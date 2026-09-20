@@ -4,7 +4,7 @@ title: A spec cannot ask for pull request body text, and nothing tells its autho
 status: open
 tier: 2
 filed: 2026-09-18
-specs: [SA-0099]
+specs: [SA-0099, SA-0111]
 prs: []
 commits: []
 cites: [§5.7]
@@ -39,3 +39,12 @@ body text.
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #338.
+- 2026-09-19: a second sighting, in the spec loop's run 10 (#381). `SA-0111`'s
+  Out of scope asked the body for three statements: why §4.2.1 allows a column
+  nothing reads, what `SA-0099`'s precedent does and does not settle, and that
+  `tests/test_ledger.py:802-826` is narrower than its name. None arrived. This
+  time the implementer's notes assert the opposite. They say "I did read
+  `DESIGN.md` §4.2.1 and `SA-0099` ... to justify the column in the PR body
+  language", describing language the body does not contain. So the cell
+  believes it complied, which hides the gap from the one channel that has it. The
+  delegate wrote the three paragraphs into #381 by hand.

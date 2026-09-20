@@ -5,7 +5,7 @@ status: open
 tier: 2
 filed: 2026-09-19
 specs: [SA-0112]
-prs: [378]
+prs: [378, 382]
 commits: []
 cites: []
 related: [123, 124, 145, 152, 153]
@@ -113,3 +113,12 @@ matters.
   `ceilings:` line itself. `.claude/agents/spec-reviewer.md:19` and `:30` also
   name `driver.py history` as the only command a review runs. Whether `check`
   joins that list is a decision about the review rather than about the command.
+
+- 2026-09-19: the ledger-reading half shipped in #382. `driver.py check
+  SA-NNNN` judges the `ceilings:` comparison and exits 1 on either of check 4's
+  blocker rules, 0 otherwise, with the REVIEW-plus-REBUT shortfall as an
+  advisory concern. Run against the live ledger it reproduces the numbers run
+  10's spec reviews worked out by hand, and it blocks where they would have:
+  `SA-0031` on both rules, `SA-0044` and `SA-0099` on turns. The prompt half is
+  still owed, so nothing calls it yet, and `tests/test_queued_specs.py`'s
+  parametrised-witness check stays open here too.

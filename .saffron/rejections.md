@@ -674,3 +674,57 @@ same-second span, and #366's per-reason lines.
 - `ADR_REQUIRED` restated four of five strings from `ADR_SECTIONS`, and
   `check_adr_supersession` rebuilt the `_ids` helper inline.
   **Bucket 2** — `CLAUDE.md`'s "One source". **Open.**
+
+## 2026-09-19 — `SA-0111`, `SA-0112` (fixes landed via #381, #382)
+
+Run 10 of the spec loop. The in-cell adequacy lens raised one blocker per cell
+and the host's probe survived both, so each was real and each was fixed inside
+the cell. Neither is a rejection. These are what the two independent seats found
+after that.
+
+- `record_merged_head` with its `self._db.commit()` deleted survived all 2465
+  tests: every witness reads the column back through `ledger._db`, the same
+  connection holding the uncommitted row, so durability was unpinned on a
+  change whose whole subject is durability.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- Criterion 2 claims a merge with no usable head "still moves the task to
+  `MERGED`" and its witness asserted only the in-memory bucket. A mutant that
+  appended the bucket and skipped `set_task_state` left the row
+  `READY_FOR_REVIEW` while `reconcile` reported it merged, and died only in a
+  file outside the spec's `touches`.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- The `merged_head_sha` comment sits below its column against house style for a
+  measured SQLite reason the code did not state. The implementer measured it
+  and put it only in the pull request's unadjudicated notes, where no gate,
+  lens or future reader of `ledger.py` looks.
+  **Bucket 2** — `CLAUDE.md`'s "A measured fact beats a reasoned one, and the
+  comment says which". **Open:** item b-63ac52 carries the channel half.
+- The rewritten `head_moved` comment said what the code does and dropped the
+  why the old one carried.
+  **Bucket 2** — `CLAUDE.md`'s "A comment is one or two lines naming the
+  non-obvious why". **Open.**
+- `SA-0111`'s Out of scope ordered three statements into the pull request body
+  and none arrived, while the implementer's notes asserted they had.
+  **No bucket** — the cell has no channel that reaches the body. **Open:** item
+  b-63ac52.
+- `_select_rows(limit=12)` made a third spelling of `history`'s row limit, so
+  editing the parser default moved `history` alone and left `check` judging 12.
+  Measured: at a parser default of 3, `history` printed 3 rows, `check` still
+  judged 12, and all 83 tests in the file passed. On the spec's own criterion 2,
+  which exists to make the two agree.
+  **Bucket 2** — `CLAUDE.md`'s "One module drives a task", in its small form.
+  **Open.**
+- `(item 145)` cited twice, in a docstring and a test comment, as the source of
+  the row-parity rule. 145 is `done`, closed 2026-09-16, `specs: [SA-0092]`,
+  and is about check 4's wording. `tests/records/check.py` asserts only that a
+  cited item exists, and its `LIVE_SURFACES` does not scan `.claude/` at all.
+  **Bucket 1** — a citation check that reads the claim, not just the id.
+  **Open:** item b-6a9707 carries the surface half.
+- `cmd_check`'s docstring called its exit status a verdict, which
+  `CONTEXT.md:285` puts on an `_Avoid_` line and `CONTEXT.md:430-432` reserves
+  for the critic. The `terms` gate returns nothing for a `.py` path.
+  **Bucket 1** — `terms` reaching Python under `.claude/`. **Open:** item
+  b-6a9707.
+- The concern said a remainder "may not cover" a cost the same function
+  computes exactly, and the docstring omitted the clause the spec asked for.
+  **Bucket 2** — a hedge on a measured number. **Open.**
