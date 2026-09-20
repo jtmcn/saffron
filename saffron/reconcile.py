@@ -97,8 +97,8 @@ class ReconcileResult:
     # answer is never recorded as "not merged"; the row is left exactly as it
     # was and its id recorded here.
     unasked: list[int] = field(default_factory=list)
-    # Reported, never written: the row's state is still true, and what the
-    # extra commits did is not this module's to judge.
+    # The merge path now writes a head onto `tasks.merged_head_sha` (below);
+    # `head_moved` itself is still only reported, never written.
     head_moved: list[HeadMoved] = field(default_factory=list)
 
 
@@ -166,6 +166,8 @@ def reconcile(
         bucket = _BUCKET.get(new_state)
         if bucket is None:
             continue
+        if new_state == "MERGED" and isinstance(head, str) and head:
+            ledger.record_merged_head(row["task_id"], head)
         ledger.set_task_state(row["task_id"], new_state)
         getattr(result, bucket).append(row["task_id"])
 

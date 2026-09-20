@@ -1342,6 +1342,33 @@ def test_an_older_ledger_gains_the_column_without_losing_a_row(tmp_path):
     second.close()
 
 
+def test_a_ledger_built_before_the_merged_head_column_gains_it_and_records_one(
+    tmp_path,
+):
+    """A ledger built before this column existed still opens, keeps the task
+    row it already had, and accepts the write the next merge `reconcile`
+    sees, rather than raising on a column it does not have (backlog item 97)."""
+    path = tmp_path / "ledger.db"
+    first = Ledger(path)
+    repo_id = first.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = first.create_run(repo_id, base_sha="a" * 40)
+    task_id = first.create_task(
+        run_id, spec_id="TE-9001", spec_sha="s" * 64, branch="saffron/TE-9001"
+    )
+    first._db.execute("ALTER TABLE tasks DROP COLUMN merged_head_sha")
+    first._db.commit()
+    first.close()
+
+    second = Ledger(path)
+    assert [r["spec_id"] for r in second.tasks_by_repo(repo_id)] == ["TE-9001"]
+    second.record_merged_head(task_id, "b" * 40)
+    row = second._db.execute(
+        "SELECT merged_head_sha FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    assert row["merged_head_sha"] == "b" * 40
+    second.close()
+
+
 def test_an_attempt_records_the_model_it_ran_on(ledger, task):
     """Declared in SCHEMA since v0.5 and never written. A prompt comparison
     means nothing if the model moved underneath it."""
