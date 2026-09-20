@@ -2,6 +2,7 @@
 id: 177
 title: Every task mints its own run, so a batch holds one run per task and not one per repo
 status: open
+tier: 2
 filed: 2026-09-17
 specs: []
 prs: []

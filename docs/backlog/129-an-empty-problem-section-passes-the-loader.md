@@ -2,6 +2,7 @@
 id: 129
 title: An empty `## Problem` section passes the loader
 status: open
+tier: 3
 filed: 2026-09-15
 specs: []
 prs: []

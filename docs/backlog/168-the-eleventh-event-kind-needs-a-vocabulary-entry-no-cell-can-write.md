@@ -2,6 +2,7 @@
 id: 168
 title: The eleventh event kind needs a vocabulary entry no cell can write, because CONTEXT.md is generated from the ontology
 status: open
+tier: 2
 filed: 2026-09-17
 by_hand: true
 specs: []

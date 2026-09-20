@@ -2,6 +2,7 @@
 id: 162
 title: The prose gate reads a prompt's register and not its instruction form
 status: open
+tier: 3
 filed: 2026-09-17
 by_hand: false
 specs: []

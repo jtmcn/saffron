@@ -2,6 +2,7 @@
 id: 171
 title: The diff stat reaches only the file the index renders from, so no authoritative record holds it
 status: open
+tier: 2
 filed: 2026-09-17
 specs: []
 prs: []

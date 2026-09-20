@@ -2,6 +2,7 @@
 id: b-606ea3
 title: '"Projection", "materialization", "emitter" and "checked walk" name SA-0107''s and SA-0108''s work and have no glossary entry'
 status: open
+tier: 2
 by_hand: true
 filed: 2026-09-18
 specs: [SA-0107, SA-0108]

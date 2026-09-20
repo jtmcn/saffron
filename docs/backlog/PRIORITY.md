@@ -119,6 +119,14 @@ wall cut that lost a cell's work and still settled its spec.
 was refused on a ceiling its own `size` gate does not enforce, at the cost of a
 cell and then two acceptance criteria.
 
+**Placed 2026-09-20, from the 16 open items that carried no tier**: **170**.
+Three records of a night disagree, and no rule says which wins. `CONTEXT.md` §8
+calls the ledger authoritative for state, and the morning index renders from the
+batch tree instead. A reconstruction of 68 stored rows on 2026-09-17 found
+`risk` differing on one row and `attempts` on four. That is this tier's honesty
+half. The page an operator reads at 06:30 and the ledger are two accounts, and
+nothing says which one to believe.
+
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
@@ -130,6 +138,13 @@ from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**, and fro
 measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, **b-a70ec1**, **b-ce93aa**, **b-461729**, and from run 10: ~~**b-865399**~~, **b-1c7019**, **b-3e0dbe**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
+
+**Placed 2026-09-20**: **171**, **177**, **168**, **169**, **b-606ea3** and
+**b-f2a9d1**. 171 and 177 are 170's neighbours. One holds a diff stat no
+authoritative record carries, and the other mints a run per task where
+`CONTEXT.md` defines one per repo. The last four are vocabulary a cell cannot
+write, because `CONTEXT.md` is generated from `ontology/factory.ttl` and is
+`protected`. They are items 65 and 72 again, with four more words.
 
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical
@@ -155,6 +170,17 @@ fire. Its number stays listed because item numbers are cited from `saffron/`.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
 to tier 1 the same day, when a host run turned it into a correctness item.)
+
+**Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128**, **129** and
+**b-61127f**. The first three are what PR #317 left on the `prose` gate. A
+prompt written as a Python string is invisible to it. Its rules read register
+and not instruction form, and its sentence limit fights §8's line budget. 126 is
+a cache write the REVIEW lenses pay for three times, at the cost of plan
+headroom rather than money. 128 and 129 are the record kind's own defects. One
+field name misleads 28 records, and an empty `## Problem` section loads clean.
+b-61127f is the ADR layer `SA-0110` stopped short of, which nothing loads or
+indexes yet. **127** and **131** were listed above with no `tier` field, so the
+index ranked neither. They now carry the 3 this list already gave them.
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
@@ -192,6 +218,7 @@ when the spec pass's own 131 was found to have landed first, the same way
 from writing #290's specs and reading their reviews, both to tier 2.
 **154**–**159** were filed open on 2026-09-16 and 2026-09-17 from the spec
 loop's run 5 (stack #308): **154** to tier 1, **157**–**159** to tier 2, and
-**155** and **156** to tier 3.)
+**155** and **156** to tier 3. The 16 items with no `tier` field were
+placed 2026-09-20: **170** to tier 1, six to tier 2, and nine to tier 3.)
 
 ---

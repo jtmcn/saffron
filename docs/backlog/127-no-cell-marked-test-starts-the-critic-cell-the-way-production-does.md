@@ -2,6 +2,7 @@
 id: 127
 title: No cell-marked test starts the critic cell the way production does
 status: open
+tier: 3
 filed: 2026-09-15
 by_hand: true
 specs: []

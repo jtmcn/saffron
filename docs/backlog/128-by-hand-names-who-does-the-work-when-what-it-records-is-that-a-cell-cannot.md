@@ -2,6 +2,7 @@
 id: 128
 title: '`by_hand` names who does the work, when what it records is that a cell cannot'
 status: open
+tier: 3
 filed: 2026-09-15
 specs: []
 prs: []
