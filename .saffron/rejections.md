@@ -630,3 +630,47 @@ same-second span, and #366's per-reason lines.
 - The module and `_chains` docstrings restated the spec.
   **Bucket 2** — `CLAUDE.md` says it since #346, and the cell read it. **Open:**
   item b-044ae7 for the gate half.
+
+## 2026-09-19 — `SA-0109`, `SA-0110` (the spec loop's run 9; fixes in #375, #377)
+
+**#375 (`SA-0109`)**
+
+- A probe cell that failed to come up left `_probe_adequacy` as an exception,
+  past every handler, so the task reached no state and a completed, paid REVIEW
+  was never written. The spec's own `## Problem` says that case leaves every
+  finding as filed. Three lenses were clean.
+  **Bucket 3** — a spec body's stated behaviour with no criterion is exactly
+  what a contract lens is for. **Open:** item b-a70ec1 is its sibling gap.
+- Nothing pinned `probes.json`'s entry shape: its `findings` list, each
+  finding's filed severity and all four baseline fields could be emptied with
+  no test noticing.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- The REVIEW line labelled `probes:` counted findings while `probes.json`
+  counts distinct edits, so the two disagreed on the one path no witness
+  covered.
+  **Bucket 3** — a rendered line checked against the record it summarises.
+  **Open.**
+- `probe_verdict` restated the `Verdict` literal that `saffron/probe.py`
+  defines and the same diff already imported, and its docstring named one
+  reader where the diff adds two.
+  **Bucket 2** — `CLAUDE.md`'s "One source", and a comment's claim checked
+  against the code. **Open:** item b-044ae7 for the gate half.
+
+**#377 (`SA-0110`)**
+
+- Two witness modules bound `KINDS["adr"]` at module scope, so the reverted run
+  raised at import and `revert` reported `skip`: the anti-theater gate checked
+  nothing for the whole diff. The spec had a section ordering the lazy lookup.
+  **Bucket 1** — a `skip` caused by a collection error is the gate's own
+  success condition misread. **Open:** item 50.
+- The `--status` witness passed an ADR status, which argparse refuses before
+  the branch under test runs, and its assertion matched the usage line. The
+  probe dropping that half of the guard survived.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- Two criteria planted only half the cases their claims list — the
+  `superseded_by` side of "either side", and no id set starting above 1 — so
+  three probes survived.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `ADR_REQUIRED` restated four of five strings from `ADR_SECTIONS`, and
+  `check_adr_supersession` rebuilt the `_ids` helper inline.
+  **Bucket 2** — `CLAUDE.md`'s "One source". **Open.**

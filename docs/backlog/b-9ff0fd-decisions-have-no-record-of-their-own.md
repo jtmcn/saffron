@@ -1,15 +1,16 @@
 ---
 id: b-9ff0fd
 title: Decisions have no record of their own, so where one stands today is spread across appendices
-status: open
+status: done
+closed: 2026-09-19
 tier: null
 filed: 2026-09-18
 by_hand: true
 specs: [SA-0110]
-prs: []
+prs: [377]
 commits: []
 cites: []
-related: []
+related: [b-61127f]
 ---
 
 ## Problem
@@ -39,3 +40,11 @@ answers four things:
 - **The first record.** The reversal U records, migrated out of U. It is
   short, self-contained and states its own reason, so it tests the kind and
   the migration path on the smallest case.
+
+## Record
+
+- 2026-09-19: `records/` gained the ADR kind by #377. That is the model, the
+  loader's required-headings rule, `records list adr`, and three of the four
+  checks. What is by hand or later has its own item, b-61127f: `docs/adr/`
+  itself and ADR 1, wiring the checks into `check_all`, `records show --kind`,
+  `check_adr_principles`, the ontology entry, and `CONTEXT.md` §11's rewrite.
