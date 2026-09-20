@@ -1,0 +1,482 @@
+---
+id: SA-0115
+title: the tests that enumerate a directory a spec adds a file to are found by reading, one review at a time, and the answer is computable
+type: feature
+priority: 2
+depends_on: [SA-0114]
+touches:
+  - .claude/skills/run-saffron-spec-loop/driver.py
+  - tests/test_spec_loop_driver.py
+forbidden:
+  - DESIGN.md
+  - CONTEXT.md
+  - CLAUDE.md
+  - README.md
+  - pyproject.toml
+  - uv.lock
+  - .saffron/**
+  - ontology/**
+  - tests/ontology/**
+  - docs/**
+  - images/**
+  - harness/**
+  - saffron/**
+  - records/**
+  - hooks/**
+  - tests/records/**
+  - tests/test_queued_specs.py
+  - tests/test_scheduler.py
+  - tests/test_citations.py
+  - tests/test_context.py
+  - tests/test_cli.py
+  - tests/test_saffron_gates.py
+  - tests/test_spec_reviewer.py
+  - .claude/agents/**
+  - .claude/skills/run-saffron-spec-loop/SKILL.md
+  - .claude/skills/run-saffron-spec-loop/GOTCHAS.md
+  - .claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md
+budget_usd: 26
+max_attempts: 3
+max_turns: 150
+acceptance:
+  - claim: >-
+      `driver.py enumerators` takes a spec path and a base commit, and reads
+      the spec from the working tree, so a spec no commit holds yet is read.
+      Its directories come from the spec's `touches`. An entry the base commit
+      holds no file at is a file the spec adds, and that entry's parent
+      directory is one of them. An entry the commit does hold a file at yields
+      no directory, and neither does an entry carrying a glob metacharacter,
+      which is counted as skipped instead. On every run, reports or none, the
+      command prints one line counting the directories it took, the entries it
+      skipped and the files it read under `tests/` at that commit, and that
+      line is not itself a report. A spec whose `touches` yields no directory
+      draws no other output and exits 0. A spec path naming no file, and a
+      spec whose frontmatter intake refuses, each print a message to stderr
+      and exit 1 without reading any commit.
+    witness: tests/test_spec_loop_driver.py::test_enumerators_takes_its_directories_from_the_touches_a_commit_holds_no_file_at
+  - claim: >-
+      For each of those directories the command reads every Python file under
+      `tests/` at the base commit, and reports the enumerating calls that
+      reach it. The call set is `.glob(...)`, `.rglob(...)` and `.iterdir()`
+      on a path expression, and `os.walk(...)`, `os.listdir(...)` and
+      `os.scandir(...)` where `os` is the name that file imported the `os`
+      module under. `ast.walk(...)` and a `walk` the file defines itself are
+      in neither. A call whose directory is the directory itself is reported
+      as enumerating it, whatever its spelling, and the command exits 1. A
+      call whose directory is an ancestor of it is reported as descending into
+      it only where that call recurses, which is `.rglob`, `os.walk`, or
+      `.glob` whose literal pattern carries `**`. A run whose reports are all
+      descents exits 0. A call on any other directory is not reported. Each
+      report names the file, the line and the function holding the call at
+      that commit.
+    witness: tests/test_spec_loop_driver.py::test_enumerators_reports_the_tests_that_enumerate_and_the_ones_that_descend
+  - claim: >-
+      The directory a call enumerates is resolved from its expression at the
+      base commit, through a string literal and `Path(...)` of one, `/` with a
+      literal on the right, `__file__`, `.resolve()`, `.parent`, `.parents[n]`,
+      `<module>.__file__` for a module that file imports and the commit holds,
+      a name bound exactly once at that file's module scope or in the function
+      holding the call, and an attribute of such a module bound exactly once
+      at that module's own top level. Anything else resolves to nothing, a
+      name bound more than once in the scope reached among them. A call whose
+      directory resolves to nothing, and a `.glob` whose pattern is not a
+      string literal, are listed as unresolved with their file and line,
+      rather than reported against a directory or dropped in silence. An
+      unresolved call is not an enumerator report, and a run whose only output
+      is unresolved calls exits 0.
+    witness: tests/test_spec_loop_driver.py::test_enumerators_lists_the_calls_whose_directory_it_cannot_resolve
+---
+
+## Context
+
+Backlog item **b-b69bb6** is
+`docs/backlog/b-b69bb6-a-specs-citations-and-added-directories-are-checked-by-eye.md`,
+tier 2. It was filed on 2026-09-20 from one spec carried end to end outside a
+loop run. It holds two computable questions a spec review answers by reading.
+`SA-0114` ships the first, the `file:line` a spec cites. This spec is the
+second, named in that spec's **Out of scope** at
+`.saffron/specs/SA-0114-a-specs-citations-are-resolved-by-eye.md:214-231` and
+in the item's own record at
+`docs/backlog/b-b69bb6-a-specs-citations-and-added-directories-are-checked-by-eye.md:70-79`.
+For each directory a spec adds a file to, find the tests that enumerate it.
+
+Every sentence here about current code was read at `91ae49a0` on 2026-09-20.
+
+**The blocker this computes is in the tree**. `TURN_PROMPTS` at
+`tests/test_context.py:369-379` is a hand-written dict of nine turn prompt
+names. `test_every_turn_prompt_file_is_loaded_by_something` at
+`tests/test_context.py:382-384` asserts that its keys equal `{path.stem for
+path in context.TURNS_DIR.glob("*.md")}`. `TURNS_DIR` is `PROMPTS_DIR /
+"turns"` at `saffron/agents/context.py:22`, and `PROMPTS_DIR` is
+`Path(__file__).resolve().parent / "prompts"` at
+`saffron/agents/context.py:21`. `SA-0113` adds a tenth file to that directory.
+`saffron/agents/prompts/turns/criterion-probe.md` is in its `touches` at
+`.saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md:11`, so
+that test fails on every attempt. It passes at base, so baseline subtraction
+absolves nothing. `tests/test_context.py` is in that spec's `forbidden` at
+`.saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md:13`, so
+the cell cannot repair it either.
+
+**The spec loop's driver is where a computed check for a spec review lives**.
+`cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1683-1712`
+judges the ceilings comparison and returns 1 on a blocker. `_git` at
+`.claude/skills/run-saffron-spec-loop/driver.py:85-89` runs git in the repo,
+and raises `GitError` on a non-zero status. `_spec_at` at
+`.claude/skills/run-saffron-spec-loop/driver.py:1425-1448` reads `git ls-tree
+-r` and `git show <commit>:<path>` to recover a spec as it stood at a commit,
+through the call at `.claude/skills/run-saffron-spec-loop/driver.py:1444`.
+`_fail` at `.claude/skills/run-saffron-spec-loop/driver.py:75-78` prints to
+stderr and returns 1, with the comment "`saffron/cli.py` reserves 2 for
+infrastructure".
+
+**`SA-0114` is the parent, and this command does not call its code**. Both
+specs declare the same two `touches`
+(`.saffron/specs/SA-0114-a-specs-citations-are-resolved-by-eye.md:7-9`). The
+overlap refusal at `saffron/scheduler.py:679-692` would refuse this one against
+that one's open pull request. Both register a subparser in the same block of
+`main`. Hence `depends_on: [SA-0114]`. `SKILL.md` at
+`.claude/skills/run-saffron-spec-loop/SKILL.md:188-189` says a spec with
+`depends_on` has its worktree cut from its parent's branch. So `cite` exists
+where this cell runs. It is a separate subcommand all the same. Nothing here
+reads `cmd_cite`, edits it, or rests on what it prints.
+
+**A spec review answers this question by reading**. Check 2 at
+`.claude/agents/spec-reviewer.md:57-63` asks a reader to list "every file the
+change must edit", "tests that assert the old behaviour" among them. It asks
+for the line at `base` that makes each one necessary.
+
+**The `prose` gate reads this driver and its tests**. `in_scope` at
+`.saffron/gates/prose.py:188-193` sends a Python path under `CODE_DIRS` to the
+comment and docstring rules. `CODE_DIRS` at `.saffron/gates/prose.py:48-58`
+holds `tests/` and `.claude/`.
+
+**Neither file in `touches` is scanned by `dead`**. `ROOTS` at
+`.saffron/gates/dead.py:21-29` names `saffron`, `harness`, `images`, `records`,
+`ontology`, `hooks` and `.saffron/gates`.
+
+**One file holds every caller of this driver's code**. A `git grep -l` for
+`driver.py` at this base returns forty files, the driver itself among them.
+`tests/test_spec_loop_driver.py` is the only importer. It execs the driver
+through `importlib.util` at `tests/test_spec_loop_driver.py:19-26`. The other
+thirty-eight name the command in prose and call nothing. They are the two agent
+definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and one
+queued spec with two retired ones. The rest are eighteen backlog records, ten
+other documents under `docs/`, and `tests/test_scheduler.py`, whose mention
+sits in the queue smoke test's docstring. The importer and the driver are in
+`touches`, and every other reader is `forbidden`.
+
+**What the command reads is bounded**. `git ls-tree -r --name-only 91ae49a0
+tests` lists 81 Python files.
+
+## Problem
+
+A spec that adds a file to a directory some test enumerates fails that test on
+every attempt. The only thing between such a spec and a cell is a reader who
+thought to look.
+
+- **Baseline subtraction does not absolve it, and the cell cannot repair it**.
+  The test passes at base, so its failure belongs to the task. The file it
+  lives in is `forbidden` because the spec is not about it. `SA-0113` drew
+  that blocker from its first review, which is the one reason no cell paid for
+  it.
+- **The answer is computable and nothing computes it**. Which directories a
+  spec adds a file to is in its `touches`. Which tests enumerate a directory
+  is an `ast` walk over `tests/` at the base commit.
+- **What the rounds cost, measured on `SA-0113`**: the draft 35.7 minutes,
+  the first review 6.2, the revision 17.9, the second review 9.5. Item
+  b-b69bb6 is first of three in `docs/backlog/PRIORITY.md:173-177` for that
+  reason.
+
+The command is `enumerators`. It takes the spec's path and `--base`, and it
+prints the tests that will see the files the spec adds.
+
+1. **Which directories**. Every entry of the spec's `touches` the base commit
+   holds no file at is a file the spec adds. That entry's parent directory is
+   what the scan looks for. An entry the commit does hold a file at adds
+   nothing. `SA-0113`'s `touches` names seven entries, two of them new prompt
+   files, so its directories are `saffron/agents/prompts` and
+   `saffron/agents/prompts/turns`.
+
+2. **What a `touches` glob does**. An entry such as `saffron/report/**` names
+   no single file, so it yields no directory. The count line counts it as
+   skipped rather than dropping it in silence. A spec declaring one has a blind
+   spot here, and the reader is the one who has to see it.
+
+3. **What an enumerating call is**. Six spellings, each of which hands a test
+   the contents of a directory: `.glob(...)`, `.rglob(...)` and `.iterdir()` on
+   a path, and `os.walk(...)`, `os.listdir(...)` and `os.scandir(...)`.
+   Measured at this base over the 81 Python files under `tests/`: **35 calls**.
+   The spelling is what decides. A name match on `walk` alone is wrong, because
+   matching every `walk` call adds **12 more calls** in four files. Ten of
+   those are `ast.walk`, among them `tests/test_cli.py:200`,
+   `tests/test_events.py:1200` and `tests/ontology/test_spans.py:21`. Two call
+   a locally defined recursive helper by its bare name, at
+   `tests/test_package.py:1161` and `tests/test_package.py:1163`. None of the
+   twelve enumerates a directory. So `os.walk` counts only where `os` is the
+   name that file imported the `os` module under.
+
+4. **Which of them reach the directory**. A call on the directory itself is
+   what fails a spec, and `tests/test_context.py:384` is that case exactly. A
+   call on a directory *above* it reaches the new file only where it recurses.
+   Recursing is `.rglob`, `os.walk`, and `.glob` whose literal pattern carries
+   `**`. Those are worth naming and are not the blocker shape. At this base
+   `tests/test_citations.py:148` walks the repository root through `os.walk`,
+   and it would be listed for every spec that adds any file at all. So the two
+   are reported apart, and only the first sets the exit status. A non-recursive
+   call on a directory above lists that directory's own entries and never the
+   new file, so it draws no report.
+
+5. **How a directory is resolved**. The receiver is an expression, and
+   resolving it is where this command earns its keep. The motivating call is
+   spelled `context.TURNS_DIR`, two hops from a path. The set is a literal, a
+   `Path(...)` of one, `/` with a literal on the right, `__file__`,
+   `.resolve()`, `.parent`, `.parents[n]` and `<module>.__file__`. It also
+   holds a name bound exactly once in the file's module scope, or in the
+   function holding the call. An attribute of an imported module bound exactly
+   once at that module's top level is in the set too. A dotted module name
+   resolves to `<a>/<b>.py` or `<a>/<b>/__init__.py` at the commit, and to
+   nothing where the commit holds neither. That is the whole of it. There is no
+   control-flow analysis and no execution. A name bound twice in the scope
+   reached resolves to nothing rather than to its first binding.
+
+6. **What is reported**. Three kinds of line: a call enumerating one of the
+   directories, a call descending into one, and a call whose directory did not
+   resolve. Measured at this base with a throwaway script over the resolution
+   set above, 19 of the 35 resolve and **16 do not**. Most of the sixteen are
+   rooted at a `tmp_path` fixture or at a function's own parameter, and
+   enumerate a scratch tree rather than the repository. Those numbers measure
+   the author's prototype and are not a criterion. Nothing asserts them, and an
+   implementation resolving more or fewer is not wrong on that account. The
+   unresolved list is printed because a command blind to sixteen calls reads
+   exactly like one with nothing to say. The reader deciding whether check 2 is
+   done needs to know which it is.
+
+7. **What the exit status means**. 1 where a call enumerating one of the
+   directories was reported, and 0 otherwise, descents and unresolved calls
+   included. `cmd_check` at
+   `.claude/skills/run-saffron-spec-loop/driver.py:1683-1712` returns 1 the
+   same way, and `_fail` at
+   `.claude/skills/run-saffron-spec-loop/driver.py:75-78` explains why 2 stays
+   reserved. A spec path naming no file, a spec frontmatter intake refuses, and
+   a `--base` git cannot resolve are usage failures. Each takes `_fail`'s 1
+   without reading a commit's `tests/` tree.
+
+## Out of scope
+
+**The citation half of item b-b69bb6**. `SA-0114` owns it, it is queued, and
+this spec's cell is cut from its branch. Nothing here calls `cmd_cite`, and
+nothing here edits it. The two subcommands share a file, a spec path argument
+and a `--base`, and nothing else. The writer agent runs two commands. Folding them
+into one is the operator's call later, and it is prose, which is the half
+below.
+
+**The prose half of item b-b69bb6**. The item asks that the `spec-writer` agent
+run this before its own self-review. It asks that `spec-reviewer`'s check 2 at
+`.claude/agents/spec-reviewer.md:57-63` read its output. Both are prompts, and
+no test watches one. `.claude/agents/**` and the skill's `SKILL.md` are
+`forbidden` here. This is the order `SA-0092`, `SA-0112` and `SA-0114` took,
+which item b-281f0a records as settled: the cell ships the command, and the
+operator wires the prose to it afterwards. So this command is called by nothing
+the day it lands, and that is the expected state rather than an omission. Two
+lines are the ones to leave alone rather than the ones to fix.
+`.claude/agents/spec-reviewer.md:19-20` names `driver.py history <SPEC-ID>` as
+what a review runs. `.claude/agents/spec-reviewer.md:30` limits a reviewer's
+Bash to "those git commands and `driver.py history` only".
+
+**Enumerating calls outside `tests/`**. `saffron/` reads directories too. The
+prompt digest at `saffron/agents/context.py:212` rglobs `PROMPTS_DIR`, and a
+tenth turn prompt changes what it hashes. A spec that adds a file there changes
+a product's behaviour rather than failing a gate. The blocking gate this
+command exists for is `tests`. Read `tests/**/*.py` at the commit and nothing
+else.
+
+**`glob.glob` and `glob.iglob`**. Measured at this base: no call site under
+`tests/` spells either. The first argument of both is a pattern rather than a
+directory. Supporting them is a second parser for a case the tree does not
+have. Leave them out.
+
+**Judging what it reports**. The command names candidates. It decides no
+severity, edits no spec, moves no `touches` entry and writes no file. A test it
+reports is sometimes one the spec is free to ignore.
+
+**The test that would have caught `SA-0113`**. Add none to
+`tests/test_context.py`, and edit nothing in that file. It is `forbidden`, and
+this command reads it as data at a commit. Changing the shape it is written in
+is a different change against a different item.
+
+**`§` citations**. `tests/test_citations.py` covers every `§N` and appendix
+citation over the whole tree on every `make check`. It is `forbidden`. Its
+`os.walk` at `tests/test_citations.py:148` is input to this command rather than
+something to change.
+
+**Every other subcommand**. `snapshot`, `next`, `record`, `drop`, `hold`,
+`probe`, `status`, `stack`, `rebase`, `size`, `history`, `check`, `pattern` and
+`cite` keep the output and the exit status they have. Read no ledger here.
+`enumerators` reads the tree and nothing else, so `_ledger_and_repo` at
+`.claude/skills/run-saffron-spec-loop/driver.py:136-144` plays no part.
+
+## Notes for the agent
+
+**This change is new code, so no criterion declares a mutant** (§5.4.1). The
+subcommand, its helpers and every sentence it prints do not exist at base, and
+nothing there determines their spelling. Expect the `witness` gate to report
+`skip`, with a summary saying the spec declares none. `SA-0112` ran under the
+same limit in this same file.
+
+**No term here is new, so no vocabulary follow-up is owed**. `CONTEXT.md`'s
+vocabulary names factory concepts. *Enumerate* here describes a Python call
+shape, in the word backlog item b-b69bb6 uses for it. The command reports
+candidates for a reader and files no finding, so `Finding` and `Severity` keep
+the meanings `CONTEXT.md` gives them. `ontology/` is `forbidden` here.
+
+**`enumerators` is the subcommand name, and `--base` defaults to
+`origin/main`.** `uv run .claude/skills/run-saffron-spec-loop/driver.py
+enumerators .saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md`.
+Register it in `main` after the `check` parser at
+`.claude/skills/run-saffron-spec-loop/driver.py:1839-1843`. `SA-0114` adds a
+`cite` parser to that same block. The branch this cell is cut from carries one
+parser there that this base does not. Add yours after both, and edit neither.
+The default matches what a spec review is told at
+`.claude/agents/spec-reviewer.md:15-16`. There `base:` is the commit a cell
+would be cut from, and a prompt naming none means `origin/main`.
+
+**Read `REPO` inside the function, never as a default argument value**. A
+default binds at definition time. `tests/test_spec_loop_driver.py:371` and
+`tests/test_spec_loop_driver.py:613` monkeypatch `driver.REPO` to a scratch
+root, and the witnesses here do the same. Helpers that read a tree take the
+root as an argument, and `cmd_enumerators` passes the module's `REPO`.
+
+**The spec is read through intake, the tree through git**. `touches` is
+frontmatter, so use `load_spec` from `saffron.intake`, imported inside the
+function as `cmd_size` does at
+`.claude/skills/run-saffron-spec-loop/driver.py:1346`. A `SpecError` becomes
+`_fail`'s message and exit 1, never a traceback. Every file the scan reads
+comes from `git ls-tree -r --name-only <base> tests` and `git show
+<base>:<path>` through `_git`. The working tree's copy of a test file is never
+what gets parsed. Eighty-one `git show` calls is the measured size of that loop
+at this base, and one call per file is fine.
+
+**A file the commit holds that `ast` cannot parse is skipped, not fatal**. A
+`SyntaxError` on one test file must not end the run. The count line says how
+many files were read.
+
+**Name the wrong implementation each witness must kill**. Criterion 1 kills
+six. One reads the spec at the base commit rather than the working tree, which
+the witness catches by never committing the spec file. One takes every
+`touches` entry as a file the spec adds: give the fixture an entry the commit
+does hold a file at, in a directory the fixture's tests enumerate, and assert
+no report for it. One drops a glob entry in silence, killed by asserting the
+skipped count. One prints no count line at all, killed by asserting that line
+on stdout in the case with no directories and exit 0. One exits 1 where nothing
+was reported. One lets a spec intake refuses raise: write a second spec file
+with broken frontmatter, and assert exit 1 with a message on stderr.
+
+Criterion 2 kills five. One knows only `.glob`. The fixture's tests must reach
+the added directory through all six spellings the claim names, each in a place
+the witness asserts on. Six calls in three short files is enough. One matches
+any `walk` at all. Put an `ast.walk(tree)` call and a locally defined `walk` in
+the fixture's tests, and assert that neither is reported. One reports every
+ancestor call: give the fixture a non-recursive `.glob("*.md")` on the parent
+directory, and assert it draws nothing. A recursive call on that same parent,
+beside it, draws a descent. One counts a descent as a defect, killed by a case
+whose only report is a descent and whose exit status is 0. One prints a file
+and line without the function holding the call.
+
+Criterion 3 kills four. One resolves only literals. The fixture must reach its
+directory through a module-scope name, and through a name bound in the function
+holding the call. A third path to it is an attribute of another module in the
+fixture tree. Give one call the shape `tests/test_cli.py:196-198` has, a
+directory read through `Path(<module>.__file__).resolve().parent`. Reach one
+through `.parents[n]`, as `tests/test_spec_loop_driver.py:18` does, so that
+shape is driven too. Spell that last one as `TURNS_DIR` is spelled, a constant
+built from `Path(__file__).resolve().parent` and two `/` joins. One drops the
+calls it cannot resolve, killed by asserting the unresolved line for a receiver
+that is a function parameter. One treats unresolved as a defect, killed by a
+case whose only output is unresolved calls and whose exit status is 0. One
+resolves a name bound twice by taking the first binding: bind one name twice in
+the fixture, to two different directories, and assert it is unresolved rather
+than reported against either.
+
+**Each witness is a plain `def`, never parametrised**. `criteria` matches a
+bare node id against the names the suite collected, by exact string. A
+`pytest.mark.parametrize` test collects under a name no criterion can name
+(backlog item 159). Several cases in one witness is one `def` driving several.
+
+**Each witness must fail with your source reverted**. `revert` re-runs every
+test your diff adds, whether or not a criterion names it, so write no test that
+passes at base. The module execs `driver.py` through `importlib.util` at
+`tests/test_spec_loop_driver.py:19-26`, and a reverted run then fails on the
+missing attribute, which is what `revert` needs to see. Load nothing new at
+module scope. A module-scope import of a name this change adds turns that run
+into a collection error, which `revert` reads as `skip`.
+
+**Build the fixtures as real commits, and keep the fixture tree small**. The
+command reads a tree at a commit, so a witness that stubs `_git` pins your own
+parsing rather than git's answer. `tests/test_spec_loop_driver.py:1-2` states
+that the file's shape is real git in a temporary repo. `_git` and `_commit` at
+`tests/test_spec_loop_driver.py:116-127`, and `empty_repo` at
+`tests/test_spec_loop_driver.py:129-137` which blinds the repo to the host's
+git config, are what to build on. Write three or four short files under the
+fixture repo's own `tests/`, plus the one module whose constant they import,
+and commit them. Do not copy this repository into the fixture. The spec file
+each witness reads is written in the fixture's working tree and committed
+nowhere.
+
+**The count line is one line**. Name the directories taken, the `touches`
+entries skipped and the files read. Print it on every run that reads the spec,
+including one with no directory to scan and no file to read. A command that
+prints nothing reads the same whether it read eighty-one files or none, and
+that no-op is what this line makes visible. `cmd_check` at
+`.claude/skills/run-saffron-spec-loop/driver.py:1711` prints a clean-verdict
+sentence for the same reason. Group the reports by directory in `touches`
+order, and sort each group by path and line. Two runs over one commit then
+print the same thing.
+
+**The `prose` gate counts comment runs and docstrings per file**. It blocks
+(`.saffron/policy.yaml:25`) and subtracts the base's failures, so a file
+gaining a hit of one rule fails the attempt. Keep every comment to one or two
+lines and every docstring under ten, `cmd_enumerators`'s included.
+`hooks/prose_limit.py --file <path>` answers the same question for one file in
+the working tree, and it is the cheap way to check before a gate does.
+
+**Rename no existing test**. `census` compares collected names between base and
+head, and reads a rename as a removal. The three new tests belong at the end of
+`tests/test_spec_loop_driver.py`, after
+`test_only_probe_takes_a_command_after_the_separator` at
+`tests/test_spec_loop_driver.py:1821`.
+
+**The shape is about 475 changed lines, and nothing here raises the tier**.
+Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
+`elevate_on`. So this task runs at `risk: standard`, where `size` is advisory
+against the `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The
+estimate is 225 in `driver.py` and 250 in the test file, derived per part. In
+`driver.py`: 25 lines to take the directories out of `touches` and count the
+skips. 35 to find the calls and decide which of them recurse. Then 25 for the
+file's import map and the dotted-name lookup, and 90 for the resolver item 5
+bounds. Last, 45 for `cmd_enumerators` and what it prints, and 8 to register
+the subcommand. In the tests: 40 for a shared helper that builds the fixture
+repo and writes a spec file, then 65, 80 and 65 for the three witnesses. The
+derivation is measured rather than guessed. The author's prototype of the
+resolver, the call finder and the import map ran over this base's `tests/` in
+120 lines. It carried no comments, no `_fail` paths and no report. Repo style
+plus the bounds above is what takes that to 225. `SA-0112` is the comparable
+cell in these same two files, at 99 lines in `driver.py` and 144 in the test
+file. That cell built one subcommand with five verdicts and four witnesses.
+This one parses Python at a commit, where that one read rows already in hand.
+475 leaves 125 lines under the ceiling that `SA-0106` (633) and `SA-0107`
+(1049) overshot. Do not go looking for more to do. The resolution set in item 5
+is closed. A shape it does not name belongs in the unresolved list rather than
+in a seventh case.
+
+**The ceilings, against `driver.py history SA-0115`**. `max_turns: 150` stands
+against a comparison row that is a floor. The line marks `SA-0106`'s peak of
+101t "a floor", because that cell ended `IMPLEMENTING error_max_turns` at its
+own ceiling. So the 49t of headroom printed there is narrower than it reads.
+The highest peak among the printed rows that ran to its own end is `SA-0089`'s
+88t, and 150 clears that by 62t. `budget_usd: 26` stands against `SA-0106`'s
+pre-REVIEW total of $14.73, above by $11.27. The most any one printed row spent
+after that point is `SA-0107`'s $2.81 review plus $3.17 rebut, $5.98, well
+inside that remainder. `max_attempts: 3` is this file's standing level, as
+`SA-0112` and `SA-0114` ran.
+
+Commit after each coherent step. Uncommitted work dies with the cell.

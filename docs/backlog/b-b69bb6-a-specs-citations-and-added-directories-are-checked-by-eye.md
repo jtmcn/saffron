@@ -4,7 +4,7 @@ title: A spec's line citations and the directories it adds files to are checked 
 status: open
 tier: 2
 filed: 2026-09-20
-specs: [SA-0114]
+specs: [SA-0114, SA-0115]
 prs: []
 commits: []
 cites: []
@@ -77,3 +77,14 @@ place of deriving both by hand.
   `tests/test_cli.py:198`, `tests/test_saffron_gates.py:1009`,
   `tests/test_citations.py:148`). A witness that exercises one spelling passes
   an implementation knowing only that one.
+- 2026-09-20: `SA-0115` is the directory half, queued behind `SA-0114`. Both
+  specs edit the spec loop's `driver.py` and `tests/test_spec_loop_driver.py`,
+  so the child declares `depends_on: [SA-0114]` and its cell is cut from that
+  branch. It adds a second subcommand, `enumerators`, rather than more of
+  `cite`. Two reasons. Nothing in it reads what `cite` prints. And a
+  review at the child's own branch cannot check a sentence about code that
+  sits on no branch yet. The call set was measured at `91ae49a0` while the spec was
+  written. There are 35 enumerating calls under `tests/`, and a throwaway
+  resolver over the declared set resolved 19 of them to a directory. Matching
+  every `walk` attribute instead would add 12 calls that enumerate nothing,
+  ten of them `ast.walk`.
