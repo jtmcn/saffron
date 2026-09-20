@@ -337,12 +337,16 @@ class Ledger:
                 WHERE t.task_id = ?""",
             (task_id,),
         ).fetchone()
+        # No row (unknown task_id) or no key (a pre-record task, NULL from
+        # the additive ALTER) is a claim with nothing to file it under.
+        if row is None or row["key"] is None:
+            return
         fact = Fact(
             kind=kind,
             task_key=row["key"],
             at=datetime.now(UTC).isoformat(),
             repo=row["repo"],
-            batch_key=str(row["batch"]) if row["batch"] else None,
+            batch_key=str(row["batch"]) if row["batch"] is not None else None,
             payload=payload,
         )
         self._record.append(row["key"], fact)
@@ -639,8 +643,8 @@ class Ledger:
         to `standard` because the index's consumers read it (item 170), but
         the fact carries the undeclared `None` rather than that default."""
         declared_risk = risk
-        risk = risk or "standard"
-        key = new_task_key() if self._record else None
+        risk = risk if risk is not None else "standard"
+        key = new_task_key() if self._record is not None else None
         cursor = self._db.execute(
             """INSERT INTO tasks
                    (run_id, spec_id, spec_sha, state, risk, branch, budget_usd,
@@ -678,6 +682,8 @@ class Ledger:
         """What the fold needs to rebuild the `repos` and `runs` rows this task
         hangs from. A run has no record of its own — it is a fold over the
         tasks that name it (design §5)."""
+        if self._record is None:
+            return {}
         row = self._db.execute(
             """SELECT rn.base_sha, r.origin, r.mirror_path
                  FROM runs rn JOIN repos r ON r.repo_id = rn.repo_id
@@ -726,16 +732,17 @@ class Ledger:
             raise ValueError(f"no task {task_id} to open an attempt against")
         self._db.commit()
         attempt_id = _inserted_id(cursor)
-        opened = self._db.execute(
-            "SELECT phase, n FROM attempts WHERE attempt_id = ?", (attempt_id,)
-        ).fetchone()
-        self._append(
-            task_id,
-            "attempt_opened",
-            attempt_id=attempt_id,
-            phase=opened["phase"],
-            n=opened["n"],
-        )
+        if self._record is not None:
+            opened = self._db.execute(
+                "SELECT phase, n FROM attempts WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            self._append(
+                task_id,
+                "attempt_opened",
+                attempt_id=attempt_id,
+                phase=opened["phase"],
+                n=opened["n"],
+            )
         return attempt_id
 
     def close_attempt(
@@ -766,20 +773,21 @@ class Ledger:
             ),
         )
         self._db.commit()
-        owner = self._db.execute(
-            "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
-        ).fetchone()
-        if owner is not None:
-            self._append(
-                owner["task_id"],
-                "attempt_closed",
-                session_id=session_id,
-                model=model,
-                subtype=subtype,
-                terminal_reason=terminal_reason,
-                num_turns=num_turns,
-                cost_usd_est=cost_usd_est,
-            )
+        if self._record is not None:
+            owner = self._db.execute(
+                "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            if owner is not None:
+                self._append(
+                    owner["task_id"],
+                    "attempt_closed",
+                    session_id=session_id,
+                    model=model,
+                    subtype=subtype,
+                    terminal_reason=terminal_reason,
+                    num_turns=num_turns,
+                    cost_usd_est=cost_usd_est,
+                )
 
     def task_spend(self, task_id: int) -> float:
         """What the task's attempts add up to — a caller whose own tally lost a
@@ -928,17 +936,18 @@ class Ledger:
             (verdict, rebuttal, finding_id),
         )
         self._db.commit()
-        owner = self._db.execute(
-            "SELECT task_id FROM findings WHERE finding_id = ?", (finding_id,)
-        ).fetchone()
-        if owner is not None:
-            self._append(
-                owner["task_id"],
-                "rebuttal",
-                finding_id=finding_id,
-                verdict=verdict,
-                rebuttal=rebuttal,
-            )
+        if self._record is not None:
+            owner = self._db.execute(
+                "SELECT task_id FROM findings WHERE finding_id = ?", (finding_id,)
+            ).fetchone()
+            if owner is not None:
+                self._append(
+                    owner["task_id"],
+                    "rebuttal",
+                    finding_id=finding_id,
+                    verdict=verdict,
+                    rebuttal=rebuttal,
+                )
 
     def findings(self, task_id: int) -> list[sqlite3.Row]:
         return list(
@@ -981,7 +990,7 @@ class Ledger:
             )
         # A baseline result (`run_id` set) belongs to no task and has nothing
         # to append against; an attempt's result does.
-        if attempt_id is not None:
+        if attempt_id is not None and self._record is not None:
             owner = self._db.execute(
                 "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
             ).fetchone()

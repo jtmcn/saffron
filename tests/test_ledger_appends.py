@@ -49,6 +49,11 @@ def test_creating_a_task_appends_task_created(ledger, record, task):
     fact = record.read(key)[0]
     assert fact.payload["spec_id"] == "SA-0099"
     assert fact.payload["risk"] == "elevated"
+    # R1: the fold's `repos`/`runs` inserts need these, and a run has no fact
+    # of its own to carry them.
+    assert fact.payload["base_sha"] == "a" * 40
+    assert fact.payload["origin"] == "/o"
+    assert fact.payload["mirror_path"] == "/m.git"
 
 
 def test_a_declared_risk_and_an_absent_one_are_distinguishable(ledger, record):
@@ -147,3 +152,26 @@ def test_every_fact_carries_the_repo_it_belongs_to(ledger, record, task):
     _, task_id = task
     ledger.set_task_state(task_id, "REVIEWING")
     assert {f.repo for f in record.read(ledger.record_key(task_id))} == {"saffron"}
+
+
+def test_a_pre_record_task_files_no_fact(tmp_path, record):
+    # A pre-record task has a NULL record_key (the additive ALTER) — filing
+    # under it would collide every such task into one bogus ref.
+    path = tmp_path / "ledger.db"
+    plain = Ledger(path)
+    repo_id = plain.upsert_repo("saffron", "/o", "/m.git", policy_sha="p")
+    run_id = plain.create_run(repo_id, base_sha="a" * 40)
+    task_id = plain.create_task(
+        run_id, spec_id="SA-0001", spec_sha="s" * 64, branch="b"
+    )
+    plain.close()
+
+    reopened = Ledger(path, record=record)
+    reopened.set_task_state(task_id, "IMPLEMENTING")
+    reopened.close()
+    assert record.task_keys() == []
+
+
+def test_an_unknown_task_id_files_no_fact(ledger, record):
+    ledger.set_task_state(999_999, "IMPLEMENTING")
+    assert record.task_keys() == []
