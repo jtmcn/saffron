@@ -5,7 +5,7 @@ status: open
 tier: 2
 filed: 2026-09-19
 specs: [SA-0112]
-prs: []
+prs: [378]
 commits: []
 cites: []
 related: [123, 124, 145, 152, 153]
@@ -78,7 +78,7 @@ matters.
   the second.
 
   **The `specs:` bookkeeping is already checked**, so that bullet is wrong.
-  `check_specs_name_their_items` at `tests/records/check.py:287-310` reports
+  `check_specs_name_their_items` at `tests/records/check.py:415` reports
   "cites this item and is not listed". It fires for any spec whose `## Context`
   names an item that does not list it back.
   `tests/records/test_records_integrity.py:13-21` runs it over the live tree on

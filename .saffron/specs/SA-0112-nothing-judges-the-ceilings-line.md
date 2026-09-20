@@ -178,7 +178,8 @@ that reason. The item stays open on it.
 
 **The `specs:` bookkeeping check of the same item**. It is already built, and
 the item's own bullet is wrong about it. `check_specs_name_their_items` at
-`tests/records/check.py:287-310` reports "cites this item and is not listed".
+`tests/records/check.py:415` on `origin/main` reports "cites this item and is
+not listed".
 It fires for any spec whose `## Context` names an item that does not list it
 back. `tests/records/test_records_integrity.py:13-21` runs the whole check set
 over the live tree. Add nothing for it.

@@ -70,8 +70,8 @@ And optionally:
 4. **Set the ceilings.**
    `uv run .claude/skills/run-saffron-spec-loop/driver.py history <SA-ID>`
    ends with a `ceilings:` line. **Done when** it reads `above by` on both
-   halves, and the budget left after the pre-REVIEW spend covers REVIEW and
-   REBUT at the rows' usual cost.
+   halves. The budget left after the pre-REVIEW spend covers the highest
+   `review_usd` plus `rebut_usd` on any one of those rows.
 5. **Do the bookkeeping** `issue-tracker.md` asks of the commit that adds a
    spec. **Done when** the origin item's `specs:` names the spec and any new
    term has its `by_hand: true` record. The queue smoke test in
