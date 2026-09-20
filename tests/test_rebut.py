@@ -93,6 +93,33 @@ def _agent(*texts, record=None):
     return run
 
 
+# --- backlog item 117: `blocker_lines` shows a survived probe ---
+
+
+def test_a_blocker_whose_probe_survived_names_the_probe_to_the_implementer():
+    """Criterion 5: a probe the tests did not notice is shown to the
+    implementer as the edit it missed; a blocker whose probe was `unproven`
+    — or that carries none — is shown exactly as it always was."""
+    survived = _blocker(
+        lens="adequacy",
+        claim="the guard never rejects a negative amount",
+        probe_verdict="survived",
+        probe={"file": "src/gap.py", "find": "if amount < 0:", "replace": "if False:"},
+    )
+    unproven = _blocker(
+        lens="adequacy",
+        claim="the other guard never rejects an empty series",
+        probe_verdict="unproven",
+        probe={"file": "src/gap.py", "find": "if not series:", "replace": "if False:"},
+    )
+    lines = rebut.blocker_lines([(1, survived), (2, unproven)]).splitlines()
+    assert "if amount < 0:" in lines[0]
+    assert "if False:" in lines[0]
+    assert "src/gap.py" in lines[0]
+    assert "if not series:" not in lines[1]
+    assert "if False:" not in lines[1]
+
+
 def _run(
     *texts,
     blockers=None,

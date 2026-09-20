@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from saffron.gates.contract import split_lines
 from saffron.intake import Mutant
+from saffron.probe import Verdict
 
 Severity = Literal["blocker", "concern", "note"]
 
@@ -44,6 +45,12 @@ class Finding(BaseModel):
     optional here on purpose: every fixture recorded before this field existed
     is rebuilt through `Finding(**f)`, and `calibrate_corpus` runs that before
     every paid pass."""
+    probe_verdict: Verdict | None = None
+    """What running `probe` answered (backlog item 117), decided before
+    `ledger.record_findings` ever sees this finding. Never `verdict` — that
+    name is REBUT's own, on the ledger's `verdict` column (`CONTEXT.md`).
+    `None` for a finding with no probe, or one REVIEW never got to probe.
+    Read by `rebut._blocker_line` and `review.describe_probes`."""
 
 
 @dataclass(frozen=True)

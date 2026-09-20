@@ -123,13 +123,26 @@ class RebutResult:
         }
 
 
+def _blocker_line(n: int, f: Finding) -> str:
+    """One numbered blocker, plus its probe when the probe is why it is here
+    (backlog item 117): a `survived` verdict is the tests not noticing the
+    edit, and the implementer is shown that edit so it can see what was
+    missed. A blocker whose probe was `unproven` — or that carries none —
+    shows nothing the host does not actually know."""
+    line = f"{n}. [{f.lens}] {f.file}:{f.line} — {f.claim}"
+    if f.probe_verdict == "survived" and f.probe is not None:
+        line += (
+            f" (its probe survived: in {f.probe.file}, `{f.probe.find}` -> "
+            f"`{f.probe.replace}` and the tests stayed green)"
+        )
+    return line
+
+
 def blocker_lines(numbered: Sequence[tuple[int, Finding]]) -> str:
     """Blockers as prompt text, numbered so a rebuttal and a verdict can name
     one. The numbers are global across the phase: a lens is shown only its own
     blockers, but under the numbers the implementer answered."""
-    return "\n".join(
-        f"{n}. [{f.lens}] {f.file}:{f.line} — {f.claim}" for n, f in numbered
-    )
+    return "\n".join(_blocker_line(n, f) for n, f in numbered)
 
 
 def run_rebuttal(

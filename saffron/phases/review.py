@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Sequence
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from saffron import probe
 from saffron.agents import context
 from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
 from saffron.agents.findings import Finding, Severity, anchor
@@ -352,6 +354,60 @@ def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
     return [
         f for r in reviews for f in r.findings if f.anchored and f.severity == "blocker"
     ]
+
+
+def adequacy_probes(reviews: Sequence[LensReview]) -> list[Finding]:
+    """Anchored adequacy findings that carry a probe — the set the Gate-only
+    cell is asked about (backlog item 117). Unanchored ones are excluded: they
+    never reach `anchored_blockers`/`anchored_concerns` either way, so
+    promoting one would spend a suite run on a finding that decides nothing."""
+    return [
+        f
+        for r in reviews
+        for f in r.findings
+        if f.lens == "adequacy" and f.anchored and f.probe is not None
+    ]
+
+
+def probe_key(probe: Mutant) -> tuple[str, str, str]:
+    """The identity two probes share when they are the same edit. `Mutant` is
+    not frozen, so this is what stands in for it as a dict key."""
+    return (probe.file, probe.find, probe.replace)
+
+
+def distinct_probes(findings: Sequence[Finding]) -> list[Mutant]:
+    """The probes `findings` carry, first-seen order, one per distinct edit —
+    matching the lens-corpus driver's own dedup (`_distinct`), so a probe two
+    findings named is asked once."""
+    seen: dict[tuple[str, str, str], Mutant] = {}
+    for f in findings:
+        assert f.probe is not None  # adequacy_probes already filtered this
+        seen.setdefault(probe_key(f.probe), f.probe)
+    return list(seen.values())
+
+
+def apply_probe_verdict(finding: Finding, verdict: probe.Verdict) -> None:
+    """Decide one finding from its probe's verdict (backlog item 117):
+    `survived` promotes to `blocker`, `killed` demotes to `note`, `unproven`
+    leaves the severity the lens filed. `Finding` is not frozen, so this
+    mutates in place — `finding` keeps its `id()`, which is what lets REBUT's
+    later `ledger.record_findings` lookup still find it."""
+    finding.probe_verdict = verdict
+    if verdict == "survived":
+        finding.severity = "blocker"
+    elif verdict == "killed":
+        finding.severity = "note"
+
+
+def describe_probes(entries: Sequence[Mapping[str, object]]) -> str:
+    """The REVIEW line probing adds, counted over `probes.json`'s own entries
+    — one per distinct edit, not per finding, so the line and the record it
+    summarises cannot disagree when two findings name one probe."""
+    counts = Counter(e["probe_verdict"] for e in entries)
+    return (
+        f"probes: {counts['survived']} survived, {counts['killed']} killed, "
+        f"{counts['unproven']} unproven"
+    )
 
 
 def anchored_concerns(reviews: Sequence[LensReview]) -> int:
