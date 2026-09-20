@@ -700,6 +700,8 @@ class Ledger:
                 WHERE rn.run_id = ?""",
             (run_id,),
         ).fetchone()
+        # ponytail: `mirror_path` puts the operator's home directory in a
+        # trail §3 makes readable, and `repos.mirror_path` is `NOT NULL`.
         return {
             "base_sha": row["base_sha"],
             "origin": row["origin"],

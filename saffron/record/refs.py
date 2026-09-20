@@ -9,7 +9,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from saffron.record.contract import Fact
+from saffron.record.contract import Fact, RecordError, StaleWriter
 
 TASKS = "refs/saffron/tasks"
 VALUES = "refs/saffron/values"
@@ -27,8 +27,15 @@ class RefsRecord:
             input=stdin,
             capture_output=True,
             text=True,
-            check=True,
         )
+        if done.returncode != 0:
+            # `check=True` would raise a `CalledProcessError` that names the
+            # argv and drops the reason, which is the one thing a caller needs.
+            raise RecordError(
+                f"git {args[0]} failed ({done.returncode}): {done.stderr.strip()}",
+                returncode=done.returncode,
+                stderr=done.stderr,
+            )
         return done.stdout
 
     def append(self, task_key: str, fact: Fact) -> None:
@@ -65,14 +72,25 @@ class RefsRecord:
     def _push(self, remote: str, ref: str) -> None:
         # No `--force`: a non-fast-forward refusal is how a stale writer
         # learns it is stale, the primitive a cross-host budget depends on.
-        self._git("push", remote, f"{ref}:{ref}")
+        try:
+            self._git("push", remote, f"{ref}:{ref}")
+        except RecordError as exc:
+            # git writes "! [rejected]" for the refusal and nothing else does,
+            # so a full disk or a dead remote stays the error it already is.
+            if "[rejected]" not in exc.stderr:
+                raise
+            raise StaleWriter(
+                f"{remote} refused {ref}: {exc.stderr.strip()}",
+                returncode=exc.returncode,
+                stderr=exc.stderr,
+            ) from exc
 
     def _resolve(self, ref: str) -> str | None:
         # Exit 1 is a genuinely absent ref; anything else is a broken repo, and
         # collapsing that into "no facts" is the `error` != `fail` mistake.
         try:
             return self._git("rev-parse", "--verify", "-q", ref).strip()
-        except subprocess.CalledProcessError as exc:
+        except RecordError as exc:
             if exc.returncode != 1:
                 raise
             return None
@@ -110,11 +128,9 @@ class RefsRecord:
     def compare_and_swap(self, key: str, expected: str | None, new: str) -> bool:
         ref = f"{VALUES}/{key}"
         current = self._resolve(ref)
-        held = (
-            self._git("cat-file", "blob", f"{current}:value").strip()
-            if current
-            else None
-        )
+        # No `.strip()`: stripping made a value with surrounding whitespace
+        # unmatchable by its own text, so no caller could swap on what it read.
+        held = self._git("cat-file", "blob", f"{current}:value") if current else None
         if held != expected:
             return False
         blob = self._git("hash-object", "-w", "--stdin", stdin=new).strip()
@@ -123,5 +139,12 @@ class RefsRecord:
         if current:
             args += ["-p", current]
         commit = self._git(*args).strip()
-        self._git("update-ref", ref, commit, current or "")
+        try:
+            self._git("update-ref", ref, commit, current or "")
+        except RecordError as exc:
+            # The value moved between the read above and this write, which is
+            # the race the swap exists to report rather than raise on.
+            if "but expected" not in exc.stderr:
+                raise
+            return False
         return True

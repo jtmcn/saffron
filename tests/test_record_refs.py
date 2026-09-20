@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from saffron.record.contract import Fact
+from saffron.record.contract import Fact, RecordError, StaleWriter
 from saffron.record.refs import TASKS, RefsRecord
 
 
@@ -100,8 +100,19 @@ def test_reading_an_absent_task_gives_an_empty_log(repo):
 def test_a_broken_repository_is_not_an_empty_log(tmp_path):
     # A repo that cannot be read is `error`, never a task with no facts.
     broken = tmp_path / "not-a-repo"
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(RecordError):
         RefsRecord(broken).read("a" * 32)
+
+
+def test_a_failure_carries_the_reason_git_gave(tmp_path):
+    # `CalledProcessError` names the argv and the exit code and drops stderr,
+    # so a refused push read exactly like a repository that is not there.
+    broken = tmp_path / "not-a-repo"
+    broken.mkdir()
+    with pytest.raises(RecordError) as raised:
+        RefsRecord(broken).read("a" * 32)
+    assert "not a git repository" in raised.value.stderr.lower()
+    assert "not a git repository" in str(raised.value).lower()
 
 
 def test_task_keys_lists_every_task_ref(repo):
@@ -158,6 +169,33 @@ def test_compare_and_swap_refuses_a_stale_writer(repo):
     assert record.compare_and_swap("budget", "1.50", "9.99") is False
     # The refused swap above must not have written "9.99" over "2.00".
     assert record.compare_and_swap("budget", "2.00", "3.00") is True
+
+
+def test_a_swap_that_loses_the_race_returns_false(repo):
+    # The one case a swap exists for: the value moves between the read and
+    # the write. Raising there left the caller only the mismatch it read.
+
+    class Raced(RefsRecord):
+        def _git(self, *args: str, stdin: str | None = None) -> str:
+            out = super()._git(*args, stdin=stdin)
+            if args[0] == "commit-tree":
+                # A second writer lands between this swap's read and its write.
+                RefsRecord(repo).compare_and_swap("budget", "1.50", "7.77")
+            return out
+
+    RefsRecord(repo).compare_and_swap("budget", None, "1.50")
+    assert Raced(repo).compare_and_swap("budget", "1.50", "2.00") is False
+    # The lost race must not have written "2.00" over the winner's "7.77".
+    assert RefsRecord(repo).compare_and_swap("budget", "7.77", "3.00") is True
+
+
+def test_a_swap_stores_the_value_it_was_given(repo):
+    # A read-back that strips makes a value with surrounding whitespace
+    # unmatchable by its own text, so no caller can swap on what it read.
+    record = RefsRecord(repo)
+    assert record.compare_and_swap("budget", None, " 1.50\n") is True
+    assert record.compare_and_swap("budget", "1.50", "2.00") is False
+    assert record.compare_and_swap("budget", " 1.50\n", "2.00") is True
 
 
 def test_a_corrupt_fact_blob_names_the_task_it_is_in(repo):
@@ -248,7 +286,9 @@ def test_a_diverged_push_is_refused_not_forced(tmp_path, repo):
     stale = tmp_path / "stale.git"
     subprocess.run(["git", "init", "-q", "--bare", str(stale)], check=True)
     diverged = a_fact(task_key=fact.task_key, payload={"spec_id": "SA-0100"})
-    with pytest.raises(subprocess.CalledProcessError):
+    # `StaleWriter`, not `RecordError`: the refusal is the cross-host
+    # detection §3 rests on, and a retry needs it apart from a dead remote.
+    with pytest.raises(StaleWriter):
         RefsRecord(stale, remote=str(remote)).append(diverged.task_key, diverged)
 
     unchanged = subprocess.run(

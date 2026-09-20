@@ -225,7 +225,7 @@ def main(source: Path, work: Path) -> None:
     rebuilt.unlink(missing_ok=True)
     ledger = Ledger(rebuilt)
     started = time.monotonic()
-    tasks = fold(record, ledger)
+    tasks = fold(record, ledger).folded
     elapsed = time.monotonic() - started
     ledger.close()
 

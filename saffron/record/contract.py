@@ -45,6 +45,23 @@ def new_task_key() -> str:
     return secrets.token_hex(16)
 
 
+class RecordError(RuntimeError):
+    """A backend failed, carrying the reason the tool gave. git says why on
+    stderr, and `CalledProcessError` prints only the argv, so a refused push
+    read the same as a missing repository."""
+
+    def __init__(self, message: str, *, returncode: int = 0, stderr: str = "") -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+class StaleWriter(RecordError):
+    """A remote refused a non-fast-forward push, so another host appended to
+    this ref first. Named apart from every other failure because §3 rests on
+    that refusal, and the retry §5 defers needs one thing to catch."""
+
+
 @dataclass(frozen=True)
 class Fact:
     kind: str

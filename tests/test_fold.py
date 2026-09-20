@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pytest
 
+from saffron import cli
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.ledger import Ledger
@@ -112,7 +113,7 @@ def rows(ledger):
 
 def test_folding_an_empty_record_makes_no_rows(tmp_path, record):
     into = Ledger(tmp_path / "into.db")
-    assert fold(record, into) == 0
+    assert fold(record, into).folded == 0
     assert rows(into)[0] == []
     into.close()
 
@@ -120,7 +121,7 @@ def test_folding_an_empty_record_makes_no_rows(tmp_path, record):
 def test_the_fold_reproduces_the_task(tmp_path, record):
     source = a_night(tmp_path, record)
     into = Ledger(tmp_path / "into.db")
-    assert fold(record, into) == 1
+    assert fold(record, into).folded == 1
     assert rows(into)[0] == rows(source)[0]
     source.close()
     into.close()
@@ -207,7 +208,7 @@ def test_an_unreadable_task_names_itself_and_folds_the_rest(tmp_path, record):
     into = Ledger(tmp_path / "into.db")
     with pytest.raises(ValueError, match="f" * 32):
         fold(record, into, strict=True)
-    assert fold(record, into, strict=False) == 1
+    assert fold(record, into, strict=False).folded == 1
     into.close()
 
 
@@ -220,7 +221,7 @@ def test_a_rebuttal_with_no_finding_fact_raises_under_strict(tmp_path, record):
     into = Ledger(tmp_path / "into.db")
     with pytest.raises(ValueError, match="rebuttal"):
         fold(record, into, strict=True)
-    assert fold(record, into, strict=False) == 1
+    assert fold(record, into, strict=False).folded == 1
     into.close()
 
 
@@ -265,7 +266,7 @@ def test_tasks_are_folded_oldest_first(tmp_path, record):
     ):
         record._facts[key] = [_retimed(f, key, at, spec_id) for f in facts]
     into = Ledger(tmp_path / "into.db")
-    assert fold(record, into) == 2
+    assert fold(record, into).folded == 2
     assert _read(into, "SELECT spec_id FROM tasks ORDER BY task_id") == [
         ("SA-0001",),
         ("SA-0002",),
@@ -275,7 +276,7 @@ def test_tasks_are_folded_oldest_first(tmp_path, record):
 
 def test_a_task_git_cannot_read_is_skipped_and_the_rest_fold(tmp_path, record):
     # The likeliest unreadable task there is: a fact object git no longer has.
-    # `RefsRecord.read` raises `CalledProcessError`, which no named tuple lists.
+    # `RefsRecord.read` raises `RecordError`, which no named tuple lists.
     repo = tmp_path / "record.git"
     subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
     on_refs = RefsRecord(repo)
@@ -288,22 +289,61 @@ def test_a_task_git_cannot_read_is_skipped_and_the_rest_fold(tmp_path, record):
     into = Ledger(tmp_path / "into.db")
     with pytest.raises(ValueError, match=broken):
         fold(on_refs, into, strict=True)
-    assert fold(on_refs, into, strict=False) == 1
+    assert fold(on_refs, into, strict=False).folded == 1
     assert _read(into, "SELECT record_key FROM tasks") == [(whole,)]
     into.close()
+
+
+def _with_unplaceable_payload(record):
+    """A payload key `Ledger.close_attempt` has no parameter for, which is
+    what a fact kind outliving the method it replays looks like."""
+    key = record.task_keys()[0]
+    record._facts[key] = [
+        replace(f, payload=f.payload | {"unexpected_new_field": 1})
+        if f.kind == "attempt_closed"
+        else f
+        for f in record._facts[key]
+    ]
+    return key
 
 
 def test_a_task_that_fails_mid_replay_leaves_no_rows_behind(tmp_path, record):
     # `Ledger`'s methods commit as they go, so the replay is not one
     # transaction: a task that dies partway is discarded rather than left half.
     a_night(tmp_path, record).close()
-    key = record.task_keys()[0]
-    record._facts[key] = record._facts[key][:3] + ["not a fact"]
+    _with_unplaceable_payload(record)
     into = Ledger(tmp_path / "into.db")
-    assert fold(record, into, strict=False) == 0
+    with pytest.raises(TypeError):
+        fold(record, into, strict=True)
     assert _read(into, "SELECT COUNT(*) FROM tasks") == [(0,)]
     assert _read(into, "SELECT COUNT(*) FROM attempts") == [(0,)]
     assert _read(into, "SELECT COUNT(*) FROM gate_results") == [(0,)]
+    into.close()
+
+
+def test_a_replay_that_breaks_is_not_skipped_as_unreadable(tmp_path, record):
+    # A fold that cannot place a payload is the fold's own defect, and
+    # charging it to the record drops the task and still exits 0.
+    a_night(tmp_path, record).close()
+    _with_unplaceable_payload(record)
+    into = Ledger(tmp_path / "into.db")
+    with pytest.raises(TypeError):
+        fold(record, into, strict=False)
+    into.close()
+
+
+def test_a_log_with_no_creation_fact_says_what_is_missing(tmp_path, record):
+    # `next` over an empty generator raises `StopIteration`, which stringifies
+    # to nothing, so strict reported "is unreadable: " and named no reason.
+    a_night(tmp_path, record).close()
+    key = record.task_keys()[0]
+    record._facts[key] = [f for f in record._facts[key] if f.kind != "task_created"]
+    into = Ledger(tmp_path / "into.db")
+    with pytest.raises(ValueError, match="no task_created fact"):
+        fold(record, into, strict=True)
+    assert fold(record, into, strict=False).skipped == [
+        (key, "ValueError: no task_created fact")
+    ]
     into.close()
 
 
@@ -325,3 +365,33 @@ def test_a_task_that_pushed_without_packaging_keeps_its_sha(tmp_path, record):
     ]
     source.close()
     into.close()
+
+
+def test_the_fold_command_exits_nonzero_when_it_skipped_a_task(tmp_path, capsys):
+    # Exit codes are load-bearing, and a ledger short of tasks is not the
+    # ledger back: "folded 1 tasks" over exit 0 reads as a whole rebuild.
+    repo = tmp_path / "record.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
+    on_refs = RefsRecord(repo)
+    a_night(tmp_path, on_refs).close()
+    a_night(tmp_path, on_refs).close()
+    broken = sorted(on_refs.task_keys())[0]
+    blob = on_refs._blobs(broken)[0][1]
+    (repo / "objects" / blob[:2] / blob[2:]).unlink()
+
+    exit_code = cli.main(
+        [
+            "--home",
+            str(tmp_path / "home"),
+            "fold",
+            "--repo",
+            str(repo),
+            "--into",
+            str(tmp_path / "into.db"),
+            "--skip-unreadable",
+        ]
+    )
+    assert exit_code == 1
+    printed = capsys.readouterr().out
+    assert f"skipped task {broken}" in printed
+    assert "skipped 1" in printed

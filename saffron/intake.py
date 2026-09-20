@@ -161,6 +161,8 @@ class Spec(BaseModel):
     # The one that has actually stopped a task: SA-0005 died at turn 61 with
     # 56% of its budget unspent, against a hardcoded 60 no spec could raise.
     max_turns: int = Field(default=60, gt=0)
+    # ponytail: not `RiskTier | None`, so no spec can declare no tier and
+    # `create_task` files the record's "standard" as though one had.
     risk: RiskTier = "standard"
 
     body: str = ""

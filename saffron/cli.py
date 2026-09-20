@@ -870,11 +870,15 @@ def _fold(args: argparse.Namespace) -> int:
     record = RefsRecord(Path(args.repo))
     ledger = Ledger(Path(args.into))
     try:
-        count = fold(record, ledger, strict=not args.skip_unreadable)
+        done = fold(record, ledger, strict=not args.skip_unreadable)
     finally:
         ledger.close()
-    print(f"folded {count} tasks into {args.into}")
-    return 0
+    for key, reason in done.skipped:
+        print(f"fold: skipped task {key}: {reason}")
+    print(f"folded {done.folded} tasks into {args.into}, skipped {len(done.skipped)}")
+    # A rebuild short of tasks is not the ledger back. Exit 1, not 2: the
+    # tasks did not make it, and no infrastructure broke to stop them.
+    return 1 if done.skipped else 0
 
 
 def _queue(args: argparse.Namespace, ledger: Ledger) -> int:

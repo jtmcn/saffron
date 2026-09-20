@@ -16,6 +16,7 @@ Replay, not snapshot: a task's state is what its facts add up to (§3).
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from saffron.agents.findings import Finding
@@ -24,30 +25,62 @@ from saffron.ledger import Ledger
 from saffron.record.contract import Fact, Record
 
 
-def fold(record: Record, ledger: Ledger, strict: bool = True) -> int:
-    folded = 0
-    for key in _creation_order(record, strict):
+@dataclass
+class Fold:
+    """What one fold did. The skipped tasks are data rather than a printed
+    line, because whether a partial rebuild is a success is the caller's to
+    decide and `saffron fold` decides it by exit code."""
+
+    folded: int = 0
+    skipped: list[tuple[str, str]] = field(default_factory=list)
+
+
+def fold(record: Record, ledger: Ledger, strict: bool = True) -> Fold:
+    done = Fold()
+    for key in _creation_order(record, strict, done):
         try:
-            _fold_task(ledger, key, record.read(key), strict)
+            facts = _facts_of(record, key)
         except Exception as exc:
             _discard_task(ledger, key)
-            _skipped(key, exc, strict)
+            _skipped(key, exc, strict, done)
             continue
-        folded += 1
-    return folded
+        try:
+            _fold_task(ledger, key, facts, strict)
+        except Exception:
+            # A replay that breaks is the fold's own defect, never a record
+            # that cannot be read, so it aborts. `error` != `fail`.
+            _discard_task(ledger, key)
+            raise
+        done.folded += 1
+    return done
 
 
-def _skipped(key: str, exc: Exception, strict: bool) -> None:
-    """`Exception`, not a named few: `RefsRecord.read` raises
-    `subprocess.CalledProcessError` on a broken repository, which is the
-    likeliest unreadable task there is (`tests/test_record_refs.py`), and a
-    guard that misses it costs the night its whole ledger."""
+def _facts_of(record: Record, key: str) -> list[Fact]:
+    """A backend owes a list of `Fact` opening on `task_created`, and the fold
+    checks both here. Read at the seam, so a backend that breaks its contract
+    is an unreadable task, and everything past this line is the fold's own."""
+    facts = record.read(key)
+    for entry in facts:
+        if not isinstance(entry, Fact):
+            raise ValueError(f"entry is not a fact: {entry!r}")
+    if not any(f.kind == "task_created" for f in facts):
+        # `next` on an empty generator raises a `StopIteration` that
+        # stringifies to nothing, so the log says what is missing instead.
+        raise ValueError("no task_created fact")
+    return facts
+
+
+def _skipped(key: str, exc: Exception, strict: bool, done: Fold) -> None:
+    """`Exception`, not a named few: `RefsRecord.read` raises `RecordError`
+    on a broken repository, which is the likeliest unreadable task there is
+    (`tests/test_record_refs.py`), and a guard that misses it costs the night
+    its whole ledger."""
     if strict:
         raise ValueError(f"task {key} is unreadable: {exc}") from exc
-    print(f"fold: skipped task {key}: {type(exc).__name__}: {exc}")
+    done.skipped.append((key, f"{type(exc).__name__}: {exc}"))
 
 
-def _creation_order(record: Record, strict: bool) -> list[str]:
+def _creation_order(record: Record, strict: bool, done: Fold) -> list[str]:
     """Task keys oldest first, by the time their `task_created` fact was
     appended. A record key is random hex, and `ORDER BY t.task_id` is read as
     a chronology by `queue_lines` and `tasks_by_spec`, so folding in key order
@@ -59,10 +92,11 @@ def _creation_order(record: Record, strict: bool) -> list[str]:
     dated = []
     for key in sorted(record.task_keys()):
         try:
-            created = next(f for f in record.read(key) if f.kind == "task_created")
+            facts = _facts_of(record, key)
         except Exception as exc:
-            _skipped(key, exc, strict)
+            _skipped(key, exc, strict, done)
             continue
+        created = next(f for f in facts if f.kind == "task_created")
         dated.append((created.at, key))
     return [key for _, key in sorted(dated)]
 
