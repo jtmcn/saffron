@@ -1,12 +1,13 @@
 ---
 id: b-865399
 title: Step 1b judges a criterion's fixture arrangement by reading, when the helper it will be judged by can be run against it
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-09-19
 specs: []
 prs: []
-commits: []
+commits: [f03a6afb]
 cites: []
 related: [123, 124, b-2750d5, b-281f0a]
 ---
