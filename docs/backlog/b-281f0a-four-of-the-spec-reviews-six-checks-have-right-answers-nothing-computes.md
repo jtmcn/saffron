@@ -1,7 +1,7 @@
 ---
 id: b-281f0a
 title: Four of the spec review's six checks have right answers, and every spec pays a subagent to work them out by eye
-status: open
+status: partial
 tier: 2
 filed: 2026-09-19
 specs: [SA-0112]
@@ -122,3 +122,11 @@ matters.
   `SA-0031` on both rules, `SA-0044` and `SA-0099` on turns. The prompt half is
   still owed, so nothing calls it yet, and `tests/test_queued_specs.py`'s
   parametrised-witness check stays open here too.
+- 2026-09-19: `partial`, not done. #382 merged and `SA-0112` retired to
+  `done/`, so the ledger-reading half is delivered. Two halves are still owed,
+  and neither has a spec. One is check 4's own wording in
+  `.claude/agents/spec-reviewer.md`. It still tells a reviewer to apply the
+  thresholds by eye, and it does not know `check` exists. The other is the
+  parametrised-witness check in `tests/test_queued_specs.py`. `SA-0112` could
+  not carry it: `revert` passes a new test there with the diff's source
+  reverted, because that source is `driver.py`, which the test does not read.

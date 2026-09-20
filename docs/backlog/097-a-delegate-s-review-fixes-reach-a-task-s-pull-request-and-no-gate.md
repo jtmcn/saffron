@@ -75,3 +75,11 @@ Two things the review left beside it. `b-1c7019` is the guard that was supposed
 to stop a column nothing reads and did not notice this one. `b-3e0dbe` is the
 row a crash between the two writes strands, which the write order makes safe to
 recover and nothing yet recovers.
+
+**The column recorded its own merge, 2026-09-19.** #381 and #382 merged and
+`reconcile` moved tasks 117 and 118 to `MERGED`. Both rows kept a head, and
+neither is the commit PACKAGE pushed: task 117 packaged `60fd3a5f` and merged
+at `a269ecd3`, its own review commit, and task 118 packaged `69a1a631` and
+merged at `8f539867`. That is the 34-of-38 case this item was filed on,
+happening twice more. These are the first two rows in the ledger that keep it.
+No gate judged either tree, which is the re-gate this item still owes.
