@@ -1602,6 +1602,21 @@ def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
     return f"ceilings: {turns_part}; {budget_part}"
 
 
+def _select_rows(
+    target: Spec, cells: list[PastCell], limit: int = 12
+) -> list[PastCell]:
+    """Past cells of `target`'s own type, closest in `touches` and criteria
+    count first, newest first on a tie, cut at `limit` — the selection
+    `history` prints and `check` must judge the same rows as (item 145)."""
+    criteria = _criteria_count(target)
+    same = [c for c in cells if c.spec_type == target.type]
+    same.sort(key=lambda c: c.started_at, reverse=True)
+    same.sort(
+        key=lambda c: abs(c.touches - len(target.touches)) + abs(c.criteria - criteria)
+    )
+    return same[:limit]
+
+
 def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list[str]:
     """The target's own shape and ceilings, then past cells of its type, the
     closest in `touches` and criteria count first, newest first on a tie, then
@@ -1613,13 +1628,79 @@ def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list
         f"criteria={criteria}  max_turns={target.max_turns} "
         f"budget_usd={target.budget_usd}  max_attempts={target.max_attempts}"
     )
-    same = [c for c in cells if c.spec_type == target.type]
-    same.sort(key=lambda c: c.started_at, reverse=True)
-    same.sort(
-        key=lambda c: abs(c.touches - len(target.touches)) + abs(c.criteria - criteria)
-    )
-    rows = same[:limit]
+    rows = _select_rows(target, cells, limit)
     return [header, *(_cell_line(c) for c in rows), _ceilings_line(target, rows)]
+
+
+def _turns_blocker(target: Spec, rows: list[PastCell]) -> str | None:
+    """Check 4's turns rule: a blocker when `max_turns` is at or below the
+    worst peak among `rows` — equality included."""
+    row = max(rows, key=lambda c: c.peak_turns)
+    if target.max_turns <= row.peak_turns:
+        return (
+            f"max_turns={target.max_turns} at or below {row.spec_id}'s peak "
+            f"{row.peak_turns}t"
+        )
+    return None
+
+
+def _budget_blocker(target: Spec, rows: list[PastCell]) -> str | None:
+    """Check 4's budget rule: a blocker only when `budget_usd` is strictly
+    below the worst pre-review total among `rows` — equality is headroom."""
+    row = max(rows, key=_pre_review_total)
+    total = _pre_review_total(row)
+    if target.budget_usd < total:
+        return (
+            f"budget_usd={target.budget_usd} below {row.spec_id}'s pre-review "
+            f"total ${total:.2f}"
+        )
+    return None
+
+
+def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
+    """What's left of `budget_usd` after the same worst-case pre-review total
+    `_budget_blocker` names, against one row's worst REVIEW+REBUT sum — not
+    the sum of two different rows' maxima, and not a mean of the rows'."""
+    remainder = target.budget_usd - _pre_review_total(max(rows, key=_pre_review_total))
+    worst = max(rows, key=lambda c: c.review_usd + c.rebut_usd)
+    worst_cost = worst.review_usd + worst.rebut_usd
+    if remainder < worst_cost:
+        return (
+            f"${remainder:.2f} left after the pre-review total may not cover "
+            f"{worst.spec_id}'s review+rebut ${worst_cost:.2f}"
+        )
+    return None
+
+
+def cmd_check(args) -> int:
+    """Judge a spec's ceilings against cells of its own shape, before a cell
+    runs — the arithmetic `_ceilings_line` renders, turned into a verdict."""
+    specs = _known_specs()
+    target = specs.get(args.spec_id)
+    if target is None:
+        return _fail(f"no spec declares {args.spec_id}")
+    ledger, repo_id, _url = _ledger_and_repo()
+    try:
+        if repo_id is None:
+            return _fail("this repo has no ledger row yet")
+        cells = _past_cells(ledger, repo_id, specs)
+    finally:
+        ledger.close()
+    rows = _select_rows(target, cells)
+    print(_ceilings_line(target, rows))
+    if not rows:
+        return 0
+    blockers = [
+        b for b in (_turns_blocker(target, rows), _budget_blocker(target, rows)) if b
+    ]
+    for blocker in blockers:
+        print(f"blocker: {blocker}")
+    concern = _review_rebut_concern(target, rows)
+    if concern:
+        print(f"concern: {concern}")
+    if not blockers and not concern:
+        print("check: ceilings clear this shape's history")
+    return 1 if blockers else 0
 
 
 def cmd_history(args) -> int:
@@ -1745,6 +1826,12 @@ def main() -> int:
     p.add_argument("--before", help="only cells that started before this commit")
     p.add_argument("--limit", type=int, default=12)
     p.set_defaults(func=cmd_history)
+
+    p = sub.add_parser(
+        "check", help="judge a spec's ceilings against cells of its shape"
+    )
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
     p.set_defaults(func=cmd_pattern)
