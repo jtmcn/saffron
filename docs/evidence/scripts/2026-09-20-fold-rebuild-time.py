@@ -15,8 +15,10 @@ import sqlite3
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
+from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
 from saffron.record.fold import fold
@@ -74,7 +76,52 @@ def _synthesize(db: sqlite3.Connection, ledger: Ledger) -> int:
                 facts += 1
         ledger.set_task_state(task_id, task["state"])
         facts += 1
+        facts += _replay_outcome(db, ledger, task, task_id)
     return facts
+
+
+def _replay_outcome(
+    db: sqlite3.Connection, ledger: Ledger, task: sqlite3.Row, task_id: int
+) -> int:
+    """The columns PACKAGE, `reconcile` and REVIEW write, as the facts that
+    wrote them. `policy_sha` is left to `create_task`, which carries it
+    already; nothing in a stored row says whether `record_policy` also ran."""
+    count = 0
+    if task["pushed_sha"] is not None:
+        ledger.record_push(task_id, task["pushed_sha"])
+        count += 1
+    if task["pr_url"] is not None:
+        ledger.set_task_package(
+            task_id, task["state"], task["branch"], task["pushed_sha"], task["pr_url"]
+        )
+        count += 1
+    if task["merged_head_sha"] is not None:
+        ledger.record_merged_head(task_id, task["merged_head_sha"])
+        count += 1
+    for f in db.execute(
+        "SELECT * FROM findings WHERE task_id = ? ORDER BY finding_id",
+        (task["task_id"],),
+    ):
+        finding_id = ledger.record_findings(
+            task_id,
+            [
+                Finding(
+                    lens=f["lens"],
+                    severity=f["severity"],
+                    file=f["file"],
+                    line=f["line"],
+                    claim=f["claim"],
+                    anchored=bool(f["anchored"]),
+                )
+            ],
+        )[0]
+        count += 1
+        if f["verdict"] is not None or f["rebuttal"] is not None:
+            ledger.record_rebuttal(
+                finding_id, verdict=f["verdict"], rebuttal=f["rebuttal"]
+            )
+            count += 1
+    return count
 
 
 def _replay_gates(
@@ -108,9 +155,11 @@ def _replay_gates(
     return count
 
 
-def _sizes(repo: Path) -> tuple[int, int, str]:
-    """Bytes on disk, the largest fact's own bytes, and the object it is."""
-    disk = sum(f.stat().st_size for f in repo.rglob("*") if f.is_file())
+def _sizes(repo: Path) -> tuple[dict[str, int], str]:
+    """What the record costs three ways, because they differ by an order of
+    magnitude: the blocks it occupies, the compressed bytes it is, and the
+    fact JSON it holds. `st_size` alone reads as the smallest of the three."""
+    files = [f for f in repo.rglob("*") if f.is_file()]
     listed = subprocess.run(
         ["git", "-C", str(repo), "cat-file", "--batch-all-objects",
          "--batch-check=%(objecttype) %(objectsize) %(objectname)"],
@@ -118,7 +167,43 @@ def _sizes(repo: Path) -> tuple[int, int, str]:
     ).stdout
     blobs = [line.split() for line in listed.splitlines() if line.startswith("blob")]
     biggest = max(blobs, key=lambda b: int(b[1]))
-    return disk, int(biggest[1]), biggest[2]
+    return {
+        "allocated": sum(f.stat().st_blocks * 512 for f in files),
+        "compressed": sum(f.stat().st_size for f in files),
+        "fact_json": sum(int(b[1]) for b in blobs),
+        "facts": len(blobs),
+        "largest": int(biggest[1]),
+    }, biggest[2]
+
+
+# The columns each table has to bring back. Multisets, not ordered reads: the
+# fold mints its own autoincrements, so row order is not what has to match.
+_SAME = {
+    "tasks": "spec_id, spec_sha, state, risk, branch, budget_usd, spent_usd_est,"
+    " record_key, pushed_sha, pr_url, policy_sha, merged_head_sha",
+    "attempts": "phase, n, session_id, subtype, num_turns, cost_usd_est,"
+    " started_at, ended_at",
+    "gate_results": "gate, status, tool, summary, duration_ms",
+    "failures": "file, code, message, line",
+    "findings": "lens, severity, file, line, claim, anchored, verdict, rebuttal",
+}
+
+
+def _agrees(source: Path, rebuilt: Path) -> None:
+    """Design §4's criterion against real nights. The unit tests pin the
+    mechanism on a fixture, which can only show the fold agreeing with itself;
+    this is the half that can say 118 stored tasks came back."""
+    was, now = _source(source), _source(rebuilt)
+    for table, columns in _SAME.items():
+        a = Counter(tuple(r) for r in was.execute(f"SELECT {columns} FROM {table}"))
+        b = Counter(tuple(r) for r in now.execute(f"SELECT {columns} FROM {table}"))
+        verdict = "identical" if a == b else f"DIFFERS on {sum(((a - b) + (b - a)).values())}"
+        print(f"  {table:<13} {sum(a.values()):>7} -> {sum(b.values()):>7}  {verdict}")
+    runs = [
+        len(was.execute("SELECT run_id FROM runs").fetchall()),
+        len(now.execute("SELECT run_id FROM runs").fetchall()),
+    ]
+    print(f"  {'runs':<13} {runs[0]:>7} -> {runs[1]:>7}  declared collapse on base_sha")
 
 
 def main(source: Path, work: Path) -> None:
@@ -135,7 +220,7 @@ def main(source: Path, work: Path) -> None:
     print(f"record built: {facts} facts in {time.monotonic() - started:.1f}s")
     synth.close()
 
-    disk, largest, name = _sizes(repo)
+    size, biggest = _sizes(repo)
     rebuilt = work / "rebuilt.db"
     rebuilt.unlink(missing_ok=True)
     ledger = Ledger(rebuilt)
@@ -145,9 +230,16 @@ def main(source: Path, work: Path) -> None:
     ledger.close()
 
     print(f"folded {tasks} tasks, {facts} facts in {elapsed:.2f}s")
-    print(f"record on disk: {disk / 1e6:.1f} MB ({disk} bytes)")
-    print(f"largest single fact: {largest / 1e6:.2f} MB ({largest} bytes) {name}")
+    print(f"record, blocks allocated: {size['allocated'] / 1e6:.1f} MB")
+    print(f"record, compressed bytes: {size['compressed'] / 1e6:.1f} MB")
+    print(f"record, fact JSON:        {size['fact_json'] / 1e6:.1f} MB")
+    print(
+        f"largest single fact: {size['largest'] / 1e6:.2f} MB "
+        f"({size['largest']} bytes) {biggest}"
+    )
     print(f"index rebuilt: {rebuilt.stat().st_size / 1e6:.1f} MB")
+    print("what came back:")
+    _agrees(work / "synth.db", rebuilt)
 
 
 if __name__ == "__main__":
