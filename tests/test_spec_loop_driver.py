@@ -1351,6 +1351,150 @@ def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
     assert "floor" not in ceilings
 
 
+class _StubLedger:
+    """A ledger `check` never queries directly — `_past_cells` is
+    monkeypatched — but must still be able to `close()`."""
+
+    def close(self):
+        pass
+
+
+def test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others(
+    monkeypatch, capsys
+):
+    # Five cases: both clear, turns below/level with the peak (both block),
+    # budget below the total (blocks) and level with it (does not).
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 100
+    target.budget_usd = 10.0
+
+    other = _cell("SA-2000", "bug", 2, 3)  # neither maximum, and not first
+    other.peak_turns = 50
+    other.plan, other.implement, other.repair = (
+        driver.Spend(1, 1.0),
+        driver.Spend(1, 1.0),
+        driver.Spend(0, 0.0),
+    )
+    peak_row = _cell("SA-2001", "bug", 2, 3)
+    peak_row.peak_turns = 90
+    peak_row.plan, peak_row.implement, peak_row.repair = (
+        driver.Spend(1, 1.0),
+        driver.Spend(1, 1.0),
+        driver.Spend(0, 0.0),
+    )
+    budget_row = _cell("SA-2002", "bug", 2, 3)
+    budget_row.peak_turns = 30
+    budget_row.plan, budget_row.implement, budget_row.repair = (
+        driver.Spend(2, 2.0),
+        driver.Spend(2, 3.0),
+        driver.Spend(0, 4.0),
+    )  # whole-dollar pre-review total: $9.00, safe against float drift
+
+    rows = [other, peak_row, budget_row]
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0009": target})
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
+
+    def run():
+        rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0009"))
+        return rc, capsys.readouterr().out
+
+    rc, out = run()
+    assert rc == 0 and "blocker:" not in out
+
+    target.max_turns = 89  # below the 90t peak
+    rc, out = run()
+    assert rc == 1
+    assert "blocker: max_turns=89" in out and "blocker: budget_usd" not in out
+
+    target.max_turns = 90  # level with the peak: still a blocker
+    rc, out = run()
+    assert rc == 1
+    assert "blocker: max_turns=90" in out and "blocker: budget_usd" not in out
+
+    target.max_turns = 100  # clear again
+    target.budget_usd = 8.0  # below the $9.00 pre-review total
+    rc, out = run()
+    assert rc == 1
+    assert "blocker: budget_usd=8.0" in out and "blocker: max_turns" not in out
+
+    target.budget_usd = 9.0  # level with it: not a blocker
+    rc, out = run()
+    assert rc == 0 and "blocker:" not in out
+
+
+def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys):
+    # A far-shaped, an off-type, and a past-the-limit row each carry a peak
+    # above the ceiling — only the rows `history` prints may vote (b-281f0a).
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 50
+    target.budget_usd = 1000.0
+
+    far = _cell("SA-3000", "bug", 9, 9)  # far shape: cut by closeness, not type
+    far.peak_turns = 999
+    low = [_cell(f"SA-31{n:02d}", "bug", 2, 3) for n in range(12)]
+    for row in low:
+        row.peak_turns = 10
+    off_type = _cell("SA-3001", "feature", 2, 3)  # same shape, wrong type
+    off_type.peak_turns = 999
+    overflow = _cell("SA-3002", "bug", 2, 3)  # same shape and type, past limit
+    overflow.peak_turns = 999
+
+    rows = [far, *low[:6], off_type, *low[6:], overflow]
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0009": target})
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
+
+    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert "blocker:" not in capsys.readouterr().out
+
+
+def test_check_reports_a_review_and_rebut_shortfall_as_a_concern(monkeypatch, capsys):
+    # Worst review+rebut sum is a third row's ($5+$0, $0+$4, $3+$3 -> $6.00).
+    # Each row's own pre-review total is distinct and non-zero too (below).
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.max_turns = 1000
+
+    def row(spec_id, review_usd, rebut_usd, pre_review_usd):
+        c = _cell(spec_id, "bug", 2, 3)
+        c.plan = driver.Spend(1, pre_review_usd)
+        c.implement, c.repair = driver.Spend(0, 0.0), driver.Spend(0, 0.0)
+        c.peak_turns, c.review_usd, c.rebut_usd = 1, review_usd, rebut_usd
+        return c
+
+    rows = [
+        row("SA-4000", 5.0, 0.0, 2.0),
+        row("SA-4001", 0.0, 4.0, 1.0),
+        row("SA-4002", 3.0, 3.0, 4.0),  # also the highest pre-review total
+    ]
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0009": target})
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
+
+    # $11.00 minus the $4.00 pre-review total leaves $7.00, covering $6.00.
+    target.budget_usd = 11.0
+    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert "concern:" not in capsys.readouterr().out
+
+    # $9.50 minus $4.00 leaves $5.50, which cannot cover $6.00 — a concern.
+    # Reading $9.50 raw, or subtracting some other row's total, would not be.
+    target.budget_usd = 9.5
+    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert "concern:" in capsys.readouterr().out
+
+
+def test_check_with_nothing_to_compare_against_claims_no_pass(monkeypatch, capsys):
+    target = _spec("SA-0009", touches=2, criteria=3)
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0009": target})
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+
+    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    out = capsys.readouterr().out
+    assert "no past cells of this shape to compare against" in out
+    assert "check: ceilings clear this shape's history" not in out
+
+
 def _spec_text(max_turns):
     return f"---\nid: SA-0001\ntitle: x\ntype: bug\nmax_turns: {max_turns}\n---\n"
 
