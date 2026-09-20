@@ -1602,12 +1602,17 @@ def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
     return f"ceilings: {turns_part}; {budget_part}"
 
 
+# `history` prints this many rows and `check` judges the same ones; one
+# spelling, so a change to either cannot silently move only one of them.
+_ROW_LIMIT = 12
+
+
 def _select_rows(
-    target: Spec, cells: list[PastCell], limit: int = 12
+    target: Spec, cells: list[PastCell], limit: int = _ROW_LIMIT
 ) -> list[PastCell]:
     """Past cells of `target`'s own type, closest in `touches` and criteria
     count first, newest first on a tie, cut at `limit` — the selection
-    `history` prints and `check` must judge the same rows as (item 145)."""
+    `history` prints and `check` must judge the same rows as (item b-281f0a)."""
     criteria = _criteria_count(target)
     same = [c for c in cells if c.spec_type == target.type]
     same.sort(key=lambda c: c.started_at, reverse=True)
@@ -1617,7 +1622,9 @@ def _select_rows(
     return same[:limit]
 
 
-def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list[str]:
+def _history_lines(
+    target: Spec, cells: list[PastCell], limit: int = _ROW_LIMIT
+) -> list[str]:
     """The target's own shape and ceilings, then past cells of its type, the
     closest in `touches` and criteria count first, newest first on a tie, then
     a `ceilings:` line comparing the target's own ceilings with what the
@@ -1634,7 +1641,7 @@ def _history_lines(target: Spec, cells: list[PastCell], limit: int = 12) -> list
 
 def _turns_blocker(target: Spec, rows: list[PastCell]) -> str | None:
     """Check 4's turns rule: a blocker when `max_turns` is at or below the
-    worst peak among `rows` — equality included."""
+    highest peak among `rows` — equality included."""
     row = max(rows, key=lambda c: c.peak_turns)
     if target.max_turns <= row.peak_turns:
         return (
@@ -1646,7 +1653,7 @@ def _turns_blocker(target: Spec, rows: list[PastCell]) -> str | None:
 
 def _budget_blocker(target: Spec, rows: list[PastCell]) -> str | None:
     """Check 4's budget rule: a blocker only when `budget_usd` is strictly
-    below the worst pre-review total among `rows` — equality is headroom."""
+    below the highest pre-review total among `rows` — equality is headroom."""
     row = max(rows, key=_pre_review_total)
     total = _pre_review_total(row)
     if target.budget_usd < total:
@@ -1658,15 +1665,16 @@ def _budget_blocker(target: Spec, rows: list[PastCell]) -> str | None:
 
 
 def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
-    """What's left of `budget_usd` after the same worst-case pre-review total
-    `_budget_blocker` names, against one row's worst REVIEW+REBUT sum — not
-    the sum of two different rows' maxima, and not a mean of the rows'."""
+    """What's left of `budget_usd` after the same highest pre-review total
+    `_budget_blocker` names, against the highest REVIEW+REBUT sum on one row —
+    not two rows' maxima added, and not a mean. A row whose REBUT never ran
+    contributes its REVIEW cost alone."""
     remainder = target.budget_usd - _pre_review_total(max(rows, key=_pre_review_total))
     worst = max(rows, key=lambda c: c.review_usd + c.rebut_usd)
     worst_cost = worst.review_usd + worst.rebut_usd
     if remainder < worst_cost:
         return (
-            f"${remainder:.2f} left after the pre-review total may not cover "
+            f"${remainder:.2f} left after the pre-review total cannot cover "
             f"{worst.spec_id}'s review+rebut ${worst_cost:.2f}"
         )
     return None
@@ -1674,7 +1682,8 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
 
 def cmd_check(args) -> int:
     """Judge a spec's ceilings against cells of its own shape, before a cell
-    runs — the arithmetic `_ceilings_line` renders, turned into a verdict."""
+    runs — the arithmetic `_ceilings_line` renders, turned into an exit
+    status."""
     specs = _known_specs()
     target = specs.get(args.spec_id)
     if target is None:
@@ -1824,7 +1833,7 @@ def main() -> int:
     p = sub.add_parser("history", help="what cells of this spec's shape spent before")
     p.add_argument("spec_id")
     p.add_argument("--before", help="only cells that started before this commit")
-    p.add_argument("--limit", type=int, default=12)
+    p.add_argument("--limit", type=int, default=_ROW_LIMIT)
     p.set_defaults(func=cmd_history)
 
     p = sub.add_parser(

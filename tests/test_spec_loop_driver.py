@@ -1425,7 +1425,7 @@ def test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others(
 
 def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys):
     # A far-shaped, an off-type, and a past-the-limit row each carry a peak
-    # above the ceiling — only the twelve rows `history` prints may vote (145).
+    # above the ceiling — only the rows `history` prints may vote (b-281f0a).
     target = _spec("SA-0009", touches=2, criteria=3)
     target.max_turns = 50
     target.budget_usd = 1000.0
