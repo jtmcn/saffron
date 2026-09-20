@@ -3,6 +3,7 @@ id: b-865399
 title: Step 1b judges a criterion's fixture arrangement by reading, when the helper it will be judged by can be run against it
 status: done
 tier: 2
+by_hand: true
 filed: 2026-09-19
 closed: 2026-09-19
 specs: []
@@ -60,33 +61,33 @@ rather than hand-scripted each time.
   settled what they were circling.
 
 - 2026-09-19: done, by hand, in the two prose files the move needs. Check 3 of
-  `.claude/agents/spec-reviewer.md` now reports a wrong implementation that
-  turns on the fixture as **unmeasured** rather than as a blocker. The reviewer
-  lists the wrong implementations the rows must exclude and names the helper.
-  That list is the measurement's input, which is why the two edits are one
-  change. Step 1b of the loop's `SKILL.md` performs the run in a throwaway
-  worktree at `base`, and dispatches no further review on that criterion.
-
-  Three decisions worth recording.
+  `.claude/agents/spec-reviewer.md` stops arguing a wrong implementation that
+  turns on the arrangement, and hands it to step 1b instead. The reviewer lists
+  the wrong implementations the arrangement must exclude, names the helper, and
+  reports the arrangement `unmeasured`. That list is the measurement's input,
+  which is why the two edits are one change. Step 1b of the loop's `SKILL.md`
+  builds the arrangement against the helper at `base` and prints what each
+  named wrong implementation would select.
 
   **The delegate performs it, not the reviewer.** Step 1b dispatches its
-  reviewers in parallel into the checkout the loop drives. `probe` mutates a
-  file in place before restoring it, so two reviewers probing one file corrupt
-  each other's restore. The helper is often `driver.py`, which the loop calls
-  for `next` and `status` meanwhile. Most specs pin no selection, so arming
-  every reviewer spends turns on nothing. This also cuts against item
-  **b-281f0a**'s neighbour finding, that the delegate's edits are the loop's
-  unread artifact. What the delegate adds here is printed output rather than
-  prose.
+  reviewers in parallel into the checkout the loop drives. Most specs pin no
+  selection, so arming every reviewer spends turns on nothing. This also
+  cuts against run 9's observation A, restated at
+  `docs/evidence/2026-09-19-spec-loop-skill-feedback-run-10.md:82`: the
+  delegate's spec edit is the loop's one artifact with no gate and no second
+  reader. What the delegate adds here is printed output rather than prose.
 
-  **`driver.py probe` is the mechanism, unchanged.** It already carries the
-  three guards a measurement needs: one match or refuse, confirm the edit
-  landed, always restore. The snippet must exit non-zero when the selection is
-  wrong, because `probe` reads exit 0 as `survived`. The rule says so.
+  **The measurement simulates, and does not mutate the helper.** A first draft
+  had step 1b probe the helper's source once per wrong implementation. Two
+  reviews of that draft rejected it, correctly. It is the technique this item's
+  Problem fences off as **b-2750d5**'s half. It costs a probe cycle per arm,
+  where run 10's measurement cost one run for all three. And `probe` classifies
+  a pytest run rather than a print, so two of its four verdicts are unreachable
+  here. Mutating the real code stays where it already works, on the delivered
+  diff, in the pull request's Spec seat.
 
-  **The optional driver command is declined.** A fixture is spec-specific, and
-  a command that builds rows would serve `history`-shaped specs alone. `probe`
-  covers the mutation half, which is the half carrying the hazards.
+  **The optional driver command is declined.** An arrangement is spec-specific,
+  and a command that builds rows would serve `history`-shaped specs alone.
 
   Nothing enforces either rule. The evidence that they fire is the next run's
   feedback record. The shape to look for is a check 3 line reading `unmeasured`

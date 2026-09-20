@@ -112,25 +112,32 @@ criteria. Until the edit merges, `hold SA-NNNN --why "#N"` keeps `next` off
 the spec, whose old text a cell would otherwise run. The re-snapshot after the
 merge releases it.
 
-**An unmeasured fixture is run, not reviewed again.**
+**An `unmeasured` arrangement is run, not reviewed again.**
 Check 3 reports one when a criterion pins a selection, an ordering or a cut.
-It names the wrong implementations the rows must exclude. Cut a throwaway
-worktree at the spec's `base` with `git worktree add`, then `uv sync` inside
-it. Write a snippet that builds the input the criterion describes, calls the
-helper, and exits non-zero when the selection is wrong. `driver.py probe` reads
-exit 0 as `survived`, so a snippet that only prints says nothing. Then probe
-the helper once per named wrong implementation
-(`probe <file> --find F --replace R --root <worktree> -- <snippet>`). It
-restores the file and refuses an edit that never landed. A probe that survives
-is a real hole in the rows. A probe that dies closes that arm. Report the
-output, remove the worktree, and dispatch no further review on that criterion.
-The helper is often `driver.py` itself, which is why this wants a worktree and
-not this checkout. `SA-0112` spent three reviews at roughly six minutes each on
-what a two-minute run settled (item b-865399).
+It names the wrong implementations the arrangement must exclude. Build that
+arrangement against the helper at `base`, and print what the helper selects and
+what each named wrong implementation would select. Run 10 did this for
+`SA-0112` in about two minutes, against `_history_lines` at `origin/main`:
 
-The round stands where there is nothing to run. The measurement needs the
-helper to exist at `base`, and check 3 raises an ordinary blocker where it does
-not.
+```
+printed: SA-T00 … SA-T11          (the twelve low-peak rows)
+far printed?  False                → the correct selection returns 0
+last printed? False
+no-sort selection includes far? True
+no-cut includes last?           True
+no-type-filter selection includes off? True
+```
+
+Each `True` on a wrong implementation is an arm the arrangement fails to watch.
+Report the output. It settles the question a further review would circle, and
+`SA-0112`'s cell then delivered exactly the arrangement it confirmed (item
+b-865399). An arrangement that needs changing is a spec edit, so the standing
+re-review rule above still applies to it.
+
+This measures the arrangement, not the delivered code. Mutating the
+implementation belongs to the pull request's Spec seat, which probes the diff
+with `driver.py probe` (`REVIEW-PROMPT.md`), and to item b-2750d5. Check 3
+handles the case where the helper does not exist at `base`.
 
 Two kinds of blocker failed the backtest, and reading the line at base does
 not filter them, because their premise holds there
