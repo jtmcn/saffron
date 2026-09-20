@@ -1,11 +1,12 @@
 ---
 id: 117
 title: The host never runs the probe the adequacy lens names, so a confirmed vacuity ships as a concern
-status: open
+status: done
+closed: 2026-09-19
 tier: 1
 filed: 2026-09-14
 specs: [SA-0109]
-prs: []
+prs: [375]
 commits: []
 cites: [§5.4.1]
 related: [69, 109]
@@ -55,3 +56,13 @@ probe, and `SA-0079`'s REBUT shows what follows: it tightened a bound until the
 named edit died and left a near neighbour surviving. And a probe handed back to the
 implementer is the exposure item 109 closes for spec mutants — tolerable here only
 because the lens authored it and a fresh one can be asked for each round.
+
+- 2026-09-19: done by #375 (`SA-0109`). The host takes every anchored adequacy
+  finding that carries a probe, and applies duplicate edits once in a Gate-only
+  cell after REVIEW. The verdict then decides: `survived` promotes to blocker,
+  `killed` demotes to note, `unproven` leaves the severity the lens filed.
+  Every probe is recorded in `probes.json`, and a survived one is shown to the
+  implementer at REBUT. The first production use was the next cell in the same
+  loop, #377. There the probe was `unproven`, because the lens named a file
+  under a declared test path. Item b-98dc4d holds that.
+

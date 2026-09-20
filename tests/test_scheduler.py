@@ -1818,7 +1818,11 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-19, a forty-sixth time: `SA-0112` queued for
+    """Re-measured 2026-09-19, a forty-seventh time: the spec loop's run 9
+    merged `SA-0109` (#375) and `SA-0110` (#377), and both retire to `done/`.
+    `SA-0111` and `SA-0112` are what is left, in that order.
+
+    Re-measured 2026-09-19, a forty-sixth time: `SA-0112` queued for
     backlog item b-281f0a, the ceilings comparison no command judges. It edits
     the spec loop's `driver.py` and `tests/test_spec_loop_driver.py`, which
     nothing else queued touches, so it has no `depends_on` and joins the
@@ -2065,15 +2069,10 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == [
-        "SA-0109",
-        "SA-0111",
-        "SA-0110",
-        "SA-0112",
-    ]
+    assert [c.spec.id for c in candidates] == ["SA-0111", "SA-0112"]
     assert refusals == []
-    # A precondition, not the glob check: `done/` is populated, so the empty
-    # queue above is a check rather than a scan of nothing.
+    # A precondition, not the glob check: `done/` holds far more specs than the
+    # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
 
 

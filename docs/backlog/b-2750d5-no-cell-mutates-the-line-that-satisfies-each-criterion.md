@@ -53,3 +53,10 @@ by hand.
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353). Ranked first in
   `docs/evidence/2026-09-19-spec-loop-skill-feedback-run-8.md`.
+- 2026-09-19: `SA-0109` shipped its half by #375. The host now runs the
+  adequacy lens's own probe and lets the verdict decide the finding. The item
+  stays open for the other half: nothing yet mutates the line behind each
+  criterion. Run 9 showed why both are needed. On #375 the lens's own probe
+  survived, and its concern was a real hole. On #377 the lens named a probe the
+  host could not apply, which is item b-98dc4d. The Spec seat's per-criterion
+  probing found four more witness holes across the two pull requests.

@@ -36,3 +36,13 @@ lives in `revert.py`'s comment and one test, and nowhere an operator reads.
 `tests` role that reports the disposition of every name it was handed turns a
 collection error into the `fail` `revert` is waiting for, which is exactly what
 this item asks for. **Tier 1** with 51.
+
+- 2026-09-19: hit in production, on the spec loop's run 9 (#377). Two witness
+  modules bound `KINDS["adr"]` at module scope. The reverted run raised
+  `KeyError` at import, pytest exited 2, and `revert` reported `skip`. The
+  anti-theater gate then checked nothing for the whole diff, and no lens
+  noticed. The spec carried a section ordering the lazy lookup, which is the
+  instruction a gate makes unnecessary. The loop's review reran the reverted
+  suite by hand. With the lookup made lazy the same run gives 6 failed and
+  153 passed, every new witness failing by assertion.
+

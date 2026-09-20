@@ -323,9 +323,10 @@ def test_scope_reaches_every_place_it_names():
     for name in prose.ROOT_FILES:
         assert name in listed and prose.in_scope(name), name
     for directory in prose.INCLUDED_DIRS:
-        assert any(p.startswith(directory) and prose.in_scope(p) for p in listed), (
-            directory
-        )
+        # Two questions, because an empty spec queue leaves `.saffron/specs/`
+        # holding only the excluded `done/`: the place exists, and it is reached.
+        assert any(p.startswith(directory) for p in listed), directory
+        assert prose.in_scope(f"{directory}scope-probe.md"), directory
 
 
 def test_scope_reaches_the_prompts_a_cell_reads():
