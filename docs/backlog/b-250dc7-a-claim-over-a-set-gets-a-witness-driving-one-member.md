@@ -1,11 +1,12 @@
 ---
 id: b-250dc7
 title: A claim quantifying over a set keeps getting a witness that drives one member, and a first review keeps passing it
-status: open
+status: done
 filed: 2026-09-20
+closed: 2026-09-20
 by_hand: true
 specs: []
-prs: []
+prs: [395]
 commits: []
 cites: []
 related: [b-ea1d13, b-b69bb6, b-2750d5]
