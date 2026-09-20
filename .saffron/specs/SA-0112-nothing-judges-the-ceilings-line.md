@@ -396,6 +396,10 @@ Sorted, the far row falls to the end, and the cut drops it with the last row.
 `check` returns 0. A `check` that filters and cuts without the closeness sort
 keeps the far row inside the first twelve, and reports a blocker on it. A
 `check` that judges every row it was handed reports a blocker on the last one.
+Put the other-type row among the twelve rather than after them. A `check` that
+sorts and cuts without the type filter then keeps it inside the first twelve,
+and blocks on its peak. Placed after them it shares the twelve's shape, and the
+cut drops it whether or not the filter ran.
 Give all fourteen `_cell`'s default `started_at`
 (`tests/test_spec_loop_driver.py:1126`). The descending sort at
 `.claude/skills/run-saffron-spec-loop/driver.py:1617` is then a no-op, and the
