@@ -196,6 +196,58 @@ def test_an_edit_the_gate_does_not_read_says_nothing(tmp_path):
     assert _edited(repo, evidence).returncode == 0
 
 
+def test_file_mode_reads_an_unstaged_new_file_against_zero(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "docs" / "backlog").mkdir(parents=True)
+    (repo / "docs" / "backlog" / "1-new.md").write_text(LONG_A + "\n")
+    done = _hook(repo, "--file", "docs/backlog/1-new.md")
+    assert done.returncode == 1
+    assert "1 new hit against zero" in done.stdout
+    assert "docs/backlog/1-new.md:1: sentence-length" in done.stdout
+
+
+def test_file_mode_reads_a_tracked_file_against_head(tmp_path):
+    repo = _repo(tmp_path, {"README.md": LONG_A + "\n"})
+    (repo / "README.md").write_text(LONG_A + "\n\n" + LONG_B + "\n")
+    done = _hook(repo, "--file", "README.md")
+    assert done.returncode == 1
+    assert "1 new hit against HEAD" in done.stdout
+    assert "README.md:3: sentence-length" in done.stdout
+
+
+def test_file_mode_says_nothing_rose_when_the_count_holds(tmp_path):
+    repo = _repo(tmp_path, {"README.md": LONG_A + "\n"})
+    (repo / "README.md").write_text(LONG_B + "\n")
+    done = _hook(repo, "--file", "README.md")
+    assert done.returncode == 0
+    assert "0 new hits against HEAD" in done.stdout
+
+
+def test_file_mode_reads_the_working_tree_not_the_index(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    _stage(repo, "README.md", "Short.\n")
+    (repo / "README.md").write_text(LONG_A + "\n")
+    done = _hook(repo, "--file", "README.md")
+    assert done.returncode == 1
+    assert "README.md:1: sentence-length" in done.stdout
+
+
+def test_file_mode_refuses_a_path_the_gates_do_not_read(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "docs" / "evidence").mkdir(parents=True)
+    (repo / "docs" / "evidence" / "run.md").write_text(LONG_A + "\n")
+    done = _hook(repo, "--file", "docs/evidence/run.md")
+    assert done.returncode == 2
+    assert "out of the gates' scope" in done.stderr
+
+
+def test_file_mode_refuses_a_path_that_is_not_there(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    done = _hook(repo, "--file", "docs/backlog/9-gone.md")
+    assert done.returncode == 2
+    assert "no such file" in done.stderr
+
+
 def test_claude_code_runs_the_hook_after_each_edit():
     settings = json.loads((REPO / ".claude" / "settings.json").read_text())
     (entry,) = settings["hooks"]["PostToolUse"]
