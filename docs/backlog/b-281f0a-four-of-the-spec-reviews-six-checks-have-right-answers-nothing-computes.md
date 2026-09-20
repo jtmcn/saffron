@@ -130,3 +130,6 @@ matters.
   parametrised-witness check in `tests/test_queued_specs.py`. `SA-0112` could
   not carry it: `revert` passes a new test there with the diff's source
   reverted, because that source is `driver.py`, which the test does not read.
+- 2026-09-20: the reword landed by hand. Check 4's concern rule now names the
+  worst case among the rows, so a reader and `check` apply one rule. The
+  wiring is the half still owed.
