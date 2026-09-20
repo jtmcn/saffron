@@ -105,6 +105,16 @@ GitHub issues remain in use only for research/evidence records under
   that does edit it (`saffron/scheduler.py`'s overlap refusal). Put such a file
   in `forbidden` instead, as `SA-0079` and `SA-0097` do.
 
+- **A claim that quantifies over a set names the set, and its witness drives
+  every member.** A fixture driving one member passes an implementation
+  handling one member, while the claim the pull request renders says more than
+  the code does. Where the set is open, the claim names what the witness
+  drives, and the notes say what is left. The sets a claim quantifies over in
+  passing count too, such as the forms of a call or the spellings of a path.
+  Five criteria across `SA-0113`, `SA-0114` and `SA-0115` carried this defect
+  and four passed a first review, so a spec's author checks each claim against
+  its own fixture rather than leaving it to a reader (backlog item b-250dc7).
+
 - **A witness must fail with the source reverted, not merely be missing at
   base.** `criteria` requires a non-`preserves` witness to be red at base, and a
   test that does not exist yet is red there by construction, so that check is
