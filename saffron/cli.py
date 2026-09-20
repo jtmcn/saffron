@@ -150,13 +150,13 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     fold_parser = subcommands.add_parser(
-        "fold", help="rebuild an index from the record on refs/saffron/*"
+        "fold", help="rebuild the ledger from the record on refs/saffron/*"
     )
     # Required, not `Path.cwd()`: facts live in the mirror, and a forgotten
     # flag would fold a working checkout with no task refs and print success.
     fold_parser.add_argument("--repo", type=Path, required=True)
     # Named, never defaulted to the home ledger: a rebuild is not a thing to
-    # do to the live index by forgetting a flag.
+    # do to the live ledger by forgetting a flag.
     fold_parser.add_argument("--into", type=Path, required=True)
     fold_parser.add_argument(
         "--skip-unreadable",
@@ -864,8 +864,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
 
 def _fold(args: argparse.Namespace) -> int:
-    """Rebuild the index from the record. The index is deletable, so this
-    command is the whole of its recovery story (design §4)."""
+    """Rebuild the ledger from the record. The ledger is deletable, so this
+    command is the whole of its recovery story (§4 of the record design,
+    not `DESIGN.md` §4)."""
     record = RefsRecord(Path(args.repo))
     ledger = Ledger(Path(args.into))
     try:

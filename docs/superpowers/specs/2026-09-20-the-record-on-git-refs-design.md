@@ -1,4 +1,4 @@
-# The record moves to git refs, and the ledger becomes its index
+# The record moves to git refs, and the ledger stops being authoritative
 
 Backlog item 170, designed. It closes `DESIGN.md` §6's open fork — *"there are
 two records of a night and the authoritative one is the file, not the
@@ -7,7 +7,7 @@ database"* — by naming one authoritative record and deriving the rest from it.
 The spike that makes it admissible is
 `docs/evidence/2026-09-17-state-on-git-refs.md`. The approach it probed was
 chosen before this document: per-target refs pushed to the real remote, with the
-index folded out of them. What was open, and is decided here, is the record's
+ledger folded out of them. What was open, and is decided here, is the record's
 shape, what happens to the 99 tasks already stored, and where a night's own
 identity lives when every ref belongs to one target.
 
@@ -39,7 +39,7 @@ carries the earned `elevated`.
 ## Decisions taken in design
 
 - **Scope.** The record as an interface, the refs backend, and the fold to the
-  index, on one host. Cloud, the artifact content-addressed store and a
+  ledger, on one host. Cloud, the artifact content-addressed store and a
   Saffron-owned state repository are named as things the interface must not
   preclude, and are not built.
 - **Encoding.** A pure append-only log of facts per task. State is a replay.
@@ -78,7 +78,7 @@ dependency of every path Saffron has: a task that cannot reach git produced
 nothing to record.
 
 And this is not dual-write. One writer appends to the record; one fold derives
-the index. The index is deletable at any time, so it has no claim to defend and
+the ledger. The ledger is deletable at any time, so it has no claim to defend and
 nothing to diverge from. §4.6 rule 1's own words are what the new arrangement
 satisfies, with the two stores exchanged: the *ledger* is now the projection
 with no write path back.
@@ -91,7 +91,7 @@ outside it.
 **What this does not reverse.** §4.1's `failures` argument stands unchanged —
 the identity `(gate, file, code)` has to be queryable for baseline subtraction,
 no-progress detection and the flywheel's question. That is a requirement on the
-*index*, which is still SQL, and the fold is what satisfies it.
+*ledger*, which is still SQL, and the fold is what satisfies it.
 
 ## 2. The record is an interface
 
@@ -121,6 +121,13 @@ heavier than assumed, and only facts go in the record.
 
 Refs are the first implementation of this interface. A later store replaces the
 backend and leaves the fold alone.
+
+**The ledger keeps its name.** An earlier draft called it the index, which
+`CONTEXT.md` §8 already gives to the morning page, and "projection" is worse —
+`DESIGN.md` §4.6, §1.4 and §9 give it to the RDF graph, `saffron/projection.py`
+is the module that emits one, and backlog item b-606ea3 is open on that word
+having no glossary entry. Nothing here needs a new noun: what changes is that
+the ledger is derived, not what it is called.
 
 ## 3. The refs backend
 
@@ -155,8 +162,10 @@ The push carries no `--force`:
 git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 ```
 
-A non-fast-forward refusal therefore means a stale writer, which must re-read
-and retry. The spike measured that refusal directly, and it is the primitive the
+A non-fast-forward refusal therefore means a stale writer. Re-reading and
+retrying is the caller's, and no caller does it yet: `append` lets the refusal
+propagate, and no production path sets a remote. The retry lands with the
+wiring. The spike measured that refusal directly, and it is the primitive the
 cross-host budget needs later — the thing `batch.py:194` cannot provide across
 hosts, because a SQLite file is local to one.
 
@@ -204,18 +213,28 @@ store: `batch_key` and `repo`.
 **A task's identity in the record is not the ledger's.** `tasks.task_id` is a
 SQLite autoincrement, and the fold mints it. An id the fold produces cannot name
 the ref the fold reads, so a task carries a `task_key` generated at creation,
-and the index holds it in a `record_key` column.
+and the ledger holds it in a `record_key` column.
 
 ## 4. The fold
 
-`saffron fold` rebuilds `~/.saffron/ledger.db` from the record. Nothing writes
-the ledger directly any more; every write goes to the record and the fold
-follows.
+`saffron fold` rebuilds `~/.saffron/ledger.db` from the record. In the end
+state nothing writes the ledger directly: every write goes to the record and the
+fold follows. That end state is not this design's — here both are written, so
+the fold's output can be compared against a ledger the old path produced, and
+no production caller constructs a `Ledger` with a record at all. Cutting the
+direct writes is the second plan's, with the `queue.json` cutover of §6.
 
 The test is the one item 170 names, and it is the whole acceptance criterion for
-this part: **delete the index, rebuild it, and get the same rows.** It runs
-against real stored nights, not a fixture, because a fixture proves the fold
-agrees with itself.
+this part: **delete the ledger, rebuild it, and get the same rows.**
+
+Two artifacts carry it, because a unit test cannot depend on a private
+`~/.saffron/ledger.db`. The test pins the mechanism on a fixture. A committed
+benchmark script carries the corpus claim, folding a record synthesised from
+real stored rows and comparing every table as a multiset. Neither alone is the
+criterion: the fixture proves the fold agrees with itself, and the script proves
+it agrees with itself over real shapes and real counts. What no artifact here
+proves is a fold over a record a night actually wrote, because no night has
+written one.
 
 The ledger keeps its schema. §4.1's tables are a good analytical surface and
 this changes nothing about them — it changes only what writes them.
@@ -270,8 +289,10 @@ written; a field it cannot is absent, not defaulted.
 
 `risk` is the case that matters. It is written where the spec declared a tier,
 and left absent otherwise. `SA-0085` therefore carries no declared tier rather
-than a `standard` it never claimed, and the earned tier is a separate field
-written from the attempt that measured it. The two quantities §4.1 conflated
+than a `standard` it never claimed. The earned tier needs a field of its own
+and does not have one yet: `attempt_closed`'s payload is exactly
+`close_attempt`'s arguments, and `effective_risk` reaches none of them. It lands
+with the migration. The two quantities §4.1 conflated
 under one name become two names, and the ambiguity dies at the migration
 boundary instead of crossing it.
 
@@ -293,6 +314,10 @@ So there are two streams, and two streams is how divergence starts — which is
 the exact defect this design exists to close. One rule prevents it:
 
 > **Every record append also emits an event. No event implies an append.**
+
+The rule binds from the point a production caller constructs a `Ledger` with a
+record. Nothing does yet, and `_append` emits nothing, so the rule is stated
+here and implemented with that wiring.
 
 One direction only. The two can differ in prose, and can never differ on whether
 something happened. An append that failed to emit is a missing line in a log; an
@@ -327,7 +352,7 @@ target repository on a paid plan or a public one.
 **Survival — accepted.** The spike measured minutes, not weeks. Whether
 server-side gc prunes objects reachable only from a ref outside `refs/heads/*`
 is unproven. *Cost if wrong:* a night's facts vanish from the remote while the
-local index still holds them, so the loss is recoverable by re-push and is
+local ledger still holds them, so the loss is recoverable by re-push and is
 detectable by the fold disagreeing with the remote. *Reopens on:* the first fold
 that finds a ref's objects missing.
 
@@ -369,10 +394,15 @@ place rather than contradicted from a distance.
   exchanged.
 - `DESIGN.md` §6 — the fork is closed. The paragraph beginning *"The queue reads
   `queue.json`, not the ledger"* names the record and the render.
-- `DESIGN.md` §4.1 — the ledger is described as the index, and the two
-  quantities under `risk` are separated.
+- `DESIGN.md` §4.1 — the ledger is described as derived rather than
+  authoritative, and the two quantities under `risk` are separated.
 - `DESIGN.md` §4.4 — the budget is a fold, not a counter.
-- `CONTEXT.md` §8 — the **Ledger** entry stops saying "Authoritative for state".
+- `DESIGN.md` §10 and `CLAUDE.md`'s "Layout" — both enumerate the packages
+  under `saffron/`, and neither lists `saffron/record/`. `CLAUDE.md` is not
+  `protected` and is done here; §10 lands with the rest.
+- `CONTEXT.md` §8 — the **Ledger** entry stops saying "Authoritative for state"
+  and says what it is instead: derived from the record, deletable, rebuilt by
+  the fold.
   A new **Record** entry names this one, and its _Avoid_ line separates it from
   `records/`, the dev-only package holding Saffron's own project documents,
   whose `records.load.Record` is a second class of that name. The two never meet

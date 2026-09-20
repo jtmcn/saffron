@@ -318,6 +318,14 @@ class Ledger:
     def close(self) -> None:
         self._db.close()
 
+    def _attempt_owner(self, attempt_id: int) -> int | None:
+        """The task an attempt belongs to, for `_append`'s sake. An attempt the
+        caller invented has no owner and files no fact."""
+        row = self._db.execute(
+            "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()
+        return row["task_id"] if row is not None else None
+
     def record_key(self, task_id: int) -> str | None:
         row = self._db.execute(
             "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
@@ -642,7 +650,7 @@ class Ledger:
         cannot say what it ran under.
 
         `risk=None` means the spec declared no tier; the column still defaults
-        to `standard` because the index's consumers read it (item 170), but
+        to `standard` because the ledger's consumers read it (item 170), but
         the fact carries the undeclared `None` rather than that default."""
         declared_risk = risk
         risk = risk if risk is not None else "standard"
@@ -683,7 +691,7 @@ class Ledger:
     def _run_facts(self, run_id: int) -> dict[str, Any]:
         """What the fold needs to rebuild the `repos` and `runs` rows this task
         hangs from. A run has no record of its own — it is a fold over the
-        tasks that name it (design §5)."""
+        tasks that name it (§5 of the record design, not `DESIGN.md` §5)."""
         if self._record is None:
             return {}
         row = self._db.execute(
@@ -776,12 +784,10 @@ class Ledger:
         )
         self._db.commit()
         if self._record is not None:
-            owner = self._db.execute(
-                "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
-            ).fetchone()
+            owner = self._attempt_owner(attempt_id)
             if owner is not None:
                 self._append(
-                    owner["task_id"],
+                    owner,
                     "attempt_closed",
                     session_id=session_id,
                     model=model,
@@ -993,12 +999,10 @@ class Ledger:
         # A baseline result (`run_id` set) belongs to no task and has nothing
         # to append against; an attempt's result does.
         if attempt_id is not None and self._record is not None:
-            owner = self._db.execute(
-                "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
-            ).fetchone()
+            owner = self._attempt_owner(attempt_id)
             if owner is not None:
                 self._append(
-                    owner["task_id"],
+                    owner,
                     "gate_result",
                     **result.model_dump(mode="json"),
                 )

@@ -2,7 +2,9 @@
 backend must do with one.
 
 The record holds facts, never events — `saffron/events.py` owns that word for
-the `events.jsonl` stream, and the two are deliberately separate (design §8).
+the `events.jsonl` stream, and the two are deliberately separate — §8 of
+`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`,
+not `DESIGN.md` §8.
 """
 
 from __future__ import annotations
@@ -92,8 +94,12 @@ class Fact:
 
 
 class Record(Protocol):
-    """Four operations and no git in any signature. `compare_and_swap` is
-    unused on one host and is the seam a cross-host budget needs."""
+    """Four operations and no git in any signature.
+
+    ponytail: `compare_and_swap` is called by nothing and every backend pays
+    for it. It is the seam a cross-host budget needs, specified now so a later
+    backend does not reshape the fold to add it (§2 of the record design).
+    """
 
     def append(self, task_key: str, fact: Fact) -> None: ...
 

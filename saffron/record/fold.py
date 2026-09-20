@@ -1,14 +1,17 @@
-"""Record -> index. Tasks, attempts, gate results and findings are replayed
-from the task facts, so deleting those rows costs nothing (design §3).
+"""Record -> ledger. Tasks, attempts, gate results and findings are replayed
+from the task facts, so deleting those rows costs nothing.
+
+§ numbers here are `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`'s,
+not `DESIGN.md`'s.
 
 Batches and runs are not, yet: `create_run`, `finish_run`, `set_run_preflight`,
 `create_batch`, `close_batch`, `attach_run_to_batch`, `attach_orphan_runs_to_batch`
 and `upsert_repo` append no fact, so a rebuild has no `batches` row and leaves
 `runs.batch_id`/`status`/`preflight`/`ended_at` unset — `Ledger.batch_spend`
-joins `runs.batch_id`, so every batch reads as $0 spent. Design §5's gap, not
-fixed here.
+joins `runs.batch_id`, so every batch reads as $0 spent. §5's gap, not fixed
+here.
 
-Replay, not snapshot: a task's state is what its facts add up to (design §3).
+Replay, not snapshot: a task's state is what its facts add up to (§3).
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ def _skipped(key: str, exc: Exception, strict: bool) -> None:
     """`Exception`, not a named few: `RefsRecord.read` raises
     `subprocess.CalledProcessError` on a broken repository, which is the
     likeliest unreadable task there is (`tests/test_record_refs.py`), and a
-    guard that misses it costs the night its whole index."""
+    guard that misses it costs the night its whole ledger."""
     if strict:
         raise ValueError(f"task {key} is unreadable: {exc}") from exc
     print(f"fold: skipped task {key}: {type(exc).__name__}: {exc}")
@@ -48,7 +51,7 @@ def _creation_order(record: Record, strict: bool) -> list[str]:
     """Task keys oldest first, by the time their `task_created` fact was
     appended. A record key is random hex, and `ORDER BY t.task_id` is read as
     a chronology by `queue_lines` and `tasks_by_spec`, so folding in key order
-    scatters a rebuilt index through time.
+    scatters a rebuilt ledger through time.
 
     A second read rather than a corpus held in memory: the 118 tasks measured
     on 2026-09-20 carry 33.7 MB of fact JSON, which is not a thing to hold to
@@ -158,7 +161,7 @@ def _discard_task(ledger: Ledger, key: str) -> None:
     they go, so a `with` block around the replay does not roll it back — a
     measured fact, not a supposition (`docs/evidence/2026-09-20-fold-rebuild-
     time.md`). The fold compensates instead, so a task that failed mid-replay
-    is absent from the index rather than half-present in it."""
+    is absent from the ledger rather than half-present in it."""
     row = ledger._db.execute(
         "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
     ).fetchone()
@@ -202,7 +205,7 @@ def _gate_result(fact: Fact) -> GateResult:
 
 def _run_for(ledger: Ledger, created: Fact) -> int:
     """The repo and run a `task_created` fact names. Neither has a record of
-    its own — both are a fold over the tasks that name them (design §5), which
+    its own — both are a fold over the tasks that name them (§5), which
     is why the three columns their `NOT NULL` needs ride on the task's fact."""
     payload = created.payload
     # `repos.policy_sha` is nobody's fact: the `policy_sha` a task carries is
@@ -216,7 +219,7 @@ def _run_for(ledger: Ledger, created: Fact) -> int:
     ).fetchone()
     if found is not None:
         return int(found["run_id"])
-    # ponytail: design §5 identifies a run by batch and repo, but `batch_key`
+    # ponytail: §5 identifies a run by batch and repo, but
     # is NULL on every stored task, so `base_sha` stands in and collapses some.
     run_id = ledger.create_run(repo_id, base_sha=payload["base_sha"])
     _at(ledger, "runs", "started_at", "run_id", run_id, created.at)
