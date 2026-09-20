@@ -4,10 +4,10 @@ title: A delegate's review fixes reach a task's pull request and no gate, critic
 status: partial
 tier: 1
 specs: [SA-0111]
-prs: [189]
+prs: [189, 381]
 commits: []
 cites: [§5.1, §5.4]
-related: []
+related: [b-1c7019, b-3e0dbe]
 ---
 
 ## Problem
@@ -65,3 +65,13 @@ shape: the head GitHub reports for a merging pull request lands on the task
 row, in the one scan that can still ask for it. The re-gate is not in it, since
 `saffron/gates/**` and `saffron/cell/**` are `forbidden` there, so this item
 stays `partial` until the re-gate ships.
+
+**The record half is delivered, 2026-09-19, in #381.** `tasks.merged_head_sha`
+holds the commit GitHub reported a merge at. `reconcile` writes it before the
+state moves, in the one scan that can still ask. The item stays `partial`: the
+re-gate is still owed, and it is still what would read the column.
+
+Two things the review left beside it. `b-1c7019` is the guard that was supposed
+to stop a column nothing reads and did not notice this one. `b-3e0dbe` is the
+row a crash between the two writes strands, which the write order makes safe to
+recover and nothing yet recovers.
