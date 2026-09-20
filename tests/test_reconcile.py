@@ -278,6 +278,194 @@ def test_a_head_that_cannot_be_compared_is_never_called_moved(ledger, pushed, an
     assert reconcile(ledger, repo_id, gh=gh).head_moved == []
 
 
+def _merged_head(ledger, task_id):
+    return ledger._db.execute(
+        "SELECT merged_head_sha FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()["merged_head_sha"]
+
+
+def test_a_merge_records_the_commit_its_pull_request_merged_at(ledger):
+    """A `MERGED` row keeps the head GitHub reported for its pull request,
+    whatever `pushed_sha` says: different, identical, or absent entirely
+    (backlog item 97)."""
+    repo_id = _repo(ledger)
+    moved_url = "https://github.com/jtmcn/saffron/pull/201"
+    moved = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9401",
+        state="READY_FOR_REVIEW",
+        pr_url=moved_url,
+        pushed_sha=_PUSHED,
+    )
+    same_url = "https://github.com/jtmcn/saffron/pull/202"
+    same = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9402",
+        state="READY_FOR_REVIEW",
+        pr_url=same_url,
+        pushed_sha=_PUSHED,
+    )
+    unpushed_url = "https://github.com/jtmcn/saffron/pull/203"
+    unpushed = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9403",
+        state="READY_FOR_REVIEW",
+        pr_url=unpushed_url,
+        pushed_sha=None,
+    )
+    gh = _FakeGh(
+        {
+            moved_url: {
+                "state": "MERGED",
+                "reviewDecision": None,
+                "headRefOid": _FIXED,
+            },
+            same_url: {
+                "state": "MERGED",
+                "reviewDecision": None,
+                "headRefOid": _PUSHED,
+            },
+            unpushed_url: {
+                "state": "MERGED",
+                "reviewDecision": None,
+                "headRefOid": _FIXED,
+            },
+        }
+    )
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert set(result.merged) == {moved, same, unpushed}
+    assert _merged_head(ledger, moved) == _FIXED
+    assert _merged_head(ledger, same) == _PUSHED
+    assert _merged_head(ledger, unpushed) == _FIXED
+
+
+def test_a_head_is_recorded_only_for_an_observed_merge(ledger):
+    """A merge GitHub answered with no usable head — absent, empty, or not a
+    string — records nothing, and a real head over a non-merge move is left
+    where `head_moved` alone already reports it (backlog item 97)."""
+    repo_id = _repo(ledger)
+    no_answer_url = "https://github.com/jtmcn/saffron/pull/204"
+    no_answer = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9404",
+        state="READY_FOR_REVIEW",
+        pr_url=no_answer_url,
+        pushed_sha=_PUSHED,
+    )
+    empty_url = "https://github.com/jtmcn/saffron/pull/205"
+    empty = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9405",
+        state="READY_FOR_REVIEW",
+        pr_url=empty_url,
+        pushed_sha=_PUSHED,
+    )
+    nonstring_url = "https://github.com/jtmcn/saffron/pull/206"
+    nonstring = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9406",
+        state="READY_FOR_REVIEW",
+        pr_url=nonstring_url,
+        pushed_sha=_PUSHED,
+    )
+    changes_url = "https://github.com/jtmcn/saffron/pull/207"
+    changes = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9407",
+        state="READY_FOR_REVIEW",
+        pr_url=changes_url,
+        pushed_sha=_PUSHED,
+    )
+    rejected_url = "https://github.com/jtmcn/saffron/pull/208"
+    rejected = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9408",
+        state="READY_FOR_REVIEW",
+        pr_url=rejected_url,
+        pushed_sha=_PUSHED,
+    )
+    gh = _FakeGh(
+        {
+            no_answer_url: {"state": "MERGED", "reviewDecision": None},
+            empty_url: {"state": "MERGED", "reviewDecision": None, "headRefOid": ""},
+            nonstring_url: {
+                "state": "MERGED",
+                "reviewDecision": None,
+                "headRefOid": 123,
+            },
+            changes_url: {
+                "state": "OPEN",
+                "reviewDecision": "CHANGES_REQUESTED",
+                "headRefOid": _FIXED,
+            },
+            rejected_url: {
+                "state": "CLOSED",
+                "reviewDecision": None,
+                "headRefOid": _FIXED,
+            },
+        }
+    )
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert set(result.merged) == {no_answer, empty, nonstring}
+    assert result.changes_requested == [changes]
+    assert result.rejected == [rejected]
+    # The claim is about the row, not the bucket: a merge with no usable head
+    # still moves, and the head alone is what goes unrecorded.
+    for task_id in (no_answer, empty, nonstring):
+        assert _state(ledger, task_id) == "MERGED"
+    for task_id in (no_answer, empty, nonstring, changes, rejected):
+        assert _merged_head(ledger, task_id) is None
+
+
+def test_the_merged_head_is_written_before_the_state_moves(ledger, monkeypatch):
+    """A `MERGED` row is never asked about again, so a crash between the two
+    writes must be able to lose only the second one: the head has to land
+    on the ledger before the state does (backlog item 97)."""
+    repo_id = _repo(ledger)
+    url = "https://github.com/jtmcn/saffron/pull/209"
+    _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9409",
+        state="READY_FOR_REVIEW",
+        pr_url=url,
+        pushed_sha=_PUSHED,
+    )
+    gh = _FakeGh(
+        {url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}}
+    )
+    calls: list[str] = []
+    real_record_head = ledger.record_merged_head
+    real_set_state = ledger.set_task_state
+
+    def spy_record_head(task_id, head):
+        calls.append("head")
+        return real_record_head(task_id, head)
+
+    def spy_set_state(task_id, state):
+        calls.append("state")
+        return real_set_state(task_id, state)
+
+    monkeypatch.setattr(ledger, "record_merged_head", spy_record_head)
+    monkeypatch.setattr(ledger, "set_task_state", spy_set_state)
+
+    reconcile(ledger, repo_id, gh=gh)
+
+    assert calls == ["head", "state"]
+
+
 def test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise(ledger):
     """Default `False` leaves in-flight rows untouched even while the
     pull-request half runs; `stamp_orphaned=True` stamps them all."""

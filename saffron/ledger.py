@@ -75,7 +75,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
     policy_sha TEXT,
     prompt_sha  TEXT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    merged_head_sha TEXT
+    -- The commit GitHub reported a merge at, written once by `reconcile`
+    -- (backlog item 97). NULL until a merge for this row is observed.
+    -- Below the column, not above it like `tool`. Measured 2026-09-19: on
+    -- SQLite 3.51.0 a comment above the *last* column makes `DROP COLUMN`
+    -- rebuild an unterminated table ("incomplete input"); 3.53.1 tolerates it.
 );
 
 -- `phase` is the state the task was in when the turn started, and `n` numbers
@@ -182,7 +188,13 @@ class Ledger:
             row["name"]
             for row in self._db.execute("PRAGMA table_info(tasks)").fetchall()
         }
-        for column in ("pushed_sha", "pr_url", "policy_sha", "prompt_sha"):
+        for column in (
+            "pushed_sha",
+            "pr_url",
+            "policy_sha",
+            "prompt_sha",
+            "merged_head_sha",
+        ):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
         if "spent_usd_est" not in existing:
@@ -700,6 +712,18 @@ class Ledger:
             "UPDATE tasks SET pushed_sha = ?, updated_at = datetime('now') "
             "WHERE task_id = ?",
             (pushed_sha, task_id),
+        )
+        self._db.commit()
+
+    def record_merged_head(self, task_id: int, head: str) -> None:
+        """The commit a merged pull request's head actually was — called by
+        `reconcile`, the only writer of `MERGED`, before that call moves the
+        state (backlog item 97). A merged branch is gone by the next scan,
+        so this is the one chance to keep it."""
+        self._db.execute(
+            "UPDATE tasks SET merged_head_sha = ?, updated_at = datetime('now') "
+            "WHERE task_id = ?",
+            (head, task_id),
         )
         self._db.commit()
 
