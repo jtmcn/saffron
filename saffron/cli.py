@@ -21,6 +21,8 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.reconcile import ReconcileResult, reconcile
+from saffron.record.fold import fold
+from saffron.record.refs import RefsRecord
 from saffron.replay import replay
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import PolicyError, load_policy
@@ -147,6 +149,20 @@ def main(argv: list[str] | None = None) -> int:
         "rather than only the newest",
     )
 
+    fold_parser = subcommands.add_parser(
+        "fold", help="rebuild an index from the record on refs/saffron/*"
+    )
+    fold_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    # Named, never defaulted to the home ledger: a rebuild is not a thing to
+    # do to the live index by forgetting a flag.
+    fold_parser.add_argument("--into", type=Path, required=True)
+    fold_parser.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="fold the tasks that can be read and skip the ones that cannot, "
+        "rather than stopping on the first",
+    )
+
     subcommands.add_parser(
         "chains",
         help="materialize the projection and compare Q4 with the checked walk "
@@ -175,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "chains":
             return _chains(args, ledger, out_dir)
+
+        if args.command == "fold":
+            return _fold(args)
 
         line = replay(
             args.repo,
@@ -840,6 +859,19 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     else:
         print("batch: infrastructure failed")
     return 2
+
+
+def _fold(args: argparse.Namespace) -> int:
+    """Rebuild the index from the record. The index is deletable, so this
+    command is the whole of its recovery story (design §4)."""
+    record = RefsRecord(Path(args.repo))
+    ledger = Ledger(Path(args.into))
+    try:
+        count = fold(record, ledger, strict=not args.skip_unreadable)
+    finally:
+        ledger.close()
+    print(f"folded {count} tasks into {args.into}")
+    return 0
 
 
 def _queue(args: argparse.Namespace, ledger: Ledger) -> int:

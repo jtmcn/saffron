@@ -352,8 +352,10 @@ class Ledger:
         self._record.append(row["key"], fact)
 
     def upsert_repo(
-        self, name: str, origin: str, mirror_path: str, policy_sha: str
+        self, name: str, origin: str, mirror_path: str, policy_sha: str | None
     ) -> int:
+        """`policy_sha` is nullable, as the column is: the fold has no fact
+        that carries a repo's own declaration, only each task's."""
         self._db.execute(
             """INSERT INTO repos (name, origin, mirror_path, policy_sha)
                VALUES (?, ?, ?, ?)
