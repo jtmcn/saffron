@@ -182,6 +182,10 @@ writing one.
   the commit message or the PR body, and a spec's notes are that rationale, not comment text.
   A function, class or test docstring stays within ten lines. **(gated: `prose` counts both,
   per file)**
+- A new file starts the `prose` ratchet at zero, however many hits its neighbours carry.
+  New Markdown and new comments take no em-dash, semicolon, contraction, perfect tense,
+  hedge or sentence over 25 words. `python3 hooks/prose_limit.py` reads the staged index,
+  so stage again after each rewrite.
 - A new test is not trusted until it has been run against the unfixed code — or, for one
   guarding a property already true, against a mutant that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the

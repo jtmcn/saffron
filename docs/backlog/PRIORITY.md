@@ -127,6 +127,13 @@ batch tree instead. A reconstruction of 68 stored rows on 2026-09-17 found
 half. The page an operator reads at 06:30 and the ledger are two accounts, and
 nothing says which one to believe.
 
+**From the spec loop's runs 8 to 10, placed 2026-09-20**: **b-a4df62**.
+Reviewing a spec before its cell is the delegate's largest manual step, and
+Saffron does none of it. Run 8 reviewed five specs and re-reviewed at parent
+branches. Run 10 took five rounds over two specs. No run reached a review with
+no finding. It sits in this tier because the step is what keeps a cell from
+being paid to satisfy a spec that cannot be satisfied.
+
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
