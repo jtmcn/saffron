@@ -106,9 +106,10 @@ criterion rests on. It then ran that criterion's witness. The surviving edit was
 a witness hole in all five pull requests, and five review commits fixed them.
 
 Every sentence below about current code was read at `ca55c57e` on 2026-09-20,
-and the sentences added in review were read at `8c2e7798`. That commit adds
-this spec, its backlog records and the queue smoke test's paragraph. It changes
-no line of `saffron/` and no test body.
+and the sentences added over two reviews were read at `8c2e7798` and
+`06a77f16`. Those commits add this spec, its backlog records and the queue
+smoke test's paragraph. They change no line of `saffron/`, and no test body
+but that smoke test's own.
 
 **Item 117's half of this shipped and this half did not**. `SA-0109` gave the
 host the adequacy lens's own vacuity probe. `_probe_adequacy`
@@ -151,8 +152,10 @@ error (`saffron/phases/review.py:224-233`). All of it runs inside one
 as a block appended to the spec body, through `context.criteria_section`
 (`saffron/agents/context.py:120`), called at `saffron/cell/session.py:2316`. The
 witness ids reach the implementer through `context.witnesses_block`
-(`saffron/agents/context.py:89`). No caller asks one session about one claim,
-and no caller withholds the witness from a critic.
+(`saffron/agents/context.py:89`). No caller pairs one claim with one session.
+The witness ids stay out of a lens prompt by design
+(`saffron/agents/context.py:120-131`), which is precedent for withholding them
+rather than a new rule.
 
 ## Problem
 
@@ -203,6 +206,20 @@ stops at the record.
    limit lands here. So the claim above is about the prompt the host builds,
    which is what a test can observe. The prompt itself tells the session it
    holds everything it needs. Item 80's fix covers this one as well.
+
+   **The diff is the second channel, and it carries the witnesses**. Each
+   session reads the patch the lenses read
+   (`saffron/cell/session.py:2303-2305`), and a witness that is not
+   `preserves` names a test that patch adds
+   (`docs/agents/issue-tracker.md:127-128`, `saffron/gates/core/revert.py:112-118`).
+   So a session sees every witness body and every witness name, and the node
+   id is the one thing the prompt withholds. That is still worth having. The
+   session is not told which test guards the claim it holds, nor that a test
+   guards it at all. It has to read a whole patch and guess, where the id
+   hands it the answer. Read the child spec's verdict under that limit: an
+   edit is evidence about its witness, and a diff-shaped hint is the standing
+   confound. Narrowing what these sessions read is a different design, and it
+   is the operator's call rather than this spec's.
 
 4. **What comes back**. One `<output>` block per session, holding an object
    with an edit and a reason. The edit is the three fields `Mutant` declares
@@ -308,11 +325,12 @@ acceptance list. One hands a session the witness ids through the block
 before the lenses rather than after. One gives these sessions the implementer's
 tools, or a ceiling of its own. One leaves their cost out of the spend.
 
-Criterion 2 kills three. One drops the entry for a session that named no edit.
+Criterion 2 kills four. One drops the entry for a session that named no edit.
 One pairs edits with criteria by position after such a drop. So the two claims
 and the two edits in that witness have to be distinguishable from each other.
-One writes an empty record over a spec with no criteria, or emits a line
-reading zero.
+One writes the entries in an order other than the spec's, so that witness
+asserts the sequence of the entries rather than their membership. One writes an
+empty record over a spec with no criteria, or emits a line reading zero.
 
 Criterion 3 kills three. One lets `AgentFailed` out of the loop. One stops at
 the first failure. One re-prompts a session, the way `run_lens` re-prompts a
@@ -471,9 +489,19 @@ half. The two feature cells that overshot this ceiling, `SA-0106` at 633 and
 `SA-0020` at 646, each carried four criteria or more. Keep the drive helper
 shared, and do not go looking for more to do.
 
-**The `prose` gate counts comment runs and docstrings per file**. It blocks,
-with the base subtracted. Keep every comment to one or two lines and every
-docstring under ten, the two new prompt files included.
+**The `prose` gate reads the two new prompt files as living prose**. It blocks
+(`.saffron/policy.yaml:26`), and the base it subtracts is per file and per
+rule. A file this change creates has no base, so every hit in it counts.
+Markdown under `saffron/agents/prompts/` gets the style rules
+(`.saffron/gates/prose.py:363-392`): a sentence over 25 words, a
+`should`/`may`/`might`, an em-dash or a spaced hyphen, a semicolon, the
+perfect tense, a contraction, a filler word. The house voice is not that
+voice. `review-adequacy.md` scores 38 em-dash hits, 21 long sentences, 8
+semicolons and 3 hedges at base, and pays for none of them. Write the two new
+files to the rules, not to the prompt you copy the shape from. Over the `.py`
+files the gate counts comment runs and docstrings instead
+(`.saffron/gates/prose.py:415-418`). Keep every comment there to one or two
+lines and every docstring under ten.
 
 **Rename no existing test**. `census` compares collected names between base and
 head, and reads a rename as a removal.
