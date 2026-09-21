@@ -26,6 +26,9 @@ CLOSED_SETS = {
     "Risk tier": "RiskTier",
     "Gate role": "GateRole",
     "Core gates": "CoreGate",
+    "Preflight outcome": "PreflightOutcome",
+    "Event kind": "EventKind",
+    "Fact kind": "FactKind",
 }
 
 

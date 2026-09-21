@@ -1,6 +1,6 @@
 """Where the vocabulary and the shipped code both close a set, they close it the same.
 
-Three sets are closed in both places. `Severity` is a `Literal` in
+Six sets are closed in both places. `Severity` is a `Literal` in
 `saffron/agents/findings.py`, so a severity declared in the vocabulary that the
 code cannot represent is a run record that cannot be written — pydantic rejects
 it. `BatchStopReason` is closed *twice* on the code side — a `Literal` in
@@ -30,7 +30,9 @@ from ontology_paths import NS, ONTOLOGY, VOCABULARY
 
 from saffron.agents.findings import Severity
 from saffron.batch import StopReason
-from saffron.ledger import SCHEMA
+from saffron.events import Event
+from saffron.ledger import RUN_PREFLIGHT_OUTCOMES, SCHEMA
+from saffron.record.contract import KINDS
 from saffron.repos.policy import CORE_GATE_NAMES
 
 
@@ -139,4 +141,29 @@ def test_the_names_a_policy_may_not_declare_are_the_core_gates_declared():
         "factory:CoreGate and saffron/repos/policy.py's CORE_GATE_NAMES disagree. "
         "A core gate missing there is a name a repo can declare and shadow; the "
         "generator cannot reach Python, so this is a hand edit in policy.py."
+    )
+
+
+def test_the_preflight_outcomes_the_ledger_stores_are_the_ones_the_vocabulary_declares():
+    """Item 169. The `CHECK` on `runs.preflight` is built from this tuple."""
+    assert _declared("PreflightOutcome") == set(RUN_PREFLIGHT_OUTCOMES), (
+        "factory:PreflightOutcome and saffron/ledger.py's RUN_PREFLIGHT_OUTCOMES "
+        "disagree. The generator cannot reach Python, so this is a hand edit."
+    )
+
+
+def test_the_event_kinds_the_log_writes_are_the_ones_the_vocabulary_declares():
+    """Item 168. The vocabulary suffixes each wire `kind` with `Event`, because
+    `Attempt` and `GateResult` already name classes there."""
+    written = {f"{cls.__name__}Event" for cls in get_args(Event)}
+    assert written, "the Event union names no kinds"
+    assert _declared("EventKind") == written, (
+        "factory:EventKind and saffron/events.py's Event union disagree"
+    )
+
+
+def test_the_fact_kinds_the_record_accepts_are_the_ones_the_vocabulary_declares():
+    """Item b-25766a. Equality, so a kind declared ahead of its writer still counts."""
+    assert _declared("FactKind") == set(KINDS), (
+        "factory:FactKind and saffron/record/contract.py's KINDS disagree"
     )

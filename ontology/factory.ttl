@@ -160,6 +160,32 @@ factory:DRAINED a factory:BatchStopReason . factory:BUDGET a factory:BatchStopRe
 factory:UNTIL a factory:BatchStopReason . factory:INFRASTRUCTURE a factory:BatchStopReason .
 factory:INCOMPLETE a factory:BatchStopReason .
 
+## What `runs.preflight` stores. NULL is not a member: it means the column was never written.
+factory:PreflightOutcome a owl:Class .
+factory:PASSED a factory:PreflightOutcome . factory:FAILED a factory:PreflightOutcome .
+
+## The kinds `events.jsonl` tags a line with. Suffixed because `Attempt` and
+## `GateResult` already name classes here, and an event is not the thing it reports.
+factory:EventKind a owl:Class .
+factory:PreflightEvent a factory:EventKind . factory:CeilingsEvent a factory:EventKind .
+factory:BaselineEvent a factory:EventKind . factory:PhaseStartEvent a factory:EventKind .
+factory:AttemptEvent a factory:EventKind . factory:GateResultEvent a factory:EventKind .
+factory:BudgetEvent a factory:EventKind . factory:AgentEvent a factory:EventKind .
+factory:TerminalEvent a factory:EventKind . factory:TaskOutcomeEvent a factory:EventKind .
+factory:TeardownEvent a factory:EventKind .
+
+## The record's whole alphabet (`saffron/record/contract.py`), including kinds nothing appends yet.
+factory:FactKind a owl:Class .
+factory:task_created a factory:FactKind . factory:task_state a factory:FactKind .
+factory:task_package a factory:FactKind . factory:task_push a factory:FactKind .
+factory:task_merged_head a factory:FactKind . factory:task_policy a factory:FactKind .
+factory:attempt_opened a factory:FactKind . factory:attempt_closed a factory:FactKind .
+factory:gate_result a factory:FactKind . factory:finding a factory:FactKind .
+factory:rebuttal a factory:FactKind . factory:decision a factory:FactKind .
+factory:run_created a factory:FactKind . factory:run_finished a factory:FactKind .
+factory:run_preflight a factory:FactKind . factory:batch_created a factory:FactKind .
+factory:batch_closed a factory:FactKind . factory:repo_upserted a factory:FactKind .
+
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .
 

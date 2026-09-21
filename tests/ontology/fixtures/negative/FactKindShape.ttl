@@ -1,0 +1,4 @@
+@prefix factory: <urn:software-factory:ns#> .
+
+# A fact whose kind is not in KINDS cannot be appended.
+factory:task_renamed a factory:FactKind .

@@ -521,6 +521,9 @@ Saffron. If it doesn't, the core/repo boundary has failed.
 **Preflight**: Per-repo readiness at batch start — mirror fetch, policy parse, image
 rebuild, baseline. A repo that fails preflight is skipped, not fatal.
 
+**Preflight outcome**: What a run stores of its own preflight: `PASSED` or `FAILED`.
+It lives in `runs.preflight`, and NULL is not one of them.
+
 ---
 
 ## 8. Artifacts
@@ -531,6 +534,21 @@ _Avoid_: "the DB" (ambiguous with fixture services inside a cell), "the store".
 **Batch tree**: The plain directory tree of artifacts under
 `~/.saffron/batches/` — transcripts, diffs, gate logs. Greppable on purpose.
 _Avoid_: "artifact store", "the logs", "the run tree".
+
+**Event kind**: What tags one line of a task's event log: `PreflightEvent`,
+`CeilingsEvent`, `BaselineEvent`, `PhaseStartEvent`, `AttemptEvent`,
+`GateResultEvent`, `BudgetEvent`, `AgentEvent`, `TerminalEvent`,
+`TaskOutcomeEvent`, `TeardownEvent`.
+Each name is the `kind` written to `events.jsonl` with `Event` appended, because
+`Attempt` and `GateResult` already name other terms here.
+
+**Fact kind**: What a record entry says it is: `task_created`, `task_state`,
+`task_package`, `task_push`, `task_merged_head`, `task_policy`, `attempt_opened`,
+`attempt_closed`, `gate_result`, `finding`, `rebuttal`, `decision`, `run_created`,
+`run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`.
+The set is the record's whole alphabet, so it holds kinds nothing appends yet.
+> A fact is an entry in the record on `refs/saffron/*`. An event is a line of
+> `events.jsonl`. The two words do not merge.
 
 **Mirror**: The local bare git repository that is a cell's only remote.
 _Avoid_: "origin" (that's the real remote, reachable only from the host).

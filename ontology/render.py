@@ -141,6 +141,9 @@ SHAPE_SETS = {
     "sh:path factory:riskTier": "RiskTier",
     "sh:path factory:endedBecause": "BatchStopReason",
     "sh:path factory:severity": "Severity",
+    "factory:PreflightOutcomeShape": "PreflightOutcome",
+    "factory:EventKindShape": "EventKind",
+    "factory:FactKindShape": "FactKind",
 }
 _PER_LINE = 3
 _INDENT = " " * 12

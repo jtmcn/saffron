@@ -98,6 +98,28 @@ factory:GateRoleShape a sh:NodeShape ;
     sh:in ( factory:format factory:lint factory:types
             factory:tests factory:no-network factory:coverage ) .
 
+# `runs.preflight` has a CHECK. This closes the same set where CONTEXT.md reads it.
+factory:PreflightOutcomeShape a sh:NodeShape ;
+    sh:targetClass factory:PreflightOutcome ;
+    sh:in ( factory:PASSED factory:FAILED ) .
+
+# Neither set is a §4.1 column. Each is closed in code, and this is where the glossary's copy is checked.
+factory:EventKindShape a sh:NodeShape ;
+    sh:targetClass factory:EventKind ;
+    sh:in ( factory:PreflightEvent factory:CeilingsEvent factory:BaselineEvent
+            factory:PhaseStartEvent factory:AttemptEvent factory:GateResultEvent
+            factory:BudgetEvent factory:AgentEvent factory:TerminalEvent
+            factory:TaskOutcomeEvent factory:TeardownEvent ) .
+
+factory:FactKindShape a sh:NodeShape ;
+    sh:targetClass factory:FactKind ;
+    sh:in ( factory:task_created factory:task_state factory:task_package
+            factory:task_push factory:task_merged_head factory:task_policy
+            factory:attempt_opened factory:attempt_closed factory:gate_result
+            factory:finding factory:rebuttal factory:decision
+            factory:run_created factory:run_finished factory:run_preflight
+            factory:batch_created factory:batch_closed factory:repo_upserted ) .
+
 # A contract gate is a repo's executable for one core-supplied role. This states
 # the contract half only; nothing here forbids a role on a core gate, because
 # `rdfs:domain` is an OWL axiom and no reasoner runs.
