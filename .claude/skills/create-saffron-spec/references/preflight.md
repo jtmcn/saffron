@@ -1,8 +1,9 @@
 # The pre-flight: what to run before a reviewer reads the spec
 
 Each check names what it catches, the command where one exists, and what the
-command cannot see. `findings.md` holds the evidence each check rests on. The
-numbers match the list in `SKILL.md` step 6.
+command cannot see. `findings.md` holds the evidence each check rests on.
+`SKILL.md` step 6 names checks 1 to 8 by these numbers. Checks 9 to 11 live
+only here.
 
 Run them against the committed draft. `D` below is
 `uv run .claude/skills/run-saffron-spec-loop/driver.py`, run from the spec's

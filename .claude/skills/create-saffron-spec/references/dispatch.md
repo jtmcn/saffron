@@ -86,7 +86,8 @@ Then say so with the evidence and do not apply it.>
 
 decisions (settled, do not re-argue):
 - <Which arm of each design finding to take.>
-- <Whether a cut is allowed if the size estimate moves inside 100 lines.>
+- <Whether a cut is allowed if the size estimate moves inside the margin
+  in preflight.md check 7.>
 
 --- REVIEW ---
 <the review, verbatim>

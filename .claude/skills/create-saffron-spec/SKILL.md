@@ -47,9 +47,8 @@ moved it to `touches` hours earlier. The spec carried the error to its review.
 Two questions decide whether one spec is the right shape, and both are cheaper
 now than after a draft.
 
-- **Size.** Estimate from real files with `wc -l`, against
-  `saffron/gates/core/size.py`'s ceiling for the type. An estimate inside 100
-  lines of the ceiling splits into a parent and children.
+- **Size.** Estimate from real files as `references/preflight.md` check 7
+  says. An estimate inside its margin splits into a parent and children.
 - **Overlap.** A queued spec whose `touches` intersect yours is your parent.
   `saffron queue --repo .` reads the mirror at the pinned `base_sha` and cannot
   see an unmerged spec, so drive `build_queue` over the working tree instead.
