@@ -1,7 +1,7 @@
 ---
 id: b-7d3810
 title: Adding a spec edits four other files by hand, and the queue smoke test's paragraph is rewritten every time
-status: open
+status: partial
 tier: 2
 filed: 2026-09-20
 specs: [SA-0116]
@@ -78,3 +78,6 @@ prints.
   $26. The review seats found the headings' order unwitnessed, among other
   findings, and the review commit fixed them. The operator accepted 636 changed
   lines against the ceiling of 600.
+- 2026-09-21: #416 merged, and `SA-0116` retires to `done/`. `bookkeeping`
+  prints three of the four edits. `partial`, because the `PRIORITY.md` edit is
+  still by hand. Its first use wrote this commit's smoke-test paragraph.

@@ -1,7 +1,7 @@
 ---
 id: b-fd1468
 title: Each fact kind is written by the ledger and read back by the fold, and nothing makes the two halves agree
-status: open
+status: partial
 tier: 1
 filed: 2026-09-20
 specs: [SA-0117]
@@ -114,3 +114,6 @@ become a third spec.
   review commit fixed them. Its SQL is packed onto long lines to pass `size`,
   which item b-89ec93 records. The second spec, which routes the write methods
   through `_apply`, is not written yet.
+- 2026-09-21: #418 merged, and `SA-0117` retires to `done/`. `partial`, because
+  the write methods still keep their own SQL. The second spec routes them
+  through `_apply` and removes the finding map.
