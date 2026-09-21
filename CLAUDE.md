@@ -94,6 +94,7 @@ Reach for `ast-grep` when the question is structural or the edit spans many site
 stay right for text and for one exact change.
 
 ```
+uv run ast-grep outline saffron/task.py        # items and members with line numbers, before a full read
 uv run ast-grep run -p 'run_one_cell($$$)' -l python --files-with-matches saffron   # every call site
 uv run ast-grep run -p 'old($A)' -r 'new($A)' -l python saffron      # preview a rewrite as a diff
 uv run ast-grep run -p 'old($A)' -r 'new($A)' -l python -U saffron   # apply it
