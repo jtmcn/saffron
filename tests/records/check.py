@@ -129,8 +129,7 @@ def check_appendix_letters(records: list[Record]) -> list[Violation]:
 
 
 def check_adr_ids(records: list[Record]) -> list[Violation]:
-    """ADR ids run 1, 2, 3 … with no gap or repeat. Not yet wired into
-    `check_all` — the by-hand layer adds it with ADR 1."""
+    """ADR ids run 1, 2, 3 … with no gap or repeat."""
     out: list[Violation] = []
     counts = Counter(_adr(r).id for r in records)
     for r in records:
@@ -152,8 +151,7 @@ def check_adr_ids(records: list[Record]) -> list[Violation]:
 
 
 def check_adr_supersession(records: list[Record]) -> list[Violation]:
-    """Supersession is recorded on both sides. Not yet wired into `check_all`
-    — the by-hand layer adds it with ADR 1."""
+    """Supersession is recorded on both sides."""
     out: list[Violation] = []
     by_id = _ids(records)
     for r in records:
@@ -226,9 +224,7 @@ def check_adr_supersession(records: list[Record]) -> list[Violation]:
 
 
 def check_adr_appendices(records: list[Record], letters: set[str]) -> list[Violation]:
-    """An ADR's `appendices` names only letters that exist. Not yet wired into
-    `check_all` — the by-hand layer adds it with ADR 1, passing in the live
-    letters from `ontology.design_record`."""
+    """An ADR's `appendices` names only letters that exist."""
     out: list[Violation] = []
     for r in records:
         m = _adr(r)
@@ -236,6 +232,20 @@ def check_adr_appendices(records: list[Record], letters: set[str]) -> list[Viola
         if bad:
             out.append(
                 Violation(r.path, "appendices", f"names {bad}, which do not exist")
+            )
+    return out
+
+
+def check_adr_principles(
+    records: list[Record], principles: set[int]
+) -> list[Violation]:
+    """An ADR's `principles` names only numbers an appendix declares."""
+    out: list[Violation] = []
+    for r in records:
+        bad = [p for p in _adr(r).principles if p not in principles]
+        if bad:
+            out.append(
+                Violation(r.path, "principles", f"names {bad}, which do not exist")
             )
     return out
 
@@ -573,10 +583,14 @@ def check_no_old_path(root: Path) -> list[Violation]:
 def check_all(
     root: Path,
     sections: set[str],
+    *,
+    principles: set[int],
     merged: frozenset[int] = frozenset(),
     building: int | None = None,
 ) -> list[Violation]:
     records = load(KINDS["backlog"], root)
+    appendices = load(KINDS["appendix"], root)
+    adrs = load(KINDS["adr"], root)
     priority = root / KINDS["backlog"].directory / "PRIORITY.md"
     return (
         check_ids(records)
@@ -590,5 +604,9 @@ def check_all(
         + check_priority(records, priority)
         + check_no_old_path(root)
         + check_awaiting(records, merged, building)
-        + check_appendix_letters(load(KINDS["appendix"], root))
+        + check_appendix_letters(appendices)
+        + check_adr_ids(adrs)
+        + check_adr_supersession(adrs)
+        + check_adr_principles(adrs, principles)
+        + check_adr_appendices(adrs, {str(r.model.id) for r in appendices})
     )
