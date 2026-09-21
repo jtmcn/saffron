@@ -1,13 +1,14 @@
 ---
 id: 142
 title: Nothing in `CONTEXT.md` defines the gate-only cell, and three sentences about the lenses go false
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 filed: 2026-09-16
 by_hand: true
 specs: [SA-0087, SA-0088, SA-0089]
 prs: [274, 277, 282]
-commits: []
+commits: [21488e89]
 cites: [§5.5]
 related: [118, 133, 140]
 ---
@@ -45,3 +46,7 @@ A **Gate-only cell** entry in `ontology/factory.ttl`, rendered into `CONTEXT.md`
 with its own `_Avoid_` line ("the gate cell", "the suite cell", "the third
 cell"); the two stale sentences corrected; and the code's prose reading
 "gate-only cell" throughout.
+
+## Record
+
+- 2026-09-21: Done by hand. The **Gate-only cell** entry and its `_Avoid_` line were already in `CONTEXT.md` §5, and both stale sentences were gone. The remaining work was the code's prose. 17 "gate cell" sites in `saffron/cell/session.py` and `tests/test_session.py` now read "Gate-only cell". The entry is hand-written, because nothing renders glossary prose from `ontology/factory.ttl`.

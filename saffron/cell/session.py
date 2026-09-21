@@ -2213,7 +2213,7 @@ def _drive_cell(
                 )
 
             # The bytes the patch export leaves behind for the operator — fed
-            # to the gate cell's own git and the critic cell's, never re-read
+            # to the Gate-only cell's own git and the critic cell's, never re-read
             # from `/work` again.
             patch_to_review = worktree.export_patch(container, spec.tree_base)
 
@@ -2247,7 +2247,7 @@ def _drive_cell(
                 _phase_start(
                     "REVIEW",
                     "REVIEW",
-                    f"the exported patch did not apply in the gate cell — {rejected}",
+                    f"the exported patch did not apply in the Gate-only cell — {rejected}",
                 )
             except CriticPatchUnrepresentable as binary:
                 gate_comparison = None
@@ -2320,7 +2320,7 @@ def _drive_cell(
                             # markdown spec already gives.
                             spec_body=spec.body
                             + context.criteria_section(spec.acceptance),
-                            # The gate cell's own comparison, never `latest` —
+                            # The Gate-only cell's own comparison, never `latest` —
                             # the implementer's last suite is exactly the input
                             # this cell exists to stop feeding the critic.
                             gates=review.gate_summary(

@@ -1,13 +1,14 @@
 ---
 id: b-f2a9d1
 title: A vacuity probe is applied during a task once SA-0109 lands, and the glossary and §5.5.1 say it never is
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 by_hand: true
 filed: 2026-09-18
 specs: [SA-0109]
 prs: []
-commits: []
+commits: [21488e89]
 cites: [§5.5, §5.5.1]
 related: [117, 65, 72]
 ---
@@ -42,3 +43,4 @@ not before.
 - 2026-09-21: the spec loop's run 11 (#403) found a second reader. `SA-0113`'s
   criterion-probe prompt injects the `CONTEXT.md` section holding that entry
   into every probe session.
+- 2026-09-21: Done by hand. The **Vacuity probe** entry says the host applies the probe after REVIEW in a gate-only cell, and that the verdict decides the finding. `DESIGN.md` §5.5.1 gains the paragraph naming the three verdicts.

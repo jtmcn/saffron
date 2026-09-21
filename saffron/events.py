@@ -60,9 +60,8 @@ from saffron.gates.contract import GateStatus
 # disk is "a small constant multiple of this", never this exactly.
 BOUND_CHARS = 8192
 
-# CONTEXT.md names GATE <-> REPAIR as one phase; split here because a gate
-# attempt and a repair turn render as different lines. Deliberate divergence,
-# recorded as backlog item 38.
+# CONTEXT.md §2 sanctions splitting GATE <-> REPAIR here, and only here, because
+# a gate attempt and a repair turn render as different lines.
 Phase = Literal["DIAGNOSE", "IMPLEMENT", "GATE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"]
 
 # The prefix a progress line actually carries, which is *not* the same set.
@@ -316,11 +315,8 @@ class Terminal:
     `detail` carries the rejection text on `plan_rejected` or a failure note
     on the salvage branches.
 
-    Not a `TerminalState`. CONTEXT.md reserves "terminal state" for the states
-    that reach the operator; this kind is narrower, and two of the five map
-    onto one, which makes the collision easy to miss. Renaming was deferred
-    because SA-0029's own criteria and SA-0030/SA-0040 all cite the name — not
-    because DESIGN.md does; it carries no event schema at all (backlog 36)."""
+    Not a `TerminalState`. CONTEXT.md §6 keeps the two names deliberately
+    distinct: each reason ends in `PLAN_REJECTED` or `NOT_IMPLEMENTED`."""
 
     timestamp: float
     spec_id: str

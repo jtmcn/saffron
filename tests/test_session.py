@@ -632,7 +632,7 @@ class _Cell:
         # *name* never shows a container was created at all.
         self.worktrees: list[dict] = []
         self.read_head_calls: list[tuple[str, str]] = []
-        # The gate cell (backlog item 118, part 4): every network `create_
+        # The Gate-only cell (backlog item 118, part 4): every network `create_
         # network` was asked to build, name and subnet both, and how many
         # times its own gate suite ran (never through `latest`'s own table).
         self.networks_created: list[tuple[str, str]] = []
@@ -888,7 +888,7 @@ def _stub_the_runtime(
         cell.gate_paths.append([str(path) for path in gates.values()])
         container = getattr(executor, "container", None)
         if container is not None and container.startswith("saffron-gate-"):
-            # The gate cell's own suite (backlog item 118, part 4): a call the
+            # The Gate-only cell's own suite (backlog item 118, part 4): a call the
             # implementer's cell never makes, so it is never allowed to
             # silently consume from `suites=` — every one of this module's
             # other tests already sizes that sequence exactly for the
@@ -1734,7 +1734,7 @@ def test_the_suite_execs_the_gates_from_the_mount_never_the_worktree(
         gates=("tests",),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Baseline, the attempt, and the gate cell's own re-run alike, and the
+    # Baseline, the attempt, and the Gate-only cell's own re-run alike, and the
     # whole path — not just its prefix: the mount holds the exported tree, so
     # the gate sits under its own .saffron/.
     assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 3
@@ -3656,7 +3656,7 @@ _CRITIC_CONTAINER = "saffron-critic-SY-1"
 _CRITIC_VOLUME = "saffron-critic-wt-SY-1"
 _CRITIC_STATE = "saffron-critic-st-SY-1"
 
-# The gate cell (backlog item 118, part 4): the table every lens is shown is
+# The Gate-only cell (backlog item 118, part 4): the table every lens is shown is
 # computed here, never in `_IMPLEMENTER_CONTAINER` and never in
 # `_CRITIC_CONTAINER` — a third container, network, and pair of volumes.
 _GATE_CONTAINER = "saffron-gate-SY-1"
@@ -4064,7 +4064,7 @@ def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cel
             gate="tests",
             status="pass",
             tool="pytest 8.3.2",
-            summary="reported by the gate cell's own toolchain",
+            summary="reported by the Gate-only cell's own toolchain",
         )
     ]
     cell = _stub_the_runtime(
@@ -4084,7 +4084,7 @@ def test_the_lenses_are_shown_a_gate_table_computed_outside_the_implementers_cel
     implement_prompt = cell.system_prompts[0]
     lens_prompts = [p for p in cell.system_prompts if p != implement_prompt]
     assert len(lens_prompts) == len(review.LENSES)
-    assert all("the gate cell's own toolchain" in p for p in lens_prompts)
+    assert all("the Gate-only cell's own toolchain" in p for p in lens_prompts)
     assert all("the implementer's own toolchain" not in p for p in lens_prompts)
 
 
@@ -4119,7 +4119,7 @@ def _drive_gate_table_scenario(monkeypatch, tmp_path, *, case):
                 gate="tests",
                 status="pass",
                 tool="pytest 8.3.2",
-                summary="reported by the gate cell's own toolchain",
+                summary="reported by the Gate-only cell's own toolchain",
             )
         ]
     cell = _stub_the_runtime(
@@ -4187,7 +4187,7 @@ def test_the_lens_gate_table_is_written_before_the_first_lens_runs(
             gate="tests",
             status="pass",
             tool="pytest 8.3.2",
-            summary="reported by the gate cell's own toolchain",
+            summary="reported by the Gate-only cell's own toolchain",
         )
     ]
     cell = _stub_the_runtime(monkeypatch, gate_cell_suite=honest)
@@ -4256,7 +4256,7 @@ def test_the_lens_gate_suite_runs_inside_the_one_cell_lifecycle(monkeypatch, tmp
 def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs(
     monkeypatch, tmp_path
 ):
-    """The gate cell REVIEW's table comes from is created on a network of its
+    """The Gate-only cell REVIEW's table comes from is created on a network of its
     own, carries the repo's declared gate env and nothing else — no proxy, no
     `CLAUDE_CODE_OAUTH_TOKEN`, no route out — and is fully torn down (its
     container and both its volumes and its own network) before the first
@@ -4944,7 +4944,7 @@ def test_the_suite_runs_the_gates_base_sha_declares_not_the_working_copys(
         gates=("lint", "tests"),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Baseline, the attempt, and the gate cell's own re-run.
+    # Baseline, the attempt, and the Gate-only cell's own re-run.
     assert cell.gate_paths == [["/gates/.saffron/gates/tests"]] * 3
 
 
@@ -5530,7 +5530,7 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     order: list[str] = []
     head = _revert_tests("t.py::test_a", "t.py::test_new")
     # Three calls now, not two: baseline, the one repair-loop attempt, and the
-    # gate cell's own suite (backlog item 118, part 4) — judged against the
+    # Gate-only cell's own suite (backlog item 118, part 4) — judged against the
     # same baseline, so it repeats the attempt's own declared results and
     # triggers `revert` identically.
     scripted = iter([_revert_tests("t.py::test_a"), head, head])
@@ -5573,11 +5573,11 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     )
     assert outcome.state == "READY_FOR_REVIEW"
     # The changed source file, never the changed test file — once for the
-    # repair-loop attempt and once more for the gate cell's own suite, judged
+    # repair-loop attempt and once more for the Gate-only cell's own suite, judged
     # against the same baseline.
     assert cell.reverted == [["src/x.py"], ["src/x.py"]]
     # Baseline: `prior` is empty, so `revert` skips without touching the
-    # worktree at all. Attempt 1, then the gate cell: each reads the tree
+    # worktree at all. Attempt 1, then the Gate-only cell: each reads the tree
     # *before* reverting — the restore checks out HEAD, so a source path with
     # uncommitted work must be seen while that work still exists — then
     # reverts, re-runs, and restores before `committed` ever reads the tree.
@@ -5600,7 +5600,7 @@ def test_revert_restores_before_committed_reads_the_tree(monkeypatch, tmp_path):
     # That the attempt-1 read precedes the revert is the gate's own contract,
     # witnessed in `test_revert.py`; the exact list above is what pins the
     # *wiring* — that `_suite` asks for it at all, and asks once per call,
-    # including the gate cell's.
+    # including the Gate-only cell's.
 
 
 def test_revert_is_absent_when_the_repo_declares_no_tests_gate(monkeypatch, tmp_path):

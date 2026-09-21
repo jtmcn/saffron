@@ -1,13 +1,14 @@
 ---
 id: b-606ea3
 title: '"Projection", "materialization", "emitter" and "checked walk" name SA-0107''s and SA-0108''s work and have no glossary entry'
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 by_hand: true
 filed: 2026-09-18
 specs: [SA-0107, SA-0108]
 prs: []
-commits: []
+commits: [21488e89]
 cites: [§4.6, §9]
 related: [65, 72, b-946f03]
 ---
@@ -32,3 +33,4 @@ This is done by hand, because `CONTEXT.md` is `protected` and generated.
 ## Record
 
 **Filed 2026-09-18** with `SA-0107`, as its vocabulary follow-up.
+- 2026-09-21: Done by hand. `CONTEXT.md` §8 gains **Projection**, **Emitter** and **Checked walk**, and the **Emitter** entry defines materialize. The entries are hand-written, because `tests/ontology/test_no_dead_terms.py` rejects a vocabulary class no shape reads.

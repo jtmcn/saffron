@@ -979,6 +979,15 @@ thought — §5.5.1 already asks the lens to name that edit in prose, so the
 naming exists and nothing runs it. The cost is real and lands where it belongs:
 writing a claim now means saying what would falsify it.
 
+**An edit a spec could not declare.** The reason above is about the implementer,
+which wrote the code and the tests. During REVIEW the host asks one fresh session per acceptance claim for
+the smallest edit that would make that claim false (`SA-0113`). The session sees
+the claim and the diff, and is never told which witness guards it. That
+withholding is what makes the edit evidence. Its author cannot see what would
+kill it, so it is not chosen to be killed. The edit is a **criterion probe**
+(`CONTEXT.md` §4). One that survives its criterion's witness is a claim nothing
+guards. No gate applies one yet (backlog item b-2750d5).
+
 **Reversion is at hunk granularity and cannot reach this.** `revert` (§5.4)
 stashes whole files and asks whether the new tests test *anything*. Scaling it
 down to hunks does not help: a diff that adds a function has one hunk, and
@@ -1058,6 +1067,8 @@ This section argued until 2026-09-02 that lens #3 in a naive design would be "te
 - **A test can be fully covered and still prove nothing.** `saffron/gates/core/size.py` reports 100% statement and 100% branch coverage, and a line whose removal left all sixteen of its tests green was executed by every one of them. An *executed line whose effect nothing observes* is the class coverage cannot report by construction, which is why a coverage gate was priced against this remit and lost.
 
 **What the lens is.** A prompted critic (`saffron/agents/prompts/review-adequacy.md`) holding no tool that can run anything: no test runner, no interpreter, no mutation harness — all three priced against this remit and rejected in the evidence above. It cannot mutate a line and watch a test fail, so every finding instead names the smallest edit that would keep the suite green while the behaviour breaks. That is what makes a finding checkable in one command by someone who *can* run one, rather than a claim about coverage the lens has no way to have confirmed.
+
+**The host runs the probe the lens names** (`SA-0109`). After REVIEW, the host applies each anchored adequacy finding's vacuity probe in a gate-only cell. A probe that edits a declared test path is `unproven` and never applied. For the rest, the host runs the repo's `tests` gate over the probed tree. The verdict decides the finding. `survived` makes it a `blocker`, because the suite stayed green with the behaviour broken. `killed` demotes it to a `note`. `unproven` leaves the severity the lens filed, and a probe the cell could not apply or answer is `unproven`, never `killed`. The lens still runs nothing.
 
 **Blast radius is retired, not deferred.** It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands — but it was never built, because it was gated on a risk tier nothing wires, and the gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering: all three prompts still route callers-and-downstream findings away to "the blast-radius lens", so that class is now owned by nobody and is suppressed at three seats rather than merely uncovered at one. Left as-is on purpose — a `Not yours` list edited to release the remit would scatter it across three lenses, which is the overlap §5.5 spends its no-voting rule on.
 
