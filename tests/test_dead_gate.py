@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from saffron.gates.contract import identity, parse_gate_json
 from saffron.intake import SpecError, parse_spec
@@ -393,3 +396,53 @@ def test_the_report_lists_each_failure_and_each_stale_entry(tmp_path):
 def test_make_deadcode_runs_the_report():
     makefile = (REPO / "Makefile").read_text()
     assert "deadcode:\n\tuv run python .saffron/gates/dead.py --report\n" in makefile
+
+
+def _hook_config() -> dict:
+    """The `dead` hook, read from the file prek reads."""
+    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
+    hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
+    (found,) = [hook for hook in hooks if hook["id"] == "dead"]
+    return found
+
+
+def _hook_verdict() -> str:
+    """The literal the hook greps for, unwrapped the way the shell unwraps it:
+    prek splits the entry, then `sh -c` splits the script that entry carries.
+    """
+    shell, flag, script = shlex.split(_hook_config()["entry"])
+    assert (shell, flag) == ("sh", "-c")
+    tokens = shlex.split(script)
+    return tokens[tokens.index("-q") + 1]
+
+
+def test_the_hooks_verdict_is_the_line_the_gate_prints(tmp_path):
+    """The hook's whole judgement is one literal, and `_emit` builds that line
+    with `json.dumps`. Compact separators would leave the gate passing while
+    every Python commit failed the hook, the rest of this file still green.
+    Measured against that mutant: `separators=(",", ":")` in `_emit` fails
+    here and nowhere else.
+
+    The other two statuses pin the reverse, that the literal rejects a verdict
+    the hook must not let through.
+    """
+    verdict = _hook_verdict()
+    assert verdict in _script(_tree(tmp_path / "pass"))
+
+    failing = _tree(tmp_path / "fail")
+    (failing / "saffron" / "extra.py").write_text(ORPHAN)
+    assert verdict not in _script(failing)
+
+    erroring = _tree(tmp_path / "error")
+    assert verdict not in _script(erroring, env=_env(path=str(tmp_path / "no-bin")))
+
+
+def test_prek_runs_the_hook_on_python_and_on_a_spec():
+    """prek skips a hook no staged file matches, and those two file sets are
+    the whole of what moves the gate's answer.
+    """
+    hook = _hook_config()
+    assert hook["pass_filenames"] is False
+    assert re.search(hook["files"], "saffron/task.py")
+    assert re.search(hook["files"], ".saffron/specs/SA-0100-x.md")
+    assert not re.search(hook["files"], "DESIGN.md")
