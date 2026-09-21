@@ -1824,3 +1824,165 @@ def test_only_probe_takes_a_command_after_the_separator(monkeypatch):
     with pytest.raises(SystemExit) as exit_:
         driver.main()
     assert exit_.value.code == 2
+
+
+def test_cite_resolves_a_specs_citations_at_the_base_commit(
+    empty_repo, monkeypatch, capsys
+):
+    """Twelve wrong shapes of `cite` this kills: reading the working tree
+    instead of `--base`; reporting a citation that resolves; the swapped exit
+    code; a boundary off by one at a file's last line; requiring `/` and
+    missing a bare filename, or the reverse; dropping a range's end, or the
+    whole range; treating a host:port or a dotted module name as a citation;
+    letting the empty suffix into the known set; and printing defects with no
+    count line, or a count line only when the run is clean."""
+    repo = empty_repo
+    monkeypatch.setattr(driver, "REPO", repo)
+    thing = "\n".join(f"line {i}" for i in range(1, 21)) + "\n"  # 20 lines
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "thing.py").write_text(thing)
+    (repo / "pkg" / "README").write_text("no suffix at all\n")
+    (repo / "run.zzz").write_text("a\nb\nc\nd\n")  # 4 lines, an unlisted suffix
+    _git(repo, "add", "pkg/thing.py", "pkg/README", "run.zzz")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    # A read from the working tree, not the committed blob, would see this.
+    (repo / "pkg" / "thing.py").write_text("only\ntwo\n")
+
+    clean = (
+        "The loop reads `pkg/thing.py:5` for its shape. It also reads "
+        "`pkg/thing.py:20` at the tail. A `localhost:8080` fixture stub sits "
+        "beside it, never a citation. Neither is `importlib.util:3`. Nor is "
+        "a plain `06:30` deploy window."
+    )
+    spec = repo / "spec.md"
+    spec.write_text(clean)
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 0
+    out = capsys.readouterr().out
+    assert out == "2 citation(s) checked\n"
+
+    defective = clean + (
+        " A now-missing `pkg/missing.py:5` citation points at nothing. Another "
+        "dangling `dir/README:3` points at nothing too. The range "
+        "`pkg/thing.py:2-999` overruns the file. The helper `run.zzz:9` "
+        "overruns too."
+    )
+    spec.write_text(defective)
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 1
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[:-1] == [
+        f"pkg/missing.py:5: no such file at {base}",
+        f"dir/README:3: no such file at {base}",
+        f"pkg/thing.py:2-999: pkg/thing.py has 20 lines at {base}",
+        f"run.zzz:9: run.zzz has 4 lines at {base}",
+    ]
+    assert lines[-1] == "6 citation(s) checked"
+
+
+def test_cite_anchors_a_bare_line_number_inside_its_own_paragraph(
+    empty_repo, monkeypatch, capsys
+):
+    """Seven wrong anchors this kills: never anchoring to a plain backticked
+    path with no line number of its own; anchoring only from a plain path and
+    never from an explicit `path:n`, or the reverse (skipping the path test
+    entirely); dropping a bare number rather than resolving it; letting a
+    paragraph inherit the path a paragraph above it named; reporting an
+    unanchored bare number as though it needed no report; and reading a bare
+    `:n` while skipping a bare range."""
+    repo = empty_repo
+    monkeypatch.setattr(driver, "REPO", repo)
+    (repo / "a").mkdir()
+    (repo / "b").mkdir()
+    (repo / "a" / "thing.py").write_text(
+        "\n".join(f"a{i}" for i in range(1, 31)) + "\n"
+    )
+    (repo / "b" / "other.py").write_text(
+        "\n".join(f"b{i}" for i in range(1, 51)) + "\n"
+    )
+    _git(repo, "add", "a/thing.py", "b/other.py")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    spec = repo / "spec.md"
+    spec.write_text(
+        "The loop reads `a/thing.py` for its shape. See `:5` for where it starts.\n"
+        "\n"
+        "Read `b/other.py:3` for the check. It matches no `importlib.util:2`. "
+        "Then `:4` confirms it.\n"
+        "\n"
+        "Nothing here names a path. See `:9-45` for confirmation.\n"
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 1
+    out = capsys.readouterr().out
+    assert out.splitlines() == [
+        ":9-45: no path named earlier in its paragraph",
+        "4 citation(s) checked",
+    ]
+
+
+def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
+    empty_repo, monkeypatch, capsys
+):
+    """Nine wrong moved-text checks this kills: reporting whenever the range
+    lacks the text, without checking the file carries it elsewhere;
+    searching the whole file instead of the range; reporting with no line
+    numbers; skipping a bare citation; reading only a range's first line;
+    requiring every other backticked string to be absent from the range
+    rather than just one being present; reading only the first such
+    string, or skipping a sentence holding more than one; and merging two
+    sentences across a period followed by a digit, so a later sentence's
+    text wrongly suppresses an earlier citation's report."""
+    repo = empty_repo
+    monkeypatch.setattr(driver, "REPO", repo)
+    lines = [f"L{i}" for i in range(1, 72)]
+    lines[2] = "alpha marker"  # line 3, "alpha" found elsewhere (case 1)
+    lines[4] = "delta marker"  # line 5, "delta" found elsewhere (case 4)
+    lines[6] = "alpha marker"  # line 7, "alpha" found elsewhere (case 1)
+    lines[8] = "omega marker"  # line 9, "omega" found elsewhere (case 5)
+    lines[24] = "beta marker"  # line 25, inside case 2's range, not its first line
+    lines[44] = "epsilon marker"  # line 45, inside case 4's range
+    lines[64] = "iota marker"  # line 65, inside case 6's range only if merged in
+    lines[70] = "theta marker"  # line 71, "theta" found elsewhere (case 6)
+    (repo / "mod").mkdir()
+    (repo / "mod" / "lib.py").write_text("\n".join(lines) + "\n")
+    _git(repo, "add", "mod/lib.py")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    spec = repo / "spec.md"
+    spec.write_text(
+        # Case 1: a bare citation, "alpha" at two other lines, none in range.
+        "The module `mod/lib.py` explains this. The `alpha` value sits at "
+        "`:11-20` supposedly.\n"
+        "\n"
+        # Case 2: a range citation; "beta" sits inside it, below its first line.
+        "Here `mod/lib.py:21-30` holds the `beta` reading directly.\n"
+        "\n"
+        # Case 3: a bare citation; "gamma" sits nowhere in the file at all.
+        "The module `mod/lib.py` is unrelated here. It holds `gamma` at "
+        "`:31-40` supposedly.\n"
+        "\n"
+        # Case 4: two strings; "epsilon" is in range, "delta" is not — no report.
+        "Here `delta` and `epsilon` both matter, at `mod/lib.py:41-50` precisely.\n"
+        "\n"
+        # Case 5: two strings, neither in range; "omega" elsewhere, "zeta" nowhere.
+        "Both `zeta` and `omega` are claimed, at `mod/lib.py:51-60` exactly.\n"
+        "\n"
+        # Case 6: a period before a digit must still end the sentence, or the
+        # next sentence's "iota" (in range) wrongly suppresses this report.
+        "Here `theta` sits far off, at `mod/lib.py:61-70` presently. 9 more "
+        "items hold `iota` too.\n"
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 1
+    out = capsys.readouterr().out
+    defects = out.splitlines()[:-1]
+    assert defects == [
+        "mod/lib.py:11-20: quoted text sits at mod/lib.py:3, 7 instead",
+        "mod/lib.py:51-60: quoted text sits at mod/lib.py:9 instead",
+        "mod/lib.py:61-70: quoted text sits at mod/lib.py:71 instead",
+    ]
+    assert out.splitlines()[-1] == "6 citation(s) checked"
