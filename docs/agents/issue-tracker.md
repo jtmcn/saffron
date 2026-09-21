@@ -105,6 +105,16 @@ GitHub issues remain in use only for research/evidence records under
   that does edit it (`saffron/scheduler.py`'s overlap refusal). Put such a file
   in `forbidden` instead, as `SA-0079` and `SA-0097` do.
 
+- **A claim over a set names the set, and its witness drives every member.**
+  A witness driving one member passes code handling one member. The claim the
+  pull request renders then says more than the code does. Where the set is
+  open, the claim names what the witness drives, and the notes say what is
+  left. The sets a claim quantifies over in passing count too, such as the
+  forms of a call or the spellings of a path. Five instances across four
+  criteria in `SA-0114` and `SA-0115` carried this defect, and three passed a
+  first review (backlog item b-250dc7). The author checks each claim against
+  its own witness rather than leaving it to a reader.
+
 - **A witness must fail with the source reverted, not merely be missing at
   base.** `criteria` requires a non-`preserves` witness to be red at base, and a
   test that does not exist yet is red there by construction, so that check is
