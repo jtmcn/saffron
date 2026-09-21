@@ -75,7 +75,9 @@ acceptance:
       whatever its pattern, and the command exits 1. A call whose directory is
       an ancestor of it is reported as descending into it only where that call
       recurses, which is `.rglob`, `os.walk`, or `.glob` whose literal pattern
-      carries `**`. A run whose reports are all descents exits 0. A call on any
+      carries `**`. An ancestor `.glob` whose literal pattern carries a `/` and
+      no `**` is not judged, and criterion 3 lists it as unresolved. A run
+      whose reports are all descents exits 0. A call on any
       other directory is not reported, whatever its pattern. Each report names
       the file, the line and the function holding the call at that commit, and
       names `<module>` in the function's place where the call sits at that
@@ -88,9 +90,12 @@ acceptance:
       them, an attribute, a subscript, `__file__` and anything built on it, a
       `/` join with any other part, a call other than `Path` of one string
       literal, and an `os` call with no positional argument. A `.glob` whose
-      directory resolves to an ancestor of one criterion 1 took, and whose
-      pattern is not a string literal, is listed as well. An unresolved call is never
-      reported as an enumerator or a descent, and it is never dropped. The
+      directory resolves to an ancestor of one criterion 1 took is listed as
+      well, where its pattern decides reach. That is a pattern that is not a
+      string literal, or a literal carrying a `/` and no `**`. A call whose
+      directory does not resolve is never reported as an enumerator or a
+      descent, and it is never dropped. A call whose directory resolves is
+      still judged per directory under criterion 2, even where it is listed. The
       list is one group after the reports, one line per call, and it prints on
       every run that takes a directory. A run whose only output beyond the
       count line is unresolved calls exits 0.
@@ -240,17 +245,21 @@ prints the tests that will see the files the spec adds.
 
 4. **Which of them reach the directory**. A call on the directory itself is
    what fails a spec, and `tests/test_context.py:384` is that shape exactly. A
-   call on a directory *above* it reaches the new file only where it recurses.
+   call on a directory *above* it reaches the new file where it recurses.
    Recursing is `.rglob`, `os.walk`, and `.glob` whose literal pattern carries
    `**`. Those are worth naming and are not the blocker shape. At this base
    `tests/test_citations.py:148` walks the repository root through `os.walk`.
    Once its receiver resolves, it reaches every directory a spec adds a file
    to. So the two are reported apart, and only the first sets the exit status.
-   A non-recursive call on a directory above lists that directory's own
-   entries and never the new file, so it draws no report. An ancestor `.glob`
-   whose pattern is not a string literal says nothing about which of the two it
-   is. Guessing either way is wrong in one direction, so that call goes to the
-   unresolved list. A call on one of the directories itself is an enumerator
+   An `.iterdir()`, `os.listdir` or `os.scandir` on a directory above lists
+   that directory's own entries and never the new file. So does a `.glob` there
+   whose literal pattern has one segment. Neither draws a report. An ancestor
+   `.glob` whose pattern is not a string literal says nothing about whether it
+   reaches the new file. A literal pattern with a `/` and no `**` has more than
+   one segment, and such a call can reach it. `Path.glob` matches segment by
+   segment, so `glob("turns/*.md")` on `saffron/agents/prompts` returns the new
+   turn prompt. Both depend on the pattern, and guessing either way is wrong in
+   one direction. So both go to the unresolved list. A call on one of the directories itself is an enumerator
    whatever its pattern, because recursion decides nothing there.
 
 5. **How a directory is resolved**. Three forms, and nothing else: a string
@@ -272,11 +281,13 @@ prints the tests that will see the files the spec adds.
    enumerator, a descent, or draws nothing. A call is judged once per
    directory taken, and so one resolved call can appear under two. For
    `SA-0113`, a recursive call on `saffron/agents/prompts` enumerates that
-   directory and descends into `saffron/agents/prompts/turns`. An unresolved
-   call is listed, never dropped and never judged. The unresolved list is one
-   group after the directories, one line per call. An ancestor `.glob` whose
-   pattern is not a literal joins it once, however many directories it sits
-   above. Measured at this base with a throwaway script over the three forms,
+   directory and descends into `saffron/agents/prompts/turns`. A call whose
+   directory does not resolve is listed, never dropped and never judged. The
+   unresolved list is one group after the directories, one line per call. An
+   ancestor `.glob` whose pattern decides reach joins it once, however many
+   directories it sits above. Its pattern is not a literal, or it is a literal
+   carrying a `/` and no `**`. That call is still judged against a directory it
+   does not sit above. Measured at this base with a throwaway script over the three forms,
    **none of the 35 calls resolves**. Every receiver is a name, an attribute, or
    a `/` join built on one, as at `tests/test_citations.py:345`,
    `tests/test_context.py:384` and `tests/ontology/ontology_paths.py:10`. So
@@ -461,12 +472,12 @@ none. Pass `--base no-such-ref` over exactly that spec. Assert the call
 returns 1 with a message on stderr and no count line on stdout. It must
 neither raise out of the command nor report a clean run.
 
-Criterion 2 kills twenty-three. Every call in its fixture sits on a
+Criterion 2 kills twenty-four. Every call in its fixture sits on a
 directory that resolves, a string literal, `Path` of one, or a join of those.
 One knows only `.glob`. The fixture's tests must reach the added directory
 through all six spellings the claim names, each in a place the witness asserts
 on. Six calls in three short files covers that, and the cases below add
-sixteen more. One resolves `Path` of a literal alone and misses a bare
+seventeen more. One resolves `Path` of a literal alone and misses a bare
 string. Spell `os.listdir(...)` on a bare string literal naming the added
 directory, and assert its report. One resolves a join only in one
 arrangement. Spell `.iterdir()` on `Path("<a>") / "<b>" / "<c>"` and
@@ -501,7 +512,10 @@ counts every other spelling as recursive. One counts `os.listdir` or
 `.glob`. One treats `.rglob` as the only recursive form. Beside that `.glob`,
 put all three recursive forms on that same parent: `.rglob(...)`,
 `os.walk(...)`, and a `.glob` whose literal pattern carries `**`. The witness
-asserts a descent for each of the three. One takes an ancestor to be the
+asserts a descent for each of the three. One treats a multi-segment pattern
+on an ancestor as reaching nothing. Put `Path("<parent>").glob("<child>/*.md")`
+on that same parent, `<child>` being the added directory's own name. Assert it
+on the unresolved list and not reported. One takes an ancestor to be the
 parent alone, testing `receiver == d.parent` where `receiver in d.parents` is
 meant. It misses the shape of `tests/test_citations.py:148`, a walk on a root
 far above. Put an `os.walk` on a bare string literal naming a directory two
@@ -561,7 +575,8 @@ literals. The seventh case names the added directory in two parts, so assert
 it listed and not reported. One lists only the three method spellings and
 drops an `os` call. The fifth and eighth cases kill it. One lists a call
 whose directory resolves. Assert that none of criterion 2's calls is on the
-list, save the parent's `.glob(name)`. One treats unresolved as a defect.
+list, save the parent's `.glob(name)` and `.glob("<child>/*.md")`. Assert
+both of those on it. One treats unresolved as a defect.
 Write a third spec file over the same commit, with one added entry. Its
 directory is neither at nor below any directory a fixture literal names.
 Assert exit 0, and the count line and the eight unresolved lines as all it
@@ -623,7 +638,7 @@ head, and reads a rename as a removal. The three new tests belong at the end of
 `SA-0114`'s `test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines`
 at `tests/test_spec_loop_driver.py:1927`, so yours follow it.
 
-**The shape is about 408 changed lines, and nothing here raises the tier**.
+**The shape is about 411 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`. So this task runs at `risk: standard`, where `size` is advisory
 against the `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The
@@ -635,17 +650,17 @@ the function holding each call. 15 resolve the three forms item 5 names. 45
 are `cmd_enumerators` and what it prints. That covers the `GitError` catch
 for an unresolvable `--base`, the order the usage failures take, and the
 per-directory judging. It also covers the count line, the grouped reports and
-the unresolved group. 8 register the subcommand. In the test file, 280 lines.
-60 are a shared helper that builds the fixture repo and writes a spec file,
-the fixture's calls included. Then 80, 95 and 45 for the three witnesses. So
-128 and 280 make 408. A 25-line throwaway script held the call finder and
+the unresolved group. 8 register the subcommand. In the test file, 283 lines.
+61 are a shared helper that builds the fixture repo and writes a spec file,
+the fixture's calls included. Then 80, 97 and 45 for the three witnesses. So
+128 and 283 make 411. A 25-line throwaway script held the call finder and
 the three-form resolver, and ran over this base's `tests/`. It carried no
 comments, no `_fail` paths and no report. Repo style and the reporting take that to 128.
 `SA-0112` is the comparable cell in these same two files, at 99 lines in
-`driver.py` and 144 in the test file. 408 sits 192 lines under the ceiling
+`driver.py` and 144 in the test file. 411 sits 189 lines under the ceiling
 that `SA-0106` (633) and `SA-0107` (1049) overshot. The turns fall with it.
 The rate that put the 573-line draft of this spec at 145 to 169 implement
-turns puts 408 lines at 103 to 120, against `max_turns: 150`. Do not go
+turns puts 411 lines at 104 to 121, against `max_turns: 150`. Do not go
 looking for more to do. The three forms in item 5 are closed. A shape they do
 not name belongs in the unresolved list rather than in a fourth form.
 
