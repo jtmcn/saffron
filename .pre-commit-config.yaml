@@ -19,6 +19,23 @@ repos:
         # must trigger the hook that reads it.
         files: ^(.*\.py|pyproject\.toml)$
 
+  # `dead` ran nowhere outside a cell, so a symbol falling out of use went red
+  # on main unseen: subtraction spares each cell and hides it from the next.
+  # The gate speaks its verdict in JSON and exits 0 either way, so read status.
+  # `tests/test_dead_gate.py` holds that literal against what the gate prints.
+  - repo: local
+    hooks:
+      - id: dead
+        name: dead (the dead gate's vulture scan)
+        language: system
+        entry: >-
+          sh -c 'uv run python .saffron/gates/dead.py
+          | tee /dev/stderr
+          | grep -q "\"status\": \"pass\""'
+        pass_filenames: false
+        # The gate scans its own roots; these are the files that change its answer.
+        files: ^(.*\.py|\.saffron/specs/.*\.md)$
+
   # Local for ty's reason: the `structure` gate parses ast-grep's JSON, and the
   # rule syntax is pre-1.0, so the hook runs the one version `pyproject.toml`
   # pins. The gate takes whatever `ast-grep` is on PATH and reports the version
