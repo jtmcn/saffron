@@ -36,6 +36,8 @@ dev = [
     "pyoxigraph>=0.4",
     "pyshacl>=0.26",
     "rdflib>=7",
+    # The spec loop's `jev` command calls it. Pinned because Jev launched 2026-09-15 and its API moves.
+    "typesafe-sdk==0.7.1",
 ]
 
 [build-system]
