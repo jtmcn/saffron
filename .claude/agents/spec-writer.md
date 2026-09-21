@@ -68,11 +68,16 @@ And optionally:
    `records show <id>` prints it.
 3. **Write the spec.** A queued spec whose `touches` overlaps yours is its
    parent. `saffron queue` cannot answer here: it exports `.saffron/specs` from
-   the mirror at `base_sha`, so a spec you have not committed is invisible to
-   it. **Done when** `uv run pytest tests/test_scheduler.py -k queue_smoke`
-   passes with your spec pinned as a candidate, or refused only on its parent.
-   That test drives the queue over the working tree, and step 5 is where you
-   write the pin.
+   the mirror at `base_sha`, so a spec you did not commit is invisible to it.
+   Call `build_queue` over the working tree instead.
+
+   ```
+   uv run python -c "from pathlib import Path; from saffron.ledger import Ledger; from saffron.scheduler import build_queue; l = Ledger(Path.home() / '.saffron' / 'ledger.db'); c, r = build_queue(Path('.saffron/specs'), l.resolve_repo_id('https://github.com/jtmcn/saffron.git'), l); print([x.spec.id for x in c], r)"
+   ```
+
+   **Done when** that prints your spec as a candidate, or refuses it only on
+   its parent. The pinned lists in `tests/test_scheduler.py` are step 5's
+   work, and no check in this step reads them.
 4. **Set the ceilings.**
    `uv run .claude/skills/run-saffron-spec-loop/driver.py history <SA-ID>`
    ends with a `ceilings:` line. **Done when** it reads `above by` on both

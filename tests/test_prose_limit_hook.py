@@ -248,6 +248,24 @@ def test_file_mode_refuses_a_path_that_is_not_there(tmp_path):
     assert "no such file" in done.stderr
 
 
+def test_file_mode_refuses_a_file_outside_the_worktree(tmp_path):
+    """`_in_repo` returns None for two callers that answer it oppositely.
+
+    `edit_time` goes quiet and `file_time` refuses, so the None branch needs a
+    witness on each side (backlog item b-929465).
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    repo = _repo(work, {"README.md": "Short.\n"})
+    # A name `in_scope` accepts, so the refusal below can only come from the
+    # path sitting outside the worktree.
+    outside = tmp_path / "README.md"
+    outside.write_text(LONG_A + "\n")
+    done = _hook(repo, "--file", str(outside))
+    assert done.returncode == 2
+    assert "out of the gates' scope" in done.stderr
+
+
 def test_claude_code_runs_the_hook_after_each_edit():
     settings = json.loads((REPO / ".claude" / "settings.json").read_text())
     (entry,) = settings["hooks"]["PostToolUse"]
