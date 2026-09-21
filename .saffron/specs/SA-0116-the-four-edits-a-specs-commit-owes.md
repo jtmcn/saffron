@@ -35,9 +35,9 @@ forbidden:
   - .claude/skills/run-saffron-spec-loop/SKILL.md
   - .claude/skills/run-saffron-spec-loop/GOTCHAS.md
   - .claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md
-budget_usd: 24
+budget_usd: 26
 max_attempts: 3
-max_turns: 130
+max_turns: 150
 acceptance:
   - claim: >-
       `driver.py bookkeeping` takes a spec id, reads the working tree and no
@@ -68,29 +68,33 @@ acceptance:
       the hyphenated and the boundary-crossing forms, so `ninth` becomes
       `tenth`, `nineteenth` becomes `twentieth` and `twenty-ninth` becomes
       `thirtieth`. The rest of the paragraph carries this spec's own id and its
-      origin item's id, whether it declares `depends_on` and which ids, and
-      then one of three things: the position it takes among the candidates, the
-      refusal it draws with the scheduler's own reason verbatim, or, for a spec
-      `spec_files` resolved under `done/`, that it is retired there and so in
-      neither list. Where
-      `tests/test_scheduler.py` holds no function of that name, and where its
-      docstring holds no `a <ordinal> time`, the paragraph is printed all the
-      same, with `<Nth>` standing where the ordinal would be and a line saying
-      which of the two happened.
+      origin item's id, whether it declares `depends_on` and which ids — every
+      id it declares, in the order it declares them — and then one of three
+      things: the position it takes among the candidates, the refusal it draws
+      with the scheduler's own reason verbatim, or, for a spec `spec_files`
+      resolved under `done/`, that it is retired there and so in neither list.
+      Two cases print the paragraph with `<Nth>` standing where the ordinal
+      would be, and a line naming which of the two it met:
+      `tests/test_scheduler.py` holds no function of that name, or that
+      function's docstring yields no ordinal to step — it holds no
+      `a <ordinal> time`, or the word it holds is one the command's list of
+      ordinals does not carry.
     witness: tests/test_spec_loop_driver.py::test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal
   - claim: >-
       The third block prints two lines, each a complete `assert` statement of
-      the form `tests/test_scheduler.py:2109-2110` holds: the candidate spec
-      ids in the order the queue gives them, and the refusals' file names cut
-      to their first seven characters. Both come from one `build_queue` over
-      `.saffron/specs` in the working tree, under a ledger this invocation
-      creates empty rather than the one at ~/.saffron/ledger.db, and with a
-      `gh` this invocation supplies that reports no open pull request, so
-      `build_queue`'s default of `run_gh` (`saffron/scheduler.py:731`) is never
-      reached and no `gh` subprocess runs. Those are the two halves of the
-      smoke test's own arrangement at `tests/test_scheduler.py:2098-2105` that
-      decide what the queue returns, so both lines equal what that test
-      asserts. `_ledger_and_repo` is not called.
+      the form `tests/test_scheduler.py:2109-2110` holds: every candidate spec
+      id in the order the queue gives them, and every refusal's file name in
+      that same order, each cut to its first seven characters. Both come from
+      one `build_queue` over `.saffron/specs` in the working tree, under a
+      ledger this invocation creates empty rather than the one at
+      ~/.saffron/ledger.db, with `repo_slug` set to the joel/saffron that
+      `tests/test_scheduler.py:2104` passes, and with a `gh` this invocation
+      supplies that reports no open pull request, so `build_queue`'s default of
+      `run_gh` (`saffron/scheduler.py:731`) is never reached and no `gh`
+      subprocess runs. That is the smoke test's own arrangement at
+      `tests/test_scheduler.py:2098-2105`, the half of it that decides what the
+      queue returns, so both lines equal what that test asserts.
+      `_ledger_and_repo` is not called.
     witness: tests/test_spec_loop_driver.py::test_bookkeeping_prints_the_two_assert_lines_the_smoke_test_pins
 ---
 
@@ -267,8 +271,9 @@ added over that message is the `### Tier <n>` heading to paste under, which is
 a grep. The other three blocks have no such report behind them. The cost is
 that an author placing a new record still finds its heading by hand, and item
 b-7d3810 keeps that quarter open. `check_priority` is then imported by nothing
-here, and the `records/` debt this spec's commit filed as b-262df1 rests on
-`first_cited_item` alone.
+here. The `records/` debt this spec's commit filed as b-262df1 rests on the
+three names this command does import from `tests/records/check.py`:
+`spec_files`, `first_cited_item` and `_context_section`.
 
 **Filing a record, and editing any of the four files**. The item's
 `## Done looks like` is one command that prints, and the author pastes. This
@@ -357,10 +362,15 @@ into its fixture's ledger before calling `build_queue`. Measured at this base,
 the candidate and refusal lists are identical with that row and with
 `repo_id=None`. Either is right, and no claim pins one. What criterion 3 does
 pin is that `~/.saffron/ledger.db` is not the ledger read. Pass `repo_slug` as
-joel/saffron too, as `tests/test_scheduler.py:2104` does. With no open pull
-request the two lists come back the same either way, so no claim pins that
-argument. The `gh` is the half criterion 3 pins, because leaving it off
-reaches the real one.
+joel/saffron, as `tests/test_scheduler.py:2104` does, and criterion 3 pins that
+too. `None` is not an equivalent spelling. `build_queue` skips `_open_prs`
+outright when the slug is `None` (`saffron/scheduler.py:746-750` and `:808`).
+The `gh` this command supplies is then never reached, and the overlap refusal
+goes unasked rather than answered. Measured at this base over the fixture
+below, with `saffron.scheduler.subprocess.run` patched to raise. With the slug
+set and `gh=` left off, the patched `run` is reached. With the slug `None` and
+`gh=` left off it is not, and both lists come back unchanged. So the slug is
+what makes the `gh` argument load-bearing at all.
 
 **The ordinal words**. One list of the words for 1 to 99 serves both
 directions. Find the docstring's word in it, and take the next. Build the list
@@ -395,10 +405,12 @@ id, a spec file whose frontmatter `load_spec` refuses, and a record file
 stdout** for each. That last assertion also kills an implementation printing
 its blocks before it validates.
 
-Criterion 2 kills ten. One leaves the `depends_on` out of the paragraph. The
-refused fixture spec declares one parent, and the admitted one declares none.
-Assert the parent's id in the first paragraph, and the words for an empty
-`depends_on` in the second. One counts the docstring's `Re-measured` lines.
+Criterion 2 kills eleven. One leaves the `depends_on` out of the paragraph,
+and one prints `depends_on[0]` alone. The refused fixture spec `SA-0203`
+declares two parents, `SA-0202` and the retired `SA-0200`, and the admitted one
+declares none. Assert both ids in the refused spec's paragraph, in the order
+that spec declares them. Assert the words for an empty `depends_on` in the
+admitted one's. One counts the docstring's `Re-measured` lines.
 Every
 fixture docstring in this witness must hold a count different from its own
 ordinal, which is the shape the real docstring has. One steps the plain words
@@ -421,21 +433,26 @@ admitted run and on the refused one. One omits the date, killed by matching
 the opening against a four-digit year and two two-digit fields. Matching
 today's date instead would flake at midnight.
 
-Criterion 3 kills six. One opens the live ledger. Monkeypatch
+Criterion 3 kills eight. One opens the live ledger. Monkeypatch
 `driver._ledger_and_repo` to raise, and assert the invocation still exits 0.
 One omits `gh=` and takes `build_queue`'s default of `run_gh`, which shells the
-real `gh` against joel/saffron. Measured at this base over a one-spec scratch
-directory: with `gh=` left off, a `subprocess.run` patched to raise is reached,
-and with a `gh` passed in it is not. So patch `saffron.scheduler.subprocess.run`
-to raise, and assert the invocation still prints both lines and exits 0.
-One prints the candidates and forgets the refusals, or the reverse. One sorts
-the candidates instead of keeping the queue's order. Both are killed by the
-fixture queue below, whose candidate order is the reverse of its filename
-order. One prints the ids
-rather than two pasteable statements. Assert the exact strings, `assert`
-keyword included, so that what the author copies is what the test file wants.
-One cuts the refusals to something other than seven characters, killed by
-fixture spec file names whose eighth character differs from their seventh.
+real `gh` against joel/saffron. Patch `saffron.scheduler.subprocess.run` to
+raise for every run this witness makes, and assert each still prints both lines
+and exits 0. One passes `repo_slug=None`, which skips `_open_prs` and leaves
+both lists unchanged, so no printed line can see it. Monkeypatch
+`saffron.scheduler._open_prs` to record its two arguments and return `[]`, and
+assert it recorded `joel/saffron` and a runner that is not
+`saffron.scheduler.run_gh`. Measured at this base over the fixture below, that
+patch records exactly that pair. One prints the candidates and forgets the
+refusals, or the reverse. One sorts the candidates instead of keeping the
+queue's order. Both are killed by the fixture queue below, whose candidate
+order is the reverse of its filename order. One prints the first refusal alone,
+or reorders them: the fixture draws two, and the asserted line is the whole
+list in the queue's order. One prints the ids rather than two pasteable
+statements. Assert the exact strings, `assert` keyword included, so that what
+the author copies is what the test file wants. One cuts the refusals to
+something other than seven characters, killed by fixture spec file names whose
+eighth character differs from their seventh.
 
 **Each witness is a plain `def`, never parametrised**. `criteria` matches a
 bare node id against the names the suite collected, by exact string. A
@@ -452,10 +469,17 @@ into a collection error, which `revert` reads as `skip`.
 
 **Build one scratch tree, and keep it small**. No git is needed anywhere in
 this witness set, because the command reads no commit. One helper writes three
-things under `tmp_path`. A `.saffron/specs/` holding the four specs measured
+things under `tmp_path`. A `.saffron/specs/` holding the five specs measured
 below, of the shape at `tests/test_spec_loop_driver.py:1058-1061` plus a
 `## Context` line naming an item. A `docs/backlog/` holding three short
-records. A `tests/test_scheduler.py` holding nothing but the smoke test's `def`
+records, each one `## Problem`, `## Done looks like` and `## Record`, in that
+order and drawn from those three headings alone. `_sectioned` refuses prose
+before the first heading, an unknown heading, and a heading out of order
+(`records/load.py:114-136`, `records/kinds.py:160`). `_check_sections` refuses
+an empty `## Done looks like` under any `status` outside `done`, `superseded`
+and `wontfix` (`records/load.py:140-147`, `records/kinds.py:25`). A three-line
+record raises `RecordError`. This command reports that as its third failure,
+so every witness but that one would be measuring the wrong thing. A `tests/test_scheduler.py` holding nothing but the smoke test's `def`
 and its docstring. The helper then monkeypatches `driver.REPO` and
 `driver.SPECS_DIR`. A record file name must match
 `^(\d{3}|b-[0-9a-f]{6})-[a-z0-9-]+\.md$` (`records/kinds.py:190`).
@@ -464,23 +488,31 @@ and its docstring. The helper then monkeypatches `driver.REPO` and
 refused, and this fixture writes none. Do not copy this repository into the
 fixture. Each witness calls the helper into its own `tmp_path`. Criterion 1
 writes its extra `## Context` shapes on top of what the helper wrote.
-Criterion 3 writes none, so the queue it reads is exactly the four specs
+Criterion 3 writes none, so the queue it reads is exactly the five specs
 below.
 
 **The fixture queue is measured, not reasoned**. Run at this base over a
 scratch directory of exactly this shape, with the ledger created empty and
 `repo_slug` set to joel/saffron. `SA-0201-alpha.md` at `priority: 3`,
 `SA-0202-bravo.md` at `priority: 1`, `SA-0203-charlie.md` at `priority: 2`
-declaring `depends_on: [SA-0202]`, and `done/SA-0200-delta.md` at
+declaring `depends_on: [SA-0202, SA-0200]`, `SA-0204-echo.md` at `priority: 3`
+declaring `depends_on: [SA-0201]`, and `done/SA-0200-delta.md` at
 `priority: 2`. `build_queue` returned the candidates `['SA-0202', 'SA-0201']`
-and one refusal, `SA-0203-charlie.md`, reading `depends_on SA-0202 has no task
-at its current spec_sha, so nothing says it merged: it has not run, or not
-since it was last edited`. Build the fixture that way and pin those strings.
-The candidate order is the reverse of the filename order, so an implementation
-sorting by id dies. The refused file's eighth character is `-` where its
-seventh is `3`, so a cut to any other length dies as well. `SA-0200` is
-retired, which is the third position criterion 2 asserts, and it satisfies no
-`depends_on` a live fixture spec declares.
+and two refusals in this order: `SA-0203-charlie.md`, reading `depends_on
+SA-0202 has no task at its current spec_sha, so nothing says it merged: it has
+not run, or not since it was last edited`, and `SA-0204-echo.md`, reading that
+same sentence about `SA-0201`. So the third block's second line reads
+`assert [r.path.name[:7] for r in refusals] == ["SA-0203", "SA-0204"]`. Build
+the fixture that way and pin those strings. The candidate order is the reverse
+of the filename order, so an implementation sorting by id dies. Each refused
+file's eighth character is `-` where its seventh is a digit, so a cut to any
+other length dies as well. `SA-0200` is retired, which is the third position
+criterion 2 asserts, and it is also the second id `SA-0203` declares. A retired
+parent is credited (`saffron/scheduler.py:535-536`), so `SA-0203`'s reason
+names `SA-0202` alone. Measured control at this base, the same fixture with
+`SA-0200` moved out of `done/`: that reason gains ` (+1 more unmet)`
+(`saffron/scheduler.py:719-720`). Pinning the suffix-free string is what holds
+the retired credit, and it costs no fixture of its own.
 
 **Every `item <id>` a witness writes must name a record `docs/backlog/`
 holds**. `first_cited_item` fires only on the `_ITEMS` pattern
@@ -509,50 +541,56 @@ lines and every docstring under ten, `cmd_bookkeeping`'s included.
 the working tree, and it is the cheap way to check before a gate does.
 
 **Rename no existing test**. `census` compares collected names between base and
-head, and reads a rename as a removal. The four new tests belong at the end of
+head, and reads a rename as a removal. The three new tests belong at the end of
 `tests/test_spec_loop_driver.py`, after
 `test_only_probe_takes_a_command_after_the_separator` at
 `tests/test_spec_loop_driver.py:1821`.
 
-**The shape is about 495 changed lines, and nothing here raises the tier**.
+**The shape is about 505 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`, and neither is under `protected` at `.saffron/policy.yaml:61-66`.
 So this task runs at `risk: standard`, where `size` is advisory against the
 `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). Derived per part,
-the three-block shape is 161 in `driver.py` and 277 in the test file, 438. In
+the three-block shape is 161 in `driver.py` and 286 in the test file, 447. In
 `driver.py`: 32 for the origin item and the `specs:` line it owes, both over
 what `tests/records/check.py` exports already. Then 26 for the queue under the
 smoke test's arrangement, the temporary ledger, the `gh` passed in and the
 retired case included. Then 22 for the ordinal list and the step, and 14 for
 finding the smoke test's docstring with `ast`. Then 26 for the paragraph and
 its three positions. Last, 36 for `cmd_bookkeeping` with its three failures and
-three headed blocks, and 5 to register the subcommand. In the tests: 45 for the
-helper that builds the scratch tree, then 98, 86 and 48 for the three
+three headed blocks, and 5 to register the subcommand. In the tests: 46 for the
+helper that builds the scratch tree, then 98, 88 and 54 for the three
 witnesses. The four-block draft this one replaces counted 490 the same way, and
 the review counted that same draft at 555. That is 13% over, on identical
-content, so 438 derived here reads as about 495 on the review's basis. Take 495
-as the planning figure. The comparable cell in these same two files is
+content, so 447 derived here reads as about 505 on the review's basis. Take 505
+as the planning figure. The second review's fixes account for 9 of those test
+lines: the fifth fixture spec, the second `depends_on` id, the second refusal
+in the same asserted list, and the `_open_prs` patch that pins the slug. The comparable cell in these same two files is
 `SA-0112`, at 99 lines in `driver.py` and 144 in the test file. That cell built
 one subcommand with five verdicts and four witnesses. This one has three blocks and
 a larger fixture. Unlike `SA-0115` it parses no Python beyond one `ast` lookup
 for a docstring, and it resolves no expression. Against the `size:` lines the
-`history` rows print, 495 sits one line above `SA-0108`'s 494, and above
+`history` rows print, 505 sits eleven lines above `SA-0108`'s 494, and above
 `SA-0016`'s 486 and `SA-0089`'s 477. All three landed. The rows below those, at
-243, 177, 175, 155 and 128, are narrower cells than this one. 495 leaves 105
-under the ceiling that `SA-0106` (633) and `SA-0107` (1049) overshot. That
-margin is thin, so do not go looking for more to do. The three blocks are the whole of it. `PRIORITY.md` is cut for size, and
+243, 243, 177, 175, 155 and 128, are narrower cells than this one. 505 leaves
+95 under the ceiling that `SA-0106` (633) and `SA-0107` (1049) overshot. That
+margin is thinner than the 100 this file's specs aim for, so do not go looking
+for more to do. The three blocks are the whole of it. `PRIORITY.md` is cut for size, and
 a fourth thing an author wants is item b-7d3810's next entry rather than this
 cell's work.
 
-**The ceilings, against `driver.py history SA-0116`**. `max_turns: 130` stands
+**The ceilings, against `driver.py history SA-0116`**. `max_turns: 150` stands
 against a comparison row that is a floor. The line marks `SA-0106`'s peak of
 101t "a floor", because that cell ended `IMPLEMENTING error_max_turns` at its
-own ceiling. So the 29t of headroom printed there is narrower than it reads.
+own ceiling. So the 49t of headroom printed there is narrower than it reads.
 The highest peak among the printed rows that ran to its own end is `SA-0089`'s
-88t, and 130 clears that by 42t. `budget_usd: 24` stands against `SA-0106`'s
-pre-REVIEW total of $14.73, above by $9.27. The most any one printed row spent
+88t, and 150 clears that by 62t. `budget_usd: 26` stands against `SA-0106`'s
+pre-REVIEW total of $14.73, above by $11.27. The most any one printed row spent
 after that point is `SA-0107`'s $2.81 review plus $3.17 rebut, $5.98. That sits
-well inside the remainder. `max_attempts: 3` is this file's standing level, as
-`SA-0112`, `SA-0114` and `SA-0115` ran.
+well inside the remainder. Both are what `SA-0114` and `SA-0115` declare
+(`.saffron/specs/SA-0115-the-tests-that-enumerate-a-directory-a-spec-adds-to.md:38-40`),
+for estimates of 405 and 520 lines either side of this one's 505.
+`max_attempts: 3` is this file's standing level, as `SA-0112`, `SA-0114` and
+`SA-0115` ran.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
