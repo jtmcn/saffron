@@ -31,6 +31,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
+    from harness.jev_observe import Round
     from saffron.gates.contract import GateResult
     from saffron.intake import Spec
 
@@ -41,6 +42,8 @@ ORDER = STATE_DIR / "order.json"
 LEGACY_PLAN = STATE_DIR / "plan.json"
 ONTOLOGY = REPO / "ontology" / "factory.ttl"
 ONTOLOGY_NS = "urn:software-factory:ns#"
+# Where `jev` writes. A cell's own batch directory sits under `v0/`, as `saffron/cli.py` puts it.
+JEV_ROOT = Path.home() / ".saffron" / "batches"
 # What the CLI prints at column 0 while a cell runs. Terminal states are not
 # listed here: `watch_pattern` takes them from the ontology's closed set.
 WATCH_PREFIXES = (
@@ -1107,6 +1110,143 @@ def cmd_record(args) -> int:
             why = "nothing was decided; `next` moves on to the next untouched spec"
         print(f"left pending: {why}.", file=sys.stderr)
     return 0 if state == "READY_FOR_REVIEW" else 1
+
+
+def _jev_client():
+    """The live client. Built only here, so no other command needs the SDK."""
+    from typesafe_sdk import TypeSafeClient
+
+    return TypeSafeClient(timeout=120.0)
+
+
+def _spec_path(spec_id: str, given: str | None) -> Path | None:
+    if given:
+        return Path(given)
+    found = sorted(SPECS_DIR.rglob(f"{spec_id}-*.md"))
+    return found[0] if len(found) == 1 else None
+
+
+def cmd_jev(args) -> int:
+    """Score one review round with Jev and write `jev.ttl`. Nothing reads it yet."""
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        print("error: TYPESAFE_API_KEY is not set for this command", file=sys.stderr)
+        return 2
+    # `harness` is not in the saffron wheel, so it is imported from the checkout.
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    from typesafe_sdk import TypeSafeError
+
+    from harness import jev_observe
+    from saffron.intake import SpecError, load_spec
+
+    path = _spec_path(args.spec_id, args.spec)
+    if path is None:
+        return _fail(f"no single spec file for {args.spec_id}, so pass --spec")
+    try:
+        spec, _sha = load_spec(path)
+    except SpecError as exc:
+        return _fail(str(exc))
+    criteria = [c.claim for c in spec.acceptance] or spec.acceptance_criteria
+    prepared = (
+        _jev_cell(spec.id, path.read_text(), criteria)
+        if args.kind == "cell"
+        else _jev_review(args, spec.id, path.read_text(), criteria)
+    )
+    if isinstance(prepared, int):
+        return prepared
+    directory, round_ = prepared
+    try:
+        model, answers = jev_observe.observe(round_, _jev_client())
+    # KeyError is an answer missing from the response, which is Jev failing too.
+    except (TypeSafeError, KeyError) as exc:
+        print(
+            f"error: Jev did not answer round {round_.number}: {exc}", file=sys.stderr
+        )
+        return 2
+    (directory / "jev.ttl").write_text(jev_observe.to_turtle(round_, model, answers))
+    print(
+        f"{spec.id}  {args.kind} round {round_.number}  {len(answers)} answers  {directory}"
+    )
+    return 0
+
+
+def _jev_review(
+    args, spec_id: str, spec_text: str, criteria: list[str]
+) -> tuple[Path, Round] | int:
+    """A spec or PR review round: numbered, diffed from the last round, saved before the call."""
+    from harness import jev_observe
+
+    base = JEV_ROOT / "spec-loop" / spec_id / args.kind
+    done = sorted(int(p.name.removeprefix("round-")) for p in base.glob("round-*"))
+    if args.round is not None:
+        number = args.round
+        directory = base / f"round-{number}"
+        if not (directory / "round.json").is_file():
+            return _fail(f"no saved round {number} at {base}")
+        saved = json.loads((directory / "round.json").read_text())
+        commit, since = saved["commit"], saved["since"]
+        reports = [p.read_text() for p in sorted(directory.glob("report-*.md"))]
+    else:
+        if not args.report or not args.commit:
+            return _fail("a new round needs --report and --commit")
+        number = (done[-1] if done else 0) + 1
+        directory = base / f"round-{number}"
+        commit = args.commit
+        previous = base / f"round-{number - 1}" / "round.json"
+        since = json.loads(previous.read_text())["commit"] if number > 1 else args.base
+        reports = [Path(p).read_text() for p in args.report]
+    try:
+        findings = [f for text in reports for f in jev_observe.parse_block(text)]
+    except jev_observe.BlockError as exc:
+        return _fail(str(exc))
+    prior: list = []
+    for n in (n for n in done if n < number):
+        prior += jev_observe.load_findings(
+            (base / f"round-{n}" / "findings.json").read_text()
+        )
+    # Round 1 reads the whole PR from its merge base. Later rounds read only what changed.
+    span = f"{since}...{commit}" if number == 1 else f"{since}..{commit}"
+    try:
+        diff = _git("diff", span, cwd=args.root)
+    except GitError as exc:
+        return _fail(str(exc))
+    pairs = [
+        (jev_observe.finding_id(args.kind, spec_id, number, i), f)
+        for i, f in enumerate(findings)
+    ]
+    directory.mkdir(parents=True, exist_ok=True)
+    for i, text in enumerate(reports, 1):
+        (directory / f"report-{i}.md").write_text(text)
+    (directory / "round.json").write_text(
+        json.dumps({"commit": commit, "since": since}) + "\n"
+    )
+    (directory / "findings.json").write_text(jev_observe.dump_findings(pairs))
+    return directory, jev_observe.Round(
+        args.kind, spec_id, number, commit, spec_text, criteria, pairs, prior, diff
+    )
+
+
+def _jev_cell(
+    spec_id: str, spec_text: str, criteria: list[str]
+) -> tuple[Path, Round] | int:
+    """The cell's REVIEW, read from its batch directory after the task ends."""
+    from harness import jev_observe
+
+    directory = JEV_ROOT / "v0" / spec_id
+    try:
+        lenses = json.loads((directory / "findings.json").read_text())
+        commit = json.loads((directory / "patch.json").read_text())["head_sha"]
+        diff = (directory / "patch.diff").read_text()
+    except (OSError, json.JSONDecodeError, KeyError) as exc:
+        return _fail(f"no finished cell to score at {directory}: {exc}")
+    findings = jev_observe.lens_findings(lenses)
+    pairs = [
+        (jev_observe.finding_id("cell", spec_id, 1, i), f)
+        for i, f in enumerate(findings)
+    ]
+    return directory, jev_observe.Round(
+        "cell", spec_id, 1, commit, spec_text, criteria, pairs, [], diff
+    )
 
 
 def cmd_drop(args) -> int:
@@ -2507,6 +2647,28 @@ def main() -> int:
     )
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_bookkeeping)
+
+    p = sub.add_parser(
+        "jev", help="score one review round with Jev, informational only"
+    )
+    p.add_argument("spec_id")
+    p.add_argument(
+        "--kind", required=True, choices=("spec-review", "pr-review", "cell")
+    )
+    p.add_argument(
+        "--spec", help="the spec file. Default: the one under .saffron/specs"
+    )
+    p.add_argument(
+        "--report",
+        action="append",
+        default=[],
+        help="a saved reviewer report, once per seat",
+    )
+    p.add_argument("--commit", help="the commit the reviewer read")
+    p.add_argument("--base", default="origin/main", help="where round 1's diff starts")
+    p.add_argument("--round", type=int, help="score a saved round again")
+    p.add_argument("--root", type=Path, default=REPO, help="the checkout git reads")
+    p.set_defaults(func=cmd_jev)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.
