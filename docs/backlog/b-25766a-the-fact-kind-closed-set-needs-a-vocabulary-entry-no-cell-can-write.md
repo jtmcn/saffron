@@ -1,13 +1,14 @@
 ---
 id: b-25766a
 title: The fact kind closed set needs a vocabulary entry no cell can write, because CONTEXT.md is generated from the ontology
-status: open
+status: done
 tier: 2
+closed: 2026-09-21
 by_hand: true
 filed: 2026-09-20
 specs: []
 prs: [393]
-commits: []
+commits: [5dacdf6]
 cites: [§4.1, §11]
 related: [168, 169, 170, 65, 72, b-d5d290]
 ---
@@ -53,3 +54,5 @@ items 168 and 169, the same constraint on two other sets.
 spans three places: `ontology/factory.ttl`, the `CONTEXT.md` generated from
 it, and a test list in `tests/ontology/`. A cell cannot move the generated
 half with the vocabulary in one task.
+
+**Closed 2026-09-21 by hand** in `5dacdf6`, with the other two sets that share this constraint.

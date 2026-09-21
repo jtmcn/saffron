@@ -1,0 +1,4 @@
+@prefix factory: <urn:software-factory:ns#> .
+
+# A kind the Event union does not name is a line read_log drops.
+factory:MessageEvent a factory:EventKind .

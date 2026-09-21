@@ -22,6 +22,9 @@ SETS = {
     "Risk tier": ("RiskTier", "or-plain"),
     "Gate role": ("GateRole", "comma"),
     "Core gates": ("CoreGate", "comma"),
+    "Preflight outcome": ("PreflightOutcome", "or-plain"),
+    "Event kind": ("EventKind", "comma"),
+    "Fact kind": ("FactKind", "comma"),
 }
 
 PRINCIPLE_ANCHOR = "## Principles — an index"

@@ -1,0 +1,4 @@
+@prefix factory: <urn:software-factory:ns#> .
+
+# The CHECK on runs.preflight admits two outcomes. A third is not one.
+factory:SKIPPED a factory:PreflightOutcome .

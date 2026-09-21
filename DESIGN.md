@@ -315,6 +315,9 @@ findings     (finding_id, task_id, lens, severity, file, line, claim, anchored,
 decisions    (decision_id, task_id, actor, action, reason, created_at)
 ```
 
+`runs.preflight` holds a preflight outcome, `PASSED` or `FAILED` (CONTEXT.md §2).
+What a NULL there means is open (backlog item b-eac388).
+
 `repos.origin` is the **real remote** — the URL a PR is opened against.
 `repos.mirror_path` is the local bare mirror, which is the only remote a cell
 ever reads (§5.1). v0 and v0.5 stored the mirror's *source* in both, so nothing
@@ -1210,7 +1213,7 @@ Sort order, designed so you can dismiss in 10 seconds and accept in two minutes:
 
 Batch header: counts by terminal state, total spend, wall clock, per-repo preflight and base-suite status, and the one number that says whether this is working — **trailing accept rate**.
 
-**Three of those six have no source yet, and the gap is not evenly distributed.** Measured against the real ledger (same record): wall clock arrives with the `batches` table §4.2.1 decides; `runs.preflight` is a column that exists and is never written; and nothing anywhere records whether a task was merged, which is the trailing accept rate's whole input. Terminal-state counts and base-suite status both render today — the baseline suite is recorded with `run_id` set (`cell/session.py`), 64 rows across ten runs, and joins per repo through `runs.repo_id`. Total spend renders but reads `0.0` on the five tasks that predate cost reconciliation, which is a truthful zero rather than a gap. **A header field with no source is not a smaller header — it is a field that renders a confident em-dash**, and the batch header is the part of this page an operator reads first.
+**Three of those six had no source when measured, and the gap is not evenly distributed.** Measured against the real ledger (same record): wall clock arrives with the `batches` table §4.2.1 decides; `runs.preflight` was a column that existed and was never written (`SA-0099` gave it a writer, and it is the source of the per-repo preflight field, which the header does not read yet); and nothing anywhere records whether a task was merged, which is the trailing accept rate's whole input. Terminal-state counts and base-suite status both render today — the baseline suite is recorded with `run_id` set (`cell/session.py`), 64 rows across ten runs, and joins per repo through `runs.repo_id`. Total spend renders but reads `0.0` on the five tasks that predate cost reconciliation, which is a truthful zero rather than a gap. **A header field with no source is not a smaller header — it is a field that renders a confident em-dash**, and the batch header is the part of this page an operator reads first.
 
 *Trailing*, and the qualifier is not pedantry. This batch's accept rate is unknowable when the batch ends: nothing has been merged yet, because merging is what you do next. The header can only show the rate over prior batches — a rolling window of about the last twenty completed tasks, which is also roughly the smallest n at which the number means anything (§8). A header field that claimed to score the night it was printed would be reporting on work that hadn't happened.
 

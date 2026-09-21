@@ -1,13 +1,14 @@
 ---
 id: 168
 title: The eleventh event kind needs a vocabulary entry no cell can write, because CONTEXT.md is generated from the ontology
-status: open
+status: done
 tier: 2
+closed: 2026-09-21
 filed: 2026-09-17
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [5dacdf6]
 cites: [§4.1]
 related: [43, 36, 37, 38, 65, 72]
 ---
@@ -53,3 +54,5 @@ surface and the same by-hand constraint.
 **Filed 2026-09-17 by hand**, with `SA-0101`. By hand because the change spans
 `ontology/factory.ttl` and the `CONTEXT.md` generated from it. A cell cannot move
 the generated half with the vocabulary in one task.
+
+**Closed 2026-09-21 by hand** in `5dacdf6`, with the other two sets that share this constraint.

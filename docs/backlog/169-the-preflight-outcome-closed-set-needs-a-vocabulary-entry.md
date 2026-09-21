@@ -1,13 +1,14 @@
 ---
 id: 169
 title: The preflight outcome closed set needs a vocabulary entry no cell can write, because CONTEXT.md is generated from the ontology
-status: open
+status: done
 tier: 2
+closed: 2026-09-21
 filed: 2026-09-17
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [5dacdf6]
 cites: [§4.1, §6]
 related: [164, 168, 65, 72]
 ---
@@ -51,3 +52,5 @@ constraint one spec along.
 `ontology/factory.ttl`, the `CONTEXT.md` generated from it, and a test list in
 `tests/ontology/`. A cell cannot move the generated half with the vocabulary in
 one task.
+
+**Closed 2026-09-21 by hand** in `5dacdf6`, with the other two sets that share this constraint.
