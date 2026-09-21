@@ -40,9 +40,16 @@ acceptance:
   - claim: >-
       `driver.py cite` takes a spec path and a base commit. It reads the spec
       from the working tree, and reads every path the spec cites at that
-      commit. A citation naming a path the commit holds no file at is
+      commit. A cited path counts where it holds a `/`. A bare filename counts
+      where it carries a dot and that suffix is one the base commit's tree
+      carries. The empty suffix is not one of them, whatever the tree holds at
+      no extension. The command reads both spellings. A citation takes the
+      form `<path>:<n>` or the form `<path>:<n>-<m>`, and the command resolves
+      both. A citation naming a path
+      the commit holds no file at is
       reported, and so is one whose line number lies past the end of that file
-      there. A citation whose path and line both resolve at that commit draws
+      there. That line number is `<m>` for a range and `<n>` for a single
+      line. A citation whose path and line both resolve at that commit draws
       no path-or-line report. A file the working tree changed after the commit
       is judged at the commit. The command exits 1 after reporting a defect and
       0 after reporting none. It prints a line counting the citations it
@@ -55,14 +62,16 @@ acceptance:
       line number of its own or as a backticked path alone, and resolves
       against that path. One whose paragraph names no path before it is
       reported as anchored to nothing. A paragraph never inherits a path from
-      the paragraph above it.
+      the paragraph above it. The command reads a bare citation written as
+      `:<n>-<m>` as well.
     witness: tests/test_spec_loop_driver.py::test_cite_anchors_a_bare_line_number_inside_its_own_paragraph
   - claim: >-
       A citation is reported as moved where the sentence around it holds
       backticked text, the cited file carries that text at the base commit,
       and no line of the cited range carries it. The report names the lines
-      that do carry it. Backticked text a cited range carries draws no report,
-      and backticked text its file carries nowhere draws none either.
+      that do carry it. Backticked text a cited range carries suppresses that
+      sentence's report, whatever the sentence's other names do. Backticked
+      text a file carries nowhere draws no report either.
     witness: tests/test_spec_loop_driver.py::test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines
 ---
 
@@ -78,7 +87,8 @@ drift. The second review then spent one of its six checks confirming by hand
 that every citation resolves. This spec is the citation half of that item. The
 directory half is under **Out of scope**.
 
-Every sentence here about current code was read at `ef1c45b3` on 2026-09-20.
+Every sentence here about current code was read at `901916a8` on 2026-09-20,
+which is the commit a cell is cut from.
 
 **The spec loop's driver is where a computed check for a spec review lives**.
 `cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1683-1712`
@@ -92,12 +102,12 @@ and records it as settled.
 raises `GitError` on a non-zero status. `_spec_at` at `:1425-1448`
 reads `git ls-tree -r` and `git show <commit>:<path>` to recover a spec as it
 stood at a commit. `_fail` at `:75-78` prints to stderr and returns 1, with the
-comment "`saffron/cli.py` reserves 2 for infrastructure".
+docstring "`saffron/cli.py` reserves 2 for infrastructure".
 
 **A spec review resolves this question by reading**. Check 6 at
 `.claude/agents/spec-reviewer.md:126-132` asks a reader to check "every
 sentence that says what the code does now" against `base`. Check 6's own rule
-for a spec author is at `docs/agents/issue-tracker.md:157-164`: "Every sentence
+for a spec author is at `docs/agents/issue-tracker.md:167-174`: "Every sentence
 that says what the code does now carries a `file:line` you read while writing
 that sentence."
 
@@ -118,12 +128,14 @@ comment and docstring rules. `CODE_DIRS` at `:48-58` holds `tests/` and
 `ontology`, `hooks` and `.saffron/gates`.
 
 **One file holds every caller of this driver's code**. A `git grep -l` for
-`driver.py` at this base returns forty files, the driver itself among them.
+`driver.py` at this base returns forty-three files, the driver itself among
+them.
 `tests/test_spec_loop_driver.py` is the only importer. It execs the driver
 through `importlib.util` at `tests/test_spec_loop_driver.py:19-26`. The other
-thirty-eight name the command in prose and call nothing. They are the two agent
+forty-one name the command in prose and call nothing. They are the two agent
 definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and
-this spec with two retired ones. The rest are eighteen backlog records, ten
+this spec with the two queued beside it and two retired ones. The rest are
+nineteen backlog records, ten
 other documents under `docs/`, and `tests/test_scheduler.py`, whose mention
 sits in the queue smoke test's docstring. The importer and the driver are in
 `touches`, and every other reader is `forbidden`.
@@ -145,7 +157,7 @@ paid reader derives it one spec at a time.
   `file:line` against a commit is two git reads.
 - **What the rounds cost, measured on `SA-0113`**: the draft 35.7 minutes,
   the first review 6.2, the revision 17.9, the second review 9.5. Item
-  b-b69bb6 is first of three in `docs/backlog/PRIORITY.md:173-177` for that
+  b-b69bb6 is first of two in `docs/backlog/PRIORITY.md:174-179` for that
   reason.
 
 The command is `cite`. It takes the spec's path and `--base`, and it prints
@@ -160,10 +172,14 @@ what it can prove wrong.
 2. **What counts as a path**. Backticked text takes a citation's shape for
    reasons that are not citations. A host and a port, a clock time and a dotted
    module name followed by a number all do. So a path part counts only where
-   it holds a `/`. A bare filename counts where its suffix is one the base
-   commit's tree carries. `CLAUDE.md:12` and `.saffron/gates/format:12`
-   are citations. `localhost:8080`, `06:30` and `importlib.util:3` are not,
-   because no file in the tree ends in `.util`. The same test decides what a
+   it holds a `/`. A bare filename counts where it carries a dot and that
+   suffix is one the base commit's tree carries. `CLAUDE.md:12` and
+   `.saffron/gates/format:12` are citations. `localhost:8080`, `06:30` and
+   `importlib.util:3` are not. No file in the tree ends in `.util`, and the
+   other two carry no dot at all. Take the empty suffix out of the set before
+   you use it. The tree holds 22 paths at no extension, `Makefile` and
+   `.saffron/gates/format` among them, so leaving it in makes `localhost` a
+   filename. The same test decides what a
    bare line number anchors to. A paragraph naming `importlib.util` before a
    bare line number therefore anchors past it. One `git ls-tree -r --name-only`
    at base gives you the suffix set. A path with neither a `/` nor such a
@@ -305,41 +321,84 @@ there: `_git` and `_commit` at `tests/test_spec_loop_driver.py:116-127` and
 to the host's git config.
 
 **Name the wrong implementation each witness must kill.** Criterion 1 kills
-six. One reads the cited file from the working tree, which the witness catches
+twelve. One reads the cited file from the working tree, which the witness catches
 by rewriting a committed file after the commit. One reports a citation that
 resolves. One returns 0 after reporting a defect, or 1 after reporting none.
 One reports a line number equal to the file's last line, which is inside the
 file and not past its end. One treats any backticked `<text>:<n>` as a
 citation. To kill that one, put a host and port and a dotted module name in the
 clean spec. It then reports two paths the commit holds no file at, where the
-witness asserts no defect and exit 0. One prints its defects and no count line,
+witness asserts no defect and exit 0. One counts a path only where it holds a
+`/`, and skips every bare filename. One counts a bare filename only, and skips a
+slashed path with no suffix. To kill both, give the defective spec two
+citations. One is a bare filename whose suffix the tree carries, at a line past
+its end. Give it a suffix no hand-written allowlist would hold, such as
+`run.zzz`, and commit that file into the fixture. Only a set derived from
+`git ls-tree` then accepts it. One is a slashed path with no suffix, which the commit holds no file
+at. The witness asserts a report for each. One matches `<path>:<n>` alone and
+reads no range. One reads a range's `<n>` and drops `<m>`. To kill both, give
+the defective spec a third citation, a range whose start line the file holds.
+Its end line sits past that file's end, and the witness asserts a report for
+it. One takes the empty suffix from the
+tree into the set. To kill that one, commit a file with no extension into the
+fixture, and put `06:30` in the clean spec beside the host and port. One prints
+its defects and no count
+line,
 which the clean case kills by asserting that line on stdout beside the exit 0.
+One prints the count line on the clean run alone. The witness asserts the line
+on the defective run too, carrying the number of citations it checked.
 The clean spec must draw no moved-text report either, since that case asserts
 exit 0 and criterion 3 reports on a citation that resolves: give each clean
 sentence backticked text the cited range itself carries, or text the cited file
 carries nowhere. Drive a clean spec and a defective one in the same witness, so
 the zero case is pinned beside the one case.
 
-Criterion 2 kills four. One drops a bare line number rather than resolving it.
-One anchors only to a path written with a line number of its own, never to a
-backticked path written alone. This spec's own **Context** writes the second
+Criterion 2 kills seven, over a fixture spec of three paragraphs, P1, P2 and
+P3. One anchors only to a path written with a line number of its own, never to
+a backticked path written alone. This spec's own **Context** writes the second
 shape in its `tests/test_citations.py` paragraph, where a bare-path mention
-carries `:1` and `:321-323`. To kill that one, give a fixture paragraph a
-bare-path mention followed by a bare citation that resolves against it, and
-assert no report. One lets a paragraph inherit the path from the paragraph
-above it. The witness catches
-that with a second paragraph whose own bare citation would resolve against the
-wrong file. One drops an unanchored bare number without a word. Make the two
-paragraphs cite files of different lengths, so an inherited path reports a
-defect the anchored one does not.
+carries `:1` and `:321-323`. P1 kills that one: a bare-path mention followed
+by a bare citation that resolves against it, and no report asserted. One partitions
+the backticked spans into citations and
+paths, and anchors a bare number to a path alone, so a `<path>:<n>` token never
+anchors. That is the commonest form a spec writes. One anchors to the last
+backticked `<text>:<n>` without applying the path test. P2 kills both: a
+`<path>:<n>` anchor, then a dotted module name, then a bare citation that
+resolves against the anchor. The witness asserts no report for P2, and both
+anchor spellings are then driven. One drops a bare line number rather than
+resolving it. One lets a paragraph inherit the path from the paragraph above
+it. One drops an unanchored bare number without a word. P3 kills all three: it
+names no path before its bare citation, and the witness asserts a report
+reading anchored to nothing. Write that bare citation as `:<n>-<m>`, with
+`<m>` past the end of the file P1 names and inside the file P2 names. An
+inherited path then prints something other than that report. One reads a bare
+`:<n>` and skips a bare range. A skipped range leaves the witness no report to
+read.
 
-Criterion 3 kills three. One reports any citation whose range lacks the
+Criterion 3 kills eight, over five fixture cases. One reports any citation
+whose range lacks the
 sentence's backticked text, which the third case kills: text the file carries
 nowhere is a name from elsewhere, not a moved line. One searches the whole file
 and never the range, which reports nothing at all. One reports the citation
 without naming the lines that carry the text, which is what makes the report
 worth reading. Put a second occurrence of the text in the file, so a report
-naming one line and a report naming both are distinguishable.
+naming one line and a report naming both are distinguishable. That arrangement
+is the first case, and the witness asserts both line numbers. One runs the
+moved-text check on citations carrying a path alone. Write the first case's
+citation as a bare number, anchored to a path named earlier in its paragraph.
+A moved-text check that skips a bare citation then prints nothing, and the
+witness catches it. One reads a range's first line alone. The second case cites
+a range as `<path>:<n>-<m>`, and the sentence's backticked text sits on a line
+inside that range below its first. The witness asserts no report for it. One
+reports where
+any of the sentence's backticked strings is absent from the range. To kill that
+one, give a fixture sentence two backticked strings. The cited range carries
+the second, and the file carries the first elsewhere. Assert no report. That is
+the fourth case. One reads the sentence's first backticked string alone. One
+skips a sentence holding more than one backticked string. The fifth case kills
+both. Its sentence holds two backticked strings, and neither sits in the cited
+range. The file carries the second elsewhere and the first nowhere. The witness
+asserts exactly one report for that sentence.
 
 **Each witness is a plain `def`, never parametrised.** `criteria` matches a
 bare node id against the names the suite collected, by exact string. A
@@ -395,23 +454,25 @@ head and reads a rename as a removal. The three new tests belong at the end of
 `test_only_probe_takes_a_command_after_the_separator` at
 `tests/test_spec_loop_driver.py:1821`.
 
-**The shape is about 405 changed lines, and nothing here raises the tier.**
+**The shape is about 485 changed lines, and nothing here raises the tier.**
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`. So this task runs at `risk: standard`, where `size` is advisory
 against the `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The
-estimate is 190 in `driver.py` and 215 in the test file, derived per part. In
-`driver.py`: 65 lines to extract citations and anchor the bare ones, 40 to
-resolve a path and a line at base. Then 35 for the moved-text check, 40 for
+estimate is 200 in `driver.py` and 285 in the test file, derived per part. In
+`driver.py`: 70 lines to extract citations in both spellings and anchor the
+bare ones. Another 45 resolve a path and a line range at base. Then 37 for the
+moved-text check, 40 for
 `cmd_cite` and what it prints, and 8 to register the subcommand. In the
 tests: 25 for a shared helper that writes a spec file and commits a fixture
-tree, then 75, 55 and 60 for the three witnesses. `SA-0112` is the comparable
+tree, then 110, 75 and 75 for the three witnesses. The first carries two spec
+texts, a multi-file commit and a count line asserted on both runs. `SA-0112` is the comparable
 cell, in these same two files. It spent 99 lines in `driver.py` and 144 in the
 test file, on one subcommand with five verdicts and four witnesses. This
 command parses prose and reads a tree at a commit, where that one read rows
 already in hand. Its witnesses build real git fixtures where that one used the
-ledger fixture. Two thirds more than that cell is the estimate. The directory
+ledger fixture. Twice that cell is the estimate. The directory
 half of item b-b69bb6 was cut from this spec for that reason. With it, the same
-derivation gave 540 lines, inside 100 of the ceiling that `SA-0106` (633) and
+derivation gave 570 lines, inside 100 of the ceiling that `SA-0106` (633) and
 `SA-0107` (1049) overshot. Do not go looking for more to do.
 
 **The ceilings, against `driver.py history SA-0114`.** `max_turns: 150` stands
