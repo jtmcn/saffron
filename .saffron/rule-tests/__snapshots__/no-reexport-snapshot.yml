@@ -1,5 +1,15 @@
 id: no-reexport
 snapshots:
+  (__all__) = ["h"]:
+    labels:
+    - source: (__all__) = ["h"]
+      style: primary
+      start: 0
+      end: 17
+    - source: (__all__)
+      style: secondary
+      start: 0
+      end: 9
   __all__ += ["Fact"]:
     labels:
     - source: __all__ += ["Fact"]
@@ -30,6 +40,12 @@ snapshots:
       style: secondary
       start: 0
       end: 7
+  from .impl import Fact as Fact:
+    labels:
+    - source: Fact as Fact
+      style: primary
+      start: 18
+      end: 30
   from saffron.record.contract import Fact as Fact:
     labels:
     - source: Fact as Fact

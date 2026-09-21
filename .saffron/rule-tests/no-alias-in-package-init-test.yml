@@ -2,8 +2,10 @@ id: no-alias-in-package-init
 valid:
   - 'from saffron.record.contract import Fact'
   - 'from collections.abc import Callable, Sequence'
+  # A module alias. vulture reports functions, not modules.
   - 'import saffron.record.contract as contract'
 invalid:
+  # Measured: vulture hid `Fact` and did not report `RecordFact` in an init.
   - 'from saffron.record.contract import Fact as RecordFact'
   - 'from .impl import a as x'
   - 'from saffron.record.contract import KINDS, Fact as RecordFact'

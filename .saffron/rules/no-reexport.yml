@@ -7,16 +7,21 @@ note: |
   itself (`import x as x`) as used everywhere. A re-export like that
   hides the symbol from the gate for good. Import from the defining module.
 
-# No `files:` scope: vulture matches names globally, so a re-export anywhere hides one.
+# Measured on vulture 2.16. No `files:` scope: a copy of `dead.py`'s ROOTS here
+# could drift and leave a root unguarded. Files outside ROOTS hide nothing.
+# ponytail: `__all__` built through `setattr` or `globals()` walks past.
+# `__all__.extend()` and `.append()` need no branch, since vulture still reports.
 rule:
   any:
+    # The optional parens catch `(__all__) = [...]`, which vulture reads as `__all__`.
     - kind: assignment
-      has: { field: left, regex: '^__all__$' }
+      has: { field: left, regex: '^\(*__all__\)*$' }
     - kind: augmented_assignment
-      has: { field: left, regex: '^__all__$' }
+      has: { field: left, regex: '^\(*__all__\)*$' }
     - pattern:
         context: 'import $A as $A'
         selector: aliased_import
+    # `m` only lets the context parse. The selector matches any module.
     - pattern:
         context: 'from m import $A as $A'
         selector: aliased_import

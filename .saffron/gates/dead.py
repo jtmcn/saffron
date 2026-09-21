@@ -28,7 +28,7 @@ ROOTS = (
     ".saffron/gates",
 )
 # ponytail: vulture matches names globally, so a new function named like any
-# attribute used anywhere is not reported. `no-reexport` bans `__all__` for the same reason.
+# attribute used anywhere is not reported. The re-export rules close a separate hole.
 MIN_CONFIDENCE = "60"
 # pydantic calls these; ignoring them by decorator keeps each new one off the whitelist.
 IGNORE_DECORATORS = "@field_validator,@model_validator"
