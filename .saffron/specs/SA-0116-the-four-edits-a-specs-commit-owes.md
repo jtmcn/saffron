@@ -173,8 +173,8 @@ prints to stderr and returns 1. Its docstring reads "`saffron/cli.py` reserves
 **`SA-0115` is the parent, and this command does not call its code**. All three
 of `SA-0114`, `SA-0115` and this spec declare the same two `touches`
 (`.saffron/specs/SA-0115-the-tests-that-enumerate-a-directory-a-spec-adds-to.md:7-9`).
-Without a `depends_on`, the overlap refusal at `saffron/scheduler.py:679-692`
-would refuse this one against either open pull request. The exemption at
+Both parents are on `main`. The `depends_on` stays because the smoke test pins
+this spec's refusal on it (`tests/test_scheduler.py:2117`). The exemption at
 `saffron/scheduler.py:671-674` passes the ancestors `depends_on[0]` walks.
 `SA-0115` is the later of the two, so it is the one named here. The subparsers
 register in one block of `main`. `check` is at
@@ -648,8 +648,8 @@ it is 169 in `driver.py` and 325 in the test file.
   rows, and 57 for criterion 3's two runs. That is 325.
 
 No uplift is applied, and the parents are why. `SA-0114` estimated 485 and
-landed 330 in `6aa8da85`. `SA-0115` estimated 520 and landed 659 in
-`e4cf6388`, 206 in `driver.py` and 453 in the test file. Together that is 1005
+landed 330 in `198aa857`. `SA-0115` estimated 520 and landed 659 in
+`d298a8a6`, 206 in `driver.py` and 453 in the test file. Together that is 1005
 estimated against 989 landed. The risk sits in the test file, where `SA-0115`
 ran 168 over its own figure. 494 leaves 106 under the ceiling. If the test file
 runs long anyway, keep every case above. `size` is advisory at this tier, and
@@ -675,7 +675,7 @@ and `SA-0115` declare
 `SA-0115` ran.
 
 **Commit before you verify.** Run 11 ran this spec and ended `NOT_IMPLEMENTED`
-with no commit. Its three witnesses passed, and the 900-second turn wall cut
+with no commit. It reported its three witnesses passing, and the 900-second turn wall cut
 it during a last full-suite run (item b-36b551). Commit as soon as a witness
 passes. Run `tests/test_spec_loop_driver.py` and
 `tests/records/test_records_integrity.py`, never the whole suite.
