@@ -55,27 +55,36 @@ attempts, 1,971 attempt-scoped gate results, 250,136 failure rows, 149 findings.
 |---|---|
 | tasks folded | 118 |
 | facts | 3,805 |
-| **fold, loose record** | **90.61 s** |
-| fold, after `git gc --aggressive` | 89.70 s |
+| **fold, loose record** | **9.94 s** |
 | ledger rebuilt | 30.6 MB |
-| record built (not the fold) | 363.4 s |
+| record built (not the fold) | 387.5 s |
 
-The fold is 24 ms per fact, and almost all of it is `git cat-file` one fact at a
-time. Packing the record saves 1%, so the cost is process spawns, not object
-lookup — the shape a batched `cat-file --batch` would move and that nothing else
-would.
+**The first measurement was 90.61 s**, and `RefsRecord.read` spawned one `git
+cat-file` per fact to get it: 24 ms a fact, of which packing the record with
+`git gc --aggressive` saved 1%. So the cost was process spawns and not object
+lookup, and `_cat_blobs` now reads a whole task in one `cat-file --batch`. Same
+118 tasks, same 3,805 facts, same rows back. The 9.1x is the whole of that one
+change.
+
+What is left is still spawns, now three a task a pass rather than one a fact:
+`rev-parse`, `ls-tree`, `cat-file`. At 118 tasks that is some 700 processes and
+about 12 ms each, which is most of the 9.94 s.
 
 It reads the record **twice**: once to order tasks by the time their
 `task_created` fact was appended, once to replay them. Key order will not do —
 a record key is random hex, and `ORDER BY t.task_id` is read as a chronology by
-`queue_lines` and `tasks_by_spec` — and holding 33.9 MB of fact JSON in memory
-to sort by one field of it is the wrong trade for a tool that has to survive a
-year of nights. Half of the 90 s is that choice, and it is reversible.
+`queue_lines` and `tasks_by_spec`. Dropping the second pass means holding every
+task's facts, and 33.9 MB of JSON parses into several times that as `Fact`
+objects, 147,591 failure dicts among them. At 24 ms a fact the second pass was
+45 s and worth that memory; at 5 s it is not, so the two passes stay.
 
-Building the record took four times as long as folding it, because
-`RefsRecord.append` rewrites the whole facts tree per fact. That is the write
-path's number, not the fold's, and it is here so the 90 s is not read as the
-system's whole cost.
+Building the record took 39 times as long as folding it, because
+`RefsRecord.append` rewrites the whole facts tree per fact and spends six
+processes doing it. That is the write path's number, not the fold's, and it is
+here so the 9.94 s is not read as the system's whole cost. It is also not a
+night's number: a night appends some 32 facts a task as the work happens, and
+3 s a task beside an agent turn is nothing. It is the migration of the stored
+tasks that pays this in one sitting.
 
 ## What came back
 

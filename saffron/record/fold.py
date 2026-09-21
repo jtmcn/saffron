@@ -93,8 +93,10 @@ def _creation_order(record: Record, strict: bool, done: Fold) -> list[str]:
     scatters a rebuilt ledger through time.
 
     A second read rather than a corpus held in memory: the 118 tasks measured
-    on 2026-09-20 carry 33.7 MB of fact JSON, which is not a thing to hold to
-    sort by one field of it."""
+    on 2026-09-20 carry 33.9 MB of fact JSON, which parses into several times
+    that as `Fact` objects. Batched reads put the whole two-pass fold at 9.94 s,
+    so the pass costs about 5 s and the memory is the worse half of the trade
+    (`docs/evidence/2026-09-20-fold-rebuild-time.md`)."""
     dated = []
     for key in sorted(record.task_keys()):
         try:

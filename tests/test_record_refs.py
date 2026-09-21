@@ -115,6 +115,18 @@ def test_a_failure_carries_the_reason_git_gave(tmp_path):
     assert "not a git repository" in str(raised.value).lower()
 
 
+def test_an_object_git_no_longer_has_is_not_a_shorter_log(repo):
+    # `cat-file --batch` answers "<sha> missing" over exit 0, so a reader that
+    # skips the line hands the fold a task missing its middle. `error` != `fail`.
+    record = RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    sha = record._blobs(fact.task_key)[0][1]
+    (repo / "objects" / sha[:2] / sha[2:]).unlink()
+    with pytest.raises(RecordError, match="missing"):
+        record.read(fact.task_key)
+
+
 def test_task_keys_lists_every_task_ref(repo):
     record = RefsRecord(repo)
     for key in ("a" * 32, "b" * 32):

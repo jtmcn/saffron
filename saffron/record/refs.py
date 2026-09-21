@@ -27,19 +27,24 @@ class RefsRecord:
         self._remote = remote
 
     def _git(self, *args: str, stdin: str | None = None) -> str:
+        return self._git_bytes(
+            *args, stdin=stdin.encode() if stdin is not None else None
+        ).decode()
+
+    def _git_bytes(self, *args: str, stdin: bytes | None = None) -> bytes:
         done = subprocess.run(
             ["git", "-C", str(self._repo), *args],
             input=stdin,
             capture_output=True,
-            text=True,
         )
         if done.returncode != 0:
             # `check=True` would raise a `CalledProcessError` that names the
             # argv and drops the reason, which is the one thing a caller needs.
+            stderr = done.stderr.decode(errors="replace")
             raise RecordError(
-                f"git {args[0]} failed ({done.returncode}): {done.stderr.strip()}",
+                f"git {args[0]} failed ({done.returncode}): {stderr.strip()}",
                 returncode=done.returncode,
-                stderr=done.stderr,
+                stderr=stderr,
             )
         return done.stdout
 
@@ -115,10 +120,39 @@ class RefsRecord:
             found.append((seq, mode_type_sha.split()[2]))
         return sorted(found)
 
+    def _cat_blobs(self, shas: list[str]) -> list[str]:
+        """One `cat-file --batch` for a whole task, never one process a fact.
+        The fold measured 24 ms a fact when each was its own spawn, and packing
+        the record saved 1%, so the cost was the spawns
+        (`docs/evidence/2026-09-20-fold-rebuild-time.md`)."""
+        if not shas:
+            return []
+        out = self._git_bytes(
+            "cat-file", "--batch", stdin=("\n".join(shas) + "\n").encode()
+        )
+        blobs = []
+        at = 0
+        for sha in shas:
+            # `<sha> blob <size>\n<contents>\n`, or `<sha> missing\n` over
+            # exit 0, which must not read as an empty log. `error` != `fail`.
+            end = out.find(b"\n", at)
+            header = out[at : end if end != -1 else len(out)].decode(errors="replace")
+            fields = header.split()
+            if end == -1 or len(fields) != 3 or fields[1] != "blob":
+                raise RecordError(f"git cat-file gave no blob for {sha}: {header}")
+            size = int(fields[2])
+            start = end + 1
+            if start + size > len(out):
+                raise RecordError(f"git cat-file truncated {sha} at {size} bytes")
+            blobs.append(out[start : start + size].decode())
+            at = start + size + 1
+        return blobs
+
     def read(self, task_key: str) -> list[Fact]:
+        blobs = self._blobs(task_key)
         facts = []
-        for seq, sha in self._blobs(task_key):
-            raw = self._git("cat-file", "blob", sha)
+        raws = self._cat_blobs([sha for _, sha in blobs])
+        for (seq, _), raw in zip(blobs, raws, strict=True):
             try:
                 facts.append(Fact.from_json(raw))
             except ValueError as exc:
