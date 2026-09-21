@@ -87,7 +87,16 @@ And optionally:
    spec. **Done when** the origin item's `specs:` names the spec and any new
    term has its `by_hand: true` record. The queue smoke test in
    `tests/test_scheduler.py` has its re-measured paragraph and pinned lists.
-6. **Review your draft** as the spec-reviewer would, on all six checks. Fix
+6. **Sweep each criterion's sets.** A claim over a set, named or in passing,
+   needs a witness driving every member (`issue-tracker.md`'s Conventions).
+   Reviewers have not caught this alone: run 11's spec blockers were all this
+   shape (backlog item b-250dc7). For each criterion, list every set its claim
+   quantifies over, such as the forms of a call or the spellings of a path.
+   Beside each member, name the witness that drives it. Give an undriven member
+   a witness, or narrow the claim and say in the notes what is left.
+   **Done when** every member of every set names its witness, and the report
+   carries the table.
+7. **Review your draft** as the spec-reviewer would, on all six checks. Fix
    everything it would call a blocker or a concern. Re-run step 1's estimate
    against the `size:` line of every row step 4 printed, the rows that
    exceeded their ceiling included. **Done when** each check has evidence you
@@ -110,8 +119,8 @@ reading its line and the review's error becomes the spec's.
    and leave the spec as it is.
 3. **Fix the rest in the spec's own terms.** A claim you widen names the
    witness reaching the new half, in the same edit. A witness you change gets
-   step 6's check 3, adversary and all.
-4. **Re-run steps 4, 5 and 6.** A criterion the review added moves the size
+   step 7's check 3, adversary and all.
+4. **Re-run steps 4 to 7.** A criterion the review added moves the size
    estimate, and the bookkeeping follows the spec.
 
 **Done when** every finding is applied or answered, and `make check` exits 0.
@@ -123,7 +132,10 @@ or `answered`, its severity, and the evidence you read.
 1. **Files written**, one line each.
 2. **Checks**: six lines, each `checked: <check> — <what you read>` or
    `open: <check> — <what you could not settle>`.
-3. **For the operator**: each judgement call you made (priority, a split, a
+3. **Sets**: step 6's table, one line per criterion, as
+   `<criterion>: <set> = <member> by <witness>, ...`. A narrowed claim adds
+   `narrowed: <members left>`.
+4. **For the operator**: each judgement call you made (priority, a split, a
    scope cut), one line each.
-4. **Next**: the `make check` exit code, then "commit on its own branch and
+5. **Next**: the `make check` exit code, then "commit on its own branch and
    run spec-reviewer with `base:` that branch's head".
