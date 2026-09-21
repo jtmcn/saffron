@@ -176,6 +176,18 @@ RECORD_KEY_INDEX = (
 )
 
 
+class UnreadableTask(Exception):
+    """A task the record cannot give back. Named apart from every other
+    failure so `saffron fold` can price it: a task that did not make it into
+    the ledger, never the fold itself breaking. `error` != `fail`."""
+
+
+def _ledger_time(at: str) -> str:
+    """`Fact.at` is ISO-8601 with an offset. Every ledger timestamp is
+    `datetime('now')`'s `%Y-%m-%d %H:%M:%S` in UTC, which `projection` parses."""
+    return datetime.fromisoformat(at).astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _inserted_id(cursor: sqlite3.Cursor) -> int:
     """`lastrowid` is `int | None` on the sqlite3 type stubs.
 
@@ -380,6 +392,235 @@ class Ledger:
             payload=payload,
         )
         self._record.append(row["key"], fact)
+
+    def fold_task(self, key: str, facts: Sequence[Fact]) -> None:
+        """Drop the task `key` names, apply every fact through `_apply`,
+        commit once. All or nothing. Empty `facts` only drops the rows."""
+        with self._db:
+            self._drop_task_rows(key)
+            task_id: int | None = None
+            attempt_id: int | None = None
+            findings: dict[int, int] = {}
+
+            def apply(fact: Fact, **kw: int | None) -> int | None:
+                return self._apply(task_id, fact, key=key, **kw)
+
+            for fact in facts:
+                if fact.kind == "task_created":
+                    task_id = apply(fact)
+                elif fact.kind == "attempt_opened":
+                    attempt_id = apply(fact)
+                elif fact.kind == "finding":
+                    new_id = apply(fact)
+                    assert new_id is not None
+                    findings[fact.payload["finding_id"]] = new_id
+                elif fact.kind == "rebuttal":
+                    # The fact names the source ledger's finding_id, so a
+                    # rebuttal is placed by the finding fact that preceded it.
+                    mapped = findings.get(fact.payload["finding_id"])
+                    if mapped is None:
+                        raise UnreadableTask(
+                            f"task {key}: rebuttal for finding "
+                            f"{fact.payload['finding_id']} has no finding "
+                            "fact to attach to"
+                        )
+                    apply(fact, finding_id=mapped)
+                else:
+                    # ponytail: an attempt_closed or gate_result fact names no
+                    # attempt; the second spec gives every fact its own place.
+                    apply(fact, attempt_id=attempt_id)
+
+    def _drop_task_rows(self, key: str) -> None:
+        """Delete every row under `record_key = key`, task row last. Makes
+        `fold_task` an upsert, and a no-op on a task with no row yet."""
+        row = self._db.execute(
+            "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
+        ).fetchone()
+        if row is None:
+            return
+        task_id = int(row["task_id"])
+        self._db.execute(
+            "DELETE FROM failures WHERE gate_result_id IN (SELECT g.gate_result_id FROM gate_results g JOIN attempts a ON a.attempt_id = g.attempt_id WHERE a.task_id = ?)",
+            (task_id,),
+        )
+        self._db.execute(
+            "DELETE FROM gate_results WHERE attempt_id IN (SELECT attempt_id FROM attempts WHERE task_id = ?)",
+            (task_id,),
+        )
+        self._db.execute("DELETE FROM attempts WHERE task_id = ?", (task_id,))
+        self._db.execute("DELETE FROM findings WHERE task_id = ?", (task_id,))
+        self._db.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+
+    def _touch_task(
+        self, task_id: int | None, column: str, value: Any, at: str
+    ) -> None:
+        """One task column, plus `updated_at`, set by a single-column fact.
+        `column` is never a caller's string, only one of three literals."""
+        self._db.execute(
+            f"UPDATE tasks SET {column} = ?, updated_at = ? WHERE task_id = ?",
+            (value, at, task_id),
+        )
+
+    def _run_for(self, fact: Fact) -> int:
+        """The repo and run a `task_created` fact names, by SQL alone since
+        `_apply` cannot call a committing write method."""
+        payload = fact.payload
+        self._db.execute(
+            "INSERT INTO repos (name, origin, mirror_path) VALUES (?, ?, ?) "
+            "ON CONFLICT(origin) DO UPDATE SET name=excluded.name, mirror_path=excluded.mirror_path",
+            (fact.repo, payload["origin"], payload["mirror_path"]),
+        )
+        repo_id = int(
+            self._db.execute(
+                "SELECT repo_id FROM repos WHERE origin = ?", (payload["origin"],)
+            ).fetchone()["repo_id"]
+        )
+        found = self._db.execute(
+            "SELECT run_id FROM runs WHERE repo_id = ? AND base_sha = ?",
+            (repo_id, payload["base_sha"]),
+        ).fetchone()
+        if found is not None:
+            return int(found["run_id"])
+        # ponytail: §5 identifies a run by batch and repo, but `batch_key` is
+        # NULL on every stored task, so `base_sha` stands in and collapses some.
+        cursor = self._db.execute(
+            """INSERT INTO runs (repo_id, base_sha, started_at, status)
+               VALUES (?, ?, ?, 'RUNNING')""",
+            (repo_id, payload["base_sha"], _ledger_time(fact.at)),
+        )
+        return _inserted_id(cursor)
+
+    def _apply(
+        self,
+        task_id: int | None,
+        fact: Fact,
+        *,
+        key: str,
+        attempt_id: int | None = None,
+        finding_id: int | None = None,
+    ) -> int | None:
+        """Turn one task fact into rows, for the eleven kinds `_append`
+        writes. Raises on any other kind, returns the id of any row
+        inserted, or None. Commits nothing. `attempt_id` and `finding_id`
+        are `fold_task`'s own rules, held between calls by `fold_task`
+        alone."""
+        payload = fact.payload
+        at = _ledger_time(fact.at)
+        if fact.kind == "task_created":
+            risk = payload["risk"] if payload["risk"] is not None else "standard"
+            run_id = self._run_for(fact)
+            cursor = self._db.execute(
+                "INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha, prompt_sha, record_key, updated_at) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    payload["spec_id"],
+                    payload["spec_sha"],
+                    risk,
+                    payload["branch"],
+                    payload["budget_usd"],
+                    payload["policy_sha"],
+                    payload["prompt_sha"],
+                    key,
+                    at,
+                ),
+            )
+            return _inserted_id(cursor)
+        if fact.kind == "attempt_opened":
+            cursor = self._db.execute(
+                "INSERT INTO attempts (task_id, phase, n, started_at) VALUES (?, ?, ?, ?)",
+                (task_id, payload["phase"], payload["n"], at),
+            )
+            return _inserted_id(cursor)
+        if fact.kind == "attempt_closed":
+            self._db.execute(
+                "UPDATE attempts SET ended_at = ?, session_id = ?, model = ?, subtype = ?, terminal_reason = ?, num_turns = ?, cost_usd_est = ? WHERE attempt_id = ?",
+                (
+                    at,
+                    payload["session_id"],
+                    payload["model"],
+                    payload["subtype"],
+                    payload["terminal_reason"],
+                    payload["num_turns"],
+                    payload["cost_usd_est"],
+                    attempt_id,
+                ),
+            )
+            return None
+        if fact.kind == "gate_result":
+            data = dict(payload)
+            failures = data.pop("failures", [])
+            cursor = self._db.execute(
+                "INSERT INTO gate_results (attempt_id, gate, status, tool, duration_ms, summary) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    attempt_id,
+                    data["gate"],
+                    data["status"],
+                    data.get("tool"),
+                    data.get("duration_ms"),
+                    data.get("summary"),
+                ),
+            )
+            gate_result_id = _inserted_id(cursor)
+            rows = [
+                (gate_result_id, f["file"], f["code"], f.get("message"), f.get("line"))
+                for f in failures
+            ]
+            self._db.executemany(
+                "INSERT INTO failures (gate_result_id, file, code, message, line) VALUES (?, ?, ?, ?, ?)",
+                rows,
+            )
+            return gate_result_id
+        if fact.kind == "task_state":
+            # `set_task_state` rolls the spend up from closed attempts, and
+            # the fold matches that instead of reading a figure off the fact.
+            self._db.execute(
+                "UPDATE tasks SET state = ?, updated_at = ?, spent_usd_est = (SELECT COALESCE(SUM(cost_usd_est), 0.0) FROM attempts WHERE task_id = ?) WHERE task_id = ?",
+                (payload["state"], at, task_id, task_id),
+            )
+            return None
+        if fact.kind == "task_package":
+            self._db.execute(
+                "UPDATE tasks SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?, updated_at = ? WHERE task_id = ?",
+                (
+                    payload["state"],
+                    payload["branch"],
+                    payload["pushed_sha"],
+                    payload["pr_url"],
+                    at,
+                    task_id,
+                ),
+            )
+            return None
+        if fact.kind == "task_push":
+            self._touch_task(task_id, "pushed_sha", payload["pushed_sha"], at)
+            return None
+        if fact.kind == "task_merged_head":
+            self._touch_task(task_id, "merged_head_sha", payload["head"], at)
+            return None
+        if fact.kind == "task_policy":
+            self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
+            return None
+        if fact.kind == "finding":
+            cursor = self._db.execute(
+                "INSERT INTO findings (task_id, lens, severity, file, line, claim, anchored) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    task_id,
+                    payload["lens"],
+                    payload["severity"],
+                    payload["file"],
+                    payload["line"],
+                    payload["claim"],
+                    int(payload["anchored"]),
+                ),
+            )
+            return _inserted_id(cursor)
+        if fact.kind == "rebuttal":
+            self._db.execute(
+                "UPDATE findings SET verdict = ?, rebuttal = ? WHERE finding_id = ?",
+                (payload["verdict"], payload["rebuttal"], finding_id),
+            )
+            return None
+        raise ValueError(f"fold cannot place fact kind {fact.kind!r}")
 
     def upsert_repo(
         self, name: str, origin: str, mirror_path: str, policy_sha: str | None

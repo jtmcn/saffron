@@ -7,6 +7,7 @@ from saffron import cli
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.ledger import Ledger
+from saffron.record.contract import Fact
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.memory import MemoryRecord
 from saffron.record.refs import RefsRecord
@@ -214,15 +215,16 @@ def test_an_unreadable_task_names_itself_and_folds_the_rest(tmp_path, record):
 
 
 def test_a_rebuttal_with_no_finding_fact_raises_under_strict(tmp_path, record):
-    # A finding row's three judgements must not silently collapse to two;
-    # unreachable today only because the map is built from this task's log.
+    # A rebuttal naming no finding fact makes its whole task unreadable.
     a_night(tmp_path, record).close()
     key = record.task_keys()[0]
     record._facts[key] = [f for f in record._facts[key] if f.kind != "finding"]
     into = Ledger(tmp_path / "into.db")
-    with pytest.raises(ValueError, match="rebuttal"):
+    with pytest.raises(UnreadableTask, match="rebuttal"):
         fold(record, into, strict=True)
-    assert fold(record, into, strict=False).folded == 1
+    result = fold(record, into, strict=False)
+    assert result.folded == 0
+    assert [k for k, _ in result.skipped] == [key]
     into.close()
 
 
@@ -295,26 +297,24 @@ def test_a_task_git_cannot_read_is_skipped_and_the_rest_fold(tmp_path, record):
     into.close()
 
 
-def _with_unplaceable_payload(record):
-    """A payload key `Ledger.close_attempt` has no parameter for, which is
-    what a fact kind outliving the method it replays looks like."""
+def _with_unplaceable_kind(record):
+    """A `decision` fact, one of the seven kinds `_apply` never places,
+    appended after a task's own facts."""
     key = record.task_keys()[0]
-    record._facts[key] = [
-        replace(f, payload=f.payload | {"unexpected_new_field": 1})
-        if f.kind == "attempt_closed"
-        else f
-        for f in record._facts[key]
-    ]
+    record.append(
+        key,
+        Fact(kind="decision", task_key=key, at="2026-09-19T00:00:00+00:00", repo="s"),
+    )
     return key
 
 
 def test_a_task_that_fails_mid_replay_leaves_no_rows_behind(tmp_path, record):
-    # `Ledger`'s methods commit as they go, so the replay is not one
-    # transaction: a task that dies partway is discarded rather than left half.
+    # `fold_task` commits once for the whole task, so a fact it cannot
+    # place leaves the ledger holding nothing for that task.
     a_night(tmp_path, record).close()
-    _with_unplaceable_payload(record)
+    _with_unplaceable_kind(record)
     into = Ledger(tmp_path / "into.db")
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="decision"):
         fold(record, into, strict=True)
     assert _read(into, "SELECT COUNT(*) FROM tasks") == [(0,)]
     assert _read(into, "SELECT COUNT(*) FROM attempts") == [(0,)]
@@ -323,12 +323,12 @@ def test_a_task_that_fails_mid_replay_leaves_no_rows_behind(tmp_path, record):
 
 
 def test_a_replay_that_breaks_is_not_skipped_as_unreadable(tmp_path, record):
-    # A fold that cannot place a payload is the fold's own defect, and
+    # A fold that cannot place a kind is the fold's own defect, and
     # charging it to the record drops the task and still exits 0.
     a_night(tmp_path, record).close()
-    _with_unplaceable_payload(record)
+    _with_unplaceable_kind(record)
     into = Ledger(tmp_path / "into.db")
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="decision"):
         fold(record, into, strict=False)
     into.close()
 
