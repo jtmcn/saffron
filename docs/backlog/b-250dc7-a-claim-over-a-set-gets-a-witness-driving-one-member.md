@@ -79,3 +79,8 @@ author already holds both the claim and the fixture.
   sweep before hand-back caught six more on `SA-0115` and ten on `SA-0116`.
   Making that sweep a mandatory, reported step in `.claude/agents/spec-writer.md`
   is the next step.
+- 2026-09-21: that step is in `.claude/agents/spec-writer.md` as step 6.
+  The author lists each criterion's sets and names the witness driving each
+  member. The report carries that table as its own Sets section, so a
+  reviewer checks a table rather than finding the gap alone. Whether it lowers
+  the blocker count stays unmeasured until the next chain.
