@@ -136,6 +136,9 @@ cost, every finding by class, and for each one the pre-flight check that caught
 it or the check that would have. That record is what makes the next run
 cheaper, and it is the only thing that tells you whether this skill works.
 
+Commit the record on the spec's branch and push it, so it rides the spec's pull
+request and merges with the spec it describes.
+
 ## What the reviews keep finding
 
 `references/findings.md` holds the corpus from 2026-09-20: four specs, eight
