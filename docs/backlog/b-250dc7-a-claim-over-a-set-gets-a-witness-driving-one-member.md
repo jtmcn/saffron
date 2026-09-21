@@ -1,10 +1,9 @@
 ---
 id: b-250dc7
 title: A claim quantifying over a set keeps getting a witness that drives one member, and a first review keeps passing it
-status: done
+status: partial
 tier: 2
 filed: 2026-09-20
-closed: 2026-09-20
 by_hand: true
 specs: []
 prs: [395]
@@ -62,3 +61,15 @@ author already holds both the claim and the fixture.
 - 2026-09-20: whether the rule works is unmeasured. The evidence is five
   instances before it, and the next spec through the chain is the first test
   of it.
+- 2026-09-20: that test came back, and the rule did not stop the defect.
+  `SA-0116` was written with the rule in the contract its author reads. Its
+  first review found two instances, its second found two more, and the author's
+  own self-review walked those sets twice and missed all four. What changed is
+  where the catch lands. On `SA-0115` a first review passed the spec and a
+  second raised three blockers. On `SA-0116` the first review cited this rule by
+  line and caught two of the four, and nothing survived a third pass. The rule
+  earns a citation and one round of lead time. It does not make an author check
+  their own coverage, which is what this item's exit criterion asked for.
+  Reopened on that evidence, and [[b-2750d5]] is the shape that would settle
+  it: a cell mutating the line behind each criterion proves the coverage a
+  reader is asserting here.
