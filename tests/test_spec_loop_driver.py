@@ -1986,3 +1986,456 @@ def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
         "mod/lib.py:61-70: quoted text sits at mod/lib.py:71 instead",
     ]
     assert out.splitlines()[-1] == "6 citation(s) checked"
+
+
+def _enumerators_repo(repo):
+    """A small real git repo under `tests/`, shared by the three
+    `enumerators` witnesses below: the six spellings, an aliased `os`
+    import, two `/`-join forms, nine ancestor-relation cases against
+    `outer/pkg` (the parent of the added `outer/pkg/added`), eight
+    receiver shapes that never resolve, one call on a pre-existing
+    directory, and three module-scope calls. Returns `(base_sha, contents)`."""
+    contents = {
+        "existing/keep.py": "PRESENT = True\n",
+        "tests/notes.txt": "not python\n",
+        "tests/case_six.py": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "\n"
+            "def glob_case():\n"
+            '    Path("outer/pkg/added").glob("*.py")\n'
+            "\n"
+            "def rglob_case():\n"
+            '    Path("outer/pkg/added").rglob("*.py")\n'
+            "\n"
+            "def iterdir_case():\n"
+            '    Path("outer/pkg/added").iterdir()\n'
+            "\n"
+            "def walk_case():\n"
+            '    os.walk("outer/pkg/added")\n'
+            "\n"
+            "def listdir_case():\n"
+            '    os.listdir("outer/pkg/added")\n'
+            "\n"
+            "def scandir_case():\n"
+            '    os.scandir("outer/pkg/added")\n'
+        ),
+        "tests/case_alias.py": (
+            "import ast\n"
+            "import os as o\n"
+            "from pathlib import Path\n"
+            "\n"
+            "def scandir_alias():\n"
+            '    o.scandir(Path("outer/pkg/added"))\n'
+            "\n"
+            "def decoy_ast_walk(tree):\n"
+            "    ast.walk(tree)\n"
+            "\n"
+            "def walk(x):\n"
+            "    return x\n"
+            "\n"
+            "def call_walk():\n"
+            "    walk(5)\n"
+        ),
+        "tests/sub/case_join.py": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "\n"
+            "def iterdir_join():\n"
+            '    (Path("outer/pkg") / "added").iterdir()\n'
+            "\n"
+            "def walk_join():\n"
+            '    os.walk("outer/pkg" / Path("added"))\n'
+        ),
+        "tests/case_ancestor.py": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "\n"
+            "def listdir_ancestor():\n"
+            '    os.listdir("outer/pkg")\n'
+            "\n"
+            "def rglob_ancestor():\n"
+            '    Path("outer/pkg").rglob("*.py")\n'
+            "\n"
+            "def glob_star_ancestor():\n"
+            '    Path("outer/pkg").glob("**/*.py")\n'
+            "\n"
+            "def glob_single_ancestor():\n"
+            '    Path("outer/pkg").glob("*.py")\n'
+            "\n"
+            "def glob_multi_ancestor():\n"
+            '    Path("outer/pkg").glob("added/*.py")\n'
+            "\n"
+            "def glob_var_ancestor(name):\n"
+            '    Path("outer/pkg").glob(name)\n'
+            "\n"
+            "def prefix_sibling():\n"
+            '    Path("outer/pkg/add").rglob("*.py")\n'
+            "\n"
+            "def below_added():\n"
+            '    Path("outer/pkg/added/deeper").rglob("*.py")\n'
+            "\n"
+            "def far_above():\n"
+            '    os.walk("outer")\n'
+        ),
+        "tests/case_unresolved.py": (
+            "import os\n"
+            "from pathlib import Path\n"
+            "\n"
+            'DIR = Path("outer/pkg/added")\n'
+            "\n"
+            "def name_case():\n"
+            '    DIR.glob("*")\n'
+            "\n"
+            "def attribute_case():\n"
+            '    mod.TURNS_DIR.glob("*.md")\n'
+            "\n"
+            "def file_subscript_case():\n"
+            '    Path(__file__).resolve().parents[1].rglob("*")\n'
+            "\n"
+            "def file_attribute_case():\n"
+            '    Path(__file__).parent.glob("*")\n'
+            "\n"
+            "def walk_param_case(d):\n"
+            "    os.walk(d)\n"
+            "\n"
+            "def join_on_name_case():\n"
+            '    (DIR / "child").iterdir()\n'
+            "\n"
+            "def two_literal_case():\n"
+            '    Path("a", "b").iterdir()\n'
+            "\n"
+            "def no_arg_case():\n"
+            "    os.listdir()\n"
+        ),
+        "tests/case_existing.py": (
+            "from pathlib import Path\n"
+            "\n"
+            "def existing_case():\n"
+            '    Path("existing").glob("*.py")\n'
+        ),
+        "tests/case_module.py": (
+            "from pathlib import Path\n"
+            "\n"
+            'SIB_PATTERN = "*.py"\n'
+            "\n"
+            'Path("outer/pkg/added").glob("*.py")\n'
+            'Path("outer/pkg/sibling").rglob("*.py")\n'
+            'Path("outer/pkg/sibling").glob(SIB_PATTERN)\n'
+        ),
+    }
+    for path, text in contents.items():
+        full = repo / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(text)
+    _git(repo, "add", *contents)
+    _git(repo, "commit", "-qm", "fixture")
+    return _git(repo, "rev-parse", "HEAD"), contents
+
+
+def _line(content, needle):
+    return content.splitlines().index(needle) + 1
+
+
+def _spec_file(repo, name, spec_id, touches):
+    path = repo / name
+    body = "touches:\n" + "".join(f"  - {t}\n" for t in touches)
+    path.write_text(f"---\nid: {spec_id}\ntitle: t\ntype: feature\n{body}---\n")
+    return path
+
+
+def test_enumerators_takes_its_directories_from_the_touches_a_commit_holds_no_file_at(
+    empty_repo, monkeypatch, capsys
+):
+    """Fifteen wrong implementations this kills: reading the spec or the
+    tree from the wrong place, deriving instead of counting the three
+    numbers, taking a directory more than once, dropping or misreading a
+    glob entry, mishandling the three usage failures, and resolving
+    `--base` only after taking directories."""
+    repo = empty_repo
+    monkeypatch.setattr(driver, "REPO", repo)
+    base, contents = _enumerators_repo(repo)
+
+    # After the added entry's own directory is taken, a physical file at
+    # it must not fool the commit-based check back into skipping it.
+    (repo / "outer" / "pkg" / "added").mkdir(parents=True)
+    (repo / "outer" / "pkg" / "added" / "new1.py").write_text("x = 1\n")
+    (repo / "tests" / "case_stray.py").write_text(
+        'from pathlib import Path\n\nPath("outer/pkg/added").glob("*.py")\n'
+    )
+
+    spec = _spec_file(
+        repo,
+        "spec.md",
+        "SA-0001",
+        [
+            "outer/pkg/added/new1.py",
+            "outer/pkg/added/new2.py",
+            "existing/keep.py",
+            "globdir/*.py",
+            "globdir/file?.py",
+        ],
+    )
+    rc = driver.cmd_enumerators(SimpleNamespace(spec_path=str(spec), base=base))
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0] == "1 directories taken, 2 entries skipped, 7 files read"
+    assert rc == 1
+    assert not any("existing" in line for line in lines)
+    assert not any("case_stray" in line for line in lines)
+
+    empty_spec = _spec_file(repo, "empty.md", "SA-0002", ["existing/keep.py"])
+    rc = driver.cmd_enumerators(SimpleNamespace(spec_path=str(empty_spec), base=base))
+    out = capsys.readouterr().out
+    assert out == "0 directories taken, 0 entries skipped, 0 files read\n"
+    assert rc == 0
+
+    broken = repo / "broken.md"
+    broken.write_text("not frontmatter at all\n")
+    missing = repo / "no-such-spec.md"
+    # A bad spec path, a spec frontmatter refuses, and a `--base` git cannot
+    # resolve are each decided before any directory is taken.
+    usage_failures = [
+        (str(broken), base),
+        (str(missing), base),
+        (str(empty_spec), "no-such-ref"),
+    ]
+    for path, ref in usage_failures:
+        rc = driver.cmd_enumerators(SimpleNamespace(spec_path=path, base=ref))
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert captured.out == ""
+        assert "error:" in captured.err
+
+
+def test_enumerators_reports_the_tests_that_enumerate_and_the_ones_that_descend(
+    empty_repo, monkeypatch, capsys
+):
+    """Twenty-four wrong implementations this kills: resolving only one
+    spelling or one join arrangement, reading only the top of `tests/`,
+    reading the working tree, matching any `walk`, deciding recursion or
+    ancestry the wrong way, and judging a call once rather than once per
+    directory taken."""
+    repo = empty_repo
+    monkeypatch.setattr(driver, "REPO", repo)
+    base, contents = _enumerators_repo(repo)
+
+    spec = _spec_file(repo, "spec.md", "SA-0003", ["outer/pkg/added/new1.py"])
+    rc = driver.cmd_enumerators(SimpleNamespace(spec_path=str(spec), base=base))
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert rc == 1
+
+    added_group = [line for line in lines if line.startswith("outer/pkg/added: ")]
+
+    # (path, needle, function, verb) for every call on the added directory
+    # itself and every ancestor call that recurses into it.
+    self_and_descent = [
+        (
+            "tests/case_six.py",
+            '    Path("outer/pkg/added").glob("*.py")',
+            "glob_case",
+            "enumerates",
+        ),
+        (
+            "tests/case_six.py",
+            '    Path("outer/pkg/added").rglob("*.py")',
+            "rglob_case",
+            "enumerates",
+        ),
+        (
+            "tests/case_six.py",
+            '    Path("outer/pkg/added").iterdir()',
+            "iterdir_case",
+            "enumerates",
+        ),
+        (
+            "tests/case_six.py",
+            '    os.walk("outer/pkg/added")',
+            "walk_case",
+            "enumerates",
+        ),
+        (
+            "tests/case_six.py",
+            '    os.listdir("outer/pkg/added")',
+            "listdir_case",
+            "enumerates",
+        ),
+        (
+            "tests/case_six.py",
+            '    os.scandir("outer/pkg/added")',
+            "scandir_case",
+            "enumerates",
+        ),
+        (
+            "tests/case_alias.py",
+            '    o.scandir(Path("outer/pkg/added"))',
+            "scandir_alias",
+            "enumerates",
+        ),
+        (
+            "tests/sub/case_join.py",
+            '    (Path("outer/pkg") / "added").iterdir()',
+            "iterdir_join",
+            "enumerates",
+        ),
+        (
+            "tests/sub/case_join.py",
+            '    os.walk("outer/pkg" / Path("added"))',
+            "walk_join",
+            "enumerates",
+        ),
+        (
+            "tests/case_module.py",
+            'Path("outer/pkg/added").glob("*.py")',
+            "<module>",
+            "enumerates",
+        ),
+        (
+            "tests/case_ancestor.py",
+            '    Path("outer/pkg").rglob("*.py")',
+            "rglob_ancestor",
+            "descends into",
+        ),
+        (
+            "tests/case_ancestor.py",
+            '    Path("outer/pkg").glob("**/*.py")',
+            "glob_star_ancestor",
+            "descends into",
+        ),
+        (
+            "tests/case_ancestor.py",
+            '    os.walk("outer")',
+            "far_above",
+            "descends into",
+        ),
+    ]
+    expected = {
+        f"outer/pkg/added: {path}:{_line(contents[path], needle)} in {func}() {verb} it"
+        for path, needle, func, verb in self_and_descent
+    }
+    assert set(added_group) == expected
+    ancestor = contents["tests/case_ancestor.py"]
+
+    silent = [
+        "listdir_ancestor",
+        "glob_single_ancestor",
+        "prefix_sibling",
+        "below_added",
+        "decoy_ast_walk",
+        "call_walk",
+        "existing_case",
+    ]
+    assert not any(name in out for name in silent)
+
+    two_dirs = _spec_file(
+        repo,
+        "two.md",
+        "SA-0004",
+        ["outer/pkg/added/new1.py", "outer/pkg/newfile.py"],
+    )
+    rc = driver.cmd_enumerators(SimpleNamespace(spec_path=str(two_dirs), base=base))
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert rc == 1
+    rglob_at = _line(ancestor, '    Path("outer/pkg").rglob("*.py")')
+    rglob_line = f"tests/case_ancestor.py:{rglob_at}"
+    assert sum(rglob_line in line for line in lines) == 2
+    assert any(
+        line.startswith("outer/pkg: ")
+        and "rglob_ancestor" in line
+        and "enumerates" in line
+        for line in lines
+    )
+    assert any(
+        line.startswith("outer/pkg/added: ")
+        and "rglob_ancestor" in line
+        and "descends" in line
+        for line in lines
+    )
+    assert any(
+        line.startswith("outer/pkg: ")
+        and "glob_var_ancestor" in line
+        and "enumerates" in line
+        for line in lines
+    )
+
+    # A directory reached only by recursion: every report on it is a
+    # descent, and that alone must not raise the exit status.
+    only_descends = _spec_file(
+        repo, "descends.md", "SA-0008", ["outer/pkg/added/extra/new.py"]
+    )
+    rc = driver.cmd_enumerators(
+        SimpleNamespace(spec_path=str(only_descends), base=base)
+    )
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    extra_group = [line for line in lines if line.startswith("outer/pkg/added/extra: ")]
+    assert extra_group
+    assert all("descends into it" in line for line in extra_group)
+    assert not any("enumerates it" in line for line in extra_group)
+    assert rc == 0
+
+
+def test_enumerators_lists_the_calls_whose_directory_it_cannot_resolve(
+    empty_repo, monkeypatch, capsys
+):
+    """Nine wrong implementations this kills: dropping a call it cannot
+    resolve, resolving a name, `__file__`, or `Path` of more than one
+    literal, listing only the method spellings, listing a call whose
+    directory does resolve, treating unresolved as a defect, and printing
+    an unresolved call once per directory taken rather than once."""
+    repo = empty_repo
+    monkeypatch.setattr(driver, "REPO", repo)
+    base, contents = _enumerators_repo(repo)
+    unresolved = contents["tests/case_unresolved.py"]
+    ancestor = contents["tests/case_ancestor.py"]
+
+    spec = _spec_file(repo, "spec.md", "SA-0005", ["outer/pkg/added/new1.py"])
+    rc = driver.cmd_enumerators(SimpleNamespace(spec_path=str(spec), base=base))
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert rc == 1
+
+    # (needle, function): every receiver shape that never resolves to a path.
+    unresolvable = [
+        ('    DIR.glob("*")', "name_case"),
+        ('    mod.TURNS_DIR.glob("*.md")', "attribute_case"),
+        ('    Path(__file__).resolve().parents[1].rglob("*")', "file_subscript_case"),
+        ('    Path(__file__).parent.glob("*")', "file_attribute_case"),
+        ("    os.walk(d)", "walk_param_case"),
+        ('    (DIR / "child").iterdir()', "join_on_name_case"),
+        ('    Path("a", "b").iterdir()', "two_literal_case"),
+        ("    os.listdir()", "no_arg_case"),
+    ]
+    expected = {
+        f"unresolved: tests/case_unresolved.py:{_line(unresolved, needle)} in {func}()"
+        for needle, func in unresolvable
+    }
+    ambiguous = [
+        ('    Path("outer/pkg").glob("added/*.py")', "glob_multi_ancestor"),
+        ('    Path("outer/pkg").glob(name)', "glob_var_ancestor"),
+    ]
+    ambiguous_lines = {
+        f"unresolved: tests/case_ancestor.py:{_line(ancestor, needle)} in {func}()"
+        for needle, func in ambiguous
+    }
+    got_unresolved = {line for line in lines if line.startswith("unresolved: ")}
+    assert got_unresolved == expected | ambiguous_lines
+    assert not any(
+        'Path("outer/pkg/sibling").glob(SIB_PATTERN)' in line for line in lines
+    )
+    assert not any(
+        name in line
+        for line in got_unresolved
+        for name in ("glob_case", "existing_case")
+    )
+
+    faraway = _spec_file(repo, "far.md", "SA-0006", ["zzz/other/new.py"])
+    rc = driver.cmd_enumerators(SimpleNamespace(spec_path=str(faraway), base=base))
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert rc == 0
+    assert lines[0] == "1 directories taken, 0 entries skipped, 7 files read"
+    assert set(lines[1:]) == expected
+    assert len(lines) == 1 + len(expected)

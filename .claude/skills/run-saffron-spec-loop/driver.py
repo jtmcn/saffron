@@ -16,6 +16,7 @@ calls `record` afterwards.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -24,7 +25,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
@@ -1916,6 +1917,202 @@ def cmd_cite(args) -> int:
     return 1 if defects else 0
 
 
+# --------------------------------------------------------- enumerators
+
+
+_GLOB_CHARS = frozenset("*?")  # scope.py:17's `_TOKENS` metacharacters
+_ENUM_ATTRS = {"glob", "rglob", "iterdir"}
+_OS_ATTRS = {"walk": "os.walk", "listdir": "os.listdir", "scandir": "os.scandir"}
+_RECURSIVE_KINDS = {"rglob", "os.walk"}
+
+
+def _os_import_names(tree: ast.Module) -> set[str]:
+    """Every name this file bound to the `os` module by `import os[ as x]`."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "os":
+                    names.add(alias.asname or "os")
+    return names
+
+
+def _literal_str(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _resolve_dir(node: ast.AST | None) -> str | None:
+    """A directory expression's path, in one of three forms only: a string
+    literal, `Path` of one string literal, or a `/` join of two expressions
+    each resolving one of those ways. No name lookup, import, or scope."""
+    literal = _literal_str(node)
+    if literal is not None:
+        return literal
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Path"
+        and len(node.args) == 1
+        and not node.keywords
+    ):
+        return _literal_str(node.args[0])
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = _resolve_dir(node.left), _resolve_dir(node.right)
+        if left is not None and right is not None:
+            return f"{left}/{right}"
+    return None
+
+
+@dataclass
+class _Call:
+    line: int
+    func: str
+    kind: str  # "glob", "rglob", "iterdir", "os.walk", "os.listdir", "os.scandir"
+    receiver: ast.AST | None
+    pattern: ast.AST | None
+
+
+class _CallVisitor(ast.NodeVisitor):
+    """Every call shaped like one of the six enumerating spellings, tagged
+    with the function it sits in (`<module>` at module scope)."""
+
+    def __init__(self, os_names: set[str]) -> None:
+        self.os_names = os_names
+        self.stack: list[str] = ["<module>"]
+        self.calls: list[_Call] = []
+
+    def _enter(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self.stack.append(node.name)
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_FunctionDef = _enter
+    visit_AsyncFunctionDef = _enter
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            if func.attr in _ENUM_ATTRS:
+                pattern = node.args[0] if node.args else None
+                self.calls.append(
+                    _Call(node.lineno, self.stack[-1], func.attr, func.value, pattern)
+                )
+            elif (
+                func.attr in _OS_ATTRS
+                and isinstance(func.value, ast.Name)
+                and func.value.id in self.os_names
+            ):
+                arg = node.args[0] if node.args else None
+                self.calls.append(
+                    _Call(node.lineno, self.stack[-1], _OS_ATTRS[func.attr], arg, None)
+                )
+        self.generic_visit(node)
+
+
+def _judge_call(
+    call: _Call, directories: list[str]
+) -> tuple[list[tuple[str, str]], bool]:
+    """`(reports, ambiguous)` for one call against every taken directory.
+
+    Each report is `(directory, "enumerates" | "descends into")`. `ambiguous`
+    marks a call that belongs on the unresolved list: its directory does not
+    resolve at all, or it sits above a directory behind a `.glob` pattern
+    that cannot decide whether it reaches it.
+    """
+    resolved = _resolve_dir(call.receiver)
+    if resolved is None:
+        return [], True
+    path = PurePosixPath(resolved)
+    reports: list[tuple[str, str]] = []
+    ambiguous = False
+    for directory in directories:
+        dpath = PurePosixPath(directory)
+        if path == dpath:
+            reports.append((directory, "enumerates"))
+        elif path in dpath.parents:
+            if call.kind in _RECURSIVE_KINDS:
+                reports.append((directory, "descends into"))
+            elif call.kind == "glob":
+                pattern = _literal_str(call.pattern)
+                if pattern is None or ("/" in pattern and "**" not in pattern):
+                    ambiguous = True
+                elif "**" in pattern:
+                    reports.append((directory, "descends into"))
+    return reports, ambiguous
+
+
+def cmd_enumerators(args) -> int:
+    """Which `tests/` calls will see the files a spec's `touches` add: for
+    every entry the base commit holds no file at, its parent directory, then
+    every call at that commit enumerating or descending into one.
+
+    Scanning `tests/` is skipped where no entry adds a directory — there is
+    nothing to compare a call against — so that run reads no file at all.
+    """
+    from saffron.intake import SpecError, load_spec
+
+    try:
+        spec, _sha = load_spec(Path(args.spec_path))
+    except SpecError as exc:
+        return _fail(str(exc))
+    try:
+        base = _git("rev-parse", args.base, cwd=REPO)
+        names = set(_git("ls-tree", "-r", "--name-only", base, cwd=REPO).splitlines())
+    except GitError as err:
+        return _fail(str(err))
+
+    directories: list[str] = []
+    skipped = 0
+    for entry in spec.touches:
+        if any(c in entry for c in _GLOB_CHARS):
+            skipped += 1
+        elif entry not in names:
+            directory = str(PurePosixPath(entry).parent)
+            if directory not in directories:
+                directories.append(directory)
+
+    reports: dict[str, list[tuple[str, int, str, str]]] = {d: [] for d in directories}
+    unresolved: dict[tuple[str, int], str] = {}
+    read = 0
+    if directories:
+        test_files = sorted(
+            n for n in names if n.startswith("tests/") and n.endswith(".py")
+        )
+        for path in test_files:
+            content = _git("show", f"{base}:{path}", cwd=REPO)
+            read += 1
+            try:
+                tree = ast.parse(content, filename=path)
+            except SyntaxError:
+                continue
+            visitor = _CallVisitor(_os_import_names(tree))
+            visitor.visit(tree)
+            for call in visitor.calls:
+                hits, ambiguous = _judge_call(call, directories)
+                for directory, kind in hits:
+                    reports[directory].append((path, call.line, call.func, kind))
+                if ambiguous:
+                    unresolved[(path, call.line)] = call.func
+
+    print(
+        f"{len(directories)} directories taken, {skipped} entries skipped, "
+        f"{read} files read"
+    )
+    exit_code = 0
+    for directory in directories:
+        for path, line, func, kind in sorted(
+            reports[directory], key=lambda r: (r[0], r[1])
+        ):
+            print(f"{directory}: {path}:{line} in {func}() {kind} it")
+            if kind == "enumerates":
+                exit_code = 1
+    for (path, line), func in sorted(unresolved.items()):
+        print(f"unresolved: {path}:{line} in {func}()")
+    return exit_code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2013,6 +2210,13 @@ def main() -> int:
     p.add_argument("spec_path")
     p.add_argument("--base", default="origin/main")
     p.set_defaults(func=cmd_cite)
+
+    p = sub.add_parser(
+        "enumerators", help="tests that will see the files a spec's touches add"
+    )
+    p.add_argument("spec_path")
+    p.add_argument("--base", default="origin/main")
+    p.set_defaults(func=cmd_enumerators)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.
