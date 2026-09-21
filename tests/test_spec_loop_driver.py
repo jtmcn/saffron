@@ -1829,13 +1829,13 @@ def test_only_probe_takes_a_command_after_the_separator(monkeypatch):
 def test_cite_resolves_a_specs_citations_at_the_base_commit(
     empty_repo, monkeypatch, capsys
 ):
-    """Twelve wrong shapes of `cite` this kills: reading the working tree
-    instead of `--base`; reporting a citation that resolves; the swapped exit
-    code; a boundary off by one at a file's last line; requiring `/` and
-    missing a bare filename, or the reverse; dropping a range's end, or the
-    whole range; treating a host:port or a dotted module name as a citation;
-    letting the empty suffix into the known set; and printing defects with no
-    count line, or a count line only when the run is clean."""
+    """Twelve wrong shapes of `cite` this kills. It reads the working tree
+    instead of `--base`, or reports a citation that resolves. It swaps the
+    exit code, or its boundary sits off by one at a file's last line. It
+    requires `/` and misses a bare filename, or the reverse. It drops a range's
+    end or the whole range. It treats a host and port or a dotted module name
+    as a citation, or lets the empty suffix into the known set. It prints
+    defects with no count line, or prints one only when it reports no defect."""
     repo = empty_repo
     monkeypatch.setattr(driver, "REPO", repo)
     thing = "\n".join(f"line {i}" for i in range(1, 21)) + "\n"  # 20 lines
@@ -1884,13 +1884,12 @@ def test_cite_resolves_a_specs_citations_at_the_base_commit(
 def test_cite_anchors_a_bare_line_number_inside_its_own_paragraph(
     empty_repo, monkeypatch, capsys
 ):
-    """Seven wrong anchors this kills: never anchoring to a plain backticked
-    path with no line number of its own; anchoring only from a plain path and
-    never from an explicit `path:n`, or the reverse (skipping the path test
-    entirely); dropping a bare number rather than resolving it; letting a
-    paragraph inherit the path a paragraph above it named; reporting an
-    unanchored bare number as though it needed no report; and reading a bare
-    `:n` while skipping a bare range."""
+    """Eight wrong anchors this kills. It never anchors to a plain backticked
+    path with no line number of its own. It anchors only from a plain path and
+    never from an explicit `path:n`, or the reverse, skipping the path test. It
+    drops a bare number, or lets a paragraph inherit the path above it. It
+    passes an unanchored bare number with no report, or skips a bare range. It
+    skips the missing-file and past-end checks for an anchored bare citation."""
     repo = empty_repo
     monkeypatch.setattr(driver, "REPO", repo)
     (repo / "a").mkdir()
@@ -1907,7 +1906,8 @@ def test_cite_anchors_a_bare_line_number_inside_its_own_paragraph(
 
     spec = repo / "spec.md"
     spec.write_text(
-        "The loop reads `a/thing.py` for its shape. See `:5` for where it starts.\n"
+        "The loop reads `a/thing.py` for its shape. See `:5` for where it starts "
+        "and `:31` for the tail.\n"
         "\n"
         "Read `b/other.py:3` for the check. It matches no `importlib.util:2`. "
         "Then `:4` confirms it.\n"
@@ -1918,23 +1918,23 @@ def test_cite_anchors_a_bare_line_number_inside_its_own_paragraph(
     assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 1
     out = capsys.readouterr().out
     assert out.splitlines() == [
+        f"a/thing.py:31: a/thing.py has 30 lines at {base}",
         ":9-45: no path named earlier in its paragraph",
-        "4 citation(s) checked",
+        "5 citation(s) checked",
     ]
 
 
 def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
     empty_repo, monkeypatch, capsys
 ):
-    """Nine wrong moved-text checks this kills: reporting whenever the range
-    lacks the text, without checking the file carries it elsewhere;
-    searching the whole file instead of the range; reporting with no line
-    numbers; skipping a bare citation; reading only a range's first line;
-    requiring every other backticked string to be absent from the range
-    rather than just one being present; reading only the first such
-    string, or skipping a sentence holding more than one; and merging two
-    sentences across a period followed by a digit, so a later sentence's
-    text wrongly suppresses an earlier citation's report."""
+    """Nine wrong moved-text checks this kills. It reports whenever the range
+    lacks the text, without checking the file carries it elsewhere. It searches
+    the whole file instead of the range, or reports no line numbers. It skips a
+    bare citation, or reads only a range's first line. It needs every other
+    string absent from the range, not just one present. It reads only the first
+    such string, or skips a sentence holding more than one. It merges two
+    sentences across a period and a digit, so a later sentence wrongly suppresses
+    an earlier report."""
     repo = empty_repo
     monkeypatch.setattr(driver, "REPO", repo)
     lines = [f"L{i}" for i in range(1, 72)]
@@ -1958,17 +1958,17 @@ def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
         "The module `mod/lib.py` explains this. The `alpha` value sits at "
         "`:11-20` supposedly.\n"
         "\n"
-        # Case 2: a range citation; "beta" sits inside it, below its first line.
+        # Case 2: a range citation. "beta" sits inside it, below its first line.
         "Here `mod/lib.py:21-30` holds the `beta` reading directly.\n"
         "\n"
-        # Case 3: a bare citation; "gamma" sits nowhere in the file at all.
+        # Case 3: a bare citation. "gamma" sits nowhere in the file at all.
         "The module `mod/lib.py` is unrelated here. It holds `gamma` at "
         "`:31-40` supposedly.\n"
         "\n"
-        # Case 4: two strings; "epsilon" is in range, "delta" is not — no report.
+        # Case 4: two strings. "epsilon" is in range and "delta" is not, so no report.
         "Here `delta` and `epsilon` both matter, at `mod/lib.py:41-50` precisely.\n"
         "\n"
-        # Case 5: two strings, neither in range; "omega" elsewhere, "zeta" nowhere.
+        # Case 5: two strings, neither in range. "omega" sits elsewhere, "zeta" nowhere.
         "Both `zeta` and `omega` are claimed, at `mod/lib.py:51-60` exactly.\n"
         "\n"
         # Case 6: a period before a digit must still end the sentence, or the

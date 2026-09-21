@@ -1776,9 +1776,9 @@ _SENTENCE_END = re.compile(r'[.!?](?=\s+[A-Z0-9`"]|\s*$)')
 
 def _is_path_shaped(candidate: str, suffixes: set[str]) -> bool:
     """A backticked `<text>` is a path where it holds `/`, or where it carries
-    a dot whose suffix the base commit's tree carries — never the empty one, so
-    `06:30` and `localhost:8080` are not citations just because `Makefile` sits
-    at no extension in the tree (item 2)."""
+    a dot and a suffix the base commit's tree carries. The empty suffix never
+    counts. Otherwise `06:30` and `localhost:8080` would be citations, because
+    `Makefile` sits at no extension in the tree."""
     if not candidate:
         return False
     if "/" in candidate:
@@ -1798,8 +1798,9 @@ def _sentence_spans(joined: str) -> list[tuple[int, int]]:
 
 
 def _paragraph_citations(paragraph: str, suffixes: set[str]) -> list[_Citation]:
-    """Every citation in one paragraph, bare ones anchored to the last path
-    named earlier in it — a citation of its own, or a plain backticked path."""
+    """Every citation in one paragraph. A bare one anchors to the last path
+    named earlier in it, which is a citation of its own or a plain backticked
+    path."""
     joined = re.sub(r"\s+", " ", paragraph.strip())
     spans = _sentence_spans(joined)
     backticks = list(_BACKTICK.finditer(joined))
@@ -1850,8 +1851,8 @@ def _range(cite: _Citation) -> str:
 
 def _moved_lines(cite: _Citation, lines: list[str]) -> list[int]:
     """Where the sentence's other quoted text sits, when none of it sits in
-    `cite`'s own range — empty where the range carries one, or where the file
-    carries none of it anywhere (item 5: proven wrong, not merely absent)."""
+    `cite`'s own range. It returns nothing where the range carries one, or
+    where the file carries none of them, so only a proven move reports."""
     if not cite.candidates:
         return []
     ranged = lines[cite.start - 1 : cite.end]
@@ -1865,9 +1866,9 @@ def _moved_lines(cite: _Citation, lines: list[str]) -> list[int]:
 
 def cmd_cite(args) -> int:
     """What `driver.py cite` proves: every `file:line` a spec quotes resolves
-    at `--base`, and its quoted text still sits in that range there. Reads the
-    spec as text — a refused spec still carries citations worth checking, and
-    frontmatter plays no part in resolving one."""
+    at `--base`, and its quoted text still sits in that range there. It reads
+    the spec as text. A refused spec still carries citations worth checking,
+    and frontmatter plays no part in resolving one."""
     spec_path = Path(args.spec_path)
     if not spec_path.is_file():
         return _fail(f"no such spec: {spec_path}")
