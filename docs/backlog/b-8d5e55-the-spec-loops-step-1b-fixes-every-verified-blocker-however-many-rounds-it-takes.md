@@ -27,7 +27,7 @@ in `.claude/skills/run-saffron-spec-loop/SKILL.md`.
 
 The evidence. Every blocker in the run was one family, item b-250dc7.
 
-- `SA-0114` took five rounds and six blockers.
+- `SA-0114` took five rounds and five blockers.
 - `SA-0115` took six rounds and thirteen blockers, then a split.
 - `SA-0116` took five rounds and four blockers.
 - After each cell, the pull request's review fixed the remaining witness holes on
