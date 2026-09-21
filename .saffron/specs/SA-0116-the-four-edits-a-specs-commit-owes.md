@@ -440,7 +440,7 @@ This witness drives one of each, and the others reach the same `SpecError` and
 `RecordError`.
 
 Criterion 2 makes three runs over the helper's tree, then a table, and kills
-twenty-seven. One `def` loops over the table, which is not a parametrised test.
+twenty-nine. One `def` loops over the table, which is not a parametrised test.
 
 - **`SA-0201`**, admitted. Match the opening against
   `Re-measured \d{4}-\d{2}-\d{2}, a tenth time:`. Assert `SA-0201`, its
@@ -462,10 +462,11 @@ The table rewrites the scratch `tests/test_scheduler.py` for each row and runs
 `SA-0201` again. Every row keeps the earlier function the helper writes, whose
 docstring reads `re-anchored a fourth time`. Each smoke-test docstring holds
 two `Re-measured` lines. The first carries the row's phrase, and the second,
-lower down, carries `a fourth time`. Nine rows step: `a ninth time`,
+lower down, carries `a fourth time`. Twelve rows step: `a ninth time`,
 `a nineteenth time`, `a twenty-ninth time`, `a fiftieth time`,
-`a fifty-second time`, `a seventh time`, `an eleventh time`,
-`a fifty-seventh time` and `an eightieth time`. Assert the next phrase the
+`a fifty-second time`, `a seventh time`, `a tenth time`, `an eleventh time`,
+`a seventeenth time`, `a fifty-seventh time`, `a seventy-ninth time` and
+`an eightieth time`. Assert the next phrase the
 claim names for each.
 
 Seven rows do not step, and four of them are the no-ordinal case. The first is
@@ -488,7 +489,10 @@ words, and one printing no `an`. The `an eleventh` and `an eightieth` rows
 kill a reader matching `a` alone. The `fifty-seventh` row kills two article
 rules, and each prints `an fifty-eighth`. One judges the last hyphen part.
 The other tests `"eigh" in word or "elev" in word`. The `eightieth` row also kills the
-first of those, which prints `a eighty-first`. The seven rows that do not
+first of those, which prints `a eighty-first`. The `tenth` row prints
+`an eleventh`, which kills a rule testing `startswith("eigh")`. The
+`seventeenth` and `seventy-ninth` rows print `an eighteenth` and `an eightieth`,
+so a set of `an` words missing either fails. The seven rows that do not
 step kill raising over each of them, `ninety-ninth` stepping past the list's
 end included.
 
@@ -627,12 +631,12 @@ head, and reads a rename as a removal. The three new tests belong at the end of
 `test_enumerators_lists_the_calls_whose_directory_it_cannot_resolve` at
 `tests/test_spec_loop_driver.py:2454`, the last test `SA-0115` added.
 
-**The shape is about 491 changed lines, and nothing here raises the tier**.
+**The shape is about 494 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`, and neither is under `protected` at `.saffron/policy.yaml:61-66`.
 So this task runs at `risk: standard`, where `size` is advisory against the
 `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). Derived per part,
-it is 169 in `driver.py` and 322 in the test file.
+it is 169 in `driver.py` and 325 in the test file.
 
 - In `driver.py`: 34 for the origin item and the `specs:` line it owes, over
   what `tests/records/check.py` exports already. 26 for the queue under the
@@ -642,18 +646,18 @@ it is 169 in `driver.py` and 322 in the test file.
   36 for `cmd_bookkeeping` with its three failures and three headed blocks,
   and 5 to register the subcommand. That is 169.
 - In the tests: 53 for the helper that builds the scratch tree. 100 for
-  criterion 1's nine runs, 112 for criterion 2's three runs and sixteen table
-  rows, and 57 for criterion 3's two runs. That is 322.
+  criterion 1's nine runs, 115 for criterion 2's three runs and nineteen table
+  rows, and 57 for criterion 3's two runs. That is 325.
 
 No uplift is applied, and the parents are why. `SA-0114` estimated 485 and
 landed 330 in `6aa8da85`. `SA-0115` estimated 520 and landed 659 in
 `e4cf6388`, 206 in `driver.py` and 453 in the test file. Together that is 1005
 estimated against 989 landed. The risk sits in the test file, where `SA-0115`
-ran 168 over its own figure. 491 leaves 109 under the ceiling. If the test file
+ran 168 over its own figure. 494 leaves 106 under the ceiling. If the test file
 runs long anyway, keep every case above. `size` is advisory at this tier, and
 an attempt spent shrinking a fixture to fit costs more than the overrun.
 
-Against the `size:` lines `driver.py history SA-0116` prints, 491 sits
+Against the `size:` lines `driver.py history SA-0116` prints, 494 sits
 below `SA-0108`'s 494 and above `SA-0016`'s 486 and `SA-0089`'s 477, all merged. It sits well
 above `SA-0114`'s 330 in these same two files. `SA-0115` at 659 and `SA-0107`
 at 1049 overshot the ceiling. The comparable narrow cell in these files is
