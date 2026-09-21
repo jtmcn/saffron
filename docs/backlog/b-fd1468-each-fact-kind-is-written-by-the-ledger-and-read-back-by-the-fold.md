@@ -77,7 +77,8 @@ ceiling once tests are added. The operator accepted two stacked specs.
 `Ledger.fold_task(key, facts)`. An empty `facts` drops the task, and `fold()`
 does that for every unreadable task. It keeps the finding remap and places an
 attempt's close and gate results on the last-opened attempt. A rebuttal with no
-finding makes its task unreadable. Its prototype measured 793 changed lines.
+finding makes its task unreadable. Its prototype measured 892 changed lines
+after its review widened the witnesses.
 
 The second spec is the writer side, stacked on `SA-0117`. Its planned contents:
 

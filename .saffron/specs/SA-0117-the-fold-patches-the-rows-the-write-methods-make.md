@@ -40,21 +40,29 @@ forbidden:
   - tests/test_record_refs.py
 budget_usd: 26
 max_attempts: 3
-max_turns: 160
+max_turns: 180
 risk: elevated
 acceptance:
   - claim: >-
       `Ledger.fold_task(key, facts)`, given one task's key and the facts its
-      writes appended, rebuilds that task's rows in a fresh ledger column for
-      column. It holds for each
-      of the eleven task kinds: `task_created`, `task_state`, `task_package`,
-      `task_push`, `task_merged_head`, `task_policy`, `attempt_opened`,
-      `attempt_closed`, `gate_result`, `finding` and `rebuttal`. The witness
-      writes one task through all eleven and gives every column those writes
-      set a value that no default and no other column carries. It compares
-      `tasks`, `attempts`, `gate_results`, `failures` and `findings` with the
-      writing ledger's, leaving out the ids the fold mints and the timestamp
-      columns.
+      writes appended, rebuilds that task's rows column for column. It holds
+      for each of the eleven task kinds: `task_created`, `task_state`,
+      `task_package`, `task_push`, `task_merged_head`, `task_policy`,
+      `attempt_opened`, `attempt_closed`, `gate_result`, `finding` and
+      `rebuttal`. It holds after every write, not only after the last, so a
+      column a later write overwrites is still compared. The witness writes
+      one task through all eleven, one fact per write. After each write it
+      folds every fact so far into one fresh ledger and compares `tasks`,
+      `attempts`, `gate_results`, `failures` and `findings` with the writing
+      ledger's. Every `*_id` column and every timestamp column is left out.
+      Each child row is compared through its parent's natural key instead: a
+      task through its run's `base_sha`, an attempt and a finding through the
+      task's `record_key`, a gate result through its attempt's `phase` and
+      `n`, and a failure through its gate result's `gate`. A second attempt
+      opens and closes after the last `task_state`, so `spent_usd_est` rolled
+      up when `task_state` is applied differs from one rolled up at the end.
+      A second task declares no risk and folds back with the `standard`
+      default.
     witness: tests/test_ledger_fold_task.py::test_every_task_fact_kind_folds_back_to_the_rows_its_write_made
   - claim: >-
       Folding a record into a ledger that has that same record attached
@@ -73,7 +81,8 @@ acceptance:
       it. The seven are `decision`, `run_created`, `run_finished`,
       `run_preflight`, `batch_created`, `batch_closed` and `repo_upserted`.
       The error is never recorded in `Fold.skipped` and never raised as
-      `UnreadableTask`. Today the fold passes over such a fact and reports
+      `UnreadableTask`. The witness drives each of the seven under each mode,
+      in one plain test. Today the fold passes over such a fact and reports
       the task folded.
     witness: tests/test_ledger_fold_task.py::test_a_kind_the_ledger_cannot_place_aborts_the_fold_in_either_mode
   - claim: >-
@@ -89,9 +98,10 @@ acceptance:
       without it. The fold drops it with `fold_task(key, [])`. The witness
       makes the record unreadable three ways: an entry that is not a fact, a
       log with no `task_created` fact, and a rebuttal whose finding is gone.
-      Without `strict`, a second task in the same record is still folded.
-      Today a task found unreadable while the fold orders tasks keeps the
-      rows of its earlier fold.
+      A second task shares the record. In both modes, the five tables then
+      hold exactly that second task's rows from the earlier fold, compared row
+      for row and counted table by table. Today a task found unreadable while
+      the fold orders tasks keeps the rows of its earlier fold.
     witness: tests/test_ledger_fold_task.py::test_a_task_that_became_unreadable_leaves_a_surviving_ledger
   - claim: >-
       A folded row's timestamps come from the facts that set them.
@@ -100,13 +110,17 @@ acceptance:
       times of that attempt's open and close facts. `tasks.updated_at` is the
       time of the last fact of the six kinds whose write sets that column:
       `task_created`, `task_state`, `task_package`, `task_push`,
-      `task_merged_head` and `task_policy`. A later finding or rebuttal does
-      not move it. The witness makes each of the six the last of them in
-      turn, with a finding and a rebuttal after it.
+      `task_merged_head` and `task_policy`. A later fact of the other five
+      kinds does not move it. The witness makes each of the six the last of
+      them in turn. After it come an `attempt_opened`, a `gate_result`, an
+      `attempt_closed`, a `finding` and a `rebuttal`.
     witness: tests/test_ledger_fold_task.py::test_a_folded_task_is_dated_by_the_facts_that_set_each_column
   - claim: >-
-      `saffron/record/fold.py` reaches the ledger through `fold_task` alone.
-      It names no `_db` and calls no other `Ledger` method.
+      `fold()` reaches the ledger through `fold_task` alone. It reads no
+      `_db` and calls no other `Ledger` method, for a readable task and for
+      an unreadable one, with `strict` and without it. The witness hands
+      `fold()` a stand-in that forwards `fold_task` to a real ledger and
+      raises on any other attribute.
     witness: tests/test_ledger_fold_task.py::test_the_fold_reaches_the_ledger_only_through_fold_task
   - claim: >-
       Tasks are still folded oldest first, by their `task_created` fact.
@@ -203,10 +217,10 @@ Build the reading half as one method:
 3. **`fold()`** keeps what it owns today: creation order
    (`_creation_order`), reading each task at the seam (`_facts_of`),
    `UnreadableTask` and `strict` against skip. `fold_task` is the only
-   ledger method it calls. For every task it finds unreadable, in either
-   read and in either mode, it calls `fold_task(key, [])` before it skips
-   the task or raises. So an unreadable task is absent from a surviving
-   ledger, as `_discard_task` meant it to be. `_fold_task`, `_retime`, `_discard_task`,
+   ledger method it calls. Wherever it finds a task unreadable, and in
+   either mode, it calls `fold_task(key, [])` before it skips the task or
+   raises. So an unreadable task is absent from a surviving ledger, as
+   `_discard_task` meant it to be. `_fold_task`, `_retime`, `_discard_task`,
    `_clear_replayed`, `_upsert_task`, `_run_for`, `_rebut`, `_finding` and
    `_gate_result` go from `fold.py`.
 4. **What `_apply` derives, and what the fact carries.** Timestamps come from
@@ -256,17 +270,34 @@ operator accepts that the second spec breaks them.
 them. So `witness` reports `skip` for each, and that skip is honest. The
 operator asked for one check by hand in its place. Before you trust criterion
 1's witness, delete one column from one `_apply` statement, run the witness,
-see it fail, and put it back. Say in your notes which column you dropped.
+see it fail, and put it back. Do it twice: once for a column no later write
+touches, and once for one of the four overwritten columns below. Say in your
+notes which columns you dropped.
 
 **The round trip compares two independent halves, and that is its worth.**
 The writing ledger's rows come from the write methods' own SQL. The folded
-rows come from `_apply`. A column `_apply` forgets differs between them. So
-give every column the eleven writes set a value that is neither `NULL` nor
-the schema's default, and distinct from every other column's value. Assert
-that no compared column is `NULL` on the writing side. `adjudication` is the
-one exception, since no fact sets it. Leave the timestamp columns out of this
-comparison, because the write methods read the wall clock and the fold reads
-`fact.at`. Criterion 7 covers them.
+rows come from `_apply`. A column `_apply` forgets differs between them.
+Give every column the eleven writes set a value that is neither `NULL` nor
+the schema's default. Where the column's type allows it, make the value
+distinct from every other column's too. `attempts.n` and `findings.anchored`
+cannot be. On the final snapshot only, assert that no compared column is
+`NULL` on the writing side. `findings.adjudication` is the one exception,
+since no fact sets it. `gate_results.run_id` is left out with every `*_id`
+column, and the table's `CHECK` makes it `NULL` on every attempt's result
+(`ledger.py:133`).
+
+**Fold every prefix, not only the whole log.** Four columns have two writers
+in one task, and the last write wins. They are `branch` (`create_task`, then
+`set_task_package`), `policy_sha` (`create_task`, then `record_policy`),
+`pushed_sha` (`record_push`, then `set_task_package`) and `state`
+(`set_task_state`, then `set_task_package`). So an `_apply` that ignores
+`policy_sha` on `task_created` matches the final rows. After each write, fold
+every fact so far into the same fresh ledger and compare. That also drives
+`fold_task` dropping the rows it folded a moment before.
+
+Leave the timestamp columns out of this comparison, because the write
+methods read the wall clock and the fold reads `fact.at`. Criterion 7 covers
+them.
 
 **Read rows in the new test module through a `sqlite3` connection of its
 own**, opened on the ledger file, never through `ledger._db`. Import nothing
@@ -275,6 +306,13 @@ source reverted. An import of a new name there is then a collection error,
 which `revert` reads as `skip`. Every witness above fails at base for a
 reason in its own body. Criteria 1 and 3 call `fold_task`, which base lacks,
 and the rest observe behaviour the base fold does not have.
+
+**Criterion 8's witness is a stand-in, not a scan of the source.** Write a
+class whose `fold_task` forwards to a real `Ledger`. Its `__getattr__` raises
+on every other name, `_db` included. Pass it as
+`cast(Ledger, stand_in)` so the `types` gate accepts the call. Give it one
+readable task and one unreadable one, under each mode, so `fold_task(key, [])`
+goes through it too.
 
 **Criterion 6's witness folds both tasks first, then breaks one.** The drop
 matters only for a ledger that already holds the task. Test each of the three
@@ -308,8 +346,8 @@ criterion 5 replaces. Delete it too.
 
 **Criterion 4's error and criterion 5's are different kinds of failure.** An
 unplaced kind is the fold's own gap and aborts the fold. `saffron fold`
-already exits 2 on any exception but `UnreadableTask` (`saffron/cli.py:181-185`). A rebuttal with nothing
-to rebut is the record's defect, priced like a record git cannot read. So
+already exits 2 on any exception but `UnreadableTask`
+(`saffron/cli.py:181-185`). A rebuttal with nothing to rebut is the record's defect, priced like a record git cannot read. So
 `fold()` has to tell the two apart by exception type, and a bare
 `ValueError` for both will not do.
 
@@ -321,10 +359,11 @@ to a distinct minute. At base the fold dates `updated_at` by the last fact,
 so the case with a rebuttal last fails there. For the `task_created` case, the
 log holds none of the other five kinds.
 
-**Size.** A prototype of this change measured 793 changed lines. It spent 254
-in `ledger.py` and 223 in `fold.py`. The new test module took 265, and 51
+**Size.** A prototype of this change measured 892 changed lines. It spent 254
+in `ledger.py` and 223 in `fold.py`. The new test module took 364, and 51
 went from `tests/test_fold.py`. The `refactor` ceiling is 1000, and `size`
-blocks at `elevated`. Keep comments short.
+blocks at `elevated`. That leaves about 100 lines for prose. Keep comments
+and docstrings short, and share one row reader across the new witnesses.
 
 **Prose.** `tests/test_ledger_fold_task.py` is a new file, so the `prose`
 ratchet starts it at zero. Its comments and docstrings take no em-dash,
