@@ -138,6 +138,10 @@ branches. Run 10 took five rounds over two specs. No run reached a review with
 no finding. It sits in this tier because the step is what keeps a cell from
 being paid to satisfy a spec that cannot be satisfied.
 
+**From the spec loop's run 12** (2026-09-21): **b-89ec93**. A cell near a
+blocking `size` ceiling packed its SQL onto long lines, and passed. The gate
+rewards the reformat, and the operator asked for a fix soon.
+
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
@@ -187,6 +191,9 @@ gate let three pull requests in a row ship what `CLAUDE.md` forbids, and each
 review spent a pass on it. Then **b-490c9c**, **b-61993a**, **b-f45f73**,
 **b-8d5e55** and **b-0de0b3**. The last is the operator's decision to generate
 the loop's report in core, and it needs design before a spec.
+
+**From the spec loop's run 12** (2026-09-21): **b-e8027b**. A re-snapshot
+released a hold whose spec edit was still open, and `next` named the old text.
 
 ### Tier 3 — real, not urgent
 

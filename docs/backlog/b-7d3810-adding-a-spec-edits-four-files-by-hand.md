@@ -5,7 +5,7 @@ status: open
 tier: 2
 filed: 2026-09-20
 specs: [SA-0116]
-prs: []
+prs: [416]
 commits: []
 cites: []
 related: [b-b69bb6, b-281f0a]
@@ -73,3 +73,8 @@ prints.
   for its parent branch (#407). Its cell was cut by the turn wall with no commit
   and ended `NOT_IMPLEMENTED`, so nothing landed. Item b-36b551 holds the cause.
   The spec is reviewed and merged, and a later loop can run it again.
+- 2026-09-21: `SA-0116` ran again in the spec loop's run 12, after #413 added a
+  commit-before-verify note. It reached `READY_FOR_REVIEW` as #416 at $13.53 of
+  $26. The review seats found the headings' order unwitnessed, among other
+  findings, and the review commit fixed them. The operator accepted 636 changed
+  lines against the ceiling of 600.

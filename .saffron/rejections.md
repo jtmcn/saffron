@@ -766,3 +766,47 @@ verified by the delegate before it was fixed or kept.
   over 25 words in new Python comments, which `CLAUDE.md` forbids. The `prose`
   gate reads no word rule in a `.py` file.
   **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+
+## 2026-09-21, `SA-0116`, `SA-0117` (the spec loop's run 12, fixes in #416, #418)
+
+Run 12 of the spec loop. `SA-0116`'s adequacy lens raised two blockers and the
+cell fixed both in REBUT. `SA-0117`'s lens raised one note, on `spec_id`. Those
+are not rejections. These are what the two independent seats found after that.
+The delegate verified each one before it was fixed or kept.
+
+- `SA-0116` (#416): no witness checked that the three headings print in order,
+  or that the first prints with no line under it. Reversing them passed.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0116` (#416): the ordinal witness compared against today's date, so a run
+  across midnight fails, against a spec note that said so.
+  **Bucket 2**, a test that reads the clock. **Open.**
+- `SA-0116` (#416): a spec whose file name and `id` disagree raised a bare
+  `StopIteration`, against "every other invocation exits 0".
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0116` (#416): the fixture patched `SPECS_DIR`, which nothing reads, and
+  its docstring claimed every helper read it.
+  **Bucket 2**, a claim stronger than the code. **Open.**
+- `SA-0117` (#418): five witnesses could not fail for their rule. Gate results
+  on the first attempt, a run found without `base_sha`, attempt `n` fixed at 1,
+  a write that appends again, and a fold that stops at a broken task all passed.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0117` (#418): criterion 7's witness read `updated_at` alone, so the run
+  and attempt times it also claims passed when fixed to a constant.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0117` (#418): `UnreadableTask` moved into `ledger.py`, and `fold.py`
+  re-exported it to `cli.py` and the tests, against the spec's "`fold()` keeps"
+  it. The `no-reexport` rule reads only aliases and `__all__`.
+  **Bucket 1**, the rule reaching a plain re-import. **Open.**
+- `SA-0117` (#418): the finding-id map had no `ponytail:` comment, though the
+  spec asked for one, and the comment the diff deleted on `repos.policy_sha`
+  had no replacement.
+  **Bucket 2**, `CLAUDE.md`'s `ponytail:` convention. **Open.**
+- `SA-0117` (#418): a test passed `verdict="w"`, outside the closed set
+  `confirmed` and `withdrawn`.
+  **Bucket 1**, a typed verdict at the ledger. **Open.**
+- `SA-0117` (#418): the SQL was packed onto long lines to pass `size`. Kept by
+  the operator.
+  **Bucket 1**, the `size` gate's unit. **Open:** item b-89ec93.
+- Both pull requests carried em-dashes, semicolons or long docstring sentences
+  in new Python comments.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.

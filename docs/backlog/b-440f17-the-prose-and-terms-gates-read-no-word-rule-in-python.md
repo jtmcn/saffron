@@ -42,3 +42,7 @@ A hunk that adds an em-dash to a new comment fails the gate.
 ## Record
 
 - 2026-09-21: filed from the spec loop's run 11 (#403, #404, #406).
+- 2026-09-21: two more in the spec loop's run 12. #416 added eight em-dashes and
+  six docstring sentences over 25 words. #418 added two em-dashes and a
+  semicolon in a new `ponytail:` comment. The Standards seat found each one, and
+  the `prose` gate passed all of them.

@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-20
 specs: [SA-0117]
-prs: []
+prs: [418]
 commits: []
 cites: [§4.1, §4.6]
 related: [170, 177, b-25766a, b-e9db0e]
@@ -108,3 +108,9 @@ The second spec is the writer side, stacked on `SA-0117`. Its planned contents:
 
 Estimated at 800 to 890 changed lines. If it crosses 900, the test deletions
 become a third spec.
+- 2026-09-21: `SA-0117` ran in the spec loop's run 12 and reached
+  `READY_FOR_REVIEW` as #418 at $30.70 of $26, green on its third attempt. The
+  Spec seat found five witnesses that could not fail for their rule, and one
+  review commit fixed them. Its SQL is packed onto long lines to pass `size`,
+  which item b-89ec93 records. The second spec, which routes the write methods
+  through `_apply`, is not written yet.
