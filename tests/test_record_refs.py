@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from saffron.record.contract import Fact, RecordError, StaleWriter
+from saffron.record.refs import _IDENT as IDENT
 from saffron.record.refs import TASKS, RefsRecord
 
 
@@ -127,6 +128,19 @@ def test_an_object_git_no_longer_has_is_not_a_shorter_log(repo):
         record.read(fact.task_key)
 
 
+def test_a_host_with_no_git_identity_can_still_append(repo, tmp_path, monkeypatch):
+    # Every append is a commit, and a host git cannot name an author on is a
+    # real one: CI is that host, and it failed this whole file for it.
+    config = tmp_path / "gitconfig"
+    config.write_text("[user]\n\tuseConfigOnly = true\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+    record = RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    assert record.read(fact.task_key) == [fact]
+
+
 def test_task_keys_lists_every_task_ref(repo):
     record = RefsRecord(repo)
     for key in ("a" * 32, "b" * 32):
@@ -238,7 +252,9 @@ def test_a_corrupt_fact_blob_names_the_task_it_is_in(repo):
         check=True,
     ).stdout.strip()
     commit = subprocess.run(
-        ["git", "-C", str(repo), "commit-tree", tree, "-m", "corrupt"],
+        # The identity is on the command because a bare repo has none, which
+        # is what `RefsRecord` does and why CI could not run this file.
+        ["git", "-C", str(repo), *IDENT, "commit-tree", tree, "-m", "corrupt"],
         capture_output=True,
         text=True,
         check=True,

@@ -16,6 +16,10 @@ from saffron.record.contract import (
     check_filed_under,
 )
 
+# On the command, as `phases/package.py` does and for its reason: a mirror
+# inherits no identity, so `commit-tree` fell to whatever the host had.
+_IDENT = ("-c", "user.email=saffron@localhost", "-c", "user.name=Saffron")
+
 TASKS = "refs/saffron/tasks"
 VALUES = "refs/saffron/values"
 _FACTS = "facts"
@@ -33,7 +37,7 @@ class RefsRecord:
 
     def _git_bytes(self, *args: str, stdin: bytes | None = None) -> bytes:
         done = subprocess.run(
-            ["git", "-C", str(self._repo), *args],
+            ["git", "-C", str(self._repo), *_IDENT, *args],
             input=stdin,
             capture_output=True,
         )
