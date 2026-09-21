@@ -284,4 +284,4 @@ def test_an_adr_rests_on_the_principles_it_lists():
     graph = _graph()
     adr = design_record.FACTORY["adr-1"]
     rests = set(graph.objects(adr, design_record.FACTORY.restsOn))
-    assert rests == {design_record.FACTORY["principle-62"]}
+    assert rests == {design_record.FACTORY[f"principle-{n}"] for n in (30, 56, 57, 62)}
