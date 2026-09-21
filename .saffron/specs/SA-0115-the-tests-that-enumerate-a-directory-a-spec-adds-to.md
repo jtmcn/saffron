@@ -47,53 +47,58 @@ acceptance:
       directory is one of them. An entry the commit does hold a file at yields
       no directory, and neither does an entry carrying `*` or `?`, the two
       metacharacters `_TOKENS` at `saffron/gates/core/scope.py:17` is built
-      from, which is counted as skipped instead. On every run, reports or none, the
-      command prints one line counting the directories it took, the entries it
-      skipped and the files it read under `tests/` at that commit, and that
-      line is not itself a report. A spec whose `touches` yields no directory
-      draws no other output and exits 0. A spec path naming no file, a spec
-      whose frontmatter intake refuses, and a `--base` git cannot resolve each
-      print a message to stderr and exit 1, reading no file under `tests/` and
+      from, which is counted as skipped instead. Every run that gets as far as
+      taking directories prints one count line, even a run that takes none. It
+      counts the directories taken, the entries skipped and the files read
+      under `tests/` at that commit, and it is not itself a report. A spec
+      whose `touches` yields no directory draws no other output and exits 0. A
+      spec path naming no file, a spec whose frontmatter intake refuses, and a
+      `--base` git cannot resolve each print a message to stderr and exit 1,
       raising no traceback. Those three are decided before any directory is
-      taken, so a spec whose `touches` yields no directory and whose `--base`
-      git cannot resolve exits 1 rather than 0.
+      taken, so none of them prints the count line. A spec whose `touches`
+      yields no directory and whose `--base` git cannot resolve exits 1
+      rather than 0.
     witness: tests/test_spec_loop_driver.py::test_enumerators_takes_its_directories_from_the_touches_a_commit_holds_no_file_at
   - claim: >-
       For each of those directories the command reads every Python file under
-      `tests/` at the base commit, and reports the enumerating calls that
-      reach it. The call set is `.glob(...)`, `.rglob(...)` and `.iterdir()`
-      on a path expression, and `os.walk(...)`, `os.listdir(...)` and
-      `os.scandir(...)` where `os` is the name that file imported the `os`
-      module under. `ast.walk(...)` and a `walk` the file defines itself are
-      in neither. A call whose directory is the directory itself is reported
-      as enumerating it, whatever its spelling and whatever its pattern, and
-      the command exits 1. A call whose directory is an ancestor of it is
-      reported as descending into it only where that call recurses, which is
-      `.rglob`, `os.walk`, or `.glob` whose literal pattern carries `**`. An
-      ancestor `.glob` whose pattern is no string literal goes to criterion
-      3's unresolved list instead of either answer. A run whose reports are
-      all descents exits 0. A call on any other directory is not reported,
-      whatever its pattern. Each report names the file, the line and the
-      function holding the call at that commit, and names `<module>` in the
-      function's place where the call sits at that file's module scope rather
-      than inside a function.
+      `tests/` at the base commit, and reports the enumerating calls whose
+      directory resolves and reaches it. The call set is `.glob(...)`,
+      `.rglob(...)` and `.iterdir()` on a receiver, and `os.walk(...)`,
+      `os.listdir(...)` and `os.scandir(...)` where `os` is the name that file
+      imported the `os` module under. For those three the directory is the
+      first positional argument, and for the other three it is the receiver.
+      `ast.walk(...)` and a `walk` the file defines itself are in neither. A
+      directory resolves only where it is a string literal, `Path` of one
+      string literal, or a `/` join whose two parts are each one of those three.
+      It is read relative to the repository root. A call whose directory is the
+      directory itself is reported as enumerating it, whatever its spelling and
+      whatever its pattern, and the command exits 1. A call whose directory is
+      an ancestor of it is reported as descending into it only where that call
+      recurses, which is `.rglob`, `os.walk`, or `.glob` whose literal pattern
+      carries `**`. An ancestor `.glob` whose literal pattern carries a `/` and
+      no `**` is not judged, and criterion 3 lists it as unresolved. A run
+      whose reports are all descents exits 0. A call on any
+      other directory is not reported, whatever its pattern. Each report names
+      the file, the line and the function holding the call at that commit, and
+      names `<module>` in the function's place where the call sits at that
+      file's module scope rather than inside a function.
     witness: tests/test_spec_loop_driver.py::test_enumerators_reports_the_tests_that_enumerate_and_the_ones_that_descend
   - claim: >-
-      The directory a call enumerates is resolved from its expression at the
-      base commit, through a string literal and `Path(...)` of one, `/` with a
-      literal on the right, `__file__`, `.resolve()`, `.parent`,
-      `.parents[n]`, `<module>.__file__` for a module that file imports and
-      the commit holds, a name bound exactly once at that file's module scope
-      or in the function holding the call, and an attribute of such a module
-      bound exactly once at that module's own top level. Anything else
-      resolves to nothing, including a name bound more than once in the scope
-      reached and a `<module>.__file__` whose module the commit holds no file
-      for. A call whose directory resolves to nothing is listed as unresolved
-      with its file and line, rather than reported against a directory or
-      dropped in silence. So is a `.glob` whose pattern is not a string
-      literal, where its directory is an ancestor of one criterion 1 took. An
-      unresolved call is not an enumerator report, and a run whose only output
-      is unresolved calls exits 0.
+      A call with one of those six spellings whose directory does not resolve
+      under criterion 2's three forms is listed as unresolved, with its file
+      and line. That covers a name of any kind, a function parameter among
+      them, an attribute, a subscript, `__file__` and anything built on it, a
+      `/` join with any other part, a call other than `Path` of one string
+      literal, and an `os` call with no positional argument. A `.glob` whose
+      directory resolves to an ancestor of one criterion 1 took is listed as
+      well, where its pattern decides reach. That is a pattern that is not a
+      string literal, or a literal carrying a `/` and no `**`. A call whose
+      directory does not resolve is never reported as an enumerator or a
+      descent, and it is never dropped. A call whose directory resolves is
+      still judged per directory under criterion 2, even where it is listed. The
+      list is one group after the reports, one line per call, and it prints on
+      every run that takes a directory. A run whose only output beyond the
+      count line is unresolved calls exits 0.
     witness: tests/test_spec_loop_driver.py::test_enumerators_lists_the_calls_whose_directory_it_cannot_resolve
 ---
 
@@ -105,19 +110,17 @@ tier 2. It was filed on 2026-09-20 from one spec carried end to end outside a
 loop run. It holds two computable questions a spec review answers by reading.
 `SA-0114` ships the first, the `file:line` a spec cites. This spec is the
 second, named in that spec's **Out of scope** at
-`.saffron/specs/SA-0114-a-specs-citations-are-resolved-by-eye.md:214-231` and
+`.saffron/specs/SA-0114-a-specs-citations-are-resolved-by-eye.md:230-247` and
 in the item's own record at
 `docs/backlog/b-b69bb6-a-specs-citations-and-added-directories-are-checked-by-eye.md:70-79`.
 For each directory a spec adds a file to, find the tests that enumerate it.
 
-Every sentence here about current code was read at `cb476888` on 2026-09-20,
-the commit that adds this spec. That is not where the cell starts: `depends_on`
-cuts its worktree from `SA-0114`'s branch `joel/spec-citation-preflight`, so
-every `driver.py` line cited below moves by whatever that cell lands in the
-same file. Grep for the name a citation gives and read the line you find,
-rather than trusting the number.
+Every sentence here about current code was read at `d5de5176` on 2026-09-20.
+That commit is the head of `SA-0114`'s pushed branch, `origin/saffron/SA-0114`.
+`depends_on` cuts this cell's worktree from that branch, so `d5de5176` is the
+base this cell starts from. Every line cited below is a line of that commit.
 
-**The blocker this computes is in the tree**. `TURN_PROMPTS` at
+**The blocker is in the tree**. `TURN_PROMPTS` at
 `tests/test_context.py:369-379` is a hand-written dict of nine turn prompt
 names. `test_every_turn_prompt_file_is_loaded_by_something` at
 `tests/test_context.py:382-384` asserts that its keys equal `{path.stem for
@@ -133,7 +136,9 @@ with the file in its `forbidden`, where no cell could repair it. Its first
 review moved it into `touches`, at
 `.saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md:14`,
 which is where it sits at this base. So what the blocker cost was a review
-round.
+round. Under this spec the call at `tests/test_context.py:384` is an
+unresolved line rather than an enumerator report, because its receiver is an
+attribute. **Out of scope** names the follow-up that resolves it.
 
 **The spec loop's driver is where a computed check for a spec review lives**.
 `cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1683-1712`
@@ -173,19 +178,19 @@ holds `tests/` and `.claude/`.
 `ontology`, `hooks` and `.saffron/gates`.
 
 **One file holds every caller of this driver's code**. A `git grep -l` for
-`driver.py` at this base returns forty-one files, the driver itself among them.
+`driver.py` at this base returns forty-three files, the driver itself among them.
 `tests/test_spec_loop_driver.py` is the only importer. It execs the driver
 through `importlib.util` at `tests/test_spec_loop_driver.py:19-26`. The other
-thirty-nine name the command in prose and call nothing. They are the two agent
-definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and two
-queued specs with two retired ones. This spec file is one of the two, and
-`.saffron/**` is `forbidden`. The rest are eighteen backlog records, ten
+forty-one name the command in prose and call nothing. They are the two agent
+definitions, the skill's three documents, `.saffron/deadcode-allow.py`, and three
+queued specs with two retired ones. This spec file is one of the three, and
+`.saffron/**` is `forbidden`. The rest are nineteen backlog records, ten
 other documents under `docs/`, and `tests/test_scheduler.py`, whose mention
 sits in the queue smoke test's docstring. The importer and the driver are in
 `touches`, and every other reader is `forbidden`.
 
-**What the command reads is bounded**. `git ls-tree -r --name-only cb476888
-tests` lists 81 Python files.
+**What the command reads is bounded**. `git ls-tree -r --name-only d5de5176
+tests` lists 85 Python files.
 
 ## Problem
 
@@ -204,7 +209,7 @@ thought to look.
   is an `ast` walk over `tests/` at the base commit.
 - **What the rounds cost, measured on `SA-0113`**: the draft 35.7 minutes,
   the first review 6.2, the revision 17.9, the second review 9.5. Item
-  b-b69bb6 is first of three in `docs/backlog/PRIORITY.md:173-177` for that
+  b-b69bb6 is first of two in `docs/backlog/PRIORITY.md:174-179` for that
   reason.
 
 The command is `enumerators`. It takes the spec's path and `--base`, and it
@@ -228,7 +233,7 @@ prints the tests that will see the files the spec adds.
 3. **What an enumerating call is**. Six spellings, each of which hands a test
    the contents of a directory: `.glob(...)`, `.rglob(...)` and `.iterdir()` on
    a path, and `os.walk(...)`, `os.listdir(...)` and `os.scandir(...)`.
-   Measured at this base over the 81 Python files under `tests/`: **35 calls**.
+   Measured at this base over the 85 Python files under `tests/`: **35 calls**.
    The spelling is what decides. A name match on `walk` alone is wrong, because
    matching every `walk` call adds **12 more calls** in four files. Ten of
    those are `ast.walk`, among them `tests/test_cli.py:200`,
@@ -239,53 +244,59 @@ prints the tests that will see the files the spec adds.
    name that file imported the `os` module under.
 
 4. **Which of them reach the directory**. A call on the directory itself is
-   what fails a spec, and `tests/test_context.py:384` is that case exactly. A
-   call on a directory *above* it reaches the new file only where it recurses.
+   what fails a spec, and `tests/test_context.py:384` is that shape exactly. A
+   call on a directory *above* it reaches the new file where it recurses.
    Recursing is `.rglob`, `os.walk`, and `.glob` whose literal pattern carries
    `**`. Those are worth naming and are not the blocker shape. At this base
-   `tests/test_citations.py:148` walks the repository root through `os.walk`,
-   and it would be listed for every spec that adds any file at all. So the two
-   are reported apart, and only the first sets the exit status. A
-   non-recursive call on a directory above lists that directory's own entries
-   and never the new file, so it draws no report. An ancestor `.glob` whose
-   pattern is a name rather than a literal says nothing about which of the two
-   it is. Guessing either way is wrong in one direction, so that call goes to
-   item 6's third kind. At this base it is `any(ROOT.glob(p))` at
-   `tests/test_citations.py:345`. Its `p` is a comprehension variable, and its
-   `ROOT` is the repository root (`tests/test_citations.py:40`). That is an
-   ancestor of every directory a spec could add to, so the case fires on every
-   invocation.
+   `tests/test_citations.py:148` walks the repository root through `os.walk`.
+   Once its receiver resolves, it reaches every directory a spec adds a file
+   to. So the two are reported apart, and only the first sets the exit status.
+   An `.iterdir()`, `os.listdir` or `os.scandir` on a directory above lists
+   that directory's own entries and never the new file. So does a `.glob` there
+   whose literal pattern has one segment. Neither draws a report. An ancestor
+   `.glob` whose pattern is not a string literal says nothing about whether it
+   reaches the new file. A literal pattern with a `/` and no `**` has more than
+   one segment, and such a call can reach it. `Path.glob` matches segment by
+   segment, so `glob("turns/*.md")` on `saffron/agents/prompts` returns the new
+   turn prompt. Both depend on the pattern, and guessing either way is wrong in
+   one direction. So both go to the unresolved list. A call on one of the directories itself is an enumerator
+   whatever its pattern, because recursion decides nothing there.
 
-5. **How a directory is resolved**. The receiver is an expression, and
-   resolving it is where this command earns its keep. The motivating call is
-   spelled `context.TURNS_DIR`, two hops from a path. The set is a literal, a
-   `Path(...)` of one, `/` with a literal on the right, `__file__`,
-   `.resolve()`, `.parent`, `.parents[n]` and `<module>.__file__`. It also
-   holds a name bound exactly once in the file's module scope, or in the
-   function holding the call. An attribute of an imported module bound exactly
-   once at that module's top level is in the set too. A dotted module name
-   resolves to `<a>/<b>.py` or `<a>/<b>/__init__.py` at the commit, and to
-   nothing where the commit holds neither. That is the whole of it. There is no
-   control-flow analysis and no execution. A name bound twice in the scope
-   reached resolves to nothing rather than to its first binding.
+5. **How a directory is resolved**. Three forms, and nothing else: a string
+   literal, `Path` of one string literal, and a `/` join whose two parts are
+   each one of the three. `Path("a") / "b"` is a join, and so is `"a" /
+   Path("b")`. A resolved directory is read relative to the repository root,
+   the form every `touches` entry takes. The set needs no name lookup, no
+   import and no scope. Every other expression is unresolved. That covers a
+   name, an attribute, a subscript, `__file__` and whatever is built on it,
+   and a call other than `Path` of one literal. A `/` join with any other part
+   is unresolved too, and so is an `os` call with no positional argument.
+   Resolving through names and imports is the follow-up **Out of scope**
+   names. One shape is left undriven, as
+   `docs/agents/issue-tracker.md:110-111` asks a spec to say. An f-string is
+   not a string literal, as a directory or as a `.glob` pattern, and no
+   witness spells one. None occurs under `tests/` at this base.
 
-6. **What is reported**. Three kinds of line: a call enumerating one of the
-   directories, a call descending into one, and a call the command could not
-   place. The third kind is a receiver that resolved to nothing, or an
-   ancestor `.glob` whose pattern is no string literal. Every call the scan
-   keeps is exactly one of the three. The directory decides before the pattern
-   does. A call on one of the directories itself is the first kind whatever
-   its pattern, because recursion decides nothing there. So `ROOT.glob(p)`
-   above is an enumerator report for a spec adding a file at the repository
-   root. It is the third kind for every other spec. Measured at this base with
-   a throwaway script over the resolution set above, the receivers of 19 of
-   the 35 resolve and **16 do not**. Most of the sixteen are rooted at a `tmp_path` fixture or at
-   a function's own parameter, and enumerate a scratch tree rather than the
-   repository. Those numbers measure the author's prototype and are not a
-   criterion. Nothing asserts them, and an implementation resolving more or
-   fewer is not wrong on that account. The unresolved list is printed because
-   a command blind to sixteen calls reads exactly like one with nothing to
-   say. The reader deciding whether check 2 is done needs to know which it is.
+6. **What is reported**. Against each directory taken, a resolved call is an
+   enumerator, a descent, or draws nothing. A call is judged once per
+   directory taken, and so one resolved call can appear under two. For
+   `SA-0113`, a recursive call on `saffron/agents/prompts` enumerates that
+   directory and descends into `saffron/agents/prompts/turns`. A call whose
+   directory does not resolve is listed, never dropped and never judged. The
+   unresolved list is one group after the directories, one line per call. An
+   ancestor `.glob` whose pattern decides reach joins it once, however many
+   directories it sits above. Its pattern is not a literal, or it is a literal
+   carrying a `/` and no `**`. That call is still judged against a directory it
+   does not sit above. Measured at this base with a throwaway script over the three forms,
+   **none of the 35 calls resolves**. Every receiver is a name, an attribute, or
+   a `/` join built on one, as at `tests/test_citations.py:345`,
+   `tests/test_context.py:384` and `tests/ontology/ontology_paths.py:10`. So
+   until the follow-up lands, a run over this repository prints the count
+   line and 35 unresolved lines, and exits 0. That is a bounded worklist in
+   place of a read over 85 files. It is the whole of what this spec promises
+   for the tree as it stands. The number measures a prototype and is
+   not a criterion. Nothing asserts it. The list is printed because a command
+   blind to 35 calls reads exactly like one with nothing to say.
 
 7. **What the exit status means**. 1 where a call enumerating one of the
    directories was reported, and 0 otherwise, descents and unresolved calls
@@ -298,6 +309,25 @@ prints the tests that will see the files the spec adds.
    without reading a commit's `tests/` tree.
 
 ## Out of scope
+
+**Resolving a receiver through names and imports**. The operator split this
+out into a follow-up spec, designed outside the spec loop. It resolves a
+receiver through a name assigned once, and through an imported module's
+attribute in that module's own scope. It resolves `__file__` and its
+`.resolve()`, `.parent` and `.parents[n]` chain. It decides scope precedence
+between a module binding and a function binding. Four review rounds of this
+spec found where such a resolver goes wrong, and the follow-up starts there.
+`TURNS_DIR` is two hops from a path, `PROMPTS_DIR / "turns"` built on
+`Path(__file__).resolve().parent / "prompts"` at
+`saffron/agents/context.py:21-22`. `tests/test_context.py:8` imports
+`context` as the second name of a multi-name `from` import. Each import form,
+`import <module>` and `from <package> import <module>`, has to reach each use,
+a module attribute and a `<module>.__file__`. A function binding shadows a
+module binding of the same name, and the resolver has to honour that. Until that spec lands, `SA-0113`'s
+`TURNS_DIR` case and every `ROOT`-rooted call, such as
+`tests/test_citations.py:148` and `:345`, show as unresolved lines. They are
+not enumerator or descent reports. Being listed is the whole of what this spec
+promises for them.
 
 **The citation half of item b-b69bb6**. `SA-0114` owns it, it is queued, and
 this spec's cell is cut from its branch. Nothing here calls `cmd_cite`, and
@@ -368,10 +398,11 @@ the meanings `CONTEXT.md` gives them. `ontology/` is `forbidden` here.
 **`enumerators` is the subcommand name, and `--base` defaults to
 `origin/main`.** `uv run .claude/skills/run-saffron-spec-loop/driver.py
 enumerators .saffron/specs/SA-0113-no-session-names-the-edit-a-claim-rests-on.md`.
-Register it in `main` after the `check` parser at
-`.claude/skills/run-saffron-spec-loop/driver.py:1839-1843`. `SA-0114` adds a
-`cite` parser to that same block. The branch this cell is cut from carries one
-parser there that this base does not. Add yours after both, and edit neither.
+Register it in `main` after the `cite` parser at
+`.claude/skills/run-saffron-spec-loop/driver.py:2010-2015`, the last one there.
+`SA-0114` added that parser below `pattern`, which follows the `check` parser at
+`.claude/skills/run-saffron-spec-loop/driver.py:2001-2005`. Add yours after
+`cite`, and edit neither of those two parsers.
 The default matches what a spec review is told at
 `.claude/agents/spec-reviewer.md:15-16`. There `base:` is the commit a cell
 would be cut from, and a prompt naming none means `origin/main`.
@@ -380,7 +411,11 @@ would be cut from, and a prompt naming none means `origin/main`.
 default binds at definition time. `tests/test_spec_loop_driver.py:371` and
 `tests/test_spec_loop_driver.py:613` monkeypatch `driver.REPO` to a scratch
 root, and the witnesses here do the same. Helpers that read a tree take the
-root as an argument, and `cmd_enumerators` passes the module's `REPO`.
+root as an argument, and `cmd_enumerators` passes the module's `REPO`. The
+trap is `_git` itself. Its own `cwd` default binds `REPO` at definition time,
+at `.claude/skills/run-saffron-spec-loop/driver.py:85`. So pass `cwd=REPO` on
+every call, as `cmd_cite` does at
+`.claude/skills/run-saffron-spec-loop/driver.py:1876`.
 
 **The spec is read through intake, the tree through git**. `touches` is
 frontmatter, so use `load_spec` from `saffron.intake`, imported inside the
@@ -389,7 +424,7 @@ function as `cmd_size` does at
 `_fail`'s message and exit 1, never a traceback. Every file the scan reads
 comes from `git ls-tree -r --name-only <base> tests` and `git show
 <base>:<path>` through `_git`. The working tree's copy of a test file is never
-what gets parsed. Eighty-one `git show` calls is the measured size of that loop
+what gets parsed. Eighty-five `git show` calls is the measured size of that loop
 at this base, and one call per file is fine.
 
 **A file the commit holds that `ast` cannot parse is skipped, not fatal**. A
@@ -397,80 +432,162 @@ at this base, and one call per file is fine.
 many files were read.
 
 **Name the wrong implementation each witness must kill**. Criterion 1 kills
-eight. One reads the spec at the base commit rather than the working tree,
-which the witness catches by never committing the spec file. One takes every
-`touches` entry as a file the spec adds: give the fixture an entry the commit
-does hold a file at, in a directory the fixture's tests enumerate, and assert
-no report for it. One drops a glob entry in silence, killed by asserting the
-skipped count. One prints no count line at all, killed by asserting that line
-on stdout in the case with no directories and exit 0. One exits 1 where
-nothing was reported. One lets a spec intake refuses raise: write a second
-spec file with broken frontmatter, and assert exit 1 with a message on stderr.
-The missing spec path takes that same `except`. `load_spec` wraps an `OSError`
-in `SpecError` at `saffron/intake.py:267-271`, so two of the three usage
-failures are one clause. One lets `_git` raise on a base no commit answers to.
-It raises `GitError` on a non-zero status
+fifteen. One reads the spec at the base commit rather than the working tree,
+which the witness catches by never committing the spec file. One asks the
+working tree rather than the commit whether an entry holds a file. Without a
+change after the commit, the two read the same tree. So after the fixture
+commit, change only the working tree, as
+`tests/test_spec_loop_driver.py:1850-1851` does for `cite`. Create a file at
+the added `touches` entry, and assert its directory is still taken. Write an
+uncommitted Python file under `tests/` as well, and assert the count of files
+read leaves it out. One takes every `touches` entry as a file the spec adds.
+Give the fixture an entry the commit does hold a file at. A fixture test
+enumerates its directory on a string literal, so the call resolves. Keep that directory apart from the added entry's,
+and assert no report for it. One drops a glob entry in silence, and one knows
+`*` alone and reads a `?` entry as a path. Give the fixture two glob entries,
+one carrying `*` and one carrying `?`, in a directory no other entry names.
+Assert a skipped count of 2. Two derive a count rather than counting it. One
+takes the directories to be the entries not skipped. The other counts every
+name `ls-tree` lists as a file read. One takes a directory once per added
+entry rather than once. Add a second new entry in the added directory. Put
+these five entries in one spec and run it once, after the working tree
+changes. Assert all three numbers there. That run takes one directory, skips
+two entries, and reads the Python files
+the commit holds under `tests/`. Commit one file under `tests/` that is not
+Python, so the third number leaves it out. The fixture holds no file `ast`
+cannot parse, so that number is not in question. One prints no count line at
+all, and one prints more than that line. In the case with no directories,
+assert exit 0 and that line as all it prints. One exits 1 where nothing was
+reported. One lets a spec intake refuses raise: write a second spec file with
+broken frontmatter, and assert exit 1, a message on stderr and no count line
+on stdout. One lets a spec path naming no file raise before intake reads it.
+`load_spec` wraps an `OSError` in `SpecError` at `saffron/intake.py:269-273`.
+A `resolve(strict=True)` or a `relative_to` made before that call raises on
+its own all the same. Pass a path no file sits at, and assert the same three
+things. One lets `_git` raise on a base no commit answers to. It raises
+`GitError` on a non-zero status
 (`.claude/skills/run-saffron-spec-loop/driver.py:85-89`). One resolves
 `--base` only after taking directories, and returns 0 on a spec that yields
 none. Pass `--base no-such-ref` over exactly that spec. Assert the call
-returns 1 with a message on stderr, rather than raising out of the command or
-reporting a clean run.
+returns 1 with a message on stderr and no count line on stdout. It must
+neither raise out of the command nor report a clean run.
 
-Criterion 2 kills nine. One knows only `.glob`. The fixture's tests must reach
-the added directory through all six spellings the claim names, each in a place
-the witness asserts on. Six calls in three short files covers that, and the
-ancestor cases below add five more. Spell one of the six on a
-`Path("tests/...")` literal rather than on a name, so criterion 3's plainest
-receiver is driven here too. One matches any `walk` at all. Put an
-`ast.walk(tree)` call and a locally defined `walk` in the fixture's tests, and
-assert that neither is reported. One matches the three `os` spellings on the
-bare name `os`, with no import map behind it. The module under any other name
-then goes missing. Spell one of those three calls through an aliased import: a
-fixture file with `import os as o` calling `o.scandir(...)` on the added
-directory, asserted as an enumerator report like the other five. That is also
-what forces the import map criterion 3 needs. One reports every ancestor call:
-give the fixture a non-recursive `.glob("*.md")` on the parent directory, and
+Criterion 2 kills twenty-four. Every call in its fixture sits on a
+directory that resolves, a string literal, `Path` of one, or a join of those.
+One knows only `.glob`. The fixture's tests must reach the added directory
+through all six spellings the claim names, each in a place the witness asserts
+on. Six calls in three short files covers that, and the cases below add
+seventeen more. One resolves `Path` of a literal alone and misses a bare
+string. Spell `os.listdir(...)` on a bare string literal naming the added
+directory, and assert its report. One resolves a join only in one
+arrangement. Spell `.iterdir()` on `Path("<a>") / "<b>" / "<c>"` and
+`os.walk(...)` on `"<a>/<b>" / Path("<c>")`, each naming the added directory.
+Between them the left part takes all three forms. The right part is a bare
+string in one and `Path` of a literal in the other. Assert both reported.
+Spell the aliased `scandir` below on `Path("<added directory>")`. The method
+spellings and the `os` spellings then each meet `Path` of a literal and a
+join. The `os` spellings meet a bare string too. One reads only the top level of `tests/`. The real cases sit lower,
+at `tests/ontology/ontology_paths.py:10` and `tests/records/check.py:335`. So
+put one of the three files in `tests/sub/`, holding one of the six calls. One
+reads `tests/` from the working tree. After the fixture commit, write an
+uncommitted test file that enumerates the added directory, and assert it
+draws no report. Create a file at the added `touches` entry too, and assert
+the committed calls are still reported. One lists the files with `git
+ls-tree` and reads their content from disk. The line at
+`tests/test_spec_loop_driver.py:1851` overwrites a committed file for that
+reason. Rewrite one committed fixture test file in the working tree, shifting
+its call down by a line. Assert its report still names the committed line.
+One matches any `walk` at all. Put an `ast.walk(tree)` call and a locally
+defined `walk` in the fixture's tests, and assert that neither is reported.
+One matches the three `os` spellings on the bare name `os`, with no import
+map behind it. The module under any other name then goes missing. Spell one
+of those three calls through an aliased import. A fixture file with `import
+os as o` calls `o.scandir(Path("<added directory>"))`, asserted as an enumerator
+report like the other five. One reports every ancestor call. Give the fixture
+a non-recursive `Path("<parent>").glob("*.md")` on the parent directory, and
 assert it draws nothing. One tests recursion by the `.glob` pattern alone and
-counts every other spelling as recursive: put an `.iterdir()` on that same
-parent, asserted silent beside the `.glob`. One treats `.rglob` as the only
-recursive form. Beside that `.glob`, put all three recursive forms on that
-same parent: `.rglob(...)`, `os.walk(...)`, and a `.glob` whose literal
-pattern carries `**`. The witness asserts a descent for each of the three. One
-counts a descent as a defect, killed by a case whose only report is a descent
-and whose exit status is 0. One prints a file and line without the function
-holding the call. One assumes every call sits inside a function.
-`tests/ontology/ontology_paths.py:10-12` and `:14` are four module-scope
-`.glob` calls at this base. Their `ONTOLOGY` and `FIXTURES` resolve at
-`tests/ontology/ontology_paths.py:5-6`. So a spec adding a `.ttl` under
-`ontology/shapes`, one of this command's motivating cases in `CLAUDE.md`,
-reports all four, and no function holds them. Put one module-scope call on the
-added directory in the fixture, and assert its report names `<module>` where
-the others name a function.
+counts every other spelling as recursive. One counts `os.listdir` or
+`os.scandir` as recursive. Put an `.iterdir()`, an `os.listdir(...)` and an
+`os.scandir(...)` on that same parent, each asserted silent beside the
+`.glob`. One treats `.rglob` as the only recursive form. Beside that `.glob`,
+put all three recursive forms on that same parent: `.rglob(...)`,
+`os.walk(...)`, and a `.glob` whose literal pattern carries `**`. The witness
+asserts a descent for each of the three. One treats a multi-segment pattern
+on an ancestor as reaching nothing. Put `Path("<parent>").glob("<child>/*.md")`
+on that same parent, `<child>` being the added directory's own name. Assert it
+on the unresolved list and not reported. One takes an ancestor to be the
+parent alone, testing `receiver == d.parent` where `receiver in d.parents` is
+meant. It misses the shape of `tests/test_citations.py:148`, a walk on a root
+far above. Put an `os.walk` on a bare string literal naming a directory two
+levels or more above the added one, such as `os.walk("fixture")`. Assert a
+descent. One decides ancestry by string prefix, and so reads `a/b` as an
+ancestor of `a/bc/x`. Give the added directory a sibling whose name is a
+prefix of its own, such as `fix` beside `fixture`. Put an `.rglob(...)` on
+`Path` of that sibling, and assert it draws nothing. One reads ancestry the
+wrong way round. Put an `.rglob(...)` on `Path` of a directory below the
+added one, and assert it draws nothing. One counts a descent as a defect,
+killed by a case whose only report is a descent and whose exit status is 0.
+One prints a file and line without the function holding the call. One assumes
+every call sits inside a function. `tests/ontology/ontology_paths.py:10-12`
+and `:14` are four module-scope `.glob` calls at this base, unresolved here
+because each receiver joins onto a name. Put one module-scope call on
+`Path("<added directory>")` in the fixture. Assert its report names
+`<module>` where the others name a function. One reports a call on a sibling
+of the added directory, as `:11` sits beside `:10`. Put a module-scope call
+on `Path` of a sibling directory beside the first, and assert it draws
+nothing. One lists a `.glob` whose pattern is not a literal as unresolved
+wherever its receiver resolves. Spell that sibling call `.glob(name)`, its
+name bound to a string. Assert it neither reported nor on the unresolved
+list. One judges each call once, against the first directory it reaches.
+Write a second spec file over the same commit, whose `touches` adds a file to
+the parent directory as well. Assert that the parent's `.rglob(...)` is then
+reported twice. It enumerates the parent and descends into the added
+directory below it. One sends every `.glob` whose pattern is not a literal to
+the unresolved list before it compares directories. One reports a call on a
+directory itself only where its pattern matches the added file. Put a
+`Path("<parent>").glob(name)` on the parent, its pattern a name bound to a
+string. In the first run it is on the unresolved list. In the second run,
+assert an enumerator report for it and for every other call on the parent.
+That run still lists it once as unresolved, for the added directory below, as
+item 6 says. Name the file the second spec adds so that `*.md` does not match
+it. Assert exit 1 for both runs.
 
-Criterion 3 kills six. One resolves only literals. The fixture must reach its
-directory through a module-scope name, and through a name bound in the
-function holding the call. A third path to it is an attribute of another
-module in the fixture tree. Give one call the shape
-`tests/test_cli.py:196-198` has, a directory read through
-`Path(<module>.__file__).resolve().parent`. Reach one through `.parents[n]`,
-as `tests/test_spec_loop_driver.py:18` does, so that shape is driven too.
-Spell that last one as `TURNS_DIR` is spelled, a constant built from
-`Path(__file__).resolve().parent` and two `/` joins. One drops the calls it
-cannot resolve, killed by asserting the unresolved line for a receiver that is
-a function parameter. One treats unresolved as a defect, killed by a case
-whose only output is unresolved calls and whose exit status is 0. One resolves
-a name bound twice by taking the first binding: bind one name twice in the
-fixture, to two different directories, and assert it is unresolved rather than
-reported against either. One drops an ancestor `.glob` whose pattern it cannot
-read. An implementation that resolves the receiver, finds it an ancestor, and
-asks whether a literal pattern carries `**` passes every case above. It drops
-`tests/test_citations.py:345` in silence on every real invocation. Put a
-`.glob(pattern)` on the parent directory, its pattern a name bound to a
-string. Assert it on the unresolved list, neither absent nor reported as a
-descent. One resolves `<module>.__file__` for a module the commit holds no
-file for. The command parses rather than imports, so a fixture test file can
-import a module its commit does not hold. Reach one call through that module's `__file__`, and assert it
-unresolved.
+Criterion 3 kills nine. Put its calls in the shared fixture's test files,
+beside criterion 2's. One drops the calls it cannot resolve. Give the fixture
+eight calls whose directory does not resolve, and assert each listed with its
+file and line. The first is a name, `DIR.glob("*")`, with `DIR` bound once at
+module scope to `Path("<added directory>")`. The second is an attribute in
+the real `TURNS_DIR` shape, `context.TURNS_DIR.glob("*.md")` under `from
+<package> import <other>, context`. That is how `tests/test_context.py:8` and
+`:384` spell it. The fixture holds no such module, and none is needed. The
+third is `Path(__file__).resolve().parents[1].rglob("*")`, a subscript built
+on `__file__`. The fourth is `Path(__file__).parent.glob("*")`, an attribute
+built on it. The fifth is a function parameter, `os.walk(d)` inside a
+function taking `d`. The sixth is a join onto a name, `(DIR /
+"<child>").iterdir()`, the shape of `tests/ontology/ontology_paths.py:10`. The
+seventh is `Path("<a>", "<b>").iterdir()`, a `Path` call with two literals.
+The eighth is `os.listdir()`, an `os` call with no positional argument. One
+resolves a name anyway. The first case kills it, since its name is bound to
+the added directory. Assert that call is on the list and draws no enumerator
+report. One resolves `__file__`. It resolves the third or the fourth case,
+and then leaves it off the list. One resolves `Path` of any number of
+literals. The seventh case names the added directory in two parts, so assert
+it listed and not reported. One lists only the three method spellings and
+drops an `os` call. The fifth and eighth cases kill it. One lists a call
+whose directory resolves. Assert that none of criterion 2's calls is on the
+list, save the parent's `.glob(name)` and `.glob("<child>/*.md")`. Assert
+both of those on it. One treats unresolved as a defect.
+Write a third spec file over the same commit, with one added entry. Its
+directory is neither at nor below any directory a fixture literal names.
+Assert exit 0, and the count line and the eight unresolved lines as all it
+prints. No second fixture is needed for it. One drops an ancestor `.glob`
+whose pattern it cannot read. An implementation that resolves the receiver,
+finds it an ancestor, and asks whether a literal pattern carries `**` passes
+every case above. Criterion 2's `Path("<parent>").glob(name)` is that call.
+In the first run, assert it on the unresolved list, neither absent nor
+reported as a descent. One prints an unresolved call once per directory
+taken. Run criterion 2's second spec, which takes two directories. Assert
+each of the eight lines appears once, and the parent's `.glob(name)` once.
 
 **Each witness is a plain `def`, never parametrised**. `criteria` matches a
 bare node id against the names the suite collected, by exact string. A
@@ -492,15 +609,16 @@ that the file's shape is real git in a temporary repo. `_git` and `_commit` at
 `tests/test_spec_loop_driver.py:116-127`, and `empty_repo` at
 `tests/test_spec_loop_driver.py:129-137` which blinds the repo to the host's
 git config, are what to build on. Write three or four short files under the
-fixture repo's own `tests/`, plus the one module whose constant they import,
-and commit them. Do not copy this repository into the fixture. The spec file
-each witness reads is written in the fixture's working tree and committed
-nowhere.
+fixture repo's own `tests/`, one of them in `tests/sub/`, and commit them. The
+three witnesses share that one fixture, and no witness builds a second. Do not
+copy this repository into the fixture. The spec file each witness reads is
+written in the fixture's working tree and committed nowhere.
 
 **The count line is one line**. Name the directories taken, the `touches`
-entries skipped and the files read. Print it on every run that reads the spec,
-including one with no directory to scan and no file to read. A command that
-prints nothing reads the same whether it read eighty-one files or none, and
+entries skipped and the files read. Print it on every run that gets as far as
+taking directories, including one with no directory to scan and no file to read.
+A usage failure ends the run before that step and prints none. A command that
+prints nothing reads the same whether it read eighty-five files or none, and
 that no-op is what this line makes visible. `cmd_check` at
 `.claude/skills/run-saffron-spec-loop/driver.py:1711` prints a clean-verdict
 sentence for the same reason. Group the reports by directory in `touches`
@@ -516,40 +634,35 @@ the working tree, and it is the cheap way to check before a gate does.
 
 **Rename no existing test**. `census` compares collected names between base and
 head, and reads a rename as a removal. The three new tests belong at the end of
-`tests/test_spec_loop_driver.py`, after
-`test_only_probe_takes_a_command_after_the_separator` at
-`tests/test_spec_loop_driver.py:1821`.
+`tests/test_spec_loop_driver.py`. At this base the last test there is
+`SA-0114`'s `test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines`
+at `tests/test_spec_loop_driver.py:1927`, so yours follow it.
 
-**The shape is about 520 changed lines, and nothing here raises the tier**.
+**The shape is about 411 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`. So this task runs at `risk: standard`, where `size` is advisory
 against the `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The
-estimate is 235 in `driver.py` and 285 in the test file, derived per part. In
-`driver.py`: 25 lines to take the directories out of `touches` and count the
-skips. 40 to find the calls and decide which of them recurse, the ancestor
-`.glob` whose pattern is no literal among them. Then 25 for the file's import
-map and the dotted-name lookup, and 90 for the resolver item 5 bounds. Last,
-47 for `cmd_enumerators` and what it prints. That covers the `GitError` catch
+estimate is derived per part for this narrowed spec, and the parts sum to
+the total. In `driver.py`, 128 lines. 25 take the directories out of
+`touches` and count the skips. 35 find the calls: the six spellings, each
+file's name for `os`, which calls recurse, whether a pattern is a literal, and
+the function holding each call. 15 resolve the three forms item 5 names. 45
+are `cmd_enumerators` and what it prints. That covers the `GitError` catch
 for an unresolvable `--base`, the order the usage failures take, and the
-`<module>` a module-scope call's report names. Then 8 to register the
-subcommand. In the tests: 40 for a shared helper that builds the fixture repo
-and writes a spec file, then 70, 102 and 73 for the three witnesses. The
-derivation is measured rather than guessed. The author's prototype of the
-resolver, the call finder and the import map ran over this base's `tests/` in
-120 lines. It carried no comments, no `_fail` paths and no report. Repo style
-plus the bounds above is what takes that to 235. `SA-0112` is the comparable
-cell in these same two files, at 99 lines in `driver.py` and 144 in the test
-file. That cell built one subcommand with five verdicts and four witnesses.
-This one parses Python at a commit, where that one read rows already in hand.
-520 leaves 80 lines under the ceiling that `SA-0106` (633) and `SA-0107`
-(1049) overshot. The twenty over the first draft are the witness prescriptions
-this spec's first review added, three ancestor calls asserted as descents and
-a `--base` case. The twenty-five over that are the second review's. They are a
-module-scope call and the `<module>` its report names, and an ancestor
-`.iterdir()`. The other two are an ancestor `.glob` whose pattern is a name,
-and a `<module>.__file__` the commit holds no file for. Do not go looking for
-more to do. The resolution set in item 5 is closed. A shape it does not name
-belongs in the unresolved list rather than in a seventh case.
+per-directory judging. It also covers the count line, the grouped reports and
+the unresolved group. 8 register the subcommand. In the test file, 283 lines.
+61 are a shared helper that builds the fixture repo and writes a spec file,
+the fixture's calls included. Then 80, 97 and 45 for the three witnesses. So
+128 and 283 make 411. A 25-line throwaway script held the call finder and
+the three-form resolver, and ran over this base's `tests/`. It carried no
+comments, no `_fail` paths and no report. Repo style and the reporting take that to 128.
+`SA-0112` is the comparable cell in these same two files, at 99 lines in
+`driver.py` and 144 in the test file. 411 sits 189 lines under the ceiling
+that `SA-0106` (633) and `SA-0107` (1049) overshot. The turns fall with it.
+The rate that put the 573-line draft of this spec at 145 to 169 implement
+turns puts 411 lines at 104 to 121, against `max_turns: 150`. Do not go
+looking for more to do. The three forms in item 5 are closed. A shape they do
+not name belongs in the unresolved list rather than in a fourth form.
 
 **The ceilings, against `driver.py history SA-0115`**. `max_turns: 150` stands
 against a comparison row that is a floor. The line marks `SA-0106`'s peak of
@@ -559,7 +672,9 @@ The highest peak among the printed rows that ran to its own end is `SA-0089`'s
 88t, and 150 clears that by 62t. `budget_usd: 26` stands against `SA-0106`'s
 pre-REVIEW total of $14.73, above by $11.27. The most any one printed row spent
 after that point is `SA-0107`'s $2.81 review plus $3.17 rebut, $5.98, well
-inside that remainder. `max_attempts: 3` is this file's standing level, as
-`SA-0112` and `SA-0114` ran.
+inside that remainder. `max_attempts: 3` is this file's standing level.
+`SA-0112` ran at it, and `SA-0114` reached `READY_FOR_REVIEW` at $9.50 under
+the same three ceilings as this spec
+(`.saffron/specs/SA-0114-a-specs-citations-are-resolved-by-eye.md:36-38`).
 
 Commit after each coherent step. Uncommitted work dies with the cell.
