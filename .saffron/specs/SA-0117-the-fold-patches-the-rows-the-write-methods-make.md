@@ -58,9 +58,14 @@ acceptance:
       `set_task_package`, `record_merged_head`, then open attempt 2, its gate
       result, and close it. Each gate result has its own gate name and at
       least two failures, each with a distinct file and code, a non-empty
-      message and a line. After each write the witness folds every fact so
-      far into one fresh ledger and compares `tasks`, `attempts`,
-      `gate_results`, `failures` and `findings` with the writing ledger's.
+      message and a line. Before the first write, the fold ledger already
+      holds an unrelated task with one attempt and one finding. That task is
+      written by a ledger and record of its own and folded in, so no finding
+      or attempt id the fold mints equals the one the writing ledger chose.
+      After each write
+      the witness folds every fact so far into that ledger and compares this
+      task's rows in `tasks`, `attempts`, `gate_results`, `failures` and
+      `findings` with the writing ledger's.
       Every `*_id` column and every timestamp column is left out. Each child
       row is compared through its parent's natural key instead: a task
       through its run's `base_sha`, an attempt and a finding through the
@@ -96,8 +101,8 @@ acceptance:
   - claim: >-
       A rebuttal fact whose finding no earlier fact of its task placed makes
       the whole task unreadable, even when the task holds another finding.
-      The witness removes the fact of the finding the rebuttal names and
-      keeps the other. A strict fold raises `UnreadableTask` naming
+      The rebuttal names the first finding. The witness removes that
+      finding's fact, whose id is the lower, and keeps the second. A strict fold raises `UnreadableTask` naming
       the task. A fold without `strict` records the task in `Fold.skipped`,
       writes none of its rows and folds the next task. Today the fold without
       `strict` drops only the rebuttal and folds the rest of the task.
@@ -110,7 +115,7 @@ acceptance:
       log with no `task_created` fact, and a rebuttal whose finding is gone
       while another finding stays. A second task shares the record. In both modes, the five tables then
       hold exactly that second task's rows from the earlier fold, compared row
-      for row and counted table by table. Today a task found unreadable while
+      for row with every `*_id` column left out, and counted table by table. Today a task found unreadable while
       the fold orders tasks keeps the rows of its earlier fold.
     witness: tests/test_ledger_fold_task.py::test_a_task_that_became_unreadable_leaves_a_surviving_ledger
   - claim: >-
@@ -265,7 +270,7 @@ today (`fold.py:117-127`). Mark both with `ponytail:` comments that name the
 second spec's fix.
 
 **The per-kind tests the round trip supersedes.** `tests/test_ledger_appends.py`
-and the `_db` queries in `tests/test_fold.py` stay until the second spec. Two
+and the `_db` queries in `tests/test_fold.py` stay until the second spec. Three
 exceptions follow in the notes, where this spec changes the premise a test
 rests on.
 
@@ -292,8 +297,8 @@ notes which columns you dropped.
 **The round trip compares two independent halves, and that is its worth.**
 The writing ledger's rows come from the write methods' own SQL. The folded
 rows come from `_apply`. A column `_apply` forgets differs between them.
-Give every column the first task's writes set a value that is neither
-`NULL` nor the schema's default. The second task exists only for the `risk`
+Give every column the compared task's writes set a value that is neither
+`NULL` nor the schema's default. The task that declares no risk exists only for the `risk`
 default, so this rule does not bind it. Where the column's type allows it, make the value
 distinct from every other column's too. `attempts.n` and `findings.anchored`
 cannot be. On the final snapshot only, assert that no compared column is
@@ -308,14 +313,17 @@ in one task, and the last write wins. They are `branch` (`create_task`, then
 `pushed_sha` (`record_push`, then `set_task_package`) and `state`
 (`set_task_state`, then `set_task_package`). So an `_apply` that ignores
 `policy_sha` on `task_created` matches the final rows. After each write, fold
-every fact so far into the same fresh ledger and compare. That also drives
+every fact so far into the ledger criterion 1 describes, which already holds
+an unrelated task, and compare. That also drives
 `fold_task` dropping the rows it folded a moment before.
 
 **Two of each row a fold places by a rule.** The finding map and the
 last-opened attempt are rules. One row lets a wrong rule pass. With one
 finding, a rebuttal placed on the latest finding matches. With results in one
-attempt only, a gate result placed on the first attempt matches. So each
-rebuttal names a finding that is not the latest when it is written. Each
+attempt only, a gate result placed on the first attempt matches. So the
+first rebuttal names the latest finding and the second names the earlier one.
+A rule that picks the latest finding fails, and so does one that pairs them
+by position. Each
 attempt has a gate result under its own gate name. A gate result with no
 failures lets an `_apply` that ignores them pass, so each carries two.
 
@@ -358,15 +366,20 @@ its repo belong to other tasks too and stay. A refold is free to give the
 task a new `task_id`. The rows the `preserves` criteria compare leave the ids
 out.
 
-**Two tests in `tests/test_fold.py` rest on a fault this spec removes.**
+**Three tests in `tests/test_fold.py` rest on a premise this spec removes.**
 `test_a_task_that_fails_mid_replay_leaves_no_rows_behind` and
 `test_a_replay_that_breaks_is_not_skipped_as_unreadable` inject an unknown
 payload key through `_with_unplaceable_payload`. They expect the `TypeError`
 a keyword call raises on it. `_apply` reads payload keys by name, so the
-extra key raises nothing. Delete both tests and the helper. Criteria 3 and 4
-test the same two properties with a fault `_apply` must refuse.
-`test_a_rebuttal_with_no_finding_fact_raises_under_strict` asserts the rule
-criterion 5 replaces. Delete it too.
+extra key raises nothing. `test_a_rebuttal_with_no_finding_fact_raises_under_strict`
+asserts the rule criterion 5 replaces. Keep all three names and rewrite their
+bodies, because `census` fails any test collected at base and missing at head
+(`saffron/gates/core/census.py:34-38`). In the first two, replace
+`_with_unplaceable_payload` with a helper that adds a `decision` fact to the
+task. The first test keeps
+its zero-row counts under `strict`. The second expects an error that is not
+`UnreadableTask` without `strict`. The third keeps its fault, the removed finding facts, and expects
+`UnreadableTask` under `strict`, and without it `folded == 0` with the task in `skipped`.
 
 **Criterion 4's error and criterion 5's are different kinds of failure.** An
 unplaced kind is the fold's own gap and aborts the fold. `saffron fold`
@@ -385,13 +398,14 @@ log holds none of the other five kinds.
 
 **Size.** A prototype of this change measured 908 changed lines. It spent 254
 in `ledger.py` and 223 in `fold.py`. The new test module took 380, and 51
-went from `tests/test_fold.py`. The `refactor` ceiling is 1000, and `size`
+went from `tests/test_fold.py`. Rewriting its three tests in place, rather
+than deleting them, adds about 30. The `refactor` ceiling is 1000, and `size`
 blocks at `elevated`. That leaves under 100 lines for prose. Keep comments
 and docstrings short, and share one row reader and one write list across
 the new witnesses.
 
 **Prose.** `tests/test_ledger_fold_task.py` is a new file, so the `prose`
 ratchet starts it at zero. Its comments and docstrings take no em-dash,
-semicolon, contraction, perfect tense or hedge. In `ledger.py` and `fold.py`
-a new comment adds hits to a file's count, and a count above base fails.
+semicolon, contraction, perfect tense or hedge. In `ledger.py`, `fold.py` and
+`tests/test_fold.py` a new or rewritten comment adds hits to a file's count, and a count above base fails.
 Check each file with `python3 hooks/prose_limit.py --file <path>`.
