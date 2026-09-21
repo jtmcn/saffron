@@ -18,11 +18,13 @@ Filed 2026-09-20 while writing `SA-0116`.
 Its module docstring says why they live there: "Test support, moved from
 `records/`: only these tests ran it."
 
-`SA-0116` gives two of them a second caller. Its command prints the four edits
-a spec's commit owes. It reads `first_cited_item` at
-`tests/records/check.py:362` for the origin item a spec's `## Context` cites,
-and `check_priority` at `:441` for the records `PRIORITY.md` does not place.
-So the stated reason for the move stops being true the day that command lands.
+`SA-0116` gives one of them a second caller. Its command prints three of the
+four edits a spec's commit owes. It reads `first_cited_item` at
+`tests/records/check.py:362` for the origin item a spec's `## Context` cites.
+`check_priority` at `:441` was the second caller until that spec's review cut
+its `PRIORITY.md` block on size. It becomes one again when the rest of
+[[b-7d3810]] lands. So the stated reason for the move stops being true the
+day that command lands.
 
 The direction is backwards. `records/` is the dev-only package for this
 repository's project documents, and nothing under it imports from `tests/`.

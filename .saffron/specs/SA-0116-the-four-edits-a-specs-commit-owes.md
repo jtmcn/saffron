@@ -1,6 +1,6 @@
 ---
 id: SA-0116
-title: the commit that adds a spec owes four edits to four other files, and every one of them is derived by hand
+title: the commit that adds a spec owes four edits to other files, and a command derives three of them
 type: feature
 priority: 2
 depends_on: [SA-0115]
@@ -42,10 +42,10 @@ acceptance:
   - claim: >-
       `driver.py bookkeeping` takes a spec id, reads the working tree and no
       commit, and resolves that id to a file through `spec_files`, which covers
-      `.saffron/specs` and `.saffron/specs/done`. It prints four headed blocks
-      in this order: the origin item's `specs:` line, the `PRIORITY.md` lines
-      owed, the queue smoke test's paragraph, and that test's two pinned
-      `assert` lines. Each of the four is headed and printed on every
+      `.saffron/specs` and `.saffron/specs/done`. It prints three headed blocks
+      in this order: the origin item's `specs:` line, the queue smoke test's
+      paragraph, and that test's two pinned
+      `assert` lines. Each of the three is headed and printed on every
       invocation that got past the three failures below, whether or not it has
       anything to report, and such an invocation exits 0. Those three each
       print a message to stderr, print nothing on stdout and exit 1: a spec id
@@ -58,47 +58,39 @@ acceptance:
       the `## Context` cites no item at all, and where it cites an id no record
       under `docs/backlog/` carries, the block says which of the two and prints
       no `specs:` line.
-    witness: tests/test_spec_loop_driver.py::test_bookkeeping_prints_four_blocks_and_the_specs_line_its_origin_item_owes
+    witness: tests/test_spec_loop_driver.py::test_bookkeeping_prints_three_blocks_and_the_specs_line_its_origin_item_owes
   - claim: >-
-      The second block prints one line for each record under `docs/backlog/`
-      whose own `tier` `PRIORITY.md` does not name it under, and takes that
-      judgement from `check_priority` over the working tree rather than from a
-      second reading of the file. Each line gives the record's id, its tier and
-      the `### Tier <n>` heading its entry belongs under. Three kinds of record
-      draw no line: one `PRIORITY.md` already names under its own tier, one
-      whose frontmatter carries no `tier` at all, and one named only in a
-      violation `check_priority` reports against `PRIORITY.md` itself rather
-      than against a record, which is the shape an id naming no record takes. A
-      block with no line to print says the file is owed nothing.
-    witness: tests/test_spec_loop_driver.py::test_bookkeeping_names_only_the_records_priority_md_leaves_unplaced
-  - claim: >-
-      The third block prints a draft paragraph for the queue smoke test. It
+      The second block prints a draft paragraph for the queue smoke test. It
       opens `Re-measured <date>, a <ordinal> time:`, the date an ISO one, and
       `<ordinal>` is the ordinal word one past the first `a <ordinal> time` in
       that test's docstring as the working tree holds it, never a count of that
       docstring's `Re-measured` lines. The word it steps to covers the plain,
       the hyphenated and the boundary-crossing forms, so `ninth` becomes
       `tenth`, `nineteenth` becomes `twentieth` and `twenty-ninth` becomes
-      `thirtieth`. The rest of the paragraph names the spec, its origin item,
-      whether it declares `depends_on` and which ids, and then one of two
-      things: the position it takes among the candidates, or the refusal it
-      draws with the scheduler's own reason verbatim. Where
+      `thirtieth`. The rest of the paragraph carries this spec's own id and its
+      origin item's id, whether it declares `depends_on` and which ids, and
+      then one of three things: the position it takes among the candidates, the
+      refusal it draws with the scheduler's own reason verbatim, or, for a spec
+      `spec_files` resolved under `done/`, that it is retired there and so in
+      neither list. Where
       `tests/test_scheduler.py` holds no function of that name, and where its
       docstring holds no `a <ordinal> time`, the paragraph is printed all the
       same, with `<Nth>` standing where the ordinal would be and a line saying
       which of the two happened.
     witness: tests/test_spec_loop_driver.py::test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal
   - claim: >-
-      The fourth block prints two lines, each a complete `assert` statement of
+      The third block prints two lines, each a complete `assert` statement of
       the form `tests/test_scheduler.py:2109-2110` holds: the candidate spec
       ids in the order the queue gives them, and the refusals' file names cut
       to their first seven characters. Both come from one `build_queue` over
       `.saffron/specs` in the working tree, under a ledger this invocation
-      creates empty rather than the one at ~/.saffron/ledger.db, with
-      `repo_slug` set to joel/saffron and a `gh` reporting no open pull
-      request, which is the
-      arrangement at `tests/test_scheduler.py:2098-2105`. So both lines equal
-      what that test asserts. `_ledger_and_repo` is not called.
+      creates empty rather than the one at ~/.saffron/ledger.db, and with a
+      `gh` this invocation supplies that reports no open pull request, so
+      `build_queue`'s default of `run_gh` (`saffron/scheduler.py:731`) is never
+      reached and no `gh` subprocess runs. Those are the two halves of the
+      smoke test's own arrangement at `tests/test_scheduler.py:2098-2105` that
+      decide what the queue returns, so both lines equal what that test
+      asserts. `_ledger_and_repo` is not called.
     witness: tests/test_spec_loop_driver.py::test_bookkeeping_prints_the_two_assert_lines_the_smoke_test_pins
 ---
 
@@ -107,8 +99,8 @@ acceptance:
 Backlog item **b-7d3810** is
 `docs/backlog/b-7d3810-adding-a-spec-edits-four-files-by-hand.md`, tier 2. It
 was filed on 2026-09-20 from `SA-0113`, one spec drafted outside a loop run. It
-is third of three in `docs/backlog/PRIORITY.md:173-175`, behind **b-b69bb6**,
-and tier 2 names it at `docs/backlog/PRIORITY.md:145`. Its sibling
+is second of three in `docs/backlog/PRIORITY.md:173-174`, behind **b-b69bb6**
+and ahead of **b-929465**, and tier 2 names it at `docs/backlog/PRIORITY.md:145`. Its sibling
 **b-b69bb6** is the item `SA-0114` and `SA-0115` serve. This one is the other
 half of the same tail: the edits `docs/agents/issue-tracker.md` asks of the
 commit that adds a spec.
@@ -141,10 +133,13 @@ live tree on every `make check`.
 `check_specs_name_their_items` at `tests/records/check.py:415-438` reports
 "`{spec_id}` cites this item and is not listed" for the first edit.
 `check_priority` reports the fourth. Both say what is missing. Neither says
-what to write. The other two are pinned by hand, in a test docstring and in two
-`assert` statements. Measured at this base: both functions return `[]` over the
-working tree. The tree is clean, so what either reports after a spec is added
-is what that spec's commit owes.
+what to write. But `check_priority`'s message carries the record and its tier,
+which is nearly the whole of the line an author pastes. That is why
+`PRIORITY.md` is the one of the four this spec leaves out, under
+*Out of scope*. The other two are pinned by hand, in a test docstring and in
+two `assert` statements, and nothing reports them at all. Measured at this
+base: both functions return `[]` over the working tree. The tree is clean, so
+what either reports after a spec is added is what that spec's commit owes.
 
 **The origin item is computable**. `first_cited_item` at
 `tests/records/check.py:362-368` takes the first id of the first `_ITEMS` match
@@ -152,7 +147,7 @@ in document order. `_context_section` at `tests/records/check.py:371-374` hands
 it the spec's `## Context`. Measured at this base: over
 `.saffron/specs/SA-0115-the-tests-that-enumerate-a-directory-a-spec-adds-to.md`
 the pair returns `b-b69bb6`. `spec_files` at `tests/records/check.py:283-285`
-resolves a spec id to its file over the queue and `done/`. It returns 105
+resolves a spec id to its file over the queue and `done/`. It returns 106
 entries here.
 
 **The spec loop's driver is where a computed aid for a spec's commit lives**.
@@ -200,13 +195,17 @@ holds `tests/` and `.claude/`.
 
 **One file holds every importer of this driver's code**.
 `tests/test_spec_loop_driver.py` execs the driver through `importlib.util` at
-`tests/test_spec_loop_driver.py:19-26`. Every other file naming `driver.py` at
-this base names it in prose and calls nothing. Those are the two agent
+`tests/test_spec_loop_driver.py:19-26`. One other file runs it.
+`docs/evidence/scripts/2026-09-14-spec-reviewer-backtest.py` execs it the same
+way at `:110` and shells `history` at `:169`, and it reaches neither the
+subcommand table nor anything this change adds. Every remaining file naming
+`driver.py` names it in prose and calls nothing. Those are the two agent
 definitions, the skill's three documents, `.saffron/deadcode-allow.py`, the
 queued and retired specs, and the backlog records. One more is
 `tests/test_scheduler.py`, whose mention sits in the queue smoke test's own
-docstring. The importer and the driver are in `touches`, and every other reader
-is `forbidden`.
+docstring. The importer and the driver are in
+`touches`. Every other reader is `forbidden`, `docs/**` and that script
+included.
 
 ## Problem
 
@@ -216,7 +215,9 @@ part of it that needs no judgement. The smoke test's paragraph recorded its
 forty-ninth re-measurement in that commit. Every one of the forty-nine was
 written by hand, from a queue the author had to compute anyway.
 
-The command is `bookkeeping`. It takes a spec id and prints the four edits.
+The command is `bookkeeping`. It takes a spec id and prints three of the four.
+The fourth, `PRIORITY.md`, is cut for size, and *Out of scope* gives the
+reason.
 
 1. **The origin item's `specs:` line**. The item is what `first_cited_item`
    returns over the spec's `## Context`. That is the rule
@@ -226,19 +227,12 @@ The command is `bookkeeping`. It takes a spec id and prints the four edits.
    the ordinary case on a second look at one. Printing a line that changes
    nothing, with no word about it, is what that case must not do.
 
-2. **The `PRIORITY.md` lines**. The question is whether each record id appears
-   in the file under its own tier, and `check_priority` answers it already. Its
-   `tier` violations name the record and the tier. The heading an entry goes
-   under is `### Tier <n>`, and `_TIER_HEADING` at `tests/records/check.py:390`
-   is the pattern for it. That function's other violations are about
-   `PRIORITY.md` itself, such as an id it names or strikes that no record
-   carries. Those are reported against that file rather than against a record.
-   They are a defect to fix rather than a line to paste, so this block leaves
-   them to `make check`.
-
-3. **The smoke test's paragraph**. What it says is computable: the spec, the
-   item it came from, its `depends_on`, and either where it lands among the
-   candidates or what refuses it. The ordinal is the one part the queue does
+2. **The smoke test's paragraph**. What it says is computable. The spec, the
+   item it came from, its `depends_on`, and one of three positions: where it
+   lands among the candidates, what refuses it, or retired. A spec under
+   `done/` is in neither list, because `discover_specs` globs
+   non-recursively (`saffron/intake.py:338`) and `_retired_ids` reads `done/`
+   on its own (`saffron/scheduler.py:522-528`). The ordinal is the one part the queue does
    not carry, and the tempting derivation of it is wrong. Measured over the
    tree this spec's commit leaves, the docstring at
    `tests/test_scheduler.py:1821` opens "Re-measured 2026-09-20, a fifty-second
@@ -247,18 +241,34 @@ The command is `bookkeeping`. It takes a spec id and prints the four edits.
    from the topmost one plus one. A count of paragraphs would run fourteen
    short and read as right.
 
-4. **The two pinned `assert` lines**. One `build_queue` over the working
+3. **The two pinned `assert` lines**. One `build_queue` over the working
    tree's `.saffron/specs` gives both. The arrangement has to be the smoke
    test's own, because the point is that the printed lines equal the asserted
    ones. That means a ledger created empty, so that nothing is filtered. It
    means a `gh` with no open pull request, so that the overlap refusal never
    fires.
 
-Nothing here judges. The command prints four blocks and exits 0. The author
-reads them and edits four files. Two of the four are judged already, by
+Nothing here judges. The command prints three blocks and exits 0. The author
+reads them and edits two files, the origin item and
+`tests/test_scheduler.py`. The first of the three blocks is judged already, by
 `make check`, and a second verdict here would be a slower copy of that one.
 
 ## Out of scope
+
+**The `PRIORITY.md` block, cut on size**. The first draft printed a fourth
+block: one line per record `PRIORITY.md` leaves unplaced, from `check_priority`
+over the working tree. The review's own size count put the four-block shape at
+555 changed lines, and the fixes this revision applies add about 35 more. That
+is inside 100 of the `feature` ceiling of 600
+(`saffron/gates/core/size.py:25`), so one block comes out. `PRIORITY.md` is the
+one to cut. `check_priority` at `tests/records/check.py:441-491` reports it on
+every `make check`, in a message naming both the record and its tier. What the block
+added over that message is the `### Tier <n>` heading to paste under, which is
+a grep. The other three blocks have no such report behind them. The cost is
+that an author placing a new record still finds its heading by hand, and item
+b-7d3810 keeps that quarter open. `check_priority` is then imported by nothing
+here, and the `records/` debt this spec's commit filed as b-262df1 rests on
+`first_cited_item` alone.
 
 **Filing a record, and editing any of the four files**. The item's
 `## Done looks like` is one command that prints, and the author pastes. This
@@ -268,9 +278,9 @@ settled that before this spec was written.
 
 **A verdict, and an exit status carrying one**. Exit is 0 on every invocation
 that read the spec, and 1 on the three usage failures. This is not `check`.
-The two halves that can be judged are judged on every `make check`, by
-`tests/records/test_records_integrity.py:13-21`. The other two are prose an
-author edits. A command exiting 1 over an unwritten paragraph would fail on
+The half that can be judged is judged on every `make check`, by
+`tests/records/test_records_integrity.py:13-21`. The other two blocks are prose
+an author edits. A command exiting 1 over an unwritten paragraph would fail on
 every spec, every time, forever.
 
 **The prose half**. Wiring this into the spec loop's `SKILL.md`, into
@@ -282,11 +292,9 @@ called by nothing the day it lands, and that is the expected state rather than
 an omission.
 
 **Reading a commit**. `cite` and `enumerators` take a `--base` because they
-compare a spec against a tree at a commit. This one does not. All four edits
-are about the working tree as the author has it. `check_priority` over that
-tree reports exactly the records left unplaced, and measured at this base it
-reports none. So there is no `--base`, and `_git`, `_spec_at` and
-`_ledger_and_repo` play no part.
+compare a spec against a tree at a commit. This one does not. All three blocks
+are about the working tree as the author has it. So there is no `--base`, and
+`_git`, `_spec_at` and `_ledger_and_repo` play no part.
 
 **Every other subcommand**. `snapshot`, `next`, `record`, `drop`, `hold`,
 `probe`, `status`, `stack`, `rebase`, `size`, `history`, `check`, `pattern`,
@@ -335,19 +343,24 @@ the root as an argument, and `cmd_bookkeeping` passes the module's constants.
 **Import inside the function, as `cmd_size` does at
 `.claude/skills/run-saffron-spec-loop/driver.py:1346`**. What this command
 needs is `saffron.intake.load_spec`, `saffron.scheduler.build_queue`,
-`saffron.ledger.Ledger`, `records.load.load`, `records.kinds.KINDS`, and the
-four functions from `tests.records.check` named in `## Context`. Importing
+`saffron.ledger.Ledger`, `records.load.load`, `records.kinds.KINDS`, and
+`spec_files`, `first_cited_item` and `_context_section` from
+`tests.records.check`. Importing
 `tests.records.check` from the driver was measured at this base and works. It
-is the right reuse rather than a convenience. `first_cited_item` and
-`check_priority` are the rules `make check` applies, and a second copy of
-either would drift from the thing it exists to predict.
+is the right reuse rather than a convenience. `first_cited_item` is the rule
+`make check` applies, and a second copy of it would drift from the thing it
+exists to predict.
 
 **The empty ledger is this invocation's own**. Create it under a temporary
 directory, and close it. `tests/test_scheduler.py:2101` upserts one repo row
 into its fixture's ledger before calling `build_queue`. Measured at this base,
 the candidate and refusal lists are identical with that row and with
-`repo_id=None`. Either is right, and no claim pins one. What criterion 4 does
-pin is that `~/.saffron/ledger.db` is not the ledger read.
+`repo_id=None`. Either is right, and no claim pins one. What criterion 3 does
+pin is that `~/.saffron/ledger.db` is not the ledger read. Pass `repo_slug` as
+joel/saffron too, as `tests/test_scheduler.py:2104` does. With no open pull
+request the two lists come back the same either way, so no claim pins that
+argument. The `gh` is the half criterion 3 pins, because leaving it off
+reaches the real one.
 
 **The ordinal words**. One list of the words for 1 to 99 serves both
 directions. Find the docstring's word in it, and take the next. Build the list
@@ -357,16 +370,19 @@ docstring carrying no `a <ordinal> time` at all.
 
 **Name the wrong implementation each witness must kill**.
 
-Criterion 1 kills ten. One reads the spec from a commit rather than from the
+Criterion 1 kills eleven. One reads the spec from a commit rather than from the
 working tree. The witness catches it by writing the spec file into a scratch
 tree no repository holds. One resolves the id under `.saffron/specs` alone and
 misses `done/`. Put one fixture spec under `.saffron/specs/done/`, and assert
-an invocation naming its id prints the four blocks and exits 0. One takes the
+an invocation naming its id prints the three blocks and exits 0. One takes the
 last item a `## Context` cites, or any of them. Give one fixture spec a
 `## Context` naming two different items, and assert the block names the first.
-One prints only the blocks with something to say.
-Assert all four headings, in order, on an invocation whose second block is
-empty. One appends the spec id to the item's `specs:` rather than sorting it
+One heads a block only when it has a line to paste. Assert all three headings,
+in order, on the invocation whose `## Context` cites no item. That first block
+has no `specs:` line, and its heading must stand above the sentence saying
+which case it met. Assert the same three headings, in the same order, on the
+invocation whose item already carries the spec. The claim's "every invocation"
+then reaches two of them. One appends the spec id to the item's `specs:` rather than sorting it
 in. Give the fixture's item a `specs:` already holding an id above this spec's
 and one below. Assert the printed line carries all three in order. One prints
 the line and says nothing where the item already carries the id. One treats a
@@ -379,21 +395,7 @@ id, a spec file whose frontmatter `load_spec` refuses, and a record file
 stdout** for each. That last assertion also kills an implementation printing
 its blocks before it validates.
 
-Criterion 2 kills six. One prints one line and stops. The fixture holds two
-records `PRIORITY.md` leaves unplaced, and the witness asserts a line for each.
-One prints every record with a missing tier line and every `PRIORITY.md`
-violation beside it. Give the fixture a `PRIORITY.md` naming a bold id no
-record carries, and assert that id draws no line here. One
-prints every record in the directory. Give the fixture a record `PRIORITY.md`
-already names under its own tier, and assert it draws nothing. One treats a
-record with no `tier` as tier 0, or as unplaced. Give the fixture one with no
-`tier` key, and assert it draws nothing. One prints the id and the tier without
-the heading the entry goes under, killed by asserting `### Tier ` and the
-number in the line. One prints an empty block with no line at all, killed by
-asserting the owed-nothing sentence over a fixture whose records are all
-placed.
-
-Criterion 3 kills eight. One leaves the `depends_on` out of the paragraph. The
+Criterion 2 kills ten. One leaves the `depends_on` out of the paragraph. The
 refused fixture spec declares one parent, and the admitted one declares none.
 Assert the parent's id in the first paragraph, and the words for an empty
 `depends_on` in the second. One counts the docstring's `Re-measured` lines.
@@ -409,18 +411,27 @@ a docstring holding no ordinal. Both must print the paragraph with `<Nth>` in
 it, print a line saying which happened, and exit 0. One covers the candidate
 case alone. Run the command over a spec the fixture queue refuses, and assert
 the scheduler's own reason reaches the paragraph. Then run it over one the
-queue admits, and assert the position. One omits the date, killed by matching
+queue admits, and assert the position. One treats a spec `spec_files` resolved
+under `done/` as absent from the directory, or reports it as a refusal it never
+drew. Run the command over criterion 1's `done/` fixture spec, and assert the
+paragraph says it is retired to `done/`. One writes a paragraph naming neither
+the spec nor the item it came from, which reads as a paragraph about nothing.
+Assert this spec's own id and its origin item's id in the paragraph, on the
+admitted run and on the refused one. One omits the date, killed by matching
 the opening against a four-digit year and two two-digit fields. Matching
 today's date instead would flake at midnight.
 
-Criterion 4 kills five. One opens the live ledger. Monkeypatch
+Criterion 3 kills six. One opens the live ledger. Monkeypatch
 `driver._ledger_and_repo` to raise, and assert the invocation still exits 0.
-One prints the candidates and forgets the refusals, or the reverse. The
-fixture's `.saffron/specs` holds two specs that queue and one child of the
-second that is refused, and the witness asserts both lines. One sorts the
-candidates instead of keeping the queue's order. Give the fixture's two
-candidates a priority order opposite to their filename order, so that the two
-readings differ. One prints the ids
+One omits `gh=` and takes `build_queue`'s default of `run_gh`, which shells the
+real `gh` against joel/saffron. Measured at this base over a one-spec scratch
+directory: with `gh=` left off, a `subprocess.run` patched to raise is reached,
+and with a `gh` passed in it is not. So patch `saffron.scheduler.subprocess.run`
+to raise, and assert the invocation still prints both lines and exits 0.
+One prints the candidates and forgets the refusals, or the reverse. One sorts
+the candidates instead of keeping the queue's order. Both are killed by the
+fixture queue below, whose candidate order is the reverse of its filename
+order. One prints the ids
 rather than two pasteable statements. Assert the exact strings, `assert`
 keyword included, so that what the author copies is what the test file wants.
 One cuts the refusals to something other than seven characters, killed by
@@ -441,16 +452,48 @@ into a collection error, which `revert` reads as `skip`.
 
 **Build one scratch tree, and keep it small**. No git is needed anywhere in
 this witness set, because the command reads no commit. One helper writes three
-things under `tmp_path`. A `.saffron/specs/` holding three or four minimal
-specs, of the shape at `tests/test_spec_loop_driver.py:1058-1061` plus a
-`## Context` line naming an item. A `docs/backlog/` holding four short records
-and a `PRIORITY.md`. A `tests/test_scheduler.py` holding nothing but the smoke
-test's `def` and its docstring. The helper then monkeypatches `driver.REPO` and
+things under `tmp_path`. A `.saffron/specs/` holding the four specs measured
+below, of the shape at `tests/test_spec_loop_driver.py:1058-1061` plus a
+`## Context` line naming an item. A `docs/backlog/` holding three short
+records. A `tests/test_scheduler.py` holding nothing but the smoke test's `def`
+and its docstring. The helper then monkeypatches `driver.REPO` and
 `driver.SPECS_DIR`. A record file name must match
-`^(\d{3}|b-[0-9a-f]{6})-[a-z0-9-]+\.md$` (`records/kinds.py:190`), and
+`^(\d{3}|b-[0-9a-f]{6})-[a-z0-9-]+\.md$` (`records/kinds.py:190`).
 `PRIORITY.md` is one of that kind's `hand_written` names
-(`records/kinds.py:189`), so it is skipped rather than refused. Do not copy
-this repository into the fixture.
+(`records/kinds.py:192`), so a fixture writing one would be skipped rather than
+refused, and this fixture writes none. Do not copy this repository into the
+fixture. Each witness calls the helper into its own `tmp_path`. Criterion 1
+writes its extra `## Context` shapes on top of what the helper wrote.
+Criterion 3 writes none, so the queue it reads is exactly the four specs
+below.
+
+**The fixture queue is measured, not reasoned**. Run at this base over a
+scratch directory of exactly this shape, with the ledger created empty and
+`repo_slug` set to joel/saffron. `SA-0201-alpha.md` at `priority: 3`,
+`SA-0202-bravo.md` at `priority: 1`, `SA-0203-charlie.md` at `priority: 2`
+declaring `depends_on: [SA-0202]`, and `done/SA-0200-delta.md` at
+`priority: 2`. `build_queue` returned the candidates `['SA-0202', 'SA-0201']`
+and one refusal, `SA-0203-charlie.md`, reading `depends_on SA-0202 has no task
+at its current spec_sha, so nothing says it merged: it has not run, or not
+since it was last edited`. Build the fixture that way and pin those strings.
+The candidate order is the reverse of the filename order, so an implementation
+sorting by id dies. The refused file's eighth character is `-` where its
+seventh is `3`, so a cut to any other length dies as well. `SA-0200` is
+retired, which is the third position criterion 2 asserts, and it satisfies no
+`depends_on` a live fixture spec declares.
+
+**Every `item <id>` a witness writes must name a record `docs/backlog/`
+holds**. `first_cited_item` fires only on the `_ITEMS` pattern
+(`tests/records/check.py:37-41`). So each fixture `## Context` carries a phrase
+like "Backlog item b-b69bb6 is the origin", in this test file's own source. `CITING` at `tests/records/check.py:23-30` includes `tests`, and
+`_citing_files` skips only `tests/records/` (`:347-349`). So
+`check_item_citations` (`:352-360`) reads those phrases as live citations and
+reports "cites backlog item {n}, which does not exist" for an invented id.
+`tests/records/test_records_integrity.py:13-21` runs that over the live tree in
+the `tests` gate. The failure is new, so the baseline subtracts nothing. Both
+`tests/records/**` and `docs/**` are `forbidden`, so the cell cannot file the
+record that would answer it. For criterion 1's case of a citation no record
+carries, cite a real live id that the scratch `docs/backlog/` omits.
 
 **Each block is headed and printed even when it is empty**. A command printing
 nothing reads the same whether it had nothing to report or never looked. That
@@ -471,32 +514,35 @@ head, and reads a rename as a removal. The four new tests belong at the end of
 `test_only_probe_takes_a_command_after_the_separator` at
 `tests/test_spec_loop_driver.py:1821`.
 
-**The shape is about 490 changed lines, and nothing here raises the tier**.
+**The shape is about 495 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`, and neither is under `protected` at `.saffron/policy.yaml:61-66`.
 So this task runs at `risk: standard`, where `size` is advisory against the
-`feature` ceiling of 600 (`saffron/gates/core/size.py:25`). The estimate is 175
-in `driver.py` and 315 in the test file, derived per part. In `driver.py`: 32
-for the origin item and the `specs:` line it owes, both over what
-`tests/records/check.py` exports already. Then 14 for the `PRIORITY.md` lines,
-which is a filter over `check_priority`'s result. Then 24 for the queue under
-the smoke test's arrangement, temporary ledger included. Then 22 for the
-ordinal list and the step, and 14 for finding the smoke test's docstring with
-`ast`. Then 22 for the paragraph. Last, 42 for `cmd_bookkeeping` with its three
-failures and four headed blocks, and 5 to register the subcommand. In the
-tests: 60 for the helper that builds the scratch tree, then 95, 50, 70 and 40
-for the four witnesses. Those four are wider than a first draft by about 35
-lines, which is what the kills added on this spec's own self-review cost. The
-comparable cell in these same two files is `SA-0112`, at 99 lines in
-`driver.py` and 144 in the test file. That cell built one subcommand with five
-verdicts and four witnesses. This one has four blocks rather than five
-verdicts, and a larger fixture. Unlike `SA-0115` it parses no Python beyond one
-`ast` lookup for a docstring, and it resolves no expression. Against the `size:`
-lines the rows print, 490 sits between `SA-0089`'s 477 and `SA-0108`'s 494, and
-above `SA-0016`'s 486. All three of those landed. 490 leaves 110 under the
-ceiling that `SA-0106` (633) and `SA-0107` (1049) overshot. Do not go
-looking for more to do. The four blocks are the whole of it, and a fifth thing
-an author wants is item b-7d3810's next entry rather than this cell's work.
+`feature` ceiling of 600 (`saffron/gates/core/size.py:25`). Derived per part,
+the three-block shape is 161 in `driver.py` and 277 in the test file, 438. In
+`driver.py`: 32 for the origin item and the `specs:` line it owes, both over
+what `tests/records/check.py` exports already. Then 26 for the queue under the
+smoke test's arrangement, the temporary ledger, the `gh` passed in and the
+retired case included. Then 22 for the ordinal list and the step, and 14 for
+finding the smoke test's docstring with `ast`. Then 26 for the paragraph and
+its three positions. Last, 36 for `cmd_bookkeeping` with its three failures and
+three headed blocks, and 5 to register the subcommand. In the tests: 45 for the
+helper that builds the scratch tree, then 98, 86 and 48 for the three
+witnesses. The four-block draft this one replaces counted 490 the same way, and
+the review counted that same draft at 555. That is 13% over, on identical
+content, so 438 derived here reads as about 495 on the review's basis. Take 495
+as the planning figure. The comparable cell in these same two files is
+`SA-0112`, at 99 lines in `driver.py` and 144 in the test file. That cell built
+one subcommand with five verdicts and four witnesses. This one has three blocks and
+a larger fixture. Unlike `SA-0115` it parses no Python beyond one `ast` lookup
+for a docstring, and it resolves no expression. Against the `size:` lines the
+`history` rows print, 495 sits one line above `SA-0108`'s 494, and above
+`SA-0016`'s 486 and `SA-0089`'s 477. All three landed. The rows below those, at
+243, 177, 175, 155 and 128, are narrower cells than this one. 495 leaves 105
+under the ceiling that `SA-0106` (633) and `SA-0107` (1049) overshot. That
+margin is thin, so do not go looking for more to do. The three blocks are the whole of it. `PRIORITY.md` is cut for size, and
+a fourth thing an author wants is item b-7d3810's next entry rather than this
+cell's work.
 
 **The ceilings, against `driver.py history SA-0116`**. `max_turns: 130` stands
 against a comparison row that is a floor. The line marks `SA-0106`'s peak of
