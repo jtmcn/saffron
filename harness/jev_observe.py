@@ -184,3 +184,58 @@ def state(r: Round) -> dict[str, Any]:
         "earlier_findings": rows(r.prior),
         "diff": r.diff,
     }
+
+
+# Task 6 replaces this with the dated name `models.list()` reports, so a record names the model that answered.
+MODEL = "jev-latest"
+_PREFIXES = """@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix jev: <urn:saffron:jev#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+"""
+
+
+@dataclass(frozen=True)
+class Answer:
+    question: str
+    subject: str
+    distribution: dict[str, float]
+
+
+def distribution(answer: Any) -> dict[str, float]:
+    """The whole distribution. A flat split says the question was ambiguous, which the top answer hides."""
+    if answer.type == "noul":
+        return {"true": answer.noul, "false": 1 - answer.noul}
+    return {str(k): v for k, v in answer.probabilities.items()}
+
+
+def observe(r: Round, client: Any, model: str = MODEL) -> tuple[str, list[Answer]]:
+    """One call per round, which TypeSafe measured as 12x cheaper than one per question."""
+    asks = build_asks(r)
+    response = client.system_one(state(r), asks, model=model)
+    answers = []
+    for key in asks:
+        question, subject = key.split("_", 1)
+        answers.append(Answer(question, subject, distribution(response.answers[key])))
+    return response.model, answers
+
+
+def to_turtle(r: Round, model: str, answers: list[Answer]) -> str:
+    """One earl:Assertion per answer. The outcome is always cantTell, because a score has no pass."""
+    # json.dumps output is a valid Turtle string literal, since every escape it writes is one Turtle reads.
+    lit = json.dumps
+    parts = [_PREFIXES]
+    for a in answers:
+        subject = f"round-{r.number}" if a.subject == "round" else a.subject
+        parts.append(
+            "[] a earl:Assertion ;\n"
+            "  earl:assertedBy jev:jev ;\n"
+            f"  earl:subject <urn:saffron:jev:{r.kind}:{r.spec_id}:{subject}> ;\n"
+            f"  earl:test jev:{a.question} ;\n"
+            "  earl:mode earl:automatic ;\n"
+            "  earl:result [ a earl:TestResult ; earl:outcome earl:cantTell ;\n"
+            f"    jev:distribution {lit(json.dumps(a.distribution, sort_keys=True))}^^rdf:JSON ] ;\n"
+            f"  jev:model {lit(model)} ;\n"
+            f"  jev:round {r.number} ;\n"
+            f"  jev:commit {lit(r.commit)} .\n"
+        )
+    return "\n".join(parts)

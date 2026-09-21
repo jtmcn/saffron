@@ -4,7 +4,10 @@ Turtle it writes. A fake client stands in for Jev, so nothing calls the network.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+from typing import cast
 
+import pyoxigraph as ox
 import pytest
 
 from harness import jev_observe as jo
@@ -199,3 +202,84 @@ def test_the_state_carries_what_the_design_names():
     assert s["criteria"] == {"c1": "it parses", "c2": "it saves"}
     assert [f["id"] for f in s["findings"]] == [r.findings[0][0]]
     assert [f["id"] for f in s["earlier_findings"]] == [r.prior[0][0]]
+
+
+class FakeClient:
+    """Answers every question with a fixed, uneven distribution."""
+
+    def __init__(self) -> None:
+        self.questions: dict = {}
+        self.state: dict = {}
+        self.model: str | None = None
+
+    def system_one(self, state, questions, *, model=None):
+        self.questions, self.state, self.model = dict(questions), state, model
+        answers = {}
+        for key, q in questions.items():
+            if q["type"] == "noul":
+                answers[key] = SimpleNamespace(type="noul", noul=0.25)
+            elif q["type"] == "choice":
+                names = list(q["criteria"])
+                rest = 0.3 / max(len(names) - 1, 1)
+                answers[key] = SimpleNamespace(
+                    type="choice",
+                    probabilities={
+                        n: 0.7 if i == 0 else rest for i, n in enumerate(names)
+                    },
+                )
+            else:
+                answers[key] = SimpleNamespace(
+                    type="score",
+                    probabilities={i: 0.25 for i in range(len(q["criteria"]))},
+                )
+        return SimpleNamespace(model="jev-test-model", answers=answers)
+
+
+def test_a_noul_answer_keeps_both_sides_of_its_probability():
+    assert jo.distribution(SimpleNamespace(type="noul", noul=0.25)) == {
+        "true": 0.25,
+        "false": 0.75,
+    }
+
+
+def test_a_score_answer_keys_its_levels_as_strings():
+    answer = SimpleNamespace(type="score", probabilities={0: 0.1, 3: 0.9})
+    assert jo.distribution(answer) == {"0": 0.1, "3": 0.9}
+
+
+def test_observe_asks_once_with_the_pinned_model():
+    client = FakeClient()
+    model, answers = jo.observe(_round(prior=1), client, model="jev-pinned")
+    assert client.model == "jev-pinned" and model == "jev-test-model"
+    assert len(answers) == len(client.questions)
+
+
+_QUERY = """
+PREFIX earl: <http://www.w3.org/ns/earl#>
+PREFIX jev: <urn:saffron:jev#>
+SELECT ?outcome ?dist ?model ?round ?commit WHERE {
+  ?a a earl:Assertion ; earl:assertedBy jev:jev ; earl:test ?test ;
+     earl:subject ?subject ; earl:mode earl:automatic ; earl:result ?r ;
+     jev:model ?model ; jev:round ?round ; jev:commit ?commit .
+  ?r earl:outcome ?outcome ; jev:distribution ?dist .
+}
+"""
+
+
+def test_every_answer_becomes_one_assertion_carrying_its_distribution():
+    r = _round("spec-review", findings=2, prior=1)
+    model, answers = jo.observe(r, FakeClient())
+    store = ox.Store()
+    store.load(jo.to_turtle(r, model, answers).encode(), ox.RdfFormat.TURTLE)
+    result = store.query(_QUERY)
+    rows = list(cast(ox.QuerySolutions, result))
+    assert len(rows) == len(answers)
+    assert {row["outcome"].value for row in rows} == {EARL + "cantTell"}
+    assert {row["model"].value for row in rows} == {"jev-test-model"}
+    assert {row["round"].value for row in rows} == {"2"}
+    assert {row["commit"].value for row in rows} == {"abc123"}
+    stored = sorted(
+        json.dumps(json.loads(row["dist"].value), sort_keys=True) for row in rows
+    )
+    expected = sorted(json.dumps(a.distribution, sort_keys=True) for a in answers)
+    assert stored == expected
