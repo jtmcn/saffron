@@ -170,8 +170,8 @@ writing one.
   commands go through it. Two copies is what let the unattended path stop recording the
   ceilings that bound each task. **(gated over `saffron/`)**
 - **Import a name from the module that defines it.** The `dead` gate's vulture treats a name in
-  `__all__`, or imported as itself, as used everywhere. So no `__all__` and no `import x as x`.
-  **(gated over all Python)**
+  `__all__`, or imported as itself, as used everywhere. So no `__all__` and no `import x as x`,
+  and no aliased import in an `__init__.py`. **(gated over all Python)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **`census` compares sets; the baseline subtraction counts.** They sit beside each

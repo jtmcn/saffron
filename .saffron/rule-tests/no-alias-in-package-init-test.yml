@@ -1,0 +1,9 @@
+id: no-alias-in-package-init
+valid:
+  - 'from saffron.record.contract import Fact'
+  - 'from collections.abc import Callable, Sequence'
+  - 'import saffron.record.contract as contract'
+invalid:
+  - 'from saffron.record.contract import Fact as RecordFact'
+  - 'from .impl import a as x'
+  - 'from saffron.record.contract import KINDS, Fact as RecordFact'

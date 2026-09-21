@@ -1,0 +1,15 @@
+id: no-alias-in-package-init
+language: python
+severity: error
+message: a package init may not import a name under an alias
+note: |
+  The `dead` gate's vulture counts `a` in `from m import a as x` as used, and it
+  never reports an unused import in an `__init__.py`. So the alias hides `a` for
+  good. Import `a` from its defining module where it is used.
+
+# `no-reexport` covers every file but cannot scope a branch to one file name.
+files:
+  - "**/__init__.py"
+rule:
+  kind: aliased_import
+  inside: { kind: import_from_statement }

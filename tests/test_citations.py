@@ -383,6 +383,7 @@ GATED = {
     "agent-sdk-import-is-runner-only": "file permitted to import the Agent SDK",
     "container-runtime-is-runtime-only": "may spell their own binary",
     "gate-tool-must-be-executed": "**The `tool` field**",
+    "no-alias-in-package-init": "**Import a name from the module that defines it.**",
     "no-reexport": "**Import a name from the module that defines it.**",
     "one-task-driver": "**One module drives a task.**",
     "podman-runtime-is-runtime-only": "may spell their own binary",
