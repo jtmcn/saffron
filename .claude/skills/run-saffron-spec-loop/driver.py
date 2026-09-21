@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import argparse
 import ast
+import datetime as dt
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -2129,6 +2131,265 @@ def cmd_enumerators(args) -> int:
     return exit_code
 
 
+# --------------------------------------------------------------- bookkeeping
+
+
+# The ordinal words for 1 through 99, in document order: index 0 is
+# "first", index 98 is "ninety-ninth".
+_UNIT_ORDINALS = (
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "eleventh",
+    "twelfth",
+    "thirteenth",
+    "fourteenth",
+    "fifteenth",
+    "sixteenth",
+    "seventeenth",
+    "eighteenth",
+    "nineteenth",
+)
+_TENS_CARDINAL = {
+    20: "twenty",
+    30: "thirty",
+    40: "forty",
+    50: "fifty",
+    60: "sixty",
+    70: "seventy",
+    80: "eighty",
+    90: "ninety",
+}
+_TENS_ORDINAL = {
+    20: "twentieth",
+    30: "thirtieth",
+    40: "fortieth",
+    50: "fiftieth",
+    60: "sixtieth",
+    70: "seventieth",
+    80: "eightieth",
+    90: "ninetieth",
+}
+
+
+def _ordinal_words() -> list[str]:
+    words = list(_UNIT_ORDINALS)
+    for tens in range(20, 91, 10):
+        words.append(_TENS_ORDINAL[tens])
+        words.extend(f"{_TENS_CARDINAL[tens]}-{unit}" for unit in _UNIT_ORDINALS[:9])
+    return words
+
+
+_ORDINAL_WORDS = _ordinal_words()
+_ORDINAL_INDEX = {word: i for i, word in enumerate(_ORDINAL_WORDS)}
+_ORDINAL_PHRASE = re.compile(r"\b(?:a|an) ([a-z]+(?:-[a-z]+)?) time\b")
+
+# The smoke test `bookkeeping` reads a paragraph draft for, by name rather
+# than position — a table row that deletes the function is a case of its own.
+SMOKE_TEST_NAME = "test_saffron_queue_smoke_reproduces_this_repos_measured_queue"
+
+_HEADINGS = (
+    "-- origin item's specs: line --",
+    "-- smoke test paragraph --",
+    "-- pinned assert lines --",
+)
+
+
+def _article(word: str) -> str:
+    """Every ordinal word needing "an" starts with "e": eighth, eleventh,
+    eighteenth, eightieth, and the eighty- words. Nothing else does."""
+    return "an" if word[0] == "e" else "a"
+
+
+def _step_ordinal(word: str) -> str | None:
+    idx = _ORDINAL_INDEX.get(word)
+    if idx is None or idx + 1 >= len(_ORDINAL_WORDS):
+        return None
+    return _ORDINAL_WORDS[idx + 1]
+
+
+def _smoke_docstring(path: Path) -> tuple[bool, str | None]:
+    """Whether `path` holds a function named `SMOKE_TEST_NAME`, and its
+    docstring if it does. `False` covers a missing file, one that does not
+    parse, and one with no such function — three reasons `bookkeeping` reports
+    as one case."""
+    try:
+        source = path.read_text()
+    except OSError:
+        return False, None
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False, None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == SMOKE_TEST_NAME:
+            return True, ast.get_docstring(node)
+    return False, None
+
+
+def _next_ordinal(root: Path) -> tuple[str | None, str]:
+    """The word after the smoke test's own first `a`/`an <ordinal> time`,
+    and which case produced it: "stepped", "no-function", or "no-ordinal"."""
+    found, doc = _smoke_docstring(root / "tests" / "test_scheduler.py")
+    if not found:
+        return None, "no-function"
+    if doc:
+        match = _ORDINAL_PHRASE.search(doc)
+        if match:
+            nxt = _step_ordinal(match.group(1))
+            if nxt is not None:
+                return nxt, "stepped"
+    return None, "no-ordinal"
+
+
+def _queue(root: Path):
+    """`build_queue` over `root`'s `.saffron/specs`, with a ledger this
+    invocation creates empty under a scratch directory and a `gh` that
+    reports no open pull request — the queue smoke test's own arrangement
+    (`tests/test_scheduler.py:2105-2112`), reproduced so the printed lines
+    equal what it asserts. `repo_id=None` so a fresh ledger filters nothing."""
+    from saffron.ledger import Ledger
+    from saffron.scheduler import build_queue
+
+    def gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, returncode=0, stdout="[]", stderr="")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        ledger = Ledger(Path(scratch) / "ledger.db")
+        try:
+            return build_queue(
+                root / ".saffron" / "specs",
+                None,
+                ledger,
+                repo_slug="joel/saffron",
+                gh=gh,
+            )
+        finally:
+            ledger.close()
+
+
+def _block1_lines(item_id, by_id: dict, spec_id: str) -> list[str]:
+    if item_id is None:
+        return ["case: `## Context` cites no backlog item"]
+    item = by_id.get(item_id)
+    if item is None:
+        return [f"case: item {item_id} has no record under docs/backlog/"]
+    specs = item.model.specs
+    if spec_id in specs:
+        return [f"specs: [{', '.join(specs)}]", "already carried"]
+    merged = sorted([*specs, spec_id])
+    return [f"specs: [{', '.join(merged)}]"]
+
+
+def _paragraph_lines(
+    root: Path,
+    spec_id: str,
+    spec,
+    item_id,
+    retired: bool,
+    candidates,
+    refusals,
+) -> list[str]:
+    ordinal, case = _next_ordinal(root)
+    today = dt.date.today().isoformat()
+    if case == "stepped" and ordinal is not None:
+        opening = f"Re-measured {today}, {_article(ordinal)} {ordinal} time:"
+    else:
+        opening = f"Re-measured {today}, <Nth> time:"
+
+    depends_part = (
+        f"depends_on: {', '.join(spec.depends_on)}"
+        if spec.depends_on
+        else "declares no depends_on"
+    )
+    item_part = f"item {item_id}" if item_id is not None else "no item cited"
+
+    if retired:
+        position = "retired to done/"
+    else:
+        position = next(
+            (
+                f"candidate {i} of {len(candidates)}"
+                for i, c in enumerate(candidates, start=1)
+                if c.spec.id == spec_id
+            ),
+            None,
+        )
+        if position is None:
+            refusal = next(r for r in refusals if r.path.name.startswith(f"{spec_id}-"))
+            position = refusal.reason
+
+    lines = [opening, f"{spec_id}, {item_part}, {depends_part}, {position}"]
+    if case != "stepped":
+        detail = (
+            f"case: no function named {SMOKE_TEST_NAME} in tests/test_scheduler.py"
+            if case == "no-function"
+            else "case: the smoke test's docstring holds no ordinal to step"
+        )
+        lines.append(detail)
+    return lines
+
+
+def _block3_lines(candidates, refusals) -> list[str]:
+    ids = ", ".join(f'"{c.spec.id}"' for c in candidates)
+    names = ", ".join(f'"{r.path.name[:7]}"' for r in refusals)
+    return [
+        f"assert [c.spec.id for c in candidates] == [{ids}]",
+        f"assert [r.path.name[:7] for r in refusals] == [{names}]",
+    ]
+
+
+def cmd_bookkeeping(args) -> int:
+    """Three of the four edits `docs/agents/issue-tracker.md` asks of the
+    commit that adds a spec (item b-7d3810): the origin item's `specs:`
+    line, a draft paragraph for the queue smoke test's docstring, and its two
+    pinned `assert` lines. The fourth, `PRIORITY.md`, is out of scope —
+    `check_priority` already reports it on every `make check`. Writes no
+    file, stages nothing, and runs no git.
+    """
+    from records.kinds import KINDS
+    from records.load import RecordError, load
+    from saffron.intake import SpecError, load_spec
+    from tests.records.check import _context_section, first_cited_item, spec_files
+
+    files = spec_files(REPO)
+    path = files.get(args.spec_id)
+    if path is None:
+        return _fail(f"no file under .saffron/specs declares {args.spec_id}")
+    try:
+        spec, _sha = load_spec(path)
+    except SpecError as exc:
+        return _fail(str(exc))
+    try:
+        records = load(KINDS["backlog"], REPO)
+    except RecordError as exc:
+        return _fail(str(exc))
+
+    by_id = {r.model.id: r for r in records}
+    item_id = first_cited_item(_context_section(path.read_text()))
+    block1 = _block1_lines(item_id, by_id, args.spec_id)
+
+    candidates, refusals = _queue(REPO)
+    retired = path.parent.name == "done"
+    block2 = _paragraph_lines(
+        REPO, args.spec_id, spec, item_id, retired, candidates, refusals
+    )
+    block3 = _block3_lines(candidates, refusals)
+
+    for heading, lines in zip(_HEADINGS, (block1, block2, block3), strict=True):
+        print(heading)
+        for line in lines:
+            print(line)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2233,6 +2494,13 @@ def main() -> int:
     p.add_argument("spec_path")
     p.add_argument("--base", default="origin/main")
     p.set_defaults(func=cmd_enumerators)
+
+    p = sub.add_parser(
+        "bookkeeping",
+        help="three of the four edits a commit adding a spec owes (item b-7d3810)",
+    )
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_bookkeeping)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.

@@ -4,6 +4,7 @@ and the watch pattern. Real git in a temporary repo; `gh` is always injected."""
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import importlib.util
 import os
 import re
@@ -2531,3 +2532,353 @@ def test_enumerators_lists_the_calls_whose_directory_it_cannot_resolve(
     assert rc == 0
     assert lines[0] == "1 directories taken, 0 entries skipped, 7 files read"
     assert Counter(lines[1:]) == expected
+
+
+# ------------------------------------------------------------ bookkeeping
+
+# Real, live backlog ids: `check_item_citations` scans this file's own
+# source for `item <id>` phrases, so a fake one here would fail `make check`.
+_BK_RECORD_A = "b-b69bb6"
+_BK_RECORD_B = "b-929465"
+_BK_RECORD_C = "32"
+
+_BK_SMOKE_DECOY = (
+    "def test_something_earlier():\n"
+    '    """Some earlier test, re-anchored a fourth time."""\n'
+    "\n"
+)
+
+
+def _bk_spec(spec_id, priority, context, *, depends_on=None, title="t"):
+    dep_line = f"depends_on: [{', '.join(depends_on)}]\n" if depends_on else ""
+    return (
+        f"---\nid: {spec_id}\ntitle: {title}\ntype: bug\npriority: {priority}\n"
+        f"{dep_line}---\n## Context\n\n{context}\n"
+    )
+
+
+def _bk_record(record_id, specs):
+    specs_text = "[" + ", ".join(specs) + "]"
+    return (
+        f"---\nid: {record_id}\ntitle: t\nstatus: open\nspecs: {specs_text}\n---\n"
+        "## Problem\n\np\n\n## Done looks like\n\nd\n\n## Record\n\nr\n"
+    )
+
+
+def _bk_scheduler_source(smoke_docstring):
+    """Two functions: an earlier test whose own docstring reads "re-anchored a
+    fourth time" (never read, by name), and the smoke test itself, whose
+    docstring is `smoke_docstring` — or none at all, for `None`."""
+    if smoke_docstring is None:
+        body = "    pass\n"
+    else:
+        body = f'    """{smoke_docstring}"""\n    pass\n'
+    return _BK_SMOKE_DECOY + f"def {driver.SMOKE_TEST_NAME}(tmp_path, ledger):\n" + body
+
+
+_BK_DEFAULT_SMOKE_DOC = (
+    "Re-measured 2026-09-01, a ninth time: filler.\n\n"
+    "Re-measured 2026-09-01, a fourth time: filler.\n"
+)
+
+
+def _bookkeeping_tree(tmp_path, monkeypatch, *, smoke_doc=_BK_DEFAULT_SMOKE_DOC):
+    """A scratch `.saffron/specs/` (five specs, one retired to `done/`),
+    `docs/backlog/` (three records), and `tests/test_scheduler.py`. No git —
+    `bookkeeping` reads no commit. `driver.REPO`/`SPECS_DIR` are patched so
+    every helper reads this tree rather than the real one."""
+    root = tmp_path
+    specs_dir = root / ".saffron" / "specs"
+    (specs_dir / "done").mkdir(parents=True)
+    backlog_dir = root / "docs" / "backlog"
+    backlog_dir.mkdir(parents=True)
+    (root / "tests").mkdir(parents=True)
+
+    (specs_dir / "SA-0201-alpha.md").write_text(
+        _bk_spec(
+            "SA-0201",
+            3,
+            "Cites item b-b69bb6 first, then item b-929465 second.",
+            title="the loop still owes item 118 something extra",
+        )
+    )
+    (specs_dir / "SA-0202-bravo.md").write_text(
+        _bk_spec("SA-0202", 1, "Cites item 32 as the origin.")
+    )
+    (specs_dir / "SA-0203-charlie.md").write_text(
+        _bk_spec(
+            "SA-0203",
+            2,
+            "Cites item b-929465 as the origin.",
+            depends_on=["SA-0202", "SA-0200"],
+        )
+    )
+    (specs_dir / "SA-0204-echo.md").write_text(
+        _bk_spec("SA-0204", 3, "Cites item 32 as the origin.", depends_on=["SA-0201"])
+    )
+    (specs_dir / "done" / "SA-0200-delta.md").write_text(
+        _bk_spec("SA-0200", 2, "Cites item 32 as the origin.")
+    )
+
+    (backlog_dir / f"{_BK_RECORD_A}-alpha.md").write_text(
+        _bk_record(_BK_RECORD_A, ["SA-0100", "SA-0300"])
+    )
+    (backlog_dir / f"{_BK_RECORD_B}-bravo.md").write_text(
+        _bk_record(_BK_RECORD_B, ["SA-0203"])
+    )
+    (backlog_dir / "032-charlie.md").write_text(_bk_record(_BK_RECORD_C, []))
+
+    (root / "tests" / "test_scheduler.py").write_text(_bk_scheduler_source(smoke_doc))
+
+    monkeypatch.setattr(driver, "REPO", root)
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+    return root
+
+
+def test_bookkeeping_prints_three_blocks_and_the_specs_line_its_origin_item_owes(
+    tmp_path, monkeypatch, capsys
+):
+    """The first block: the origin item's `specs:` line, added and sorted, or
+    left unchanged with a word saying so, or a case line where there is no
+    line to print. Three usage failures print nothing on stdout and exit 1,
+    in the order `bookkeeping` checks them: an unknown spec id, a spec
+    `load_spec` refuses, and a record `records.load.load` refuses — the last
+    reached whether or not the target spec cites anything at all."""
+    root = _bookkeeping_tree(tmp_path, monkeypatch)
+    (root / ".saffron" / "specs" / "SA-0205-fox.md").write_text(
+        _bk_spec("SA-0205", 3, "Names no backlog entry at all, only prose.")
+    )
+    (root / ".saffron" / "specs" / "SA-0206-golf.md").write_text(
+        _bk_spec(
+            "SA-0206",
+            3,
+            "Cites item b-7d3810, real but absent from this scratch tree.",
+        )
+    )
+
+    def run(spec_id):
+        rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id=spec_id))
+        return rc, capsys.readouterr()
+
+    rc, out = run("SA-0201")
+    assert rc == 0
+    lines = out.out.splitlines()
+    for heading in driver._HEADINGS:
+        assert heading in lines
+    assert "specs: [SA-0100, SA-0201, SA-0300]" in lines
+
+    rc, out = run("SA-0203")
+    assert rc == 0
+    lines = out.out.splitlines()
+    idx = lines.index("specs: [SA-0203]")
+    assert "already carried" in lines[idx + 1]
+
+    rc, out = run("SA-0200")
+    assert rc == 0
+    assert "specs: [SA-0200]" in out.out.splitlines()
+
+    rc, out = run("SA-0205")
+    assert rc == 0
+    assert not any("specs: [" in line for line in out.out.splitlines())
+    case_205 = next(line for line in out.out.splitlines() if line.startswith("case:"))
+    assert case_205 == "case: `## Context` cites no backlog item"
+
+    rc, out = run("SA-0206")
+    assert rc == 0
+    assert not any("specs: [" in line for line in out.out.splitlines())
+    case_206 = next(line for line in out.out.splitlines() if line.startswith("case:"))
+    assert case_206 == "case: item b-7d3810 has no record under docs/backlog/"
+
+    # Written only now: no passing run above may read either.
+    (root / ".saffron" / "specs" / "SA-0207-hotel.md").write_text(
+        "---\nid: SA-0207\n\ttitle: t\ntype: bug\n---\n## Context\n\nx\n"
+    )
+    (root / "docs" / "backlog" / "b-dead00-broken.md").write_text(
+        "---\nid: b-dead00\ntitle: t\nstatus: open\n---\n"
+        "## Done looks like\n\nd\n\n## Problem\n\np\n"
+    )
+
+    for spec_id in ("SA-0299", "SA-0207", "SA-0201", "SA-0205"):
+        rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id=spec_id))
+        captured = capsys.readouterr()
+        assert rc == 1, spec_id
+        assert captured.out == "", spec_id
+        assert captured.err != "", spec_id
+
+
+def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
+    tmp_path, monkeypatch, capsys
+):
+    """The second block's opening line steps the smoke test's own first
+    ordinal phrase, found by name via `ast` rather than by scanning the
+    whole file. Its body names the spec, its origin item, its `depends_on`,
+    and one of three positions."""
+    root = _bookkeeping_tree(tmp_path, monkeypatch)
+    today = dt.date.today().isoformat()
+
+    driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    out = capsys.readouterr().out
+    assert f"Re-measured {today}, a tenth time:" in out
+    assert "SA-0201" in out
+    assert "b-b69bb6" in out
+    assert "declares no depends_on" in out
+    assert "candidate 2 of 2" in out
+
+    driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0203"))
+    out = capsys.readouterr().out
+    assert "SA-0203" in out
+    assert "b-929465" in out
+    assert out.index("SA-0202") < out.index("SA-0200")
+    assert (
+        "depends_on SA-0202 has no task at its current spec_sha, so nothing "
+        "says it merged: it has not run, or not since it was last edited"
+    ) in out
+
+    driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0200"))
+    out = capsys.readouterr().out
+    block2 = out.split(driver._HEADINGS[1])[1].split(driver._HEADINGS[2])[0]
+    assert "SA-0200" in block2
+    assert "32" in block2
+    assert "retired to done/" in block2
+    assert "candidate" not in block2
+
+    step_rows = [
+        ("a ninth time", "tenth"),
+        ("a nineteenth time", "twentieth"),
+        ("a twenty-ninth time", "thirtieth"),
+        ("a fiftieth time", "fifty-first"),
+        ("a fifty-second time", "fifty-third"),
+        ("a seventh time", "eighth"),
+        ("a tenth time", "eleventh"),
+        ("an eleventh time", "twelfth"),
+        ("a seventeenth time", "eighteenth"),
+        ("a fifty-seventh time", "fifty-eighth"),
+        ("a seventy-ninth time", "eightieth"),
+        ("an eightieth time", "eighty-first"),
+    ]
+    for phrase, expected in step_rows:
+        doc = (
+            f"Re-measured 2026-09-10, {phrase}: filler.\n\n"
+            "Re-measured 2026-09-10, a fourth time: filler.\n"
+        )
+        (root / "tests" / "test_scheduler.py").write_text(_bk_scheduler_source(doc))
+        rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+        out = capsys.readouterr().out
+        assert rc == 0, phrase
+        article = "an" if expected[0] == "e" else "a"
+        assert f"Re-measured {today}, {article} {expected} time:" in out, phrase
+        assert "case:" not in out, phrase
+        for heading in driver._HEADINGS:
+            assert heading in out, phrase
+
+    no_ordinal_docs = [
+        "Re-measured 2026-09-10, filler with nothing to step.\n\n"
+        "Re-measured 2026-09-10, still nothing to step either.\n",
+        "Re-measured 2026-09-10, a hundredth time: filler.\n",
+        "Re-measured 2026-09-10, a ninety-ninth time: filler.\n",
+    ]
+    no_ordinal_cases = []
+    for doc in no_ordinal_docs:
+        (root / "tests" / "test_scheduler.py").write_text(_bk_scheduler_source(doc))
+        rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert f"Re-measured {today}, <Nth> time:" in out
+        case = next(line for line in out.splitlines() if line.startswith("case:"))
+        no_ordinal_cases.append(case)
+        for heading in driver._HEADINGS:
+            assert heading in out
+
+    (root / "tests" / "test_scheduler.py").write_text(_bk_scheduler_source(None))
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"Re-measured {today}, <Nth> time:" in out
+    no_ordinal_cases.append(
+        next(line for line in out.splitlines() if line.startswith("case:"))
+    )
+    assert set(no_ordinal_cases) == {
+        "case: the smoke test's docstring holds no ordinal to step"
+    }
+
+    no_function_cases = []
+
+    (root / "tests" / "test_scheduler.py").unlink()
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"Re-measured {today}, <Nth> time:" in out
+    no_function_cases.append(
+        next(line for line in out.splitlines() if line.startswith("case:"))
+    )
+
+    (root / "tests" / "test_scheduler.py").write_text("def broken(:\n    pass\n")
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"Re-measured {today}, <Nth> time:" in out
+    no_function_cases.append(
+        next(line for line in out.splitlines() if line.startswith("case:"))
+    )
+
+    (root / "tests" / "test_scheduler.py").write_text(_BK_SMOKE_DECOY)
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert f"Re-measured {today}, <Nth> time:" in out
+    no_function_cases.append(
+        next(line for line in out.splitlines() if line.startswith("case:"))
+    )
+
+    assert set(no_function_cases) == {
+        f"case: no function named {driver.SMOKE_TEST_NAME} in tests/test_scheduler.py"
+    }
+
+
+def test_bookkeeping_prints_the_two_assert_lines_the_smoke_test_pins(
+    tmp_path, monkeypatch, capsys
+):
+    """The third block: `build_queue` over the working tree, under a ledger
+    this invocation creates empty rather than the one at
+    `~/.saffron/ledger.db`, with `repo_slug` set and a `gh` this invocation
+    supplies — `_ledger_and_repo` is never called and no ledger appears under
+    a patched `HOME`."""
+    import saffron.scheduler as scheduler
+
+    _bookkeeping_tree(tmp_path, monkeypatch)
+
+    def raise_run(*_a, **_k):
+        raise AssertionError("saffron.scheduler.subprocess.run must not be reached")
+
+    monkeypatch.setattr(scheduler.subprocess, "run", raise_run)
+
+    def raise_ledger_and_repo():
+        raise AssertionError("driver._ledger_and_repo must not be reached")
+
+    monkeypatch.setattr(driver, "_ledger_and_repo", raise_ledger_and_repo)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert rc == 0
+    assert 'assert [c.spec.id for c in candidates] == ["SA-0202", "SA-0201"]' in lines
+    assert (
+        'assert [r.path.name[:7] for r in refusals] == ["SA-0203", "SA-0204"]' in lines
+    )
+    assert not (home / ".saffron" / "ledger.db").exists()
+
+    recorded = {}
+
+    def fake_open_prs(repo_slug, gh):
+        recorded["repo_slug"] = repo_slug
+        recorded["gh"] = gh
+        return []
+
+    monkeypatch.setattr(scheduler, "_open_prs", fake_open_prs)
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    assert rc == 0
+    assert recorded["repo_slug"] == "joel/saffron"
+    assert recorded["gh"] is not scheduler.run_gh
