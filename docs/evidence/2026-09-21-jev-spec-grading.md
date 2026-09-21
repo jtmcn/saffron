@@ -1,4 +1,4 @@
-# Jev grades of spec text against cell outcomes (2026-09-21)
+# Jev against spec outcomes and review rounds (2026-09-21)
 
 A spike. The question: do grades from TypeSafe's Jev model, read from a spec's
 text alone, predict whether a cell lands that spec?
@@ -6,6 +6,9 @@ text alone, predict whether a cell lands that spec?
 **Answer:** two of six grades carry a signal, and both measure the size of the
 change. None of the four spec-quality grades separates landed from missed. The
 size signal mostly repeats the count of files the spec's `touches` list names.
+A second backtest asks whether Jev can tell a review loop to stop. Pooled over
+git history it cannot, but the history mixes review processes that changed
+under it, so that result is not final. See [Review rounds](#review-rounds).
 
 ## Method
 
@@ -104,4 +107,61 @@ A paired bootstrap scores both signals on the same 2,000 resamples.
 Little beyond what the frontmatter gives for free. A count of `touches` carries
 most of the signal with no network call. Jev's lead over it is unproven, and
 only grades recorded for new specs before their cells run could test it. The
-spike stops here.
+spec-grading question stops here.
+
+## Review rounds
+
+A second question comes from a proposal to log Jev beside every review round.
+After a round, can Jev tell whether another round will find a defect? That
+answer would be the loop's stop signal.
+
+`scripts/2026-09-21-jev-review-rounds.py` reads every `review(SA-NNNN)` commit
+on main as one round that found something. A loop is one spec's rounds of one
+kind. Spec rounds edit `.saffron/specs/`, and code rounds edit anything else.
+Round N is labelled `more` when round N+1 exists in its loop. The state holds
+the spec at that commit, the subjects of earlier rounds, and the round's own
+message and diff. Two Nouls ask whether another round would find a defect, and
+whether the round's diff settles what it names.
+
+That gives 80 loops and 131 rounds. 51 rounds have a successor and 80 end their
+loop. The run cost $0.043 for 1,022,901 input tokens.
+`scripts/2026-09-21-jev-review-rounds-eras.py` computes the intervals below.
+AUC is the chance a round with a successor outscores a final round.
+
+| Rounds | `another_round_blocks` | `fix_settles` | baseline: round number |
+|---|---|---|---|
+| All 131 | 0.442 (0.341 to 0.543) | 0.559 (0.459 to 0.664) | 0.587 (0.497 to 0.677) |
+| Spec loops, 29 | 0.524 (0.234 to 0.792) | 0.411 (0.133 to 0.674) | 0.452 (0.192 to 0.717) |
+| Code loops, 102 | 0.516 (0.389 to 0.646) | 0.513 (0.381 to 0.638) | 0.511 (0.422 to 0.616) |
+| Aug 26 to Sep 3, 43 | 0.501 (0.324 to 0.694) | 0.656 (0.486 to 0.811) | 0.255 (0.116 to 0.416) |
+| Sep 3 to Sep 17, 43 | 0.678 (0.442 to 0.895) | 0.315 (0.086 to 0.613) | 0.419 (0.355 to 0.474) |
+| Sep 18 to Sep 21, 45 | 0.289 (0.143 to 0.459) | 0.616 (0.441 to 0.778) | 0.722 (0.573 to 0.862) |
+
+1. Pooled, neither Noul separates the two classes. Every pooled interval
+   includes 0.5.
+2. Jev rarely commits. Half of its `another_round_blocks` answers fall between
+   0.46 and 0.61, around a median of 0.54.
+3. The pooled null is not a clean negative. Split by date, the relationship
+   changes sign. In the oldest third a late round is the one that ends a loop.
+   In the newest third a late round is the one that continues. Jev's
+   `another_round_blocks` moves from 0.678 in the middle third to 0.289 in the
+   newest. Its newest-third interval excludes 0.5 on the wrong side.
+4. The operator reports that the review process changed continuously across
+   these dates. The label then means something different in each era, so
+   pooling averages opposite effects.
+
+Limits of this backtest:
+
+- A loop ends at a round cap or on the operator's call as well as when
+  nothing is left. Such a round is labelled final either way.
+- 72 of the 80 final rounds come from code loops with a single round.
+- `review(specs)` commits span many specs, so they are left out.
+- Each Noul has one phrasing. The state is truncated at 45,000 characters of
+  spec and 30,000 of diff.
+
+This does not show the stop signal is worthless. It shows that git history
+cannot answer the question, because the process that made the history kept
+changing. A fixed process can. Log `another_round_blocks` for each round under
+the current review process, run one extra round after each loop stops, and
+compare the prediction with what that round finds. The label then comes from
+the next round and needs no hand labelling.
