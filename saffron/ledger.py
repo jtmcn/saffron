@@ -363,14 +363,16 @@ class Ledger:
         self, name: str, origin: str, mirror_path: str, policy_sha: str | None
     ) -> int:
         """`policy_sha` is nullable, as the column is: the fold has no fact
-        that carries a repo's own declaration, only each task's."""
+        that carries a repo's own declaration, only each task's. `COALESCE`
+        on the conflict, so a fold into a surviving ledger leaves the value
+        it cannot reproduce rather than clearing it."""
         self._db.execute(
             """INSERT INTO repos (name, origin, mirror_path, policy_sha)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(origin) DO UPDATE
                  SET name=excluded.name,
                      mirror_path=excluded.mirror_path,
-                     policy_sha=excluded.policy_sha""",
+                     policy_sha=COALESCE(excluded.policy_sha, repos.policy_sha)""",
             (name, str(origin), str(mirror_path), policy_sha),
         )
         self._db.commit()

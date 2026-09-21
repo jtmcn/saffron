@@ -25,6 +25,16 @@ proved in two places and neither alone is enough.
   so `tasks 118 -> 118 identical` is not "the real ledger came back" — it is
   "the fold's rules reproduce what `_synthesize` fed them." Anyone with a
   ledger can re-run it; the table below is its output, not a transcription.
+- **`repos.*` is the one exclusion the criterion cannot absorb.** `_run_for`
+  upserts with `policy_sha=None`, because a repo's own declaration is nobody's
+  fact — only each task's is. So a rebuilt `repos` row carries a NULL where the
+  source carried a sha, `tests/test_fold.py`'s `rows()` reads four tables and
+  not this one, and design §4's *delete the ledger, rebuild it, get the same
+  rows* does not hold for `repos.policy_sha` by either artifact. Two things
+  bound it. Nothing in `saffron/` reads the column, only `session.py:1514` and
+  `replay.py:53` write it. And `upsert_repo`'s conflict clause coalesces, so a
+  fold into a surviving ledger leaves the value rather than clearing it. The
+  fidelity gap stays, and a `repo_policy` fact is what closes it.
 
 ## Why the benchmark synthesises its own record
 
@@ -120,8 +130,9 @@ The largest fact is one `prose` gate result carrying 5,693 failures inline. The
 distribution has no middle: a fact is a few hundred bytes or it is a megabyte,
 and which one it is depends entirely on how many failures the gate found.
 
-**This is not the size the design argued from.** `DESIGN.md` reasons from a
-2026-09-17 measurement of 6.7 MB for 102 tasks — about 65 KB of facts per task.
+**This is not the size the design argued from.** The record design's §2
+(`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`, not
+`DESIGN.md`) reasons from a 2026-09-17 measurement of 6.7 MB for 102 tasks — about 65 KB of facts per task.
 The same quantity today is 287 KB per task uncompressed, four times that, and
 the whole of the gap is inline failure lists. Two readings of the same fact,
 both true:

@@ -21,7 +21,7 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.reconcile import ReconcileResult, reconcile
-from saffron.record.fold import fold
+from saffron.record.fold import UnreadableTask, fold
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
 from saffron.repos import mirror as git_mirror
@@ -174,6 +174,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
+
+    if args.command == "fold":
+        # Before the home ledger below, not after: `--into` names the ledger
+        # to rebuild, and opening the home one would create what it protects.
+        try:
+            return _fold(args)
+        except Exception as broke:
+            print(f"saffron: {type(broke).__name__}: {broke}")
+            return 2
+
     ledger = Ledger(args.home / "ledger.db")
     try:
         if args.command == "cell":
@@ -193,9 +203,6 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "chains":
             return _chains(args, ledger, out_dir)
-
-        if args.command == "fold":
-            return _fold(args)
 
         line = replay(
             args.repo,
@@ -871,6 +878,11 @@ def _fold(args: argparse.Namespace) -> int:
     ledger = Ledger(Path(args.into))
     try:
         done = fold(record, ledger, strict=not args.skip_unreadable)
+    except UnreadableTask as unreadable:
+        # Exit 1 here and 1 under `--skip-unreadable`: the same record is
+        # unreadable either way, and neither is infrastructure failing.
+        print(f"fold: {unreadable}")
+        return 1
     finally:
         ledger.close()
     for key, reason in done.skipped:

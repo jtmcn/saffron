@@ -7,7 +7,7 @@ from saffron import cli
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.ledger import Ledger
-from saffron.record.fold import fold
+from saffron.record.fold import UnreadableTask, fold
 from saffron.record.memory import MemoryRecord
 from saffron.record.refs import RefsRecord
 
@@ -140,7 +140,7 @@ def test_the_fold_reproduces_attempts_and_gate_results(tmp_path, record):
     into.close()
 
 
-def test_delete_the_index_rebuild_it_and_get_the_same_rows(tmp_path, record):
+def test_delete_the_ledger_rebuild_it_and_get_the_same_rows(tmp_path, record):
     # Spec §4's acceptance criterion, and the reason the ledger may be deleted
     # at any time.
     source = a_night(tmp_path, record)
@@ -200,13 +200,13 @@ def test_the_fold_keeps_error_and_fail_apart(tmp_path, record):
 
 
 def test_an_unreadable_task_names_itself_and_folds_the_rest(tmp_path, record):
-    # A record one task cannot be read from must still produce an index of
+    # A record one task cannot be read from must still produce a ledger of
     # the others, or one bad task costs a whole night's page.
     a_night(tmp_path, record)
     record.append("f" * 32, record.read(record.task_keys()[0])[0])
     record._facts["f" * 32] = ["not a fact"]
     into = Ledger(tmp_path / "into.db")
-    with pytest.raises(ValueError, match="f" * 32):
+    with pytest.raises(UnreadableTask, match="f" * 32):
         fold(record, into, strict=True)
     assert fold(record, into, strict=False).folded == 1
     into.close()
@@ -237,8 +237,8 @@ def _retimed(fact, key, at, spec_id):
 
 
 def test_the_fold_restores_the_times_the_facts_carry(tmp_path, record):
-    # `projection` ties a task to its ceiling span by `runs.started_at`, so an
-    # index carrying the fold's own clock ties every task to one instant.
+    # `projection` ties a task to its ceiling span by `runs.started_at`, so a
+    # ledger carrying the fold's own clock ties every task to one instant.
     a_night(tmp_path, record).close()
     key = record.task_keys()[0]
     record._facts[key] = [
@@ -287,7 +287,7 @@ def test_a_task_git_cannot_read_is_skipped_and_the_rest_fold(tmp_path, record):
     (repo / "objects" / blob[:2] / blob[2:]).unlink()
 
     into = Ledger(tmp_path / "into.db")
-    with pytest.raises(ValueError, match=broken):
+    with pytest.raises(UnreadableTask, match=broken):
         fold(on_refs, into, strict=True)
     assert fold(on_refs, into, strict=False).folded == 1
     assert _read(into, "SELECT record_key FROM tasks") == [(whole,)]
@@ -339,7 +339,7 @@ def test_a_log_with_no_creation_fact_says_what_is_missing(tmp_path, record):
     key = record.task_keys()[0]
     record._facts[key] = [f for f in record._facts[key] if f.kind != "task_created"]
     into = Ledger(tmp_path / "into.db")
-    with pytest.raises(ValueError, match="no task_created fact"):
+    with pytest.raises(UnreadableTask, match="no task_created fact"):
         fold(record, into, strict=True)
     assert fold(record, into, strict=False).skipped == [
         (key, "ValueError: no task_created fact")
@@ -395,3 +395,89 @@ def test_the_fold_command_exits_nonzero_when_it_skipped_a_task(tmp_path, capsys)
     printed = capsys.readouterr().out
     assert f"skipped task {broken}" in printed
     assert "skipped 1" in printed
+
+
+def _a_repo_with_one_broken_task(tmp_path):
+    """Two tasks on real refs, one of them missing a fact object git had."""
+    repo = tmp_path / "record.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
+    on_refs = RefsRecord(repo)
+    a_night(tmp_path, on_refs).close()
+    a_night(tmp_path, on_refs).close()
+    broken = sorted(on_refs.task_keys())[0]
+    blob = on_refs._blobs(broken)[0][1]
+    (repo / "objects" / blob[:2] / blob[2:]).unlink()
+    return repo, broken
+
+
+def test_one_unreadable_record_exits_one_in_either_mode(tmp_path, capsys):
+    # The flag changes how much is folded, never what went wrong. Exit 2 is
+    # infrastructure, and a record git cannot read is not that.
+    repo, broken = _a_repo_with_one_broken_task(tmp_path)
+    argv = [
+        "--home",
+        str(tmp_path / "home"),
+        "fold",
+        "--repo",
+        str(repo),
+        "--into",
+        str(tmp_path / "into.db"),
+    ]
+    assert cli.main(argv) == 1
+    assert broken in capsys.readouterr().out
+    assert cli.main([*argv, "--skip-unreadable"]) == 1
+
+
+def test_a_fold_that_breaks_still_exits_two(tmp_path, record, monkeypatch):
+    # The other half of the split: the fold's own defect stays infrastructure.
+    a_night(tmp_path, record).close()
+    monkeypatch.setattr(
+        "saffron.cli.RefsRecord", lambda *a, **k: _Exploding(), raising=True
+    )
+    exit_code = cli.main(
+        [
+            "--home",
+            str(tmp_path / "home"),
+            "fold",
+            "--repo",
+            str(tmp_path),
+            "--into",
+            str(tmp_path / "into.db"),
+        ]
+    )
+    assert exit_code == 2
+
+
+class _Exploding:
+    def task_keys(self):
+        raise RuntimeError("the backend is broken")
+
+
+def test_folding_never_opens_the_home_ledger(tmp_path):
+    # `--into` names the ledger to rebuild. Opening the home one to reach the
+    # dispatch created the file the flag exists to keep a fold away from.
+    repo, _ = _a_repo_with_one_broken_task(tmp_path)
+    home = tmp_path / "home"
+    cli.main(
+        [
+            "--home",
+            str(home),
+            "fold",
+            "--repo",
+            str(repo),
+            "--into",
+            str(tmp_path / "into.db"),
+            "--skip-unreadable",
+        ]
+    )
+    assert not (home / "ledger.db").exists()
+
+
+def test_a_fold_leaves_a_policy_it_cannot_reproduce(tmp_path, record):
+    # `repos.policy_sha` is nobody's fact, so the fold upserts `None`. Into a
+    # surviving ledger that cleared a column the record cannot restore.
+    source = a_night(tmp_path, record)
+    assert _read(source, "SELECT policy_sha FROM repos") == [("p" * 64,)]
+    fold(record, source)
+    assert _read(source, "SELECT policy_sha FROM repos") == [("p" * 64,)]
+    source.close()

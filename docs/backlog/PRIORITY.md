@@ -147,13 +147,14 @@ item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
 **Placed 2026-09-20**: **171**, **177**, **168**, **169**, **b-606ea3**,
-**b-f2a9d1** and **b-0c1d69**. 171 and 177 are 170's neighbours. One holds a
+**b-f2a9d1**, **b-0c1d69** and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
 diff stat no authoritative record carries, and the other mints a run per task
 where `CONTEXT.md` defines one per repo. The last five are vocabulary a cell
 cannot write, because `CONTEXT.md` is generated from `ontology/factory.ttl` and
 is `protected`. They are items 65 and 72 again, with five more words.
-`b-0c1d69` is the newest, filed writing `SA-0113`, and it carries a `DESIGN.md`
-§5.4.1 paragraph beside its glossary entry.
+`b-0c1d69` was filed writing `SA-0113`, and it carries a `DESIGN.md`
+§5.4.1 paragraph beside its glossary entry. `b-25766a` is the newest, the
+record's own fact kinds, and it is 168 and 169 a third time.
 
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical

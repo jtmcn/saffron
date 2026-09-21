@@ -25,6 +25,12 @@ from saffron.ledger import Ledger
 from saffron.record.contract import Fact, Record
 
 
+class UnreadableTask(Exception):
+    """A task the record cannot give back. Named apart from every other
+    failure so `saffron fold` can price it: a task that did not make it into
+    the ledger, never the fold itself breaking. `error` != `fail`."""
+
+
 @dataclass
 class Fold:
     """What one fold did. The skipped tasks are data rather than a printed
@@ -76,7 +82,7 @@ def _skipped(key: str, exc: Exception, strict: bool, done: Fold) -> None:
     (`tests/test_record_refs.py`), and a guard that misses it costs the night
     its whole ledger."""
     if strict:
-        raise ValueError(f"task {key} is unreadable: {exc}") from exc
+        raise UnreadableTask(f"task {key} is unreadable: {exc}") from exc
     done.skipped.append((key, f"{type(exc).__name__}: {exc}"))
 
 
@@ -111,10 +117,10 @@ def _fold_task(ledger: Ledger, key: str, facts: list[Fact], strict: bool) -> Non
     for fact in facts:
         if fact.kind == "attempt_opened":
             attempt_id = ledger.open_attempt(task_id, phase=fact.payload["phase"])
-            _at(ledger, "attempts", "started_at", "attempt_id", attempt_id, fact.at)
+            _retime(ledger, "attempts", "started_at", "attempt_id", attempt_id, fact.at)
         elif fact.kind == "attempt_closed" and attempt_id is not None:
             ledger.close_attempt(attempt_id, **fact.payload)
-            _at(ledger, "attempts", "ended_at", "attempt_id", attempt_id, fact.at)
+            _retime(ledger, "attempts", "ended_at", "attempt_id", attempt_id, fact.at)
         elif fact.kind == "gate_result":
             ledger.record_gate_result(_gate_result(fact), attempt_id=attempt_id)
         elif fact.kind == "task_state":
@@ -133,7 +139,7 @@ def _fold_task(ledger: Ledger, key: str, facts: list[Fact], strict: bool) -> Non
             )[0]
         elif fact.kind == "rebuttal":
             _rebut(ledger, findings, fact, key, strict)
-    _at(ledger, "tasks", "updated_at", "task_id", task_id, facts[-1].at)
+    _retime(ledger, "tasks", "updated_at", "task_id", task_id, facts[-1].at)
 
 
 def _ledger_time(at: str) -> str:
@@ -143,15 +149,15 @@ def _ledger_time(at: str) -> str:
     return datetime.fromisoformat(at).astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _at(
-    ledger: Ledger, table: str, column: str, key: str, row_id: int, at: str
+def _retime(
+    ledger: Ledger, table: str, column: str, id_column: str, row_id: int, at: str
 ) -> None:
     """A timestamp column defaults to `datetime('now')`, which for a fold is
     the rebuild's own clock — so `projection`, which ties a task to its
     ceiling span by `runs.started_at` and never by position, would tie every
     folded task to one instant. The fact's own time goes in instead."""
     ledger._db.execute(
-        f"UPDATE {table} SET {column} = ? WHERE {key} = ?",
+        f"UPDATE {table} SET {column} = ? WHERE {id_column} = ?",
         (_ledger_time(at), row_id),
     )
     ledger._db.commit()
@@ -253,10 +259,10 @@ def _run_for(ledger: Ledger, created: Fact) -> int:
     ).fetchone()
     if found is not None:
         return int(found["run_id"])
-    # ponytail: §5 identifies a run by batch and repo, but
-    # is NULL on every stored task, so `base_sha` stands in and collapses some.
+    # ponytail: §5 identifies a run by batch and repo, but `batch_key` is NULL
+    # on every stored task, so `base_sha` stands in and collapses some.
     run_id = ledger.create_run(repo_id, base_sha=payload["base_sha"])
-    _at(ledger, "runs", "started_at", "run_id", run_id, created.at)
+    _retime(ledger, "runs", "started_at", "run_id", run_id, created.at)
     return run_id
 
 

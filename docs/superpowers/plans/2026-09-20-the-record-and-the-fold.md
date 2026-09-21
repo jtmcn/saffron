@@ -1353,6 +1353,26 @@ git commit -m "feat(record): the index had no way back from the record, so the f
 
 ---
 
+## Where the shipped code diverged from Task 5
+
+Recorded rather than rewritten: the snippets above are what was planned, and
+these four are what a review of the branch changed after it. The code is
+authoritative; read `saffron/record/fold.py` and `saffron/cli.py` first.
+
+- **`fold` returns a `Fold`, not an `int`.** The plan's `fold(record, ledger)
+  -> int` gives the CLI a count with the skipped tasks left out, and an exit
+  code cannot be decided from it. The dataclass carries `folded` and a
+  `(task_key, reason)` per skip, so the printing lives in the CLI.
+- **An unreadable task is `UnreadableTask`, not `ValueError`.** The plan catches
+  `(ValueError, TypeError, AttributeError)` around `record.read`, which reaches
+  neither `RefsRecord`'s `RecordError` nor a replay failure. `_facts_of` checks
+  the backend's contract at the seam, and everything past it aborts as itself.
+- **`saffron fold` exits 1 when it skipped a task**, in both modes, where the
+  plan's `_fold` returns 0 always. A rebuild short of tasks is not the ledger
+  back, and exit 2 would call an unreadable record an infrastructure failure.
+- **The plan's argparse block never adds `--skip-unreadable`** although its
+  `_fold` reads `args.skip_unreadable`. The shipped parser adds it.
+
 ## What this plan does not do
 
 Design steps 3 to 6, which need the rebuild-time measurement Task 5 produces:
