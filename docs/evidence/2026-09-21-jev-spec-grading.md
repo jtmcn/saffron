@@ -4,7 +4,8 @@ A spike. The question: do grades from TypeSafe's Jev model, read from a spec's
 text alone, predict whether a cell lands that spec?
 
 **Answer:** two of six grades carry a signal, and both measure the size of the
-change. None of the four spec-quality grades separates landed from missed.
+change. None of the four spec-quality grades separates landed from missed. The
+size signal mostly repeats the count of files the spec's `touches` list names.
 
 ## Method
 
@@ -53,6 +54,41 @@ columns are Spearman rho against spec length and spec number.
 4. As a flag, `change_size` at 2.5 or more marks 19 specs. Eight of them missed,
    against a base rate of 15%. That is half of all 16 misses.
 
+## Against the frontmatter
+
+A spec already declares its own size. `scripts/2026-09-21-jev-vs-frontmatter.py`
+compares `change_size` with those fields. AUC here is the chance a missed spec
+scores higher than a landed one.
+
+| Signal | AUC | 95% interval | rho with `change_size` |
+|---|---|---|---|
+| `change_size` | 0.752 | 0.599 to 0.877 | +1.00 |
+| `max_turns` | 0.705 | 0.556 to 0.843 | +0.63 |
+| `touches` count | 0.672 | 0.512 to 0.824 | +0.85 |
+| `budget_usd` | 0.652 | 0.502 to 0.792 | +0.49 |
+| `risk` is `elevated` | 0.531 | 0.391 to 0.673 | +0.09 |
+| acceptance criteria count | 0.435 | 0.248 to 0.613 | -0.09 |
+
+A paired bootstrap scores both signals on the same 2,000 resamples.
+
+| `change_size` minus | Difference | 95% interval | Resamples at or below 0 |
+|---|---|---|---|
+| `touches` count | +0.080 | -0.013 to +0.174 | 5% |
+| `max_turns` | +0.047 | -0.074 to +0.162 | 22% |
+| `budget_usd` | +0.100 | -0.044 to +0.229 | 8% |
+
+1. `change_size` correlates +0.85 with the `touches` count. The grade mostly
+   reads the file list. `agent_lands_it` correlates -0.77 with `change_size`,
+   so it is the same signal and not a second one.
+2. The lead over the `touches` count is +0.080, and its interval includes 0.
+   Sixteen misses cannot settle it.
+3. A leave-one-out logistic model of `touches`, criteria count, `budget_usd`
+   and `risk` scores 0.584. Adding `change_size` gives 0.631, below
+   `change_size` alone at 0.712. Sixteen misses are too few to fit five
+   features.
+4. The criteria count is unreliable. Twenty-three older specs use another key
+   and count as zero.
+
 ## Limits
 
 - Sixteen misses make every interval wide.
@@ -65,5 +101,7 @@ columns are Spearman rho against spec length and spec number.
 
 ## What it would be good for
 
-A cheap size warning before `spec-reviewer` or a cell runs. It replaces none of
-the six review checks.
+Little beyond what the frontmatter gives for free. A count of `touches` carries
+most of the signal with no network call. Jev's lead over it is unproven, and
+only grades recorded for new specs before their cells run could test it. The
+spike stops here.
