@@ -42,6 +42,9 @@ _ITEMS = re.compile(
 _ANY_ID = rf"{RANDOM_ID}|\d+"
 _NUM = re.compile(_ANY_ID)
 _SPEC_FILENAME = re.compile(r"^([A-Za-z0-9]+-\d+)-")
+# `- **62** upholds. <why>`, one per principle an ADR lists.
+_PRINCIPLE_BULLET = re.compile(r"^- \*\*(\d+)\*\* (\w+)\.", re.MULTILINE)
+_NO_PRINCIPLE = "Judged against no principle."
 
 
 @dataclass(frozen=True)
@@ -239,13 +242,57 @@ def check_adr_appendices(records: list[Record], letters: set[str]) -> list[Viola
 def check_adr_principles(
     records: list[Record], principles: set[int]
 ) -> list[Violation]:
-    """An ADR's `principles` names only numbers an appendix declares."""
+    """An ADR's `principles` names only numbers an appendix declares, and its
+    `## Principles` section has one `upholds` or `departs` bullet per number.
+    An empty list is written down as `Judged against no principle.`"""
     out: list[Violation] = []
     for r in records:
-        bad = [p for p in _adr(r).principles if p not in principles]
+        listed = _adr(r).principles
+        bad = [p for p in listed if p not in principles]
         if bad:
             out.append(
                 Violation(r.path, "principles", f"names {bad}, which do not exist")
+            )
+        section = r.sections.get("Principles", "")
+        if not listed and not section.startswith(_NO_PRINCIPLE):
+            out.append(
+                Violation(
+                    r.path,
+                    "principles",
+                    f"is empty, so the section begins `{_NO_PRINCIPLE}`",
+                )
+            )
+        bullets = _PRINCIPLE_BULLET.findall(section)
+        counts = Counter(int(n) for n, _ in bullets)
+        for n, verb in bullets:
+            if verb not in ("upholds", "departs"):
+                out.append(
+                    Violation(
+                        r.path,
+                        "principles",
+                        f"the bullet for {n}'s verb is {verb}, not upholds or departs",
+                    )
+                )
+        for n, c in sorted(counts.items()):
+            if c > 1:
+                out.append(
+                    Violation(
+                        r.path, "principles", f"the bullet for {n} appears {c} times"
+                    )
+                )
+        if missing := sorted(set(listed) - set(counts)):
+            out.append(
+                Violation(
+                    r.path, "principles", f"lists {missing} and no bullet names them"
+                )
+            )
+        if extra := sorted(set(counts) - set(listed)):
+            out.append(
+                Violation(
+                    r.path,
+                    "principles",
+                    f"bullets name {extra}, which principles does not list",
+                )
             )
     return out
 

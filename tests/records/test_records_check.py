@@ -648,5 +648,60 @@ def test_an_adr_cites_only_principles_that_exist(tmp_path: Path):
         "principles: [1]",
         "principles: [1, 99]",
     )
+    _rewrite(
+        _adr(broken, "0001-a-fixture-decision.md"),
+        "- **1** upholds.",
+        "- **99** upholds. Planted.\n- **1** upholds.",
+    )
     [v] = tests.records.check.check_adr_principles(load(_adr_kind(), broken), {1})
-    assert v.field == "principles" and "99" in v.message
+    assert v.field == "principles" and "[99], which do not exist" in v.message
+
+
+@pytest.mark.parametrize(
+    ("name", "old", "new", "expected"),
+    [
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds.",
+            "- **1** supports.",
+            "verb is supports",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds. It is",
+            "- **1** upholds.\n- **1** upholds. It is",
+            "bullet for 1 appears 2 times",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds. It is the only principle the fixture defines.",
+            "Upheld, as the only principle the fixture defines.",
+            "lists [1] and no bullet names them",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "principles: [1]",
+            "principles: []",
+            "bullets name [1], which principles does not list",
+        ),
+        (
+            "0002-the-fixture-decision-superseded.md",
+            "Judged against no principle.",
+            "None apply.",
+            "Judged against no principle.",
+        ),
+    ],
+    ids=["verb", "repeat", "missing-bullet", "extra-bullet", "empty-unstated"],
+)
+def test_an_adr_principles_section_declares_exactly_its_principles(
+    tmp_path: Path, name: str, old: str, new: str, expected: str
+):
+    broken = tmp_path / "root"
+    shutil.copytree(FIXTURE, broken)
+    _rewrite(_adr(broken, name), old, new)
+    violations = tests.records.check.check_adr_principles(
+        load(_adr_kind(), broken), {1}
+    )
+    assert any(v.field == "principles" and expected in v.message for v in violations), (
+        violations
+    )
