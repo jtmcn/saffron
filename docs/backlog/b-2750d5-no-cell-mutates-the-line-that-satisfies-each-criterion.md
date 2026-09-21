@@ -1,7 +1,7 @@
 ---
 id: b-2750d5
 title: No cell mutates the line that satisfies each criterion, so a witness hole ships unless a person probes it
-status: open
+status: partial
 tier: 1
 filed: 2026-09-19
 specs: [SA-0113]
@@ -71,3 +71,6 @@ by hand.
 - 2026-09-21: `SA-0113` ran in the spec loop's run 11 and reached
   `READY_FOR_REVIEW` at $12.70 (#403). Review fixed four witness holes and one
   prompt that told its session it could not see what its diff shows it.
+- 2026-09-21: #403 merged, and `SA-0113` retires to `done/`. `partial`, because
+  the spec loop's run 12 Spec seat still found five witness holes in #418 after
+  the in-cell criterion probes ran.

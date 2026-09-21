@@ -56,3 +56,11 @@ so no spec has to repeat it.
   Teardown reported "no commits, nothing to export", and it ended
   `NOT_IMPLEMENTED` at $6.63 (task 124). Its spec said "Commit after each coherent
   step", and that did not stop it. The ledger records the cut turn as zero turns.
+- 2026-09-21: two more in the spec loop's run 12. `SA-0116` was out of the
+  queue with no refusal line, because run 11's `NOT_IMPLEMENTED` settled its
+  `spec_sha`. The operator asked where it went. A spec edit (#413) gave it a new
+  `spec_sha` and told the cell to commit before any full-suite run. The rerun
+  committed twice and reached `READY_FOR_REVIEW` (#416). `SA-0117`'s cell was then
+  cut by the wall in both IMPLEMENT and REPAIR. It had committed once before the
+  first cut, and the host checkpointed the second. The cut IMPLEMENT turn reports
+  $1.52, and the cell's total was $30.70, so the cut turn's spend looks lost.

@@ -334,10 +334,10 @@ frontmatter shape of any open item, id from `uv run python -m records new-id` �
 `PRIORITY.md`'s tier index, with `uv run pytest tests/records -q` green before
 committing. Each item a spec came from gets its frontmatter `status` / `closed`
 / `prs` (and `specs`/`commits` as applicable) set and a dated line added to
-`## Record`. If the spec merged, retire it to `.saffron/specs/done/` (updating
-the scheduler smoke test, `docs/agents/issue-tracker.md`) — an item whose
-origin spec is in `done/` cannot stay `open`. They go in a standalone PR off
-the default branch unless the operator says otherwise.
+`## Record`. The PR sits on top of the stack and assumes every PR below it
+is merged. So it retires each spec to `.saffron/specs/done/`, updates the
+scheduler smoke test with `driver.py bookkeeping SA-NNNN`, and sets each origin
+item's status. An item whose origin spec is in `done/` cannot stay `open`.
 
 Every finding you verified that the in-cell critic did not raise, and that was
 fixed or kept, is a change requested on the operator's behalf — a rejection:
