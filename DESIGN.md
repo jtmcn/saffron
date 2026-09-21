@@ -1672,4 +1672,4 @@ the ADR records, so a hand edit here is discarded.
 
 | ADR | Title | Status | Principles |
 |---|---|---|---|
-| 1 | Decisions are recorded one per file as ADRs | accepted | 30, 56, 57, 62 |
+| 1 | Decisions are recorded one per file as ADRs | accepted | 27, 29, 30, 40, 56, 57, 62 |
