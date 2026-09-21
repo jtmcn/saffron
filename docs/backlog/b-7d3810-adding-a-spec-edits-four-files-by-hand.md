@@ -69,3 +69,7 @@ prints.
 - 2026-09-20: the prose half stays open here, as item b-281f0a left its own.
   Running the command from `.claude/agents/spec-writer.md`, and naming it in
   the spec loop's `SKILL.md`, are by-hand edits after the cell lands.
+- 2026-09-21: `SA-0116` ran in the spec loop's run 11 after its spec was revised
+  for its parent branch (#407). Its cell was cut by the turn wall with no commit
+  and ended `NOT_IMPLEMENTED`, so nothing landed. Item b-36b551 holds the cause.
+  The spec is reviewed and merged, and a later loop can run it again.
