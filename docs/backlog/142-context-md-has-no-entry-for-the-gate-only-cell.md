@@ -49,4 +49,4 @@ cell"); the two stale sentences corrected; and the code's prose reading
 
 ## Record
 
-- 2026-09-21: Done by hand. The **Gate-only cell** entry and its `_Avoid_` line were already in `CONTEXT.md` §5, and both stale sentences were gone. The code's prose was left: 22 sites in `saffron/cell/session.py` and `tests/test_session.py` now read "Gate-only cell". The entry is hand-written, because `ontology/factory.ttl` declares closed sets only.
+- 2026-09-21: Done by hand. The **Gate-only cell** entry and its `_Avoid_` line were already in `CONTEXT.md` §5, and both stale sentences were gone. The remaining work was the code's prose. 17 "gate cell" sites in `saffron/cell/session.py` and `tests/test_session.py` now read "Gate-only cell". The entry is hand-written, because nothing renders glossary prose from `ontology/factory.ttl`.

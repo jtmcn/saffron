@@ -351,8 +351,8 @@ the edit is applied to; that is the worktree, mutated. _Avoid_ "mutant" for the
 edit a lens names in a review finding; that is a vacuity probe.
 
 **Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
-notice the behaviour it describes breaking. The host applies every anchored adequacy
-finding's probe after REVIEW, in a Gate-only cell. The corpus harness applies one inside a
+notice the behaviour it describes breaking. After REVIEW the host applies each anchored adequacy
+finding's probe in a gate-only cell, unless the probe edits a declared test path. The corpus harness applies one inside a
 fixture's cell. No gate applies one. Its outcome is inverted from a mutant's: a
 vacuity probe that *survives* the suite is the finding confirmed, where a mutant that
 survives its witness is the finding.
@@ -364,11 +364,11 @@ per finding, chosen by the lens to make its own case, is not a sample of the mut
 
 **Criterion probe**: A find-and-replace edit a fresh session names to make one acceptance
 claim false. During REVIEW the host starts one session per criterion in the critic cell.
-Each session sees one claim and the diff, and never the witness or another claim.
+Each session sees one claim and the diff, and is never told which test is its witness.
 Its edits are recorded in `criterion-probes.json`. A criterion probe that survives its own
 criterion's witness is the finding: nothing guards the claim. No gate applies one yet
 (backlog item b-2750d5).
-_Avoid_: "mutant" for one. A mutant is declared by the spec author, and a criterion probe is
+_Avoid_: "mutant" for one. A mutant is declared in a criterion, and a criterion probe is
 named by a session that wrote neither the code nor the witness. _Avoid_ "vacuity probe" for
 one. A lens names a vacuity probe against the tests, and a criterion probe targets a claim.
 
@@ -469,8 +469,10 @@ Everything else is internal.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
 > rather than the operator — and one column holds both.
 
-`TerminalEvent` is not a terminal state. It records one IMPLEMENT turn that ended
-with nothing committed, and the two names are deliberately distinct.
+`TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
+IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
+reasons ends the task in `PLAN_REJECTED` or `NOT_IMPLEMENTED`. The two names are
+deliberately distinct.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase.
@@ -544,8 +546,9 @@ Saffron. If it doesn't, the core/repo boundary has failed.
 
 **Preflight**: Per-repo readiness at batch start — mirror fetch, policy parse, image
 rebuild, baseline. A repo that fails preflight is skipped, not fatal.
-A task has a preflight of its own. Each `PreflightEvent` is one step of it, such
-as the proxy, the image build, the port probe or the worktree coming online.
+A task has a preflight of its own. Each `PreflightEvent` is one step of it, written by
+`events.Preflight`. The steps include the proxy, the image build, the port probe and the
+worktree coming online.
 A baseline that aborts inside the task's cell ends the task in
 `PREFLIGHT_FAILED`. That is fatal to the task, where the per-repo sense skips a repo.
 
@@ -576,7 +579,7 @@ The set is the record's whole alphabet, so it holds kinds nothing appends yet.
 > `events.jsonl`. The two words do not merge.
 
 **Projection**: The RDF graph of a run record, read from the ledger and the batch tree.
-It holds the six kinds the derivation-chain query reads (`DESIGN.md` Appendix T). It is
+It is built for the derivation-chain query (`DESIGN.md` Appendix T). It is
 derived and one-way, with no write path back to the ledger (`DESIGN.md` §4.6).
 _Avoid_: "projection" for the ledger `saffron fold` rebuilds from the record. That is the
 ledger.

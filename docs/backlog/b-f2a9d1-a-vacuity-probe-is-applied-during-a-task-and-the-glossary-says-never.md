@@ -43,4 +43,4 @@ not before.
 - 2026-09-21: the spec loop's run 11 (#403) found a second reader. `SA-0113`'s
   criterion-probe prompt injects the `CONTEXT.md` section holding that entry
   into every probe session.
-- 2026-09-21: Done by hand. The **Vacuity probe** entry says the host applies the probe after REVIEW in a Gate-only cell, and that the verdict decides the finding. `DESIGN.md` §5.5.1 gains the paragraph naming the three verdicts.
+- 2026-09-21: Done by hand. The **Vacuity probe** entry says the host applies the probe after REVIEW in a gate-only cell, and that the verdict decides the finding. `DESIGN.md` §5.5.1 gains the paragraph naming the three verdicts.

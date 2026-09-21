@@ -316,7 +316,7 @@ class Terminal:
     on the salvage branches.
 
     Not a `TerminalState`. CONTEXT.md §6 keeps the two names deliberately
-    distinct, and two of the five reasons map onto a terminal state."""
+    distinct: each reason ends in `PLAN_REJECTED` or `NOT_IMPLEMENTED`."""
 
     timestamp: float
     spec_id: str
