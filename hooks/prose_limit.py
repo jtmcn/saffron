@@ -164,13 +164,15 @@ def file_time(root: Path, raw_path: str) -> int:
     file_path = Path(raw_path)
     if not file_path.is_absolute():
         file_path = root / file_path
+    # A path that is not there is answered before scope: "out of the gates'
+    # scope" for a typo in a filename reads as a rule, not as a miss.
+    if not file_path.is_file():
+        print(f"no such file: {raw_path}", file=sys.stderr)
+        return 2
     path = _in_repo(root, file_path)
     prose = load_prose()
     if path is None or not prose.in_scope(path):
         print(f"out of the gates' scope: {raw_path}", file=sys.stderr)
-        return 2
-    if not file_path.is_file():
-        print(f"no such file: {raw_path}", file=sys.stderr)
         return 2
     old_text, new_text = _against_head(root, path, file_path)
     lines = _risen_lines(prose, root, path, old_text, new_text)

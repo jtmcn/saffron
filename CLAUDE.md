@@ -184,7 +184,8 @@ writing one.
   per file)**
 - A new file starts the `prose` ratchet at zero, however many hits its neighbours carry.
   New Markdown and new comments take no em-dash, semicolon, contraction, perfect tense,
-  hedge or sentence over 25 words. `python3 hooks/prose_limit.py` reads the staged index,
+  hedge or sentence over 25 words. `python3 hooks/prose_limit.py --file <path>` counts one
+  file in the working tree, staged or not. With no arguments it reads the staged index,
   so stage again after each rewrite.
 - A new test is not trusted until it has been run against the unfixed code — or, for one
   guarding a property already true, against a mutant that breaks it.

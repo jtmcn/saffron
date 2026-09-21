@@ -142,7 +142,7 @@ rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
 ~~**104**~~, **113**, **135**, and from stack #285: **147**, **146**, ~~**144**~~,
 **149**, **148**, **142**, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
 from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**, and from run 7: **b-b5f379**, **b-60732c**, **b-eac388**, **b-bc54d1**, **b-63ac52**, ~~**b-122686**~~, ~~**b-afec7c**~~, and from `SA-0109`'s spec review: **b-7c41e0**, and from run 8: **b-044ae7**, **b-65e7e2**, **b-5e443c**, **b-5d5b56**, **b-952c34**, **b-60d804**, **b-4589be**, **b-6f7f8d**, and from the spec-writer
-measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, **b-a70ec1**, **b-ce93aa**, **b-461729**, and from run 10: ~~**b-865399**~~, **b-1c7019**, **b-3e0dbe**, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, **b-929465**. Then **160**, which is what
+measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, **b-a70ec1**, **b-ce93aa**, **b-461729**, and from run 10: ~~**b-865399**~~, **b-1c7019**, **b-3e0dbe**, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, ~~**b-929465**~~. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
@@ -171,17 +171,17 @@ decision because it was the one item whose defect was a guard that could not
 fire. Its number stays listed because item numbers are cited from `saffron/`.
 
 **From the spec chain of 2026-09-20** (`SA-0113`): **b-b69bb6**, then
-**b-7d3810** and **b-929465**. One spec measured the chain at 35.7 minutes to
+**b-7d3810**. One spec measured the chain at 35.7 minutes to
 draft and 6.2 to review, so a revision costs about six reviews. b-b69bb6 is
 first because it removes the findings that need no judgement, which was three
-of the first review's six. **b-ea1d13** sits in tier 3 as an edit to the writer
-agent's own file. It takes minutes, so take it first of the four.
+of the first review's six. ~~**b-929465**~~ and ~~**b-ea1d13**~~ are done by
+#392, which leaves the two above.
 
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, **b-e403c1**, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: **b-ea1d13**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, **b-e403c1**, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
