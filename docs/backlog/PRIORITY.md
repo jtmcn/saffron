@@ -127,6 +127,10 @@ batch tree instead. A reconstruction of 68 stored rows on 2026-09-17 found
 half. The page an operator reads at 06:30 and the ledger are two accounts, and
 nothing says which one to believe.
 
+**Placed 2026-09-20, from an architecture review**: **b-fd1468**. The ledger
+writes each fact kind and the fold reads it back in a second module. It makes
+170's rebuild test hold by construction rather than kind by kind.
+
 **From the spec loop's runs 8 to 10, placed 2026-09-20**: **b-a4df62**.
 Reviewing a spec before its cell is the delegate's largest manual step, and
 Saffron does none of it. Run 8 reviewed five specs and re-reviewed at parent
