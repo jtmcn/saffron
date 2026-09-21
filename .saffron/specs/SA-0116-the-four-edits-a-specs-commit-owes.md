@@ -676,4 +676,9 @@ and `SA-0115` declare
 `max_attempts: 3` is this file's standing level, as `SA-0112`, `SA-0114` and
 `SA-0115` ran.
 
-Commit after each coherent step. Uncommitted work dies with the cell.
+**Commit before you verify.** Run 11 ran this spec and ended `NOT_IMPLEMENTED`
+with no commit. Its three witnesses passed, and the 900-second turn wall cut
+it during a last full-suite run (item b-36b551). Commit as soon as a witness
+passes. Run `tests/test_spec_loop_driver.py` alone, never the whole suite.
+The gates run the whole suite after the turn ends. Uncommitted work dies with
+the cell.
