@@ -440,7 +440,7 @@ This witness drives one of each, and the others reach the same `SpecError` and
 `RecordError`.
 
 Criterion 2 makes three runs over the helper's tree, then a table, and kills
-twenty-nine. One `def` loops over the table, which is not a parametrised test.
+thirty. One `def` loops over the table, which is not a parametrised test.
 
 - **`SA-0201`**, admitted. Match the opening against
   `Re-measured \d{4}-\d{2}-\d{2}, a tenth time:`. Assert `SA-0201`, its
@@ -657,8 +657,8 @@ ran 168 over its own figure. 494 leaves 106 under the ceiling. If the test file
 runs long anyway, keep every case above. `size` is advisory at this tier, and
 an attempt spent shrinking a fixture to fit costs more than the overrun.
 
-Against the `size:` lines `driver.py history SA-0116` prints, 494 sits
-below `SA-0108`'s 494 and above `SA-0016`'s 486 and `SA-0089`'s 477, all merged. It sits well
+Against the `size:` lines `driver.py history SA-0116` prints, 494 equals
+`SA-0108`'s 494 and sits above `SA-0016`'s 486 and `SA-0089`'s 477, all merged. It sits well
 above `SA-0114`'s 330 in these same two files. `SA-0115` at 659 and `SA-0107`
 at 1049 overshot the ceiling. The comparable narrow cell in these files is
 `SA-0112`, at 243. `PRIORITY.md` is cut for size, and a fourth thing an author
