@@ -57,7 +57,8 @@ acceptance:
       spec's id added in sorted order. So `specs: [SA-0100, SA-0300]` becomes
       `specs: [SA-0100, SA-0201, SA-0300]`, and `specs: []` becomes
       `specs: [SA-0200]`. In the second, where the item already lists the spec,
-      the line is printed unchanged and named as already carried. In the third
+      the line is printed unchanged and named as already carried. The item's id
+      is numbered, as `32`, or random, as `b-7d3810`, and both resolve. In the third
       the `## Context` cites no item at all. In the fourth it cites an id no
       record under `docs/backlog/` carries. Those two print no `specs:` line,
       and the block says which of the two it met.
@@ -72,7 +73,9 @@ acceptance:
       a word takes on either side of it: `ninth` becomes `tenth`, `nineteenth`
       becomes `twentieth`, `twenty-ninth` becomes `thirtieth`, `fiftieth`
       becomes `fifty-first`, `fifty-second` becomes `fifty-third`, `seventh`
-      becomes `an eighth` and `an eleventh` becomes `a twelfth`. The paragraph
+      becomes `an eighth` and `an eleventh` becomes `a twelfth`. The article
+      reads the whole word's first letter, so `fifty-seventh` becomes
+      `a fifty-eighth` and `an eightieth` becomes `an eighty-first`. The paragraph
       names this spec's id, and the id its `## Context` cites first where it
       cites one. It names every id the spec declares in `depends_on`, in the
       order declared, or says it declares none. It ends in one of three
@@ -81,10 +84,12 @@ acceptance:
       A spec `spec_files` resolved under `done/` is named as retired there, and
       so in neither list. Two cases print the paragraph with `<Nth>` where the
       ordinal would stand, and a line naming which case it met. In the first,
-      `tests/test_scheduler.py` holds no function of the smoke test's name. In
-      the second, its docstring yields no ordinal to step. It holds no
+      `tests/test_scheduler.py` is missing, does not parse, or holds no function
+      of the smoke test's name. In the second, that function has no docstring,
+      or its docstring yields no ordinal to step. It holds no
       `a <ordinal> time`, or it holds a word the command's list of ordinals
-      lacks, or it holds `ninety-ninth`, the last word that list carries.
+      lacks, or it holds `ninety-ninth`, the last word that list carries. Each
+      of these prints all three headings and exits 0.
     witness: tests/test_spec_loop_driver.py::test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal
   - claim: >-
       The third block prints two lines, each a complete `assert` statement of
@@ -159,13 +164,13 @@ resolves a spec id to its file over the queue and `done/`. It keys on the file
 name alone (`tests/records/check.py:274-280`), and it returns 106 entries here.
 
 **The spec loop's driver is where a computed aid for a spec's commit lives**.
-`cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1684-1714`
+`cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1684-1713`
 judges the ceilings comparison. It prints a sentence at
-`.claude/skills/run-saffron-spec-loop/driver.py:1713` even with no blocker to
-report. `_fail` at `.claude/skills/run-saffron-spec-loop/driver.py:75-78`
+`.claude/skills/run-saffron-spec-loop/driver.py:1712` even with no blocker to
+report. `_fail` at `.claude/skills/run-saffron-spec-loop/driver.py:76-79`
 prints to stderr and returns 1. Its docstring reads "`saffron/cli.py` reserves
 2 for infrastructure". `REPO` and `SPECS_DIR` are module constants at
-`.claude/skills/run-saffron-spec-loop/driver.py:34` and `:36`.
+`.claude/skills/run-saffron-spec-loop/driver.py:35` and `:37`.
 
 **`SA-0115` is the parent, and this command does not call its code**. All three
 of `SA-0114`, `SA-0115` and this spec declare the same two `touches`
@@ -344,7 +349,7 @@ An id rather than a path, for two reasons. `spec_files` then resolves it the
 same way `check_specs_name_their_items` does, and `check` takes the same
 argument. Register it after the `enumerators` parser at
 `.claude/skills/run-saffron-spec-loop/driver.py:2230-2235`, before the argv
-split at `:2237-2239`, and edit no other parser.
+split at `:2237-2241`, and edit no other parser.
 
 **Read `REPO` and `SPECS_DIR` inside the function, never as default argument
 values**. A default binds at definition time.
@@ -391,7 +396,7 @@ named per run, and each run kills several. Keep every one of them. A fixture
 compacted to fit the size ceiling is how `SA-0115`'s review found six mutants
 alive in cases its spec named.
 
-Criterion 1 makes eight runs and kills eighteen wrong implementations. The
+Criterion 1 makes nine runs and kills twenty wrong implementations. The
 scratch tree sits in no repository, which kills reading the spec from a
 commit. Five runs succeed, and each asserts the three headings in order and
 exit 0. That kills an implementation heading a block only when it has a line
@@ -409,28 +414,33 @@ to paste.
   implementation printing the line and saying nothing.
 - **`SA-0200`**, under `done/`. Assert `specs: [SA-0200]` exactly. That kills
   resolving the id under `.saffron/specs` alone, and a join that crashes or
-  prints `[, SA-0200]` over an empty list.
+  prints `[, SA-0200]` over an empty list. Its origin is record C, the one
+  numbered item. That kills finding a record by file name, as by `name[:8]`
+  or a glob of `f"{n}-*.md"`. The file is `032-`, so either reports an id no
+  record carries.
 - **`SA-0205`**, written by this witness with a `## Context` citing no item.
   **`SA-0206`**, written with a `## Context` citing a real live id the scratch
   `docs/backlog/` omits. Assert no `specs: [` in either output, and a
   different case line in each. That kills treating either as a crash, and
   treating one as the other.
 
-Three runs fail, and each asserts exit 1, a message on stderr, and **empty
+Four runs fail, and each asserts exit 1, a message on stderr, and **empty
 stdout**. Write the two broken files after the five runs above, so that no
 passing run reads them. `SA-0299`, which no file declares. `SA-0207`, whose
 frontmatter is not YAML, the refusal at `saffron/intake.py:186-187`. Then a
-fourth scratch record whose sections are out of order, with `SA-0201` run again
-and citing none of that record. That kills three implementations letting an
-error escape as a traceback instead of `_fail`'s 1. Empty stdout also kills
-one printing its blocks before it validates. The unrelated record kills one
-that parses the cited record alone rather than calling `records.load.load`.
+fourth scratch record whose sections are out of order. `SA-0201` runs again,
+citing none of that record, and then `SA-0205`, citing no item at all. That
+kills three implementations letting an error escape as a traceback instead of
+`_fail`'s 1. Empty stdout also kills one printing its blocks before it
+validates. The unrelated record kills one that parses the cited record alone
+rather than calling `records.load.load`. The `SA-0205` run kills one that
+loads records only once `first_cited_item` returns an id.
 `load_spec` refuses on several grounds, and `records.load.load` on several.
 This witness drives one of each, and the others reach the same `SpecError` and
 `RecordError`.
 
 Criterion 2 makes three runs over the helper's tree, then a table, and kills
-twenty-one. One `def` loops over the table, which is not a parametrised test.
+twenty-seven. One `def` loops over the table, which is not a parametrised test.
 
 - **`SA-0201`**, admitted. Match the opening against
   `Re-measured \d{4}-\d{2}-\d{2}, a tenth time:`. Assert `SA-0201`, its
@@ -449,21 +459,37 @@ twenty-one. One `def` loops over the table, which is not a parametrised test.
   absent from the directory, or as a refusal it never drew.
 
 The table rewrites the scratch `tests/test_scheduler.py` for each row and runs
-`SA-0201` again. Each docstring holds two `Re-measured` lines. The first
-carries the row's phrase, and the second, lower down, carries
-`a fourth time`. Seven rows step: `a ninth time`, `a nineteenth time`,
-`a twenty-ninth time`, `a fiftieth time`, `a fifty-second time`,
-`a seventh time` and `an eleventh time`. Assert the next phrase the claim
-names for each. Four rows do not step. The first is a docstring whose two
-lines both drop the phrase, since its second line would otherwise supply one.
-Then come `a hundredth time` and `a ninety-ninth time`, and last a file
-holding no function of the smoke test's name. Assert `<Nth>`, exit 0, and
-the case line for each, the same line for the first three. The two-line docstring kills a count of
-`Re-measured` lines, which gives `third`, and a reader taking the last phrase,
-which gives `fifth`. The stepping rows kill a list of plain words alone, one
-that misorders the tens against the hyphenated words, and one printing no
-`an`. The `an eleventh` row kills a reader matching `a` alone. The last four
-rows kill raising over each of them, `ninety-ninth` stepping past the list's
+`SA-0201` again. Every row keeps the earlier function the helper writes, whose
+docstring reads `re-anchored a fourth time`. Each smoke-test docstring holds
+two `Re-measured` lines. The first carries the row's phrase, and the second,
+lower down, carries `a fourth time`. Nine rows step: `a ninth time`,
+`a nineteenth time`, `a twenty-ninth time`, `a fiftieth time`,
+`a fifty-second time`, `a seventh time`, `an eleventh time`,
+`a fifty-seventh time` and `an eightieth time`. Assert the next phrase the
+claim names for each.
+
+Seven rows do not step, and four of them are the no-ordinal case. The first is
+a docstring whose two lines both drop the phrase, since its second line would
+otherwise supply one. Then come `a hundredth time`, `a ninety-ninth time`, and
+a smoke test with no docstring at all. Three are the no-function case. One
+file holds no function of the smoke test's name. One file does not parse. One
+row deletes the file. Assert the three headings, `<Nth>`, exit 0, and the case line for each. The
+line is the same within a case and differs between the two.
+
+The two-line docstring kills a count of `Re-measured` lines, which gives
+`third`, and a reader taking the last phrase, which gives `fifth`. The earlier
+function kills a reader taking the first phrase anywhere in the file, which
+gives `fifth` in every stepping row. It prints a phrase in the no-ordinal and
+no-function rows too. The live file is why. Its first phrase is
+`re-anchored a fourth time` at `tests/test_scheduler.py:1545`, in the test
+starting at `:1542`, before the smoke test at `:1820`. The stepping rows kill a
+list of plain words alone, one that misorders the tens against the hyphenated
+words, and one printing no `an`. The `an eleventh` and `an eightieth` rows
+kill a reader matching `a` alone. The `fifty-seventh` row kills two article
+rules, and each prints `an fifty-eighth`. One judges the last hyphen part.
+The other tests `"eigh" in word or "elev" in word`. The `eightieth` row also kills the
+first of those, which prints `a eighty-first`. The seven rows that do not
+step kill raising over each of them, `ninety-ninth` stepping past the list's
 end included.
 
 Criterion 3 makes two runs and kills eleven. Patch
@@ -514,10 +540,14 @@ things under `tmp_path`, and each witness calls it into its own `tmp_path`.
   record B second. Its frontmatter `title:` cites a third live id as
   `item <id>`, one the scratch `docs/backlog/` omits. That is what kills a
   reader of the whole file. `SA-0203` cites record B, and
-  `SA-0200`, `SA-0202` and `SA-0204` cite record C.
-- A `docs/backlog/` holding three short records. Record A carries
-  `specs: [SA-0100, SA-0300]`, record B `specs: [SA-0203]`, and record C
-  `specs: []`. Each holds `## Problem`, `## Done looks like` and `## Record`,
+  `SA-0200`, `SA-0202` and `SA-0204` cite record C as `item 32`.
+- A `docs/backlog/` holding three short records. Records A and B are random
+  ids. Record A carries `specs: [SA-0100, SA-0300]` and record B
+  `specs: [SA-0203]`. Record C is the numbered item `032-<slug>.md`, with
+  `id: 32` and `specs: []`. Live, 177 of `docs/backlog/`'s records are
+  numbered, and retired specs cite them first. `_ID` reads a numbered id as
+  `\d{1,3}` (`tests/records/check.py:37`), and `as_id` turns the file's `032`
+  into the `32` its `id` must equal (`records/load.py:170-173`). Each holds `## Problem`, `## Done looks like` and `## Record`,
   in that order and drawn from those three headings alone. `_sectioned`
   refuses prose before the first heading, an unknown heading, and a heading
   out of order (`records/load.py:114-136`, `records/kinds.py:160`).
@@ -531,8 +561,10 @@ things under `tmp_path`, and each witness calls it into its own `tmp_path`.
   one of that kind's `hand_written` names (`records/kinds.py:192`), so a
   fixture writing one would be skipped rather than refused. This fixture
   writes none.
-- A `tests/test_scheduler.py` holding nothing but the smoke test's `def` and a
-  docstring whose two `Re-measured` lines read `a ninth time` and then
+- A `tests/test_scheduler.py` holding two functions. The first is a test
+  whose docstring reads `re-anchored a fourth time`, as
+  `tests/test_scheduler.py:1545` does. The second is the smoke test's `def`,
+  with a docstring whose two `Re-measured` lines read `a ninth time` and then
   `a fourth time`.
 
 The helper then monkeypatches `driver.REPO` and `driver.SPECS_DIR`. Do not copy
@@ -572,13 +604,14 @@ reports "cites backlog item {n}, which does not exist" for an invented id.
 `tests/records/test_records_integrity.py:13-21` runs that over the live tree in
 the `tests` gate. The failure is new, so the baseline subtracts nothing. Both
 `tests/records/**` and `docs/**` are `forbidden`, so the cell cannot file the
-record that would answer it. For `SA-0206`, cite a real live id that the
-scratch `docs/backlog/` omits.
+record that would answer it. Record C's `32` is live, as
+`docs/backlog/032-the-dependency-gate-asked-whether-a-parent-shipped-and-answered-from-a.md`.
+For `SA-0206`, cite a real live id that the scratch `docs/backlog/` omits.
 
 **Each block is headed and printed even when it is empty**. A command printing
 nothing reads the same whether it had nothing to report or never looked. That
 no-op is what the headings make visible. `cmd_check` at
-`.claude/skills/run-saffron-spec-loop/driver.py:1713` prints a clean-verdict
+`.claude/skills/run-saffron-spec-loop/driver.py:1712` prints a clean-verdict
 sentence for the same reason.
 
 **The `prose` gate counts comment runs and docstrings per file**. It blocks
@@ -594,34 +627,34 @@ head, and reads a rename as a removal. The three new tests belong at the end of
 `test_enumerators_lists_the_calls_whose_directory_it_cannot_resolve` at
 `tests/test_spec_loop_driver.py:2454`, the last test `SA-0115` added.
 
-**The shape is about 468 changed lines, and nothing here raises the tier**.
+**The shape is about 491 changed lines, and nothing here raises the tier**.
 Neither file in `touches` sits under `.saffron/policy.yaml:34-58`'s
 `elevate_on`, and neither is under `protected` at `.saffron/policy.yaml:61-66`.
 So this task runs at `risk: standard`, where `size` is advisory against the
 `feature` ceiling of 600 (`saffron/gates/core/size.py:25`). Derived per part,
-it is 166 in `driver.py` and 302 in the test file.
+it is 169 in `driver.py` and 322 in the test file.
 
 - In `driver.py`: 34 for the origin item and the `specs:` line it owes, over
   what `tests/records/check.py` exports already. 26 for the queue under the
   smoke test's arrangement, with the temporary ledger and the `gh` passed in.
-  25 for the ordinal list, the step and the article. 14 for finding the smoke
-  test's docstring with `ast`. 26 for the paragraph and its three positions.
+  25 for the ordinal list, the step and the article. 17 for finding the smoke
+  test's docstring with `ast`, a missing or unparseable file included. 26 for the paragraph and its three positions.
   36 for `cmd_bookkeeping` with its three failures and three headed blocks,
-  and 5 to register the subcommand. That is 166.
-- In the tests: 50 for the helper that builds the scratch tree. 95 for
-  criterion 1's eight runs, 100 for criterion 2's three runs and eleven table
-  rows, and 57 for criterion 3's two runs. That is 302.
+  and 5 to register the subcommand. That is 169.
+- In the tests: 53 for the helper that builds the scratch tree. 100 for
+  criterion 1's nine runs, 112 for criterion 2's three runs and sixteen table
+  rows, and 57 for criterion 3's two runs. That is 322.
 
 No uplift is applied, and the parents are why. `SA-0114` estimated 485 and
 landed 330 in `6aa8da85`. `SA-0115` estimated 520 and landed 659 in
 `e4cf6388`, 206 in `driver.py` and 453 in the test file. Together that is 1005
 estimated against 989 landed. The risk sits in the test file, where `SA-0115`
-ran 168 over its own figure. 468 leaves 132 under the ceiling. If the test file
+ran 168 over its own figure. 491 leaves 109 under the ceiling. If the test file
 runs long anyway, keep every case above. `size` is advisory at this tier, and
 an attempt spent shrinking a fixture to fit costs more than the overrun.
 
-Against the `size:` lines `driver.py history SA-0116` prints, 468 sits below
-`SA-0108`'s 494, `SA-0016`'s 486 and `SA-0089`'s 477, all merged. It sits well
+Against the `size:` lines `driver.py history SA-0116` prints, 491 sits
+below `SA-0108`'s 494 and above `SA-0016`'s 486 and `SA-0089`'s 477, all merged. It sits well
 above `SA-0114`'s 330 in these same two files. `SA-0115` at 659 and `SA-0107`
 at 1049 overshot the ceiling. The comparable narrow cell in these files is
 `SA-0112`, at 243. `PRIORITY.md` is cut for size, and a fourth thing an author
