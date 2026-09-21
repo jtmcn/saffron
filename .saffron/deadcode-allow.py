@@ -41,3 +41,8 @@ _.register_spread  # harness/register_scoring.py: the pending instrument of docs
 _.driver_path  # harness/register_scoring.py: the pending instrument of docs/superpowers/specs/2026-09-17-prompt-change-measurement-design.md
 _.baseline_results  # Ledger: the read-side partner of task_results, read by the ledger tests
 _.batch_runs  # ledger read API, kept like baseline_results by operator decision
+
+# Read only by the record's tests, which `dead` does not scan (.saffron/gates/dead.py:5).
+_.record_key  # Ledger: the key the fold upserts on, read by tests/test_ledger_appends.py like baseline_results
+_.MemoryRecord  # saffron/record/memory.py: the in-memory backend tests/test_record.py and tests/test_fold.py drive
+_.compare_and_swap  # Record and both backends: the seam contract.py:125's ponytail names, driven by tests/test_record.py
