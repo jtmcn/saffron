@@ -2183,6 +2183,9 @@ def _drive_cell(
         reviewed_diff = ""
         # REVIEW binds it and REBUT reads it, like the three above.
         critic_env: dict[str, str] = {}
+        # One entry per criterion (backlog item b-2750d5), empty for a spec
+        # declaring none. Bound early for the same reason as `reviews`.
+        criterion_probes: list[dict] = []
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
@@ -2282,6 +2285,9 @@ def _drive_cell(
                     + "; ".join(gate_comparison.aborted or gate_comparison.drift),
                 )
             elif gate_comparison is not None:
+                # One ceiling for every lens and every criterion-probe
+                # session alike (backlog item b-2750d5), computed once.
+                probe_budget = critic_budget(spec.budget_usd, spent)
                 try:
                     with critic_cell(
                         spec=spec,
@@ -2325,7 +2331,22 @@ def _drive_cell(
                             claude_md=claude_md,
                             prompts_dir=context.PROMPTS_DIR,
                             max_turns=spec.max_turns,
-                            budget_usd=critic_budget(spec.budget_usd, spent),
+                            budget_usd=probe_budget,
+                            agent=agent,
+                            spec_id=spec.spec_id,
+                            emit=emit,
+                        )
+                        # One fresh session per criterion, asked before this
+                        # cell is torn down and never after (item b-2750d5).
+                        criterion_probes = review.run_criterion_probes(
+                            critic_container,
+                            acceptance=spec.acceptance,
+                            diff=reviewed_diff,
+                            context_md=context_md,
+                            claude_md=claude_md,
+                            prompts_dir=context.PROMPTS_DIR,
+                            max_turns=spec.max_turns,
+                            budget_usd=probe_budget,
                             agent=agent,
                             spec_id=spec.spec_id,
                             emit=emit,
@@ -2372,10 +2393,24 @@ def _drive_cell(
                             review.describe_probes(probed),
                         )
 
+                    # A spec declaring no criterion bought no session above
+                    # and writes no record here (backlog item b-2750d5).
+                    if criterion_probes:
+                        (task_dir / "criterion-probes.json").write_text(
+                            json.dumps(criterion_probes, indent=2)
+                        )
+                        _phase_start(
+                            "REVIEW",
+                            "REVIEW",
+                            review.describe_criterion_probes(criterion_probes),
+                        )
+
                     # Deliberately not gated on the host ceiling: a green diff
                     # nobody reviewed is exactly the product Appendix K says
                     # means nothing.
-                    spent += sum(r.cost_usd for r in reviews)
+                    spent += sum(r.cost_usd for r in reviews) + sum(
+                        e["cost_usd"] for e in criterion_probes
+                    )
                     (task_dir / "findings.json").write_text(
                         json.dumps([r.as_dict() for r in reviews], indent=2)
                     )

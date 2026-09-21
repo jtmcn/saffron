@@ -26,7 +26,7 @@ from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
 from saffron.agents.findings import Finding, Severity, anchor
 from saffron.events import Event, PhaseStart, describe
 from saffron.gates.contract import GateResult
-from saffron.intake import Mutant
+from saffron.intake import Criterion, Mutant
 from saffron.phases import implement
 
 # The implementer holds Write/Edit/Bash; a critic that can run a command can
@@ -329,6 +329,133 @@ def run_review(
         )
         reviews.append(review)
     return reviews
+
+
+class _ProbeAnswer(BaseModel):
+    """One criterion-probe session's own answer (backlog item b-2750d5): the
+    edit it names against the one claim it was shown, or none, and why."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    edit: Mutant | None = None
+    reason: str
+
+
+CRITERION_PROBE_PROMPT = context.turn_prompt("criterion-probe")
+
+
+def criterion_probe_prompt(
+    *,
+    claim: str,
+    diff: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+) -> str:
+    """The system prompt for one criterion's own session: the claim substituted
+    for `{spec}`, never the spec body and never a witness node id."""
+    template = (prompts_dir / "criterion-probe.md").read_text()
+    return context.build_system_prompt(
+        "REVIEW",
+        context_md,
+        template=template,
+        spec=claim,
+        diff=diff,
+        standing_instructions=context.standing_instructions(claude_md),
+    )
+
+
+def run_criterion_probe(
+    container: str,
+    *,
+    system_prompt: str,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> tuple[Mutant | None, str, float, str | None]:
+    """One fresh session, asked for the edit that falsifies one claim.
+
+    No re-prompt on a bad shape, unlike `run_lens`: a criterion probe costs
+    one claim, where a lens costs a whole remit.
+    """
+    options = implement.agent_options(
+        system_prompt=system_prompt,
+        max_turns=max_turns,
+        budget_usd=budget_usd,
+        tools=REVIEW_TOOLS,
+    )
+    try:
+        attempt = agent(
+            container, prompt=CRITERION_PROBE_PROMPT, options=options, emit=emit
+        )
+    except implement.AgentFailed as failed:
+        cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+        return None, "", cost, str(failed)
+    try:
+        answer = _ProbeAnswer.model_validate(
+            json.loads(parse_output_block(attempt.text))
+        )
+    except (ValueError, ValidationError) as exc:
+        return None, "", attempt.cost_usd_est, f"not the schema: {exc}"
+    return answer.edit, answer.reason, attempt.cost_usd_est, None
+
+
+def run_criterion_probes(
+    container: str,
+    *,
+    acceptance: Sequence[Criterion],
+    diff: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> list[dict]:
+    """One fresh session per criterion, in the spec's own declared order
+    (backlog item b-2750d5). Every entry is asked about, a `preserves` one
+    included, and a spec declaring none buys no session at all."""
+    entries = []
+    for criterion in acceptance:
+        system_prompt = criterion_probe_prompt(
+            claim=criterion.claim,
+            diff=diff,
+            context_md=context_md,
+            claude_md=claude_md,
+            prompts_dir=prompts_dir,
+        )
+        edit, reason, cost, error = run_criterion_probe(
+            container,
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            budget_usd=budget_usd,
+            agent=agent,
+            spec_id=spec_id,
+            emit=emit,
+        )
+        entries.append(
+            {
+                "witness": criterion.witness,
+                "claim": criterion.claim,
+                "edit": None if edit is None else edit.model_dump(),
+                "reason": reason,
+                "cost_usd": cost,
+                "error": error,
+            }
+        )
+    return entries
+
+
+def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
+    """The one REVIEW line criterion-probing adds, counted over
+    `criterion-probes.json`'s own entries. `describe_probes` sets that
+    precedent for a line counted over the record it summarises."""
+    named = sum(1 for e in entries if e["edit"] is not None)
+    return f"criterion probes: {named} named, {len(entries) - named} unnamed"
 
 
 def _describe(review: LensReview) -> str:

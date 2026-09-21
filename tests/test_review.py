@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from harness import lens_scoring
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
-from saffron.intake import Mutant
+from saffron.intake import Criterion, Mutant
 from saffron.phases import implement, review
 from saffron.phases.review import LensReview
 
@@ -532,3 +532,67 @@ def test_the_gate_results_reach_the_critic_with_the_tool_that_ran():
     )
     assert "tests: pass (pytest 8.0) — 31 ok" in summary
     assert "types: skip (no tool reported)" in summary
+
+
+# --- criterion probes: one fresh session per criterion (backlog item b-2750d5) ---
+
+
+def _probe_text(edit, reason):
+    return f"Here it is.\n<output>\n{json.dumps({'edit': edit, 'reason': reason})}\n</output>"
+
+
+def _probe_agent(*turns, record=None):
+    """Like `_lens_agent`, scripting one turn per `run_criterion_probes` call
+    rather than per lens: an exception is raised, anything else is the
+    session's raw text."""
+    scripted = iter(turns)
+
+    def run(container, *, prompt, options, **kwargs):
+        if record is not None:
+            record.append({"prompt": prompt, "options": options})
+        turn = next(scripted)
+        if isinstance(turn, BaseException):
+            raise turn
+        return _turn(turn)
+
+    return run
+
+
+def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still_asked():
+    """Criterion 3: an `AgentFailed` session and one whose output the schema
+    refuses each leave an entry naming what went wrong and no edit. Neither
+    stops the loop, and neither is re-prompted the way a lens is."""
+    first = Criterion(
+        claim="the guard rejects a negative amount", witness="t.py::test_a"
+    )
+    second = Criterion(claim="the total never goes negative", witness="t.py::test_b")
+    failed = implement.AgentFailed("cut off", _turn("", cost=0.3))
+
+    record: list[dict] = []
+    agent = _probe_agent(failed, "not a block at all", record=record)
+
+    entries = review.run_criterion_probes(
+        "cell",
+        acceptance=[first, second],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 2, "the second criterion must still be asked"
+    assert [e["witness"] for e in entries] == ["t.py::test_a", "t.py::test_b"]
+    assert [e["claim"] for e in entries] == [first.claim, second.claim]
+    assert entries[0]["edit"] is None
+    assert "cut off" in entries[0]["error"]
+    assert entries[0]["cost_usd"] == pytest.approx(0.3)
+    assert entries[1]["edit"] is None
+    assert entries[1]["error"] is not None
+    assert "not the schema" in entries[1]["error"]
+    # A refused session still spent its turn, and the task is charged for it.
+    assert entries[1]["cost_usd"] == pytest.approx(0.1)
