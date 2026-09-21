@@ -2134,7 +2134,7 @@ def cmd_enumerators(args) -> int:
 # --------------------------------------------------------------- bookkeeping
 
 
-# The ordinal words for 1 through 99, in document order: index 0 is
+# The ordinal words for 1 through 99, in numeric order: index 0 is
 # "first", index 98 is "ninety-ninth".
 _UNIT_ORDINALS = (
     "first",
@@ -2191,8 +2191,8 @@ _ORDINAL_WORDS = _ordinal_words()
 _ORDINAL_INDEX = {word: i for i, word in enumerate(_ORDINAL_WORDS)}
 _ORDINAL_PHRASE = re.compile(r"\b(?:a|an) ([a-z]+(?:-[a-z]+)?) time\b")
 
-# The smoke test `bookkeeping` reads a paragraph draft for, by name rather
-# than position — a table row that deletes the function is a case of its own.
+# The smoke test `bookkeeping` drafts a paragraph for, found by name rather
+# than by position.
 SMOKE_TEST_NAME = "test_saffron_queue_smoke_reproduces_this_repos_measured_queue"
 
 _HEADINGS = (
@@ -2218,8 +2218,8 @@ def _step_ordinal(word: str) -> str | None:
 def _smoke_docstring(path: Path) -> tuple[bool, str | None]:
     """Whether `path` holds a function named `SMOKE_TEST_NAME`, and its
     docstring if it does. `False` covers a missing file, one that does not
-    parse, and one with no such function — three reasons `bookkeeping` reports
-    as one case."""
+    parse, and one with no such function. `bookkeeping` reports all three as
+    one case."""
     try:
         source = path.read_text()
     except OSError:
@@ -2250,11 +2250,11 @@ def _next_ordinal(root: Path) -> tuple[str | None, str]:
 
 
 def _queue(root: Path):
-    """`build_queue` over `root`'s `.saffron/specs`, with a ledger this
-    invocation creates empty under a scratch directory and a `gh` that
-    reports no open pull request — the queue smoke test's own arrangement
-    (`tests/test_scheduler.py:2105-2112`), reproduced so the printed lines
-    equal what it asserts. `repo_id=None` so a fresh ledger filters nothing."""
+    """`build_queue` over `root`'s `.saffron/specs`, under an empty scratch
+    ledger and a `gh` that reports no open pull request. That is the queue
+    smoke test's own arrangement (`tests/test_scheduler.py:2105-2112`), so the
+    printed lines equal what it asserts. A fresh ledger filters nothing, so
+    `repo_id` is `None`."""
     from saffron.ledger import Ledger
     from saffron.scheduler import build_queue
 
@@ -2323,8 +2323,14 @@ def _paragraph_lines(
             None,
         )
         if position is None:
-            refusal = next(r for r in refusals if r.path.name.startswith(f"{spec_id}-"))
-            position = refusal.reason
+            refusal = next(
+                (r for r in refusals if r.path.name.startswith(f"{spec_id}-")), None
+            )
+            position = (
+                refusal.reason
+                if refusal is not None
+                else "case: neither a candidate nor a refusal"
+            )
 
     lines = [opening, f"{spec_id}, {item_part}, {depends_part}, {position}"]
     if case != "stepped":
@@ -2348,9 +2354,9 @@ def _block3_lines(candidates, refusals) -> list[str]:
 
 def cmd_bookkeeping(args) -> int:
     """Three of the four edits `docs/agents/issue-tracker.md` asks of the
-    commit that adds a spec (item b-7d3810): the origin item's `specs:`
-    line, a draft paragraph for the queue smoke test's docstring, and its two
-    pinned `assert` lines. The fourth, `PRIORITY.md`, is out of scope —
+    commit that adds a spec (item b-7d3810). They are the origin item's
+    `specs:` line, a draft paragraph for the queue smoke test's docstring,
+    and its two pinned `assert` lines. The fourth, `PRIORITY.md`, is out of scope.
     `check_priority` already reports it on every `make check`. Writes no
     file, stages nothing, and runs no git.
     """

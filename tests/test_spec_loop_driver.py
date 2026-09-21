@@ -4,7 +4,6 @@ and the watch pattern. Real git in a temporary repo; `gh` is always injected."""
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import importlib.util
 import os
 import re
@@ -2557,6 +2556,9 @@ def _bk_spec(spec_id, priority, context, *, depends_on=None, title="t"):
     )
 
 
+_DATE = r"\d{4}-\d{2}-\d{2}"
+
+
 def _bk_record(record_id, specs):
     specs_text = "[" + ", ".join(specs) + "]"
     return (
@@ -2566,9 +2568,9 @@ def _bk_record(record_id, specs):
 
 
 def _bk_scheduler_source(smoke_docstring):
-    """Two functions: an earlier test whose own docstring reads "re-anchored a
-    fourth time" (never read, by name), and the smoke test itself, whose
-    docstring is `smoke_docstring` — or none at all, for `None`."""
+    """Two functions. The earlier one's docstring reads "re-anchored a
+    fourth time", and nothing reads it by name. The smoke test's docstring is
+    `smoke_docstring`, or none at all for `None`."""
     if smoke_docstring is None:
         body = "    pass\n"
     else:
@@ -2584,9 +2586,9 @@ _BK_DEFAULT_SMOKE_DOC = (
 
 def _bookkeeping_tree(tmp_path, monkeypatch, *, smoke_doc=_BK_DEFAULT_SMOKE_DOC):
     """A scratch `.saffron/specs/` (five specs, one retired to `done/`),
-    `docs/backlog/` (three records), and `tests/test_scheduler.py`. No git —
-    `bookkeeping` reads no commit. `driver.REPO`/`SPECS_DIR` are patched so
-    every helper reads this tree rather than the real one."""
+    `docs/backlog/` (three records), and `tests/test_scheduler.py`. It has no
+    git, because `bookkeeping` reads no commit. `driver.REPO` is patched so
+    every helper reads this tree."""
     root = tmp_path
     specs_dir = root / ".saffron" / "specs"
     (specs_dir / "done").mkdir(parents=True)
@@ -2631,19 +2633,25 @@ def _bookkeeping_tree(tmp_path, monkeypatch, *, smoke_doc=_BK_DEFAULT_SMOKE_DOC)
     (root / "tests" / "test_scheduler.py").write_text(_bk_scheduler_source(smoke_doc))
 
     monkeypatch.setattr(driver, "REPO", root)
-    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
     return root
+
+
+def _assert_headings_in_order(out):
+    lines = out.splitlines()
+    assert [line for line in lines if line in driver._HEADINGS] == list(
+        driver._HEADINGS
+    )
 
 
 def test_bookkeeping_prints_three_blocks_and_the_specs_line_its_origin_item_owes(
     tmp_path, monkeypatch, capsys
 ):
-    """The first block: the origin item's `specs:` line, added and sorted, or
-    left unchanged with a word saying so, or a case line where there is no
-    line to print. Three usage failures print nothing on stdout and exit 1,
-    in the order `bookkeeping` checks them: an unknown spec id, a spec
-    `load_spec` refuses, and a record `records.load.load` refuses — the last
-    reached whether or not the target spec cites anything at all."""
+    """The first block: the origin item's `specs:` line, added and sorted.
+    An item already listing the spec keeps its line with a word saying so.
+    With no line to print, a case line says why. Three usage failures print
+    nothing on stdout and exit 1. In checking order they are an unknown spec
+    id, a spec `load_spec` refuses, and a record `records.load.load` refuses. The last
+    is reached whether or not the target spec cites anything."""
     root = _bookkeeping_tree(tmp_path, monkeypatch)
     (root / ".saffron" / "specs" / "SA-0205-fox.md").write_text(
         _bk_spec("SA-0205", 3, "Names no backlog entry at all, only prose.")
@@ -2663,33 +2671,36 @@ def test_bookkeeping_prints_three_blocks_and_the_specs_line_its_origin_item_owes
     rc, out = run("SA-0201")
     assert rc == 0
     lines = out.out.splitlines()
-    for heading in driver._HEADINGS:
-        assert heading in lines
+    _assert_headings_in_order(out.out)
     assert "specs: [SA-0100, SA-0201, SA-0300]" in lines
 
     rc, out = run("SA-0203")
     assert rc == 0
+    _assert_headings_in_order(out.out)
     lines = out.out.splitlines()
     idx = lines.index("specs: [SA-0203]")
     assert "already carried" in lines[idx + 1]
 
     rc, out = run("SA-0200")
     assert rc == 0
+    _assert_headings_in_order(out.out)
     assert "specs: [SA-0200]" in out.out.splitlines()
 
     rc, out = run("SA-0205")
     assert rc == 0
+    _assert_headings_in_order(out.out)
     assert not any("specs: [" in line for line in out.out.splitlines())
     case_205 = next(line for line in out.out.splitlines() if line.startswith("case:"))
     assert case_205 == "case: `## Context` cites no backlog item"
 
     rc, out = run("SA-0206")
     assert rc == 0
+    _assert_headings_in_order(out.out)
     assert not any("specs: [" in line for line in out.out.splitlines())
     case_206 = next(line for line in out.out.splitlines() if line.startswith("case:"))
     assert case_206 == "case: item b-7d3810 has no record under docs/backlog/"
 
-    # Written only now: no passing run above may read either.
+    # Written last, so no earlier invocation reads either file.
     (root / ".saffron" / "specs" / "SA-0207-hotel.md").write_text(
         "---\nid: SA-0207\n\ttitle: t\ntype: bug\n---\n## Context\n\nx\n"
     )
@@ -2714,11 +2725,10 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
     whole file. Its body names the spec, its origin item, its `depends_on`,
     and one of three positions."""
     root = _bookkeeping_tree(tmp_path, monkeypatch)
-    today = dt.date.today().isoformat()
 
     driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
     out = capsys.readouterr().out
-    assert f"Re-measured {today}, a tenth time:" in out
+    assert re.search(rf"Re-measured {_DATE}, a tenth time:", out)
     assert "SA-0201" in out
     assert "b-b69bb6" in out
     assert "declares no depends_on" in out
@@ -2766,7 +2776,9 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
         out = capsys.readouterr().out
         assert rc == 0, phrase
         article = "an" if expected[0] == "e" else "a"
-        assert f"Re-measured {today}, {article} {expected} time:" in out, phrase
+        assert re.search(rf"Re-measured {_DATE}, {article} {expected} time:", out), (
+            phrase
+        )
         assert "case:" not in out, phrase
         for heading in driver._HEADINGS:
             assert heading in out, phrase
@@ -2783,7 +2795,7 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
         rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
         out = capsys.readouterr().out
         assert rc == 0
-        assert f"Re-measured {today}, <Nth> time:" in out
+        assert re.search(rf"Re-measured {_DATE}, <Nth> time:", out)
         case = next(line for line in out.splitlines() if line.startswith("case:"))
         no_ordinal_cases.append(case)
         for heading in driver._HEADINGS:
@@ -2793,7 +2805,7 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
     rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
     out = capsys.readouterr().out
     assert rc == 0
-    assert f"Re-measured {today}, <Nth> time:" in out
+    assert re.search(rf"Re-measured {_DATE}, <Nth> time:", out)
     no_ordinal_cases.append(
         next(line for line in out.splitlines() if line.startswith("case:"))
     )
@@ -2807,7 +2819,7 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
     rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
     out = capsys.readouterr().out
     assert rc == 0
-    assert f"Re-measured {today}, <Nth> time:" in out
+    assert re.search(rf"Re-measured {_DATE}, <Nth> time:", out)
     no_function_cases.append(
         next(line for line in out.splitlines() if line.startswith("case:"))
     )
@@ -2816,7 +2828,7 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
     rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
     out = capsys.readouterr().out
     assert rc == 0
-    assert f"Re-measured {today}, <Nth> time:" in out
+    assert re.search(rf"Re-measured {_DATE}, <Nth> time:", out)
     no_function_cases.append(
         next(line for line in out.splitlines() if line.startswith("case:"))
     )
@@ -2825,7 +2837,7 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
     rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
     out = capsys.readouterr().out
     assert rc == 0
-    assert f"Re-measured {today}, <Nth> time:" in out
+    assert re.search(rf"Re-measured {_DATE}, <Nth> time:", out)
     no_function_cases.append(
         next(line for line in out.splitlines() if line.startswith("case:"))
     )
@@ -2838,10 +2850,9 @@ def test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal(
 def test_bookkeeping_prints_the_two_assert_lines_the_smoke_test_pins(
     tmp_path, monkeypatch, capsys
 ):
-    """The third block: `build_queue` over the working tree, under a ledger
-    this invocation creates empty rather than the one at
-    `~/.saffron/ledger.db`, with `repo_slug` set and a `gh` this invocation
-    supplies — `_ledger_and_repo` is never called and no ledger appears under
+    """The third block: `build_queue` over the working tree. Its ledger is
+    one this invocation creates empty, never `~/.saffron/ledger.db`. It sets
+    `repo_slug` and passes a `gh` of its own. `_ledger_and_repo` is never called, and no ledger appears under
     a patched `HOME`."""
     import saffron.scheduler as scheduler
 
