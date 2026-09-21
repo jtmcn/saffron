@@ -19,8 +19,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from saffron.ledger import Ledger, UnreadableTask
+from saffron.ledger import Ledger, UnplacedRebuttal
 from saffron.record.contract import Fact, Record
+
+
+class UnreadableTask(Exception):
+    """A task the record cannot give back. Named apart from every other
+    failure so `saffron fold` can price it: a task that did not make it into
+    the ledger, never the fold itself breaking. `error` != `fail`."""
 
 
 @dataclass
@@ -44,7 +50,7 @@ def fold(record: Record, ledger: Ledger, strict: bool = True) -> Fold:
             continue
         try:
             ledger.fold_task(key, facts)
-        except UnreadableTask as exc:
+        except UnplacedRebuttal as exc:
             # The record's own defect, not the fold's: a rebuttal with
             # nothing to rebut is priced like a fact git cannot read.
             ledger.fold_task(key, [])

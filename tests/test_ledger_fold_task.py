@@ -1,8 +1,8 @@
 """`Ledger._apply`/`fold_task`: the round trip between what a ledger's write
 methods put in its own rows and what the same facts, read back, rebuild.
 
-Read through a `sqlite3` connection of its own throughout, never through
-`ledger._db` — the round trip is worth nothing if both sides share one path
+Rows are read through a `sqlite3` connection of its own, never through
+`ledger._db`. The round trip is worth nothing if both sides share one path
 into SQLite.
 """
 
@@ -31,10 +31,10 @@ def record():
 _JOIN_A = "JOIN attempts a USING (attempt_id) JOIN tasks t USING (task_id)"
 _JOIN_G = f"JOIN gate_results g USING (gate_result_id) {_JOIN_A}"
 _TABLE_SQL = {
-    "tasks": "SELECT * FROM tasks WHERE record_key = ?",
+    "tasks": "SELECT t.*, r.base_sha FROM tasks t JOIN runs r USING (run_id) WHERE record_key = ?",
     "attempts": "SELECT a.* FROM attempts a JOIN tasks t USING (task_id) WHERE t.record_key = ? ORDER BY a.phase, a.n",
-    "gate_results": f"SELECT g.* FROM gate_results g {_JOIN_A} WHERE t.record_key = ? ORDER BY a.phase, a.n, g.gate",
-    "failures": f"SELECT f.* FROM failures f {_JOIN_G} WHERE t.record_key = ? ORDER BY a.phase, a.n, g.gate, f.file, f.code",
+    "gate_results": f"SELECT g.*, a.phase, a.n FROM gate_results g {_JOIN_A} WHERE t.record_key = ? ORDER BY a.phase, a.n, g.gate",
+    "failures": f"SELECT f.*, a.phase, a.n, g.gate FROM failures f {_JOIN_G} WHERE t.record_key = ? ORDER BY a.phase, a.n, g.gate, f.file, f.code",
     "findings": "SELECT f.* FROM findings f JOIN tasks t USING (task_id) WHERE t.record_key = ? ORDER BY f.claim",
 }
 _TASK_SQL = _TABLE_SQL["tasks"]
@@ -49,12 +49,14 @@ def _raw_rows(path: Path, sql: str, key: str) -> list[dict]:
         con.close()
 
 
+_KEYS = {"task_id", "run_id", "attempt_id", "gate_result_id", "failure_id"}
+_KEYS |= {"finding_id", "repo_id", "batch_id", "row_id"}
+
+
 def _compact(row: dict) -> dict:
-    """Every `*_id` and timestamp column left out. What two independently
-    autoincremented ledgers can still be compared on."""
-    return {
-        k: v for k, v in row.items() if not (k.endswith("_id") or k.endswith("_at"))
-    }
+    """Every surrogate key and timestamp column left out. What two
+    independently autoincremented ledgers can still be compared on."""
+    return {k: v for k, v in row.items() if k not in _KEYS and not k.endswith("_at")}
 
 
 def _table_rows(path: Path, sql: str, key: str) -> list[dict]:
@@ -193,7 +195,7 @@ def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, re
     check()
     source.record_merged_head(task_id, "h" * 40)
     check()
-    a2 = source.open_attempt(task_id, phase="REPAIR")
+    a2 = source.open_attempt(task_id, phase="IMPLEMENT")
     check()
     gate2 = _gate("types", "ty", _fail("c", "T1", 4, "m3"), _fail("d", "T2", 8, "m4"))
     source.record_gate_result(gate2, attempt_id=a2)
@@ -222,11 +224,14 @@ def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, re
 
 def test_folding_into_a_ledger_with_a_record_appends_nothing(tmp_path, record):
     source = Ledger(tmp_path / "source.db", record=record)
-    task_id = _minimal(source, "SA-1")
-    source.set_task_state(task_id, "IMPLEMENTING")
-    key = _key(source, task_id)
+    key, _ = _write_small_task(source, "SA-1")
+    by_key = "SELECT task_id FROM tasks WHERE record_key = ?"
+    task_id = _raw_rows(tmp_path / "source.db", by_key, key)[0]["task_id"]
+    for kind in _UPDATED_AT_KINDS[1:]:
+        _set_six_kind(source, task_id, kind)
     before = len(record.read(key))
-    source.fold_task(key, record.read(key))
+    assert {f.kind for f in record.read(key)} >= set(_UPDATED_AT_KINDS)
+    fold(record, source)
     assert len(record.read(key)) == before
     source.close()
 
@@ -292,6 +297,7 @@ def test_a_rebuttal_with_no_finding_skips_its_whole_task(tmp_path, record):
     writer.record_findings(task_id, [_find("a", "concern", "y", 2, "f2")])
     writer.record_rebuttal(finding1, verdict="withdrawn", rebuttal="ok")
     key = _key(writer, task_id)
+    next_key = _key(writer, _minimal(writer, "SA-5"))
     writer.close()
     _without_finding(record, key, finding1)
 
@@ -302,9 +308,10 @@ def test_a_rebuttal_with_no_finding_skips_its_whole_task(tmp_path, record):
 
     into2 = Ledger(tmp_path / "into2.db")
     result = fold(record, into2, strict=False)
-    assert result.folded == 0
+    assert result.folded == 1
     assert [k for k, _ in result.skipped] == [key]
     assert _table_rows(tmp_path / "into2.db", _TASK_SQL, key) == []
+    assert len(_table_rows(tmp_path / "into2.db", _TASK_SQL, next_key)) == 1
     into2.close()
 
 
@@ -388,8 +395,8 @@ def _set_six_kind(ledger: Ledger, task_id: int, kind: str) -> None:
 
 
 def _retimed(record: MemoryRecord, key: str) -> None:
-    """Every fact for `key`, one minute apart, oldest first — so `updated_at`
-    is checked against a value distinct from every other fact's."""
+    """Every fact for `key`, one minute apart and oldest first. Each column
+    is then checked against a value distinct from every other fact's."""
     facts = record.read(key)
     record._facts[key] = [
         replace(f, at=f"2026-09-19T00:{i:02d}:00+00:00") for i, f in enumerate(facts, 1)
@@ -414,8 +421,8 @@ def test_a_folded_task_is_dated_by_the_facts_that_set_each_column(tmp_path):
             _close(writer, attempt_id, "s", None, None, 1, 0.1)
             (f1,) = writer.record_findings(task_id, [_find("a", "note", "x", 1, "1")])
             (f2,) = writer.record_findings(task_id, [_find("a", "note", "y", 2, "2")])
-            writer.record_rebuttal(f2, verdict="w", rebuttal="r2")
-            writer.record_rebuttal(f1, verdict="w", rebuttal="r1")
+            writer.record_rebuttal(f2, verdict="withdrawn", rebuttal="r2")
+            writer.record_rebuttal(f1, verdict="confirmed", rebuttal="r1")
         writer.close()
         _retimed(record, key)
 
@@ -424,6 +431,19 @@ def test_a_folded_task_is_dated_by_the_facts_that_set_each_column(tmp_path):
         query = "SELECT updated_at FROM tasks WHERE record_key = ?"
         got = _raw_rows(tmp_path / f"{target}-into.db", query, key)
         assert got == [{"updated_at": f"2026-09-19 00:{target_n:02d}:00"}]
+        run = "SELECT r.started_at FROM runs r JOIN tasks t USING (run_id) WHERE record_key = ?"
+        got = _raw_rows(tmp_path / f"{target}-into.db", run, key)
+        assert got == [{"started_at": "2026-09-19 00:01:00"}]
+        if target != "task_created":
+            times = "SELECT a.started_at, a.ended_at FROM attempts a JOIN tasks t USING (task_id) WHERE record_key = ?"
+            got = _raw_rows(tmp_path / f"{target}-into.db", times, key)
+            opened, closed = f"00:{target_n + 1:02d}", f"00:{target_n + 3:02d}"
+            assert got == [
+                {
+                    "started_at": f"2026-09-19 {opened}:00",
+                    "ended_at": f"2026-09-19 {closed}:00",
+                }
+            ]
         into.close()
 
 

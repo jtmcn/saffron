@@ -176,10 +176,9 @@ RECORD_KEY_INDEX = (
 )
 
 
-class UnreadableTask(Exception):
-    """A task the record cannot give back. Named apart from every other
-    failure so `saffron fold` can price it: a task that did not make it into
-    the ledger, never the fold itself breaking. `error` != `fail`."""
+class UnplacedRebuttal(Exception):
+    """A rebuttal fact whose finding no earlier fact of its task placed. The
+    record's defect, which `fold()` prices as an unreadable task."""
 
 
 def _ledger_time(at: str) -> str:
@@ -415,11 +414,11 @@ class Ledger:
                     assert new_id is not None
                     findings[fact.payload["finding_id"]] = new_id
                 elif fact.kind == "rebuttal":
-                    # The fact names the source ledger's finding_id, so a
-                    # rebuttal is placed by the finding fact that preceded it.
+                    # ponytail: the fact names the writing ledger's finding_id,
+                    # so this maps it. The second spec names a finding by place.
                     mapped = findings.get(fact.payload["finding_id"])
                     if mapped is None:
-                        raise UnreadableTask(
+                        raise UnplacedRebuttal(
                             f"task {key}: rebuttal for finding "
                             f"{fact.payload['finding_id']} has no finding "
                             "fact to attach to"
@@ -427,7 +426,7 @@ class Ledger:
                     apply(fact, finding_id=mapped)
                 else:
                     # ponytail: an attempt_closed or gate_result fact names no
-                    # attempt; the second spec gives every fact its own place.
+                    # attempt. The second spec gives every fact its own place.
                     apply(fact, attempt_id=attempt_id)
 
     def _drop_task_rows(self, key: str) -> None:
@@ -465,6 +464,7 @@ class Ledger:
         """The repo and run a `task_created` fact names, by SQL alone since
         `_apply` cannot call a committing write method."""
         payload = fact.payload
+        # `repos.policy_sha` is nobody's fact, so a fold never writes it.
         self._db.execute(
             "INSERT INTO repos (name, origin, mirror_path) VALUES (?, ?, ?) "
             "ON CONFLICT(origin) DO UPDATE SET name=excluded.name, mirror_path=excluded.mirror_path",
