@@ -256,7 +256,7 @@ def test_observe_asks_once_with_the_pinned_model():
 
 _QUERY = """
 PREFIX earl: <http://www.w3.org/ns/earl#>
-PREFIX jev: <urn:saffron:jev#>
+PREFIX jev: <urn:software-factory:jev#>
 SELECT ?outcome ?dist ?model ?round ?commit WHERE {
   ?a a earl:Assertion ; earl:assertedBy jev:jev ; earl:test ?test ;
      earl:subject ?subject ; earl:mode earl:automatic ; earl:result ?r ;

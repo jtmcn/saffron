@@ -26,7 +26,7 @@
 
 Task 5 writes these into the design doc.
 
-1. **Jev terms use their own namespace, `urn:saffron:jev#`, not `factory:`.** `tests/ontology/test_no_dead_terms.py` requires every `factory:` term to have a query or shape that reads it. The design says nothing reads these scores yet, so a `factory:` term would fail that test. The `.ttl` files live under `~/.saffron/`, outside the `shacl` gate's tree. T6 (pyshacl) is dropped. T1's SPARQL query checks the shape instead.
+1. **Jev terms use their own namespace, `urn:software-factory:jev#`, not `factory:`.** `tests/ontology/test_no_dead_terms.py` requires every `factory:` term to have a query or shape that reads it. The design says nothing reads these scores yet, so a `factory:` term would fail that test. The `.ttl` files live under `~/.saffron/`, outside the `shacl` gate's tree. T6 (pyshacl) is dropped. T1's SPARQL query checks the shape instead.
 2. **`typesafe-sdk` goes in the `dev` group, not a new `harness` group.** `ty` checks every file, including `.claude/`. An import from a group `make install` does not sync would fail the `types` gate. The dev group never ships in the `saffron` wheel.
 3. **One Jev call per round, not one per question group.** TypeSafe's parallel-questions cookbook measured one batched call as 12.2x cheaper and 10x faster, with no change to each answer.
 4. **Q4 is skipped in a round with no earlier round.** Every finding in round 1 is new by definition.
@@ -537,7 +537,7 @@ def test_observe_asks_once_with_the_pinned_model():
 
 _QUERY = """
 PREFIX earl: <http://www.w3.org/ns/earl#>
-PREFIX jev: <urn:saffron:jev#>
+PREFIX jev: <urn:software-factory:jev#>
 SELECT ?outcome ?dist ?model ?round ?commit WHERE {
   ?a a earl:Assertion ; earl:assertedBy jev:jev ; earl:test ?test ;
      earl:subject ?subject ; earl:mode earl:automatic ; earl:result ?r ;
@@ -576,7 +576,7 @@ Append to `harness/jev_observe.py`:
 # Task 6 replaces this with the dated name `models.list()` reports, so a record names the model that answered.
 MODEL = "jev-latest"
 _PREFIXES = """@prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix jev: <urn:saffron:jev#> .
+@prefix jev: <urn:software-factory:jev#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 """
 
@@ -616,7 +616,7 @@ def to_turtle(r: Round, model: str, answers: list[Answer]) -> str:
         parts.append(
             "[] a earl:Assertion ;\n"
             "  earl:assertedBy jev:jev ;\n"
-            f"  earl:subject <urn:saffron:jev:{r.kind}:{r.spec_id}:{subject}> ;\n"
+            f"  earl:subject <urn:software-factory:jev:{r.kind}:{r.spec_id}:{subject}> ;\n"
             f"  earl:test jev:{a.question} ;\n"
             "  earl:mode earl:automatic ;\n"
             "  earl:result [ a earl:TestResult ; earl:outcome earl:cantTell ;\n"

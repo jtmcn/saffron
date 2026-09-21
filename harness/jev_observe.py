@@ -189,7 +189,7 @@ def state(r: Round) -> dict[str, Any]:
 # Task 6 replaces this with the dated name `models.list()` reports, so a record names the model that answered.
 MODEL = "jev-latest"
 _PREFIXES = """@prefix earl: <http://www.w3.org/ns/earl#> .
-@prefix jev: <urn:saffron:jev#> .
+@prefix jev: <urn:software-factory:jev#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 """
 
@@ -229,7 +229,7 @@ def to_turtle(r: Round, model: str, answers: list[Answer]) -> str:
         parts.append(
             "[] a earl:Assertion ;\n"
             "  earl:assertedBy jev:jev ;\n"
-            f"  earl:subject <urn:saffron:jev:{r.kind}:{r.spec_id}:{subject}> ;\n"
+            f"  earl:subject <urn:software-factory:jev:{r.kind}:{r.spec_id}:{subject}> ;\n"
             f"  earl:test jev:{a.question} ;\n"
             "  earl:mode earl:automatic ;\n"
             "  earl:result [ a earl:TestResult ; earl:outcome earl:cantTell ;\n"
