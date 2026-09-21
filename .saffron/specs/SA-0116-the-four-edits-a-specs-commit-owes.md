@@ -93,17 +93,17 @@ acceptance:
     witness: tests/test_spec_loop_driver.py::test_bookkeeping_drafts_the_smoke_tests_paragraph_and_steps_its_ordinal
   - claim: >-
       The third block prints two lines, each a complete `assert` statement of
-      the form `tests/test_scheduler.py:2109-2110` holds: every candidate spec
+      the form `tests/test_scheduler.py:2116-2117` holds: every candidate spec
       id in the order the queue gives them, and every refusal's file name in
       that same order, each cut to its first seven characters. Both come from
       one `build_queue` over `.saffron/specs` in the working tree, under a
       ledger this invocation creates empty rather than the one at
       ~/.saffron/ledger.db, with `repo_slug` set to the joel/saffron that
-      `tests/test_scheduler.py:2104` passes, and with a `gh` this invocation
+      `tests/test_scheduler.py:2111` passes, and with a `gh` this invocation
       supplies that reports no open pull request, so `build_queue`'s default of
       `run_gh` (`saffron/scheduler.py:731`) is never reached and no `gh`
       subprocess runs. That is the smoke test's own arrangement at
-      `tests/test_scheduler.py:2098-2105`, the half of it that decides what the
+      `tests/test_scheduler.py:2105-2112`, the half of it that decides what the
       queue returns, so both lines equal what that test asserts.
       `_ledger_and_repo` is not called, and no ledger file appears under the
       home directory's `.saffron/`.
@@ -115,18 +115,16 @@ acceptance:
 Backlog item **b-7d3810** is
 `docs/backlog/b-7d3810-adding-a-spec-edits-four-files-by-hand.md`, tier 2. It
 was filed on 2026-09-20 from `SA-0113`, one spec drafted outside a loop run. It
-follows **b-b69bb6** in the tier-2 passage at `docs/backlog/PRIORITY.md:174-179`,
+follows **b-b69bb6** in the tier-2 passage at `docs/backlog/PRIORITY.md:178-183`,
 which strikes **b-929465** as done by #392. Tier 2 names it at
-`docs/backlog/PRIORITY.md:145`. Its sibling **b-b69bb6** is the item `SA-0114`
+`docs/backlog/PRIORITY.md:149`. Its sibling **b-b69bb6** is the item `SA-0114`
 and `SA-0115` serve. This one is the other half of the same tail: the edits
 `docs/agents/issue-tracker.md` asks of the commit that adds a spec.
 
-Every sentence here about current code was read on 2026-09-21 at `f3dcae7c`.
-That commit is the head of `origin/saffron/SA-0115`, the branch `SA-0115`'s cell
-pushed, and it is the base this cell is cut from. It carries `SA-0114`'s `cite`
-and `SA-0115`'s `enumerators`, with their tests. "This base" below names that
-commit. `main` holds neither parent's code, so its line numbers in the two
-`touches` files differ from the ones cited here.
+Every sentence here about current code was read on 2026-09-21 at `35b4ce88`,
+on `main`, which is the base this cell is cut from. It carries `SA-0114`'s
+`cite` and `SA-0115`'s `enumerators`, with their tests. "This base" below
+names that commit.
 
 **What `issue-tracker.md` asks for**. The bullet at
 `docs/agents/issue-tracker.md:44-51` carries three of the four edits. It says
@@ -161,7 +159,7 @@ it the spec's `## Context`. Measured at this base: over
 `.saffron/specs/SA-0115-the-tests-that-enumerate-a-directory-a-spec-adds-to.md`
 the pair returns `b-b69bb6`. `spec_files` at `tests/records/check.py:283-285`
 resolves a spec id to its file over the queue and `done/`. It keys on the file
-name alone (`tests/records/check.py:274-280`), and it returns 106 entries here.
+name alone (`tests/records/check.py:274-280`), and it returns 107 entries here.
 
 **The spec loop's driver is where a computed aid for a spec's commit lives**.
 `cmd_check` at `.claude/skills/run-saffron-spec-loop/driver.py:1684-1713`
@@ -194,10 +192,10 @@ the function rather than at module scope.
 
 **The queue is `build_queue`**. `saffron/scheduler.py:725-731` takes the specs
 directory, a `repo_id` and a ledger, with keyword `repo_slug` and `gh`. The
-smoke test calls it at `tests/test_scheduler.py:2103-2105`. Its ledger is
+smoke test calls it at `tests/test_scheduler.py:2110-2112`. Its ledger is
 created empty by the fixture at `tests/test_scheduler.py:26-30`, and its `gh`
 returns no pull request. It asserts the two lists at
-`tests/test_scheduler.py:2109-2110`.
+`tests/test_scheduler.py:2116-2117`.
 
 **The `prose` gate reads this driver and its tests**. `in_scope` at
 `.saffron/gates/prose.py:188-193` sends a Python path under `CODE_DIRS` to the
@@ -227,8 +225,8 @@ included.
 Adding a spec edits four other files, and an author works all four out by
 reading. `SA-0113`'s draft took 35.7 minutes of agent time. This tail is the
 part of it that needs no judgement. `SA-0113`'s commit wrote the smoke test's
-forty-ninth re-measurement. Its docstring now opens at the fifty-second
-(`tests/test_scheduler.py:1821`). Every one of the fifty-two was written by
+forty-ninth re-measurement. Its docstring now opens at the fifty-third
+(`tests/test_scheduler.py:1821`). Every one of the fifty-three was written by
 hand, from a queue the author had to compute anyway.
 
 The command is `bookkeeping`. It takes a spec id and prints three of the four.
@@ -251,11 +249,11 @@ reason.
    on its own (`saffron/scheduler.py:523-528`). The ordinal is the one part
    the queue does not carry, and the tempting derivation of it is wrong. The
    docstring at `tests/test_scheduler.py:1821` opens "Re-measured 2026-09-20,
-   a fifty-second time". That same docstring holds **38** lines beginning
-   `Re-measured`. Fourteen of the fifty-two are no longer in the file. So the
+   a fifty-third time". That same docstring holds **39** lines beginning
+   `Re-measured`. Fourteen of the fifty-three are no longer in the file. So the
    ordinal comes from the topmost one plus one. A count of paragraphs would
    run fourteen short and read as right. The article varies too.
-   `tests/test_scheduler.py:2048` reads "an eighteenth time".
+   `tests/test_scheduler.py:2055` reads "an eighteenth time".
 
 3. **The two pinned `assert` lines**. One `build_queue` over the working
    tree's `.saffron/specs` gives both. The arrangement has to be the smoke
@@ -369,12 +367,12 @@ convenience. `first_cited_item` is the rule `make check` applies, and a second
 copy of it would drift from the thing it exists to predict.
 
 **The empty ledger is this invocation's own**. Create it under a temporary
-directory, and close it. `tests/test_scheduler.py:2101` upserts one repo row
+directory, and close it. `tests/test_scheduler.py:2108` upserts one repo row
 into its fixture's ledger before calling `build_queue`. Measured at this base
 over the fixture below, `repo_id=None` gives the same two lists the smoke test
 pins. Either is right, and no claim pins one. What criterion 3 does pin is
 that no ledger under the home directory is read or made. Pass `repo_slug` as
-joel/saffron, as `tests/test_scheduler.py:2104` does, and criterion 3 pins that
+joel/saffron, as `tests/test_scheduler.py:2111` does, and criterion 3 pins that
 too. `None` is not an equivalent spelling. `build_queue` skips `_open_prs`
 outright when the slug is `None` (`saffron/scheduler.py:746-750` and `:808`).
 The `gh` this command supplies is then never reached, and the overlap refusal
@@ -679,6 +677,7 @@ and `SA-0115` declare
 **Commit before you verify.** Run 11 ran this spec and ended `NOT_IMPLEMENTED`
 with no commit. Its three witnesses passed, and the 900-second turn wall cut
 it during a last full-suite run (item b-36b551). Commit as soon as a witness
-passes. Run `tests/test_spec_loop_driver.py` alone, never the whole suite.
+passes. Run `tests/test_spec_loop_driver.py` and
+`tests/records/test_records_integrity.py`, never the whole suite.
 The gates run the whole suite after the turn ends. Uncommitted work dies with
 the cell.
