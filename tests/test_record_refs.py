@@ -298,3 +298,11 @@ def test_a_diverged_push_is_refused_not_forced(tmp_path, repo):
         check=True,
     ).stdout.strip()
     assert unchanged == on_remote
+
+
+def test_a_fact_cannot_be_filed_under_another_task(repo):
+    # The same guard on the backend a night actually writes to.
+    record = RefsRecord(repo)
+    with pytest.raises(ValueError, match="filed under"):
+        record.append("b" * 32, a_fact())
+    assert record.task_keys() == []

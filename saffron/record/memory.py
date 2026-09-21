@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from saffron.record.contract import Fact
+from saffron.record.contract import Fact, check_filed_under
 
 
 class MemoryRecord:
@@ -14,6 +14,7 @@ class MemoryRecord:
         self._values: dict[str, str] = {}
 
     def append(self, task_key: str, fact: Fact) -> None:
+        check_filed_under(task_key, fact)
         self._facts[task_key].append(fact)
 
     def read(self, task_key: str) -> list[Fact]:

@@ -4,6 +4,7 @@ from saffron.record.contract import (
     Record,
     RecordError,
     StaleWriter,
+    check_filed_under,
     new_task_key,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "Record",
     "RecordError",
     "StaleWriter",
+    "check_filed_under",
     "new_task_key",
 ]

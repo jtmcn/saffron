@@ -116,3 +116,12 @@ def test_reading_an_absent_task_does_not_register_it():
     record = MemoryRecord()
     record.read("nonexistent-key")
     assert record.task_keys() == []
+
+
+def test_a_fact_cannot_be_filed_under_another_task():
+    # The ref names one task and the fact names another, so a fold reading
+    # the ref would attribute the fact to whichever it trusted.
+    record = MemoryRecord()
+    with pytest.raises(ValueError, match="filed under"):
+        record.append("b" * 32, a_fact())
+    assert record.task_keys() == []

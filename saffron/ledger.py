@@ -1,4 +1,8 @@
-"""The ledger — SQLite, one file, WAL, authoritative for state (DESIGN.md §4.1).
+"""The ledger — SQLite, one file, WAL. `DESIGN.md` §4.1 calls it authoritative
+for state, and the record design reverses that: a store folded out of
+`refs/saffron/*` by `saffron/record/fold.py`, deletable at any time. Only the
+eleven kinds `_append` writes are folded back, so today it is authoritative for
+the rest. The `DESIGN.md` and `CONTEXT.md` amendments are second-plan work.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it.
@@ -79,6 +83,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     policy_sha TEXT,
     prompt_sha  TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    record_key TEXT,
     merged_head_sha TEXT
     -- The commit GitHub reported a merge at, written once by `reconcile`
     -- (backlog item 97). NULL until a merge for this row is observed.
@@ -160,6 +165,12 @@ CREATE INDEX IF NOT EXISTS attempts_by_task ON attempts(task_id);
 CREATE INDEX IF NOT EXISTS findings_by_task ON findings(task_id);
 """
 
+# Not in `SCHEMA`: that runs before the `ALTER`s, so on a ledger predating
+# `record_key` it indexes a missing column and the open fails. Measured.
+RECORD_KEY_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS tasks_by_record_key ON tasks(record_key)"
+)
+
 
 def _inserted_id(cursor: sqlite3.Cursor) -> int:
     """`lastrowid` is `int | None` on the sqlite3 type stubs.
@@ -206,6 +217,9 @@ class Ledger:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
             )
+        # The fold upserts on `record_key`, so two rows sharing one would make
+        # its `fetchone` pick one. SQLite counts NULLs distinct.
+        self._db.execute(RECORD_KEY_INDEX)
         # Same trap, this time on `runs`: `batches` arriving in `SCHEMA` does
         # not retrofit `batch_id` onto a `runs` table that already exists.
         runs_existing = {
@@ -334,7 +348,11 @@ class Ledger:
 
     def _append(self, task_id: int, kind: str, **payload: Any) -> None:
         """Every ledger write appends the fact it represents. A `None` record
-        is every caller that predates the record, which must be unaffected."""
+        is every caller that predates the record, which must be unaffected.
+
+        After the commit that wrote the row, never before: a fact for a row
+        that does not exist is the worse of the two. So an append that raises,
+        a refused push being the case, leaves a row the next fold reverts."""
         if self._record is None:
             return
         row = self._db.execute(

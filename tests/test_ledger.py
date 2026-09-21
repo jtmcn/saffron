@@ -1390,3 +1390,55 @@ def test_an_attempt_records_the_model_it_ran_on(ledger, task):
     )
     (row,) = ledger.attempts(task_id)
     assert row["model"] == "claude-opus-5"
+
+
+def test_a_ledger_built_before_the_record_key_column_gains_it_and_its_index(
+    tmp_path,
+):
+    """`record_key` is in `SCHEMA` now and in the guarded `ALTER` list, and a
+    database that predates both has to reach the same shape by the second
+    one. The unique index is what the fold's upsert on the column needs."""
+    path = tmp_path / "ledger.db"
+    first = Ledger(path)
+    repo_id = first.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = first.create_run(repo_id, base_sha="a" * 40)
+    first.create_task(
+        run_id, spec_id="TE-9001", spec_sha="s" * 64, branch="saffron/TE-9001"
+    )
+    # The index first: SQLite refuses to drop a column one names.
+    first._db.execute("DROP INDEX IF EXISTS tasks_by_record_key")
+    first._db.execute("ALTER TABLE tasks DROP COLUMN record_key")
+    first._db.commit()
+    first.close()
+
+    second = Ledger(path)
+    assert [r["spec_id"] for r in second.tasks_by_repo(repo_id)] == ["TE-9001"]
+    columns = {r["name"] for r in second._db.execute("PRAGMA table_info(tasks)")}
+    assert "record_key" in columns
+    indexes = {r["name"] for r in second._db.execute("PRAGMA index_list(tasks)")}
+    assert "tasks_by_record_key" in indexes
+    second.close()
+
+
+def test_two_tasks_cannot_share_one_record_key(tmp_path):
+    """The fold upserts on `record_key`, so a second row under one key would
+    make its `fetchone` pick one and fold the other's facts into it. NULL
+    stays distinct in SQLite, so the rows that predate the record are free."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    first = ledger.create_task(
+        run_id, spec_id="TE-9001", spec_sha="s" * 64, branch="saffron/TE-9001"
+    )
+    second = ledger.create_task(
+        run_id, spec_id="TE-9002", spec_sha="s" * 64, branch="saffron/TE-9002"
+    )
+    # Both NULL to begin with, and two NULLs do not collide.
+    ledger._db.execute(
+        "UPDATE tasks SET record_key = ? WHERE task_id = ?", ("a" * 32, first)
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger._db.execute(
+            "UPDATE tasks SET record_key = ? WHERE task_id = ?", ("a" * 32, second)
+        )
+    ledger.close()

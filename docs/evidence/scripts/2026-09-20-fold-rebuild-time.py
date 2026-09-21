@@ -237,7 +237,7 @@ def main(source: Path, work: Path) -> None:
         f"largest single fact: {size['largest'] / 1e6:.2f} MB "
         f"({size['largest']} bytes) {biggest}"
     )
-    print(f"index rebuilt: {rebuilt.stat().st_size / 1e6:.1f} MB")
+    print(f"ledger rebuilt: {rebuilt.stat().st_size / 1e6:.1f} MB")
     print("what came back:")
     _agrees(work / "synth.db", rebuilt)
 

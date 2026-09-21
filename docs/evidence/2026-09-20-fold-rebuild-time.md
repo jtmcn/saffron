@@ -1,4 +1,4 @@
-# What it costs to delete the index and fold it back
+# What it costs to delete the ledger and fold it back
 
 Measured 2026-09-20 on macOS 25.6, `git 2.51.0`, Python 3.14.7, APFS. The
 instrument is `scripts/2026-09-20-fold-rebuild-time.py`; it copies the ledger
@@ -6,7 +6,7 @@ first and writes nothing to `~/.saffron`.
 
 ## Which artifact establishes which half of the criterion
 
-Design §4's criterion — delete the index, rebuild it, get the same rows — is
+Design §4's criterion — delete the ledger, rebuild it, get the same rows — is
 proved in two places and neither alone is enough.
 
 - `tests/test_fold.py` pins the **mechanism** on a fixture it builds itself. It
@@ -57,7 +57,7 @@ attempts, 1,971 attempt-scoped gate results, 250,136 failure rows, 149 findings.
 | facts | 3,805 |
 | **fold, loose record** | **90.61 s** |
 | fold, after `git gc --aggressive` | 89.70 s |
-| index rebuilt | 30.6 MB |
+| ledger rebuilt | 30.6 MB |
 | record built (not the fold) | 363.4 s |
 
 The fold is 24 ms per fact, and almost all of it is `git cat-file` one fact at a

@@ -110,6 +110,15 @@ class Fact:
         )
 
 
+def check_filed_under(task_key: str, fact: Fact) -> None:
+    """A fact names its own task, so filing it under another key would make
+    the ref and its contents disagree and the fold trust the ref."""
+    if fact.task_key != task_key:
+        raise ValueError(
+            f"fact claims task {fact.task_key!r}, filed under {task_key!r}"
+        )
+
+
 class Record(Protocol):
     """Four operations and no git in any signature.
 

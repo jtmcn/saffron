@@ -203,7 +203,8 @@ def test_an_unreadable_task_names_itself_and_folds_the_rest(tmp_path, record):
     # A record one task cannot be read from must still produce a ledger of
     # the others, or one bad task costs a whole night's page.
     a_night(tmp_path, record)
-    record.append("f" * 32, record.read(record.task_keys()[0])[0])
+    borrowed = record.read(record.task_keys()[0])[0]
+    record.append("f" * 32, replace(borrowed, task_key="f" * 32))
     record._facts["f" * 32] = ["not a fact"]
     into = Ledger(tmp_path / "into.db")
     with pytest.raises(UnreadableTask, match="f" * 32):

@@ -9,7 +9,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from saffron.record.contract import Fact, RecordError, StaleWriter
+from saffron.record.contract import (
+    Fact,
+    RecordError,
+    StaleWriter,
+    check_filed_under,
+)
 
 TASKS = "refs/saffron/tasks"
 VALUES = "refs/saffron/values"
@@ -39,6 +44,7 @@ class RefsRecord:
         return done.stdout
 
     def append(self, task_key: str, fact: Fact) -> None:
+        check_filed_under(task_key, fact)
         ref = f"{TASKS}/{task_key}"
         parent = self._resolve(ref)
         blobs = self._blobs(task_key)
