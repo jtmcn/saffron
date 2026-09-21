@@ -58,9 +58,12 @@ acceptance:
       `set_task_package`, `record_merged_head`, then open attempt 2, its gate
       result, and close it. Each gate result has its own gate name and at
       least two failures, each with a distinct file and code, a non-empty
-      message and a line. After each write the witness folds every fact so
-      far into one fresh ledger and compares `tasks`, `attempts`,
-      `gate_results`, `failures` and `findings` with the writing ledger's.
+      message and a line. Before the first write, the fold ledger already
+      holds an unrelated task with one finding, folded into it, so no id the
+      fold mints equals the one the writing ledger chose. After each write
+      the witness folds every fact so far into that ledger and compares this
+      task's rows in `tasks`, `attempts`, `gate_results`, `failures` and
+      `findings` with the writing ledger's.
       Every `*_id` column and every timestamp column is left out. Each child
       row is compared through its parent's natural key instead: a task
       through its run's `base_sha`, an attempt and a finding through the
@@ -96,8 +99,8 @@ acceptance:
   - claim: >-
       A rebuttal fact whose finding no earlier fact of its task placed makes
       the whole task unreadable, even when the task holds another finding.
-      The witness removes the fact of the finding the rebuttal names and
-      keeps the other. A strict fold raises `UnreadableTask` naming
+      The rebuttal names the first finding. The witness removes that
+      finding's fact, whose id is the lower, and keeps the second. A strict fold raises `UnreadableTask` naming
       the task. A fold without `strict` records the task in `Fold.skipped`,
       writes none of its rows and folds the next task. Today the fold without
       `strict` drops only the rebuttal and folds the rest of the task.
@@ -110,7 +113,7 @@ acceptance:
       log with no `task_created` fact, and a rebuttal whose finding is gone
       while another finding stays. A second task shares the record. In both modes, the five tables then
       hold exactly that second task's rows from the earlier fold, compared row
-      for row and counted table by table. Today a task found unreadable while
+      for row with every `*_id` column left out, and counted table by table. Today a task found unreadable while
       the fold orders tasks keeps the rows of its earlier fold.
     witness: tests/test_ledger_fold_task.py::test_a_task_that_became_unreadable_leaves_a_surviving_ledger
   - claim: >-
@@ -315,7 +318,7 @@ every fact so far into the same fresh ledger and compare. That also drives
 last-opened attempt are rules. One row lets a wrong rule pass. With one
 finding, a rebuttal placed on the latest finding matches. With results in one
 attempt only, a gate result placed on the first attempt matches. So each
-rebuttal names a finding that is not the latest when it is written. Each
+the first rebuttal written names a finding that is not the latest. Each
 attempt has a gate result under its own gate name. A gate result with no
 failures lets an `_apply` that ignores them pass, so each carries two.
 
