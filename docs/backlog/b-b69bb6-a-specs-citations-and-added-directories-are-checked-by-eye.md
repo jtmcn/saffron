@@ -1,7 +1,7 @@
 ---
 id: b-b69bb6
 title: A spec's line citations and the directories it adds files to are checked by eye, and both are computable
-status: open
+status: partial
 tier: 2
 filed: 2026-09-20
 specs: [SA-0114, SA-0115]
@@ -92,3 +92,5 @@ place of deriving both by hand.
   (#406) in the spec loop's run 11. The directory half resolves only literal
   receivers, so on this repository it lists all 35 calls as unresolved.
   Resolution follows in item b-f45f73, and `cite`'s precision in item b-61993a.
+- 2026-09-21: #404 and #406 merged, and `SA-0114` and `SA-0115` retire to
+  `done/`. `partial`, because neither agent runs the commands yet.
