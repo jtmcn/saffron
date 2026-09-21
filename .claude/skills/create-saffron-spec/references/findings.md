@@ -56,15 +56,27 @@ in all. Classed by what could have caught each one before a reviewer read it.
 | A change breaking a live check or test | 3 | a globbed directory, fixture ids the records check scans |
 | Judgement about the design | 3 | withholding a node id the diff discloses |
 
-Two findings in the first corpus were false: a reviewer's `terms` claim, which
-the gate's `AVOIDED` set disproves. Both were answered with evidence and not
-applied.
+Two findings in the first corpus were false, one of them a reviewer's `terms`
+claim that the gate's `AVOIDED` set disproves. Both were answered with evidence
+and not applied.
+
+## Classes the backtest added
+
+The held-out backtest of 2026-09-21 found two classes neither corpus names.
+Both configurations missed them, and neither was counted.
+
+- A field, key, unit or lookup the spec leans on that the base does not carry.
+- A data flow the base cannot support: a source only a `forbidden` file holds,
+  or an output with no named place.
+
+`preflight.md` checks 3 and 4 exist for them.
 
 ## The two corpora together
 
 Corpus 1 is what readers catch, and corpus 2 is what they miss. The quantified
 set class appears in both. Readers caught 14 instances before the cells ran,
-and the cells still found at least seven more. A rule in
+and the cells still found eleven more: four in `SA-0113`, six in `SA-0115` and
+one in `SA-0116`. A rule in
 `docs/agents/issue-tracker.md` names the class, and item b-250dc7 records that
 the rule did not stop a writer producing it.
 

@@ -55,8 +55,8 @@ spends its rounds on judgement rather than re-deriving arithmetic.>
 
 Report findings with severities as your instructions define them, say
 which of the six checks you settled and on what evidence, and mark
-anything you could not verify at base. Where the spec quotes a
-measurement, check the number.
+anything you could not verify at base, including any measurement the
+spec quotes that reading cannot confirm.
 ```
 
 ## The second reviewer
@@ -74,8 +74,11 @@ The same shape, plus two things a first review does not need.
 ## The writer, revising
 
 ```
-review: the findings below, on spec <path>, which you wrote.
-It is committed as <commit> on branch <branch> in the checkout at <path>,
+review: the findings below, on the spec you wrote.
+
+spec: <path>
+
+base: <commit>, the head of branch <branch> in the checkout at <path>,
 the base the reviewer read at. Revise in place. Do not commit.
 
 <Apply all, unless reading the line at base shows a finding is wrong.
@@ -89,6 +92,9 @@ decisions (settled, do not re-argue):
 <the review, verbatim>
 --- END REVIEW ---
 ```
+
+Name `base:` as a field. The writer verifies each finding at `base`, and
+without one it reads `origin/main`, where the spec does not exist.
 
 Pass the review verbatim. A paraphrase is a second citation nobody checked, and
 a reviewer's line numbers are what the writer re-reads at the base.

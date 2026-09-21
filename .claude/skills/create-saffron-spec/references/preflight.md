@@ -5,8 +5,9 @@ command cannot see. `findings.md` holds the evidence each check rests on. The
 numbers match the list in `SKILL.md` step 6.
 
 Run them against the committed draft. `D` below is
-`uv run .claude/skills/run-saffron-spec-loop/driver.py`, run from a checkout of
-`main`, because a base older than a command does not carry it.
+`uv run .claude/skills/run-saffron-spec-loop/driver.py`, run from the spec's
+branch. The driver reads specs from the checkout that holds it, so from `main`
+it cannot see the draft.
 
 ## 1. Claim against witness
 
@@ -129,8 +130,8 @@ the origin item's `specs:` line, the queue smoke test's paragraph with its
 ordinal stepped, and its two pinned lines. It does not place a new record in
 `docs/backlog/PRIORITY.md`, which `make check` reports on its own.
 
-What it cannot see. It has no `--base`, and reads the checkout that holds the
-driver. Run it from the branch the spec is committed on.
+What it cannot see. It has no `--base`, so it reads the spec branch's working
+tree as it stands.
 
 ## 10. Arrangements
 
@@ -146,9 +147,9 @@ looks for.
 - Commit before the full suite. The turn wall cut the first cell of `SA-0116`
   before its first commit (b-36b551). So tell a long cell to commit as each
   witness passes.
-- Prose. `python3 hooks/prose_limit.py --file <path>` on every new file, from
-  `main`, where the flag exists. A new file compares against zero hits, and
-  `make check` passes an unstaged one.
+- Prose. `python3 hooks/prose_limit.py --file <path>` on every new file
+  before it is committed. It compares against `HEAD`, so a committed file
+  compares with itself and always reports zero.
 
 ## Adding a check
 

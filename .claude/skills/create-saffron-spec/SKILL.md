@@ -53,6 +53,7 @@ now than after a draft.
 - **Overlap.** A queued spec whose `touches` intersect yours is your parent.
   `saffron queue --repo .` reads the mirror at the pinned `base_sha` and cannot
   see an unmerged spec, so drive `build_queue` over the working tree instead.
+  `.claude/agents/spec-writer.md` step 3 has the one-liner.
 
 ### 4. Dispatch the writer
 
@@ -66,9 +67,11 @@ match. A decision left open returns as a question and costs a round.
 ### 5. Commit what it wrote
 
 The reviewer reads at a commit, so the draft is committed before the review is
-dispatched. Run `make check`. Then check each new file with
-`python3 hooks/prose_limit.py --file <path>`. `make check` reads the staged
-index, so an unstaged file passes it and fails the commit hook.
+dispatched. Before the commit, check each new file with
+`python3 hooks/prose_limit.py --file <path>`. It compares against `HEAD`, so
+after the commit it reports zero whatever the file holds. Then stage the draft
+and run `make check`. Its lint pass reads tracked files only, so an untracked
+spec passes it and fails the commit hook.
 
 ### 6. Pre-flight the spec
 
@@ -122,8 +125,8 @@ in twenty is false, and applying one puts the reviewer's error into the spec.
 
 ### 9. Open the pull request
 
-`.github/pull_request_template.md` is the body's shape, and `gh pr create
---body-file` skips the template, so write the body to a file first. Say in
+Read `.github/pull_request_template.md` first. `gh pr create --body-file`
+skips it, so the body file follows its shape by hand. Say in
 **Not covered** what the pre-flight could not settle and what the reviews left.
 
 ### 10. Record the run
@@ -136,17 +139,20 @@ cheaper, and it is the only thing that tells you whether this skill works.
 ## What the reviews keep finding
 
 `references/findings.md` holds the corpus from 2026-09-20: four specs, eight
-review rounds, and every finding classed. The shape of it:
+review rounds, and every finding classed. Its counts, with the two classes the
+backtest added:
 
-| Class | Share | Caught by |
+| Class | Corpus 1 | Caught by |
 |---|---|---|
-| A claim's witness drives one member of a set | largest | pre-flight 1 |
-| A claim about the tree that stopped being true | large | pre-flight 5 |
-| A name the spec leans on that the base lacks | medium | pre-flight 3 |
-| A data flow the base cannot carry | medium | pre-flight 4 |
-| Two criteria disagreeing on one input | small | pre-flight 2 |
-| Size or ceilings | small | pre-flight 7 |
-| A design argument the documents do not support | small | pre-flight 8 |
+| A claim's witness drives one member of a set | 14 | pre-flight 1 |
+| A claim about the tree that stopped being true | 14 | pre-flight 5 |
+| Two criteria disagreeing on one input | 4 | pre-flight 2 |
+| Size or ceilings | 4 | pre-flight 7 |
+| An arrangement argued rather than run | 3 | pre-flight 10 |
+| A change breaking a live check or test | 3 | pre-flight 6 |
+| A design argument the documents do not support | 3 | pre-flight 8 |
+| A name the spec leans on that the base lacks | backtest | pre-flight 3 |
+| A data flow the base cannot carry | backtest | pre-flight 4 |
 
 Every class has a check, the design class included. A pre-flight that leaves
 design to the reviewer leaves the reviewer something to find.
