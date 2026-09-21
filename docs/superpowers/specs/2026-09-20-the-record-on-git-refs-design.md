@@ -256,6 +256,17 @@ half-written and nothing for a stale writer to overwrite. The compare-and-swap
 of §2 is what makes this efficient across hosts later, never what makes it
 correct.
 
+**What that costs has no number, and it is the one that can invalidate this
+section.** `batch.py:194` runs before every task, and a fold over every enabled
+target's refs is O(every task the record holds) rather than O(the night). The
+whole-record fold measures 9.94 s over 118 tasks
+(`docs/evidence/2026-09-20-fold-rebuild-time.md`). A night of ten tasks pays
+that ten times, and the multiple grows with the record. There are two ways out
+and this design picks neither. Read the spend from the derived ledger, which
+makes a lagging store decide a ceiling. Or give the record an index per batch,
+which is the second store §1 refuses. Plan 2 opens on this rather than reaching
+it.
+
 **This closes item 177.** A run stops being minted per task and becomes a fold
 over the tasks sharing a `batch_id` and a `repo` — which is what §4.1 and
 `CONTEXT.md` already define a run as, and what `SA-0100` could not make true
@@ -441,6 +452,10 @@ Steps 1 to 5 are code and can go through cells. Step 6 cannot.
 **Whether the fold runs continuously or on demand.** The design says the ledger
 is rebuilt from the record and does not say when. Continuous keeps `saffron
 queue` fast and reintroduces a writer that can lag; on demand is simpler and
-makes the morning index pay for the rebuild. It is decided when the fold is
-built and measured, not here, because the number that decides it is the rebuild
-time and nothing has measured that yet.
+makes the morning index pay for the rebuild. The rebuild time now exists: 9.94 s
+over 118 tasks, measured 2026-09-20. It does not settle the question on its own.
+The number grows with the record, and the budget check of §5 reads the same
+quantity once a task rather than once a morning.
+
+**What the budget check costs.** §5 removes the counter and prices nothing in
+its place. It is the first question plan 2 takes, and §5 says why.
