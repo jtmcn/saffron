@@ -10,8 +10,9 @@ review finds is paid for twice, once by the reader and once by the writer. A
 defect a cell finds is paid for in dollars and an hour.
 
 Most of what eight review rounds found on 2026-09-20 was computable before any
-reviewer read a word. This skill runs those checks first, so the review round
-is a check on judgement rather than a search for arithmetic.
+reviewer read a word. This skill runs those checks first. Then it reads the
+design the way a reviewer would. A first review with nothing to find has to
+find no design question either.
 
 **The target is a first review with no findings.** Read that as a measurement
 rather than a slogan: every run records what the first review found, and a
@@ -75,25 +76,35 @@ This is the step that earns the skill. `references/preflight.md` holds the
 checks, each with its command and the findings it removes. Run them all before
 any reviewer is dispatched, and fix what they surface.
 
-The six that catch the most, in the order that costs least:
+The ones that catch the most, in the order that costs least:
 
 1. **Claim against witness, per claim.** For every set a claim quantifies
    over, name the members and say which one the witness drives. This is the
    largest class by a wide margin.
 2. **Criteria against each other.** Two claims that answer one reachable input
    differently is a blocker a cell cannot resolve.
-3. **Citations.** Resolve every `file:line` the spec quotes at the base.
-4. **Claims about the tree.** Re-run every count, and read every "today"
-   sentence at the base.
-5. **What the change breaks.** Any test enumerating a directory the spec adds
+3. **Every name the spec leans on.** The spec tells the cell to read, key by
+   or compare fields, keys, units and paths. Each one exists at the base and
+   means what the spec assumes.
+4. **The data flow.** Every source the change reads from and every place it
+   writes to is reachable from `touches`. A value the change needs from a
+   `forbidden` file, or a location nothing passes it, is a blocker.
+5. **Citations and claims about the tree.** Resolve every `file:line`, re-run
+   every count, and read every "today" sentence at the base.
+6. **What the change breaks.** Any test enumerating a directory the spec adds
    a file to. Any live check the spec's own fixtures would trip.
-6. **Ceilings and size.** `driver.py check <SA-ID>` and a per-part estimate.
+7. **Ceilings and size.** A per-part estimate against the ceiling, and the
+   ceilings against cells of the same shape.
+8. **The design.** Read the spec against `DESIGN.md` and the `protected`
+   documents the way a reviewer would. An argument that rests on a section
+   saying something it does not say is a finding here, not a review's job.
 
 ### 7. Dispatch the first review
 
 Use the `spec-reviewer` agent with `spec:`, `base:` and `history: run it
-yourself`. Tell it what the pre-flight already settled, so it spends its rounds
-on judgement rather than re-deriving arithmetic.
+yourself`. Tell it what the pre-flight already settled, and ask it for what the
+pre-flight missed. Its findings are the pre-flight's misses, and step 10 records
+each one against the check that missed it.
 
 ### 8. Answer the review, and stop
 
@@ -130,14 +141,15 @@ review rounds, and every finding classed. The shape of it:
 | Class | Share | Caught by |
 |---|---|---|
 | A claim's witness drives one member of a set | largest | pre-flight 1 |
-| A claim about the tree that stopped being true | large | pre-flight 3 and 4 |
+| A claim about the tree that stopped being true | large | pre-flight 5 |
+| A name the spec leans on that the base lacks | medium | pre-flight 3 |
+| A data flow the base cannot carry | medium | pre-flight 4 |
 | Two criteria disagreeing on one input | small | pre-flight 2 |
-| An arrangement argued rather than run | small | measure it |
-| Size or ceilings | small | pre-flight 6 |
-| Judgement about the design | small | the reviewer, rightly |
+| Size or ceilings | small | pre-flight 7 |
+| A design argument the documents do not support | small | pre-flight 8 |
 
-Only the last belongs in a review. The rest is arithmetic, and a reader spent a
-round of judgement on it.
+Every class has a check, the design class included. A pre-flight that leaves
+design to the reviewer leaves the reviewer something to find.
 
 ## Keeping the skill honest
 
@@ -150,9 +162,8 @@ run, ask three questions of it.
 - **Did a check cost more than it caught?** A check that finds nothing across
   several runs is prose. Prose nobody acts on is worth deleting.
 - **Can a check become a command?** A check written as a paragraph gets skipped
-  and drifts. `SA-0114`, `SA-0115` and `SA-0116` turn three of these checks
-  into `driver.py` subcommands, and `references/preflight.md` names which
-  command replaces which paragraph once each one lands.
+  and drifts. `driver.py` carries `cite`, `enumerators` and `bookkeeping` for
+  three of them. `references/preflight.md` says what each cannot see.
 
 The skill is working when the checks it names are commands, the first review
 finds nothing, and the record says both with numbers.
