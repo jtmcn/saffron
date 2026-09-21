@@ -28,6 +28,22 @@ repos:
   # clean scan. The flags are the gate's, for the gate's reasons — see
   # `.saffron/gates/structure.py`; a hook that scanned a different set of files
   # than the gate would disagree with it at exactly the wrong moment.
+  # `dead` ran nowhere outside a cell, so a symbol falling out of use went red
+  # on main unseen: subtraction spares each cell and hides it from the next.
+  # The gate speaks its verdict in JSON and exits 0 either way, so read status.
+  - repo: local
+    hooks:
+      - id: dead
+        name: dead (the dead gate's vulture scan)
+        language: system
+        entry: >-
+          sh -c 'uv run python .saffron/gates/dead.py
+          | tee /dev/stderr
+          | grep -q "\"status\": \"pass\""'
+        pass_filenames: false
+        # The gate scans its own roots; these are the files that change its answer.
+        files: ^(.*\.py|\.saffron/specs/.*\.md)$
+
   - repo: local
     hooks:
       - id: ast-grep
