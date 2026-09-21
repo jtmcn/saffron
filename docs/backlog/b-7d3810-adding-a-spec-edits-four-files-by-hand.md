@@ -4,7 +4,7 @@ title: Adding a spec edits four other files by hand, and the queue smoke test's 
 status: open
 tier: 2
 filed: 2026-09-20
-specs: []
+specs: [SA-0116]
 prs: []
 commits: []
 cites: []
@@ -45,3 +45,27 @@ prints.
 
 - 2026-09-20: filed from `SA-0113`. The same shape as `SA-0092` and `SA-0112`,
   where a cell built a command and the prompt that calls it was a hand edit.
+- 2026-09-20: `SA-0116` is queued for the command. It goes in the spec loop's
+  `.claude/skills/run-saffron-spec-loop/driver.py` beside `check`, `cite` and
+  `enumerators`, as `driver.py bookkeeping SA-NNNN`. It edits the same two
+  files as `SA-0114` and `SA-0115`, so it
+  declares `depends_on: [SA-0115]`, the later of the two. Three findings came
+  out of writing it. Two of the four edits are judged already, by
+  `check_specs_name_their_items` and `check_priority` in `tests/records/check.py`,
+  so the command imports rather than re-derives. There is no
+  `--base`: all four edits are about the working tree, and `check_priority` over
+  that tree already reports the records left unplaced. And the smoke test's
+  ordinal cannot be counted. Measured at this base, the docstring says "a
+  fifty-first time" and holds 37 lines beginning `Re-measured`. So the ordinal
+  comes from the topmost one plus one.
+- 2026-09-20: the first review of `SA-0116` put the four-block shape at 555
+  changed lines against a `feature` ceiling of 600. So the spec was cut to
+  three blocks. It now prints the `specs:` line, the smoke test's
+  paragraph and its two pinned `assert` lines. `PRIORITY.md` is the block that
+  came out. `check_priority` already names the record and its tier on
+  every `make check`, leaving only the `### Tier <n>` heading to find. That
+  quarter of this item stays open, and it is a small spec of its own: a filter
+  over `check_priority` plus a heading lookup.
+- 2026-09-20: the prose half stays open here, as item b-281f0a left its own.
+  Running the command from `.claude/agents/spec-writer.md`, and naming it in
+  the spec loop's `SKILL.md`, are by-hand edits after the cell lands.
