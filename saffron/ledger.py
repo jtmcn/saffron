@@ -1,4 +1,12 @@
-"""The ledger — SQLite, one file, WAL, authoritative for state (DESIGN.md §4.1).
+"""The ledger. SQLite, one file, WAL, authoritative for state (`DESIGN.md` §4.1).
+
+Still true of what runs. No caller constructs a `Ledger` with a record, so no
+row here is derived from one and §4.6 rule 1 holds as written. The record
+design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
+by `saffron/record/fold.py`, deletable at any time. Only the eleven kinds
+`_append` writes fold back, so even then it stays authoritative for the rest.
+That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
+with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it.
@@ -8,10 +16,13 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
+from saffron.record.contract import Fact, Record, new_task_key
 
 # The closed set `set_run_preflight` writes; the `CHECK` below is built from it.
 RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
@@ -76,6 +87,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     policy_sha TEXT,
     prompt_sha  TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    record_key TEXT,
     merged_head_sha TEXT
     -- The commit GitHub reported a merge at, written once by `reconcile`
     -- (backlog item 97). NULL until a merge for this row is observed.
@@ -157,6 +169,12 @@ CREATE INDEX IF NOT EXISTS attempts_by_task ON attempts(task_id);
 CREATE INDEX IF NOT EXISTS findings_by_task ON findings(task_id);
 """
 
+# Not in `SCHEMA`: that runs before the `ALTER`s, so on a ledger predating
+# `record_key` it indexes a missing column and the open fails. Measured.
+RECORD_KEY_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS tasks_by_record_key ON tasks(record_key)"
+)
+
 
 def _inserted_id(cursor: sqlite3.Cursor) -> int:
     """`lastrowid` is `int | None` on the sqlite3 type stubs.
@@ -175,7 +193,8 @@ def _inserted_id(cursor: sqlite3.Cursor) -> int:
 
 
 class Ledger:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, record: Record | None = None) -> None:
+        self._record = record
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
         self._db.row_factory = sqlite3.Row
@@ -194,6 +213,7 @@ class Ledger:
             "policy_sha",
             "prompt_sha",
             "merged_head_sha",
+            "record_key",
         ):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
@@ -201,6 +221,9 @@ class Ledger:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
             )
+        # The fold upserts on `record_key`, so two rows sharing one would make
+        # its `fetchone` pick one. SQLite counts NULLs distinct.
+        self._db.execute(RECORD_KEY_INDEX)
         # Same trap, this time on `runs`: `batches` arriving in `SCHEMA` does
         # not retrofit `batch_id` onto a `runs` table that already exists.
         runs_existing = {
@@ -313,16 +336,65 @@ class Ledger:
     def close(self) -> None:
         self._db.close()
 
+    def _attempt_owner(self, attempt_id: int) -> int | None:
+        """The task an attempt belongs to, for `_append`'s sake. An attempt the
+        caller invented has no owner and files no fact."""
+        row = self._db.execute(
+            "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()
+        return row["task_id"] if row is not None else None
+
+    def record_key(self, task_id: int) -> str | None:
+        row = self._db.execute(
+            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["record_key"] if row else None
+
+    def _append(self, task_id: int, kind: str, **payload: Any) -> None:
+        """Every ledger write appends the fact it represents. A `None` record
+        is every caller that predates the record, which must be unaffected.
+
+        After the commit that wrote the row, never before: a fact for a row
+        that does not exist is the worse of the two. So an append that raises,
+        a refused push being the case, leaves a row the next fold reverts."""
+        if self._record is None:
+            return
+        row = self._db.execute(
+            """SELECT t.record_key AS key, r.name AS repo, rn.batch_id AS batch
+                 FROM tasks t
+                 JOIN runs rn ON rn.run_id = t.run_id
+                 JOIN repos r ON r.repo_id = rn.repo_id
+                WHERE t.task_id = ?""",
+            (task_id,),
+        ).fetchone()
+        # No row (unknown task_id) or no key (a pre-record task, NULL from
+        # the additive ALTER) is a claim with nothing to file it under.
+        if row is None or row["key"] is None:
+            return
+        fact = Fact(
+            kind=kind,
+            task_key=row["key"],
+            at=datetime.now(UTC).isoformat(),
+            repo=row["repo"],
+            batch_key=str(row["batch"]) if row["batch"] is not None else None,
+            payload=payload,
+        )
+        self._record.append(row["key"], fact)
+
     def upsert_repo(
-        self, name: str, origin: str, mirror_path: str, policy_sha: str
+        self, name: str, origin: str, mirror_path: str, policy_sha: str | None
     ) -> int:
+        """`policy_sha` is nullable, as the column is: the fold has no fact
+        that carries a repo's own declaration, only each task's. `COALESCE`
+        on the conflict, so a fold into a surviving ledger leaves the value
+        it cannot reproduce rather than clearing it."""
         self._db.execute(
             """INSERT INTO repos (name, origin, mirror_path, policy_sha)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(origin) DO UPDATE
                  SET name=excluded.name,
                      mirror_path=excluded.mirror_path,
-                     policy_sha=excluded.policy_sha""",
+                     policy_sha=COALESCE(excluded.policy_sha, repos.policy_sha)""",
             (name, str(origin), str(mirror_path), policy_sha),
         )
         self._db.commit()
@@ -589,7 +661,7 @@ class Ledger:
         spec_id: str,
         spec_sha: str,
         branch: str,
-        risk: str = "standard",
+        risk: str | None = None,
         budget_usd: float | None = None,
         policy_sha: str | None = None,
         prompt_sha: str | None = None,
@@ -599,12 +671,19 @@ class Ledger:
         `context.prompt_sha()`, the prompt tree the cell was given. Both
         default to `None`: every caller that predates the parameter
         (`saffron/replay.py` included) still records a task, just one that
-        cannot say what it ran under."""
+        cannot say what it ran under.
+
+        `risk=None` means the spec declared no tier; the column still defaults
+        to `standard` because the ledger's consumers read it (item 170), but
+        the fact carries the undeclared `None` rather than that default."""
+        declared_risk = risk
+        risk = risk if risk is not None else "standard"
+        key = new_task_key() if self._record is not None else None
         cursor = self._db.execute(
             """INSERT INTO tasks
                    (run_id, spec_id, spec_sha, state, risk, branch, budget_usd,
-                    policy_sha, prompt_sha)
-               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?)""",
+                    policy_sha, prompt_sha, record_key)
+               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?)""",
             (
                 run_id,
                 spec_id,
@@ -614,10 +693,44 @@ class Ledger:
                 budget_usd,
                 policy_sha,
                 prompt_sha,
+                key,
             ),
         )
         self._db.commit()
-        return _inserted_id(cursor)
+        task_id = _inserted_id(cursor)
+        self._append(
+            task_id,
+            "task_created",
+            spec_id=spec_id,
+            spec_sha=spec_sha,
+            branch=branch,
+            risk=declared_risk,
+            budget_usd=budget_usd,
+            policy_sha=policy_sha,
+            prompt_sha=prompt_sha,
+            **self._run_facts(run_id),
+        )
+        return task_id
+
+    def _run_facts(self, run_id: int) -> dict[str, Any]:
+        """What the fold needs to rebuild the `repos` and `runs` rows this task
+        hangs from. A run has no record of its own — it is a fold over the
+        tasks that name it (§5 of the record design, not `DESIGN.md` §5)."""
+        if self._record is None:
+            return {}
+        row = self._db.execute(
+            """SELECT rn.base_sha, r.origin, r.mirror_path
+                 FROM runs rn JOIN repos r ON r.repo_id = rn.repo_id
+                WHERE rn.run_id = ?""",
+            (run_id,),
+        ).fetchone()
+        # ponytail: `mirror_path` puts the operator's home directory in a
+        # trail §3 makes readable, and `repos.mirror_path` is `NOT NULL`.
+        return {
+            "base_sha": row["base_sha"],
+            "origin": row["origin"],
+            "mirror_path": row["mirror_path"],
+        }
 
     def set_task_state(self, task_id: int, state: str) -> None:
         """Also rolls the task's spend up from its attempts. Derived rather than
@@ -632,6 +745,7 @@ class Ledger:
             (state, task_id, task_id),
         )
         self._db.commit()
+        self._append(task_id, "task_state", state=state)
 
     def open_attempt(self, task_id: int, phase: str | None = None) -> int:
         """One agent turn. The phase defaults to the state the task is in — the
@@ -653,7 +767,19 @@ class Ledger:
         if cursor.rowcount != 1:
             raise ValueError(f"no task {task_id} to open an attempt against")
         self._db.commit()
-        return _inserted_id(cursor)
+        attempt_id = _inserted_id(cursor)
+        if self._record is not None:
+            opened = self._db.execute(
+                "SELECT phase, n FROM attempts WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            self._append(
+                task_id,
+                "attempt_opened",
+                attempt_id=attempt_id,
+                phase=opened["phase"],
+                n=opened["n"],
+            )
+        return attempt_id
 
     def close_attempt(
         self,
@@ -683,6 +809,19 @@ class Ledger:
             ),
         )
         self._db.commit()
+        if self._record is not None:
+            owner = self._attempt_owner(attempt_id)
+            if owner is not None:
+                self._append(
+                    owner,
+                    "attempt_closed",
+                    session_id=session_id,
+                    model=model,
+                    subtype=subtype,
+                    terminal_reason=terminal_reason,
+                    num_turns=num_turns,
+                    cost_usd_est=cost_usd_est,
+                )
 
     def task_spend(self, task_id: int) -> float:
         """What the task's attempts add up to — a caller whose own tally lost a
@@ -714,6 +853,7 @@ class Ledger:
             (pushed_sha, task_id),
         )
         self._db.commit()
+        self._append(task_id, "task_push", pushed_sha=pushed_sha)
 
     def record_merged_head(self, task_id: int, head: str) -> None:
         """The commit a merged pull request's head actually was — called by
@@ -726,6 +866,7 @@ class Ledger:
             (head, task_id),
         )
         self._db.commit()
+        self._append(task_id, "task_merged_head", head=head)
 
     def task_policy_sha(self, task_id: int) -> str | None:
         """What this task is currently on record as having run under — the
@@ -748,6 +889,7 @@ class Ledger:
             (policy_sha, task_id),
         )
         self._db.commit()
+        self._append(task_id, "task_policy", policy_sha=policy_sha)
 
     def set_task_package(
         self,
@@ -772,13 +914,21 @@ class Ledger:
             (state, branch, pushed_sha, pr_url, task_id),
         )
         self._db.commit()
+        self._append(
+            task_id,
+            "task_package",
+            state=state,
+            branch=branch,
+            pushed_sha=pushed_sha,
+            pr_url=pr_url,
+        )
 
     def record_findings(self, task_id: int, findings: Sequence[Finding]) -> list[int]:
         """Every finding the review produced, anchored or not, in the order the
         lenses reported them. Returns the ids in that same order — REBUT names
         a finding by its position in it (`review.anchored_blockers`)."""
         with self._db:
-            return [
+            ids = [
                 _inserted_id(
                     self._db.execute(
                         """INSERT INTO findings
@@ -797,6 +947,20 @@ class Ledger:
                 )
                 for f in findings
             ]
+        # One fact per finding — a fold inserts `findings` one row at a time.
+        for finding_id, f in zip(ids, findings, strict=True):
+            self._append(
+                task_id,
+                "finding",
+                finding_id=finding_id,
+                lens=f.lens,
+                severity=f.severity,
+                file=f.file,
+                line=f.line,
+                claim=f.claim,
+                anchored=f.anchored,
+            )
+        return ids
 
     def record_rebuttal(
         self, finding_id: int, *, verdict: str | None, rebuttal: str | None
@@ -806,6 +970,18 @@ class Ledger:
             (verdict, rebuttal, finding_id),
         )
         self._db.commit()
+        if self._record is not None:
+            owner = self._db.execute(
+                "SELECT task_id FROM findings WHERE finding_id = ?", (finding_id,)
+            ).fetchone()
+            if owner is not None:
+                self._append(
+                    owner["task_id"],
+                    "rebuttal",
+                    finding_id=finding_id,
+                    verdict=verdict,
+                    rebuttal=rebuttal,
+                )
 
     def findings(self, task_id: int) -> list[sqlite3.Row]:
         return list(
@@ -846,6 +1022,16 @@ class Ledger:
                     for f in result.failures
                 ],
             )
+        # A baseline result (`run_id` set) belongs to no task and has nothing
+        # to append against; an attempt's result does.
+        if attempt_id is not None and self._record is not None:
+            owner = self._attempt_owner(attempt_id)
+            if owner is not None:
+                self._append(
+                    owner,
+                    "gate_result",
+                    **result.model_dump(mode="json"),
+                )
         return gate_result_id
 
     # The read side. The spec-loop driver calls task_results; the tests alone

@@ -21,6 +21,8 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.reconcile import ReconcileResult, reconcile
+from saffron.record.fold import UnreadableTask, fold
+from saffron.record.refs import RefsRecord
 from saffron.replay import replay
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import PolicyError, load_policy
@@ -147,6 +149,22 @@ def main(argv: list[str] | None = None) -> int:
         "rather than only the newest",
     )
 
+    fold_parser = subcommands.add_parser(
+        "fold", help="rebuild the ledger from the record on refs/saffron/*"
+    )
+    # Required, not `Path.cwd()`: facts live in the mirror, and a forgotten
+    # flag would fold a working checkout with no task refs and print success.
+    fold_parser.add_argument("--repo", type=Path, required=True)
+    # Named, never defaulted to the home ledger: a rebuild is not a thing to
+    # do to the live ledger by forgetting a flag.
+    fold_parser.add_argument("--into", type=Path, required=True)
+    fold_parser.add_argument(
+        "--skip-unreadable",
+        action="store_true",
+        help="fold the tasks that can be read and skip the ones that cannot, "
+        "rather than stopping on the first",
+    )
+
     subcommands.add_parser(
         "chains",
         help="materialize the projection and compare Q4 with the checked walk "
@@ -156,6 +174,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
+
+    if args.command == "fold":
+        # Before the home ledger below, not after: `--into` names the ledger
+        # to rebuild, and opening the home one would create what it protects.
+        try:
+            return _fold(args)
+        except Exception as broke:
+            print(f"saffron: {type(broke).__name__}: {broke}")
+            return 2
+
     ledger = Ledger(args.home / "ledger.db")
     try:
         if args.command == "cell":
@@ -840,6 +868,29 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     else:
         print("batch: infrastructure failed")
     return 2
+
+
+def _fold(args: argparse.Namespace) -> int:
+    """Rebuild the ledger from the record. The ledger is deletable, so this
+    command is the whole of its recovery story (§4 of the record design,
+    not `DESIGN.md` §4)."""
+    record = RefsRecord(Path(args.repo))
+    ledger = Ledger(Path(args.into))
+    try:
+        done = fold(record, ledger, strict=not args.skip_unreadable)
+    except UnreadableTask as unreadable:
+        # Exit 1 here and 1 under `--skip-unreadable`: the same record is
+        # unreadable either way, and neither is infrastructure failing.
+        print(f"fold: {unreadable}")
+        return 1
+    finally:
+        ledger.close()
+    for key, reason in done.skipped:
+        print(f"fold: skipped task {key}: {reason}")
+    print(f"folded {done.folded} tasks into {args.into}, skipped {len(done.skipped)}")
+    # A rebuild short of tasks is not the ledger back. Exit 1, not 2: the
+    # tasks did not make it, and no infrastructure broke to stop them.
+    return 1 if done.skipped else 0
 
 
 def _queue(args: argparse.Namespace, ledger: Ledger) -> int:

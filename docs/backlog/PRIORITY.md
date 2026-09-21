@@ -147,13 +147,14 @@ item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
 **Placed 2026-09-20**: **171**, **177**, **168**, **169**, **b-606ea3**,
-**b-f2a9d1** and **b-0c1d69**. 171 and 177 are 170's neighbours. One holds a
+**b-f2a9d1**, **b-0c1d69** and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
 diff stat no authoritative record carries, and the other mints a run per task
 where `CONTEXT.md` defines one per repo. The last five are vocabulary a cell
 cannot write, because `CONTEXT.md` is generated from `ontology/factory.ttl` and
 is `protected`. They are items 65 and 72 again, with five more words.
-`b-0c1d69` is the newest, filed writing `SA-0113`, and it carries a `DESIGN.md`
-§5.4.1 paragraph beside its glossary entry.
+`b-0c1d69` was filed writing `SA-0113`, and it carries a `DESIGN.md`
+§5.4.1 paragraph beside its glossary entry. `b-25766a` is the newest, the
+record's own fact kinds, and it is 168 and 169 a third time.
 
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical
@@ -181,7 +182,7 @@ of the first review's six. ~~**b-929465**~~ and ~~**b-ea1d13**~~ are done by
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, **b-e403c1**, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, **b-e403c1**, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved
@@ -200,6 +201,14 @@ index ranked neither. They now carry the 3 this list already gave them.
 **b-7d2acf**, filed the same day, is the check that was missing. Nothing
 compares the index to the records in that direction. It ranks here, beside
 128 and 129.
+
+**b-d5d290 is filed here and is the fourth instance of one shape.** Building
+the record on git refs took four names the tree already held: "event",
+`records/`, "index" and "projection". One was caught before code. The `terms`
+gate's `AVOIDED` map reads the seven spellings it forbids. It never reads
+`CONTEXT.md`'s 86 defined headwords. It cannot see any of the four. It ranks
+here because a collision costs a reader rather than a night. It ranks above
+nothing, which is where the pattern sat until now.
 
 **76 sits here rather than in tier 1** because `structure`, where the hole was
 found, is closed: it refuses every ignore source and states its own file set.
