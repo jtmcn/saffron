@@ -1,11 +1,12 @@
 ---
 id: 37
 title: '`events.Terminal` and `CONTEXT.md`''s "terminal state" are two different things'
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 specs: [SA-0029, SA-0030, SA-0040]
 prs: []
-commits: []
+commits: [21488e89]
 cites: [§4.1]
 related: [36]
 by_hand: true
@@ -27,3 +28,7 @@ cite `Terminal`. An earlier draft of this item said the name was `DESIGN.md`
 `TurnEnded` across the three specs, or a `CONTEXT.md` entry
 saying the two terms are deliberately distinct. Protected either way, so by
 hand, and worth settling before `SA-0040` and `SA-0038` render the word.
+
+## Record
+
+- 2026-09-21: Done by hand. `CONTEXT.md` §6 now says `TerminalEvent` is not a terminal state and that the two names are deliberately distinct. The class keeps its name, so no spec citation moves.

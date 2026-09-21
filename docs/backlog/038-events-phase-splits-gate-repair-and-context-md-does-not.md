@@ -1,11 +1,12 @@
 ---
 id: 38
 title: '`events.Phase` splits `GATE ⇄ REPAIR`, and `CONTEXT.md` does not'
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 specs: []
 prs: []
-commits: []
+commits: [21488e89]
 cites: []
 related: [37]
 by_hand: true
@@ -21,3 +22,7 @@ The split is probably right and is currently held by a comment and a test.
 
 `CONTEXT.md` saying whether it is sanctioned, and the `Literal`
 following. Protected, so by hand. Second divergence — see item 37.
+
+## Record
+
+- 2026-09-21: Done by hand. `CONTEXT.md` §2 sanctions the split for the event log alone, so the `Literal` stays as it is.

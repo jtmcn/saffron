@@ -1,13 +1,14 @@
 ---
 id: b-0c1d69
 title: A criterion probe has no glossary entry, and §5.4.1 reads as a refusal of the session that names one
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 by_hand: true
 filed: 2026-09-20
 specs: [SA-0113]
 prs: []
-commits: []
+commits: [21488e89]
 cites: [§5.4.1, §5.5]
 related: [b-2750d5, b-f2a9d1, 117, 80]
 ---
@@ -58,3 +59,4 @@ probe entry. Both halves land after `SA-0113` merges, not before.
 - 2026-09-21: `SA-0113`'s cell shipped the criterion-probe prompt (#403). The
   in-cell `contract` lens raised this item's tension as a concern, and the review
   left it here, since the spec sanctions the design.
+- 2026-09-21: Done by hand. `CONTEXT.md` §4 gains **Criterion probe**, with an `_Avoid_` line against mutant and vacuity probe. `DESIGN.md` §5.4.1 gains the paragraph beside the mutant's. Both say no gate applies one yet, which is b-2750d5's open half.

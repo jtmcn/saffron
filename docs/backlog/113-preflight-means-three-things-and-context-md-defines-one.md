@@ -1,13 +1,14 @@
 ---
 id: 113
 title: '"Preflight" means three things, and `CONTEXT.md` defines one'
-status: open
+status: done
+closed: 2026-09-21
 tier: 2
 filed: 2026-09-13
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [21488e89]
 cites: [§4.2.1, §5.1]
 related: [37]
 ---
@@ -41,3 +42,7 @@ batch-only — or `events.Preflight` renamed after §5.1's cell construction and
 `PREFLIGHT_FAILED` defined. The **Preflight** entry is hand-written, outside
 the first sentences `ontology.render` rewrites, and `CONTEXT.md` is `protected`,
 so by hand, like 37 and 38.
+
+## Record
+
+- 2026-09-21: Done by hand. `CONTEXT.md` §7's **Preflight** entry names the per-task sense beside the per-repo one, and says `PREFLIGHT_FAILED` is fatal to the task. `events.Preflight` keeps its name.

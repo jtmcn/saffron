@@ -145,17 +145,17 @@ rewards the reformat, and the operator asked for a fix soon.
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
-rewritten onto **42** — then Task 11's by-hand documents (**36**, **37**,
-**38**), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
-~~**104**~~, **113**, **135**, and from stack #285: **147**, **146**, ~~**144**~~,
-**149**, **148**, **142**, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
+rewritten onto **42** — then Task 11's by-hand documents (**36**, ~~**37**~~,
+~~**38**~~), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
+~~**104**~~, ~~**113**~~, **135**, and from stack #285: **147**, **146**, ~~**144**~~,
+**149**, **148**, ~~**142**~~, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
 from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**, and from run 7: **b-b5f379**, **b-60732c**, **b-eac388**, **b-bc54d1**, **b-63ac52**, ~~**b-122686**~~, ~~**b-afec7c**~~, and from `SA-0109`'s spec review: **b-7c41e0**, and from run 8: **b-044ae7**, **b-65e7e2**, **b-5e443c**, **b-5d5b56**, **b-952c34**, **b-60d804**, **b-4589be**, **b-6f7f8d**, and from the spec-writer
 measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, **b-a70ec1**, **b-ce93aa**, **b-461729**, and from run 10: ~~**b-865399**~~, **b-1c7019**, **b-3e0dbe**, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, ~~**b-929465**~~, **b-250dc7**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
-**Placed 2026-09-20**: **171**, **177**, **168**, **169**, **b-606ea3**,
-**b-f2a9d1**, **b-0c1d69** and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
+**Placed 2026-09-20**: **171**, **177**, **168**, **169**, ~~**b-606ea3**~~,
+~~**b-f2a9d1**~~, ~~**b-0c1d69**~~ and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
 diff stat no authoritative record carries, and the other mints a run per task
 where `CONTEXT.md` defines one per repo. The last five are vocabulary a cell
 cannot write, because `CONTEXT.md` is generated from `ontology/factory.ttl` and
