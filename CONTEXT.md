@@ -151,6 +151,12 @@ and baseline. A batch contains one run per repo.
 > went multi-repo. Budget is a batch property; `base_sha` is a run property. If a
 > sentence works with either word, it is imprecise.
 
+**Preflight outcome**: What a run records when its first baseline suite ends: `PASSED`
+or `FAILED`.
+It lives in `runs.preflight`. A baseline that aborts in the cell writes `FAILED`, so
+this is not the batch-start **Preflight** under Repos (backlog item 113). What a
+NULL means is open (backlog item b-eac388).
+
 **Phase**: A named stage in the cell pipeline — DIAGNOSE, IMPLEMENT, GATE ⇄ REPAIR,
 REVIEW, REBUT, PACKAGE. Written in bare caps.
 _Avoid_: "stage", "step", "mode".
@@ -520,9 +526,6 @@ Saffron. If it doesn't, the core/repo boundary has failed.
 
 **Preflight**: Per-repo readiness at batch start — mirror fetch, policy parse, image
 rebuild, baseline. A repo that fails preflight is skipped, not fatal.
-
-**Preflight outcome**: What a run stores of its own preflight: `PASSED` or `FAILED`.
-It lives in `runs.preflight`, and NULL is not one of them.
 
 ---
 

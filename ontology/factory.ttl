@@ -160,7 +160,7 @@ factory:DRAINED a factory:BatchStopReason . factory:BUDGET a factory:BatchStopRe
 factory:UNTIL a factory:BatchStopReason . factory:INFRASTRUCTURE a factory:BatchStopReason .
 factory:INCOMPLETE a factory:BatchStopReason .
 
-## What `runs.preflight` stores. NULL is not a member: it means the column was never written.
+## What `runs.preflight` stores. What a NULL there means is open (backlog item b-eac388).
 factory:PreflightOutcome a owl:Class .
 factory:PASSED a factory:PreflightOutcome . factory:FAILED a factory:PreflightOutcome .
 
