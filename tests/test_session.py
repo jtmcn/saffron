@@ -5696,8 +5696,8 @@ def _section(prompt, heading, next_heading=None):
 
 def _probe_turns(*probes):
     """Plan, implement, the three lenses clean, then one criterion-probe turn
-    per entry in `probes`, in the spec's own declared order — the shape both
-    criterion-probe witnesses below drive with."""
+    per entry in `probes`, in the spec's own declared order. Both
+    criterion-probe witnesses below drive with this shape."""
     return [
         _turn(_block(_PLAN)),
         _turn(),
@@ -5712,9 +5712,9 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     monkeypatch, tmp_path
 ):
     """REVIEW buys one fresh session per entry in the spec's acceptance list,
-    after every lens has run, and shows each one only its own claim — never
-    the witness that checks it, never another criterion's claim, and never
-    the implementer's tools or a ceiling of its own."""
+    after every lens has run, inside the critic cell. Each is shown its own
+    claim. It is never shown the witness node id that checks it, another
+    criterion's claim, the implementer's tools or a ceiling of its own."""
     from saffron.intake import Criterion
 
     first = Criterion(
@@ -5755,7 +5755,7 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     assert len(probe_prompts) == 2
 
     # Positional, not `in`: the claim must land under its own heading, never
-    # under the diff's — a swap of the two would still pass a bare `in` check.
+    # under the diff's. A swap of the two would still pass a bare `in` check.
     claim_0 = _section(probe_prompts[0], "## The claim")
     diff_0 = _section(probe_prompts[0], "## The diff", "## The claim")
     assert "the guard rejects a negative amount" in claim_0
@@ -5775,6 +5775,14 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     assert "the guard rejects a negative amount" not in probe_prompts[1]
     assert "tests/test_x.py::test_guard" not in probe_prompts[1]
     assert "tests/test_x.py::test_total" not in probe_prompts[1]
+
+    # The turn prompt is a prompt the host builds too.
+    for turn in cell.turns[5:]:
+        assert "tests/test_x.py::test_guard" not in turn
+        assert "tests/test_x.py::test_total" not in turn
+
+    # Asked inside the critic cell the lenses ran in, never a cell of its own.
+    assert cell.turn_containers[5:] == [_CRITIC_CONTAINER] * 2
 
     # The same read-only tools and the same per-session ceiling a lens holds.
     lens_options = cell.turn_options[2]

@@ -16,8 +16,8 @@ change produced. Read the diff and the files under /work.
 Then name the smallest edit to the source, never the test, that would break
 the claim. The program must still run after it.
 
-You hold no test runner, no interpreter, and no shell. You do not see which
-test guards this claim, or whether one exists. You do not see any other claim
+You hold no test runner, no interpreter, and no shell. You are not told which
+test guards this claim, or whether one exists. You are shown no other claim
 from this change. This prompt holds everything you need: the vocabulary
 above, the diff below, and the claim at the end.
 

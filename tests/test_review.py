@@ -587,8 +587,12 @@ def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still
 
     assert len(record) == 2, "the second criterion must still be asked"
     assert [e["witness"] for e in entries] == ["t.py::test_a", "t.py::test_b"]
+    assert [e["claim"] for e in entries] == [first.claim, second.claim]
     assert entries[0]["edit"] is None
     assert "cut off" in entries[0]["error"]
     assert entries[0]["cost_usd"] == pytest.approx(0.3)
     assert entries[1]["edit"] is None
+    assert entries[1]["error"] is not None
     assert "not the schema" in entries[1]["error"]
+    # A refused session still spent its turn, and the task is charged for it.
+    assert entries[1]["cost_usd"] == pytest.approx(0.1)

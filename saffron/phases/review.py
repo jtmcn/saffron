@@ -452,8 +452,8 @@ def run_criterion_probes(
 
 def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     """The one REVIEW line criterion-probing adds, counted over
-    `criterion-probes.json`'s own entries — the precedent `describe_probes`
-    sets for a line counted over the record it summarises."""
+    `criterion-probes.json`'s own entries. `describe_probes` sets that
+    precedent for a line counted over the record it summarises."""
     named = sum(1 for e in entries if e["edit"] is not None)
     return f"criterion probes: {named} named, {len(entries) - named} unnamed"
 

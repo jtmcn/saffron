@@ -2184,7 +2184,7 @@ def _drive_cell(
         # REVIEW binds it and REBUT reads it, like the three above.
         critic_env: dict[str, str] = {}
         # One entry per criterion (backlog item b-2750d5), empty for a spec
-        # declaring none — same pre-binding reason as `reviews`.
+        # declaring none. Bound early for the same reason as `reviews`.
         criterion_probes: list[dict] = []
 
         if outcome == "READY_FOR_REVIEW":
