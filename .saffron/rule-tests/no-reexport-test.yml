@@ -1,0 +1,19 @@
+id: no-reexport
+valid:
+  - 'from saffron.record.contract import Fact'
+  # vulture reports `RecordFact` as an unused import outside an init, so this hides nothing.
+  - 'from saffron.record.contract import Fact as RecordFact'
+  # A module alias. vulture reports functions, not modules.
+  - 'import saffron.record.contract as contract'
+  - 'import numpy as np'
+  - 'names = ["__all__"]'
+invalid:
+  - '__all__ = ["Fact"]'
+  - '__all__: list[str] = ["Fact"]'
+  - '__all__ += ["Fact"]'
+  # Measured: vulture hid `h`, and the first version of this rule missed it.
+  - '(__all__) = ["h"]'
+  - 'from saffron.record.contract import Fact as Fact'
+  - 'from saffron.record.contract import KINDS, Fact as Fact'
+  - 'from .impl import Fact as Fact'
+  - 'import contract as contract'

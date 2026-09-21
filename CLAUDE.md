@@ -155,7 +155,7 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Invariants worth knowing before editing
 
-The five marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
+The six marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
 means a rule ships with the mutant that proves it fires. Read `.saffron/sgconfig.yml` before
 writing one.
@@ -169,6 +169,9 @@ writing one.
 - **One module drives a task.** `saffron/task.py` is the only caller of `run_one_cell`; both
   commands go through it. Two copies is what let the unattended path stop recording the
   ceilings that bound each task. **(gated over `saffron/`)**
+- **Import a name from the module that defines it.** The `dead` gate's vulture treats a name in
+  `__all__`, or imported as itself, as used everywhere. So no `__all__` and no `import x as x`,
+  and no aliased import in an `__init__.py`. **(gated over all Python)**
 - **`error` ≠ `fail`.** `fail` means the repo's code is wrong; `error` means the gate broke,
   aborts the attempt, and is charged to nobody. Never collapse them.
 - **`census` compares sets; the baseline subtraction counts.** They sit beside each

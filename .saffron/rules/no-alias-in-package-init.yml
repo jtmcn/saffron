@@ -1,0 +1,16 @@
+id: no-alias-in-package-init
+language: python
+severity: error
+message: a package init may not import a name under an alias
+note: |
+  The `dead` gate's vulture counts `a` in `from m import a as x` as used, and it
+  never reports an unused import in an `__init__.py`. So the alias hides `a` for
+  good. Import `a` from its defining module where it is used.
+
+# Measured on vulture 2.16. `no-reexport` cannot scope a branch to one file name.
+# A self-alias in an init trips both rules.
+files:
+  - "**/__init__.py"
+rule:
+  kind: aliased_import
+  inside: { kind: import_from_statement }
