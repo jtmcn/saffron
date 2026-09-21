@@ -22,7 +22,7 @@ every top-level `DESIGN.md` section: renumbering `## 9.` dangled nothing.
 
 Written while deciding *against* splitting `DESIGN.md` into per-decision files.
 It is what let the appendices move out as records with every letter intact
-(Appendix U).
+(Appendix U), and what lets ADRs live beside them as records (ADR 1).
 """
 
 from __future__ import annotations
@@ -304,17 +304,15 @@ def test_a_bolded_rule_is_an_address():
     assert "4.6" in PER_DOCUMENT["DESIGN.md"]
 
 
-def test_saffron_keeps_no_adrs():
-    """`CONTEXT.md` §11 refuses a `docs/adr/` tree beside the appendix records, and prose is what failed last time.
+def test_every_file_under_docs_adr_is_an_adr_record():
+    """`docs/adr/` holds ADRs and nothing else, so a stray file there is refused."""
+    from records.kinds import KINDS
+    from records.load import load
 
-    `CLAUDE.md` and `docs/agents/domain.md` promised `docs/adr/` for months. The
-    promise was wrong from the day it landed and nothing noticed, because a claim
-    in a document has no reader that fails.
-    """
-    assert not (ROOT / "docs" / "adr").exists(), (
-        "docs/adr/ exists — either CONTEXT.md §11 changed its mind and this test "
-        "should go, or a directory arrived that the design record does not want"
-    )
+    directory = ROOT / KINDS["adr"].directory
+    assert directory.is_dir(), "docs/adr/ is missing; ADR 1 lives there"
+    loaded = {r.path.name for r in load(KINDS["adr"], ROOT)}
+    assert loaded == {p.name for p in directory.glob("*.md")}
 
 
 # A path rooted at the repo, which is what a rename or a spec's retirement breaks.

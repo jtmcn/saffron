@@ -36,6 +36,7 @@ ROOT_FILES = ("CONTEXT.md", "CLAUDE.md", "DESIGN.md", "README.md")
 INCLUDED_DIRS = (
     "docs/backlog/",
     "docs/appendices/",
+    "docs/adr/",
     ".saffron/specs/",
     ".claude/agents/",
     ".claude/skills/",
