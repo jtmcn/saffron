@@ -42,3 +42,8 @@ can be checked against that gate's own verdict.
 
 - 2026-09-19: filed from the spec loop's run 9 (#375, #377). Ranked first in
   `docs/evidence/2026-09-19-spec-loop-skill-feedback-run-9.md`.
+- 2026-09-21: a second occurrence, in the spec loop's run 11 (#406). Nothing
+  told `SA-0115`'s cell that `size` is advisory at `risk: standard`. Its implement
+  session ran the full suite 15 times chasing 600 lines, and the wall bound cut
+  it. That took about 45 of its 60 minutes. The fixture it compacted lacks cases
+  the spec named. `SA-0116`'s spec now tells the cell by hand (#407).

@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-19
 specs: [SA-0113]
-prs: []
+prs: [403]
 commits: []
 cites: [§5.4, §5.5.1]
 related: [117, 80, 79, b-f2a9d1, 97, b-0c1d69]
@@ -68,3 +68,6 @@ by hand.
   runs that criterion's witness over it, and turns a surviving edit into a
   blocker for REBUT. `b-0c1d69` holds the glossary entry and the `DESIGN.md`
   §5.4.1 paragraph that the parent's term needs.
+- 2026-09-21: `SA-0113` ran in the spec loop's run 11 and reached
+  `READY_FOR_REVIEW` at $12.70 (#403). Review fixed four witness holes and one
+  prompt that told its session it could not see what its diff shows it.

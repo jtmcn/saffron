@@ -5,7 +5,7 @@ status: open
 tier: 2
 filed: 2026-09-20
 specs: [SA-0114, SA-0115]
-prs: []
+prs: [404, 406]
 commits: []
 cites: []
 related: [b-281f0a, 130, b-865399]
@@ -88,3 +88,7 @@ place of deriving both by hand.
   resolver over the declared set resolved 19 of them to a directory. Matching
   every `walk` attribute instead would add 12 calls that enumerate nothing,
   ten of them `ast.walk`.
+- 2026-09-21: `SA-0114` built `cite` (#404) and `SA-0115` built `enumerators`
+  (#406) in the spec loop's run 11. The directory half resolves only literal
+  receivers, so on this repository it lists all 35 calls as unresolved.
+  Resolution follows in item b-f45f73, and `cite`'s precision in item b-61993a.
