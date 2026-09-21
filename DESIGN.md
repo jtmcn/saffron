@@ -1423,6 +1423,7 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
   pyproject.toml
   DESIGN.md              # what the system does
   docs/appendices/       # the revision appendices, one record each (Appendix U)
+  docs/adr/              # one decision per file, as it stands today (ADR 1)
   CONTEXT.md             # what the words mean — injected per phase (§5.3)
   saffron/
     cli.py                 # batch, run, queue, ratify, gc

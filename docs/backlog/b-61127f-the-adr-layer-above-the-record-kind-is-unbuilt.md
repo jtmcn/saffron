@@ -1,7 +1,7 @@
 ---
 id: b-61127f
 title: The ADR layer above the record kind is unbuilt, so nothing loads, indexes or judges a real decision
-status: open
+status: partial
 tier: 3
 filed: 2026-09-19
 by_hand: true
@@ -45,3 +45,8 @@ against it, and the glossary says what an ADR is here.
 
 - 2026-09-19: filed when `b-9ff0fd` closed with #377, so the deferred half has
   a record of its own.
+- 2026-09-21: done by hand on `joel/adrs-by-hand`, bar `records show --kind`.
+  ADR 1 is in `docs/adr/`. `check_all` runs all four ADR checks, and
+  `check_adr_principles` reads the bullets. The ontology and `DESIGN.md`'s ADR
+  index read ADRs, and "ADR N" is a citation that must resolve.
+  `adr-reviewer` exists, and `CONTEXT.md` §11 defines Saffron's ADR.

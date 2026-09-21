@@ -5,18 +5,19 @@ How the engineering skills should consume this repo's domain documentation when 
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root — the glossary. Saffron is single-context; there is no `CONTEXT-MAP.md` and there will not be one.
-- **`DESIGN.md`** — authoritative for what the system does (§1–9), and two indexes over `docs/appendices/`, the revision appendices that carry the design record, one record each (`CONTEXT.md` §11). Read the §-numbered section covering the area you're about to work in, and the revision appendix that last touched it. The numbered principles run in one global sequence across those appendices and are cited as "principle 34".
+- **`DESIGN.md`** — authoritative for what the system does (§1–9), an index over `docs/adr/`, and two indexes over `docs/appendices/`, the revision appendices that carry the design record, one record each (`CONTEXT.md` §11). Read the §-numbered section covering the area you're about to work in, and the revision appendix that last touched it. The numbered principles run in one global sequence across those appendices and are cited as "principle 34".
 - **`docs/evidence/`** — the primary records, one dated document per live run or spike. When `DESIGN.md` says a revision *found* something, this is where it found it.
 
-**There is no `docs/adr/`, and creating one would be a defect.** `CONTEXT.md` §11 gives the reasoning: decisions here are addressed by citation (`§5.4`, `Appendix G`, `principle 34`), and a parallel tree would be a second address space for the same decisions. The appendices themselves are records under `docs/appendices/`, cited by the same letters (Appendix U). Every `ADR-NNNN` in the design record refers to *prior art's* decision records (Appendix D), never to one of Saffron's.
+**`docs/adr/` holds Saffron's ADRs, one decision per file, cited as "ADR 1".** A revision appendix records what a revision found, and an ADR records where one decision stands now (`CONTEXT.md` §11, ADR 1). Prior art's decision records keep their dashed form, `ADR-NNNN`, and appear where Appendix D cites them.
 
 ## File structure
 
 ```
 /
 ├── CONTEXT.md                  ← the glossary; its §11 names the decision-record genres
-├── DESIGN.md                   ← §-numbered design + the appendix and principle indexes
+├── DESIGN.md                   ← §-numbered design + the appendix, principle and ADR indexes
 ├── docs/appendices/            ← revision appendices, one record each; the letter is the id
+├── docs/adr/                   ← ADRs, one decision per file; the number is the id
 ├── ontology/
 │   ├── factory.ttl             ← authoritative for CONTEXT.md's six closed sets
 │   └── RATIONALE.md            ← a spike verdict, not an ADR
