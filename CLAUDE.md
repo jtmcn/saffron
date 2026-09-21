@@ -88,6 +88,23 @@ Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` i
 failed (`saffron/cli.py`).
 PACKAGE opens the PR as a draft (§5.7): mark it ready with `gh pr ready <n>` before `gh pr merge`.
 
+## Searching and rewriting code
+
+Reach for `ast-grep` when the question is structural or the edit spans many sites. Grep and Edit
+stay right for text and for one exact change.
+
+```
+uv run ast-grep outline saffron/task.py        # items and members with line numbers, before a full read
+uv run ast-grep run -p 'run_one_cell($$$)' -l python --files-with-matches saffron   # every call site
+uv run ast-grep run -p 'old($A)' -r 'new($A)' -l python saffron      # preview a rewrite as a diff
+uv run ast-grep run -p 'old($A)' -r 'new($A)' -l python -U saffron   # apply it
+```
+
+- Leave the body out of a `def` pattern. `def $F($$$A)` matches every function here, and
+  `def $F($$$A): $$$B` matches none (measured).
+- Wrap a pattern in single quotes, so the shell leaves `$A` and `$$$` alone.
+- Read the preview before `-U`, then run the tests that cover every rewritten file.
+
 ## Architecture
 
 Three planes (§2). **Control plane** — the host, trusted, decides what runs and whether the
