@@ -1920,7 +1920,7 @@ def cmd_cite(args) -> int:
 # --------------------------------------------------------- enumerators
 
 
-_GLOB_CHARS = frozenset("*?")  # scope.py:17's `_TOKENS` metacharacters
+_GLOB_CHARS = frozenset("*?")  # the metacharacters scope.py's `_TOKENS` matches
 _ENUM_ATTRS = {"glob", "rglob", "iterdir"}
 _OS_ATTRS = {"walk": "os.walk", "listdir": "os.listdir", "scandir": "os.scandir"}
 _RECURSIVE_KINDS = {"rglob", "os.walk"}
@@ -1944,9 +1944,9 @@ def _literal_str(node: ast.AST | None) -> str | None:
 
 
 def _resolve_dir(node: ast.AST | None) -> str | None:
-    """A directory expression's path, in one of three forms only: a string
-    literal, `Path` of one string literal, or a `/` join of two expressions
-    each resolving one of those ways. No name lookup, import, or scope."""
+    """A directory expression's path, in one of three forms only. It is a
+    string literal, `Path` of one, or a `/` join of two parts that each
+    resolve. It does no name lookup, import, or scope."""
     literal = _literal_str(node)
     if literal is not None:
         return literal
@@ -1972,6 +1972,7 @@ class _Call:
     kind: str  # "glob", "rglob", "iterdir", "os.walk", "os.listdir", "os.scandir"
     receiver: ast.AST | None
     pattern: ast.AST | None
+    col: int = 0
 
 
 class _CallVisitor(ast.NodeVisitor):
@@ -1997,7 +1998,14 @@ class _CallVisitor(ast.NodeVisitor):
             if func.attr in _ENUM_ATTRS:
                 pattern = node.args[0] if node.args else None
                 self.calls.append(
-                    _Call(node.lineno, self.stack[-1], func.attr, func.value, pattern)
+                    _Call(
+                        node.lineno,
+                        self.stack[-1],
+                        func.attr,
+                        func.value,
+                        pattern,
+                        node.col_offset,
+                    )
                 )
             elif (
                 func.attr in _OS_ATTRS
@@ -2006,7 +2014,14 @@ class _CallVisitor(ast.NodeVisitor):
             ):
                 arg = node.args[0] if node.args else None
                 self.calls.append(
-                    _Call(node.lineno, self.stack[-1], _OS_ATTRS[func.attr], arg, None)
+                    _Call(
+                        node.lineno,
+                        self.stack[-1],
+                        _OS_ATTRS[func.attr],
+                        arg,
+                        None,
+                        node.col_offset,
+                    )
                 )
         self.generic_visit(node)
 
@@ -2017,9 +2032,9 @@ def _judge_call(
     """`(reports, ambiguous)` for one call against every taken directory.
 
     Each report is `(directory, "enumerates" | "descends into")`. `ambiguous`
-    marks a call that belongs on the unresolved list: its directory does not
-    resolve at all, or it sits above a directory behind a `.glob` pattern
-    that cannot decide whether it reaches it.
+    marks a call that belongs on the unresolved list. Its directory does not
+    resolve, or it sits above a directory behind a `.glob` pattern that
+    cannot decide reach.
     """
     resolved = _resolve_dir(call.receiver)
     if resolved is None:
@@ -2044,12 +2059,13 @@ def _judge_call(
 
 
 def cmd_enumerators(args) -> int:
-    """Which `tests/` calls will see the files a spec's `touches` add: for
-    every entry the base commit holds no file at, its parent directory, then
-    every call at that commit enumerating or descending into one.
+    """Which `tests/` calls will see the files a spec's `touches` add. It
+    takes the parent directory of every entry the base commit holds no file
+    at. It then finds every call at that commit that enumerates or descends
+    into one.
 
-    Scanning `tests/` is skipped where no entry adds a directory — there is
-    nothing to compare a call against — so that run reads no file at all.
+    Where no entry adds a directory there is nothing to compare a call
+    against. That invocation skips `tests/` and reads no file at all.
     """
     from saffron.intake import SpecError, load_spec
 
@@ -2074,7 +2090,7 @@ def cmd_enumerators(args) -> int:
                 directories.append(directory)
 
     reports: dict[str, list[tuple[str, int, str, str]]] = {d: [] for d in directories}
-    unresolved: dict[tuple[str, int], str] = {}
+    unresolved: dict[tuple[str, int, int], str] = {}
     read = 0
     if directories:
         test_files = sorted(
@@ -2094,7 +2110,7 @@ def cmd_enumerators(args) -> int:
                 for directory, kind in hits:
                     reports[directory].append((path, call.line, call.func, kind))
                 if ambiguous:
-                    unresolved[(path, call.line)] = call.func
+                    unresolved[(path, call.line, call.col)] = call.func
 
     print(
         f"{len(directories)} directories taken, {skipped} entries skipped, "
@@ -2108,7 +2124,7 @@ def cmd_enumerators(args) -> int:
             print(f"{directory}: {path}:{line} in {func}() {kind} it")
             if kind == "enumerates":
                 exit_code = 1
-    for (path, line), func in sorted(unresolved.items()):
+    for (path, line, _col), func in sorted(unresolved.items()):
         print(f"unresolved: {path}:{line} in {func}()")
     return exit_code
 
