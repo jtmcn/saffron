@@ -7,6 +7,7 @@ _.by_hand  # BacklogItem field: extra="forbid" refuses a record that sets it unl
 _.related  # BacklogItem field: extra="forbid" refuses a record that sets it unless it exists
 _.supersedes  # Adr field (SA-0110): read only by check_adr_supersession in tests/records/check.py
 _.APPENDIX_OPENS  # ontology/design_record.py: read only by the guard test that refuses an appendix heading in DESIGN.md
+_.add_adrs  # ontology/design_record.py: read only by the design-record tests that validate each ADR against ADRShape
 _.envelope  # Spec field (§3.2): extra="forbid" needs it for a bug spec to parse
 _.envelope_default  # Policy field (§2.1): extra="forbid" needs it for policy.yaml to parse
 _.pending_symbols  # Spec field: pydantic validates it, and .saffron/gates/dead.py reads it from YAML

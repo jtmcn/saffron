@@ -1,12 +1,12 @@
 """The design record as a graph, parsed from the appendix records.
 
-`CONTEXT.md` §11 names the genres the factory records a decision in. Two are
-modelled here: a **principle**, and the **revision appendix** that contributed
-it, read from `docs/appendices/`. `EvidenceRecord` and `SpikeVerdict` are
+`CONTEXT.md` §11 names the genres the factory records a decision in. Three are
+modelled here: a **principle**, the **revision appendix** that contributed it,
+read from `docs/appendices/`, and the **ADR**, read from `docs/adr/`. `EvidenceRecord` and `SpikeVerdict` are
 deliberately absent: they have no reader yet.
 
-**The appendix records are authoritative.** This module reads them and renders
-two indexes into `DESIGN.md` from them, the opposite direction from `render.py`'s
+**The appendix and ADR records are authoritative.** This module reads them and
+renders three indexes into `DESIGN.md` from them, the opposite direction from `render.py`'s
 vocabulary renders. Dev-only and outside `saffron/`: nothing there imports a
 graph library.
 """
@@ -17,12 +17,14 @@ from pathlib import Path
 import rdflib
 
 from ontology.spans import (
+    ADR_HEADER,
     APPENDIX_HEADER,
     PRINCIPLE_HEADER,
+    adr_index,
     appendix_index,
     principle_index,
 )
-from records.kinds import KINDS, Appendix
+from records.kinds import KINDS, Adr, Appendix
 from records.load import Record, load
 
 NS = "urn:software-factory:ns#"
@@ -173,3 +175,48 @@ def render_appendix_index(text: str, records: list[Record], graph: rdflib.Graph)
     if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
         raise ValueError("the span after the appendix header is not a table body")
     return text[:start] + APPENDIX_HEADER + body + text[end:]
+
+
+def adrs(root: Path) -> list[Record]:
+    return load(KINDS["adr"], root)
+
+
+def _adr(record: Record) -> Adr:
+    if not isinstance(record.model, Adr):
+        raise TypeError(f"{record.path}: not an ADR record")
+    return record.model
+
+
+def add_adrs(graph: rdflib.Graph, records: list[Record]) -> rdflib.Graph:
+    """Each ADR, what it supersedes, and the principles it rests on."""
+    for record in records:
+        m = _adr(record)
+        node = FACTORY[f"adr-{m.id}"]
+        graph.add((node, rdflib.RDF.type, FACTORY.ADR))
+        graph.add((node, FACTORY.adrNumber, rdflib.Literal(m.id)))
+        graph.add((node, FACTORY.adrStatus, rdflib.Literal(m.status)))
+        for old in m.supersedes:
+            graph.add((node, FACTORY.supersedes, FACTORY[f"adr-{old}"]))
+        for n in m.principles:
+            graph.add((node, FACTORY.restsOn, FACTORY[f"principle-{n}"]))
+    return graph
+
+
+def _status_cell(m: Adr) -> str:
+    if m.status != "superseded":
+        return m.status
+    return "superseded by " + ", ".join(f"ADR {n}" for n in m.superseded_by)
+
+
+def render_adr_index(text: str, records: list[Record]) -> str:
+    """Rewrite the ADR index's table body from the ADR records."""
+    body = ""
+    for record in records:
+        m = _adr(record)
+        principles = ", ".join(str(n) for n in m.principles)
+        body += f"| {m.id} | {_escaped(m.title)} | {_status_cell(m)} | {principles} |\n"
+    start, end = adr_index(text)
+    replaced = text[start + len(ADR_HEADER) : end]
+    if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
+        raise ValueError("the span after the ADR header is not a table body")
+    return text[:start] + ADR_HEADER + body + text[end:]

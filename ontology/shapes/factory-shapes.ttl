@@ -282,3 +282,14 @@ factory:RevisionAppendixShape a sh:NodeShape ;
         sh:datatype xsd:string ; sh:pattern "^[A-Z]{1,2}$" ] ;
     sh:property [ sh:path factory:coversRevision ; sh:minCount 1 ;
         sh:datatype xsd:integer ; sh:minInclusive 1 ] .
+
+# Supersession symmetry and id contiguity are sets, not focus nodes, so they live
+# in `tests/records/check.py`, not here.
+factory:ADRShape a sh:NodeShape ;
+    sh:targetClass factory:ADR ;
+    sh:property [ sh:path factory:adrNumber ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:datatype xsd:integer ; sh:minInclusive 1 ] ;
+    sh:property [ sh:path factory:adrStatus ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:in ( "accepted" "superseded" "deprecated" ) ] ;
+    sh:property [ sh:path factory:supersedes ; sh:class factory:ADR ] ;
+    sh:property [ sh:path factory:restsOn ; sh:class factory:Principle ] .

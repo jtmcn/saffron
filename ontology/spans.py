@@ -72,3 +72,12 @@ def principle_index(text: str) -> tuple[int, int]:
 def appendix_index(text: str) -> tuple[int, int]:
     """`(start, end)` of the appendix index table, its header included."""
     return _table(text, APPENDIX_ANCHOR, APPENDIX_HEADER)
+
+
+ADR_ANCHOR = "## ADRs — an index"
+ADR_HEADER = "| ADR | Title | Status | Principles |\n|---|---|---|---|\n"
+
+
+def adr_index(text: str) -> tuple[int, int]:
+    """`(start, end)` of the ADR index table, its header included."""
+    return _table(text, ADR_ANCHOR, ADR_HEADER)

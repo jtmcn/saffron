@@ -197,13 +197,14 @@ def main() -> None:
             (root / "ontology" / "shapes" / "factory-shapes.ttl", render_shapes),
         )
     }
-    # `DESIGN.md`'s two indexes render from the appendix records, not from the
-    # vocabulary: an appendix owns its prose, and the indexes are downstream of it.
+    # `DESIGN.md`'s three indexes render from the appendix and ADR records, not the
+    # vocabulary: a record owns its prose, and the indexes are downstream of it.
     design = root / "DESIGN.md"
     records = design_record.appendices(root)
     graph = design_record.parse(records)
     text = design_record.render_principles(design.read_text(), graph)
-    rendered[design] = design_record.render_appendix_index(text, records, graph)
+    text = design_record.render_appendix_index(text, records, graph)
+    rendered[design] = design_record.render_adr_index(text, design_record.adrs(root))
     # Nothing is written until every render succeeds: this one refuses a record
     # it cannot read or a title contradicting its revisions; a half-applied render leaves two surfaces current.
     for path, text in rendered.items():

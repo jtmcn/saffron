@@ -182,11 +182,11 @@ factory:disputes a factory:Role . factory:concedes  a factory:Role .
 ## The design record — CONTEXT.md §11. Not part of the run record: nothing here
 ## projects from a §4.1 table and no scheduling decision reads it, so §1.4's
 ## non-goal is untouched. What it models is the document, and the reader that
-## earns it is `ontology/design_record.py`, which reads the appendix records
-## and renders DESIGN.md's two indexes from these two classes.
+## earns it is `ontology/design_record.py`, which reads the appendix and ADR
+## records and renders DESIGN.md's three indexes from these three classes.
 ##
-## `CONTEXT.md` §11 names four genres the factory records a decision in — ADR is the
-## fifth entry and disowns itself. `EvidenceRecord` and `SpikeVerdict` are
+## `CONTEXT.md` §11 names the genres the factory records a decision in. The ADR
+## is the third modelled here, read by the ADR index. `EvidenceRecord` and `SpikeVerdict` are
 ## deliberately not declared: they have no shape or query reading them yet, and a
 ## term whose only reader is an rdfs:comment is what the dead-term test deletes.
 ## They join when something reads them, not when someone writes a definition.
@@ -202,3 +202,11 @@ factory:contributedBy a owl:ObjectProperty ; rdfs:domain factory:Principle ; rdf
 factory:appendixLetter a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:string .
 factory:coversRevision a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:integer ;
     rdfs:comment "One or more. Appendix G covers rev 8 and rev 10 and Appendix O rev 18 and rev 19, because a revision that closes an earlier revision's question lands in that question's appendix." .
+
+factory:ADR a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "ADR" ;
+    rdfs:comment "One decision as it stands today, under docs/adr/, cited by number (ADR 1)." .
+
+factory:adrNumber a owl:DatatypeProperty ; rdfs:domain factory:ADR ; rdfs:range xsd:integer .
+factory:adrStatus a owl:DatatypeProperty ; rdfs:domain factory:ADR ; rdfs:range xsd:string .
+factory:supersedes a owl:ObjectProperty ; rdfs:domain factory:ADR ; rdfs:range factory:ADR .
+factory:restsOn a owl:ObjectProperty ; rdfs:domain factory:ADR ; rdfs:range factory:Principle .

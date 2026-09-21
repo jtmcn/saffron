@@ -1657,3 +1657,18 @@ compresses an appendix, and the appendix is where the case that found it lives.
 | 60 | A threshold that names one cause is read as naming the only cause | S |
 | 61 | A check that runs only on fixtures verifies the check, not the subject | T |
 | 62 | A refusal reaches only as far as its reason | U |
+
+---
+
+## ADRs — an index
+
+Every decision recorded as an ADR under `docs/adr/`, one per file. A revision
+appendix records what a revision found, and an ADR records where one decision
+stands today.
+
+**This table is generated.** `uv run python -m ontology.render` rewrites it from
+the ADR records, so a hand edit here is discarded.
+
+| ADR | Title | Status | Principles |
+|---|---|---|---|
+| 1 | Decisions are recorded one per file as ADRs | accepted | 62 |
