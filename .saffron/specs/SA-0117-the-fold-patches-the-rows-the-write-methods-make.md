@@ -59,8 +59,10 @@ acceptance:
       result, and close it. Each gate result has its own gate name and at
       least two failures, each with a distinct file and code, a non-empty
       message and a line. Before the first write, the fold ledger already
-      holds an unrelated task with one finding, folded into it, so no id the
-      fold mints equals the one the writing ledger chose. After each write
+      holds an unrelated task with one attempt and one finding. That task is
+      written by a ledger and record of its own and folded in, so no finding
+      or attempt id the fold mints equals the one the writing ledger chose.
+      After each write
       the witness folds every fact so far into that ledger and compares this
       task's rows in `tasks`, `attempts`, `gate_results`, `failures` and
       `findings` with the writing ledger's.
@@ -311,14 +313,17 @@ in one task, and the last write wins. They are `branch` (`create_task`, then
 `pushed_sha` (`record_push`, then `set_task_package`) and `state`
 (`set_task_state`, then `set_task_package`). So an `_apply` that ignores
 `policy_sha` on `task_created` matches the final rows. After each write, fold
-every fact so far into the same fresh ledger and compare. That also drives
+every fact so far into the ledger criterion 1 describes, which already holds
+an unrelated task, and compare. That also drives
 `fold_task` dropping the rows it folded a moment before.
 
 **Two of each row a fold places by a rule.** The finding map and the
 last-opened attempt are rules. One row lets a wrong rule pass. With one
 finding, a rebuttal placed on the latest finding matches. With results in one
-attempt only, a gate result placed on the first attempt matches. So each
-the first rebuttal written names a finding that is not the latest. Each
+attempt only, a gate result placed on the first attempt matches. So the
+first rebuttal names the latest finding and the second names the earlier one.
+A rule that picks the latest finding fails, and so does one that pairs them
+by position. Each
 attempt has a gate result under its own gate name. A gate result with no
 failures lets an `_apply` that ignores them pass, so each carries two.
 
@@ -366,10 +371,14 @@ out.
 `test_a_replay_that_breaks_is_not_skipped_as_unreadable` inject an unknown
 payload key through `_with_unplaceable_payload`. They expect the `TypeError`
 a keyword call raises on it. `_apply` reads payload keys by name, so the
-extra key raises nothing. Delete both tests and the helper. Criteria 3 and 4
-test the same two properties with a fault `_apply` must refuse.
-`test_a_rebuttal_with_no_finding_fact_raises_under_strict` asserts the rule
-criterion 5 replaces. Delete it too.
+extra key raises nothing. `test_a_rebuttal_with_no_finding_fact_raises_under_strict`
+asserts the rule criterion 5 replaces. Keep all three names and rewrite their
+bodies, because `census` fails any test collected at base and missing at head
+(`saffron/gates/core/census.py:34-38`). Replace `_with_unplaceable_payload`
+with a helper that adds a `decision` fact to the task. The first test keeps
+its zero-row counts under `strict`. The second expects an error that is not
+`UnreadableTask` without `strict`. The third expects `UnreadableTask` under
+`strict`, and without it `folded == 0` with the task in `skipped`.
 
 **Criterion 4's error and criterion 5's are different kinds of failure.** An
 unplaced kind is the fold's own gap and aborts the fold. `saffron fold`
@@ -388,7 +397,8 @@ log holds none of the other five kinds.
 
 **Size.** A prototype of this change measured 908 changed lines. It spent 254
 in `ledger.py` and 223 in `fold.py`. The new test module took 380, and 51
-went from `tests/test_fold.py`. The `refactor` ceiling is 1000, and `size`
+went from `tests/test_fold.py`. Rewriting its three tests in place, rather
+than deleting them, adds about 30. The `refactor` ceiling is 1000, and `size`
 blocks at `elevated`. That leaves under 100 lines for prose. Keep comments
 and docstrings short, and share one row reader and one write list across
 the new witnesses.
