@@ -376,6 +376,7 @@ TURN_PROMPTS = {
     "verdict": rebut.VERDICT_TURN_PROMPT,
     "notes": artifacts.NOTES_PROMPT,
     "extraction": artifacts.EXTRACTION_PROMPT,
+    "criterion-probe": review.CRITERION_PROBE_PROMPT,
 }
 
 

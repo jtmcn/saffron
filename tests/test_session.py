@@ -5678,6 +5678,194 @@ def test_the_review_lens_prompt_carries_the_claim_for_a_witnessed_spec(
     assert all("the box ticks" in p for p in review_prompts)
 
 
+# --- criterion probes: one fresh session per criterion (backlog item b-2750d5) ---
+
+
+def _probe_answer(edit, reason):
+    return f"Here it is.\n<output>\n{json.dumps({'edit': edit, 'reason': reason})}\n</output>"
+
+
+def _section(prompt, heading, next_heading=None):
+    """The prompt text strictly between `heading` and `next_heading` (or the
+    end). Positional, not `in`: a caller that swapped which value fills which
+    heading would still pass an `in` check on the whole prompt."""
+    start = prompt.index(heading) + len(heading)
+    end = prompt.index(next_heading, start) if next_heading else len(prompt)
+    return prompt[start:end]
+
+
+def _probe_turns(*probes):
+    """Plan, implement, the three lenses clean, then one criterion-probe turn
+    per entry in `probes`, in the spec's own declared order — the shape both
+    criterion-probe witnesses below drive with."""
+    return [
+        _turn(_block(_PLAN)),
+        _turn(),
+        _turn(_EMPTY),
+        _turn(_EMPTY),
+        _turn(_EMPTY),
+        *probes,
+    ]
+
+
+def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
+    monkeypatch, tmp_path
+):
+    """REVIEW buys one fresh session per entry in the spec's acceptance list,
+    after every lens has run, and shows each one only its own claim — never
+    the witness that checks it, never another criterion's claim, and never
+    the implementer's tools or a ceiling of its own."""
+    from saffron.intake import Criterion
+
+    first = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="tests/test_x.py::test_guard",
+    )
+    second = Criterion(
+        claim="the total stays unchanged when nothing is removed",
+        witness="tests/test_x.py::test_total",
+        preserves=True,
+    )
+
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(
+                _probe_answer(
+                    {"file": "src/x.py", "find": "if x < 0:", "replace": "if False:"},
+                    "removing the guard lets a negative amount through",
+                ),
+                cost=0.05,
+            ),
+            _turn(
+                _probe_answer(None, "nothing in the diff touches the total"), cost=0.07
+            ),
+        ),
+        spec=_spec(acceptance=[first, second]),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    # Five calls precede the criterion probes: the plan, the implement turn,
+    # and the three lenses (correctness, contract, adequacy).
+    probe_prompts = cell.system_prompts[5:]
+    probe_options = cell.turn_options[5:]
+    assert len(probe_prompts) == 2
+
+    # Positional, not `in`: the claim must land under its own heading, never
+    # under the diff's — a swap of the two would still pass a bare `in` check.
+    claim_0 = _section(probe_prompts[0], "## The claim")
+    diff_0 = _section(probe_prompts[0], "## The diff", "## The claim")
+    assert "the guard rejects a negative amount" in claim_0
+    assert "the guard rejects a negative amount" not in diff_0
+    assert "diff --git a/src/x.py" in diff_0
+    assert "diff --git a/src/x.py" not in claim_0
+    assert "the total stays unchanged" not in probe_prompts[0]
+    assert "tests/test_x.py::test_guard" not in probe_prompts[0]
+    assert "tests/test_x.py::test_total" not in probe_prompts[0]
+
+    claim_1 = _section(probe_prompts[1], "## The claim")
+    diff_1 = _section(probe_prompts[1], "## The diff", "## The claim")
+    assert "the total stays unchanged when nothing is removed" in claim_1
+    assert "the total stays unchanged when nothing is removed" not in diff_1
+    assert "diff --git a/src/x.py" in diff_1
+    assert "diff --git a/src/x.py" not in claim_1
+    assert "the guard rejects a negative amount" not in probe_prompts[1]
+    assert "tests/test_x.py::test_guard" not in probe_prompts[1]
+    assert "tests/test_x.py::test_total" not in probe_prompts[1]
+
+    # The same read-only tools and the same per-session ceiling a lens holds.
+    lens_options = cell.turn_options[2]
+    for options in probe_options:
+        assert options["tools"] == review.REVIEW_TOOLS
+        assert options["max_turns"] == lens_options["max_turns"]
+        assert options["max_budget_usd"] == lens_options["max_budget_usd"]
+
+    # Charged to the task beside the lenses' own cost.
+    assert outcome.spent_usd == pytest.approx(0.1 * 5 + 0.05 + 0.07)
+
+
+def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
+    monkeypatch, tmp_path
+):
+    """The task directory carries `criterion-probes.json`, one entry per
+    criterion in the spec's own order, pairing each criterion's witness and
+    claim with the edit its own session named (or none) and its reason word
+    for word. REVIEW emits one line counting the named and the unnamed over
+    that record. A spec declaring no criterion writes no such record and
+    emits no such line."""
+    from saffron.intake import Criterion
+
+    first = Criterion(
+        claim="the guard rejects a negative amount", witness="t.py::test_a"
+    )
+    second = Criterion(claim="the total never goes negative", witness="t.py::test_b")
+
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(
+                _probe_answer(
+                    {"file": "src/x.py", "find": "if x < 0:", "replace": "if False:"},
+                    "removing the guard lets a negative amount through",
+                )
+            ),
+            _turn(_probe_answer(None, "nothing in the diff touches the total")),
+        ),
+        spec=_spec(acceptance=[first, second]),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    assert len(entries) == 2
+    assert entries[0]["witness"] == "t.py::test_a"
+    assert entries[0]["claim"] == "the guard rejects a negative amount"
+    assert entries[0]["edit"] == {
+        "file": "src/x.py",
+        "find": "if x < 0:",
+        "replace": "if False:",
+    }
+    assert entries[0]["reason"] == "removing the guard lets a negative amount through"
+    assert entries[1]["witness"] == "t.py::test_b"
+    assert entries[1]["claim"] == "the total never goes negative"
+    assert entries[1]["edit"] is None
+    assert entries[1]["reason"] == "nothing in the diff touches the total"
+
+    (line,) = [w for w in cell.watched if w.startswith("REVIEW: criterion probes:")]
+    assert line == "REVIEW: criterion probes: 1 named, 1 unnamed"
+
+    # A spec declaring no criterion buys no session, writes no record and
+    # emits no line.
+    empty_cell = _stub_the_runtime(monkeypatch)
+    empty_outcome, _empty_ledger = _drive(
+        monkeypatch,
+        tmp_path / "no-criteria",
+        cell=empty_cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_EMPTY),
+            _turn(_EMPTY),
+            _turn(_EMPTY),
+        ],
+        spec=_spec(),
+    )
+    assert empty_outcome.state == "READY_FOR_REVIEW"
+    assert not (
+        tmp_path / "no-criteria" / "out" / "SY-1" / "criterion-probes.json"
+    ).exists()
+    assert len(empty_cell.system_prompts) == 5
+    assert not [
+        w for w in empty_cell.watched if w.startswith("REVIEW: criterion probes:")
+    ]
+
+
 def test_a_proposed_scope_keeps_the_specs_declared_touches(monkeypatch, tmp_path):
     """The ratified set is a superset, not a replacement. The prompt asks the
     model for every path "inside or outside" the declared `touches`, but a
