@@ -270,7 +270,7 @@ today (`fold.py:117-127`). Mark both with `ponytail:` comments that name the
 second spec's fix.
 
 **The per-kind tests the round trip supersedes.** `tests/test_ledger_appends.py`
-and the `_db` queries in `tests/test_fold.py` stay until the second spec. Two
+and the `_db` queries in `tests/test_fold.py` stay until the second spec. Three
 exceptions follow in the notes, where this spec changes the premise a test
 rests on.
 
@@ -297,8 +297,8 @@ notes which columns you dropped.
 **The round trip compares two independent halves, and that is its worth.**
 The writing ledger's rows come from the write methods' own SQL. The folded
 rows come from `_apply`. A column `_apply` forgets differs between them.
-Give every column the first task's writes set a value that is neither
-`NULL` nor the schema's default. The second task exists only for the `risk`
+Give every column the compared task's writes set a value that is neither
+`NULL` nor the schema's default. The task that declares no risk exists only for the `risk`
 default, so this rule does not bind it. Where the column's type allows it, make the value
 distinct from every other column's too. `attempts.n` and `findings.anchored`
 cannot be. On the final snapshot only, assert that no compared column is
@@ -366,7 +366,7 @@ its repo belong to other tasks too and stay. A refold is free to give the
 task a new `task_id`. The rows the `preserves` criteria compare leave the ids
 out.
 
-**Two tests in `tests/test_fold.py` rest on a fault this spec removes.**
+**Three tests in `tests/test_fold.py` rest on a premise this spec removes.**
 `test_a_task_that_fails_mid_replay_leaves_no_rows_behind` and
 `test_a_replay_that_breaks_is_not_skipped_as_unreadable` inject an unknown
 payload key through `_with_unplaceable_payload`. They expect the `TypeError`
@@ -374,11 +374,12 @@ a keyword call raises on it. `_apply` reads payload keys by name, so the
 extra key raises nothing. `test_a_rebuttal_with_no_finding_fact_raises_under_strict`
 asserts the rule criterion 5 replaces. Keep all three names and rewrite their
 bodies, because `census` fails any test collected at base and missing at head
-(`saffron/gates/core/census.py:34-38`). Replace `_with_unplaceable_payload`
-with a helper that adds a `decision` fact to the task. The first test keeps
+(`saffron/gates/core/census.py:34-38`). In the first two, replace
+`_with_unplaceable_payload` with a helper that adds a `decision` fact to the
+task. The first test keeps
 its zero-row counts under `strict`. The second expects an error that is not
-`UnreadableTask` without `strict`. The third expects `UnreadableTask` under
-`strict`, and without it `folded == 0` with the task in `skipped`.
+`UnreadableTask` without `strict`. The third keeps its fault, the removed finding facts, and expects
+`UnreadableTask` under `strict`, and without it `folded == 0` with the task in `skipped`.
 
 **Criterion 4's error and criterion 5's are different kinds of failure.** An
 unplaced kind is the fold's own gap and aborts the fold. `saffron fold`
@@ -405,6 +406,6 @@ the new witnesses.
 
 **Prose.** `tests/test_ledger_fold_task.py` is a new file, so the `prose`
 ratchet starts it at zero. Its comments and docstrings take no em-dash,
-semicolon, contraction, perfect tense or hedge. In `ledger.py` and `fold.py`
-a new comment adds hits to a file's count, and a count above base fails.
+semicolon, contraction, perfect tense or hedge. In `ledger.py`, `fold.py` and
+`tests/test_fold.py` a new or rewritten comment adds hits to a file's count, and a count above base fails.
 Check each file with `python3 hooks/prose_limit.py --file <path>`.
