@@ -52,3 +52,9 @@ it apart from a mutant and from a vacuity probe.
 asks a fresh session for the edit a spec could not declare. It names the
 withholding as the reason that edit is evidence, and points at the criterion
 probe entry. Both halves land after `SA-0113` merges, not before.
+
+## Record
+
+- 2026-09-21: `SA-0113`'s cell shipped the criterion-probe prompt (#403). The
+  in-cell `contract` lens raised this item's tension as a concern, and the review
+  left it here, since the spec sanctions the design.

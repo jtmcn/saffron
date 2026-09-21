@@ -36,3 +36,9 @@ the host applies the probe after REVIEW, in a Gate-only cell, and that the
 verdict decides the finding. `DESIGN.md` §5.5.1 gains a paragraph saying the
 same thing and naming the three verdicts. Both land after `SA-0109` merges,
 not before.
+
+## Record
+
+- 2026-09-21: the spec loop's run 11 (#403) found a second reader. `SA-0113`'s
+  criterion-probe prompt injects the `CONTEXT.md` section holding that entry
+  into every probe session.

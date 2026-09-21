@@ -50,3 +50,9 @@ so no spec has to repeat it.
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-09-21: a recurrence in the spec loop's run 11. `SA-0116`'s implement turn
+  made 11 `pytest` calls and no commit, and its last message says its three
+  witnesses pass. The 900s turn wall cut it during a final full-suite run.
+  Teardown reported "no commits, nothing to export", and it ended
+  `NOT_IMPLEMENTED` at $6.63 (task 124). Its spec said "Commit after each coherent
+  step", and that did not stop it. The ledger records the cut turn as zero turns.

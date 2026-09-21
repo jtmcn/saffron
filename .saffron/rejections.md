@@ -728,3 +728,41 @@ after that.
 - The concern said a remainder "may not cover" a cost the same function
   computes exactly, and the docstring omitted the clause the spec asked for.
   **Bucket 2** — a hedge on a measured number. **Open.**
+
+## 2026-09-21, `SA-0113`, `SA-0114`, `SA-0115` (the spec loop's run 11, fixes in #403, #404, #406)
+
+Run 11 of the spec loop. The in-cell adequacy lens raised one blocker per cell,
+the host's probe survived each, and each was fixed inside the cell. Those are not
+rejections. These are what the two independent seats found after that, each
+verified by the delegate before it was fixed or kept.
+
+- `SA-0113` (#403): four witnesses passed with their behaviour broken. A witness
+  id appended to the turn prompt, a refused session charged zero, the probes run
+  outside the critic cell, and an error entry that drops its claim all survived.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0113` (#403): the probe prompt told its session it could not see which
+  test guards a claim, while the diff it holds carries every witness. The
+  witness docstring made the same claim.
+  **Bucket 2**, a claim stronger than the code. **Open.**
+- `SA-0114` (#404): no witness sent an anchored bare citation through the
+  past-end report, so skipping that check for one passed all three witnesses.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0114` (#404): two comments cited "(item 2)" and "(item 5)" meaning the
+  spec's own list, in a file where "(item N)" names a backlog item. Both
+  resolved, to unrelated finished work, so `check_item_citations` passed them.
+  **Bucket 2.** **Open.**
+- `SA-0114` (#404): `cite`'s moved-text half was four for four false on its own
+  spec, since it matches quoted text as a substring.
+  **No bucket**, it needs a better matcher. **Open:** item b-61993a.
+- `SA-0115` (#406): thirteen mutants survived all three witnesses. Six were cases
+  the spec named and the fixture left out, among them `.iterdir()` and
+  `os.scandir` on the parent, a committed file rewritten on disk, the order of
+  the output, and a function-local `import os`.
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- `SA-0115` (#406): two unresolvable calls on one line printed as one line, since
+  `unresolved` was keyed by path and line, against "one line per call".
+  **Bucket 1, and the gate does not exist.** **Open:** item b-2750d5.
+- All three pull requests carried em-dashes, semicolons or docstring sentences
+  over 25 words in new Python comments, which `CLAUDE.md` forbids. The `prose`
+  gate reads no word rule in a `.py` file.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.

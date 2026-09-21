@@ -73,3 +73,9 @@ author already holds both the claim and the fixture.
   Reopened on that evidence, and [[b-2750d5]] is the shape that would settle
   it: a cell mutating the line behind each criterion proves the coverage a
   reader is asserting here.
+- 2026-09-21: the spec loop's run 11 gave the strongest evidence yet. Every spec
+  blocker in the run was this family. `SA-0114` drew five over five rounds,
+  `SA-0115` thirteen over six, and `SA-0116` four over five. An author's own
+  sweep before hand-back caught six more on `SA-0115` and ten on `SA-0116`.
+  Making that sweep a mandatory, reported step in `.claude/agents/spec-writer.md`
+  is the next step.
