@@ -60,13 +60,19 @@ And optionally:
    `.saffron/policy.yaml`'s `elevate_on` says when the gate blocks.
    **Done when** the estimate is 100 lines or more under that ceiling. An
    estimate above that line splits into a parent and children with
-   `depends_on`, and you write the parent.
+   `depends_on`, and you write the parent. A split leads your report, ahead of
+   the files you wrote, and names each child you would write next: the caller
+   dispatches those, and reads the rest of your report knowing what is missing.
 2. **For `context:`, file the record.** `uv run python -m records new-id`
    gives the id. Copy a recent `b-` record's shape. **Done when**
    `records show <id>` prints it.
 3. **Write the spec.** A queued spec whose `touches` overlaps yours is its
-   parent. **Done when** `uv run saffron queue --repo .` lists it as a
-   candidate or refuses it only on its parent.
+   parent. `saffron queue` cannot answer here: it exports `.saffron/specs` from
+   the mirror at `base_sha`, so a spec you have not committed is invisible to
+   it. **Done when** `uv run pytest tests/test_scheduler.py -k queue_smoke`
+   passes with your spec pinned as a candidate, or refused only on its parent.
+   That test drives the queue over the working tree, and step 5 is where you
+   write the pin.
 4. **Set the ceilings.**
    `uv run .claude/skills/run-saffron-spec-loop/driver.py history <SA-ID>`
    ends with a `ceilings:` line. **Done when** it reads `above by` on both

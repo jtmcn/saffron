@@ -9,6 +9,9 @@ Standard library only, like the gate it loads.
 With `--edited`, a Claude Code PostToolUse hook: the edited file's new hits
 for both gates go to stderr with exit 2, which Claude Code shows the model.
 PostToolUse cannot block, because the edit already happened.
+
+With `--file <path>`, the same question about one file in the working tree,
+answered on stdout before anything is staged.
 """
 
 from __future__ import annotations
@@ -123,6 +126,60 @@ def commit_time(root: Path) -> int:
     return 1 if failed else 0
 
 
+def _in_repo(root: Path, file_path: Path) -> str | None:
+    try:
+        return file_path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _against_head(root: Path, path: str, file_path: Path) -> tuple[str | None, str]:
+    """The file at `HEAD` or None, and the working tree's copy of it."""
+    head = _git(root, "show", f"HEAD:{path}")
+    return (
+        head.stdout if head.returncode == 0 else None,
+        file_path.read_text(encoding="utf-8", errors="replace"),
+    )
+
+
+def _risen_lines(
+    prose: Any, root: Path, path: str, old_text: str | None, new_text: str
+) -> list[str]:
+    # Only a code whose count actually rose, like `commit_time` does: an
+    # untouched hit sharing its line with an edit is not new.
+    lines = []
+    for gate in prose.GATES:
+        _, hits = risen_hits(prose, root, gate, path, old_text, new_text)
+        lines += [f"{path}:{hit.line}: {hit.code}: {hit.excerpt}" for hit in hits]
+    return lines
+
+
+def file_time(root: Path, raw_path: str) -> int:
+    """What the gates would count for one path, staged or not.
+
+    The question `commit_time` answers about the index and `edit_time` about an
+    edit, asked about a file in hand. A new file compares against zero
+    (backlog item b-929465).
+    """
+    file_path = Path(raw_path)
+    if not file_path.is_absolute():
+        file_path = root / file_path
+    path = _in_repo(root, file_path)
+    prose = load_prose()
+    if path is None or not prose.in_scope(path):
+        print(f"out of the gates' scope: {raw_path}", file=sys.stderr)
+        return 2
+    if not file_path.is_file():
+        print(f"no such file: {raw_path}", file=sys.stderr)
+        return 2
+    old_text, new_text = _against_head(root, path, file_path)
+    lines = _risen_lines(prose, root, path, old_text, new_text)
+    baseline = "HEAD" if old_text is not None else "zero"
+    plural = "" if len(lines) == 1 else "s"
+    print(f"{path}: {len(lines)} new hit{plural} against {baseline}", *lines, sep="\n")
+    return 1 if lines else 0
+
+
 def edit_time(root: Path, event: object) -> int:
     """Print the edited file's new hits for the model. The edit already happened."""
     if not isinstance(event, dict):
@@ -137,22 +194,12 @@ def edit_time(root: Path, event: object) -> int:
     if not file_path.is_absolute():
         cwd = event.get("cwd")
         file_path = (Path(cwd) if isinstance(cwd, str) else root) / file_path
-    try:
-        path = file_path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return 0
+    path = _in_repo(root, file_path)
     prose = load_prose()
-    if not prose.in_scope(path) or not file_path.is_file():
+    if path is None or not prose.in_scope(path) or not file_path.is_file():
         return 0
-    head = _git(root, "show", f"HEAD:{path}")
-    old_text = head.stdout if head.returncode == 0 else None
-    new_text = file_path.read_text(encoding="utf-8", errors="replace")
-    # Only report a code whose count actually rose, like `commit_time` does:
-    # an untouched hit sharing its line with an edit is not new.
-    lines = []
-    for gate in prose.GATES:
-        _, hits = risen_hits(prose, root, gate, path, old_text, new_text)
-        lines += [f"{path}:{hit.line}: {hit.code}: {hit.excerpt}" for hit in hits]
+    old_text, new_text = _against_head(root, path, file_path)
+    lines = _risen_lines(prose, root, path, old_text, new_text)
     if not lines:
         return 0
     print(
@@ -171,6 +218,8 @@ def main(argv: list[str]) -> int:
         except json.JSONDecodeError:
             return 0
         return edit_time(Path.cwd(), event)
+    if len(argv) == 2 and argv[0] == "--file":
+        return file_time(Path.cwd(), argv[1])
     if argv:
         print(f"unexpected arguments: {argv}", file=sys.stderr)
         return 2
