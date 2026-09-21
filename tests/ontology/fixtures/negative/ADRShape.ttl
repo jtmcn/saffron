@@ -1,0 +1,8 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix : <urn:software-factory:data:> .
+
+# An ADR in a status the records refuse. The index would show a decision that
+# neither stands nor names what replaced it.
+:a a factory:ADR ;
+    factory:adrNumber 1 ;
+    factory:adrStatus "proposed" .

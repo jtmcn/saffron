@@ -62,6 +62,8 @@ protected:
   - CONTEXT.md
   # The design record left DESIGN.md as records, and stays as protected (Appendix U).
   - docs/appendices/**
+  # One decision per file, as it stands today (ADR 1).
+  - docs/adr/**
   - .saffron/**
   - uv.lock
 

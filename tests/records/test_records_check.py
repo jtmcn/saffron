@@ -265,16 +265,7 @@ def test_tests_records_is_not_scanned(broken):
 
 
 def test_the_good_fixture_passes_every_check():
-    assert check_all(FIXTURE, {"4", "4.2", "4.2.1", "5", "5.4"}) == []
-
-
-# The three _adr_kind() checks land with _adr_kind() 1, by hand — CONTEXT.md, DESIGN.md and
-# .saffron/policy.yaml are protected, so _adr_kind() 1 cannot land in this diff.
-ADR_CHECKS_NOT_YET_WIRED = {
-    "check_adr_ids",
-    "check_adr_supersession",
-    "check_adr_appendices",
-}
+    assert check_all(FIXTURE, {"4", "4.2", "4.2.1", "5", "5.4"}, principles={1}) == []
 
 
 def test_check_all_runs_every_check(monkeypatch):
@@ -284,7 +275,6 @@ def test_check_all_runs_every_check(monkeypatch):
         for name, fn in inspect.getmembers(tests.records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
-        and name not in ADR_CHECKS_NOT_YET_WIRED
         and fn.__module__ == "tests.records.check"
     }
     for name in names:
@@ -292,7 +282,7 @@ def test_check_all_runs_every_check(monkeypatch):
         monkeypatch.setattr(
             tests.records.check, name, lambda *_, sentinel=sentinel: [sentinel]
         )
-    ran = {v.message for v in check_all(FIXTURE, set())}
+    ran = {v.message for v in check_all(FIXTURE, set(), principles=set())}
     assert ran == names
 
 
@@ -644,3 +634,94 @@ def test_an_adr_cites_only_appendices_that_exist(tmp_path: Path):
     )
     [v] = tests.records.check.check_adr_appendices(load(_adr_kind(), broken), letters)
     assert v.field == "appendices" and "Z" in v.message
+
+
+def test_an_adr_cites_only_principles_that_exist(tmp_path: Path):
+    assert (
+        tests.records.check.check_adr_principles(load(_adr_kind(), FIXTURE), {1}) == []
+    )
+
+    broken = tmp_path / "root"
+    shutil.copytree(FIXTURE, broken)
+    _rewrite(
+        _adr(broken, "0001-a-fixture-decision.md"),
+        "principles: [1]",
+        "principles: [1, 99]",
+    )
+    _rewrite(
+        _adr(broken, "0001-a-fixture-decision.md"),
+        "- **1** upholds.",
+        "- **99** upholds. Planted.\n- **1** upholds.",
+    )
+    [v] = tests.records.check.check_adr_principles(load(_adr_kind(), broken), {1})
+    assert v.field == "principles" and "[99], which do not exist" in v.message
+
+
+@pytest.mark.parametrize(
+    ("name", "old", "new", "expected"),
+    [
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds.",
+            "- **1** supports.",
+            "verb is supports",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds. It is",
+            "- **1** upholds.\n- **1** upholds. It is",
+            "bullet for 1 appears 2 times",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds. It is the only principle the fixture defines.",
+            "Upheld, as the only principle the fixture defines.",
+            "lists [1] and no bullet names them",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "principles: [1]",
+            "principles: []",
+            "bullets name [1], which principles does not list",
+        ),
+        (
+            "0002-the-fixture-decision-superseded.md",
+            "Judged against no principle.",
+            "None apply.",
+            "Judged against no principle.",
+        ),
+        (
+            "0002-the-fixture-decision-superseded.md",
+            "Judged against no principle.",
+            "Judged against no principle.\nBut see principle 1.",
+            "Judged against no principle.",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds.",
+            "- **1** upholds:",
+            "verb is upholds:",
+        ),
+    ],
+    ids=[
+        "verb",
+        "repeat",
+        "missing-bullet",
+        "extra-bullet",
+        "empty-unstated",
+        "empty-not-one-line",
+        "verb-colon",
+    ],
+)
+def test_an_adr_principles_section_declares_exactly_its_principles(
+    tmp_path: Path, name: str, old: str, new: str, expected: str
+):
+    broken = tmp_path / "root"
+    shutil.copytree(FIXTURE, broken)
+    _rewrite(_adr(broken, name), old, new)
+    violations = tests.records.check.check_adr_principles(
+        load(_adr_kind(), broken), {1}
+    )
+    assert any(v.field == "principles" and expected in v.message for v in violations), (
+        violations
+    )

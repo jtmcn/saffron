@@ -22,7 +22,7 @@ every top-level `DESIGN.md` section: renumbering `## 9.` dangled nothing.
 
 Written while deciding *against* splitting `DESIGN.md` into per-decision files.
 It is what let the appendices move out as records with every letter intact
-(Appendix U).
+(Appendix U), and what lets ADRs live beside them as records (ADR 1).
 """
 
 from __future__ import annotations
@@ -107,6 +107,14 @@ def cited_letters(line: str) -> list[str]:
     ]
 
 
+_ADR_CITATION = re.compile(r"\bADR (\d+)\b")
+
+
+def cited_adrs(line: str) -> list[int]:
+    """Every ADR a line cites. Prior art's dashed `ADR-0019` is not one."""
+    return [int(n) for n in _ADR_CITATION.findall(line)]
+
+
 def addresses(document: Path) -> set[str]:
     """Every address a document defines: headings, plus the bolded numbered rules
     under the heading they appear beneath.
@@ -160,11 +168,14 @@ def _citing_files() -> list[Path]:
 
 
 def _cited() -> tuple[
-    list[tuple[Path, int, str, str | None]], list[tuple[Path, int, str]]
+    list[tuple[Path, int, str, str | None]],
+    list[tuple[Path, int, str]],
+    list[tuple[Path, int, int]],
 ]:
     """Every citation in the repo, as (file, line, address, qualifying document)."""
     sections: list[tuple[Path, int, str, str | None]] = []
     appendices: list[tuple[Path, int, str]] = []
+    adrs: list[tuple[Path, int, int]] = []
     for path in _citing_files():
         try:
             text = path.read_text()
@@ -174,12 +185,16 @@ def _cited() -> tuple[
             for match in _CITATION.finditer(line):
                 sections.append((path, number, match.group("num"), match.group("doc")))
             appendices.extend((path, number, letter) for letter in cited_letters(line))
-    return sections, appendices
+            adrs.extend((path, number, n) for n in cited_adrs(line))
+    return sections, appendices, adrs
 
 
 PER_DOCUMENT = _by_document()
 APPENDICES = {str(r.model.id) for r in load(KINDS["appendix"], ROOT)}
-SECTION_CITATIONS, APPENDIX_CITATIONS = _cited()
+ADRS = {int(r.model.id) for r in load(KINDS["adr"], ROOT)}
+# A finished spec stays as written, and SA-0110's cites its fixture's ADRs.
+FIXTURE_ADR_CITER = ROOT / ".saffron/specs/done/SA-0110-records-have-no-adr-kind.md"
+SECTION_CITATIONS, APPENDIX_CITATIONS, ADR_CITATIONS = _cited()
 
 
 def _resolves_against(path: Path, document: str | None) -> set[str]:
@@ -235,6 +250,22 @@ def test_the_widening_stays_six_citations_wide():
         f"the widening is now {len(shadowed)} citations wide, not six — update the "
         f"module docstring or narrow it:\n" + "\n".join(shadowed)
     )
+
+
+def test_an_adr_citation_is_read_and_a_dashed_one_is_not():
+    # Joined so this file does not itself cite an ADR that does not exist.
+    line = " ".join(["see", "ADR", "12", "and", "ADR-0019"])
+    assert cited_adrs(line) == [12]
+
+
+def test_every_adr_citation_resolves():
+    """An ADR number is an address, like an appendix letter."""
+    dangling = [
+        f"{path.relative_to(ROOT)}:{line} cites ADR {n}"
+        for path, line, n in ADR_CITATIONS
+        if n not in ADRS and path != FIXTURE_ADR_CITER
+    ]
+    assert not dangling, "citations to ADRs that do not exist:\n" + "\n".join(dangling)
 
 
 def test_every_appendix_citation_resolves():
@@ -304,17 +335,12 @@ def test_a_bolded_rule_is_an_address():
     assert "4.6" in PER_DOCUMENT["DESIGN.md"]
 
 
-def test_saffron_keeps_no_adrs():
-    """`CONTEXT.md` §11 refuses a `docs/adr/` tree beside the appendix records, and prose is what failed last time.
-
-    `CLAUDE.md` and `docs/agents/domain.md` promised `docs/adr/` for months. The
-    promise was wrong from the day it landed and nothing noticed, because a claim
-    in a document has no reader that fails.
-    """
-    assert not (ROOT / "docs" / "adr").exists(), (
-        "docs/adr/ exists — either CONTEXT.md §11 changed its mind and this test "
-        "should go, or a directory arrived that the design record does not want"
-    )
+def test_every_file_under_docs_adr_is_an_adr_record():
+    """`docs/adr/` holds ADRs and nothing else, so a stray file there is refused."""
+    directory = ROOT / KINDS["adr"].directory
+    assert directory.is_dir(), "docs/adr/ is missing; ADR 1 lives there"
+    loaded = {r.path.name for r in load(KINDS["adr"], ROOT)}
+    assert loaded == {p.name for p in directory.glob("*.md")}
 
 
 # A path rooted at the repo, which is what a rename or a spec's retirement breaks.

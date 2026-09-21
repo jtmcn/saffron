@@ -602,7 +602,7 @@ already reserves it. Also "round", "sweep", "iteration".
 ## 11. Design record
 
 Where a decision Saffron made is written down. Every genre here is addressed by a
-citation rather than a path — "principle 34", "Appendix G", "§5.4" — because specs,
+citation rather than a path — "principle 34", "Appendix G", "ADR 1", "§5.4" — because specs,
 prompts and evidence records all cite them, and a record addressed by path moves
 when the path does. Distinct from the **run record** (`DESIGN.md` §4.6), which is
 what the factory produced; this is why the factory has the shape it has.
@@ -636,13 +636,13 @@ answer, carrying the clause that would reopen it (`ontology/RATIONALE.md`). A
 verdict may be negative and still be the deliverable (principle 10).
 _Avoid_: "ADR", "the analysis", "the recommendation".
 
-**ADR**: Prior art's. The term appears in the design record only when citing
-another project's decision records (Appendix D), and `docs/adr/` does not exist here.
-**Saffron keeps no `docs/adr/`.** A decision becomes a principle, a revision appendix, a
-`DESIGN.md` subsection, or a settled naming decision below. A parallel `docs/adr/`
-tree would be a second address space for what §-numbers and letters already address,
-and the first two records to disagree would do it undetectably. The appendices are
-themselves records, in the one address space their letters name (Appendix U).
+**ADR**: A record under `docs/adr/` holding one decision Saffron made, as it
+stands today. Cited by number: "ADR 1". It names the revision appendices that
+argued it, the principles it upholds or departs from, and the ADRs it
+supersedes. A revision appendix records what a revision found, and an ADR
+records where one decision stands now (ADR 1). Prior art's decision records
+keep their dashed form, as in `ADR-0019`, and appear where Appendix D cites
+them.
 
 ---
 
@@ -680,6 +680,8 @@ defect rather than a word choice (Appendix E).
    Narrowed in rev 25: the refusal was argued against a parallel tree, and the
    appendices became records under `docs/appendices/` with their letters intact
    (Appendix U, principle 62).
+   Reversed in ADR 1: Saffron keeps its own ADRs under `docs/adr/`, cited
+   without the dash.
 
 5. **Claude Code vs. the delegate** — a model session on the host had no name, so
    it was called by its product, and the product name hid the fact that shapes

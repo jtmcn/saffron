@@ -22,6 +22,7 @@ from ontology_paths import ONTOLOGY, SHAPES, VOCABULARY
 from pyshacl import validate
 
 from ontology import design_record
+from records.kinds import Adr
 from records.load import Record
 
 REPO = ONTOLOGY.parent
@@ -33,7 +34,9 @@ def _records() -> list[Record]:
 
 
 def _graph() -> rdflib.Graph:
-    return design_record.parse(_records())
+    return design_record.add_adrs(
+        design_record.parse(_records()), design_record.adrs(REPO)
+    )
 
 
 def _edited(letter: str, edit: Callable[[str], str]) -> list[Record]:
@@ -256,3 +259,37 @@ def test_design_md_holds_no_appendix():
 def test_the_guard_would_catch_an_appendix_written_the_old_way():
     mutant = DESIGN.read_text() + "\n## Appendix Q — rev 21: written the old way\n"
     assert _appendix_headings(mutant)
+
+
+def test_the_committed_adr_index_is_current_with_the_records():
+    committed = DESIGN.read_text()
+    rendered = design_record.render_adr_index(committed, design_record.adrs(REPO))
+    assert rendered == committed, (
+        "DESIGN.md's ADR index and the ADR records disagree: run "
+        "`uv run python -m ontology.render`."
+    )
+
+
+def test_the_adr_currency_check_would_catch_a_dropped_row():
+    committed = DESIGN.read_text()
+    without = "".join(
+        ln for ln in committed.splitlines(keepends=True) if not ln.startswith("| 1 | ")
+    )
+    assert without != committed, "the ADR 1 row was not found"
+    assert design_record.render_adr_index(without, design_record.adrs(REPO)) != without
+
+
+def test_an_adr_rests_on_the_principles_it_lists():
+    graph = _graph()
+    seen = 0
+    for record in design_record.adrs(REPO):
+        m = record.model
+        assert isinstance(m, Adr)
+        rests = set(
+            graph.objects(
+                design_record.FACTORY[f"adr-{m.id}"], design_record.FACTORY.restsOn
+            )
+        )
+        assert rests == {design_record.FACTORY[f"principle-{n}"] for n in m.principles}
+        seen += len(rests)
+    assert seen, "no ADR rests on a principle, so this test checks nothing"

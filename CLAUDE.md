@@ -224,4 +224,4 @@ writing one.
 ## Agent skills
 
 `docs/agents/` holds how skills read this repo: spec files as the issue tracker, the five
-triage labels, and the domain docs (no ADRs, `CONTEXT.md` §11).
+triage labels, and the domain docs (ADRs under `docs/adr/`, `CONTEXT.md` §11).
