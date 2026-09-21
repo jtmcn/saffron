@@ -42,8 +42,9 @@ _ITEMS = re.compile(
 _ANY_ID = rf"{RANDOM_ID}|\d+"
 _NUM = re.compile(_ANY_ID)
 _SPEC_FILENAME = re.compile(r"^([A-Za-z0-9]+-\d+)-")
-# `- **62** upholds. <why>`, one per principle an ADR lists.
-_PRINCIPLE_BULLET = re.compile(r"^- \*\*(\d+)\*\* (\w+)\.", re.MULTILINE)
+# `- **62** upholds. <why>`, one per principle an ADR lists. The verb is read to
+# whitespace, so `upholds:` is reported as a bad verb rather than as no bullet.
+_PRINCIPLE_BULLET = re.compile(r"^- \*\*(\d+)\*\* (\S+)", re.MULTILINE)
 _NO_PRINCIPLE = "Judged against no principle."
 
 
@@ -254,23 +255,25 @@ def check_adr_principles(
                 Violation(r.path, "principles", f"names {bad}, which do not exist")
             )
         section = r.sections.get("Principles", "")
-        if not listed and not section.startswith(_NO_PRINCIPLE):
+        if not listed and not (
+            section.startswith(_NO_PRINCIPLE) and "\n" not in section
+        ):
             out.append(
                 Violation(
                     r.path,
                     "principles",
-                    f"is empty, so the section begins `{_NO_PRINCIPLE}`",
+                    f"is empty, so the section is one line beginning `{_NO_PRINCIPLE}`",
                 )
             )
         bullets = _PRINCIPLE_BULLET.findall(section)
         counts = Counter(int(n) for n, _ in bullets)
         for n, verb in bullets:
-            if verb not in ("upholds", "departs"):
+            if verb not in ("upholds.", "departs."):
                 out.append(
                     Violation(
                         r.path,
                         "principles",
-                        f"the bullet for {n}'s verb is {verb}, not upholds or departs",
+                        f"the bullet for {n}'s verb is {verb}, not upholds. or departs.",
                     )
                 )
         for n, c in sorted(counts.items()):

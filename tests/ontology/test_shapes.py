@@ -402,3 +402,22 @@ def test_the_implementer_acts_for_the_operator_and_works_each_attempt_to_its_pla
     conforms, found, text = _components(graph, shapes_graph)
     assert conforms == (not components), text
     assert found == components, text
+
+
+def test_the_adr_shape_allows_exactly_the_statuses_records_accepts(shapes_graph):
+    """`AdrStatus` and `ADRShape`'s `sh:in` are two hand-written copies of one set."""
+    import typing
+
+    from records.kinds import AdrStatus
+
+    shape = rdflib.URIRef(f"{NS}ADRShape")
+    status = rdflib.URIRef(f"{NS}adrStatus")
+    [prop] = [
+        p
+        for p in shapes_graph.objects(shape, SH.property)
+        if (p, SH.path, status) in shapes_graph
+    ]
+    listed = rdflib.collection.Collection(
+        shapes_graph, shapes_graph.value(prop, SH["in"])
+    )
+    assert {str(v) for v in listed} == set(typing.get_args(AdrStatus))

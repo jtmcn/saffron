@@ -22,6 +22,7 @@ from ontology_paths import ONTOLOGY, SHAPES, VOCABULARY
 from pyshacl import validate
 
 from ontology import design_record
+from records.kinds import Adr
 from records.load import Record
 
 REPO = ONTOLOGY.parent
@@ -272,9 +273,7 @@ def test_the_committed_adr_index_is_current_with_the_records():
 def test_the_adr_currency_check_would_catch_a_dropped_row():
     committed = DESIGN.read_text()
     without = "".join(
-        ln
-        for ln in committed.splitlines(keepends=True)
-        if not ln.startswith("| 1 | Decisions")
+        ln for ln in committed.splitlines(keepends=True) if not ln.startswith("| 1 | ")
     )
     assert without != committed, "the ADR 1 row was not found"
     assert design_record.render_adr_index(without, design_record.adrs(REPO)) != without
@@ -282,6 +281,15 @@ def test_the_adr_currency_check_would_catch_a_dropped_row():
 
 def test_an_adr_rests_on_the_principles_it_lists():
     graph = _graph()
-    adr = design_record.FACTORY["adr-1"]
-    rests = set(graph.objects(adr, design_record.FACTORY.restsOn))
-    assert rests == {design_record.FACTORY[f"principle-{n}"] for n in (30, 56, 57, 62)}
+    seen = 0
+    for record in design_record.adrs(REPO):
+        m = record.model
+        assert isinstance(m, Adr)
+        rests = set(
+            graph.objects(
+                design_record.FACTORY[f"adr-{m.id}"], design_record.FACTORY.restsOn
+            )
+        )
+        assert rests == {design_record.FACTORY[f"principle-{n}"] for n in m.principles}
+        seen += len(rests)
+    assert seen, "no ADR rests on a principle, so this test checks nothing"

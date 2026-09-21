@@ -193,7 +193,7 @@ PER_DOCUMENT = _by_document()
 APPENDICES = {str(r.model.id) for r in load(KINDS["appendix"], ROOT)}
 ADRS = {int(r.model.id) for r in load(KINDS["adr"], ROOT)}
 # A finished spec stays as written, and SA-0110's cites its fixture's ADRs.
-DONE_SPECS = ROOT / ".saffron" / "specs" / "done"
+FIXTURE_ADR_CITER = ROOT / ".saffron/specs/done/SA-0110-records-have-no-adr-kind.md"
 SECTION_CITATIONS, APPENDIX_CITATIONS, ADR_CITATIONS = _cited()
 
 
@@ -263,7 +263,7 @@ def test_every_adr_citation_resolves():
     dangling = [
         f"{path.relative_to(ROOT)}:{line} cites ADR {n}"
         for path, line, n in ADR_CITATIONS
-        if n not in ADRS and DONE_SPECS not in path.parents
+        if n not in ADRS and path != FIXTURE_ADR_CITER
     ]
     assert not dangling, "citations to ADRs that do not exist:\n" + "\n".join(dangling)
 
@@ -337,9 +337,6 @@ def test_a_bolded_rule_is_an_address():
 
 def test_every_file_under_docs_adr_is_an_adr_record():
     """`docs/adr/` holds ADRs and nothing else, so a stray file there is refused."""
-    from records.kinds import KINDS
-    from records.load import load
-
     directory = ROOT / KINDS["adr"].directory
     assert directory.is_dir(), "docs/adr/ is missing; ADR 1 lives there"
     loaded = {r.path.name for r in load(KINDS["adr"], ROOT)}

@@ -2,8 +2,9 @@
 
 `CONTEXT.md` §11 names the genres the factory records a decision in. Three are
 modelled here: a **principle**, the **revision appendix** that contributed it,
-read from `docs/appendices/`, and the **ADR**, read from `docs/adr/`. `EvidenceRecord` and `SpikeVerdict` are
-deliberately absent: they have no reader yet.
+read from `docs/appendices/`, and the **ADR**, read from `docs/adr/`.
+`EvidenceRecord` and `SpikeVerdict` are deliberately absent: they have no
+reader yet.
 
 **The appendix and ADR records are authoritative.** This module reads them and
 renders three indexes into `DESIGN.md` from them, the opposite direction from `render.py`'s
@@ -143,13 +144,20 @@ def render_principles(text: str, graph: rdflib.Graph) -> str:
     body = "".join(
         f"| {n} | {_escaped(claim)} | {letter} |\n" for n, claim, letter in rows
     )
-    start, end = principle_index(text)
+    return _replace_table(text, principle_index(text), _HEADER, body, "principle")
+
+
+def _replace_table(
+    text: str, span: tuple[int, int], header: str, body: str, what: str
+) -> str:
+    """`text` with the table at `span` given `body` under `header`."""
+    start, end = span
     # Confirm what is being replaced is a table body before overwriting prose in
     # the document every spec cites.
-    replaced = text[start + len(_HEADER) : end]
+    replaced = text[start + len(header) : end]
     if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
-        raise ValueError("the span after the principle header is not a table body")
-    return text[:start] + _HEADER + body + text[end:]
+        raise ValueError(f"the span after the {what} header is not a table body")
+    return text[:start] + header + body + text[end:]
 
 
 def _principle_cell(numbers: list[int]) -> str:
@@ -170,11 +178,7 @@ def render_appendix_index(text: str, records: list[Record], graph: rdflib.Graph)
         revisions = ", ".join(str(n) for n in m.revisions)
         cell = _principle_cell(blocks.get(m.id, []))
         body += f"| **{m.id}** | {revisions} | {_escaped(m.question)} | {cell} |\n"
-    start, end = appendix_index(text)
-    replaced = text[start + len(APPENDIX_HEADER) : end]
-    if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
-        raise ValueError("the span after the appendix header is not a table body")
-    return text[:start] + APPENDIX_HEADER + body + text[end:]
+    return _replace_table(text, appendix_index(text), APPENDIX_HEADER, body, "appendix")
 
 
 def adrs(root: Path) -> list[Record]:
@@ -215,8 +219,4 @@ def render_adr_index(text: str, records: list[Record]) -> str:
         m = _adr(record)
         principles = ", ".join(str(n) for n in m.principles)
         body += f"| {m.id} | {_escaped(m.title)} | {_status_cell(m)} | {principles} |\n"
-    start, end = adr_index(text)
-    replaced = text[start + len(ADR_HEADER) : end]
-    if replaced and not all(ln.startswith("| ") for ln in replaced.splitlines()):
-        raise ValueError("the span after the ADR header is not a table body")
-    return text[:start] + ADR_HEADER + body + text[end:]
+    return _replace_table(text, adr_index(text), ADR_HEADER, body, "ADR")

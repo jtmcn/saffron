@@ -38,8 +38,8 @@ appendices that argued it. An appendix still records what a revision found,
 and principles are still numbered there.
 
 Ids are sequential, not random. An ADR is `protected`, so only a person writes
-one, and parallel ADRs are rare. A collision is renumbered before merge, while
-nothing cites the new ADR. A random id would give up the short citation, "ADR 1".
+one, and parallel ADRs are rare. A collision is renumbered while nothing cites
+the later ADR. A random id would give up the short citation, "ADR 1".
 
 A new ADR that replaces older ones lists them in `supersedes`. Each replaced
 ADR lists it in `superseded_by`, in the same pull request, and `records/`

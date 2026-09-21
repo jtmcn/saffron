@@ -690,8 +690,28 @@ def test_an_adr_cites_only_principles_that_exist(tmp_path: Path):
             "None apply.",
             "Judged against no principle.",
         ),
+        (
+            "0002-the-fixture-decision-superseded.md",
+            "Judged against no principle.",
+            "Judged against no principle.\nBut see principle 1.",
+            "Judged against no principle.",
+        ),
+        (
+            "0001-a-fixture-decision.md",
+            "- **1** upholds.",
+            "- **1** upholds:",
+            "verb is upholds:",
+        ),
     ],
-    ids=["verb", "repeat", "missing-bullet", "extra-bullet", "empty-unstated"],
+    ids=[
+        "verb",
+        "repeat",
+        "missing-bullet",
+        "extra-bullet",
+        "empty-unstated",
+        "empty-not-one-line",
+        "verb-colon",
+    ],
 )
 def test_an_adr_principles_section_declares_exactly_its_principles(
     tmp_path: Path, name: str, old: str, new: str, expected: str
