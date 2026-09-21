@@ -1,0 +1,22 @@
+id: no-reexport
+language: python
+severity: error
+message: import a name from the module that defines it, not through a re-export
+note: |
+  The `dead` gate's vulture counts a name listed in `__all__` or imported as
+  itself (`import x as x`) as used everywhere. A re-export like that
+  hides the symbol from the gate for good. Import from the defining module.
+
+# No `files:` scope: vulture matches names globally, so a re-export anywhere hides one.
+rule:
+  any:
+    - kind: assignment
+      has: { field: left, regex: '^__all__$' }
+    - kind: augmented_assignment
+      has: { field: left, regex: '^__all__$' }
+    - pattern:
+        context: 'import $A as $A'
+        selector: aliased_import
+    - pattern:
+        context: 'from m import $A as $A'
+        selector: aliased_import

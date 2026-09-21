@@ -522,6 +522,7 @@ def test_a_rules_exemptions_are_the_named_files():
         "podman-runtime-is-runtime-only": ["saffron/cell/runtimes/podman.py"],
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
+        "no-reexport": None,
         "one-task-driver": ["saffron/task.py"],
         # None, not an exemption for tests/conftest.py: that is the file SA-0077
         # aliased the skip in, so exempting it would reopen exactly that hole.

@@ -1,0 +1,14 @@
+id: no-reexport
+valid:
+  - 'from saffron.record.contract import Fact'
+  - 'from saffron.record.contract import Fact as RecordFact'
+  - 'import saffron.record.contract as contract'
+  - 'import numpy as np'
+  - 'names = ["__all__"]'
+invalid:
+  - '__all__ = ["Fact"]'
+  - '__all__: list[str] = ["Fact"]'
+  - '__all__ += ["Fact"]'
+  - 'from saffron.record.contract import Fact as Fact'
+  - 'from saffron.record.contract import KINDS, Fact as Fact'
+  - 'import contract as contract'

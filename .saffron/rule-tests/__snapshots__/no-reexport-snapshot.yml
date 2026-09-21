@@ -1,0 +1,50 @@
+id: no-reexport
+snapshots:
+  __all__ += ["Fact"]:
+    labels:
+    - source: __all__ += ["Fact"]
+      style: primary
+      start: 0
+      end: 19
+    - source: __all__
+      style: secondary
+      start: 0
+      end: 7
+  __all__ = ["Fact"]:
+    labels:
+    - source: __all__ = ["Fact"]
+      style: primary
+      start: 0
+      end: 18
+    - source: __all__
+      style: secondary
+      start: 0
+      end: 7
+  '__all__: list[str] = ["Fact"]':
+    labels:
+    - source: '__all__: list[str] = ["Fact"]'
+      style: primary
+      start: 0
+      end: 29
+    - source: __all__
+      style: secondary
+      start: 0
+      end: 7
+  from saffron.record.contract import Fact as Fact:
+    labels:
+    - source: Fact as Fact
+      style: primary
+      start: 36
+      end: 48
+  from saffron.record.contract import KINDS, Fact as Fact:
+    labels:
+    - source: Fact as Fact
+      style: primary
+      start: 43
+      end: 55
+  import contract as contract:
+    labels:
+    - source: contract as contract
+      style: primary
+      start: 7
+      end: 27
