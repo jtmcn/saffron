@@ -1,8 +1,12 @@
-"""The ledger — SQLite, one file, WAL. `DESIGN.md` §4.1 calls it authoritative
-for state, and the record design reverses that: a store folded out of
-`refs/saffron/*` by `saffron/record/fold.py`, deletable at any time. Only the
-eleven kinds `_append` writes are folded back, so today it is authoritative for
-the rest. The `DESIGN.md` and `CONTEXT.md` amendments are second-plan work.
+"""The ledger. SQLite, one file, WAL, authoritative for state (`DESIGN.md` §4.1).
+
+Still true of what runs. No caller constructs a `Ledger` with a record, so no
+row here is derived from one and §4.6 rule 1 holds as written. The record
+design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
+by `saffron/record/fold.py`, deletable at any time. Only the eleven kinds
+`_append` writes fold back, so even then it stays authoritative for the rest.
+That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
+with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it.
