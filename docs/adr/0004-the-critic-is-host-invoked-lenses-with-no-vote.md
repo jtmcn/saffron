@@ -104,14 +104,15 @@ green fix. A person adjudicates a confirmed blocker in the pull request.
   was filed on, since the rebuttal moves its line.
 - **28** departs. `LensReview.drop_rate` excludes a host-filed survivor, and the
   ledger's drop rate in §4.1 counts it against the lens (backlog item
-  b-b431c1). A survivor that fails to anchor never reaches REBUT, and no item
-  owns that half.
+  b-b431c1). A survivor that fails to anchor never reaches REBUT (backlog item
+  b-e40d09).
 - **29** departs. "Any one blocker goes to REBUT" has an exception. REBUT's
   budget check sends a task over its ceiling to `EXHAUSTED` with no rebuttal.
   That also narrows ADR 3's rule that a surviving probe reaches REBUT. §4.3's
   rule that every phase is bounded on spend has one too, since REVIEW is not.
   Only a comment in `saffron/cell/session.py` states either. §5.5.1 cites §5.5
-  for REVIEW's exemption, and §5.5 has no such sentence.
+  for REVIEW's exemption, and §5.5 has no such sentence (backlog item
+  b-26315b).
 - **30** departs. At least seven sentences still call the lenses disjoint,
   where L measured an overlap:
   - §4.6, §5.5 and §7's plausible-but-wrong row in `DESIGN.md`.
@@ -120,8 +121,7 @@ green fix. A person adjudicates a confirmed blocker in the pull request.
     `ontology/shapes/factory-shapes.ttl`.
   - Backlog item 79.
 
-  §5.5.1 also hands the tier question to item 6, which is closed. No backlog
-  item owns these.
+  Backlog item b-ac97c0 owns these.
 - **34** upholds. A lens that errors stops the task, so an absent review never
   reads as a clean one.
 - **36** upholds. A verdict set missing a blocker is an error, not a partial
@@ -145,7 +145,7 @@ green fix. A person adjudicates a confirmed blocker in the pull request.
   `rebuttal.json`, and it emits a `Budget` event. §3.3 draws only the red
   re-run. The three halts sit in states `saffron/reconcile.py` counts as in
   flight, so a batch scan reads a deliberate halt as a crash. Item 120 owns
-  that for `REBUTTING`, and no record owns it for `REVIEWING`.
+  that for `REBUTTING`, and backlog item b-032c3e for `REVIEWING`.
 - **57** upholds. This ADR condenses §3.3, §5.5, §5.5.1, §5.6 and §11. It adds
   two rules no section states. The budget exception is in
   `saffron/cell/session.py`. The adequacy session answering host blockers is a
@@ -173,4 +173,4 @@ scores the lenses against a fixture whose defects are declared (backlog
 item 79).
 
 A risk tier adds no lens. Whether a tier gates one is open. Item 6 closed
-without settling it, and no open record holds the question.
+without settling it, and backlog item b-07f694 holds the question.
