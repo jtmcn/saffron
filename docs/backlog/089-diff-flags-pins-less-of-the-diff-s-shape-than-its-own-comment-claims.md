@@ -3,7 +3,7 @@ id: 89
 title: '`DIFF_FLAGS` pins less of the diff''s shape than its own comment claims'
 status: partial
 tier: 1
-specs: [SA-0072, SA-0082, SA-0118]
+specs: [SA-0072, SA-0082]
 prs: [219, 244]
 commits: []
 cites: [§2]

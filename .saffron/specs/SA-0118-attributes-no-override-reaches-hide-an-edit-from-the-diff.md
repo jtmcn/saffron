@@ -7,9 +7,9 @@ depends_on: []
 touches:
   - saffron/cell/worktree.py
   - tests/test_worktree.py
-  - tests/test_package.py
-  - harness/recovery.py
 forbidden:
+  - harness/**
+  - tests/test_package.py
   - DESIGN.md
   - CONTEXT.md
   - .saffron/**
@@ -28,7 +28,7 @@ forbidden:
   - saffron/replay.py
   - tests/test_corpus.py
   - .git/**
-budget_usd: 17
+budget_usd: 20
 max_attempts: 3
 max_turns: 95
 risk: elevated
@@ -47,57 +47,57 @@ acceptance:
       hides the edit, and no commit shows why.
     witness: tests/test_worktree.py::test_export_patch_shows_hunks_under_an_excluded_gitattributes
   - claim: >-
-      Two global settings that shape a new git dir do not reach the one
-      `export_patch` reads from. An `init.templateDir` whose attributes file
-      marks every path `-diff` does not hide the hunks, and an
-      `init.defaultObjectFormat` of `sha256` does not stop the read. Today the
-      worktree's own `.git/info/attributes` already hides them.
+      Two defaults that shape a new git dir do not reach the one `export_patch`
+      reads from. An `init.templateDir` whose attributes file marks every path
+      `-diff` does not hide the hunks. A `sha256` default object format, set
+      through `GIT_DEFAULT_HASH`, does not stop the read. Today the worktree's
+      own `.git/info/attributes` already hides them.
     witness: tests/test_worktree.py::test_export_patch_shows_hunks_when_global_config_shapes_a_new_git_dir
   - claim: >-
-      `harness/recovery.py`'s `pinned_diff` takes its hunk context width from
-      `worktree.DIFF_FLAGS` alone, and every shipped fixture still reproduces
-      through it. Today its own copy of the flag follows `DIFF_FLAGS` and wins,
-      so a change to the pin reaches no harness test.
-    witness: tests/test_corpus.py::test_every_shipped_fixture_reproduces_its_own_declared_range
+      `export_patch` still prints the hunks when the agent's global git config
+      sets `core.bigFileThreshold` to 1. Its witness plants the setting where
+      the fresh git dir reads it.
+    witness: tests/test_worktree.py::test_export_patch_shows_hunks_under_a_tiny_big_file_threshold
     preserves: true
     mutant:
       file: saffron/cell/worktree.py
-      find: '"--unified=3",'
-      replace: '"--unified=4",'
+      find: '"core.bigFileThreshold=2g",'
+      replace: '"core.abbrev=7",'
   - claim: >-
-      `pinned_diff` takes its `index` line abbreviation from
-      `worktree.DIFF_FLAGS` alone, and every shipped fixture still reproduces
-      through it.
-    witness: tests/test_corpus.py::test_every_shipped_fixture_reproduces_its_own_declared_range
+      `export_patch` still prints the hunks when the agent's global git config
+      names a `core.attributesFile` marking every path `-diff`. Its witness
+      plants the setting where the fresh git dir reads it.
+    witness: tests/test_worktree.py::test_export_patch_shows_hunks_under_a_configured_attributes_file
     preserves: true
     mutant:
       file: saffron/cell/worktree.py
-      find: '"--abbrev=7",'
-      replace: '"--abbrev=9",'
+      find: '"core.attributesFile=/dev/null",'
+      replace: '"core.abbrev=7",'
   - claim: >-
-      `pinned_diff` takes its diff algorithm from `worktree.DIFF_FLAGS` alone,
-      and every shipped fixture still reproduces through it.
-    witness: tests/test_corpus.py::test_every_shipped_fixture_reproduces_its_own_declared_range
-    preserves: true
-    mutant:
-      file: saffron/cell/worktree.py
-      find: '"--diff-algorithm=myers",'
-      replace: '"--diff-algorithm=histogram",'
-  - claim: >-
-      `tests/test_package.py`'s `cell_patch` fixture, which calls itself shaped
-      exactly like `export_patch`'s output, builds its patch with
-      `worktree.DIFF_FLAGS` rather than a copy holding five of its flags.
-    witness: tests/test_package.py::test_a_patch_applies_onto_a_base_that_moved_elsewhere
+      `export_patch` still carries no escape codes when the agent's global git
+      config sets `color.ui` or `color.diff` to `always`. Its witness plants
+      both settings where the fresh git dir reads them.
+    witness: tests/test_worktree.py::test_export_patch_carries_no_color_when_the_worktree_forces_it
     preserves: true
     mutant:
       file: saffron/cell/worktree.py
       find: '"--no-color",'
-      replace: '"--color=always",'
+      replace: '"--abbrev=7",'
+  - claim: >-
+      `export_patch` still keeps two nearby hunks apart when the agent's global
+      git config sets `diff.interHunkContext` to 10. Its witness plants the
+      setting where the fresh git dir reads it.
+    witness: tests/test_worktree.py::test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context
+    preserves: true
+    mutant:
+      file: saffron/cell/worktree.py
+      find: '"--inter-hunk-context=0",'
+      replace: '"--abbrev=7",'
 ---
 
 ## Context
 
-Backlog item **103**, with the remainder of item **89** folded in.
+Backlog item **103**.
 
 Item 103 lists settings a cell can write that make the pinned diff print
 `Binary files a/f.py and b/f.py differ` with no hunks. `SA-0075` pinned the two
@@ -144,24 +144,21 @@ the same output except where the second bullet says:
   `unknown revision`. Git 2.39.5 ignores the key and creates a `sha1` dir.
   Passing `--object-format` with the value `git rev-parse --show-object-format`
   prints in the worktree restores the hunks on both.
+- `GIT_DEFAULT_HASH=sha256` makes `git init --bare` create a `sha256` dir on
+  both gits, and `--object-format=sha1` overrides it on both
+  (`docs/evidence/scripts/2026-09-21-fresh-git-dir-hashenv.sh`). A cell cannot
+  set it for a host exec, so it is the witness's lever, not a vector.
 - A fresh dir also ignores a *committed* `.gitattributes` marking `*.py -diff`.
   A file holding a NUL byte still prints `Binary files … differ` from it.
 - From a fresh dir, `--name-only` still lists a gitlink that a committed
   `.gitmodules` marks `ignore = all`.
 
-Item 89's remainder is two copies of `DIFF_FLAGS`
-(`saffron/cell/worktree.py:131-166`):
-
-- `pinned_diff` (`harness/recovery.py:70-106`) passes `--abbrev=7`,
-  `--unified=3` and `--diff-algorithm=myers` after `*DIFF_FLAGS`. `SA-0072`
-  added all three to `DIFF_FLAGS` (`saffron/cell/worktree.py:146-151`), so the
-  copies win and hide any change to the pins. Its docstring
-  (`harness/recovery.py:75-76`) still says `_git` carries "two `-c`
-  overrides". `git_argv` now holds six.
-- `tests/test_package.py:361-367` keeps five of the eleven flags as its own
-  `DIFF_FLAGS`, under a `cell_patch` fixture (`:371-372`) that calls itself
-  shaped exactly like `export_patch`'s output. The module uses that copy at
-  fourteen sites.
+Four existing witnesses guard pins by planting a setting in the worktree's own
+`.git/config`: `tests/test_worktree.py:1689` (`core.bigFileThreshold`),
+`:1705` (`core.attributesFile`), `:1936` (`color.ui`, `color.diff`) and
+`:1970` (`diff.interHunkContext`). A fresh git dir never reads that file. The
+agent's global config still reaches it, as criterion 3's template shows. So
+each pin still matters, and each witness must plant its setting globally.
 
 ## Problem
 
@@ -169,9 +166,6 @@ A cell is untrusted, and every control that matters lives outside it (§2). The
 critic reads `export_patch`'s output (§5.5). A file the agent writes inside
 its own git dir decides whether that output contains the edit at all. And
 `integrity` then errors the attempt, which is charged to nobody (§5.4).
-
-Both copies of the flags make a change to `DIFF_FLAGS` invisible to the tests
-built on them.
 
 ## Out of scope
 
@@ -203,20 +197,25 @@ forbidden here.
 above). So a target repo that commits `-diff` for a lock file now
 sends that file's hunks to the lenses and to `size`. No criterion pins it.
 
-**`pinned_diff`'s other pins.** It keeps its two `-c` overrides and takes none
-of `git_argv`'s others.
+**Item 89's remainder.** The copies of `DIFF_FLAGS` in `harness/recovery.py`'s
+`pinned_diff` and `tests/test_package.py:361` are a separate spec. They cost
+about 55 lines, and this spec sits near its margin without them.
 
 ## Notes for the agent
 
 **Which criteria carry mutants.** The fresh git dir is new code, so criteria 1
 to 3 declare witnesses and no mutant. A mutant would pin a spelling you have
-not written yet. Criteria 4 to 7 are `preserves`, and each mutant edits a
-`DIFF_FLAGS` entry that exists now. Each survives while a copy of the flag
-stays. Measured on this base: each of the four mutants passes its witness with
-the copies in place and fails it with them gone.
+not written yet. Criteria 4 to 7 are `preserves`. Each mutant swaps one pin for
+a harmless one, and each witness kills it at base through the worktree's own
+config. Once `export_patch` reads a fresh dir, each witness kills its mutant
+only if it plants its setting in the global config file.
 
 **One helper, one caller.** `export_patch` reads its diff through it, and
-`changed_files` does not change. Per call, inside the cell:
+`changed_files` does not change. Run the steps as one `sh -euc` script in one
+exec, with `workdir=WORKTREE_MOUNT`: `_no_cell_runtime`'s `_exec`
+(`tests/test_worktree.py:644-648`) raises on any other `workdir`, and
+`export_patch` passes through it at `:739` and `:748`. Per call, inside the
+cell:
 
 1. Resolve HEAD to a sha in the worktree first. The fresh dir has no refs.
 2. Read the worktree's object format and its object directory from the
@@ -225,7 +224,8 @@ the copies in place and fails it with them gone.
    every exec with `cwd=tmp_path`.
 3. Create the dir with `mktemp -d`, then `git init -q --bare --template=`
    with `--object-format` set to the worktree's value.
-4. Write the object directory into its `objects/info/alternates`.
+4. Write the object directory into its `objects/info/alternates` as an
+   absolute path. A relative one resolves against the fresh dir.
 5. Run the diff with `--git-dir` naming it, `base_sha` against the resolved
    sha, under `git_argv`'s env and every `-c` pin it holds now.
 6. Remove the dir, whether the diff succeeded or not. On the host test seam
@@ -248,24 +248,24 @@ Pass a path to a shell as a positional argument, never inside the script text.
 - Criterion 2 writes the exclude line before the file. After the commit it
   asserts `git status --porcelain` prints nothing.
 - Criterion 3 plants `.git/info/attributes` as well, so the test fails at
-  base. Point `GIT_CONFIG_GLOBAL` at a file under `tmp_path` and write the two
-  settings there with `git config --file`. Keep the template dir outside the
-  repo, as `tests/test_worktree.py:1712` keeps its attributes file, since
-  `_commit` runs `add -A`. Prove the template bites: a plain `git init --bare`
-  under that config creates `info/attributes`. Do not assert the object
-  format bites. Git 2.39.5 ignores that key, and the cell executes its
-  `tests` gate under that git.
+  base. Point `GIT_CONFIG_GLOBAL` at a file under `tmp_path` and write
+  `init.templateDir` there with `git config --file`. Keep the template dir
+  outside the repo, as `tests/test_worktree.py:1712` keeps its attributes
+  file, since `_commit` runs `add -A`. Prove the template bites: a plain
+  `git init --bare` under that config creates `info/attributes`. Set
+  `GIT_DEFAULT_HASH=sha256` with `monkeypatch.setenv` after the repo exists,
+  and prove it bites the same way: a plain `git init --bare` then reports
+  `sha256` from `rev-parse --show-object-format`. Both gits honour it, so the
+  cell's `tests` gate drives the `--object-format` half.
+
+**Criteria 4 to 7 move their setting.** Each of the four witnesses points
+`GIT_CONFIG_GLOBAL` at a file under `tmp_path`. It writes its setting there with
+`git config --file`, not into the worktree's `.git/config`. Keep each bare-diff
+check that proves the setting bites.
 
 **Never run `git config --global` in a test.** Write the file
 `GIT_CONFIG_GLOBAL` names with `git config --file`, so the write lands where the
 test pointed it and nowhere else.
-
-**The copies.** In `tests/test_package.py`, import `DIFF_FLAGS` from
-`saffron.cell.worktree` in place of the list, so no call site changes. The
-comment at `tests/test_package.py:3077` and the explicit
-`--ignore-submodules=none` after it describe the copy, so remove both. In `pinned_diff`, drop the three flags and
-correct the docstring. Keep the measurement as provenance for the pins
-`DIFF_FLAGS` now holds. A docstring stays within ten lines.
 
 **Every new witness must fail with the source reverted.** Import nothing new at
 module scope. A module-scope import of a name you add turns the reverted run
