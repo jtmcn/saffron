@@ -44,7 +44,8 @@ risk: elevated
 acceptance:
   - claim: >-
       Each of the four PACKAGE paths that return after `diff_stat` ran writes
-      the stat it measured to the task's row, a measured 0 included. The four
+      the stat it measured to the task's row. On `READY_FOR_REVIEW` a
+      measured 0 reads 0 rather than NULL. The four
       are new failures on re-verification, a credential in the pull request
       body, a branch that moved under the lease, and `READY_FOR_REVIEW`. The
       witness drives all four in turn on one `packageable` task, whose diff
@@ -237,8 +238,9 @@ column.
 
 **Criteria 1 and 2 build on the `packageable` fixture**
 (`tests/test_package.py:857-962`). Its diff is +2/−1 on purpose, as its
-comment at `:894` says. Each witness is one plain `def` that drives its four
-paths in turn on one task, and resets the fixture's changes between them.
+comment at `:894` says. Criterion 1's witness makes five runs and criterion
+2's makes four. Each witness is one plain `def` that drives its paths in
+turn on one task, and resets the fixture's changes between them.
 The seed of 7 and 7 before each path is what makes each path's own write
 visible. Without it, a write that kept the old value would pass on every
 path after the first. Write the seed through a `sqlite3` connection opened
@@ -274,15 +276,17 @@ reached:
 `result.added or None` would store NULL for an empty diff. Two runs on the
 prototype tested it.
 
-- A patch that only changes `f.txt`'s mode does not reach `diff_stat`. Its
-  hunk carries no `index` line, so `apply_patch` raises `PackageError`: "git
+- A patch that only changes `f.txt`'s mode does not reach `diff_stat`. It has
+  mode headers and no hunk, so `apply_patch` raises `PackageError`: "git
   fell back to direct application: the preimage blob is absent".
 - A patch that adds one empty file does reach it. Build it on a branch cut
-  from the fixture's base, and rewrite `patch.diff` from it. Its hunk carries
+  from the fixture's base, and rewrite `patch.diff` from it. Its header carries
   `index 0000000..e69de29`. PACKAGE reached `READY_FOR_REVIEW` with the
-  result's counts at 0 and 0, and the row read 0 and 0.
+  result's counts at 0 and 0, and the row read 0 and 0. Both runs used the
+  host's git. The cell's git 2.39.5 was not measured.
 
-The `or None` counterfeit passed all four witnesses without the fifth run
+The `or None` counterfeit passed the witnesses of criteria 1 to 4 without
+the fifth run
 (`4 passed`). With the fifth run, criterion 1's witness failed it. Run the
 fifth after the four, reusing the `gh` stub. The lease then reads the branch
 the fourth run pushed.
