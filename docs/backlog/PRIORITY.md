@@ -114,6 +114,7 @@ the loop's delegate ran by hand after every cell. Mutating the line behind
 each criterion found a witness hole in all five pull requests. A run over a
 real ledger found #355 leaving out 75 of 76 merged tasks. **b-36b551** is a
 wall cut that lost a cell's work and still settled its spec.
+**b-149df3** is its by-hand half: the glossary and §4.5 after `SA-0126`.
 
 **From the spec loop's run 9, 2026-09-19** (#375, #377): **b-408cf5**. A plan
 was refused on a ceiling its own `size` gate does not enforce, at the cost of a
