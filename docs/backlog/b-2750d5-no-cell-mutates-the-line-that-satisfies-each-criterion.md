@@ -4,7 +4,7 @@ title: No cell mutates the line that satisfies each criterion, so a witness hole
 status: partial
 tier: 1
 filed: 2026-09-19
-specs: [SA-0113]
+specs: [SA-0113, SA-0120]
 prs: [403]
 commits: []
 cites: [§5.4, §5.5.1]
@@ -74,3 +74,7 @@ by hand.
 - 2026-09-21: #403 merged, and `SA-0113` retires to `done/`. `partial`, because
   the spec loop's run 12 Spec seat still found five witness holes in #418 after
   the in-cell criterion probes ran.
+- 2026-09-21: `SA-0120` specced for the child half. It applies each recorded
+  edit in a Gate-only cell through `witness_gate`, and files a survivor as an
+  `adequacy` blocker for REBUT. It waits on `SA-0119`, which gives it the one
+  test-path rule.

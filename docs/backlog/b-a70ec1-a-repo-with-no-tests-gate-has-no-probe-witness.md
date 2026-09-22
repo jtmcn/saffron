@@ -4,7 +4,7 @@ title: The probe step's no-`tests`-gate path is unwitnessed, and without it the 
 status: open
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0119]
 prs: []
 commits: []
 cites: [§5.5]

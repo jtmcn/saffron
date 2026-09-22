@@ -1818,7 +1818,32 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-21, a fifty-fifth time: the spec loop's run 11
+    """Re-measured 2026-09-21, a fifty-ninth time: `SA-0121` and `SA-0122`
+    queued together. `SA-0121` takes item 89's remainder, the two copies of
+    `DIFF_FLAGS` in `harness/recovery.py` and `tests/test_package.py`. It
+    overlaps nothing and declares no `depends_on`, so it is candidate 3 of 3.
+    `SA-0122` takes item b-e403c1, the `probes.json` entry shape written twice.
+    It declares `depends_on: [SA-0120]` and is refused on that.
+
+    Re-measured 2026-09-21, a fifty-eighth time: `SA-0120` queued for
+    backlog item b-2750d5, the half that applies each criterion probe and runs
+    its criterion's witness over it. It edits `session.py` and its tests, which
+    `SA-0119` edits too, so it declares `depends_on: [SA-0119]`. It is refused
+    on that, since `SA-0119` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-21, a fifty-seventh time: `SA-0118` queued for
+    backlog item 103, the two attribute sources no override reaches. Its
+    touches are `worktree.py` and its tests, which `SA-0119` forbids, so the
+    two do not overlap. Neither declares `depends_on`, and both are candidates.
+    Nothing is refused.
+
+    Re-measured 2026-09-21, a fifty-sixth time: `SA-0119` queued for
+    backlog item b-461729, the two rules that decide where a vacuity probe is
+    applied, with item b-a70ec1 folded in. It edits `probe.py`, `session.py`,
+    the lens-corpus driver and their tests, and nothing else is queued. So it
+    has no `depends_on` and is the one candidate. Nothing is refused.
+
+    Re-measured 2026-09-21, a fifty-fifth time: the spec loop's run 11
     merged `SA-0113` (#403), `SA-0114` (#404) and `SA-0115` (#406), and all
     three retire to `done/`. Nothing is queued, so both lists are empty.
 
@@ -2122,8 +2147,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == []
-    assert [r.path.name[:7] for r in refusals] == []
+    assert [c.spec.id for c in candidates] == ["SA-0118", "SA-0119", "SA-0121"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0120", "SA-0122"]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

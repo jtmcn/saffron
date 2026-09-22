@@ -1,12 +1,14 @@
 ---
 id: b-ce93aa
 title: The probe cell's `env` is pinned by no test the operator runs by default
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-09-21
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [436c6e88]
 cites: [§2, §5.5]
 related: [b-a70ec1]
 ---
@@ -33,3 +35,9 @@ does and probes its environment from inside.
 ## Record
 
 - 2026-09-19: filed from the spec loop's run 9 (#375).
+- 2026-09-21: done by hand. A spec cannot carry it. The `tests` gate never
+  collects a cell-marked test, so its witness would fail `criteria`, and a
+  spec with no criteria passes every gate. `tests/test_probe_cell.py` starts
+  the probe cell through `_probe_adequacy` and reads its environment from
+  inside. `uv run pytest -m cell tests/test_probe_cell.py` passed, and
+  `env=dict(os.environ)` at `saffron/cell/session.py:1371` turned it red.
