@@ -168,8 +168,9 @@ acceptance:
       a record attached and with none. On each ledger the witness writes one
       task with an attempt, a gate result and a finding through the real
       methods. It then replaces `Ledger._apply` with a function that raises
-      an exception of the witness's own. It makes each of the eleven writes
-      of criterion 1 once more and asserts each raises that exception. Today
+      an exception of the witness's own. It makes one call of each of the
+      eleven write methods criterion 1 drives, and asserts each raises that
+      exception. Today
       no write calls `_apply`, so each one returns.
     witness: tests/test_ledger_fold_task.py::test_every_task_write_applies_its_fact_through_apply
 ---
@@ -307,7 +308,8 @@ lines as they are.
 `_db` queries in `tests/test_fold.py` to be deleted. `census` fails any test
 collected at base and missing at head, with no override
 (`saffron/gates/core/census.py:34-38`). So every test keeps its name, and the
-notes say what changes inside it.
+notes say what changes inside it. The `tests/test_fold.py` rewrite waits for
+a later change, as its note says.
 
 ## Notes for the agent
 
@@ -362,7 +364,10 @@ round trip writes only `fail` results (`tests/test_ledger_fold_task.py:97`).
 **`tests/test_fold.py` keeps reading `ledger._db`.** The item asks its
 `rows` and `_read` helpers to read the file through a connection of their
 own. That rewrite serves no criterion and spent 90 lines on the prototype, so
-it waits for a later change. The file is out of `touches`.
+it waits for a later change. The file is out of `touches`. Its
+`test_a_rebuttal_with_no_finding_fact_raises_under_strict` matches
+"rebuttal" in the `UnplacedRebuttal` message, so the rewritten message keeps
+that word.
 
 **Criterion 1's witness needs a clock it controls.** Read the wall clock as
 `datetime.now(UTC)` through `saffron.ledger`'s own `datetime` name, as
@@ -435,14 +440,16 @@ three parts were added: the ledgers with no record in criteria 1 and 6, and
 criterion 13. Each must fail a writer that keeps base's
 `if self._record is None` path: criterion 1 when that path still stamps
 `datetime('now')`, criterion 6 when it still returns. Criterion 13 must fail
-a write method that keeps its own `INSERT` or `UPDATE` beside the fact.
+a write method that writes its rows with its own SQL instead of calling
+`_apply`.
 Criterion 4's old files are opened with no record, so a backfill that runs
 only with a record attached fails it. Say in your notes what each run
 printed.
 
 **Size.** A prototype of this change measured 865 changed lines. It wrote
 new SQL over several lines, as below, and updated the docstrings the change
-makes false. It spent 440 in `ledger.py`, 290 in
+makes false, `_key`'s at `tests/test_ledger_fold_task.py:83` among them. It
+spent 440 in `ledger.py`, 290 in
 `tests/test_ledger_fold_task.py`, 90 in `tests/test_fold.py`, 30 in
 `tests/test_ledger_appends.py` and 15 in `tests/test_ledger.py`. This spec
 drops the 90 in `tests/test_fold.py` and adds about 70 of witness for the
