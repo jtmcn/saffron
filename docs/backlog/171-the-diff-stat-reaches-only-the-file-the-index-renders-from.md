@@ -4,7 +4,7 @@ title: The diff stat reaches only the file the index renders from, so no authori
 status: open
 tier: 2
 filed: 2026-09-17
-specs: []
+specs: [SA-0124]
 prs: []
 commits: []
 cites: [§5.7, §6]
