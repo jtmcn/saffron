@@ -142,4 +142,6 @@ whole or not at all. When the reverted tests fail to import, `revert` reports
 b-4a63b7 records as open.
 
 `witness` as a suite gate is advisory at `standard` and blocking at `elevated`.
-A surviving probe of either kind is a blocker for REBUT, whatever the tier.
+A surviving probe of either kind is a blocker for REBUT, whatever the tier, once
+its finding anchors to the diff. A criterion-probe survivor that does not anchor
+is dropped.
