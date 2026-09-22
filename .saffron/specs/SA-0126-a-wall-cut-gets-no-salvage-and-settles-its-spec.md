@@ -300,7 +300,9 @@ re-queues, and the second settles it. Editing the spec gives it a new
   `saffron/scheduler.py:779-780` computes which one. Nothing passes that row
   to a cell yet. If a re-queue ever resumes it, the cap's "an earlier task"
   excludes the first cut's own row, and the cap stops firing with no error.
-  That change must re-key the cap. Backlog item b-149df3 records it too.
+  That change must re-key the cap, and revisit the every-attempt rule. A
+  resumed row cut after REBUT ends on an `IMPLEMENTING` attempt, and that
+  rule would miss it. Backlog item b-149df3 records both.
 - **`CONTEXT.md`, `DESIGN.md` and the spec loop's gotchas.** `CONTEXT.md` §6
   says each `TerminalEvent` reason ends in `PLAN_REJECTED` or
   `NOT_IMPLEMENTED`. It defines `ORPHANED` as a cell killed or crashed.

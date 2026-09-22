@@ -45,6 +45,9 @@ resumes its task row (`DESIGN.md:384`), and `saffron/scheduler.py:779-780`
 computes which row. Nothing passes that row to a cell yet. The day a re-queue
 resumes it, the cap's "an earlier task" excludes the first cut's own row, and
 the cap stops firing with no error. The resumption change must re-key the cap.
+It must also revisit the rule that every attempt is in `IMPLEMENTING`. A
+resumed row that went through REBUT and was then cut ends on an `IMPLEMENTING`
+attempt after a `REBUTTING` one. That row is a cut, and the rule misses it.
 
 ## Done looks like
 

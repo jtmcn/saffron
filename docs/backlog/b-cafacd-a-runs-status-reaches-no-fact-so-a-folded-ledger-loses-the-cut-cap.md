@@ -19,8 +19,11 @@ Found 2026-09-22, revising `SA-0126` against its review.
 first cut at a `spec_sha` ends `ORPHANED`, and the second ends
 `NOT_IMPLEMENTED`. To find the first, it looks for an earlier `ORPHANED` task
 at the same `spec_sha`. That task's run finished `COMPLETE`, and its attempts
-are all in phase `IMPLEMENTING`. The run's status is what tells a cut apart.
-A kill finishes its run `ABORTED`, and a scan's stamp leaves it `RUNNING`.
+are all in phase `IMPLEMENTING`. The run's status and the attempt phases
+together tell a cut apart. A kill finishes its run `ABORTED`. A scan's stamp
+leaves the run as it was. That is `RUNNING` for a cell that died in flight,
+and `COMPLETE` for one that returned in `REVIEWING` or `REBUTTING`
+(`saffron/cell/session.py:2709-2710`).
 
 No fact carries a run's status. `saffron/record/contract.py:32-33` declares
 `run_created` and `run_finished`, and nothing appends either.
