@@ -1126,11 +1126,27 @@ def _spec_path(spec_id: str, given: str | None) -> Path | None:
     return found[0] if len(found) == 1 else None
 
 
+def _resolve_commit(ref: str, cwd: Path) -> str | int:
+    """`ref` as a SHA. A round stores and emits only SHAs, never a ref: a
+    branch name re-resolves to a different commit on every re-score, and
+    `origin/main` diffed against itself is empty (item F1)."""
+    try:
+        return _git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=cwd)
+    except GitError as exc:
+        return _fail(f"{ref} does not resolve to a commit: {exc}")
+
+
 def cmd_jev(args) -> int:
     """Score one review round with Jev and write `jev.ttl`. Nothing reads it yet."""
     if not os.environ.get("TYPESAFE_API_KEY"):
         print("error: TYPESAFE_API_KEY is not set for this command", file=sys.stderr)
         return 2
+    if args.kind == "cell" and args.round is not None:
+        return _fail("--kind cell has one round; it takes no --round")
+    if args.round is not None and (args.report or args.commit or args.base):
+        return _fail(
+            "--round re-scores a saved round; it takes no --report, --commit or --base"
+        )
     # `harness` is not in the saffron wheel, so it is imported from the checkout.
     if str(REPO) not in sys.path:
         sys.path.insert(0, str(REPO))
@@ -1189,11 +1205,18 @@ def _jev_review(
     else:
         if not args.report or not args.commit:
             return _fail("a new round needs --report and --commit")
+        commit = _resolve_commit(args.commit, args.root)
+        if isinstance(commit, int):
+            return commit
         number = (done[-1] if done else 0) + 1
         directory = base / f"round-{number}"
-        commit = args.commit
         previous = base / f"round-{number - 1}" / "round.json"
-        since = json.loads(previous.read_text())["commit"] if number > 1 else args.base
+        if number > 1:
+            since = json.loads(previous.read_text())["commit"]
+        else:
+            since = _resolve_commit(args.base or "origin/main", args.root)
+            if isinstance(since, int):
+                return since
         reports = [Path(p).read_text() for p in args.report]
     try:
         findings = [f for text in reports for f in jev_observe.parse_block(text)]
@@ -2665,7 +2688,7 @@ def main() -> int:
         help="a saved reviewer report, once per seat",
     )
     p.add_argument("--commit", help="the commit the reviewer read")
-    p.add_argument("--base", default="origin/main", help="where round 1's diff starts")
+    p.add_argument("--base", help="where round 1's diff starts (default: origin/main)")
     p.add_argument("--round", type=int, help="score a saved round again")
     p.add_argument("--root", type=Path, default=REPO, help="the checkout git reads")
     p.set_defaults(func=cmd_jev)

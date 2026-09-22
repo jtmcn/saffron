@@ -105,7 +105,7 @@ loop carries on.
 ```bash
 env TYPESAFE_API_KEY="$(bash -c 'source ~/.secrets; printf %s "$TYPESAFE_API_KEY"')" \
   uv run .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind spec-review \
-  --report <saved review> --commit <the base the reviewer read>
+  --report <saved review> --commit <the commit SHA the reviewer read>
 ```
 
 **Only a spec that has not run.** Editing one whose pull request is already
@@ -267,9 +267,15 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
 
-   Save both seats' reports and score them as one round with
-   `--kind pr-review --report <spec seat> --report <standards seat> --commit <PR head>`,
-   the same command as step 1b.
+   Save both seats' reports and score them, the same command as step 1b:
+
+   ```bash
+   driver.py jev SA-NNNN --kind pr-review --report <spec seat> \
+     --report <standards seat> --commit <PR head> --base <the PR's base SHA>
+   ```
+
+   `--base` only matters for round 1. A later round reads the previous
+   round's own commit.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe with the driver:
    `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.

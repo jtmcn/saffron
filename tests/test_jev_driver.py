@@ -225,6 +225,58 @@ def test_a_failed_call_exits_2_and_leaves_the_round_to_score_again(monkeypatch, 
     assert (d / "findings.json").is_file() and not (d / "jev.ttl").exists()
 
 
+def test_commit_and_base_resolve_to_shas_and_stay_pinned_on_a_rescore(
+    monkeypatch, loop
+):
+    first, second, third = loop.commits
+    _git(loop.root, "branch", "feature", second)
+    one = _report(loop, "r1.md", [FINDING])
+    assert (
+        _review(
+            monkeypatch, loop, "--report", one, "--commit", "feature", "--base", first
+        )
+        == 0
+    )
+    base = loop.batches / "spec-loop" / "SA-0901" / "pr-review"
+    saved = json.loads((base / "round-1" / "round.json").read_text())
+    assert saved["commit"] == second
+    assert (
+        "a.py" in loop.client.state["diff"] and "b.py" not in loop.client.state["diff"]
+    )
+
+    _git(loop.root, "branch", "-f", "feature", third)
+    assert _review(monkeypatch, loop, "--round", "1") == 0
+    saved_again = json.loads((base / "round-1" / "round.json").read_text())
+    assert saved_again["commit"] == second
+    assert (
+        "a.py" in loop.client.state["diff"] and "b.py" not in loop.client.state["diff"]
+    )
+
+
+def test_an_unresolvable_ref_exits_1_before_any_directory(monkeypatch, loop):
+    one = _report(loop, "r1.md", [FINDING])
+    assert (
+        _review(
+            monkeypatch,
+            loop,
+            "--report",
+            one,
+            "--commit",
+            "no-such-ref",
+            "--base",
+            loop.commits[0],
+        )
+        == 1
+    )
+    assert not loop.batches.exists()
+
+
+def test_round_refuses_report_alongside_it(monkeypatch, loop):
+    _two_rounds(monkeypatch, loop)
+    extra = _report(loop, "extra.md", [FINDING])
+    assert _review(monkeypatch, loop, "--round", "1", "--report", extra) == 1
+
+
 def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
     cell = loop.batches / "v0" / "SA-0901"
     cell.mkdir(parents=True)
