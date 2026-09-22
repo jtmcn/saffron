@@ -62,7 +62,8 @@ acceptance:
       `(phase, n)` names, and a rebuttal on the finding at its position in the
       task. That holds in the writing ledger's rows and in the rows a fold
       into a fresh ledger makes. The witness writes to a ledger that already
-      holds an unrelated task with an attempt and a finding. It opens
+      holds an unrelated task with a finding and an `IMPLEMENT` 1 attempt of
+      its own. It opens
       `IMPLEMENT` 1, `IMPLEMENT` 2 and `REPAIR` 1, then writes each one's gate
       result and close in the order `IMPLEMENT` 2, `REPAIR` 1, `IMPLEMENT` 1.
       Each gate result has its own gate name, and each close its own
@@ -78,8 +79,11 @@ acceptance:
       the same writes to one task append the same facts, kind and payload,
       whatever else each ledger holds. The witness drives all five kinds that
       name an attempt or a finding: `attempt_opened`, `attempt_closed`,
-      `gate_result`, `finding` and `rebuttal`. One ledger first holds other
-      tasks with attempts and findings, and the other holds nothing. The
+      `gate_result`, `finding` and `rebuttal`. One ledger first holds two
+      other tasks. Each sits on a run of its own and has an attempt, a gate
+      result with a failure, and a finding. The other ledger holds nothing. So
+      every run, task, attempt, gate result, failure and finding id differs
+      between the two for the tracked task. The
       task records two findings in one call and a third in a second call, and
       rebuts all three out of order. Each `attempt_closed` and `gate_result`
       fact carries the `phase` and `n` of its attempt, spelled as its
@@ -257,9 +261,13 @@ writes to.
 
 A record appended before this change names attempts and findings by id, and
 its `attempt_closed` and `gate_result` facts carry no `(phase, n)`. This spec
-does not migrate them and does not read the old form. The fold cannot place
-such a fact. It aborts as it does for any fact `_apply` cannot place
-(`SA-0117`'s criterion 4), and `saffron fold` exits 2 (`saffron/cli.py:181-185`).
+does not migrate them and does not read the old form. Measured on a prototype
+of this change, a base-format record with one attempt and one finding made
+`saffron fold` print `saffron: KeyError: 'phase'` and exit 2. It did so with
+and without `--skip-unreadable`, since the fold aborts rather than skipping
+the task (`saffron/cli.py:181-185`). No criterion pins this. An `_apply` that
+read a missing position as out of place would make the task unreadable and
+exit 1 instead.
 Such records exist only in tests and in the scratch record
 `docs/evidence/scripts/2026-09-20-fold-rebuild-time.py` builds. That script
 rebuilds its record from the ledger each time it runs, and its calls keep
@@ -306,7 +314,7 @@ Keep every name and rewrite the body, never delete one.
 - `test_a_gate_result_cannot_name_an_attempt_that_does_not_exist` expects
   `ValueError`, and then that the task holds no gate result.
 - `test_a_ledger_that_predates_attempts_gains_the_reference`
-  (`tests/test_ledger.py:556`) and
+  (`tests/test_ledger.py:557`) and
   `test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows`
   prove the foreign key with `record_gate_result` on attempt 90210. The
   writer now raises before the insert. Prove it with a direct `INSERT` into
@@ -334,6 +342,8 @@ on a payload key that criterion 7's round trip reads back. Where a test then
 has none left, assert the kinds its writes appended. Keep
 `test_a_declared_risk_and_an_absent_one_are_distinguishable` whole. A `None`
 risk and a declared `standard` fold to the same row, so no round trip sees it.
+Keep `test_a_gate_error_is_not_recorded_as_a_failure` whole too. Criterion 7's
+round trip writes only `fail` results (`tests/test_ledger_fold_task.py:97`).
 
 **`tests/test_fold.py` reads no `ledger._db`.** Its `rows` and `_read`
 helpers read through a `sqlite3` connection of their own, opened on the
@@ -343,8 +353,8 @@ ledger's file. Pass them the path, since `Ledger` exposes none.
 `datetime.now(UTC)` through `saffron.ledger`'s own `datetime` name, as
 `_append` does at `saffron/ledger.py:388`. The witness replaces that name with
 a `datetime` subclass whose `now` starts at 2001-01-01 and adds a minute per
-call. `_ledger_time`
-still reaches `fromisoformat` through the subclass. The minute per call makes
+call. `_ledger_time` still reaches `fromisoformat` through the subclass. The
+minute per call makes
 a row dated by a second read of the clock differ from its fact. At base the
 writer's rows carry SQLite's clock, so the witness fails there for its own
 reason. Share the write sequence with criterion 7's test through one helper.
@@ -360,11 +370,36 @@ for `task_push` alone, and `_apply` finding an attempt by `n` alone. Criterion
 1's witness must fail the first, and criterion 2's the second. Say in your
 notes what each run printed.
 
-**What criterion 2's arrangement excludes.** It was measured on a prototype.
-It fails an attempt found by `n` alone, by `phase` alone, or as the last one
-opened. It fails a finding position counted over every task rather than one.
-It fails a rebuttal placed on the latest finding. The unrelated task in the
-writing ledger is what catches the position counted over every task.
+**What each new witness excludes, measured.** A prototype of this change
+carried the six witnesses as this spec describes them. Each line below is one
+run of all six against the base source or one wrong version of the prototype,
+and the witnesses that failed.
+
+- Base source: C1, C2, C3, C4, C5, C6.
+- `_apply` stamps `datetime('now')` for `task_push` alone: C1.
+- `_apply` stamps `datetime('now')` for every kind: C1.
+- The writer dates its row by a second read of the clock: C1.
+- An attempt found by `n` alone: C2.
+- An attempt found by `phase` alone: C2.
+- An attempt taken as the last one opened: C2.
+- An attempt found by `(phase, n)` in any task: C2.
+- A finding position counted over every task: C2, C3.
+- A rebuttal placed on the latest finding: C2.
+- A `task_created` fact that carries its `run_id`: C3.
+- A `gate_result` fact that carries its `attempt_id`: C3.
+- An `attempt_opened` fact that carries the id the insert will mint: C3.
+- No key filled in on open: C4, C5.
+- `create_task` with no record attached mints no key: C4.
+- One key given to every task the open fills in: C4, C5.
+- A write to a task with no `task_created` fact appends nothing: C5.
+- `record_rebuttal` on an unknown finding returns: C6.
+- `close_attempt` on an unknown attempt returns: C6.
+- `record_findings` on an unknown task raises `sqlite3.IntegrityError`: C1,
+  C2, C3, C6.
+
+The unrelated task's `IMPLEMENT` 1 attempt in criterion 2's writing ledger is
+what catches `(phase, n)` looked up in any task. Its finding is what catches a
+position counted over every task.
 
 **Criterion 4's witness builds its old files with `sqlite3` and `SCHEMA`.**
 The file without the column removes the `record_key` line from `SCHEMA`.
@@ -375,19 +410,19 @@ Assert the removal changed the text, as the migration tests in
 no table holds for all ten.
 
 **Read rows in the new witnesses through `_raw_rows`**
-(`tests/test_ledger_fold_task.py:43`), never through `ledger._db`. Import nothing at module scope that this change adds. `revert`
-runs the new tests with the source reverted, and an import of a new name is
+(`tests/test_ledger_fold_task.py:43`), never through `ledger._db`. Import
+nothing at module scope that this change adds. `revert` runs the new tests with the source reverted, and an import of a new name is
 then a collection error it reads as `skip`. All six new witnesses failed
 against the base source when measured with a prototype of the change.
 
-**Size.** A prototype of this change measured 829 changed lines. It spent 423
-in `ledger.py`, 273 in `tests/test_ledger_fold_task.py`, 90 in
-`tests/test_fold.py`, 30 in `tests/test_ledger_appends.py` and 13 in
-`tests/test_ledger.py`. It left the write methods' docstrings as they were.
-Updating the ones this change makes false adds about 40. The `refactor`
-ceiling is 1000, and `size` blocks at `elevated`. Write new SQL the way the
-file already writes it, as triple-quoted strings over several lines. Keep new
-comments to one or two lines.
+**Size.** A prototype of this change measured 865 changed lines. It wrote
+new SQL over several lines, as below, and updated the docstrings the change
+makes false. It spent 440 in `ledger.py`, 290 in
+`tests/test_ledger_fold_task.py`, 90 in `tests/test_fold.py`, 30 in
+`tests/test_ledger_appends.py` and 15 in `tests/test_ledger.py`. The
+`refactor` ceiling is 1000, and `size` blocks at `elevated`. Write new SQL the
+way the file already writes it, as triple-quoted strings over several lines.
+Keep new comments to one or two lines.
 
 **Prose.** In each touched file a new or rewritten comment adds to that
 file's `prose` count, and a count above base fails. New comments and
