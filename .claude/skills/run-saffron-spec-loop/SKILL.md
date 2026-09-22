@@ -251,7 +251,7 @@ at a ceiling and nothing decided the task. `record` says so, and a halt goes
 to the operator (GOTCHAS, Recording).
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
-`--report` or `--commit`.
+`--report` or `--commit`. A non-zero exit is noted and the loop carries on.
 
 `drop SA-NNNN --why "…"` takes a spec out for good.
 
@@ -268,7 +268,8 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
 
-   Save both seats' reports and score them, the same command as step 1b:
+   Save both seats' reports and score them, the same command as step 1b. A
+   non-zero exit is noted and the loop carries on.
 
    ```bash
    driver.py jev SA-NNNN --kind pr-review --report <spec seat> \
