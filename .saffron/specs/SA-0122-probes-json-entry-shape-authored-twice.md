@@ -174,26 +174,35 @@ failure and not a collection error, so `revert` sees the witness fail.
 one review through `_drive` with `_PROBE_POLICY` and `gates=("tests",)`.
 File two findings with `_adequacy_finding`, one probing `src/a.py` and one
 probing `spec/a.py`. Answer the probe cell with `_stub_probe_gates`: a green
-baseline, then a failing suite. Give the two answers a different `tool`,
-`collected` set and `summary`, rather than reuse `_GREEN_TESTS`
-(`tests/test_session.py:2729-2731`) unchanged. The source probe is then
-`killed`, and the task ends `READY_FOR_REVIEW` with no REBUT turn.
+baseline, then a failing suite. Give the two answers a different `tool` and
+`summary`, and a different count of collected ids. The probed run must
+collect every baseline id plus at least one more, such as
+`["t.py::test_a"]` then `["t.py::test_a", "t.py::test_b"]`.
+`check_probe` returns `unproven` when a baseline id goes missing
+(`saffron/probe.py:214-225`). The helper records only a count, so two sets of
+one size would hide a swap. `_GREEN_TESTS` (`tests/test_session.py:2729-2731`)
+and the failing suite in
 `test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run`
-builds the failing suite you need. The `spec/a.py` probe is refused on the
+share all three, so build new answers rather than reuse them. The source
+probe is then `killed`, and the task ends `READY_FOR_REVIEW` with no REBUT
+turn. The `spec/a.py` probe is refused on the
 declared test path before any cell, so it has no baseline, at base and
 after `SA-0119` alike.
 
 **The driver witness.** Put it in `tests/test_corpus.py`, after
 `test_a_probe_with_no_baseline_in_hand_writes_null_not_an_empty_list`. Call
-`_drive` twice, each into its own subdirectory of `tmp_path`: once by
-default, and once with `baseline_raises=CellRuntimeError(...)`. Each pass
+`_drive` twice, each into its own subdirectory of `tmp_path`: once with the
+new parameter below, and once with `baseline_raises=CellRuntimeError(...)`. Each pass
 files one probe, so each writes one entry. `_write_probes` rewrites the file
 after every probe, so match each entry to the wrapper's last return for its
 pass. Compare the ten names with `BASELINE_KEYS` (`tests/test_corpus.py:716`)
 and the six others. The stub `gate` inside `_drive` answers every call with
 one `GateResult` (`tests/test_corpus.py:524-528`). Add a `_drive` parameter
-that sets the baseline's `tool`, `collected` and `summary` apart from the
-probed run's. Then assert every value in the default pass.
+that sets the baseline's `tool`, `collected` count and `summary` apart from
+the probed run's, and gives the baseline one pre-existing failure. Default it
+to `None` and replace only the first call's answer, as `baseline_raises` does
+(`tests/test_corpus.py:526`), so every existing caller sees what it sees now.
+Then assert every value in that pass.
 
 **The wrong implementations each witness must fail.** Each of these failed
 its witness on a prototype of this change.
@@ -205,6 +214,11 @@ its witness on a prototype of this change.
 - The helper holding only the four baseline fields, with each writer
   keeping the other six. The real return then has four keys, not ten.
 - The helper returning a verdict key, or `[]` for a missing baseline.
+
+Five more no prototype has run yet. Each witness must also fail a helper that
+swaps a value with its counterpart: `failures`, `tool`, `collected` or
+`summary` with its baseline field, and `reason` with `summary`. Run each
+swap against both witnesses before you commit them.
 
 **What is left unwitnessed.** Each witness drives two of its writer's
 paths. The host's other paths are a survivor, a mutator refusal, a raise, a

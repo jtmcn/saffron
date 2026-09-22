@@ -116,3 +116,56 @@ reader downstream of the change that nobody listed.
    readers of a file or field the change writes would catch this class.
 2. **A child spec names only what the parent's criteria promise.** Anything
    else the parent's cell may not build.
+
+## SA-0121, SA-0122 and b-ce93aa
+
+Branch `joel/specs-probe-children-and-89`, stacked on the branch above. Three
+writers drafted in one checkout at once. Each wrote only its own spec and
+record, and the delegate wrote the shared smoke-test paragraph after all three
+returned.
+
+### Rounds and cost
+
+| Step | Who | Time | Tokens |
+|---|---|---|---|
+| SA-0121 draft, with a prototype | `spec-writer` | 23.3 min | 153k |
+| SA-0122 draft, with a prototype | `spec-writer` | 12.3 min | 153k |
+| b-ce93aa, a by-hand test in place of a spec | `spec-writer` | 16.3 min | 92k |
+| SA-0121 first and second review | `spec-reviewer` | 3.5 and 3.8 min | 81k and 68k |
+| SA-0122 first and second review | `spec-reviewer` | 3.9 and 4.2 min | 85k and 88k |
+
+### b-ce93aa was not a spec
+
+The writer was told to settle that first. A cell-marked witness is never
+collected by the `tests` gate, so it fails `criteria`. A spec with no criteria
+passes every gate while its test never runs. So the test landed by hand, and
+the writer ran it in a real cell against three mutants of the probe cell's
+`env`.
+
+### First reviews: one blocker each
+
+| Finding | Class | Check that should have caught it |
+|---|---|---|
+| SA-0121 removed a flag that SA-0097's witness relies on | A change breaking a live check or test | Pre-flight 6, extended to earlier specs' witnesses |
+| SA-0122's witnesses passed a helper that swaps two values | A witness drives one member of a set | Pre-flight 1 |
+
+These were the day's first blockers. Both sat in the class every earlier
+review had found.
+
+### Second reviews: no blocker
+
+| Finding | Class | Check that should have caught it |
+|---|---|---|
+| SA-0121's fix claimed a guard that no test provides | A claim about the tree that stopped being true | Pre-flight 5, applied to the delegate's own fix |
+| SA-0122's fix could flip the verdict and reopen the swap | An arrangement argued rather than run | Pre-flight 10 |
+
+Both second-round findings came from the delegate's by-hand fixes to the first
+round. A hand fix is a claim like any other, and it went to a reader untested.
+
+### What the next run should change
+
+1. **Search earlier specs' witnesses before removing a line.** SA-0121's
+   blocker was a line SA-0097 placed on purpose. A command that lists every
+   done spec whose witness or mutant touches the change's files would find it.
+2. **Run a by-hand fix before handing it back.** Both second-round findings
+   were fixes argued at the keyboard.

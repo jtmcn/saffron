@@ -100,7 +100,7 @@ Backlog item **89**, its "Done looks like" remainder. `SA-0072` (commit
 `SA-0082` (commit `1e4b3b61`) added three more. Two copies of the old flags
 are left.
 
-`DIFF_FLAGS` (`saffron/cell/worktree.py:131-166`) holds eleven flags. They
+`DIFF_FLAGS` (`saffron/cell/worktree.py:131-165`) holds eleven flags. They
 include `--abbrev=7` at `:146`, `--unified=3` at `:149` and
 `--diff-algorithm=myers` at `:151`.
 
@@ -158,6 +158,9 @@ build, under a fixture that says it matches the cell's export.
 
 ## Out of scope
 
+**Closing item 89.** `docs/**` is `forbidden`, so the operator closes it by
+hand after merge.
+
 **`DIFF_FLAGS` itself.** `SA-0118` edits `saffron/cell/worktree.py`, and it is
 forbidden here. Every mutant names that file, since a mutant needs no
 `touches` entry.
@@ -210,9 +213,10 @@ with the module's list left in place, fails at least one of them.
 
 - The docstring rewrite.
 - The rewrite of the comment at `tests/test_package.py:3077-3079`.
-- The explicit flag kept at `tests/test_package.py:3085`. `SA-0097`'s own
-  witness guards it: remove the flag, and the mutant kills that witness
-  whatever the listing does.
+- The explicit flag kept at `tests/test_package.py:3085`. The imported tuple
+  carries the same flag, so removing the explicit one leaves every test
+  green. `SA-0097`'s mutant would then kill its witness whatever the listing
+  does, and only review catches the removal.
 
 The `--no-color` mutant kills most of `tests/test_package.py` once the change
 lands. Of the fourteen sites that read the list, three have no test it kills
