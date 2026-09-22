@@ -28,9 +28,9 @@ forbidden:
   - saffron/replay.py
   - tests/test_corpus.py
   - .git/**
-budget_usd: 10
+budget_usd: 17
 max_attempts: 3
-max_turns: 60
+max_turns: 95
 risk: elevated
 acceptance:
   - claim: >-
