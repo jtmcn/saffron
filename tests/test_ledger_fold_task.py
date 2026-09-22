@@ -189,7 +189,9 @@ def _drive_eleven_kinds(source: Ledger, after) -> tuple[str, int]:
     after(key)
     source.record_push(task_id, "d" * 40)
     after(key)
-    source.set_task_package(task_id, "READY_FOR_REVIEW", "pkg", "e" * 40, "https://x/9")
+    source.set_task_package(
+        task_id, "READY_FOR_REVIEW", "pkg", "e" * 40, "https://x/9", added=6, removed=2
+    )
     after(key)
     source.record_merged_head(task_id, "h" * 40)
     after(key)
@@ -230,6 +232,73 @@ def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, re
     plain = _table_rows(fold_path, _TASK_SQL, plain_key)
     assert plain == _table_rows(source_path, _TASK_SQL, plain_key)
     assert plain[0]["risk"] == "standard"
+    source.close()
+    into.close()
+
+
+def test_the_diff_stat_folds_back_as_written_and_null_where_unmeasured(
+    tmp_path, record
+):
+    """`task_package`'s payload carries `added`/`removed` whether or not a
+    stat was measured, and `_apply` reads them with `payload.get` — so a
+    fact from before this change, missing the keys entirely, folds to NULL
+    exactly like a fact that carries them as `None`."""
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+
+    ids = {
+        spec_id: _minimal(source, spec_id)
+        for spec_id in ("SA-20", "SA-21", "SA-22", "SA-23", "SA-24", "SA-25")
+    }
+
+    def _pkg(spec_id, **stat):
+        source.set_task_package(
+            ids[spec_id], "READY_FOR_REVIEW", "b", "d" * 40, "u", **stat
+        )
+
+    _pkg("SA-20", added=2, removed=1)
+    _pkg("SA-21", added=0, removed=0)
+    _pkg("SA-22")
+    # SA-23 is never packaged.
+    _pkg("SA-24", added=5, removed=5)
+    _pkg("SA-24")
+    _pkg("SA-25", added=5, removed=5)
+    _pkg("SA-25", added=5, removed=5)
+
+    key25 = _key(source, ids["SA-25"])
+    facts25 = record.read(key25)
+    last = facts25[-1]
+    stripped = replace(
+        last,
+        payload={
+            k: v for k, v in last.payload.items() if k not in ("added", "removed")
+        },
+    )
+    record._facts[key25] = [*facts25[:-1], stripped]
+
+    for spec_id in ids:
+        key = _key(source, ids[spec_id])
+        into.fold_task(key, record.read(key))
+
+    both = {
+        "SA-20": (2, 1),
+        "SA-21": (0, 0),
+        "SA-22": (None, None),
+        "SA-23": (None, None),
+        "SA-24": (None, None),
+    }
+    for spec_id, expected in both.items():
+        key = _key(source, ids[spec_id])
+        for path in (source_path, fold_path):
+            row = _raw_rows(path, _TASK_SQL, key)[0]
+            assert (row["added"], row["removed"]) == expected, (spec_id, path)
+
+    # SA-25's live source row still holds the real (5, 5) — only the folded
+    # copy of its second fact was stripped, so only the fold reads NULL.
+    fold_row = _raw_rows(fold_path, _TASK_SQL, key25)[0]
+    assert (fold_row["added"], fold_row["removed"]) == (None, None)
+
     source.close()
     into.close()
 
