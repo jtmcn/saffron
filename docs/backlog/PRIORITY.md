@@ -161,8 +161,8 @@ ledger has no owner column that fits it.
 
 **Placed 2026-09-20**: **171**, ~~**177**~~, **168**, **169**, ~~**b-606ea3**~~,
 ~~**b-f2a9d1**~~, ~~**b-0c1d69**~~ and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
-diff stat no authoritative record carries, and the other mints a run per task
-where `CONTEXT.md` defines one per repo. The last five are vocabulary a cell
+diff stat no authoritative record carries, and the other minted a run per task
+where `CONTEXT.md` defined one per repo. #444 redefined **Run**. The last five are vocabulary a cell
 cannot write, because `CONTEXT.md` is generated from `ontology/factory.ttl` and
 is `protected`. They are items 65 and 72 again, with five more words.
 `b-0c1d69` was filed writing `SA-0113`, and it carries a `DESIGN.md`

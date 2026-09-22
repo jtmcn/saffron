@@ -145,11 +145,12 @@ reasons, and `INFRASTRUCTURE` outranks it.
 _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished",
 "timeout" for `UNTIL`.
 
-**Run**: One task's pin, owning the `base_sha` its task was cut from, its preflight
-outcome and its baseline. A batch holds one run per task. Every run of one repo in a
-batch shares the `base_sha` the batch pinned for that repo. `saffron cell` and
-`saffron replay` each mint a run that belongs to no batch. The per-repo slice of a
-batch has no name and no row (backlog item 177).
+**Run**: One task's pin, owning the `base_sha` its gates and policy are read at, its
+**preflight outcome** and its baseline. A batch holds one run per task. Every run of
+one repo in a batch shares the `base_sha` the batch pinned for that repo. A stacked
+task's tree and baseline sit on its parent's head instead, while its run keeps the
+pin. `saffron cell` and `saffron replay` each mint a run that belongs to no batch.
+The per-repo slice of a batch has no name and no row (backlog item 177).
 > Batch and run are **not** synonyms and stopped being interchangeable when Saffron
 > went multi-repo. Budget is a batch property; `base_sha` is a run property. If a
 > sentence works with either word, it is imprecise.
