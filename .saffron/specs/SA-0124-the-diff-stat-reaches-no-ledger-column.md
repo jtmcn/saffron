@@ -76,7 +76,8 @@ acceptance:
       through a ledger with a record attached. One is packaged with 2 and 1,
       one with 0 and 0, and one with no stat. One is never packaged. One is
       packaged with 5 and 5 and then again with no stat. The last is packaged
-      with 5 and 5, and the witness then strips both keys from that fact. The
+      with 5 and 5 twice, and the witness strips both keys from the second
+      of those facts. The
       first task's fact carries 2 and 1, and the never-packaged task has no
       `task_package` fact. After a fold into a fresh ledger, both ledgers read
       2 and 1, then 0 and 0, then NULL for the next three. The fresh ledger
@@ -88,7 +89,7 @@ acceptance:
       `SCHEMA` with the two columns' lines removed, and asserts the removal
       changed the text. The file holds two tasks, and both read NULL through
       `queue_lines` after the open. A `set_task_package` with 3 and 4 on the
-      first task then reads back 3 and 4 through a second `Ledger` on the same
+      first task then reads back the integers 3 and 4 through a second `Ledger` on the same
       file, and the second task still reads NULL.
     witness: tests/test_ledger.py::test_a_ledger_that_predates_the_diff_stat_gains_it_as_null
   - claim: >-
@@ -308,10 +309,11 @@ source reverted.
 task fails a fold that writes `payload.get(...) or None`. The task packaged
 twice fails a write that keeps the old value. The stripped task fails a fold
 that defaults a missing key to 0, and one that indexes the payload for
-them. The first
+them. It also fails a fold that keeps the first fact's 5 and 5 when the
+second carries no key. The first
 task fails a writer that leaves the keys out of the payload. Strip the keys
-the way `_retimed` (`tests/test_ledger_fold_task.py:397-403`) rewrites facts,
-with `dataclasses.replace`. Read rows through `_raw_rows` (`:43`), never
+the way `_retimed` (`tests/test_ledger_fold_task.py:409-415` after `SA-0123`) rewrites facts,
+with `dataclasses.replace`. Read rows through `_raw_rows` (`:45`), never
 through `ledger._db`.
 
 **Criterion 4's witness copies `tests/test_ledger.py:273-298`.** Assert
