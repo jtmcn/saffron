@@ -32,8 +32,9 @@ then REBUT.
 
 ## Questions
 
-Each group of questions is one Jev call. `Noul` is the SDK's name for a
-yes-or-no question and returns the probability of yes.
+Every question below is asked in one Jev call per round (Changed while
+planning, item 3). `Noul` is the SDK's name for a yes-or-no question and
+returns the probability of yes.
 
 | Code | Asked of | Question | Type |
 |---|---|---|---|
@@ -94,9 +95,10 @@ distribution property are declared inline in `to_turtle`, not by
 | `pr-review` | `~/.saffron/batches/spec-loop/SA-NNNN/pr-review/round-N/` |
 | `cell` | `~/.saffron/batches/v0/SA-NNNN/` |
 
-A round directory holds `report.md`, `findings.json` and `jev.ttl`. A
-`pr-review` round holds one report and one findings file per seat, and both
-seats share the round number.
+A round directory holds one `report-N.md` per seat, one `round.json` with the
+resolved commit and the diff's start, one merged `findings.json`, and
+`jev.ttl`. A `pr-review` round holds two reports, and both seats share the
+round number and the one findings file.
 
 ## The JSON block
 
@@ -152,8 +154,8 @@ the `types` gate. The `dev` group never ships in the `saffron` wheel. The
 driver imports it only inside `jev`, so a command that never calls Jev
 never runs that import. No cell receives the key.
 
-The request pins a dated model name, never `jev-latest`, so the recorded model
-names the model that answered.
+The request sends the alias `jev-latest` (Changed while planning, item 7), and
+`response.model` records the build that answered.
 
 ## Testing
 
@@ -198,6 +200,14 @@ output goes to `docs/evidence/2026-09-21-jev-first-call.md`.
    one.** A choice with one option carries no information.
 6. **`--commit` is passed by the delegate.** It is the commit the reviewer
    read. For `cell` it comes from `patch.json`'s `head_sha`.
+7. **The request sends `jev-latest`, not a dated name.** `models.list()`
+   offered only aliases on 2026-09-21 (`jev-latest`, `jev-preview`), no dated
+   build. `response.model`, for example `jev-1.13.0`, records which build
+   answered.
+8. **`typesafe-sdk` also lands in the cell image.** `.saffron/Dockerfile`
+   syncs the `dev` group for the cell too, so item 2's placement installs the
+   package there as well. No key reaches a cell, so this is accepted
+   knowingly rather than moved to a group of its own.
 
 ## Out of scope
 
