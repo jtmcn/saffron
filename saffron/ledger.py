@@ -18,7 +18,7 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
@@ -177,8 +177,8 @@ RECORD_KEY_INDEX = (
 
 
 class UnplacedRebuttal(Exception):
-    """A rebuttal fact whose finding no earlier fact of its task placed. The
-    record's defect, which `fold()` prices as an unreadable task."""
+    """A finding out of place, or a rebuttal naming no finding before it —
+    the record's own defect, which `fold()` prices as an unreadable task."""
 
 
 def _ledger_time(at: str) -> str:
@@ -232,6 +232,17 @@ class Ledger:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
             )
+        # Every task carries a key now, backfilled if it has none yet.
+        keyless = self._db.execute(
+            "SELECT task_id FROM tasks WHERE record_key IS NULL"
+        ).fetchall()
+        for row in keyless:
+            self._db.execute(
+                "UPDATE tasks SET record_key = ? WHERE task_id = ?",
+                (new_task_key(), row["task_id"]),
+            )
+        if keyless:
+            self._db.commit()
         # The fold upserts on `record_key`, so two rows sharing one would make
         # its `fetchone` pick one. SQLite counts NULLs distinct.
         self._db.execute(RECORD_KEY_INDEX)
@@ -347,29 +358,14 @@ class Ledger:
     def close(self) -> None:
         self._db.close()
 
-    def _attempt_owner(self, attempt_id: int) -> int | None:
-        """The task an attempt belongs to, for `_append`'s sake. An attempt the
-        caller invented has no owner and files no fact."""
-        row = self._db.execute(
-            "SELECT task_id FROM attempts WHERE attempt_id = ?", (attempt_id,)
-        ).fetchone()
-        return row["task_id"] if row is not None else None
-
     def record_key(self, task_id: int) -> str | None:
         row = self._db.execute(
             "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
         ).fetchone()
         return row["record_key"] if row else None
 
-    def _append(self, task_id: int, kind: str, **payload: Any) -> None:
-        """Every ledger write appends the fact it represents. A `None` record
-        is every caller that predates the record, which must be unaffected.
-
-        After the commit that wrote the row, never before: a fact for a row
-        that does not exist is the worse of the two. So an append that raises,
-        a refused push being the case, leaves a row the next fold reverts."""
-        if self._record is None:
-            return
+    def _build_fact(self, task_id: int, kind: str, payload: dict[str, Any]) -> Fact:
+        """Every write method's one fact. Raises if `task_id` names nothing."""
         row = self._db.execute(
             """SELECT t.record_key AS key, r.name AS repo, rn.batch_id AS batch
                  FROM tasks t
@@ -378,11 +374,9 @@ class Ledger:
                 WHERE t.task_id = ?""",
             (task_id,),
         ).fetchone()
-        # No row (unknown task_id) or no key (a pre-record task, NULL from
-        # the additive ALTER) is a claim with nothing to file it under.
         if row is None or row["key"] is None:
-            return
-        fact = Fact(
+            raise ValueError(f"no task {task_id} to record a {kind!r} fact against")
+        return Fact(
             kind=kind,
             task_key=row["key"],
             at=datetime.now(UTC).isoformat(),
@@ -390,44 +384,27 @@ class Ledger:
             batch_key=str(row["batch"]) if row["batch"] is not None else None,
             payload=payload,
         )
-        self._record.append(row["key"], fact)
+
+    def _append(self, fact: Fact) -> None:
+        """After the commit that wrote the row, never before. `None` is
+        every caller that predates the record, unaffected."""
+        if self._record is not None:
+            self._record.append(fact.task_key, fact)
+
+    def _commit_and_append(self, fact: Fact, **apply_kwargs: int | None) -> int | None:
+        """Every write method's own tail: apply, commit, then append."""
+        with self._db:
+            result = self._apply(fact, **apply_kwargs)
+        self._append(fact)
+        return result
 
     def fold_task(self, key: str, facts: Sequence[Fact]) -> None:
         """Drop the task `key` names, apply every fact through `_apply`,
-        commit once. All or nothing. Empty `facts` only drops the rows."""
+        commit once. No state carried between facts."""
         with self._db:
             self._drop_task_rows(key)
-            task_id: int | None = None
-            attempt_id: int | None = None
-            findings: dict[int, int] = {}
-
-            def apply(fact: Fact, **kw: int | None) -> int | None:
-                return self._apply(task_id, fact, key=key, **kw)
-
             for fact in facts:
-                if fact.kind == "task_created":
-                    task_id = apply(fact)
-                elif fact.kind == "attempt_opened":
-                    attempt_id = apply(fact)
-                elif fact.kind == "finding":
-                    new_id = apply(fact)
-                    assert new_id is not None
-                    findings[fact.payload["finding_id"]] = new_id
-                elif fact.kind == "rebuttal":
-                    # ponytail: the fact names the writing ledger's finding_id,
-                    # so this maps it. The second spec names a finding by place.
-                    mapped = findings.get(fact.payload["finding_id"])
-                    if mapped is None:
-                        raise UnplacedRebuttal(
-                            f"task {key}: rebuttal for finding "
-                            f"{fact.payload['finding_id']} has no finding "
-                            "fact to attach to"
-                        )
-                    apply(fact, finding_id=mapped)
-                else:
-                    # ponytail: an attempt_closed or gate_result fact names no
-                    # attempt. The second spec gives every fact its own place.
-                    apply(fact, attempt_id=attempt_id)
+                self._apply(fact)
 
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
@@ -490,29 +467,37 @@ class Ledger:
         )
         return _inserted_id(cursor)
 
-    def _apply(
-        self,
-        task_id: int | None,
-        fact: Fact,
-        *,
-        key: str,
-        attempt_id: int | None = None,
-        finding_id: int | None = None,
-    ) -> int | None:
-        """Turn one task fact into rows, for the eleven kinds `_append`
-        writes. Raises on any other kind, returns the id of any row
-        inserted, or None. Commits nothing. `attempt_id` and `finding_id`
-        are `fold_task`'s own rules, held between calls by `fold_task`
-        alone."""
+    def _attempt_for(self, task_id: int, payload: dict[str, Any]) -> int:
+        """The attempt a fact names by `(phase, n)`, scoped to its own task."""
+        row = self._db.execute(
+            "SELECT attempt_id FROM attempts WHERE task_id = ? AND phase = ? AND n = ?",
+            (task_id, payload["phase"], payload["n"]),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no attempt {payload['phase']!r} {payload['n']!r}")
+        return int(row["attempt_id"])
+
+    def _finding_at(self, task_id: int, position: int) -> int | None:
+        """The finding at `position` (1 for the first), or `None` if lost."""
+        row = self._db.execute(
+            "SELECT finding_id FROM findings WHERE task_id = ? "
+            "ORDER BY finding_id LIMIT 1 OFFSET ?",
+            (task_id, position - 1),
+        ).fetchone()
+        return int(row["finding_id"]) if row is not None else None
+
+    def _apply(self, fact: Fact, *, run_id: int | None = None) -> int | None:
+        """Turn one task fact into rows. Commits nothing. `run_id` is a live
+        writer's own run; the fold passes none and falls back to `_run_for`."""
         payload = fact.payload
         at = _ledger_time(fact.at)
         if fact.kind == "task_created":
             risk = payload["risk"] if payload["risk"] is not None else "standard"
-            run_id = self._run_for(fact)
+            resolved_run = run_id if run_id is not None else self._run_for(fact)
             cursor = self._db.execute(
                 "INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha, prompt_sha, record_key, updated_at) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    run_id,
+                    resolved_run,
                     payload["spec_id"],
                     payload["spec_sha"],
                     risk,
@@ -520,11 +505,17 @@ class Ledger:
                     payload["budget_usd"],
                     payload["policy_sha"],
                     payload["prompt_sha"],
-                    key,
+                    fact.task_key,
                     at,
                 ),
             )
             return _inserted_id(cursor)
+        row = self._db.execute(
+            "SELECT task_id FROM tasks WHERE record_key = ?", (fact.task_key,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no task {fact.task_key} for a {fact.kind!r} fact")
+        task_id = int(row["task_id"])
         if fact.kind == "attempt_opened":
             cursor = self._db.execute(
                 "INSERT INTO attempts (task_id, phase, n, started_at) VALUES (?, ?, ?, ?)",
@@ -532,6 +523,7 @@ class Ledger:
             )
             return _inserted_id(cursor)
         if fact.kind == "attempt_closed":
+            attempt_id = self._attempt_for(task_id, payload)
             self._db.execute(
                 "UPDATE attempts SET ended_at = ?, session_id = ?, model = ?, subtype = ?, terminal_reason = ?, num_turns = ?, cost_usd_est = ? WHERE attempt_id = ?",
                 (
@@ -547,6 +539,7 @@ class Ledger:
             )
             return None
         if fact.kind == "gate_result":
+            attempt_id = self._attempt_for(task_id, payload)
             data = dict(payload)
             failures = data.pop("failures", [])
             cursor = self._db.execute(
@@ -601,6 +594,14 @@ class Ledger:
             self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
             return None
         if fact.kind == "finding":
+            existing = self._db.execute(
+                "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
+            ).fetchone()["n"]
+            if payload["position"] != existing + 1:
+                raise UnplacedRebuttal(
+                    f"task {fact.task_key}: finding at position "
+                    f"{payload['position']} has no finding fact before it"
+                )
             cursor = self._db.execute(
                 "INSERT INTO findings (task_id, lens, severity, file, line, claim, anchored) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -615,6 +616,12 @@ class Ledger:
             )
             return _inserted_id(cursor)
         if fact.kind == "rebuttal":
+            finding_id = self._finding_at(task_id, payload["position"])
+            if finding_id is None:
+                raise UnplacedRebuttal(
+                    f"task {fact.task_key}: rebuttal for position "
+                    f"{payload['position']} has no finding fact to attach to"
+                )
             self._db.execute(
                 "UPDATE findings SET verdict = ?, rebuttal = ? WHERE finding_id = ?",
                 (payload["verdict"], payload["rebuttal"], finding_id),
@@ -918,47 +925,35 @@ class Ledger:
         to `standard` because the ledger's consumers read it (item 170), but
         the fact carries the undeclared `None` rather than that default."""
         declared_risk = risk
-        risk = risk if risk is not None else "standard"
-        key = new_task_key() if self._record is not None else None
-        cursor = self._db.execute(
-            """INSERT INTO tasks
-                   (run_id, spec_id, spec_sha, state, risk, branch, budget_usd,
-                    policy_sha, prompt_sha, record_key)
-               VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?)""",
-            (
-                run_id,
-                spec_id,
-                spec_sha,
-                risk,
-                branch,
-                budget_usd,
-                policy_sha,
-                prompt_sha,
-                key,
-            ),
+        key = new_task_key()
+        envelope = self._db.execute(
+            "SELECT r.name AS repo, rn.batch_id AS batch FROM runs rn "
+            "JOIN repos r ON r.repo_id = rn.repo_id WHERE rn.run_id = ?",
+            (run_id,),
+        ).fetchone()
+        fact = Fact(
+            kind="task_created",
+            task_key=key,
+            at=datetime.now(UTC).isoformat(),
+            repo=envelope["repo"],
+            batch_key=str(envelope["batch"]) if envelope["batch"] is not None else None,
+            payload={
+                "spec_id": spec_id,
+                "spec_sha": spec_sha,
+                "branch": branch,
+                "risk": declared_risk,
+                "budget_usd": budget_usd,
+                "policy_sha": policy_sha,
+                "prompt_sha": prompt_sha,
+                **self._run_facts(run_id),
+            },
         )
-        self._db.commit()
-        task_id = _inserted_id(cursor)
-        self._append(
-            task_id,
-            "task_created",
-            spec_id=spec_id,
-            spec_sha=spec_sha,
-            branch=branch,
-            risk=declared_risk,
-            budget_usd=budget_usd,
-            policy_sha=policy_sha,
-            prompt_sha=prompt_sha,
-            **self._run_facts(run_id),
-        )
-        return task_id
+        return cast(int, self._commit_and_append(fact, run_id=run_id))
 
     def _run_facts(self, run_id: int) -> dict[str, Any]:
         """What the fold needs to rebuild the `repos` and `runs` rows this task
         hangs from. A run has no record of its own — it is a fold over the
         tasks that name it (§5 of the record design, not `DESIGN.md` §5)."""
-        if self._record is None:
-            return {}
         row = self._db.execute(
             """SELECT rn.base_sha, r.origin, r.mirror_path
                  FROM runs rn JOIN repos r ON r.repo_id = rn.repo_id
@@ -977,50 +972,34 @@ class Ledger:
         """Also rolls the task's spend up from its attempts. Derived rather than
         passed, so the figure can never disagree with the rows it is made of —
         and every terminal path already calls this, so none can forget it."""
-        self._db.execute(
-            """UPDATE tasks
-                  SET state = ?, updated_at = datetime('now'),
-                      spent_usd_est = (SELECT COALESCE(SUM(cost_usd_est), 0.0)
-                                         FROM attempts WHERE task_id = ?)
-                WHERE task_id = ?""",
-            (state, task_id, task_id),
+        self._commit_and_append(
+            self._build_fact(task_id, "task_state", {"state": state})
         )
-        self._db.commit()
-        self._append(task_id, "task_state", state=state)
 
     def open_attempt(self, task_id: int, phase: str | None = None) -> int:
         """One agent turn. The phase defaults to the state the task is in — the
         caller sets that at each phase boundary and would otherwise have to
         track it again at every turn (§4.1). Only `replay`, which has no agent
         and no phase to be in, passes one."""
-        cursor = self._db.execute(
-            """INSERT INTO attempts (task_id, phase, n)
-               SELECT ?, COALESCE(?, t.state),
+        resolved = self._db.execute(
+            """SELECT t.state AS state,
                       1 + COALESCE((SELECT MAX(a.n) FROM attempts a
                                      WHERE a.task_id = t.task_id
-                                       AND a.phase = COALESCE(?, t.state)), 0)
+                                       AND a.phase = COALESCE(?, t.state)), 0) AS n
                  FROM tasks t WHERE t.task_id = ?""",
-            (task_id, phase, phase, task_id),
-        )
-        # A task_id matching nothing selects nothing, and `lastrowid` still
-        # reports the connection's previous insert — an id that exists, belongs
-        # to another attempt, and satisfies the foreign key.
-        if cursor.rowcount != 1:
+            (phase, task_id),
+        ).fetchone()
+        if resolved is None:
             raise ValueError(f"no task {task_id} to open an attempt against")
-        self._db.commit()
-        attempt_id = _inserted_id(cursor)
-        if self._record is not None:
-            opened = self._db.execute(
-                "SELECT phase, n FROM attempts WHERE attempt_id = ?", (attempt_id,)
-            ).fetchone()
-            self._append(
-                task_id,
-                "attempt_opened",
-                attempt_id=attempt_id,
-                phase=opened["phase"],
-                n=opened["n"],
-            )
-        return attempt_id
+        fact = self._build_fact(
+            task_id,
+            "attempt_opened",
+            {
+                "phase": phase if phase is not None else resolved["state"],
+                "n": resolved["n"],
+            },
+        )
+        return cast(int, self._commit_and_append(fact))
 
     def close_attempt(
         self,
@@ -1033,36 +1012,27 @@ class Ledger:
         num_turns: int,
         cost_usd_est: float,
     ) -> None:
-        self._db.execute(
-            """UPDATE attempts
-                  SET ended_at = datetime('now'), session_id = ?, model = ?,
-                      subtype = ?, terminal_reason = ?, num_turns = ?,
-                      cost_usd_est = ?
-                WHERE attempt_id = ?""",
-            (
-                session_id,
-                model,
-                subtype,
-                terminal_reason,
-                num_turns,
-                cost_usd_est,
-                attempt_id,
-            ),
+        owner = self._db.execute(
+            "SELECT task_id, phase, n FROM attempts WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()
+        if owner is None:
+            raise ValueError(f"no attempt {attempt_id} to close")
+        fact = self._build_fact(
+            owner["task_id"],
+            "attempt_closed",
+            {
+                "phase": owner["phase"],
+                "n": owner["n"],
+                "session_id": session_id,
+                "model": model,
+                "subtype": subtype,
+                "terminal_reason": terminal_reason,
+                "num_turns": num_turns,
+                "cost_usd_est": cost_usd_est,
+            },
         )
-        self._db.commit()
-        if self._record is not None:
-            owner = self._attempt_owner(attempt_id)
-            if owner is not None:
-                self._append(
-                    owner,
-                    "attempt_closed",
-                    session_id=session_id,
-                    model=model,
-                    subtype=subtype,
-                    terminal_reason=terminal_reason,
-                    num_turns=num_turns,
-                    cost_usd_est=cost_usd_est,
-                )
+        self._commit_and_append(fact)
 
     def task_spend(self, task_id: int) -> float:
         """What the task's attempts add up to — a caller whose own tally lost a
@@ -1088,26 +1058,18 @@ class Ledger:
         """The push already happened, so it is recorded before the pull request
         is opened: a `gh` that fails otherwise leaves a pushed branch the
         ledger cannot name (§5.7)."""
-        self._db.execute(
-            "UPDATE tasks SET pushed_sha = ?, updated_at = datetime('now') "
-            "WHERE task_id = ?",
-            (pushed_sha, task_id),
+        self._commit_and_append(
+            self._build_fact(task_id, "task_push", {"pushed_sha": pushed_sha})
         )
-        self._db.commit()
-        self._append(task_id, "task_push", pushed_sha=pushed_sha)
 
     def record_merged_head(self, task_id: int, head: str) -> None:
         """The commit a merged pull request's head actually was — called by
         `reconcile`, the only writer of `MERGED`, before that call moves the
         state (backlog item 97). A merged branch is gone by the next scan,
         so this is the one chance to keep it."""
-        self._db.execute(
-            "UPDATE tasks SET merged_head_sha = ?, updated_at = datetime('now') "
-            "WHERE task_id = ?",
-            (head, task_id),
+        self._commit_and_append(
+            self._build_fact(task_id, "task_merged_head", {"head": head})
         )
-        self._db.commit()
-        self._append(task_id, "task_merged_head", head=head)
 
     def task_policy_sha(self, task_id: int) -> str | None:
         """What this task is currently on record as having run under — the
@@ -1124,13 +1086,9 @@ class Ledger:
         re-verification ran under a declaration different from the one this
         task is on record for — never unconditionally, which would satisfy
         the letter of "rewrites when it differs" while doing it every time."""
-        self._db.execute(
-            "UPDATE tasks SET policy_sha = ?, updated_at = datetime('now') "
-            "WHERE task_id = ?",
-            (policy_sha, task_id),
+        self._commit_and_append(
+            self._build_fact(task_id, "task_policy", {"policy_sha": policy_sha})
         )
-        self._db.commit()
-        self._append(task_id, "task_policy", policy_sha=policy_sha)
 
     def set_task_package(
         self,
@@ -1147,82 +1105,66 @@ class Ledger:
         `READY_FOR_REVIEW` row once GitHub records what the operator decided.
         `MERGE_FAILED` is not revised — it is not in `PR_PENDING_STATES`,
         because it reaches the operator with no pull request to ask about."""
-        self._db.execute(
-            """UPDATE tasks
-                  SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?,
-                      updated_at = datetime('now')
-                WHERE task_id = ?""",
-            (state, branch, pushed_sha, pr_url, task_id),
-        )
-        self._db.commit()
-        self._append(
+        fact = self._build_fact(
             task_id,
             "task_package",
-            state=state,
-            branch=branch,
-            pushed_sha=pushed_sha,
-            pr_url=pr_url,
+            {
+                "state": state,
+                "branch": branch,
+                "pushed_sha": pushed_sha,
+                "pr_url": pr_url,
+            },
         )
+        self._commit_and_append(fact)
 
     def record_findings(self, task_id: int, findings: Sequence[Finding]) -> list[int]:
         """Every finding the review produced, anchored or not, in the order the
         lenses reported them. Returns the ids in that same order — REBUT names
-        a finding by its position in it (`review.anchored_blockers`)."""
-        with self._db:
-            ids = [
-                _inserted_id(
-                    self._db.execute(
-                        """INSERT INTO findings
-                               (task_id, lens, severity, file, line, claim, anchored)
-                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            task_id,
-                            f.lens,
-                            f.severity,
-                            f.file,
-                            f.line,
-                            f.claim,
-                            int(f.anchored),
-                        ),
-                    )
-                )
-                for f in findings
-            ]
-        # One fact per finding — a fold inserts `findings` one row at a time.
-        for finding_id, f in zip(ids, findings, strict=True):
-            self._append(
+        a finding by its position in it (`review.anchored_blockers`), and now
+        so does each fact's own `position`, 1 for the first."""
+        existing = self._db.execute(
+            "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
+        ).fetchone()["n"]
+        facts = [
+            self._build_fact(
                 task_id,
                 "finding",
-                finding_id=finding_id,
-                lens=f.lens,
-                severity=f.severity,
-                file=f.file,
-                line=f.line,
-                claim=f.claim,
-                anchored=f.anchored,
+                {
+                    "position": existing + i,
+                    "lens": f.lens,
+                    "severity": f.severity,
+                    "file": f.file,
+                    "line": f.line,
+                    "claim": f.claim,
+                    "anchored": f.anchored,
+                },
             )
-        return ids
+            for i, f in enumerate(findings, start=1)
+        ]
+        with self._db:
+            ids = [self._apply(fact) for fact in facts]
+        for fact in facts:
+            self._append(fact)
+        return cast("list[int]", ids)
 
     def record_rebuttal(
         self, finding_id: int, *, verdict: str | None, rebuttal: str | None
     ) -> None:
-        self._db.execute(
-            "UPDATE findings SET verdict = ?, rebuttal = ? WHERE finding_id = ?",
-            (verdict, rebuttal, finding_id),
+        owner = self._db.execute(
+            """SELECT task_id,
+                      (SELECT COUNT(*) FROM findings o
+                        WHERE o.task_id = f.task_id AND o.finding_id <= f.finding_id) AS position
+                 FROM findings f WHERE f.finding_id = ?""",
+            (finding_id,),
+        ).fetchone()
+        if owner is None:
+            raise ValueError(f"no finding {finding_id} to rebut")
+        fact = self._build_fact(
+            owner["task_id"],
+            "rebuttal",
+            {"position": owner["position"], "verdict": verdict, "rebuttal": rebuttal},
         )
-        self._db.commit()
-        if self._record is not None:
-            owner = self._db.execute(
-                "SELECT task_id FROM findings WHERE finding_id = ?", (finding_id,)
-            ).fetchone()
-            if owner is not None:
-                self._append(
-                    owner["task_id"],
-                    "rebuttal",
-                    finding_id=finding_id,
-                    verdict=verdict,
-                    rebuttal=rebuttal,
-                )
+        self._commit_and_append(fact)
 
     def findings(self, task_id: int) -> list[sqlite3.Row]:
         return list(
@@ -1239,41 +1181,51 @@ class Ledger:
         run_id: int | None = None,
         attempt_id: int | None = None,
     ) -> int:
-        with self._db:
-            cursor = self._db.execute(
-                """INSERT INTO gate_results
-                       (attempt_id, run_id, gate, status, tool, duration_ms, summary)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    attempt_id,
-                    run_id,
-                    result.gate,
-                    result.status,
-                    result.tool,
-                    result.duration_ms,
-                    result.summary,
-                ),
-            )
-            gate_result_id = _inserted_id(cursor)
-            self._db.executemany(
-                """INSERT INTO failures (gate_result_id, file, code, message, line)
-                   VALUES (?, ?, ?, ?, ?)""",
-                [
-                    (gate_result_id, f.file, f.code, f.message, f.line)
-                    for f in result.failures
-                ],
-            )
-        # A baseline result (`run_id` set) belongs to no task and has nothing
-        # to append against; an attempt's result does.
-        if attempt_id is not None and self._record is not None:
-            owner = self._attempt_owner(attempt_id)
-            if owner is not None:
-                self._append(
-                    owner,
-                    "gate_result",
-                    **result.model_dump(mode="json"),
+        if attempt_id is not None and run_id is not None:
+            raise ValueError("a gate result names an attempt or a run, never both")
+        if attempt_id is None:
+            # A baseline result names a run and is no task fact (item 177).
+            with self._db:
+                cursor = self._db.execute(
+                    """INSERT INTO gate_results
+                           (attempt_id, run_id, gate, status, tool, duration_ms, summary)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        attempt_id,
+                        run_id,
+                        result.gate,
+                        result.status,
+                        result.tool,
+                        result.duration_ms,
+                        result.summary,
+                    ),
                 )
-        return gate_result_id
+                gate_result_id = _inserted_id(cursor)
+                self._db.executemany(
+                    """INSERT INTO failures (gate_result_id, file, code, message, line)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    [
+                        (gate_result_id, f.file, f.code, f.message, f.line)
+                        for f in result.failures
+                    ],
+                )
+            return gate_result_id
+        owner = self._db.execute(
+            "SELECT task_id, phase, n FROM attempts WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()
+        if owner is None:
+            raise ValueError(f"no attempt {attempt_id} to record a gate result against")
+        fact = self._build_fact(
+            owner["task_id"],
+            "gate_result",
+            {
+                **result.model_dump(mode="json"),
+                "phase": owner["phase"],
+                "n": owner["n"],
+            },
+        )
+        return cast(int, self._commit_and_append(fact))
 
     # The read side. The spec-loop driver calls task_results; the tests alone
     # read baseline_results and queue_lines.
