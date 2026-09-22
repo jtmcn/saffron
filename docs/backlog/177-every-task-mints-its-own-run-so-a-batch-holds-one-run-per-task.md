@@ -1,13 +1,15 @@
 ---
 id: 177
 title: Every task mints its own run, so a batch holds one run per task and not one per repo
-status: open
+status: done
 tier: 2
+closed: 2026-09-22
+by_hand: true
 filed: 2026-09-17
 specs: []
 prs: []
-commits: []
-cites: [§4.1, §4.2.1]
+commits: [49c4095]
+cites: [§4.1, §4.2.1, §4.4]
 related: [68, 164]
 ---
 
@@ -46,3 +48,11 @@ One of the two is made true, and the other says so:
 
 **Filed 2026-09-17** from the domain-modeling read of `CONTEXT.md` (PR #322).
 Item 164 reads the same `create_run` call for a different defect.
+
+**Closed 2026-09-22 by hand**, taking the second arm on the operator's call.
+**Run** is now one task's pin in `CONTEXT.md` and `DESIGN.md` §4.1. §4.1 pins
+`base_sha` for the whole batch, not the whole run. §4.2.1 and §4.4 now say what
+a batch does once per repo. §4.4 and §6 place the baseline and its outcome on
+the run. A stacked task's baseline sits on its parent's head. The per-repo
+slice of a batch has no name and no row, since no table holds it and no reader
+asks for it. The code already matched, so `saffron/` is unchanged.
