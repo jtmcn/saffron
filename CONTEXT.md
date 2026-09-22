@@ -145,8 +145,11 @@ reasons, and `INFRASTRUCTURE` outranks it.
 _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished",
 "timeout" for `UNTIL`.
 
-**Run**: One repo's slice of a batch, owning its own `base_sha`, preflight outcome,
-and baseline. A batch contains one run per repo.
+**Run**: One task's pin, owning the `base_sha` its task was cut from, its preflight
+outcome and its baseline. A batch holds one run per task. Every run of one repo in a
+batch shares the `base_sha` the batch pinned for that repo. `saffron cell` and
+`saffron replay` each mint a run that belongs to no batch. The per-repo slice of a
+batch has no name and no row (backlog item 177).
 > Batch and run are **not** synonyms and stopped being interchangeable when Saffron
 > went multi-repo. Budget is a batch property; `base_sha` is a run property. If a
 > sentence works with either word, it is imprecise.
@@ -273,7 +276,7 @@ gate. _Avoid_ naming any repo-defined gate here as though it were universal.
 **Gate result**: One execution of one gate against one tree — an attempt's, or a
 run's `base_sha` for the baseline. Exactly one of `attempt_id` and `run_id` is set
 on the row, and the baseline is why (`DESIGN.md` §4.1).
-_Avoid_: "gate run", or bare "run" — "run" means a repo's slice of a batch.
+_Avoid_: "gate run", or bare "run" — "run" means one task's pin.
 
 **Gate suite**: Every gate executed as one unit against one tree — the core gates
 plus the roles the repo declares. It has no identity of its own; name what it ran
@@ -625,7 +628,7 @@ _Avoid_: "automate", "harden", "codify", "promote up", "promote down".
 
 **Scoring run**: One execution of all three lenses over one fixture, in the
 harness (`harness/lens_scoring.py`). The qualifier is not optional: bare **run**
-is one repo's slice of a batch (§2), and the harness measures REVIEW rather than
+is one task's pin (§2), and the harness measures REVIEW rather than
 running a night.
 _Avoid_: bare "run" for one, "attempt" (that is a phase execution inside a task),
 "sample", "trial".
@@ -724,7 +727,7 @@ Recorded because each was a live ambiguity and each turned out to be a design
 defect rather than a word choice (Appendix E).
 
 1. **run vs. batch** — *not* synonyms. A **batch** is one night across repos and
-   owns the budget; a **run** is one repo's slice and owns `base_sha` and the
+   owns the budget; a **run** is one task's pin and owns `base_sha` and the
    baseline. They diverged when Saffron went multi-repo and kept sharing a table,
    which left a multi-repo night with no identity to query. The ledger now has a
    `batches` table. The third sense — one gate execution — is retired: it is a

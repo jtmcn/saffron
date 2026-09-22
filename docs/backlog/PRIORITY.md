@@ -159,7 +159,7 @@ measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, ~~
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
-**Placed 2026-09-20**: **171**, **177**, **168**, **169**, ~~**b-606ea3**~~,
+**Placed 2026-09-20**: **171**, ~~**177**~~, **168**, **169**, ~~**b-606ea3**~~,
 ~~**b-f2a9d1**~~, ~~**b-0c1d69**~~ and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
 diff stat no authoritative record carries, and the other mints a run per task
 where `CONTEXT.md` defines one per repo. The last five are vocabulary a cell
