@@ -68,3 +68,51 @@ The second finding pushed the estimate to about 205 lines. That is inside the
 3. **A second worktree cannot be committed from this session.** The isolation
    guard refuses git outside the session's own worktree, and a subagent sent
    there inherits the refusal. Parallel chains need the operator to commit.
+
+## SA-0120, item b-2750d5's second half
+
+Branch `joel/specs-diff-pins-and-probe-rules`, which also carries SA-0118 and
+SA-0119 for one pull request. It depends on SA-0119.
+
+### Rounds and cost
+
+| Step | Who | Time | Tokens |
+|---|---|---|---|
+| Draft, with a prototype of the change | `spec-writer` | 21.0 min | 216k |
+| Two by-hand records and pre-flight | delegate | about 10 min | not counted |
+| First review | `spec-reviewer` | 9.4 min | 154k |
+| Revision | delegate, by hand | about 15 min | not counted |
+| Second review | `spec-reviewer` | 6.4 min | 100k |
+| Revision | delegate, by hand | about 10 min | not counted |
+
+The prototype counted 351 changed lines against the `feature` ceiling of 600,
+so there was no split. It reused `witness_gate` unchanged.
+
+### First review: no blocker, six concerns
+
+| Finding | Class | Check that should have caught it |
+|---|---|---|
+| A mutator raise and a `tests` gate `error` share one status | Two criteria disagreeing on one input | Pre-flight 2 |
+| REBUT's "the tests stayed green" overstates one witness | A change breaking a live check or test | Pre-flight 6 |
+| The adequacy drop rate counts host-filed findings | A change breaking a live check or test | Pre-flight 6 |
+| Lens-scoring fixtures would credit adequacy | A change breaking a live check or test | Pre-flight 6 |
+| A function the parent spec names in no criterion | A name the spec leans on that the base lacks | Pre-flight 3 |
+| Two wrong implementations the witness setup allowed | An arrangement argued rather than run | Pre-flight 10 |
+
+Three of the six are the class both earlier specs' reviews also found: a
+reader downstream of the change that nobody listed.
+
+### Second review: no blocker, two concerns
+
+| Finding | Class | Check that should have caught it |
+|---|---|---|
+| The anchoring survivor sat on a hunk line, so a blind reader passed | An arrangement argued rather than run | Pre-flight 10 |
+| A `run_tests` raise was invisible to a `mutate` wrapper | Two criteria disagreeing on one input | Pre-flight 2 |
+
+### What the next run should change
+
+1. **Pre-flight 6 lists every reader of what the change writes.** It found
+   three readers here and two witnesses on SA-0118. A command that lists the
+   readers of a file or field the change writes would catch this class.
+2. **A child spec names only what the parent's criteria promise.** Anything
+   else the parent's cell may not build.

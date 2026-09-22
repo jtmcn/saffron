@@ -187,8 +187,10 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    - Every remaining edit in a repo whose head declares no `tests` gate.
    - Every remaining edit, where the cell cannot be entered.
 3. **How each is asked.** Call `witness_gate` once per edit. Hand it one
-   criterion, the entry's own with the edit as its `mutant`
-   (`criterion.model_copy(update={"mutant": edit})`). Give it the
+   criterion, the entry's own with the edit as its `mutant`:
+   `criterion.model_copy(update={"mutant": Mutant.model_validate(edit)})`.
+   The entry holds the edit as a `model_dump()`, and `model_copy` validates
+   nothing. Give it the
    `collected` of the `tests` result in `gate_comparison.run.results`, or
    `None` when there is none. `run_tests` is the `tests` gate in the cell,
    built as `_probe_adequacy` builds it. `mutate` is
@@ -218,12 +220,15 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    it as `error`, the same status a `tests` gate `error` gets
    (`saffron/gates/core/witness.py:183-206` against `:228-239`). So wrap
    `mutate` in the host's own context manager that notes a raise. Tell the
-   two apart by that note, never by parsing the summary. After a noted
-   raise, apply no later edit in that cell. Record each later edit
-   `unproven`, saying an earlier edit left the tree unknown. A
-   `CellRuntimeError` out of `run_tests`, which `witness_gate` also reports
-   as `error`, means the cell died. Stop the same way, as `_probe_adequacy`
-   stops on one (`saffron/cell/session.py:1400-1417`). A `tests` gate that
+   two apart by that note, never by parsing the summary. The edit whose mutator raised records
+   `error` with `witness_gate`'s summary. After a noted raise, apply no later
+   edit in that cell. Record each later edit `unproven`, saying an earlier
+   edit left the tree unknown. `witness_gate` also catches a raise out of
+   `run_tests` and returns `error` (`witness.py:174-182`), where a `mutate`
+   wrapper cannot see it. So wrap the host's `run_tests` too, and note a
+   `CellRuntimeError` there. It means the runtime binary could not be run
+   (`saffron/cell/runtime.py:272-275`). Stop the same way, as
+   `_probe_adequacy` stops on one (`saffron/cell/session.py:1400-1417`). A `tests` gate that
    answered `error` under an edit stops nothing, since the mutator's exit
    restored the file.
 
@@ -277,9 +282,15 @@ witness id, so a subset names which criterion ran.
   see.
 - Stub `saffron.cell.worktree.source_mutated` to append to `cell.mutated`
   and yield `None`, or a reason for the file it refuses.
-- Criterion 1 anchors one edit on `_ANCHORING_DIFF`'s one line in
-  `src/x.py`. Its other edit sits on a line `read_at_head` returns for
-  another file, with no token the diff changed. Put that edit's `find` on a
+- Criterion 1 anchors one edit through the token rule, not the hunk. Put
+  its `find` on line 3 of `src/x.py`, outside `_ANCHORING_DIFF`'s one-line
+  hunk. There the Gate-only cell's `read_at_head` returns a line holding `x`,
+  a token the diff changed. `_is_anchored` accepts a hunk line before it
+  reads the file (`saffron/agents/findings.py:152-153`). So only this
+  placement fails an `anchor` handed the critic cell's reader, a reader that
+  returns `None`, or a hand-rolled hunk-only check. Its other edit sits on a
+  line `read_at_head` returns for another file, with no token the diff
+  changed. Put that edit's `find` on a
   line other than 1 of that file, and assert each finding's `line`. A
   hard-coded line then fails. `_rebuttable` stubs `read_at_head` for every
   path, so override it after calling that helper. Make the override return
