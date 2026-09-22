@@ -186,7 +186,7 @@ def state(r: Round) -> dict[str, Any]:
     }
 
 
-# Task 6 replaces this with the dated name `models.list()` reports, so a record names the model that answered.
+# models.list() on 2026-09-21 offered only aliases (jev-latest, jev-preview), no dated name.
 MODEL = "jev-latest"
 _PREFIXES = """@prefix earl: <http://www.w3.org/ns/earl#> .
 @prefix jev: <urn:software-factory:jev#> .
