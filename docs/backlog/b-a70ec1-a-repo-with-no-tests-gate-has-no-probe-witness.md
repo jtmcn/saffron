@@ -1,11 +1,12 @@
 ---
 id: b-a70ec1
 title: The probe step's no-`tests`-gate path is unwitnessed, and without it the next line raises
-status: open
+status: done
+closed: 2026-09-22
 tier: 2
 filed: 2026-09-19
 specs: [SA-0119]
-prs: []
+prs: [431]
 commits: []
 cites: [§5.5]
 related: [117, b-ce93aa]
@@ -36,3 +37,4 @@ every probe `unproven` with that reason.
 
 - 2026-09-19: filed from the spec loop's run 9 (#375). Kept out of the review
   commit because #375 was already over its `size` ceiling.
+- 2026-09-22: done, folded into `SA-0119`, #431, in the spec loop's run 13.

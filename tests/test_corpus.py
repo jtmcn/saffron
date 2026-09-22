@@ -17,7 +17,7 @@ from saffron import probe as probe_check
 from saffron.agents.findings import Finding
 from saffron.cell.runtime import CellRuntimeError
 from saffron.gates import runner
-from saffron.gates.contract import GateResult
+from saffron.gates.contract import Failure, GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
@@ -439,6 +439,16 @@ def _load_driver():
     return module
 
 
+def test_the_driver_passes_check_probe_this_repos_declared_globs():
+    """`TEST_PATHS` is this repo's own declared `integrity.test_paths` globs,
+    because `check_probe` matches globs (backlog b-461729)."""
+    from saffron.repos.policy import load_policy
+
+    driver = _load_driver()
+    policy, _sha = load_policy(REPO)
+    assert list(driver.TEST_PATHS) == policy.integrity.test_paths
+
+
 PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
 # A second, distinct probe on a second file. Distinct on all three fields so
 # `_distinct` cannot collapse the pair into one.
@@ -470,6 +480,8 @@ def _drive(
     fixture_ids=("SA-0045",),
     mutate_raises=None,
     baseline_raises=None,
+    baseline_answer=None,
+    probed_answer=None,
     probes=(PROBE,),
 ):
     """One fixture through the driver's `main`, with every path into a cell
@@ -488,6 +500,10 @@ def _drive(
     unknown, observed not being.
 
     `baseline_raises` makes the first `run_gate` call — the baseline — raise.
+
+    `baseline_answer` is what the first `run_gate` call returns, as
+    `baseline_raises` is what it raises. `probed_answer` is what the second
+    call returns.
 
     `probes` is one adequacy finding each, so a fixture can file more than one.
     """
@@ -525,6 +541,10 @@ def _drive(
         calls.append((name, executable, subset, executor))
         if baseline_raises is not None and len(calls) == 1:
             raise baseline_raises
+        if baseline_answer is not None and len(calls) == 1:
+            return baseline_answer
+        if probed_answer is not None and len(calls) == 2:
+            return probed_answer
         return GateResult(gate=name, status="pass", tool="stub tests gate")
 
     @contextlib.contextmanager
@@ -737,6 +757,102 @@ def test_a_probe_with_no_baseline_in_hand_writes_null_not_an_empty_list(
     assert {key: recorded[0][key] for key in BASELINE_KEYS} == dict.fromkeys(
         BASELINE_KEYS
     )
+
+
+def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
+    tmp_path, monkeypatch
+):
+    """`_write_probes` builds its entry from `probe.record_fields` plus only
+    `verdict`. Nothing else is spelled by hand."""
+    pre_existing = Failure(file="t.py", code="pre-existing", message="already red")
+    baseline = GateResult(
+        gate="tests",
+        status="fail",
+        tool="stub tests gate (baseline)",
+        collected=["t.py::test_a"],
+        failures=[pre_existing],
+        summary="baseline: 1 failed",
+    )
+    probed = GateResult(
+        gate="tests",
+        status="fail",
+        tool="stub tests gate (probed)",
+        collected=["t.py::test_a", "t.py::test_b"],
+        failures=[pre_existing, Failure(file="t.py", code="new", message="boom")],
+        summary="probed: 2 failed",
+    )
+
+    real = probe_check.record_fields
+    captured: list[tuple[Mutant, dict]] = []
+
+    def _wrapper(probe, result):
+        fields = real(probe, result)
+        assert fields["probe"] == probe.model_dump()
+        assert fields["reason"] == result.reason
+        captured.append((probe, fields))
+        sentinel = {key: f"sentinel:{key}" for key in fields}
+        sentinel["extra"] = "sentinel:extra"
+        return sentinel
+
+    monkeypatch.setattr(probe_check, "record_fields", _wrapper)
+
+    distinct = _drive(
+        tmp_path / "distinct",
+        monkeypatch,
+        baseline_answer=baseline,
+        probed_answer=probed,
+    )
+    raised = _drive(
+        tmp_path / "raised",
+        monkeypatch,
+        baseline_raises=CellRuntimeError("exec for the baseline failed"),
+    )
+
+    distinct_entries = json.loads(
+        (distinct.out / "SA-0045" / "probes.json").read_text()
+    )
+    raised_entries = json.loads((raised.out / "SA-0045" / "probes.json").read_text())
+    assert len(distinct_entries) == len(raised_entries) == 1
+    assert len(captured) == 2
+
+    shared = set(BASELINE_KEYS) | {
+        "probe",
+        "reason",
+        "failures",
+        "tool",
+        "collected",
+        "summary",
+    }
+    for entry, (_probe, fields) in zip(
+        [distinct_entries[0], raised_entries[0]], captured, strict=True
+    ):
+        assert set(fields) == shared
+        own = {k: v for k, v in entry.items() if k != "verdict"}
+        assert own == {
+            **{k: f"sentinel:{k}" for k in fields},
+            "extra": "sentinel:extra",
+        }
+
+    _distinct_probe, distinct_fields = captured[0]
+    _raised_probe, raised_fields = captured[1]
+
+    assert distinct_fields["tool"] == "stub tests gate (probed)"
+    assert distinct_fields["baseline_tool"] == "stub tests gate (baseline)"
+    assert distinct_fields["collected"] == 2
+    assert distinct_fields["baseline_collected"] == 1
+    assert distinct_fields["summary"] == "probed: 2 failed"
+    assert distinct_fields["baseline_summary"] == "baseline: 1 failed"
+    assert distinct_fields["failures"] == ["new"]
+    assert distinct_fields["baseline_failures"] == ["pre-existing"]
+    assert distinct_fields["reason"] != distinct_fields["summary"]
+
+    assert raised_fields["baseline_failures"] is None
+    assert raised_fields["baseline_tool"] is None
+    assert raised_fields["baseline_collected"] is None
+    assert raised_fields["baseline_summary"] is None
+
+    assert distinct_entries[0]["verdict"] == "killed"
+    assert raised_entries[0]["verdict"] == "unproven"
 
 
 def test_a_probe_that_raised_still_records_the_baseline_it_was_checked_against(

@@ -2674,11 +2674,14 @@ def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
 # --- backlog item 117: the adequacy lens's own probe, run for real ---
 
 
-def _stub_probe_gates(monkeypatch, cell, *, gate_results, mutate=None):
+def _stub_probe_gates(monkeypatch, cell, *, gate_results, mutate=None, subsets=None):
     """`run_gate`, answered only for the probe cell's `saffron-gate-`
     container, from `gate_results` in order; every other call passes
     through to the real gate runner. `worktree.source_mutated` becomes
-    `mutate`, or a default that applies cleanly into `cell.mutated`."""
+    `mutate`, or a default that applies cleanly into `cell.mutated`.
+
+    `subsets`, given a list, collects each such call's own `subset` argument.
+    A criterion-probe witness asserts one list per edit against it."""
     import saffron.gates.runner as runner_mod
 
     real_run_gate = runner_mod.run_gate
@@ -2687,6 +2690,8 @@ def _stub_probe_gates(monkeypatch, cell, *, gate_results, mutate=None):
     def _run_gate(name, executable, cwd, *, subset=None, executor=None, **kw):
         container = getattr(executor, "container", None)
         if container is not None and container.startswith("saffron-gate-"):
+            if subsets is not None:
+                subsets.append(list(subset or []))
             return next(results)
         return real_run_gate(
             name, executable, cwd, subset=subset, executor=executor, **kw
@@ -2860,8 +2865,8 @@ def test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied(
 ):
     """Criterion 4: a probe whose file, normalised, matches a declared
     `integrity.test_paths` glob (never merely `tests/**`) is `unproven`
-    without the mutator ever being entered — checked host-side, on the
-    normalised path, not `check_probe`'s own prefix rule."""
+    without the mutator ever being entered. The host asks before any cell,
+    with the same rule `check_probe` itself would apply."""
     on_a_test_path = {
         "findings": [
             _adequacy_finding(_CONCERN_CLAIM, "./spec/a.py", "if x < 0:", "if False:")
@@ -2881,6 +2886,99 @@ def test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied(
     assert entry["probe_verdict"] == "unproven"
     assert "spec/a.py" in entry["reason"]
     assert cell.mutated == []
+
+
+def test_a_probed_review_no_probe_cell_could_answer_enters_none(monkeypatch, tmp_path):
+    """Criterion 2, with backlog item b-a70ec1 folded in: when nothing in a
+    review's probes could be answered in a Gate-only cell, none is asked for.
+    Every probe is `unproven` with its own reason, and the task still ends
+    `READY_FOR_REVIEW`. Three reviews of two probes each: no `tests` gate
+    declared, no `test_paths` declared, and (with both declared) one probe on
+    a declared test path beside one outside the tree."""
+    import inspect
+
+    real_critic_cell = session.critic_cell
+    calls: list[str] = []
+
+    def _spy(**kwargs):
+        # By caller, because every cell here is created through one function.
+        if any(f.function == "_probe_adequacy" for f in inspect.stack()):
+            calls.append("called")
+            raise runtime.CellRuntimeError("must not be entered")
+        return real_critic_cell(**kwargs)
+
+    monkeypatch.setattr("saffron.cell.session.critic_cell", _spy)
+
+    two_probes = {
+        "findings": [
+            _adequacy_finding("c1", "src/a.py", "a", "A"),
+            _adequacy_finding("c2", "src/b.py", "b", "B"),
+        ]
+    }
+    scenarios = [
+        (
+            "no-tests-gate",
+            'gates: {}\nintegrity:\n  test_paths: ["spec/**"]\n',
+            (),
+            "this repo's head declares no `tests` gate, so nothing could "
+            "answer the probe",
+        ),
+        (
+            "no-test-paths",
+            "gates: {tests: {}}\n",
+            ("tests",),
+            "the repo declares no test paths, so source cannot be told from test",
+        ),
+    ]
+    for name, policy, gates, reason in scenarios:
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=_adequacy_turns(two_probes),
+            policy=policy,
+            gates=gates,
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert cell.mutated == []
+        entries = json.loads(
+            (tmp_path / name / "out" / "SY-1" / "probes.json").read_text()
+        )
+        assert [e["probe_verdict"] for e in entries] == ["unproven", "unproven"]
+        assert [e["reason"] for e in entries] == [reason, reason]
+
+    # Both declared, but `check_probe`'s own rule refuses every probe in the
+    # review: one on a declared test path, one outside the tree.
+    on_test_and_outside = {
+        "findings": [
+            _adequacy_finding("c1", "spec/a.py", "a", "A"),
+            _adequacy_finding("c2", "../outside.py", "b", "B"),
+        ]
+    }
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "test-path-and-outside",
+        cell=cell,
+        turns=_adequacy_turns(on_test_and_outside),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.mutated == []
+    entries = json.loads(
+        (
+            tmp_path / "test-path-and-outside" / "out" / "SY-1" / "probes.json"
+        ).read_text()
+    )
+    by_file = {e["probe"]["file"]: e for e in entries}
+    assert by_file["spec/a.py"]["probe_verdict"] == "unproven"
+    assert "test" in by_file["spec/a.py"]["reason"]
+    assert by_file["../outside.py"]["probe_verdict"] == "unproven"
+    assert "inside the tree" in by_file["../outside.py"]["reason"]
+
+    assert calls == []
 
 
 def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
@@ -3044,6 +3142,111 @@ def test_a_probe_cell_that_never_comes_up_leaves_the_findings_as_filed(
     (finding,) = adequacy["findings"]
     assert finding["severity"] == "concern"
     assert finding["probe_verdict"] == "unproven"
+
+
+def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
+    monkeypatch, tmp_path
+):
+    """`decide` builds its entry from `probe.record_fields` plus only
+    `probe_verdict` and `findings`. Nothing else is spelled by hand."""
+    import saffron.probe as probe_check
+    from saffron.intake import Mutant
+
+    baseline = GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.0",
+        collected=["t.py::test_a"],
+        summary="1 passed in 1s",
+    )
+    killed = Failure(file="t.py", code="t.py::test_b", message="boom")
+    mutated = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8.1 probed",
+        collected=["t.py::test_a", "t.py::test_b"],
+        failures=[killed],
+        summary="1 failed in 2s",
+    )
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _stub_probe_gates(monkeypatch, cell, gate_results=[baseline, mutated])
+
+    real = probe_check.record_fields
+    captured: list[tuple[Mutant, dict]] = []
+
+    def _wrapper(probe, result):
+        fields = real(probe, result)
+        assert fields["probe"] == probe.model_dump()
+        assert fields["reason"] == result.reason
+        captured.append((probe, fields))
+        sentinel = {key: f"sentinel:{key}" for key in fields}
+        sentinel["extra"] = "sentinel:extra"
+        return sentinel
+
+    monkeypatch.setattr(probe_check, "record_fields", _wrapper)
+
+    two_findings = {
+        "findings": [
+            _adequacy_finding("source probe", "src/a.py", "if x < 0:", "if False:"),
+            _adequacy_finding("test-path probe", "spec/a.py", "if y < 0:", "if False:"),
+        ]
+    }
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(two_findings),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    entries = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    assert len(entries) == len(captured) == 2
+
+    shared = {
+        "probe",
+        "reason",
+        "failures",
+        "tool",
+        "collected",
+        "summary",
+        "baseline_failures",
+        "baseline_tool",
+        "baseline_collected",
+        "baseline_summary",
+    }
+    for entry, (_probe, fields) in zip(entries, captured, strict=True):
+        assert set(fields) == shared
+        own = {k: v for k, v in entry.items() if k not in ("probe_verdict", "findings")}
+        assert own == {
+            **{k: f"sentinel:{k}" for k in fields},
+            "extra": "sentinel:extra",
+        }
+
+    by_file = {probe.file: fields for probe, fields in captured}
+    refused = by_file["spec/a.py"]
+    assert refused["baseline_failures"] is None
+    assert refused["baseline_tool"] is None
+    assert refused["baseline_collected"] is None
+    assert refused["baseline_summary"] is None
+
+    probed = by_file["src/a.py"]
+    assert probed["tool"] == "pytest 8.1 probed"
+    assert probed["baseline_tool"] == baseline.tool
+    assert probed["collected"] == 2
+    assert probed["baseline_collected"] == 1  # len(baseline.collected)
+    assert probed["summary"] == "1 failed in 2s"
+    assert probed["baseline_summary"] == baseline.summary
+    assert probed["failures"] == ["t.py::test_b"]
+    assert probed["baseline_failures"] == []
+    assert probed["reason"] != probed["summary"]
+
+    verdicts = {
+        probe.file: entry["probe_verdict"]
+        for entry, (probe, _fields) in zip(entries, captured, strict=True)
+    }
+    assert verdicts == {"src/a.py": "killed", "spec/a.py": "unproven"}
 
 
 def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
@@ -5872,6 +6075,261 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
     assert not [
         w for w in empty_cell.watched if w.startswith("REVIEW: criterion probes:")
     ]
+
+
+# --- criterion probes, applied: does the witness notice its own edit? (b-2750d5) ---
+
+
+def _tests_result(status, **kw):
+    """A `tests` gate result, `pytest 8.0` by default. Every
+    criterion-probe witness below scripts this shape through `_stub_probe_gates` and
+    `_stub_the_runtime`'s own `gate_cell_suite`."""
+    return GateResult(gate="tests", status=status, tool="pytest 8.0", **kw)
+
+
+def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
+    monkeypatch, tmp_path
+):
+    """Criterion 1: an edit its own witness does not notice is filed as a
+    host-filed `adequacy` blocker. Of two survivors, only the one anchored by
+    the token rule (its `find` sits outside `_ANCHORING_DIFF`'s one-line
+    hunk) reaches `rebuttal.json`. The other reaches only `findings.json`.
+    Neither moves the `adequacy` lens's own drop rate, which counts only its own."""
+    from saffron.agents.findings import Finding
+    from saffron.intake import Criterion, Mutant
+
+    first = Criterion(claim="the guard rejects a negative amount", witness="t.py::a")
+    second = Criterion(claim="the total never goes negative", witness="t.py::b")
+
+    # Line 3 of `src/x.py` sits outside the diff's `@@ -1 +1 @@` hunk.
+    # It shares a token ("x") the diff changed, so it anchors by content.
+    anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
+    # No token the diff touched is on its own line, so it does not anchor.
+    unanchored = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a", "t.py::b"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::b"]),
+        ],
+        subsets=subsets,
+    )
+    contents = {
+        "src/x.py": "def y():\n    return 1\nassert x == 1\n",
+        "src/y.py": "def other():\n    check(9)\n",
+    }
+
+    def _read_at_head(container, path):
+        # The critic cell is torn down before criterion probes run. A read
+        # aimed at it must fail, never fall back to the real content.
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(_probe_answer(anchors, "removing the guard lets a negative through")),
+            _turn(_probe_answer(unanchored, "nothing checks the total's sign")),
+        )
+        + [_turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))],
+        spec=_spec(acceptance=[first, second]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTING"
+    assert subsets == [["t.py::a"], ["t.py::b"]]
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    assert [e["outcome"] for e in entries] == ["survived", "survived"]
+
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    assert all(f["claim"].startswith(review.HOST_FILED) for f in adequacy["findings"])
+    assert [f["anchored"] for f in adequacy["findings"]] == [True, False]
+    assert [f["lens"] for f in adequacy["findings"]] == ["adequacy", "adequacy"]
+    assert [f["line"] for f in adequacy["findings"]] == [3, 2]
+    assert adequacy["drop_rate"] == 0.0  # neither survivor is the lens's own
+    # Each finding carries its own edit, in the spec's own order. It is never
+    # the other survivor's, and never dropped.
+    assert adequacy["findings"][0]["probe"] == anchors
+    assert adequacy["findings"][1]["probe"] == unanchored
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (blocker,) = record["blockers"]
+    assert blocker["claim"].startswith(review.HOST_FILED)
+    assert blocker["lens"] == "adequacy"
+    assert blocker["probe_verdict"] == "survived"
+    assert blocker["line"] == 3
+    # The edit `_blocker_line` renders to the implementer for this survivor.
+    assert blocker["probe"] == anchors
+
+    # A lens's own unanchored finding still counts, whatever its probe
+    # verdict. A `HOST_FILED` one, alike in every field but its claim, does not.
+    own = Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="z.py",
+        line=1,
+        claim="the lens's own claim",
+        anchored=False,
+        probe=Mutant.model_validate(anchors),
+        probe_verdict="survived",
+    )
+    host_filed = own.model_copy(update={"claim": f"{review.HOST_FILED}x"})
+    assert review.LensReview("adequacy", findings=[own, host_filed]).drop_rate == 1.0
+
+    # A lens cannot file a claim starting with `HOST_FILED`: every leading
+    # occurrence is stripped, however many a report tries to stack.
+    spoofed = review._Reported(
+        file="a.py", line=1, severity="blocker", claim=review.HOST_FILED * 2 + "spoofed"
+    )
+    for lens in review.LENSES:
+        stripped = review._from_report(lens, [spoofed], 0.0)
+        assert not stripped.findings[0].claim.startswith(review.HOST_FILED)
+
+
+def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
+    monkeypatch, tmp_path
+):
+    """Criterion 2: an edit its own witness kills is `killed` and files
+    nothing. An edit under which the `tests` gate itself answers `error` is
+    `error`, with `witness_gate`'s own summary, and stops nothing after it.
+    The witness drives three edits, in order: killed, `error`, killed."""
+    from saffron.intake import Criterion
+
+    criteria = [Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abc"]
+
+    def edit(replace):
+        return {"file": "src/x.py", "find": "assert x == 1", "replace": replace}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[
+            _tests_result("pass", collected=["t.py::a", "t.py::b", "t.py::c"])
+        ],
+    )
+    errored = _tests_result("error", summary="collection crashed")
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result(
+                "fail",
+                collected=["t.py::a"],
+                failures=[Failure(file="t.py", code="a", message="boom")],
+            ),
+            errored,
+            _tests_result(
+                "fail",
+                collected=["t.py::c"],
+                failures=[Failure(file="t.py", code="c", message="boom")],
+            ),
+        ],
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            *(_turn(_probe_answer(edit(n), f"reason {n}")) for n in "123")
+        ),
+        spec=_spec(acceptance=criteria),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    assert [e["outcome"] for e in entries] == ["killed", "error", "killed"]
+    assert errored.summary in entries[1]["summary"]
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    assert adequacy["findings"] == []
+
+
+def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: five entries nothing could answer are all `unproven` and
+    file nothing. They are an entry with no edit, an edit on a declared test
+    path, an edit outside the tree, and an edit the mutator refuses. The fifth
+    is an edit whose witness the `tests` gate never collected. The mutator is
+    entered for the refused edit alone, and its reason is quoted verbatim."""
+    from saffron.intake import Criterion, Mutant
+
+    criteria = [Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abcde"]
+    on_test_path = {"file": "spec/t.py", "find": "assert 1", "replace": "2"}
+    outside_tree = {"file": "../outside.py", "find": "assert 1", "replace": "2"}
+    refused_edit = {"file": "src/x.py", "find": "assert x == 1", "replace": "2"}
+    not_collected = {"file": "src/x.py", "find": "assert x == 2", "replace": "3"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[
+            _tests_result(
+                "pass", collected=["t.py::a", "t.py::b", "t.py::c", "t.py::d"]
+            )
+        ],
+    )
+    refusal_reason = "src/x.py carries uncommitted work, nothing to restore"
+
+    @contextlib.contextmanager
+    def _refuses(_container, edit):
+        cell.mutated.append(edit)
+        yield refusal_reason
+
+    _stub_probe_gates(monkeypatch, cell, gate_results=[], mutate=_refuses)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(_probe_answer(None, "nothing in the diff touches this")),
+            _turn(_probe_answer(on_test_path, "reason")),
+            _turn(_probe_answer(outside_tree, "reason")),
+            _turn(_probe_answer(refused_edit, "reason")),
+            _turn(_probe_answer(not_collected, "reason")),
+        ),
+        spec=_spec(acceptance=criteria),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    assert [e["outcome"] for e in entries] == ["unproven"] * 5
+    assert "spec/t.py" in entries[1]["summary"]
+    assert (
+        "outside.py" in entries[2]["summary"]
+        or "not a relative" in entries[2]["summary"]
+    )
+    assert refusal_reason in entries[3]["summary"]
+    assert "t.py::e" in entries[4]["summary"]
+    # The mutator is entered for the refused edit alone.
+    assert cell.mutated == [Mutant.model_validate(refused_edit)]
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    assert adequacy["findings"] == []
 
 
 def test_a_proposed_scope_keeps_the_specs_declared_touches(monkeypatch, tmp_path):

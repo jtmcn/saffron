@@ -1,11 +1,12 @@
 ---
 id: b-2750d5
 title: No cell mutates the line that satisfies each criterion, so a witness hole ships unless a person probes it
-status: partial
+status: done
+closed: 2026-09-22
 tier: 1
 filed: 2026-09-19
 specs: [SA-0113, SA-0120]
-prs: [403]
+prs: [403, 434]
 commits: []
 cites: [§5.4, §5.5.1]
 related: [117, 80, 79, b-f2a9d1, 97, b-0c1d69]
@@ -78,3 +79,9 @@ by hand.
   edit in a Gate-only cell through `witness_gate`, and files a survivor as an
   `adequacy` blocker for REBUT. It waits on `SA-0119`, which gives it the one
   test-path rule.
+- 2026-09-22: done, `SA-0120`, #434, in the spec loop's run 13. The host
+  applies each criterion probe in a Gate-only cell and runs its criterion's
+  witness over it. A survivor is an `adequacy` blocker for REBUT. The Spec seat
+  still found four wrong implementations that passed criterion 1's witness.
+  The stale glossary and `DESIGN.md` text is item b-37924b, and the ledger's
+  drop rate is item b-b431c1.

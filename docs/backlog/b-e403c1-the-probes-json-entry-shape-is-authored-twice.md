@@ -1,11 +1,12 @@
 ---
 id: b-e403c1
 title: '`probes.json`''s entry shape is authored twice, with nothing holding the two together'
-status: open
+status: done
+closed: 2026-09-22
 tier: 3
 filed: 2026-09-19
 specs: [SA-0122]
-prs: []
+prs: [436]
 commits: []
 cites: [§5.5]
 related: [94, 117]
@@ -30,3 +31,5 @@ The entry-shape helper lives in `saffron/probe.py` and both writers call it.
 
 - 2026-09-19: filed from the spec loop's run 9 (#375). Both files were
   forbidden to `SA-0109`.
+- 2026-09-22: done, `SA-0122`, #436, in the spec loop's run 13. Both writers
+  call one helper in `saffron/probe.py`.

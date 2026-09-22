@@ -11,7 +11,6 @@ import contextlib
 import hashlib
 import json
 import os
-import posixpath
 import re
 import time
 from collections import Counter
@@ -21,7 +20,7 @@ from functools import partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from saffron.agents.findings import Finding
+from saffron.agents.findings import Finding, anchor
 from saffron.cell import runtime
 from saffron.events import (
     Attempt,
@@ -43,7 +42,6 @@ from saffron.events import (
 from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
-from saffron.gates.core.scope import matches
 from saffron.intake import Criterion, Mutant
 from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
@@ -1240,18 +1238,6 @@ def _gate_cell_suite(
         return suite.against(CellTree(container, cwd=repo), baseline)
 
 
-def _declared_test_path(file: str, test_paths: Sequence[str]) -> bool:
-    """`file`, normalised, against the repo's declared `integrity.test_paths`
-    globs — `scope.matches`, the rule `revert` uses, because `check_probe`'s
-    own `test_paths` compares prefixes and `saffron/probe.py` is forbidden
-    here (backlog item 117)."""
-    normalised = posixpath.normpath(file)
-    escapes = normalised == ".." or normalised.startswith("../")
-    if posixpath.isabs(normalised) or escapes:
-        return False
-    return any(matches(normalised, pattern) for pattern in test_paths)
-
-
 def _probe_adequacy(
     *,
     spec: CellSpec,
@@ -1294,20 +1280,10 @@ def _probe_adequacy(
         findings = by_probe[review.probe_key(probe)]
         for f in findings:
             review.apply_probe_verdict(f, result.verdict)
-        record = result.baseline
         entries.append(
             {
-                "probe": probe.model_dump(),
+                **probe_check.record_fields(probe, result),
                 "probe_verdict": result.verdict,
-                "reason": result.reason,
-                "failures": list(result.failures),
-                "tool": result.tool,
-                "collected": result.collected,
-                "summary": result.summary,
-                "baseline_failures": None if record is None else list(record.failures),
-                "baseline_tool": None if record is None else record.tool,
-                "baseline_collected": None if record is None else record.collected,
-                "baseline_summary": None if record is None else record.summary,
                 "findings": [
                     {
                         "lens": f.lens,
@@ -1325,19 +1301,16 @@ def _probe_adequacy(
             decide(p, probe_check.ProbeResult("unproven", reason, baseline=record))
 
     probes = review.distinct_probes(targets)
-    on_test_path = {
-        review.probe_key(p) for p in probes if _declared_test_path(p.file, test_paths)
+    refused = {
+        review.probe_key(p): reason
+        for p in probes
+        if (reason := probe_check.probe_refusal(p.file, test_paths)) is not None
     }
-    # The mutator is never entered for a declared test path (item 117).
+    # The mutator is never entered for a refused probe (item 117, b-461729).
     for p in probes:
-        if review.probe_key(p) in on_test_path:
-            decide(
-                p,
-                probe_check.ProbeResult(
-                    "unproven", f"{p.file} is a declared test path"
-                ),
-            )
-    remaining = [p for p in probes if review.probe_key(p) not in on_test_path]
+        if review.probe_key(p) in refused:
+            decide(p, probe_check.ProbeResult("unproven", refused[review.probe_key(p)]))
+    remaining = [p for p in probes if review.probe_key(p) not in refused]
     if not remaining:
         return entries
     if "tests" not in gates:
@@ -1395,7 +1368,7 @@ def _probe_adequacy(
                     baseline=baseline,
                     mutate=partial(worktree.source_mutated, container),
                     run_tests=run_tests,
-                    test_paths=(),  # the host already refused a test path above
+                    test_paths=test_paths,  # the same list every probe was asked about
                 )
             except runtime.CellRuntimeError as exc:
                 # A failed undo leaves the tree untrustworthy (item 117): no
@@ -1417,6 +1390,157 @@ def _probe_adequacy(
                 break
             decide(p, result)
     return entries
+
+
+def _apply_criterion_probes(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    test_paths: Sequence[str],
+    gates: dict[str, Path],
+    patch: str,
+    entries: list[dict],
+    diff: str,
+    gate_comparison: SuiteComparison,
+    reviews: list[review.LensReview],
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> None:
+    """Every criterion probe's own edit, applied and asked of its own witness
+    (backlog item b-2750d5). It runs in a Gate-only cell entered after
+    `_probe_adequacy`'s own is torn down, never inside the critic cell.
+
+    Writes each edit's outcome and summary into `entries` in place. Appends a
+    survivor's `Finding` to the `adequacy` review in `reviews`, the same
+    in-place contract `_probe_adequacy` keeps with its caller.
+    """
+    from saffron import probe as probe_check
+    from saffron.cell import worktree
+    from saffron.gates import runner
+    from saffron.gates.core.witness import witness_gate
+
+    paired = list(zip(spec.acceptance, entries, strict=True))
+    unknown_tree = (
+        "an earlier edit left this cell's tree in an unknown state, so nothing "
+        "after it was asked"
+    )
+
+    def _unproven(pending: list[tuple[Criterion, dict]], reason: str) -> None:
+        for _criterion, entry in pending:
+            entry["outcome"] = "unproven"
+            entry["summary"] = reason
+
+    # The mutator is never entered for an entry with no edit or a refused one.
+    with_edit: list[tuple[Criterion, dict]] = []
+    for criterion, entry in paired:
+        if entry["edit"] is None:
+            _unproven([(criterion, entry)], "this session named no edit")
+            continue
+        refusal = probe_check.probe_refusal(entry["edit"]["file"], test_paths)
+        if refusal is not None:
+            _unproven([(criterion, entry)], refusal)
+            continue
+        with_edit.append((criterion, entry))
+
+    if not with_edit:
+        return
+    if "tests" not in gates:
+        _unproven(
+            with_edit,
+            "this repo's head declares no `tests` gate, so nothing could "
+            "answer the probe",
+        )
+        return
+
+    collected = next(
+        (r.collected for r in gate_comparison.run.results if r.gate == "tests"), None
+    )
+    adequacy = next(r for r in reviews if r.lens == "adequacy")
+
+    stack = contextlib.ExitStack()
+    try:
+        container = stack.enter_context(
+            critic_cell(
+                spec=spec,
+                repo=repo,
+                mirror=mirror,
+                network=None,
+                env=dict(thread_env),  # the repo's declared gate env, nothing more
+                gates_dir=gates_dir,
+                patch=patch,
+                created=created,
+                note=note,
+            )
+        )
+    except runtime.CellRuntimeError as exc:
+        _unproven(with_edit, f"the probe cell could not be entered: {exc}")
+        return
+
+    with stack:
+        # `witness_gate` reports a raise here and a gate `error` alike as
+        # `error`. Only this note tells them apart.
+        stopped: str | None = None
+
+        @contextlib.contextmanager
+        def _mutate(edit: Mutant):
+            nonlocal stopped
+            try:
+                with worktree.source_mutated(container, edit) as reason:
+                    yield reason
+            except runtime.CellRuntimeError as exc:
+                stopped = str(exc)
+                raise
+
+        def _run_tests(subset: list[str]) -> GateResult:
+            nonlocal stopped
+            try:
+                return runner.run_gate(
+                    "tests",
+                    gates["tests"],
+                    repo,
+                    subset=subset,
+                    executor=runner.CellExecutor(container),
+                )
+            except runtime.CellRuntimeError as exc:
+                stopped = str(exc)
+                raise
+
+        for index, (criterion, entry) in enumerate(with_edit):
+            edit = Mutant.model_validate(entry["edit"])
+            result = witness_gate(
+                acceptance=[criterion.model_copy(update={"mutant": edit})],
+                mutate=_mutate,
+                run_tests=_run_tests,
+                collected=collected,
+            )
+            entry["outcome"] = review.criterion_probe_outcome(result.status)
+            entry["summary"] = result.summary
+            if stopped is not None:
+                # `witness_gate` already reports this entry as `error`, with
+                # the summary kept above. `stopped` only ends the loop.
+                _unproven(with_edit[index + 1 :], unknown_tree)
+                return
+            if entry["outcome"] != "survived":
+                continue
+            try:
+                content = worktree.read_at_head(container, edit.file)
+                if content is None or edit.find not in content:
+                    entry["outcome"] = "error"
+                    entry["summary"] = "the survivor's line could not be read"
+                    continue
+                finding = review.survivor_finding(criterion, edit, content)
+                (anchored,) = anchor(
+                    [finding], diff, read_head=partial(worktree.read_at_head, container)
+                )
+            except runtime.CellRuntimeError as exc:
+                entry["outcome"] = "error"
+                entry["summary"] = f"the survivor's line could not be read: {exc}"
+                _unproven(with_edit[index + 1 :], unknown_tree)
+                return
+            adequacy.findings.append(anchored)
 
 
 def _drive_cell(
@@ -2392,6 +2516,25 @@ def _drive_cell(
                             "REVIEW",
                             review.describe_probes(probed),
                         )
+
+                    # Every named edit, applied and asked (item b-2750d5),
+                    # before the record below is written.
+                    _apply_criterion_probes(
+                        spec=spec,
+                        repo=repo,
+                        mirror=mirror,
+                        gates_dir=gates_dir,
+                        thread_env=policy.thread_env,
+                        test_paths=policy.integrity.test_paths,
+                        gates=gates,
+                        patch=patch_to_review,
+                        entries=criterion_probes,
+                        diff=reviewed_diff,
+                        gate_comparison=gate_comparison,
+                        reviews=reviews,
+                        created=created,
+                        note=_critic_teardown,
+                    )
 
                     # A spec declaring no criterion bought no session above
                     # and writes no record here (backlog item b-2750d5).

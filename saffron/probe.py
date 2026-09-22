@@ -28,6 +28,7 @@ from typing import Literal
 
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import GateResult
+from saffron.gates.core.scope import matches
 from saffron.intake import Mutant
 
 # Redeclared rather than imported from `witness`/`revert`: this module owes
@@ -129,20 +130,28 @@ def _repo_relative(file: str) -> str | None:
 
     The path is model-authored, so it is normalised before anything compares
     it: `ls-tree HEAD --` resolves `tests/x.py`, `./tests/x.py` and
-    `a/../tests/x.py` to the same blob (measured 2026-09-09), so a raw prefix
-    test refuses one spelling of a test file and applies the other two.
+    `a/../tests/x.py` to the same blob (measured 2026-09-09).
     """
     normalised = posixpath.normpath(file)
     escapes = normalised == ".." or normalised.startswith("../")
     return None if posixpath.isabs(normalised) or escapes else normalised
 
 
-def _under(path: str, prefix: str) -> bool:
-    """Segment-wise containment: `tests/` covers `tests/test_x.py` and not
-    `tests_helpers/x.py`. Both sides normalised, or `tests/` would match
-    nothing after the left side lost its trailing slash."""
-    prefix = posixpath.normpath(prefix)
-    return path == prefix or path.startswith(prefix + "/")
+def probe_refusal(file: str, test_paths: Sequence[str]) -> str | None:
+    """Why a probe aimed at `file` is refused, or `None` if it may proceed.
+
+    A path outside the tree first, then `revert`'s rule: no declared test
+    paths at all, then a declared glob (`scope.matches`, never a prefix, never
+    `fnmatch`) the normalised path matches.
+    """
+    target = _repo_relative(file)
+    if target is None:
+        return f"{file} is not a relative path inside the tree"
+    if not test_paths:
+        return "the repo declares no test paths, so source cannot be told from test"
+    if any(matches(target, pattern) for pattern in test_paths):
+        return f"{target} is a test; a probe must target source"
+    return None
 
 
 def check_probe(
@@ -163,21 +172,11 @@ def check_probe(
     # Before any refusal, so a `None` baseline means the same thing whichever
     # path returns: there was no baseline verdict to record.
     record = BaselineRecord.of(baseline)
-    target = _repo_relative(probe.file)
-    if target is None:
-        return ProbeResult(
-            "unproven",
-            f"{probe.file} is not a relative path inside the tree",
-            baseline=record,
-        )
-    if any(_under(target, prefix) for prefix in test_paths):
-        # Otherwise satisfiable by construction — deleting an assertion
-        # survives trivially. Refused before `mutate`, so nothing is written.
-        return ProbeResult(
-            "unproven",
-            f"{probe.file} is a test; a probe must target source",
-            baseline=record,
-        )
+    reason = probe_refusal(probe.file, test_paths)
+    if reason is not None:
+        # Refused before `mutate`, so nothing is written for a question that
+        # must not be asked.
+        return ProbeResult("unproven", reason, baseline=record)
     if record is None:
         # `error` or `skip`: a baseline that measured no failures would read
         # every probe against it as a kill of tests that never ran.
@@ -243,3 +242,24 @@ def check_probe(
         summary=summary,
         baseline=record,
     )
+
+
+def record_fields(probe: Mutant, result: ProbeResult) -> dict[str, object]:
+    """The ten fields a `probes.json` entry owes `probe` and `result`, flat.
+
+    It returns no verdict key and no `findings`. Each caller adds its own.
+    The baseline fields are `null` when `result.baseline` is `None`, never
+    `[]`."""
+    baseline = result.baseline
+    return {
+        "probe": probe.model_dump(),
+        "reason": result.reason,
+        "failures": list(result.failures),
+        "tool": result.tool,
+        "collected": result.collected,
+        "summary": result.summary,
+        "baseline_failures": None if baseline is None else list(baseline.failures),
+        "baseline_tool": None if baseline is None else baseline.tool,
+        "baseline_collected": None if baseline is None else baseline.collected,
+        "baseline_summary": None if baseline is None else baseline.summary,
+    }

@@ -1,10 +1,11 @@
 ---
 id: 103
 title: A cell can hide an edit's content from the critic with settings the diff never shows
-status: partial
+status: done
+closed: 2026-09-22
 tier: 2
 specs: [SA-0075, SA-0118]
-prs: [231]
+prs: [231, 433]
 commits: []
 cites: []
 related: [89]
@@ -64,3 +65,10 @@ this was corrected by hand the same day, since `SA-0075` cannot reach
 `--numstat` printed `-	-	f.py`, with `--text` as well.
 
 Merged 2026-09-13, PR #231.
+
+**2026-09-22: done, `SA-0118`, PR #433.** `export_patch` now reads a fresh git
+dir, so neither `.git/info/attributes` nor a hidden untracked `.gitattributes`
+reaches the diff. The cell ended `EXHAUSTED` at $10.45 of $20 with a correct
+diff, because `revert` refused a witness REBUT added (item b-4a63b7). The
+operator opened #433 by hand. The stale `integrity` comment is item b-542beb.
+A global `attr.tree` on newer git is item b-a9ee32.

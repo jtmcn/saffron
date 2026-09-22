@@ -1,10 +1,11 @@
 ---
 id: 89
 title: '`DIFF_FLAGS` pins less of the diff''s shape than its own comment claims'
-status: partial
+status: done
+closed: 2026-09-22
 tier: 1
 specs: [SA-0072, SA-0082, SA-0121]
-prs: [219, 244]
+prs: [219, 244, 435]
 commits: []
 cites: [§2]
 related: [115]
@@ -96,3 +97,8 @@ restore the pinned shape. `-c color.ui=never` does not beat `color.diff=always`.
 One correction to the bullet below: `color.ui=always` leaves the name-only
 listing clean, so its escape codes land in the patch, not in the list `scope`
 reads.
+
+**2026-09-22: done, `SA-0121`, PR #435.** `pinned_diff` and the
+`tests/test_package.py` fixture now take their flags from `DIFF_FLAGS`, and
+no other half of this item is open. Two `tests/test_scope.py` docstrings still
+cite `pinned_diff` as the home of the pins, which is item b-542beb.

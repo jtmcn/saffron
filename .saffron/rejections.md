@@ -810,3 +810,44 @@ The delegate verified each one before it was fixed or kept.
 - Both pull requests carried em-dashes, semicolons or long docstring sentences
   in new Python comments.
   **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+
+## 2026-09-22, `SA-0118` to `SA-0122` (the spec loop's run 13, fixes in #431, #433, #434, #435, #436)
+
+Run 13 of the spec loop. The in-cell adequacy lens caught `SA-0118`'s sha1
+literal, which step 1b had flagged and the delegate deferred. That is not a
+rejection. These are what the two independent seats found after each cell. The
+delegate verified each one before it was fixed or kept.
+
+- `SA-0119` (#431): new Python comments carried em-dashes.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0119` (#431): a docstring credited `revert` with an order of checks it
+  does not make.
+  **Bucket 2**, a claim stronger than the code. **Open.**
+- `SA-0118` (#433): moving `.git/info/attributes` aside and back passed the
+  witnesses of criteria 1 to 3. A review commit added an mtime sentinel.
+  **Bucket 1**, the spec's arrangement. **Landed:** item b-2750d5's criterion
+  probes, by #434, after this cell ran.
+- `SA-0118` (#433): docstrings still named the worktree's own config, which the
+  diff stopped reading.
+  **Bucket 2**, a comment the diff made false. **Open.**
+- `SA-0118` (#433): one docstring sentence ran to 43 words.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0120` (#434): four wrong implementations passed criterion 1's witness.
+  They were drop-rate rules keyed on verdict and on probe, a strip limited to
+  `adequacy`, an unasserted lens field and a hard-coded line. Two were step 1b
+  findings from round 4, deferred to the Spec seat by rule.
+  **Bucket 1.** **Landed:** item b-2750d5, in this pull request.
+- `SA-0120` (#434): new prose called a criterion probe a "declared mutant", and
+  carried em-dashes, semicolons and sentences over 25 words.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0121` (#435): the rewritten `pinned_diff` docstring named config keys the
+  flags override, where the measurement was of flag values.
+  **Bucket 2**, a comment saying the opposite of the code, whose meaning no gate
+  reads. **Open.**
+- `SA-0122` (#436): neither witness pinned the `probe` or `reason` values, and
+  each left default-valued fields that only the other checked.
+  **Bucket 1.** **Landed:** item b-2750d5, by #434.
+- `SA-0122` (#436): a `_drive` docstring inverted what `baseline_raises` does.
+  **Bucket 2**, a comment saying the opposite of the code. **Open.**
+- `SA-0122` (#436): new comments carried em-dashes.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.

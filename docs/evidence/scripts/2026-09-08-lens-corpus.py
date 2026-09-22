@@ -116,11 +116,11 @@ def _write_manifest(out: Path, fixtures: list[corpus.Fixture]) -> None:
         )
     )
 
-TEST_PATHS = ("tests/",)
-"""This repo's test root as a path prefix, which is not
-`policy.integrity.test_paths` — those are globs (`tests/**`) where
-`check_probe` compares normalised path prefixes. An edit to a test satisfies
-the number by construction, so `check_probe` requires this argument."""
+TEST_PATHS = ("tests/**",)
+"""This repo's own declared `integrity.test_paths` globs. `check_probe`
+matches them by the rule `revert` uses, never as a path prefix. An edit
+to a test satisfies the number by construction, so `check_probe` requires
+this argument."""
 
 
 def _tests_gate_in_cell(
@@ -157,17 +157,6 @@ def _distinct(probes: list[Mutant]) -> list[Mutant]:
     return list({(p.file, p.find, p.replace): p for p in probes}.values())
 
 
-def _baseline_keys(record: probe_check.BaselineRecord | None) -> dict[str, object]:
-    """Flat, and `null` throughout when no baseline was in hand — never `[]`,
-    which is a baseline read and green."""
-    return {
-        "baseline_failures": None if record is None else list(record.failures),
-        "baseline_tool": None if record is None else record.tool,
-        "baseline_collected": None if record is None else record.collected,
-        "baseline_summary": None if record is None else record.summary,
-    }
-
-
 def _write_probes(
     out: Path, applied: list[tuple[Mutant, probe_check.ProbeResult]]
 ) -> None:
@@ -180,19 +169,7 @@ def _write_probes(
     (out / "probes.json").write_text(
         json.dumps(
             [
-                {
-                    "probe": probe.model_dump(),
-                    "verdict": result.verdict,
-                    "reason": result.reason,
-                    "failures": list(result.failures),
-                    # What answered it: a `survived` over a suite that
-                    # collected almost nothing is green too.
-                    "tool": result.tool,
-                    "collected": result.collected,
-                    "summary": result.summary,
-                    # And what it was subtracted from (item 94).
-                    **_baseline_keys(result.baseline),
-                }
+                {**probe_check.record_fields(probe, result), "verdict": result.verdict}
                 for probe, result in applied
             ],
             indent=2,

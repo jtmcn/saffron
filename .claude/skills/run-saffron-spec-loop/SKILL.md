@@ -98,8 +98,9 @@ settle goes into that PR's `{KNOWN}` for the Spec seat (step 2c). Other concerns
 and notes are kept for step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
 after the edit merges.
 
-Save each review's final message to a file and score it with Jev. The scores
-are informational and nothing reads them yet. A non-zero exit is noted and the
+Save each reviewer's whole final report to a file, verbatim, and score it
+with Jev. Jev reads the report's findings block, and a summary cuts the claims
+it scores (run 13). The scores are informational and nothing reads them yet. A non-zero exit is noted and the
 loop carries on.
 
 ```bash
@@ -268,7 +269,8 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
 
-   Save both seats' reports and score them, the same command as step 1b. A
+   Save both seats' whole reports, verbatim, and score them, the same command
+   as step 1b. A
    non-zero exit is noted and the loop carries on.
 
    ```bash
@@ -370,5 +372,30 @@ append it to `.saffron/rejections.md` as its **Adding one** paragraph says, in
 the same PR. A finding answered with no change rejected nothing. Those lines
 are §8's evidence for which gate, `CLAUDE.md` line or lens comes next.
 
+Label every Jev-scored review round, because a score is worth nothing without
+the outcome it predicted. Write `labels.json` beside each round's
+`findings.json` under `~/.saffron/batches/spec-loop/SA-NNNN/<kind>/round-N/`.
+For each finding id, record these four facts:
+
+- `verified`: `real`, `not-a-defect` or `unverified`.
+- `disposition`: `fixed-pre-cell`, `fixed-in-review`, `deferred-to-seat`,
+  `operator-decided`, `filed-backlog` or `no-action`.
+- `recurred_in`: any of `cell-review`, `pr-spec-seat` and `pr-standards-seat`.
+- `item`: the backlog id it went to, if any.
+
+For the round, record `blocker_followed`. It says whether the next spec review,
+the in-cell REVIEW and the PR seats each found a blocker, or `null` for one that
+never ran. A defect no findings block carried, such as one you found yourself,
+goes in `run-NN-unscored.json` beside the spec folders. Run 13's files show the
+shape.
+
+```bash
+uv run .claude/skills/run-saffron-spec-loop/driver.py labels   # every spec in the order
+```
+
+It exits 1 and names each gap: a scored round with no `labels.json`, a finding
+with no label or an unknown value, or a missing `blocker_followed` field.
+
 **Done when** every kept finding has an item, every spec's origin item names
-its PR, and every fixed or kept finding the critic missed has a rejection line.
+its PR, every fixed or kept finding the critic missed has a rejection line, and
+`driver.py labels` exits 0.

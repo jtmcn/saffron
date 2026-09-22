@@ -127,7 +127,8 @@ def prepare_worktree(
 # The shape of every diff the host reads, pinned on the command line. Worktree
 # config is the agent's to write (§2), and a `-c` override or an explicit flag
 # beats `.git/config` — including config it pulls in via `include.path`,
-# measured on git 2.50.
+# measured on git 2.50. `export_patch` reads no `.git/config`, but the agent's
+# global config still reaches it.
 DIFF_FLAGS = (
     # diff.srcPrefix/dstPrefix/noprefix/mnemonicPrefix all move the a/ b/ the
     # host matches paths against; these flags win over every one of them.
@@ -232,8 +233,37 @@ def commit_subjects(container: str, base_sha: str) -> list[str]:
     return [line for line in done.stdout.splitlines() if line.strip()]
 
 
+# Each `{prefix}`/`{diff_flags}` token below comes from `git_argv`/`DIFF_FLAGS`.
+_EXPORT_PATCH_SCRIPT = """\
+worktree_prefix="{prefix}"
+git_dir=$($worktree_prefix rev-parse --absolute-git-dir)
+head=$($worktree_prefix rev-parse HEAD)
+fmt=$($worktree_prefix rev-parse --show-object-format)
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+git init -q --bare --template= --object-format="$fmt" "$dir"
+printf '%s\\n' "$git_dir/objects" > "$dir/objects/info/alternates"
+$worktree_prefix --git-dir="$dir" diff {diff_flags} "$1..$head"
+"""
+
+
 def export_patch(container: str, base_sha: str) -> str:
-    done = _git(container, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD")
+    """The patch every lens, `integrity` and `size` read, and PACKAGE applies.
+
+    Read from a fresh bare git dir that borrows the worktree's objects
+    through `objects/info/alternates`. That dir has no `info` of its own. So
+    neither `* -diff` in `.git/info/attributes` nor an excluded, untracked
+    `.gitattributes` reaches it (item 103). The fresh dir has no refs, so
+    `HEAD` is resolved to a sha first, and `base_sha` arrives as one. It has no template and no object-format default,
+    so `git init` pins both against whatever global config is readable.
+    """
+    prefix = shlex.join(git_argv())
+    script = _EXPORT_PATCH_SCRIPT.format(
+        prefix=prefix, diff_flags=shlex.join(DIFF_FLAGS)
+    )
+    done = runtime.exec_(
+        container, ["sh", "-euc", script, "sh", base_sha], workdir=WORKTREE_MOUNT
+    )
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff failed: {done.stderr.strip()}")
     return done.stdout
