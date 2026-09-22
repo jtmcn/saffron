@@ -119,7 +119,7 @@ acceptance:
       drives all ten such writes on a ledger with a record attached:
       `set_task_state`, `set_task_package`, `record_push`,
       `record_merged_head`, `record_policy`, `record_findings` with one
-      finding, `open_attempt`, `close_attempt`, `record_gate_result` naming an
+      finding or more, `open_attempt`, `close_attempt`, `record_gate_result` naming an
       attempt, and `record_rebuttal`. After each it asserts the record holds
       no key. At the end, `tasks`, `attempts`, `gate_results` and `findings`
       hold no row. Today seven of the ten return without a word.
@@ -166,8 +166,8 @@ acceptance:
 Backlog item **b-fd1468**, the second of the two specs its record plans.
 `SA-0117` built the half that reads facts and merged as #418. This spec builds
 the half that writes them. The ledger's schema is `DESIGN.md` §4.1, and this
-spec changes none of it. §4.6 rule 1 still holds: every write lands in SQLite
-first, and no production caller attaches a record.
+spec changes none of it. Every write still lands in SQLite first, and no
+production caller attaches a record.
 
 What the code does today, read at this spec's base:
 
@@ -266,7 +266,7 @@ of this change, a base-format record with one attempt and one finding made
 `saffron fold` print `saffron: KeyError: 'phase'` and exit 2. It did so with
 and without `--skip-unreadable`, since the fold aborts rather than skipping
 the task (`saffron/cli.py:181-185`). No criterion pins this. An `_apply` that
-read a missing position as out of place would make the task unreadable and
+read a missing `(phase, n)` or position as the record's own defect would make the task unreadable and
 exit 1 instead.
 Such records exist only in tests and in the scratch record
 `docs/evidence/scripts/2026-09-20-fold-rebuild-time.py` builds. That script
@@ -281,7 +281,8 @@ baseline gate result, which names a run and is no task fact.
 
 **`saffron/record/`.** `fold()` already reaches the ledger only through
 `fold_task`, and `Fact` needs no change. Keep `UnplacedRebuttal`'s name, since
-`saffron/record/fold.py:22` imports it.
+`saffron/record/fold.py:22` imports it. Rewrite its docstring
+(`saffron/ledger.py:180-181`) to cover a finding out of place too.
 
 **`saffron/projection.py` and `saffron/chain_walk.py`**, which read `_db`
 (item b-e9db0e). **The vocabulary entry for the fact kinds** (item b-25766a).
