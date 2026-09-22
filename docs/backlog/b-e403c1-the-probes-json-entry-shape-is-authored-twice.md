@@ -4,7 +4,7 @@ title: '`probes.json`''s entry shape is authored twice, with nothing holding the
 status: open
 tier: 3
 filed: 2026-09-19
-specs: []
+specs: [SA-0122]
 prs: []
 commits: []
 cites: [§5.5]
