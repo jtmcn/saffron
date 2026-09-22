@@ -3147,12 +3147,18 @@ def test_a_probe_cell_that_never_comes_up_leaves_the_findings_as_filed(
 def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
     monkeypatch, tmp_path
 ):
-    """b-e403c1: `decide` builds its entry from `probe.record_fields` plus
-    only `probe_verdict` and `findings` — nothing else is hand-spelled."""
+    """`decide` builds its entry from `probe.record_fields` plus only
+    `probe_verdict` and `findings`. Nothing else is spelled by hand."""
     import saffron.probe as probe_check
     from saffron.intake import Mutant
 
-    baseline = _GREEN_TESTS
+    baseline = GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.0",
+        collected=["t.py::test_a"],
+        summary="1 passed in 1s",
+    )
     killed = Failure(file="t.py", code="t.py::test_b", message="boom")
     mutated = GateResult(
         gate="tests",
@@ -3170,6 +3176,8 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
 
     def _wrapper(probe, result):
         fields = real(probe, result)
+        assert fields["probe"] == probe.model_dump()
+        assert fields["reason"] == result.reason
         captured.append((probe, fields))
         sentinel = {key: f"sentinel:{key}" for key in fields}
         sentinel["extra"] = "sentinel:extra"

@@ -17,7 +17,7 @@ from saffron import probe as probe_check
 from saffron.agents.findings import Finding
 from saffron.cell.runtime import CellRuntimeError
 from saffron.gates import runner
-from saffron.gates.contract import GateResult
+from saffron.gates.contract import Failure, GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
@@ -481,6 +481,7 @@ def _drive(
     mutate_raises=None,
     baseline_raises=None,
     baseline_answer=None,
+    probed_answer=None,
     probes=(PROBE,),
 ):
     """One fixture through the driver's `main`, with every path into a cell
@@ -500,8 +501,9 @@ def _drive(
 
     `baseline_raises` makes the first `run_gate` call — the baseline — raise.
 
-    `baseline_answer` replaces the first `run_gate` call's own return, the
-    same way `baseline_raises` replaces its raise.
+    `baseline_answer` is what the first `run_gate` call returns, as
+    `baseline_raises` is what it raises. `probed_answer` is what the second
+    call returns.
 
     `probes` is one adequacy finding each, so a fixture can file more than one.
     """
@@ -541,6 +543,8 @@ def _drive(
             raise baseline_raises
         if baseline_answer is not None and len(calls) == 1:
             return baseline_answer
+        if probed_answer is not None and len(calls) == 2:
+            return probed_answer
         return GateResult(gate=name, status="pass", tool="stub tests gate")
 
     @contextlib.contextmanager
@@ -758,17 +762,24 @@ def test_a_probe_with_no_baseline_in_hand_writes_null_not_an_empty_list(
 def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
     tmp_path, monkeypatch
 ):
-    """b-e403c1: `_write_probes` builds its entry from `probe.record_fields`
-    plus only `verdict` — nothing else is hand-spelled."""
-    from saffron.gates.contract import Failure
-
+    """`_write_probes` builds its entry from `probe.record_fields` plus only
+    `verdict`. Nothing else is spelled by hand."""
+    pre_existing = Failure(file="t.py", code="pre-existing", message="already red")
     baseline = GateResult(
         gate="tests",
         status="fail",
         tool="stub tests gate (baseline)",
         collected=["t.py::test_a"],
-        failures=[Failure(file="t.py", code="pre-existing", message="already red")],
+        failures=[pre_existing],
         summary="baseline: 1 failed",
+    )
+    probed = GateResult(
+        gate="tests",
+        status="fail",
+        tool="stub tests gate (probed)",
+        collected=["t.py::test_a", "t.py::test_b"],
+        failures=[pre_existing, Failure(file="t.py", code="new", message="boom")],
+        summary="probed: 2 failed",
     )
 
     real = probe_check.record_fields
@@ -776,6 +787,8 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
 
     def _wrapper(probe, result):
         fields = real(probe, result)
+        assert fields["probe"] == probe.model_dump()
+        assert fields["reason"] == result.reason
         captured.append((probe, fields))
         sentinel = {key: f"sentinel:{key}" for key in fields}
         sentinel["extra"] = "sentinel:extra"
@@ -783,7 +796,12 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
 
     monkeypatch.setattr(probe_check, "record_fields", _wrapper)
 
-    distinct = _drive(tmp_path / "distinct", monkeypatch, baseline_answer=baseline)
+    distinct = _drive(
+        tmp_path / "distinct",
+        monkeypatch,
+        baseline_answer=baseline,
+        probed_answer=probed,
+    )
     raised = _drive(
         tmp_path / "raised",
         monkeypatch,
@@ -818,13 +836,13 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
     _distinct_probe, distinct_fields = captured[0]
     _raised_probe, raised_fields = captured[1]
 
-    assert distinct_fields["tool"] == "stub tests gate"
+    assert distinct_fields["tool"] == "stub tests gate (probed)"
     assert distinct_fields["baseline_tool"] == "stub tests gate (baseline)"
-    assert distinct_fields["collected"] is None
+    assert distinct_fields["collected"] == 2
     assert distinct_fields["baseline_collected"] == 1
-    assert distinct_fields["summary"] == ""
+    assert distinct_fields["summary"] == "probed: 2 failed"
     assert distinct_fields["baseline_summary"] == "baseline: 1 failed"
-    assert distinct_fields["failures"] == []
+    assert distinct_fields["failures"] == ["new"]
     assert distinct_fields["baseline_failures"] == ["pre-existing"]
     assert distinct_fields["reason"] != distinct_fields["summary"]
 
@@ -833,7 +851,7 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
     assert raised_fields["baseline_collected"] is None
     assert raised_fields["baseline_summary"] is None
 
-    assert distinct_entries[0]["verdict"] == "survived"
+    assert distinct_entries[0]["verdict"] == "killed"
     assert raised_entries[0]["verdict"] == "unproven"
 
 
