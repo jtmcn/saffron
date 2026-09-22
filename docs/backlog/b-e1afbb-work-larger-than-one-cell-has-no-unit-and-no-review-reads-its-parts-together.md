@@ -36,10 +36,11 @@ wave.
 
 ## Done looks like
 
-An ADR decides the shape. A spec then declares member specs, their order, and
-constraints every member inherits. Once the last member reaches
-`READY_FOR_REVIEW`, one review runs in a critic cell. It checks the joins
-between members.
+ADR 6 decides the shape. A composite spec declares member specs, their order,
+and constraints every member inherits. Once the last member reaches
+`READY_FOR_REVIEW`, one review runs in a critic cell over the tree the last
+member's critic read. It checks the joins between members. ADR 6's
+Consequences list what the spec that builds it must settle.
 
 ## Record
 
