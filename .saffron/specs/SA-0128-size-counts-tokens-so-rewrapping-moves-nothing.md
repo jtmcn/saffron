@@ -176,9 +176,9 @@ kind with a literal event, never with text `judge_estimate` builds
 ## Problem
 
 `SA-0117` ran at `elevated`. The ledger holds a `size` result of 1035
-changed lines over its `refactor` ceiling of 1000, then one of 979. Twelve
+changed lines over its `refactor` ceiling of 1000, then one of 979. Fourteen
 lines of `saffron/ledger.py` now run past 88 characters, the longest to 193
-(`saffron/ledger.py:513`). The rest of that file writes SQL over several
+(`saffron/ledger.py:511`). The rest of that file writes SQL over several
 lines. Ruff ignores `E501` (`pyproject.toml:86`), and no gate objects. A cell that writes
 readable code pays for it in `size`, and one that packs it does not.
 
