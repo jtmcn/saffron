@@ -6,7 +6,7 @@ date: 2026-09-22
 supersedes: []
 superseded_by: []
 appendices: [A, K, L, Q]
-principles: [4, 9, 15, 16, 17, 27, 28, 29, 30, 34, 36, 42, 48, 50, 51, 55, 57, 58]
+principles: [4, 9, 15, 16, 17, 18, 27, 28, 29, 30, 34, 36, 42, 48, 50, 51, 55, 57, 58, 61]
 ---
 
 ## Context
@@ -24,8 +24,9 @@ filing one finding, so the lenses are less disjoint than §5.5 assumed.
 Appendix Q moved every lens out of the implementer's container. Until rev 21
 each lens was a new conversation in the implementer's own cell.
 
-The decision is spread across §3.3, §5.5, §5.5.1, §5.6, §11 and
-`saffron/cell/session.py`, which holds one rule no section states.
+The decision is spread across §3.3, §5.5, §5.5.1, §5.6 and §11. Two rules
+live only in code. `saffron/cell/session.py` holds the budget exception, and
+`saffron/phases/rebut.py` has the adequacy session answer the host's blockers.
 
 ## Decision
 
@@ -72,26 +73,33 @@ REVIEW saw, because a blocker's line number was filed against that tree. A
 verdict set that leaves a blocker unanswered is an error, never a withdrawal. A
 verdict session that errors halts the task at `REBUTTING`.
 
-Three outcomes reach `READY_FOR_REVIEW`. Every blocker was withdrawn, or a fix
-committed and stayed green, or the implementer argued against a confirmed
-blocker. A person adjudicates the last one in the pull request.
+Any confirmed blocker reaches `READY_FOR_REVIEW`, whether the implementer
+argued against it or fixed it and stayed green. So do a withdrawn set and a
+green fix. A person adjudicates a confirmed blocker in the pull request.
 
 ## Principles
 
 - **4** upholds. No lens runs in the container the implementer had root in.
-  The gate re-run after a rebuttal still does, and Appendix Q accepts it as
-  feedback because PACKAGE re-verifies.
+  The gate re-run after a rebuttal still does. Q keeps the repair loop's suites
+  in the cell as feedback, and the REBUT re-run follows that reasoning, since
+  PACKAGE re-verifies. Each session's spend cap is the runtime's in-cell
+  backstop, which §4.3 calls worthless as a guarantee. The host sums REVIEW's
+  cost only after every session has run.
 - **9** upholds. Any one blocker routes to REBUT. Disjoint lenses never form a
   majority, and overlapping ones agree for reasons that are not evidence
   (principle 51).
 - **15** departs. At REVIEW a finding counts only once the host anchors it. At
   REBUT the adequacy session can withdraw a probe the host ran and saw
   survive, so a reading overrules a measurement. ADR 3 records the same step.
-- **16** upholds. The budget exit keeps the work. The findings are written, and
-  the branch is pushed unpackaged.
+- **16** upholds. The budget exit keeps the work. The findings are written,
+  and the branch is pushed unpackaged when `scope` passes it.
 - **17** departs. A lens runs on a $2 floor after the budget is gone, so REVIEW
-  spends past the ceiling. REBUT upholds it, and refuses before the rebuttal
-  turn.
+  spends past the ceiling. REBUT refuses only once the task is already over.
+  Below that, its rebuttal, extraction and verdict sessions run on the same
+  floored cap, never reduced between sessions (item 120).
+- **18** departs. REBUT extracts its output in a separate turn. A lens and a
+  verdict session emit their block in the same turn as the work, with
+  read-only tools.
 - **27** upholds. The verdict session reads each blocker against the diff it
   was filed on, since the rebuttal moves its line.
 - **28** departs. `LensReview.drop_rate` excludes a host-filed survivor, and the
@@ -100,10 +108,20 @@ blocker. A person adjudicates the last one in the pull request.
   owns that half.
 - **29** departs. "Any one blocker goes to REBUT" has an exception. REBUT's
   budget check sends a task over its ceiling to `EXHAUSTED` with no rebuttal.
-  Only a comment in `saffron/cell/session.py` states it, and no section does.
-- **30** departs. Three sentences still call the lenses disjoint: §5.5, §7's
-  plausible-but-wrong row, and `CONTEXT.md`'s entry for a lens. L measured an
-  overlap. No backlog item owns them.
+  That also narrows ADR 3's rule that a surviving probe reaches REBUT. §4.3's
+  rule that every phase is bounded on spend has one too, since REVIEW is not.
+  Only a comment in `saffron/cell/session.py` states either. §5.5.1 cites §5.5
+  for REVIEW's exemption, and §5.5 has no such sentence.
+- **30** departs. At least seven sentences still call the lenses disjoint,
+  where L measured an overlap:
+  - §4.6, §5.5 and §7's plausible-but-wrong row in `DESIGN.md`.
+  - `CONTEXT.md`'s entry for a lens.
+  - The lens comment in `ontology/factory.ttl`, and a shape comment in
+    `ontology/shapes/factory-shapes.ttl`.
+  - Backlog item 79.
+
+  §5.5.1 also hands the tier question to item 6, which is closed. No backlog
+  item owns these.
 - **34** upholds. A lens that errors stops the task, so an absent review never
   reads as a clean one.
 - **36** upholds. A verdict set missing a blocker is an error, not a partial
@@ -120,10 +138,14 @@ blocker. A person adjudicates the last one in the pull request.
   runs. Item 6 records that the overlap did not recur. §5.5.1 records a class
   owned by nobody. Every prompt still routes callers and downstream findings to
   the retired blast radius lens.
-- **55** upholds. Three outcomes share `READY_FOR_REVIEW`, and `rebuttal.json`
-  and the sustained blockers tell them apart. Three routes also share
-  `EXHAUSTED` at REBUT. Only the budget exit writes no `rebuttal.json`, and it
-  emits a `Budget` event. §3.3 draws only the red re-run.
+- **55** upholds. Four routes reach `READY_FOR_REVIEW`. The fourth is a fix
+  that committed and stayed green, whose blocker the verdict still confirmed.
+  `rebuttal.json` tells the routes apart, and the sustained blockers alone do
+  not. Three routes share `EXHAUSTED` at REBUT. Only the budget exit writes no
+  `rebuttal.json`, and it emits a `Budget` event. §3.3 draws only the red
+  re-run. The three halts sit in states `saffron/reconcile.py` counts as in
+  flight, so a batch scan reads a deliberate halt as a crash. Item 120 owns
+  that for `REBUTTING`, and no record owns it for `REVIEWING`.
 - **57** upholds. This ADR condenses §3.3, §5.5, §5.5.1, §5.6 and §11. It adds
   two rules no section states. The budget exception is in
   `saffron/cell/session.py`. The adequacy session answering host blockers is a
@@ -131,17 +153,21 @@ blocker. A person adjudicates the last one in the pull request.
 - **58** upholds. A lens in the implementer's cell was a fresh conversation on
   a tree the implementer controlled. The critic cell does not rely on the
   implementer having been honest.
+- **61** departs. `harness/lens_scoring.py` scores the lenses on a declared
+  fixture. No adjudication is written to the ledger, so §11's count of agreed
+  blockers has no input on real diffs.
 
 ## Consequences
 
 Every lens and every criterion-probe session is a paid session on every
 reviewed diff. Each is capped at what is left of the budget, with a $2 floor,
 and the cap is not reduced between sessions. REBUT adds the rebuttal turn and
-one verdict session per lens with a blocker. REBUT's budget is inherited as a
+one verdict session per lens with a blocker. The rebuttal is two turns, one
+to argue or fix and one to extract. REBUT's budget is inherited as a
 remainder, not decided, and backlog item 120 holds that open.
 
 Whether the critic earns its cost is to be measured, not argued. §11 asks for
-the count of blockers the operator agrees with. It names cutting a lens whose
+the count of blockers the operator agrees with, and nothing records it yet. It names cutting a lens whose
 count trends toward zero as an option, not a rule. `harness/lens_scoring.py`
 scores the lenses against a fixture whose defects are declared (backlog
 item 79).
