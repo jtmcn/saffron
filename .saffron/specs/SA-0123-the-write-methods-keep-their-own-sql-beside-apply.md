@@ -8,7 +8,6 @@ touches:
   - tests/test_ledger.py
   - tests/test_ledger_appends.py
   - tests/test_ledger_fold_task.py
-  - tests/test_fold.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -53,9 +52,12 @@ acceptance:
       write it folds every fact so far into a second ledger. The two ledgers'
       rows of this task then match on every column but the `*_id` columns,
       with the three timestamp columns included. Each of those three that is
-      set on either side reads a time the clock gave, never the wall's. Today
-      each write stamps SQLite's `datetime('now')` while its fact carries
-      Python's clock.
+      set on either side reads a time the clock gave, never the wall's. The
+      witness then makes the same writes on a ledger with no record attached,
+      under a fresh clock of the same kind. Each of that ledger's three
+      timestamp columns that is set reads a time its clock gave. Today each
+      write stamps SQLite's `datetime('now')` while its fact carries Python's
+      clock.
     witness: tests/test_ledger_fold_task.py::test_a_written_task_folds_back_with_the_times_its_facts_carry
   - claim: >-
       An `attempt_closed` or `gate_result` fact lands on the attempt its
@@ -95,7 +97,8 @@ acceptance:
       Every task carries a `record_key`. `create_task` mints one with a
       record attached and without one. Opening a ledger gives each task that
       has none its own key. The witness creates a task on a ledger with a
-      record and on one without. It drives both kinds of old ledger file:
+      record and on one without. It opens both kinds of old ledger file with
+      no record attached:
       one whose `record_key` column holds `NULL`, and one with no such column
       at all. Each holds two tasks, and after the open both carry distinct
       keys. Every key the witness reads is 32 lowercase hex characters, the
@@ -116,13 +119,14 @@ acceptance:
   - claim: >-
       A write that names a task, attempt or finding the ledger does not hold
       raises `ValueError`. It writes no row and appends no fact. The witness
-      drives all ten such writes on a ledger with a record attached:
+      drives all ten such writes on a ledger with a record attached, then on
+      one with no record:
       `set_task_state`, `set_task_package`, `record_push`,
       `record_merged_head`, `record_policy`, `record_findings` with one
       finding or more, `open_attempt`, `close_attempt`, `record_gate_result` naming an
-      attempt, and `record_rebuttal`. After each it asserts the record holds
-      no key. At the end, `tasks`, `attempts`, `gate_results` and `findings`
-      hold no row. Today seven of the ten return without a word.
+      attempt, and `record_rebuttal`. After each write on the first ledger
+      it asserts the record holds no key. At the end, neither ledger's
+      `tasks`, `attempts`, `gate_results` or `findings` holds a row. Today seven of the ten return without a word.
       `record_findings` and `record_gate_result` raise the foreign key's
       `sqlite3.IntegrityError`, and only `open_attempt` raises `ValueError`.
     witness: tests/test_ledger_fold_task.py::test_a_write_naming_nothing_the_ledger_holds_raises_and_files_nothing
@@ -159,6 +163,16 @@ acceptance:
       another task's attempt.
     witness: tests/test_ledger.py::test_an_attempt_against_no_task_raises_rather_than_naming_another
     preserves: true
+  - claim: >-
+      Every write of a task fact kind applies its fact through `_apply`, with
+      a record attached and with none. On each ledger the witness writes one
+      task with an attempt, a gate result and a finding through the real
+      methods. It then replaces `Ledger._apply` with a function that raises
+      an exception of the witness's own. It makes one call of each of the
+      eleven write methods criterion 1 drives, and asserts each raises that
+      exception. Today
+      no write calls `_apply`, so each one returns.
+    witness: tests/test_ledger_fold_task.py::test_every_task_write_applies_its_fact_through_apply
 ---
 
 ## Context
@@ -294,7 +308,8 @@ lines as they are.
 `_db` queries in `tests/test_fold.py` to be deleted. `census` fails any test
 collected at base and missing at head, with no override
 (`saffron/gates/core/census.py:34-38`). So every test keeps its name, and the
-notes say what changes inside it.
+notes say what changes inside it. The `tests/test_fold.py` rewrite waits for
+a later change, as its note says.
 
 ## Notes for the agent
 
@@ -346,9 +361,13 @@ risk and a declared `standard` fold to the same row, so no round trip sees it.
 Keep `test_a_gate_error_is_not_recorded_as_a_failure` whole too. Criterion 7's
 round trip writes only `fail` results (`tests/test_ledger_fold_task.py:97`).
 
-**`tests/test_fold.py` reads no `ledger._db`.** Its `rows` and `_read`
-helpers read through a `sqlite3` connection of their own, opened on the
-ledger's file. Pass them the path, since `Ledger` exposes none.
+**`tests/test_fold.py` keeps reading `ledger._db`.** The item asks its
+`rows` and `_read` helpers to read the file through a connection of their
+own. That rewrite serves no criterion and spent 90 lines on the prototype, so
+it waits for a later change. The file is out of `touches`. Its
+`test_a_rebuttal_with_no_finding_fact_raises_under_strict` matches
+"rebuttal" in the `UnplacedRebuttal` message, so the rewritten message keeps
+that word.
 
 **Criterion 1's witness needs a clock it controls.** Read the wall clock as
 `datetime.now(UTC)` through `saffron.ledger`'s own `datetime` name, as
@@ -416,11 +435,25 @@ nothing at module scope that this change adds. `revert` runs the new tests with 
 then a collection error it reads as `skip`. All six new witnesses failed
 against the base source when measured with a prototype of the change.
 
+**Three halves and one criterion are unmeasured.** The prototype ran before
+three parts were added: the ledgers with no record in criteria 1 and 6, and
+criterion 13. Each must fail a writer that keeps base's
+`if self._record is None` path: criterion 1 when that path still stamps
+`datetime('now')`, criterion 6 when it still returns. Criterion 13 must fail
+a write method that writes its rows with its own SQL instead of calling
+`_apply`.
+Criterion 4's old files are opened with no record, so a backfill that runs
+only with a record attached fails it. Say in your notes what each run
+printed.
+
 **Size.** A prototype of this change measured 865 changed lines. It wrote
 new SQL over several lines, as below, and updated the docstrings the change
-makes false. It spent 440 in `ledger.py`, 290 in
+makes false, `_key`'s at `tests/test_ledger_fold_task.py:83` among them. It
+spent 440 in `ledger.py`, 290 in
 `tests/test_ledger_fold_task.py`, 90 in `tests/test_fold.py`, 30 in
-`tests/test_ledger_appends.py` and 15 in `tests/test_ledger.py`. The
+`tests/test_ledger_appends.py` and 15 in `tests/test_ledger.py`. This spec
+drops the 90 in `tests/test_fold.py` and adds about 70 of witness for the
+no-record halves and criterion 13, so expect about 845. The
 `refactor` ceiling is 1000, and `size` blocks at `elevated`. Write new SQL the
 way the file already writes it, as triple-quoted strings over several lines.
 Keep new comments to one or two lines.
