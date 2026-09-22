@@ -1818,7 +1818,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-21, a fifty-sixth time: `SA-0119` queued for
+    """Re-measured 2026-09-21, a fifty-seventh time: `SA-0118` queued for
+    backlog item 103, the two attribute sources no override reaches. Its
+    touches are `worktree.py` and its tests, which `SA-0119` forbids, so the
+    two do not overlap. Neither declares `depends_on`, and both are candidates.
+    Nothing is refused.
+
+    Re-measured 2026-09-21, a fifty-sixth time: `SA-0119` queued for
     backlog item b-461729, the two rules that decide where a vacuity probe is
     applied, with item b-a70ec1 folded in. It edits `probe.py`, `session.py`,
     the lens-corpus driver and their tests, and nothing else is queued. So it
@@ -2128,7 +2134,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0119"]
+    assert [c.spec.id for c in candidates] == ["SA-0118", "SA-0119"]
     assert [r.path.name[:7] for r in refusals] == []
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
