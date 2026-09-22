@@ -8,8 +8,10 @@ into SQLite.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -17,7 +19,7 @@ import pytest
 
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.contract import Failure, GateResult
-from saffron.ledger import Ledger
+from saffron.ledger import SCHEMA, Ledger
 from saffron.record.contract import Fact
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.memory import MemoryRecord
@@ -71,17 +73,22 @@ def _fact(key: str, kind: str, at: str, **payload) -> Fact:
     return Fact(kind=kind, task_key=key, at=at, repo="saffron", payload=payload)
 
 
-def _without_finding(record: MemoryRecord, key: str, finding_id: int) -> None:
-    """Drop the `finding` fact for `finding_id`, keeping every other fact."""
+def _without_finding(record: MemoryRecord, key: str, position: int) -> None:
+    """Drop the task's `position`th `finding` fact (1 for the first)."""
     facts = record._facts[key]
-    record._facts[key] = [
-        f for f in facts if f.kind != "finding" or f.payload["finding_id"] != finding_id
-    ]
+    seen = 0
+    kept = []
+    for f in facts:
+        if f.kind == "finding":
+            seen += 1
+            if seen == position:
+                continue
+        kept.append(f)
+    record._facts[key] = kept
 
 
 def _key(ledger: Ledger, task_id: int) -> str:
-    """`record_key` is nullable on a ledger with no record. This witness
-    always has one, so it turns the type back into a plain `str`."""
+    """Turns `record_key`'s `str | None` back into `str` for a known task."""
     key = ledger.record_key(task_id)
     assert key is not None
     return key
@@ -145,12 +152,8 @@ def _seed_unrelated_task(tmp_path: Path, into: Ledger) -> None:
     into.fold_task(key, other.read(key))
 
 
-def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, record):
-    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
-    source = Ledger(source_path, record=record)
-    into = Ledger(fold_path)
-    _seed_unrelated_task(tmp_path, into)
-
+def _drive_eleven_kinds(source: Ledger, after) -> tuple[str, int]:
+    """Every task fact kind once. `after(key)` runs once per write."""
     repo_id = source.upsert_repo("saffron", "https://o", "/m.git", policy_sha="p" * 64)
     run_id = source.create_run(repo_id, base_sha="a" * 40)
     task_id = source.create_task(
@@ -164,44 +167,53 @@ def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, re
         prompt_sha="g" * 64,
     )
     key = _key(source, task_id)
+    after(key)
+    a1 = source.open_attempt(task_id, phase="IMPLEMENT")
+    after(key)
+    gate1 = _gate("lint", "ruff", _fail("a", "E1", 3, "m1"), _fail("b", "E2", 9, "m2"))
+    source.record_gate_result(gate1, attempt_id=a1)
+    after(key)
+    _close(source, a1, "s1", "m1", "done", 7, 3.25)
+    after(key)
+    source.set_task_state(task_id, "REVIEWING")
+    after(key)
+    (f1,) = source.record_findings(task_id, [_find("a", "blocker", "x", 4, "c1")])
+    after(key)
+    (f2,) = source.record_findings(task_id, [_find("s", "note", "y", 8, "c2", False)])
+    after(key)
+    source.record_rebuttal(f2, verdict="withdrawn", rebuttal="rebut two")
+    after(key)
+    source.record_rebuttal(f1, verdict="confirmed", rebuttal="rebut one")
+    after(key)
+    source.record_policy(task_id, "f" * 64)
+    after(key)
+    source.record_push(task_id, "d" * 40)
+    after(key)
+    source.set_task_package(task_id, "READY_FOR_REVIEW", "pkg", "e" * 40, "https://x/9")
+    after(key)
+    source.record_merged_head(task_id, "h" * 40)
+    after(key)
+    a2 = source.open_attempt(task_id, phase="IMPLEMENT")
+    after(key)
+    gate2 = _gate("types", "ty", _fail("c", "T1", 4, "m3"), _fail("d", "T2", 8, "m4"))
+    source.record_gate_result(gate2, attempt_id=a2)
+    after(key)
+    _close(source, a2, "s2", "m2", "budget", 3, 1.10)
+    after(key)
+    return key, repo_id
 
-    def check():
+
+def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, record):
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+    _seed_unrelated_task(tmp_path, into)
+
+    def check(key):
         into.fold_task(key, record.read(key))
         assert _snapshot(fold_path, key) == _snapshot(source_path, key)
 
-    check()
-    a1 = source.open_attempt(task_id, phase="IMPLEMENT")
-    check()
-    gate1 = _gate("lint", "ruff", _fail("a", "E1", 3, "m1"), _fail("b", "E2", 9, "m2"))
-    source.record_gate_result(gate1, attempt_id=a1)
-    check()
-    _close(source, a1, "s1", "m1", "done", 7, 3.25)
-    check()
-    source.set_task_state(task_id, "REVIEWING")
-    check()
-    (f1,) = source.record_findings(task_id, [_find("a", "blocker", "x", 4, "c1")])
-    check()
-    (f2,) = source.record_findings(task_id, [_find("s", "note", "y", 8, "c2", False)])
-    check()
-    source.record_rebuttal(f2, verdict="withdrawn", rebuttal="rebut two")
-    check()
-    source.record_rebuttal(f1, verdict="confirmed", rebuttal="rebut one")
-    check()
-    source.record_policy(task_id, "f" * 64)
-    check()
-    source.record_push(task_id, "d" * 40)
-    check()
-    source.set_task_package(task_id, "READY_FOR_REVIEW", "pkg", "e" * 40, "https://x/9")
-    check()
-    source.record_merged_head(task_id, "h" * 40)
-    check()
-    a2 = source.open_attempt(task_id, phase="IMPLEMENT")
-    check()
-    gate2 = _gate("types", "ty", _fail("c", "T1", 4, "m3"), _fail("d", "T2", 8, "m4"))
-    source.record_gate_result(gate2, attempt_id=a2)
-    check()
-    _close(source, a2, "s2", "m2", "budget", 3, 1.10)
-    check()
+    key, repo_id = _drive_eleven_kinds(source, check)
 
     final = _snapshot(fold_path, key)
     for table, rows in final.items():
@@ -299,7 +311,7 @@ def test_a_rebuttal_with_no_finding_skips_its_whole_task(tmp_path, record):
     key = _key(writer, task_id)
     next_key = _key(writer, _minimal(writer, "SA-5"))
     writer.close()
-    _without_finding(record, key, finding1)
+    _without_finding(record, key, 1)
 
     into = Ledger(tmp_path / "into.db")
     with pytest.raises(UnreadableTask, match=key):
@@ -330,14 +342,14 @@ def _write_small_task(ledger: Ledger, spec_id: str) -> tuple[str, int]:
 _BREAKAGES = ("not-a-fact", "no-task-created", "orphan-rebuttal")
 
 
-def _break(record: MemoryRecord, breakage: str, key: str, finding_id: int) -> None:
+def _break(record: MemoryRecord, breakage: str, key: str, position: int) -> None:
     if breakage == "not-a-fact":
         corrupted: list = ["not a fact"]
         record._facts[key] = corrupted
     elif breakage == "no-task-created":
         record._facts[key] = [f for f in record._facts[key] if f.kind != "task_created"]
     else:
-        _without_finding(record, key, finding_id)
+        _without_finding(record, key, position)
 
 
 def test_a_task_that_became_unreadable_leaves_a_surviving_ledger(tmp_path):
@@ -347,7 +359,7 @@ def test_a_task_that_became_unreadable_leaves_a_surviving_ledger(tmp_path):
             case.mkdir()
             record = MemoryRecord()
             writer = Ledger(case / "writer.db", record=record)
-            key_a, finding_a = _write_small_task(writer, "SA-A")
+            key_a, _ = _write_small_task(writer, "SA-A")
             key_b, _ = _write_small_task(writer, "SA-B")
             writer.close()
 
@@ -355,7 +367,7 @@ def test_a_task_that_became_unreadable_leaves_a_surviving_ledger(tmp_path):
             into = Ledger(into_path)
             fold(record, into)
             kept = _snapshot(into_path, key_b)
-            _break(record, breakage, key_a, finding_a)
+            _break(record, breakage, key_a, 1)  # position 1: the first finding
 
             if strict:
                 with pytest.raises(UnreadableTask):
@@ -488,3 +500,330 @@ def test_the_fold_reaches_the_ledger_only_through_fold_task(tmp_path, record):
         fold(record, cast(Ledger, stand_in_strict), strict=True)
     assert stand_in_strict.touched == []
     real_strict.close()
+
+
+def _idless(row: dict) -> dict:
+    return {k: v for k, v in row.items() if k not in _KEYS}
+
+
+_CLOCK_DAY = re.compile(r"^2001-01-01 \d{2}:\d{2}:\d{2}$")
+
+
+class _MinuteClock(datetime):
+    """`datetime.now`: 2001-01-01, a minute later on each call."""
+
+    calls = 0
+
+    @classmethod
+    def now(cls, tz=None):
+        del tz  # Always UTC. Kept only to match `datetime.now`'s signature.
+        cls.calls += 1
+        return cls(2001, 1, 1, tzinfo=UTC) + timedelta(minutes=cls.calls - 1)
+
+
+def _assert_stamped_by_the_clock(path: Path, key: str) -> None:
+    for table, sql in _TABLE_SQL.items():
+        for row in _raw_rows(path, sql, key):
+            for column, value in row.items():
+                if column.endswith("_at") and value is not None:
+                    assert _CLOCK_DAY.match(value), (table, column, value)
+
+
+def test_a_written_task_folds_back_with_the_times_its_facts_carry(
+    tmp_path, record, monkeypatch
+):
+    monkeypatch.setattr("saffron.ledger.datetime", _MinuteClock)
+    _MinuteClock.calls = 0
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+
+    def check(key):
+        into.fold_task(key, record.read(key))
+        for sql in _TABLE_SQL.values():
+            fold_rows = [_idless(r) for r in _raw_rows(fold_path, sql, key)]
+            assert fold_rows == [_idless(r) for r in _raw_rows(source_path, sql, key)]
+        _assert_stamped_by_the_clock(fold_path, key)
+
+    _drive_eleven_kinds(source, check)
+    source.close()
+    into.close()
+
+    # The same writes, no record attached: still stamped by the clock.
+    _MinuteClock.calls = 0
+    plain_path = tmp_path / "plain.db"
+    plain = Ledger(plain_path)
+    _drive_eleven_kinds(plain, lambda k: _assert_stamped_by_the_clock(plain_path, k))
+    plain.close()
+
+
+def test_each_fact_lands_on_the_attempt_or_finding_it_names(tmp_path, record):
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+    # An unrelated IMPLEMENT-1 attempt and finding in both, to catch scoping.
+    _seed_unrelated_task(tmp_path / "src-seed", source)
+    _seed_unrelated_task(tmp_path / "dst-seed", into)
+
+    task_id = _minimal(source, "SA-9")
+    key = _key(source, task_id)
+
+    i1 = source.open_attempt(task_id, phase="IMPLEMENT")
+    i2 = source.open_attempt(task_id, phase="IMPLEMENT")
+    r1 = source.open_attempt(task_id, phase="REPAIR")
+
+    def gate_and_close(attempt_id: int, gate: str, turns: int) -> None:
+        source.record_gate_result(_gate(gate, "tool"), attempt_id=attempt_id)
+        _close(source, attempt_id, f"s{attempt_id}", None, None, turns, 0.1)
+
+    # Written out of open order: 2, then REPAIR 1, then 1.
+    gate_and_close(i2, "types", 11)
+    gate_and_close(r1, "tests", 22)
+    gate_and_close(i1, "lint", 33)
+
+    f1, f2 = source.record_findings(
+        task_id,
+        [_find("a", "blocker", "x", 1, "c1"), _find("a", "concern", "y", 2, "c2")],
+    )
+    (f3,) = source.record_findings(task_id, [_find("a", "note", "z", 3, "c3")])
+    source.record_rebuttal(f3, verdict="confirmed", rebuttal="third")
+    source.record_rebuttal(f1, verdict="withdrawn", rebuttal="first")
+    source.record_rebuttal(f2, verdict="confirmed", rebuttal="second")
+
+    into.fold_task(key, record.read(key))
+
+    for path in (source_path, fold_path):
+        turns = {
+            (r["phase"], r["n"]): r["num_turns"]
+            for r in _raw_rows(path, _TABLE_SQL["attempts"], key)
+        }
+        got = {
+            (r["phase"], r["n"]): (turns[r["phase"], r["n"]], r["gate"])
+            for r in _raw_rows(path, _TABLE_SQL["gate_results"], key)
+        }
+        assert got == {
+            ("IMPLEMENT", 1): (33, "lint"),
+            ("IMPLEMENT", 2): (11, "types"),
+            ("REPAIR", 1): (22, "tests"),
+        }
+        claims = {
+            r["claim"]: r["rebuttal"]
+            for r in _raw_rows(path, _TABLE_SQL["findings"], key)
+        }
+        assert claims == {"c1": "first", "c2": "second", "c3": "third"}
+
+    source.close()
+    into.close()
+
+
+def _compact_facts(facts: list[Fact]) -> list[tuple[str, dict]]:
+    """Kind and payload alone, never the independently minted `task_key`/`at`."""
+    return [(f.kind, f.payload) for f in facts]
+
+
+def test_two_ledgers_making_the_same_writes_append_the_same_facts(tmp_path):
+    busy_record = MemoryRecord()
+    busy = Ledger(tmp_path / "busy.db", record=busy_record)
+    for spec_id in ("SA-X", "SA-Y"):
+        other_id = _minimal(busy, spec_id)
+        attempt_id = busy.open_attempt(other_id, phase="IMPLEMENT")
+        busy.record_gate_result(
+            _gate("lint", "ruff", _fail("a", "E1", 1, "m")), attempt_id=attempt_id
+        )
+        busy.record_findings(other_id, [_find("a", "note", "x", 1, spec_id)])
+
+    empty_record = MemoryRecord()
+    empty = Ledger(tmp_path / "empty.db", record=empty_record)
+
+    def drive(ledger: Ledger) -> str:
+        task_id = _minimal(ledger, "SA-T")
+        a1 = ledger.open_attempt(task_id, phase="IMPLEMENT")
+        ledger.record_gate_result(_gate("lint", "ruff"), attempt_id=a1)
+        _close(ledger, a1, "s1", None, None, 1, 0.1)
+        f1, f2 = ledger.record_findings(
+            task_id,
+            [_find("a", "blocker", "x", 1, "c1"), _find("a", "concern", "y", 2, "c2")],
+        )
+        (f3,) = ledger.record_findings(task_id, [_find("a", "note", "z", 3, "c3")])
+        ledger.record_rebuttal(f3, verdict="confirmed", rebuttal="r3")
+        ledger.record_rebuttal(f1, verdict="withdrawn", rebuttal="r1")
+        ledger.record_rebuttal(f2, verdict="confirmed", rebuttal="r2")
+        return _key(ledger, task_id)
+
+    key_busy = drive(busy)
+    key_empty = drive(empty)
+    busy.close()
+    empty.close()
+
+    assert _compact_facts(busy_record.read(key_busy)) == _compact_facts(
+        empty_record.read(key_empty)
+    )
+
+
+_KEY_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _old_file(path: Path, schema: str, spec_ids: tuple[str, ...]) -> None:
+    """A pre-record ledger file, built by hand, never through `Ledger`."""
+    con = sqlite3.connect(path)
+    con.executescript(schema)
+    con.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    con.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    for spec_id in spec_ids:
+        con.execute(
+            "INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch) "
+            "VALUES (1, ?, 's', 'QUEUED', 'b')",
+            (spec_id,),
+        )
+    con.commit()
+    con.close()
+
+
+def _stored_keys(path: Path) -> list[str]:
+    con = sqlite3.connect(path)
+    try:
+        return [r[0] for r in con.execute("SELECT record_key FROM tasks")]
+    finally:
+        con.close()
+
+
+def test_every_task_carries_a_record_key_with_or_without_a_record(tmp_path, record):
+    with_record = Ledger(tmp_path / "with-record.db", record=record)
+    task_a = _minimal(with_record, "SA-A")
+    assert _KEY_RE.match(_key(with_record, task_a))
+    with_record.close()
+
+    no_record = Ledger(tmp_path / "no-record.db")
+    task_b = _minimal(no_record, "SA-B")
+    assert _KEY_RE.match(_key(no_record, task_b))
+    no_record.close()
+
+    def backfilled(path: Path, schema: str, spec_ids: tuple[str, ...]) -> None:
+        _old_file(path, schema, spec_ids)
+        opened = Ledger(path)
+        keys = _stored_keys(path)
+        assert len(keys) == len(spec_ids) == len(set(keys))
+        assert all(_KEY_RE.match(k) for k in keys)
+        opened.close()
+
+    # A record_key column already there and NULL, the additive ALTER's shape.
+    backfilled(tmp_path / "null-column.db", SCHEMA, ("SA-C", "SA-D"))
+
+    # No such column at all, which is older still.
+    no_column_schema = SCHEMA.replace("    record_key TEXT,\n", "")
+    assert no_column_schema != SCHEMA  # otherwise this proves nothing
+    backfilled(tmp_path / "no-column.db", no_column_schema, ("SA-E", "SA-F"))
+
+
+def test_a_backfilled_task_written_with_a_record_folds_as_unreadable(tmp_path, record):
+    path = tmp_path / "old.db"
+    _old_file(path, SCHEMA, ("SA-Z",))
+
+    reopened = Ledger(path, record=record)
+    task_id = reopened._db.execute("SELECT task_id FROM tasks").fetchone()["task_id"]
+    key = _key(reopened, task_id)
+    reopened.set_task_state(task_id, "IMPLEMENTING")
+    reopened.close()
+
+    assert record.task_keys() == [key]
+    assert [f.kind for f in record.read(key)] == ["task_state"]
+
+    into = Ledger(tmp_path / "into.db")
+    result = fold(record, into, strict=False)
+    assert result.folded == 0
+    (skipped_key, reason) = result.skipped[0]
+    assert skipped_key == key
+    assert "no task_created fact" in reason
+    into.close()
+
+
+def _table_counts(ledger: Ledger) -> dict[str, int]:
+    return {
+        table: ledger._db.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"]
+        for table in ("tasks", "attempts", "gate_results", "findings")
+    }
+
+
+def _ten_missing_writes(ledger: Ledger, missing: int) -> None:
+    calls = [
+        lambda: ledger.set_task_state(missing, "IMPLEMENTING"),
+        lambda: ledger.set_task_package(missing, "X", "b", "d" * 40, "u"),
+        lambda: ledger.record_push(missing, "d" * 40),
+        lambda: ledger.record_merged_head(missing, "h" * 40),
+        lambda: ledger.record_policy(missing, "p" * 64),
+        lambda: ledger.record_findings(missing, [_find("a", "note", "x", 1, "c")]),
+        lambda: ledger.open_attempt(missing, phase="IMPLEMENT"),
+        lambda: _close(ledger, missing, "s", None, None, 1, 0.1),
+        lambda: ledger.record_gate_result(_gate("lint", "ruff"), attempt_id=missing),
+        lambda: ledger.record_rebuttal(missing, verdict="withdrawn", rebuttal="x"),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError):
+            call()
+
+
+_EMPTY_COUNTS = {"tasks": 0, "attempts": 0, "gate_results": 0, "findings": 0}
+
+
+def test_a_write_naming_nothing_the_ledger_holds_raises_and_files_nothing(
+    tmp_path, record
+):
+    missing = 999_999
+    with_record = Ledger(tmp_path / "with-record.db", record=record)
+    _ten_missing_writes(with_record, missing)
+    assert record.task_keys() == []
+    assert _table_counts(with_record) == _EMPTY_COUNTS
+    with_record.close()
+
+    no_record = Ledger(tmp_path / "no-record.db")
+    _ten_missing_writes(no_record, missing)
+    assert _table_counts(no_record) == _EMPTY_COUNTS
+    no_record.close()
+
+
+class _BustedApply(Exception):
+    """Never mistaken for one `_apply` can raise on its own."""
+
+
+def _busted_apply(*_args: object, **_kwargs: object) -> None:
+    raise _BustedApply
+
+
+def _eleven_write_calls(ledger, run_id, task_id, attempt_id, finding_id):
+    """Not nested in the test's loop, so ruff sees no captured loop variable."""
+    return [
+        lambda: ledger.create_task(run_id, spec_id="SA-14", spec_sha="s", branch="b"),
+        lambda: ledger.open_attempt(task_id, phase="IMPLEMENT"),
+        lambda: _close(ledger, attempt_id, "s", None, None, 1, 0.1),
+        lambda: ledger.record_gate_result(_gate("lint", "ruff"), attempt_id=attempt_id),
+        lambda: ledger.set_task_state(task_id, "IMPLEMENTING"),
+        lambda: ledger.record_findings(task_id, [_find("a", "note", "y", 2, "c2")]),
+        lambda: ledger.record_rebuttal(finding_id, verdict="withdrawn", rebuttal="x"),
+        lambda: ledger.record_policy(task_id, "p" * 64),
+        lambda: ledger.record_push(task_id, "d" * 40),
+        lambda: ledger.set_task_package(task_id, "X", "b", "d" * 40, "u"),
+        lambda: ledger.record_merged_head(task_id, "h" * 40),
+    ]
+
+
+def test_every_task_write_applies_its_fact_through_apply(tmp_path, record, monkeypatch):
+    for suffix, rec in (("with-record", record), ("no-record", None)):
+        ledger = Ledger(tmp_path / f"{suffix}.db", record=rec)
+        task_id = _minimal(ledger, "SA-13")
+        attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
+        ledger.record_gate_result(_gate("lint", "ruff"), attempt_id=attempt_id)
+        (finding_id,) = ledger.record_findings(
+            task_id, [_find("a", "note", "x", 1, "c")]
+        )
+        run_id = ledger._db.execute(
+            "SELECT run_id FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()["run_id"]
+
+        monkeypatch.setattr(Ledger, "_apply", _busted_apply)
+        for call in _eleven_write_calls(
+            ledger, run_id, task_id, attempt_id, finding_id
+        ):
+            with pytest.raises(_BustedApply):
+                call()
+        monkeypatch.undo()
+        ledger.close()

@@ -70,7 +70,7 @@ def test_a_baseline_result_is_not_a_task_result(ledger, task):
 
 def test_a_gate_result_must_belong_to_exactly_one_of_them(ledger, task):
     run_id, task_id = task
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(ValueError, match="never both"):
         ledger.record_gate_result(
             GateResult(gate="lint", status="pass"),
             run_id=run_id,
@@ -356,10 +356,11 @@ def test_a_gate_result_belongs_to_the_attempt_that_produced_it(ledger, task):
 def test_a_gate_result_cannot_name_an_attempt_that_does_not_exist(ledger, task):
     """What made `attempt_id = task_id` possible: the column had no reference."""
     _, task_id = task
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(ValueError, match="90210"):
         ledger.record_gate_result(
             GateResult(gate="lint", status="pass"), attempt_id=90210
         )
+    assert ledger.task_results(task_id) == []
 
 
 def test_a_task_spends_the_sum_of_its_attempts(ledger, task):
@@ -581,10 +582,15 @@ def test_a_ledger_that_predates_attempts_gains_the_reference(tmp_path):
     old.close()
 
     ledger = Ledger(path)
+    # `record_gate_result` now raises before it ever reaches the table, so the
+    # constraint is proved with a direct INSERT instead, foreign keys on.
+    direct = sqlite3.connect(path)
+    direct.execute("PRAGMA foreign_keys=ON")
     with pytest.raises(sqlite3.IntegrityError):
-        ledger.record_gate_result(
-            GateResult(gate="lint", status="pass"), attempt_id=90210
+        direct.execute(
+            "INSERT INTO gate_results (attempt_id, gate, status) VALUES (90210, 'lint', 'pass')"
         )
+    direct.close()
     # The rebuild copied, it did not lose — and the index the DROP took is back.
     assert [r.gate for r in ledger.task_results(1)] == ["tests"]
     assert ledger._db.execute(
@@ -1255,11 +1261,15 @@ def test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows(tmp_pat
     )
     _, lint = ledger.baseline_results(1)
     assert lint.tool == "ruff 0.16.3"
-    # And the rebuild delivered the constraint it exists for.
+    # And the rebuild delivered the constraint it exists for. `record_gate_result`
+    # now raises before the insert, so a direct INSERT proves it instead.
+    direct = sqlite3.connect(path)
+    direct.execute("PRAGMA foreign_keys=ON")
     with pytest.raises(sqlite3.IntegrityError):
-        ledger.record_gate_result(
-            GateResult(gate="types", status="pass"), attempt_id=90210
+        direct.execute(
+            "INSERT INTO gate_results (attempt_id, gate, status) VALUES (90210, 'types', 'pass')"
         )
+    direct.close()
     ledger.close()
 
 
@@ -1433,7 +1443,7 @@ def test_two_tasks_cannot_share_one_record_key(tmp_path):
     second = ledger.create_task(
         run_id, spec_id="TE-9002", spec_sha="s" * 64, branch="saffron/TE-9002"
     )
-    # Both NULL to begin with, and two NULLs do not collide.
+    # Both minted their own distinct key on create. Force a collision by hand.
     ledger._db.execute(
         "UPDATE tasks SET record_key = ? WHERE task_id = ?", ("a" * 32, first)
     )
