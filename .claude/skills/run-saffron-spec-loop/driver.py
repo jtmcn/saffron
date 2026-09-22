@@ -1269,6 +1269,9 @@ def _jev_cell(
         diff = (directory / "patch.diff").read_text()
     except (OSError, json.JSONDecodeError, KeyError) as exc:
         return _fail(f"no finished cell to score at {directory}: {exc}")
+    # A re-run cell keeps `directory`; clear a prior score so a failed call
+    # below does not leave it looking current (item F7).
+    (directory / "jev.ttl").unlink(missing_ok=True)
     findings = jev_observe.lens_findings(lenses)
     pairs = [
         (jev_observe.finding_id("cell", spec_id, 1, i), f)

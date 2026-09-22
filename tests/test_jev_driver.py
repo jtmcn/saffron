@@ -296,6 +296,43 @@ def test_a_corrupt_earlier_findings_file_exits_1_not_a_traceback(monkeypatch, lo
     )
 
 
+def test_a_rerun_cell_clears_a_stale_ttl_before_scoring_again(monkeypatch, loop):
+    cell = loop.batches / "v0" / "SA-0901"
+    cell.mkdir(parents=True)
+    lens = {
+        "lens": "adequacy",
+        "severity": "note",
+        "file": "t.py",
+        "line": 5,
+        "claim": "weak",
+    }
+    (cell / "findings.json").write_text(
+        json.dumps([{"lens": "adequacy", "findings": [lens]}])
+    )
+    (cell / "patch.json").write_text(json.dumps({"head_sha": "feedbeef"}))
+    (cell / "patch.diff").write_text("diff --git a/t.py b/t.py\n")
+    (cell / "jev.ttl").write_text("stale")
+
+    class Down:
+        def system_one(self, *args, **kwargs):
+            raise TypeSafeError("down")
+
+    monkeypatch.setattr(driver, "_jev_client", Down)
+    assert (
+        _run(
+            monkeypatch,
+            "jev",
+            "SA-0901",
+            "--kind",
+            "cell",
+            "--spec",
+            str(loop.root / "spec.md"),
+        )
+        == 2
+    )
+    assert not (cell / "jev.ttl").exists()
+
+
 def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
     cell = loop.batches / "v0" / "SA-0901"
     cell.mkdir(parents=True)
