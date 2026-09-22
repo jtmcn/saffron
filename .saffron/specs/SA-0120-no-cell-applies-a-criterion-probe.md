@@ -65,7 +65,7 @@ acceptance:
   - claim: >-
       A criterion probe its criterion's witness kills records `killed` and
       files nothing. One under which the `tests` gate answers `error` records
-      `error` with that gate's summary and files nothing. The edit after it
+      `error` with `witness_gate`'s summary and files nothing. The edit after it
       is still applied and its witness still run, and the task ends
       `READY_FOR_REVIEW`. The witness drives three edits in that order:
       killed, `error`, killed.
@@ -177,8 +177,11 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    and never applied.
    - An entry with no edit.
    - An edit the one test-path rule refuses. That is the function `SA-0119`
-     adds to `saffron/probe.py`, which answers why a probe on a file is
-     refused. It refuses a path outside the tree, an empty `test_paths`, and
+     adds to `saffron/probe.py` (its Problem step 1), which answers why a
+     probe on a file is refused. `SA-0119`'s criteria drive its refusals
+     through `check_probe` and the host loop, not by the function's name. So
+     read `saffron/probe.py` at your base and call the one function that
+     answers all three refusals. It refuses a path outside the tree, an empty `test_paths`, and
      a declared test path. An edit to the witness's own test would survive
      by construction, so refusing it is the point.
    - Every remaining edit in a repo whose head declares no `tests` gate.
@@ -202,17 +205,27 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    and its line is where `find` begins in that file at head. Read it with
    `worktree.read_at_head` in the Gate-only cell. Its `probe` is the edit,
    and its `probe_verdict` is `survived`. Its claim
-   names the criterion's witness and quotes its claim. Pass it through
+   names the criterion's witness, quotes its claim, and says that only that
+   witness ran under the edit. REBUT renders every surviving probe as "the
+   tests stayed green" (`saffron/phases/rebut.py:133-136`), which reads as
+   the whole suite. Pass it through
    `findings.anchor` against the reviewed diff, with `read_head` reading
    the Gate-only cell, while that cell is up. Append it to the `adequacy`
    `LensReview`'s findings. That list is what `findings.json`,
    `ledger.record_findings` and `review.review_state` read after it.
 6. **When a raise stops the rest.** A `CellRuntimeError` out of the
    mutator's entry or exit leaves the tree unknown. `witness_gate` reports
-   it as `error`. Apply no later edit in that cell. Record each later edit
-   `unproven`, saying an earlier edit left the tree unknown. A `tests` gate
-   that answered `error` under an edit stops nothing, since the mutator's
-   exit restored the file.
+   it as `error`, the same status a `tests` gate `error` gets
+   (`saffron/gates/core/witness.py:183-206` against `:228-239`). So wrap
+   `mutate` in the host's own context manager that notes a raise. Tell the
+   two apart by that note, never by parsing the summary. After a noted
+   raise, apply no later edit in that cell. Record each later edit
+   `unproven`, saying an earlier edit left the tree unknown. A
+   `CellRuntimeError` out of `run_tests`, which `witness_gate` also reports
+   as `error`, means the cell died. Stop the same way, as `_probe_adequacy`
+   stops on one (`saffron/cell/session.py:1400-1417`). A `tests` gate that
+   answered `error` under an edit stops nothing, since the mutator's exit
+   restored the file.
 
 ## Out of scope
 
@@ -266,8 +279,12 @@ witness id, so a subset names which criterion ran.
   and yield `None`, or a reason for the file it refuses.
 - Criterion 1 anchors one edit on `_ANCHORING_DIFF`'s one line in
   `src/x.py`. Its other edit sits on a line `read_at_head` returns for
-  another file, with no token the diff changed. `_rebuttable` stubs
-  `read_at_head` for every path, so override it after calling that helper.
+  another file, with no token the diff changed. Put that edit's `find` on a
+  line other than 1 of that file, and assert each finding's `line`. A
+  hard-coded line then fails. `_rebuttable` stubs `read_at_head` for every
+  path, so override it after calling that helper. Make the override return
+  `None` for any `saffron-critic-` container. The critic cell is torn down
+  by then, so a read aimed at it must fail the witness.
   Script REBUT as `test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker`
   does, with `rebut_commits=0` and `_CLAIMED_FIX`. The task then stops at
   `REBUTTING` with `rebuttal.json` written.
