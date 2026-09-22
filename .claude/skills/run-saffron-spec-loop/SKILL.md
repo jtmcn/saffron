@@ -275,8 +275,8 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
      --report <standards seat> --commit <PR head> --base <the PR's base SHA>
    ```
 
-   `--base` only matters for round 1. A later round reads the previous
-   round's own commit.
+   `--base` only matters for review round 1. A later review round reads the
+   previous review round's own commit.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe with the driver:
    `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.
