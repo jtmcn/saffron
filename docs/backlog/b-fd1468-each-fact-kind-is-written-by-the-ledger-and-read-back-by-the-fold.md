@@ -1,11 +1,12 @@
 ---
 id: b-fd1468
 title: Each fact kind is written by the ledger and read back by the fold, and nothing makes the two halves agree
-status: partial
+status: done
 tier: 1
 filed: 2026-09-20
+closed: 2026-09-22
 specs: [SA-0117, SA-0123]
-prs: [418]
+prs: [418, 451]
 commits: []
 cites: [§4.1, §4.6]
 related: [170, 177, b-25766a, b-e9db0e]
@@ -117,3 +118,8 @@ become a third spec.
 - 2026-09-21: #418 merged, and `SA-0117` retires to `done/`. `partial`, because
   the write methods still keep their own SQL. The second spec routes them
   through `_apply` and removes the finding map.
+- 2026-09-22: `SA-0123` ran in the spec loop's run 14. It ended `EXHAUSTED`
+  at $38.20 of $32, one line over its `refactor` ceiling. The operator opened
+  #451 by hand, and review brought it to 999 lines. #451 merged, and `SA-0123`
+  retires to `done/`. The `tests/test_fold.py` rewrite this item asked for, and
+  what else review left for size, is item b-49329e.
