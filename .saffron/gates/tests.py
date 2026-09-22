@@ -33,8 +33,9 @@ subset = sys.argv[1:]
 # Same argv as the run below, so both see the same selection — pyproject's
 # `-m "not cell"` deselects thirteen tests, and a census comparing a
 # deselected list against a full one would report every cell test removed.
+# `--color=no`: a host gate inherits FORCE_COLOR, and escapes break both parses.
 collect = subprocess.run(
-    ["pytest", "-q", "--collect-only", "-p", "no:cacheprovider", *subset],
+    ["pytest", "-q", "--collect-only", "--color=no", "-p", "no:cacheprovider", *subset],
     capture_output=True,
     text=True,
 )
@@ -48,7 +49,7 @@ collected = (
 )
 
 proc = subprocess.run(
-    ["pytest", "-q", "--no-header", "-p", "no:cacheprovider", *subset],
+    ["pytest", "-q", "--no-header", "--color=no", "-p", "no:cacheprovider", *subset],
     capture_output=True,
     text=True,
 )
