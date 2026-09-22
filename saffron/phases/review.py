@@ -48,6 +48,10 @@ LENSES = {
 # notice the code being wrong — no mutation tool, no coverage gate, both
 # priced and both rejected in `docs/evidence/`.
 
+# Marks a finding the host filed, never a lens (item b-2750d5): excluded
+# from `drop_rate` and stripped by `_from_report` so a lens cannot forge one.
+HOST_FILED = "[host-filed criterion probe] "
+
 REVIEW_PROMPT = context.turn_prompt("review")
 
 
@@ -120,10 +124,15 @@ class LensReview:
 
     @property
     def drop_rate(self) -> float:
-        """Unanchorable share. The signal a lens is badly prompted (§5.5)."""
-        if not self.findings:
+        """Unanchorable share. The signal a lens is badly prompted (§5.5).
+
+        A `HOST_FILED` finding is excluded: the lens never filed it, so it
+        cannot move the number that measures the lens's own prompting.
+        """
+        own = [f for f in self.findings if not f.claim.startswith(HOST_FILED)]
+        if not own:
             return 0.0
-        return sum(not f.anchored for f in self.findings) / len(self.findings)
+        return sum(not f.anchored for f in own) / len(own)
 
     def as_dict(self) -> dict:
         return {
@@ -179,12 +188,21 @@ def lens_prompt(
     )
 
 
+def _strip_host_filed(claim: str) -> str:
+    """Every leading `HOST_FILED` stripped, so a lens cannot buy its own
+    finding an exemption from `drop_rate` by echoing the host's prefix."""
+    while claim.startswith(HOST_FILED):
+        claim = claim[len(HOST_FILED) :]
+    return claim
+
+
 def _from_report(lens: str, findings: list[_Reported], cost_usd: float) -> LensReview:
-    return LensReview(
-        lens,
-        findings=[Finding(lens=lens, **reported.model_dump()) for reported in findings],
-        cost_usd=cost_usd,
-    )
+    built = []
+    for reported in findings:
+        data = reported.model_dump()
+        data["claim"] = _strip_host_filed(data["claim"])
+        built.append(Finding(lens=lens, **data))
+    return LensReview(lens, findings=built, cost_usd=cost_usd)
 
 
 def run_lens(
@@ -456,6 +474,47 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     precedent for a line counted over the record it summarises."""
     named = sum(1 for e in entries if e["edit"] is not None)
     return f"criterion probes: {named} named, {len(entries) - named} unnamed"
+
+
+# `witness_gate`'s own status, over one criterion, in this record's words
+# (item b-2750d5): `pass` killed, `fail` survived, `error`/`skip` unchanged.
+_CRITERION_PROBE_OUTCOMES = {
+    "pass": "killed",
+    "fail": "survived",
+    "error": "error",
+    "skip": "unproven",
+}
+
+
+def criterion_probe_outcome(status: str) -> str:
+    """`witness_gate`'s status for one criterion, read as an outcome. Only the
+    four statuses `witness_gate` can return over a single declared mutant are
+    valid input — anything else is this module misreading its own contract."""
+    return _CRITERION_PROBE_OUTCOMES[status]
+
+
+def survivor_finding(criterion: Criterion, mutant: Mutant, content: str) -> Finding:
+    """The blocker filed when a criterion's own witness survives the edit its
+    own session named for it (backlog item b-2750d5). `content` is the file at
+    head in the cell that applied and restored the edit; the line is where
+    `mutant.find` begins there, never a hunk line the edit may sit outside.
+
+    Unanchored: the caller still runs this through `findings.anchor`, exactly
+    as every other finding in a `LensReview` is."""
+    line = content.count("\n", 0, content.index(mutant.find)) + 1
+    return Finding(
+        lens="adequacy",
+        severity="blocker",
+        file=mutant.file,
+        line=line,
+        claim=(
+            f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
+            f"own edit applied to {mutant.file} — the claim was "
+            f"{criterion.claim!r}, and only that witness ran under the edit."
+        ),
+        probe=mutant,
+        probe_verdict="survived",
+    )
 
 
 def _describe(review: LensReview) -> str:
