@@ -1280,20 +1280,10 @@ def _probe_adequacy(
         findings = by_probe[review.probe_key(probe)]
         for f in findings:
             review.apply_probe_verdict(f, result.verdict)
-        record = result.baseline
         entries.append(
             {
-                "probe": probe.model_dump(),
+                **probe_check.record_fields(probe, result),
                 "probe_verdict": result.verdict,
-                "reason": result.reason,
-                "failures": list(result.failures),
-                "tool": result.tool,
-                "collected": result.collected,
-                "summary": result.summary,
-                "baseline_failures": None if record is None else list(record.failures),
-                "baseline_tool": None if record is None else record.tool,
-                "baseline_collected": None if record is None else record.collected,
-                "baseline_summary": None if record is None else record.summary,
                 "findings": [
                     {
                         "lens": f.lens,

@@ -242,3 +242,23 @@ def check_probe(
         summary=summary,
         baseline=record,
     )
+
+
+def record_fields(probe: Mutant, result: ProbeResult) -> dict[str, object]:
+    """The ten fields a `probes.json` entry owes `probe` and `result`, flat.
+
+    No verdict key and no `findings` — a caller's own. `null` throughout
+    when `result.baseline` is `None`, never `[]` (b-e403c1)."""
+    baseline = result.baseline
+    return {
+        "probe": probe.model_dump(),
+        "reason": result.reason,
+        "failures": list(result.failures),
+        "tool": result.tool,
+        "collected": result.collected,
+        "summary": result.summary,
+        "baseline_failures": None if baseline is None else list(baseline.failures),
+        "baseline_tool": None if baseline is None else baseline.tool,
+        "baseline_collected": None if baseline is None else baseline.collected,
+        "baseline_summary": None if baseline is None else baseline.summary,
+    }

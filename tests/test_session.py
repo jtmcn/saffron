@@ -3144,6 +3144,103 @@ def test_a_probe_cell_that_never_comes_up_leaves_the_findings_as_filed(
     assert finding["probe_verdict"] == "unproven"
 
 
+def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
+    monkeypatch, tmp_path
+):
+    """b-e403c1: `decide` builds its entry from `probe.record_fields` plus
+    only `probe_verdict` and `findings` — nothing else is hand-spelled."""
+    import saffron.probe as probe_check
+    from saffron.intake import Mutant
+
+    baseline = _GREEN_TESTS
+    killed = Failure(file="t.py", code="t.py::test_b", message="boom")
+    mutated = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8.1 probed",
+        collected=["t.py::test_a", "t.py::test_b"],
+        failures=[killed],
+        summary="1 failed in 2s",
+    )
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _stub_probe_gates(monkeypatch, cell, gate_results=[baseline, mutated])
+
+    real = probe_check.record_fields
+    captured: list[tuple[Mutant, dict]] = []
+
+    def _wrapper(probe, result):
+        fields = real(probe, result)
+        captured.append((probe, fields))
+        sentinel = {key: f"sentinel:{key}" for key in fields}
+        sentinel["extra"] = "sentinel:extra"
+        return sentinel
+
+    monkeypatch.setattr(probe_check, "record_fields", _wrapper)
+
+    two_findings = {
+        "findings": [
+            _adequacy_finding("source probe", "src/a.py", "if x < 0:", "if False:"),
+            _adequacy_finding("test-path probe", "spec/a.py", "if y < 0:", "if False:"),
+        ]
+    }
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(two_findings),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    entries = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    assert len(entries) == len(captured) == 2
+
+    shared = {
+        "probe",
+        "reason",
+        "failures",
+        "tool",
+        "collected",
+        "summary",
+        "baseline_failures",
+        "baseline_tool",
+        "baseline_collected",
+        "baseline_summary",
+    }
+    for entry, (_probe, fields) in zip(entries, captured, strict=True):
+        assert set(fields) == shared
+        own = {k: v for k, v in entry.items() if k not in ("probe_verdict", "findings")}
+        assert own == {
+            **{k: f"sentinel:{k}" for k in fields},
+            "extra": "sentinel:extra",
+        }
+
+    by_file = {probe.file: fields for probe, fields in captured}
+    refused = by_file["spec/a.py"]
+    assert refused["baseline_failures"] is None
+    assert refused["baseline_tool"] is None
+    assert refused["baseline_collected"] is None
+    assert refused["baseline_summary"] is None
+
+    probed = by_file["src/a.py"]
+    assert probed["tool"] == "pytest 8.1 probed"
+    assert probed["baseline_tool"] == baseline.tool
+    assert probed["collected"] == 2
+    assert probed["baseline_collected"] == 1  # len(baseline.collected)
+    assert probed["summary"] == "1 failed in 2s"
+    assert probed["baseline_summary"] == baseline.summary
+    assert probed["failures"] == ["t.py::test_b"]
+    assert probed["baseline_failures"] == []
+    assert probed["reason"] != probed["summary"]
+
+    verdicts = {
+        probe.file: entry["probe_verdict"]
+        for entry, (probe, _fields) in zip(entries, captured, strict=True)
+    }
+    assert verdicts == {"src/a.py": "killed", "spec/a.py": "unproven"}
+
+
 def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
     monkeypatch, tmp_path
 ):

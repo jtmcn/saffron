@@ -480,6 +480,7 @@ def _drive(
     fixture_ids=("SA-0045",),
     mutate_raises=None,
     baseline_raises=None,
+    baseline_answer=None,
     probes=(PROBE,),
 ):
     """One fixture through the driver's `main`, with every path into a cell
@@ -498,6 +499,9 @@ def _drive(
     unknown, observed not being.
 
     `baseline_raises` makes the first `run_gate` call — the baseline — raise.
+
+    `baseline_answer` replaces the first `run_gate` call's own return, the
+    same way `baseline_raises` replaces its raise.
 
     `probes` is one adequacy finding each, so a fixture can file more than one.
     """
@@ -535,6 +539,8 @@ def _drive(
         calls.append((name, executable, subset, executor))
         if baseline_raises is not None and len(calls) == 1:
             raise baseline_raises
+        if baseline_answer is not None and len(calls) == 1:
+            return baseline_answer
         return GateResult(gate=name, status="pass", tool="stub tests gate")
 
     @contextlib.contextmanager
@@ -747,6 +753,88 @@ def test_a_probe_with_no_baseline_in_hand_writes_null_not_an_empty_list(
     assert {key: recorded[0][key] for key in BASELINE_KEYS} == dict.fromkeys(
         BASELINE_KEYS
     )
+
+
+def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
+    tmp_path, monkeypatch
+):
+    """b-e403c1: `_write_probes` builds its entry from `probe.record_fields`
+    plus only `verdict` — nothing else is hand-spelled."""
+    from saffron.gates.contract import Failure
+
+    baseline = GateResult(
+        gate="tests",
+        status="fail",
+        tool="stub tests gate (baseline)",
+        collected=["t.py::test_a"],
+        failures=[Failure(file="t.py", code="pre-existing", message="already red")],
+        summary="baseline: 1 failed",
+    )
+
+    real = probe_check.record_fields
+    captured: list[tuple[Mutant, dict]] = []
+
+    def _wrapper(probe, result):
+        fields = real(probe, result)
+        captured.append((probe, fields))
+        sentinel = {key: f"sentinel:{key}" for key in fields}
+        sentinel["extra"] = "sentinel:extra"
+        return sentinel
+
+    monkeypatch.setattr(probe_check, "record_fields", _wrapper)
+
+    distinct = _drive(tmp_path / "distinct", monkeypatch, baseline_answer=baseline)
+    raised = _drive(
+        tmp_path / "raised",
+        monkeypatch,
+        baseline_raises=CellRuntimeError("exec for the baseline failed"),
+    )
+
+    distinct_entries = json.loads(
+        (distinct.out / "SA-0045" / "probes.json").read_text()
+    )
+    raised_entries = json.loads((raised.out / "SA-0045" / "probes.json").read_text())
+    assert len(distinct_entries) == len(raised_entries) == 1
+    assert len(captured) == 2
+
+    shared = set(BASELINE_KEYS) | {
+        "probe",
+        "reason",
+        "failures",
+        "tool",
+        "collected",
+        "summary",
+    }
+    for entry, (_probe, fields) in zip(
+        [distinct_entries[0], raised_entries[0]], captured, strict=True
+    ):
+        assert set(fields) == shared
+        own = {k: v for k, v in entry.items() if k != "verdict"}
+        assert own == {
+            **{k: f"sentinel:{k}" for k in fields},
+            "extra": "sentinel:extra",
+        }
+
+    _distinct_probe, distinct_fields = captured[0]
+    _raised_probe, raised_fields = captured[1]
+
+    assert distinct_fields["tool"] == "stub tests gate"
+    assert distinct_fields["baseline_tool"] == "stub tests gate (baseline)"
+    assert distinct_fields["collected"] is None
+    assert distinct_fields["baseline_collected"] == 1
+    assert distinct_fields["summary"] == ""
+    assert distinct_fields["baseline_summary"] == "baseline: 1 failed"
+    assert distinct_fields["failures"] == []
+    assert distinct_fields["baseline_failures"] == ["pre-existing"]
+    assert distinct_fields["reason"] != distinct_fields["summary"]
+
+    assert raised_fields["baseline_failures"] is None
+    assert raised_fields["baseline_tool"] is None
+    assert raised_fields["baseline_collected"] is None
+    assert raised_fields["baseline_summary"] is None
+
+    assert distinct_entries[0]["verdict"] == "survived"
+    assert raised_entries[0]["verdict"] == "unproven"
 
 
 def test_a_probe_that_raised_still_records_the_baseline_it_was_checked_against(
