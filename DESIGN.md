@@ -1688,4 +1688,4 @@ the ADR records, so a hand edit here is discarded.
 | 1 | Decisions are recorded one per file as ADRs | accepted | 27, 29, 30, 40, 56, 57, 62 |
 | 2 | Core invokes declared gates, never tools | accepted | 12, 13, 14, 29, 30, 34, 36, 39, 41, 52, 54, 57 |
 | 3 | A test is judged by an edit chosen to break it, not by a mutation tool | accepted | 1, 4, 5, 6, 15, 17, 20, 28, 30, 34, 44, 45, 47, 48, 49, 52, 56, 57, 61 |
-| 4 | The critic is host-invoked lenses, and any one blocker goes to REBUT | accepted | 4, 9, 15, 28, 48, 50, 51, 57, 58 |
+| 4 | The critic is host-invoked lenses, and any one blocker goes to REBUT | accepted | 4, 9, 15, 27, 28, 29, 30, 34, 36, 48, 50, 51, 55, 57, 58 |
