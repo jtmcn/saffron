@@ -60,7 +60,10 @@ acceptance:
       and is the one blocker in `rebuttal.json`. The one that does not
       anchor is recorded in `findings.json` and routes nothing. For each, the
       host ran that criterion's own witness node id alone, and each entry in
-      `criterion-probes.json` records `survived`.
+      `criterion-probes.json` records `survived`. Each survivor's claim
+      starts with `review.HOST_FILED`. The `adequacy` lens's drop rate in
+      `findings.json` counts only the findings the lens filed, so neither
+      survivor moves it.
     witness: tests/test_session.py::test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker
   - claim: >-
       A criterion probe its criterion's witness kills records `killed` and
@@ -76,7 +79,7 @@ acceptance:
       declared test path, an edit on a path outside the tree, an edit the
       mutator refuses to apply, and an edit whose criterion's witness is not
       in the set the `tests` gate collected. The mutator is entered for the
-      refused edit alone, and its reason is recorded word for word. No
+      refused edit alone, and the recorded summary quotes its reason. No
       witness runs, and the task ends `READY_FOR_REVIEW`.
     witness: tests/test_session.py::test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing
   - claim: >-
@@ -215,6 +218,14 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    the Gate-only cell, while that cell is up. Append it to the `adequacy`
    `LensReview`'s findings. That list is what `findings.json`,
    `ledger.record_findings` and `review.review_state` read after it.
+   Start its claim with a new `HOST_FILED` constant in
+   `saffron/phases/review.py`. `LensReview.drop_rate` and the count
+   `_describe` prints beside it skip a finding whose claim starts with it.
+   The drop rate says whether a lens is badly prompted (§5.5), and the lens
+   never filed this one. `saffron/agents/findings.py` is forbidden, so no
+   field on `Finding` can mark it. In the witness, have the `adequacy` lens
+   file nothing, so its drop rate is `0.0` only if both survivors are
+   skipped.
 6. **When a raise stops the rest.** A `CellRuntimeError` out of the
    mutator's entry or exit leaves the tree unknown. `witness_gate` reports
    it as `error`, the same status a `tests` gate `error` gets
@@ -230,7 +241,9 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    (`saffron/cell/runtime.py:272-275`). Stop the same way, as
    `_probe_adequacy` stops on one (`saffron/cell/session.py:1400-1417`). A `tests` gate that
    answered `error` under an edit stops nothing, since the mutator's exit
-   restored the file.
+   restored the file. A `CellRuntimeError` out of step 5's read of the
+   survivor's line, or out of `findings.anchor`'s `read_head`, stops the
+   same way. That edit records `error` and files nothing.
 
 ## Out of scope
 
