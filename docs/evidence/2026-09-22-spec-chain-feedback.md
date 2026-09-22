@@ -66,3 +66,57 @@ applied them by hand and did not re-review, under the two-round stop.
 3. **Keep one scratch directory per writer.** The SA-0124 writer synced into
    a `proto` directory an earlier writer had left. It lost nothing that
    mattered, since SA-0123 was committed first.
+
+# Second chain, same day: SA-0125 to SA-0128
+
+Four specs drafted in parallel worktrees, then stacked. `SA-0127` (items 50
+and 51) stands alone. `SA-0125` (b-408cf5), `SA-0126` (b-36b551) and `SA-0128`
+(b-89ec93) chain, because each edits files its parent edits. Ids were assigned
+up front so parallel writers could not collide, and the queue smoke test was
+updated once per layer after stacking.
+
+## Rounds
+
+| Spec | Rounds | Blockers | Writer time, first draft |
+|---|---|---|---|
+| SA-0127 | 2 | 0 | 18 min, after a stop on `.saffron/**` |
+| SA-0125 | 2 | 0 | 22 min |
+| SA-0126 | 2 | 1 (round 1) | 26 min |
+| SA-0128 | 2, plus a delegate check | 3 (2 in round 1, 1 in round 2) | 36 min |
+
+## What the first reviews found, by class
+
+| Finding | Class | Check that should have caught it |
+|---|---|---|
+| SA-0127: criteria 2 and 3 answered an errored run differently | Two criteria disagreeing on one input | Pre-flight 2 |
+| SA-0127: the readability guard skipped item 50's own shape | A data flow the base cannot carry | Pre-flight 4 |
+| SA-0125: nothing held both callers to one predicate | A witness drives one member of a set | Pre-flight 1 |
+| SA-0125: a rejected plan recorded the baseline's tier | A data flow the base cannot carry | Pre-flight 4 |
+| SA-0126: two docstrings at the ten-line limit told to grow | A change breaking a live check | Pre-flight 6 |
+| SA-0126: the cap keys on a column no record fact carries | A design argument the documents do not support | Pre-flight 8 |
+| SA-0128: two fixtures trip `size` by line count, one in a forbidden file | A change breaking a live check | Pre-flight 6 |
+| SA-0128: the token diff had no time or memory bound | An arrangement argued rather than run | Pre-flight 10 |
+
+SA-0128's two fixture blockers were found only by running the whole suite
+against the prototype with the new counting. A grep had not found them. That
+sweep is the check pre-flight 6 lacks for any spec that changes a gate's unit.
+
+## Decisions the operator made mid-chain
+
+1. A `.saffron/**` gate change goes by hand, after the cell (SA-0127).
+2. A cut with nothing committed ends `ORPHANED`, capped at one retry per
+   `spec_sha` (SA-0126).
+3. `size` counts whitespace tokens, not AST logical lines. An AST count would
+   put Python knowledge in core, which §2.1 forbids (SA-0128). The delegate had
+   recommended the AST form first, and corrected it before dispatch.
+4. Past the token-diff bound a file is estimated at 4 tokens a changed line,
+   not counted in full (SA-0128).
+
+## What the next run should change
+
+1. **Sweep the suite for a gate's unit change.** Run every test against the
+   prototype and diff the failures against base, before the first review.
+2. **Check a recommendation against §2.1 before offering it.** The AST option
+   reached the operator and cost a round of questions.
+3. **Assign spec ids and stack order before parallel drafting.** Both paid off
+   here: no collision, and the bookkeeping took one pass per layer.
