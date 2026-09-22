@@ -49,11 +49,13 @@ acceptance:
       `scope.matches` over the `test_paths` globs it is given, against the
       normalised path. Under a `**` glob it refuses three spellings of one
       file beneath it: plain, with a leading `./`, and through a `..` segment.
-      None of them enters the mutator. Given no test paths,
-      it refuses every probe without entering the mutator. The reason is
-      "the repo declares no test paths, so source cannot be told from test".
-      A bare `tests` refuses nothing beneath it, as it refuses nothing there
-      for `revert`.
+      None of them enters the mutator. Under a single-star glob it applies a
+      probe on a file one directory deeper, which `fnmatch` would refuse.
+      Given no test
+      paths, it refuses every probe on a path inside the tree without entering
+      the mutator. The reason is "the repo declares no test paths, so source
+      cannot be told from test". A bare `tests` refuses nothing beneath it, as
+      it refuses nothing there for `revert`.
     witness: tests/test_probe_check.py::test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths
     mutant:
       file: saffron/probe.py
@@ -72,9 +74,8 @@ acceptance:
       find: 'if "tests" not in gates:'
       replace: "if False:"
   - claim: >-
-      The lens-corpus driver hands `check_probe` the globs this repo declares
-      as `integrity.test_paths`, so the corpus still refuses a probe on a test
-      file under the glob rule.
+      The lens-corpus driver's `TEST_PATHS` equals the globs this repo
+      declares as `integrity.test_paths`.
     witness: tests/test_corpus.py::test_the_driver_passes_check_probe_this_repos_declared_globs
   - claim: >-
       A probe on source, in a repo that declares test paths and a `tests`
@@ -119,8 +120,9 @@ prefix differs from the policy's globs.
 Item b-a70ec1: the branch at `saffron/cell/session.py:1343` records every
 remaining probe `unproven` when the repo declares no `tests` gate. No witness
 drives it. Replacing its condition with `False` survives the default suite,
-per the item. The next line reached indexes `gates["tests"]` at
-`saffron/cell/session.py:1382`. The mutant also survived four test files at
+per the item. The next step reached enters `critic_cell` at
+`saffron/cell/session.py:1365-1376`, and `gates["tests"]` at `:1382` is read
+inside it. The mutant also survived four test files at
 base here: `tests/test_session.py`, `tests/test_probe_check.py`,
 `tests/test_corpus.py` and `tests/test_review.py`.
 
@@ -156,8 +158,10 @@ rather than read it as "nothing is a test".
 - Item b-98dc4d, checking logic this repo keeps under `tests/`.
 - A repo whose policy declares a bare `tests`. That is a misdeclared glob for
   `revert` and for the probe alike, and this spec makes them agree.
-- `DESIGN.md` §5.5.1 and `CONTEXT.md`'s *vacuity probe* entry. Both still hold
-  after the change, and both are protected.
+- `DESIGN.md` §5.5.1 (`:1071`) and `CONTEXT.md`'s *vacuity probe* entry
+  (`:355`). Each says every probe off a test path reaches a cell, and neither
+  names the empty `test_paths` refusal. Both are protected, so backlog item
+  b-5fa523 corrects them by hand.
 
 ## Notes for the agent
 
@@ -191,7 +195,9 @@ prototype raised `UnboundLocalError` there.
 (`tests/test_probe_check.py:110`) is a prefix.
 So are the two literal arguments at `tests/test_probe_check.py:67` and
 `tests/test_probe_check.py:84`. As globs they match nothing beneath the
-directory. Two refusal tests then fail. They are
+directory. Three tests then fail. They are
+`test_a_verdict_reached_without_a_suite_records_no_count`
+(`tests/test_probe_check.py:79-88`),
 `test_a_probe_aimed_at_a_test_file_is_refused_before_it_is_applied`
 (`tests/test_probe_check.py:274`) and
 `test_a_probe_refused_before_mutation_still_records_the_baseline_in_hand`
@@ -222,8 +228,11 @@ as `skip`.
 **The wrong implementations each witness must fail.** Each of these failed
 its witness on the prototype.
 
-- Criterion 1: keeping `_under` beside the glob, and matching the raw path
-  unnormalised.
+- Criterion 1: keeping `_under` beside the glob, matching the raw path
+  unnormalised, and `fnmatch` in place of `scope.matches`.
+  `saffron/report/pr_body.py:395` uses `fnmatch` over `test_paths`. Measured
+  at base: under `tests/*.py`, `scope.matches` rejects `tests/sub/x.py` and
+  `fnmatch` accepts it.
 - Criterion 2: a host-side glob check that sends a path outside the tree to
   the cell. Also an empty list refused only inside the cell, which is the
   base's behaviour and failed the reverted run.
