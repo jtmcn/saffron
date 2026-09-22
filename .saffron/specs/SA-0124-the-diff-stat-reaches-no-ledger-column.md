@@ -51,7 +51,7 @@ acceptance:
       witness drives all four in turn on one `packageable` task, whose diff
       adds 2 lines and removes 1. It then drives `READY_FOR_REVIEW` a second
       time over a patch that adds one empty file, which measures 0 and 0.
-      Before each of the five runs it writes 7 and 7 into the row's two
+      Before each of the five `package()` calls it writes 7 and 7 into the row's two
       columns through a `sqlite3` connection of its own. After each it asserts
       the path's own note or state. It reads 2 and 1 through `queue_lines`
       after the first four, and 0 and 0 after the fifth. Today
@@ -283,7 +283,10 @@ prototype tested it.
   from the fixture's base, and rewrite `patch.diff` from it. Its header carries
   `index 0000000..e69de29`. PACKAGE reached `READY_FOR_REVIEW` with the
   result's counts at 0 and 0, and the row read 0 and 0. Both runs used the
-  host's git. The cell's git 2.39.5 was not measured.
+  host's git. In `saffron/cell-base:python`, git 2.39.5 applied the same
+  empty-file patch with `git apply --3way --index` and exited 0. Its stderr
+  held only "Falling back to direct application...", never
+  `_NO_BLOB`'s text, so `apply_patch` returns `APPLY_OK` there too.
 
 The `or None` counterfeit passed the witnesses of criteria 1 to 4 without
 the fifth run
