@@ -217,7 +217,13 @@ what it lacks.
 
 **The driver witness.** Compare `TEST_PATHS` with
 `load_policy(REPO)[0].integrity.test_paths`, loading the driver with
-`_load_driver` (`tests/test_corpus.py:432`).
+`_load_driver` (`tests/test_corpus.py:432`). One is a tuple and the other a
+list, so compare them as lists.
+
+**Three sentences name the prefix rule this removes.** Rewrite each: the
+docstring at `tests/test_session.py:2862-2865`, the "raw prefix test" in
+`_repo_relative`'s docstring (`saffron/probe.py:130-133`), and the comment on
+`saffron/cell/session.py:1398`.
 
 **Import anything new inside the test body.** A module-scope import of a new
 name turns `revert`'s reverted run into a collection error. `revert` reads that
