@@ -123,7 +123,8 @@ five flags. The `cell_patch` fixture (`tests/test_package.py:370-386`) calls
 its output "shaped exactly like `worktree.export_patch`'s output"
 (`tests/test_package.py:372`). It builds that patch from the five-flag list
 (`tests/test_package.py:385`). Thirteen more sites in the module do the same.
-Among them are the `packageable` fixture (`tests/test_package.py:866`) and
+Among them are the `packageable` fixture (defined at `tests/test_package.py:866`,
+reading the list at `:905`) and
 `test_a_degraded_apply_is_an_error_not_a_success` (`tests/test_package.py:411`).
 
 One site knows the list is short. At `tests/test_package.py:3077-3079` a
@@ -189,11 +190,15 @@ counts each rule per file.
 
 **In `tests/test_package.py`.** Replace the module's list with an import of
 `DIFF_FLAGS` from `saffron.cell.worktree`, at module scope beside the other
-`saffron` imports. No call site needs to change. Then remove the comment at
-`tests/test_package.py:3077-3079` and the explicit `--ignore-submodules=none`
-at `tests/test_package.py:3085`. The imported tuple carries that flag now. The
-diff call there can then take the one-line shape of
-`tests/test_package.py:3045`.
+`saffron` imports. No call site needs to change. Keep the explicit
+`--ignore-submodules=none` after `*DIFF_FLAGS` at `tests/test_package.py:3085`.
+`SA-0097`'s criterion 1 uses that test as its witness, with a mutant that
+deletes the flag from `DIFF_FLAGS`
+(`.saffron/specs/done/SA-0097-two-name-only-reads-miss-a-hidden-gitlink.md:34-43`).
+The explicit flag keeps the gitlink in the test's own patch under that mutant,
+so only the listing under test decides the result (`:162-169`). Rewrite the
+comment at `tests/test_package.py:3077-3079` to give that reason. It must no
+longer say the module's list lacks the flag.
 
 **What each witness drives.** Criteria 1 to 3 drive the three flags
 `pinned_diff` copies, one mutant each. Criteria 4 to 6 drive the module-scope
@@ -204,8 +209,10 @@ with the module's list left in place, fails at least one of them.
 **What no witness drives.** Three edits carry no witness:
 
 - The docstring rewrite.
-- The removal of the comment at `tests/test_package.py:3077-3079`.
-- The removal of the explicit flag at `tests/test_package.py:3085`.
+- The rewrite of the comment at `tests/test_package.py:3077-3079`.
+- The explicit flag kept at `tests/test_package.py:3085`. `SA-0097`'s own
+  witness guards it: remove the flag, and the mutant kills that witness
+  whatever the listing does.
 
 The `--no-color` mutant kills most of `tests/test_package.py` once the change
 lands. Of the fourteen sites that read the list, three have no test it kills

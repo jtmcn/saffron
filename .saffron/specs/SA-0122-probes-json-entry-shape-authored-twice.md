@@ -131,6 +131,8 @@ the shared fields, and have both writers call it.
 
 ## Out of scope
 
+- Closing item b-e403c1. `docs/backlog/**` is `forbidden`, so the operator
+  closes it by hand after merge.
 - Renaming either verdict key. Each has readers named in the Context, and
   the committed pass records cannot be rewritten.
 - `criterion-probes.json`. It is a different record with different fields
@@ -155,7 +157,12 @@ Then read `probes.json` back and assert three things.
 - Each entry, minus the writer's own keys, equals the wrapper's return for
   that probe.
 - The real return's keys are exactly the ten names in the Context.
-- The baseline fields of the real return, for each case the claim names.
+- Every value of the real return against its source, for each case the
+  claim names. Where a baseline was in hand, the two runs must differ. Give
+  the baseline and the probed run a different `tool`, `collected` set and
+  `summary`. Today both suites a witness can reuse share all
+  three, and both summaries default to `""`. So a helper that reads the
+  probed run into a baseline key, or the reverse, passes unless they differ.
 
 Also assert the writer's own verdict value for each entry. Take the real
 helper from the module inside the test body, and import nothing the change
@@ -167,8 +174,10 @@ failure and not a collection error, so `revert` sees the witness fail.
 one review through `_drive` with `_PROBE_POLICY` and `gates=("tests",)`.
 File two findings with `_adequacy_finding`, one probing `src/a.py` and one
 probing `spec/a.py`. Answer the probe cell with `_stub_probe_gates`: a green
-baseline, then a failing suite. The source probe is then `killed`, and the
-task ends `READY_FOR_REVIEW` with no REBUT turn.
+baseline, then a failing suite. Give the two answers a different `tool`,
+`collected` set and `summary`, rather than reuse `_GREEN_TESTS`
+(`tests/test_session.py:2729-2731`) unchanged. The source probe is then
+`killed`, and the task ends `READY_FOR_REVIEW` with no REBUT turn.
 `test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run`
 builds the failing suite you need. The `spec/a.py` probe is refused on the
 declared test path before any cell, so it has no baseline, at base and
@@ -181,7 +190,10 @@ default, and once with `baseline_raises=CellRuntimeError(...)`. Each pass
 files one probe, so each writes one entry. `_write_probes` rewrites the file
 after every probe, so match each entry to the wrapper's last return for its
 pass. Compare the ten names with `BASELINE_KEYS` (`tests/test_corpus.py:716`)
-and the six others.
+and the six others. The stub `gate` inside `_drive` answers every call with
+one `GateResult` (`tests/test_corpus.py:524-528`). Add a `_drive` parameter
+that sets the baseline's `tool`, `collected` and `summary` apart from the
+probed run's. Then assert every value in the default pass.
 
 **The wrong implementations each witness must fail.** Each of these failed
 its witness on a prototype of this change.
