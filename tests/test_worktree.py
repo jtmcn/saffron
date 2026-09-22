@@ -1646,8 +1646,8 @@ _PADDING = "".join(f"line_{i} = {i}\n" for i in range(80_000))
 
 def _isolated_repo_with_a_text_file(tmp_path, monkeypatch):
     """A repo isolated from the operator's own git config, with one committed
-    text file ready to be edited under whatever worktree-local setting each
-    witness pins. Shared: `core.bigFileThreshold` and `core.attributesFile`
+    text file ready to be edited under whatever setting each witness pins
+    in the global git config. Shared: `core.bigFileThreshold` and `core.attributesFile`
     are two instances of the same hazard (backlog item 103), so both
     witnesses build on this one fixture rather than duplicating it — the
     `size` gate counts tests.
@@ -1718,6 +1718,8 @@ def test_export_patch_shows_hunks_under_the_git_dirs_own_attributes(
     attributes.write_text("* -diff\n")
     (tmp_path / "bin.dat").write_bytes(b"real\x00binary")
     _edit_and_commit_f(tmp_path)
+    # A rename moves the directory's mtime, so moving the file aside and back fails.
+    os.utime(attributes.parent, ns=(10**18, 10**18))
 
     bare = subprocess.run(
         ["git", "diff", f"{base}..HEAD"],
@@ -1734,6 +1736,7 @@ def test_export_patch_shows_hunks_under_the_git_dirs_own_attributes(
     assert "Binary files" not in _diff_block(patch, "f.py")
     assert "Binary files" in _diff_block(patch, "bin.dat")
     assert attributes.read_text() == "* -diff\n"
+    assert attributes.parent.stat().st_mtime_ns == 10**18
 
 
 def test_export_patch_shows_hunks_under_an_excluded_gitattributes(
@@ -1749,11 +1752,13 @@ def test_export_patch_shows_hunks_under_an_excluded_gitattributes(
 
     assert _porcelain(tmp_path) == ""
     _assert_bare_diff_is_binary(tmp_path, base)
+    os.utime(tmp_path, ns=(10**18, 10**18))
 
     patch = worktree.export_patch("c", base)
     assert "+one = 2" in patch
     assert "Binary files" not in patch
     assert (tmp_path / ".gitattributes").read_text() == "* -diff\n"
+    assert tmp_path.stat().st_mtime_ns == 10**18
 
 
 def test_export_patch_shows_hunks_when_global_config_shapes_a_new_git_dir(
@@ -1791,10 +1796,13 @@ def test_export_patch_shows_hunks_when_global_config_shapes_a_new_git_dir(
         check=True,
     ).stdout.strip()
     assert fmt == "sha256"
+    info = tmp_path / ".git" / "info"
+    os.utime(info, ns=(10**18, 10**18))
 
     patch = worktree.export_patch("c", base)
     assert "+one = 2" in patch
     assert "Binary files" not in patch
+    assert info.stat().st_mtime_ns == 10**18
 
 
 def test_export_patch_reads_a_worktree_whose_own_object_format_is_sha256(
@@ -1833,8 +1841,8 @@ def test_export_patch_reads_a_worktree_whose_own_object_format_is_sha256(
 def test_export_patch_shows_hunks_under_a_tiny_big_file_threshold(
     tmp_path, monkeypatch
 ):
-    """`preserves`: still kills a reverted pin, now through a global
-    setting the fresh dir actually reads."""
+    """`export_patch` prints hunks when the global config sets
+    `core.bigFileThreshold` to 1."""
     base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
     config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
     _set_global(config, "core.bigFileThreshold", "1")
@@ -1850,8 +1858,8 @@ def test_export_patch_shows_hunks_under_a_tiny_big_file_threshold(
 def test_export_patch_shows_hunks_under_a_configured_attributes_file(
     tmp_path, monkeypatch
 ):
-    """`preserves`: still kills a reverted pin, now through a global
-    setting the fresh dir actually reads."""
+    """`export_patch` prints hunks when the global config names a
+    `core.attributesFile` marking every path `-diff`."""
     base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
     # Outside the repository on purpose: no commit here shows this file, and
     # that is exactly why `integrity`'s check on a committed `.gitattributes`
@@ -1971,7 +1979,7 @@ def test_history_reads_see_through_a_shallow_file(tmp_path, monkeypatch):
 def _isolated_repo(tmp_path, monkeypatch):
     """An empty repo isolated from the operator's own git config — the
     shared start for the three witnesses below, each of which sets its own
-    worktree-local config afterward."""
+    config afterward."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
@@ -2081,8 +2089,8 @@ def test_export_patch_carries_no_color_when_the_worktree_forces_it(
     tmp_path, monkeypatch
 ):
     """Every line of the patch, the `diff --git` header the host parses
-    included, carries terminal escape codes when the worktree forces colour
-    on, whether through `color.ui` or through `color.diff`. `--no-color`, not
+    included, carries terminal escape codes when the global config forces
+    colour on, whether through `color.ui` or through `color.diff`. `--no-color`, not
     a `-c color.ui=never` override: probed on git 2.39.5 and 2.54, the
     override does not undo `color.diff=always`.
     """
@@ -2115,9 +2123,9 @@ def test_export_patch_carries_no_color_when_the_worktree_forces_it(
 def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
     tmp_path, monkeypatch
 ):
-    """Two hunks merge into one when the worktree sets `diff.interHunkContext`
-    wide enough — which widens the lines a critic finding may anchor to, the
-    way `diff.context` would. One unchanged line separates their context, so
+    """Two hunks merge into one when the global config sets
+    `diff.interHunkContext` wide enough. That widens the lines a critic
+    finding may anchor to, the way `diff.context` would. One unchanged line separates their context, so
     any pin but 0 merges them.
     """
     _isolated_repo(tmp_path, monkeypatch)

@@ -127,7 +127,8 @@ def prepare_worktree(
 # The shape of every diff the host reads, pinned on the command line. Worktree
 # config is the agent's to write (§2), and a `-c` override or an explicit flag
 # beats `.git/config` — including config it pulls in via `include.path`,
-# measured on git 2.50.
+# measured on git 2.50. `export_patch` reads no `.git/config`, but the agent's
+# global config still reaches it.
 DIFF_FLAGS = (
     # diff.srcPrefix/dstPrefix/noprefix/mnemonicPrefix all move the a/ b/ the
     # host matches paths against; these flags win over every one of them.
@@ -249,12 +250,11 @@ $worktree_prefix --git-dir="$dir" diff {diff_flags} "$1..$head"
 def export_patch(container: str, base_sha: str) -> str:
     """The patch every lens, `integrity` and `size` read, and PACKAGE applies.
 
-    Read from a fresh bare git dir linked to the worktree's objects through
-    `objects/info/alternates`, not the worktree's own: neither `* -diff` in
-    `.git/info/attributes` nor an untracked `.gitattributes` a line in
-    `.git/info/exclude` hides reaches a dir with no `info` of its own
-    (item 103). The fresh dir has no refs, so `base_sha` and `HEAD` are
-    resolved to shas first. It has no template and no object-format default,
+    Read from a fresh bare git dir that borrows the worktree's objects
+    through `objects/info/alternates`. That dir has no `info` of its own. So
+    neither `* -diff` in `.git/info/attributes` nor an excluded, untracked
+    `.gitattributes` reaches it (item 103). The fresh dir has no refs, so
+    `HEAD` is resolved to a sha first, and `base_sha` arrives as one. It has no template and no object-format default,
     so `git init` pins both against whatever global config is readable.
     """
     prefix = shlex.join(git_argv())
