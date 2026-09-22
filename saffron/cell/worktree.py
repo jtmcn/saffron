@@ -232,8 +232,38 @@ def commit_subjects(container: str, base_sha: str) -> list[str]:
     return [line for line in done.stdout.splitlines() if line.strip()]
 
 
+# Each `{prefix}`/`{diff_flags}` token below comes from `git_argv`/`DIFF_FLAGS`.
+_EXPORT_PATCH_SCRIPT = """\
+worktree_prefix="{prefix}"
+git_dir=$($worktree_prefix rev-parse --absolute-git-dir)
+head=$($worktree_prefix rev-parse HEAD)
+fmt=$($worktree_prefix rev-parse --show-object-format)
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+git init -q --bare --template= --object-format="$fmt" "$dir"
+printf '%s\\n' "$git_dir/objects" > "$dir/objects/info/alternates"
+$worktree_prefix --git-dir="$dir" diff {diff_flags} "$1..$head"
+"""
+
+
 def export_patch(container: str, base_sha: str) -> str:
-    done = _git(container, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD")
+    """The patch every lens, `integrity` and `size` read, and PACKAGE applies.
+
+    Read from a fresh bare git dir linked to the worktree's objects through
+    `objects/info/alternates`, not the worktree's own: neither `* -diff` in
+    `.git/info/attributes` nor an untracked `.gitattributes` a line in
+    `.git/info/exclude` hides reaches a dir with no `info` of its own
+    (item 103). The fresh dir has no refs, so `base_sha` and `HEAD` are
+    resolved to shas first. It has no template and no object-format default,
+    so `git init` pins both against whatever global config is readable.
+    """
+    prefix = shlex.join(git_argv())
+    script = _EXPORT_PATCH_SCRIPT.format(
+        prefix=prefix, diff_flags=shlex.join(DIFF_FLAGS)
+    )
+    done = runtime.exec_(
+        container, ["sh", "-euc", script, "sh", base_sha], workdir=WORKTREE_MOUNT
+    )
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff failed: {done.stderr.strip()}")
     return done.stdout

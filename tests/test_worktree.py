@@ -1686,13 +1686,158 @@ def _assert_bare_diff_is_binary(tmp_path, base):
     assert "Binary files" in bare
 
 
+def _diff_block(patch: str, path: str) -> str:
+    """The one `diff --git a/<path> b/<path>` block, so a genuinely binary
+    file elsewhere in the same patch cannot stand in for `path`'s own."""
+    marker = f"diff --git a/{path} b/{path}"
+    start = patch.index(marker)
+    rest = patch[start:]
+    end = rest.find("\ndiff --git ", 1)
+    return rest if end == -1 else rest[:end]
+
+
+def _point_global_config_outside_the_repo(tmp_path, monkeypatch) -> Path:
+    """`GIT_CONFIG_GLOBAL`, pointed at a file the fresh dir `export_patch`
+    builds still reads, unlike `tmp_path/.git/config`."""
+    config = Path(f"{tmp_path}-global.gitconfig")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    return config
+
+
+def _set_global(config: Path, key: str, value: str) -> None:
+    subprocess.run(["git", "config", "--file", str(config), key, value], check=True)
+
+
+def test_export_patch_shows_hunks_under_the_git_dirs_own_attributes(
+    tmp_path, monkeypatch
+):
+    """`* -diff` in `.git/info/attributes` hides an edit's hunks. A real
+    binary committed in the same range still reads as binary."""
+    base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
+    attributes = tmp_path / ".git" / "info" / "attributes"
+    attributes.write_text("* -diff\n")
+    (tmp_path / "bin.dat").write_bytes(b"real\x00binary")
+    _edit_and_commit_f(tmp_path)
+
+    bare = subprocess.run(
+        ["git", "diff", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "Binary files" in _diff_block(bare, "f.py")
+    assert "Binary files" in _diff_block(bare, "bin.dat")
+
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in _diff_block(patch, "f.py")
+    assert "Binary files" not in _diff_block(patch, "f.py")
+    assert "Binary files" in _diff_block(patch, "bin.dat")
+    assert attributes.read_text() == "* -diff\n"
+
+
+def test_export_patch_shows_hunks_under_an_excluded_gitattributes(
+    tmp_path, monkeypatch
+):
+    """An untracked `.gitattributes`, hidden by `.git/info/exclude`, hides
+    an edit's hunks the same way a tracked one would."""
+    base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
+    exclude = tmp_path / ".git" / "info" / "exclude"
+    exclude.write_text(exclude.read_text() + ".gitattributes\n")
+    (tmp_path / ".gitattributes").write_text("* -diff\n")
+    _edit_and_commit_f(tmp_path)
+
+    assert _porcelain(tmp_path) == ""
+    _assert_bare_diff_is_binary(tmp_path, base)
+
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in patch
+    assert "Binary files" not in patch
+    assert (tmp_path / ".gitattributes").read_text() == "* -diff\n"
+
+
+def test_export_patch_shows_hunks_when_global_config_shapes_a_new_git_dir(
+    tmp_path, monkeypatch
+):
+    """A global `init.templateDir` seeding a new git dir's attributes, and
+    `GIT_DEFAULT_HASH=sha256` forcing its object format, stop neither read."""
+    base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
+
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+    template_dir = Path(f"{tmp_path}-template")
+    (template_dir / "info").mkdir(parents=True)
+    (template_dir / "info" / "attributes").write_text("* -diff\n")
+    _set_global(config, "init.templateDir", str(template_dir))
+
+    # Prove the template bites first: a plain bare init under this config
+    # seeds `info/attributes` from it.
+    probe = Path(f"{tmp_path}-template-probe")
+    subprocess.run(["git", "init", "-q", "--bare", str(probe)], check=True)
+    assert (probe / "info" / "attributes").read_text() == "* -diff\n"
+
+    # Today's own hiding mechanism, still planted, so this fails at base.
+    (tmp_path / ".git" / "info" / "attributes").write_text("* -diff\n")
+    _edit_and_commit_f(tmp_path)
+    _assert_bare_diff_is_binary(tmp_path, base)
+
+    monkeypatch.setenv("GIT_DEFAULT_HASH", "sha256")
+    hash_probe = Path(f"{tmp_path}-hash-probe")
+    subprocess.run(["git", "init", "-q", "--bare", str(hash_probe)], check=True)
+    fmt = subprocess.run(
+        ["git", "rev-parse", "--show-object-format"],
+        cwd=hash_probe,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert fmt == "sha256"
+
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in patch
+    assert "Binary files" not in patch
+
+
+def test_export_patch_reads_a_worktree_whose_own_object_format_is_sha256(
+    tmp_path, monkeypatch
+):
+    """The worktree's own object format, not `GIT_DEFAULT_HASH` merely
+    threatening the fresh dir's default, is what `git init` must pin."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", "--object-format=sha256", str(tmp_path)],
+        check=True,
+    )
+    (tmp_path / "f.py").write_text("one = 1\n")
+    base = _commit(tmp_path, "base")
+
+    # Prove the worktree really is sha256 before asking the fresh dir to
+    # match it.
+    fmt = subprocess.run(
+        ["git", "rev-parse", "--show-object-format"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert fmt == "sha256"
+
+    (tmp_path / "f.py").write_text("one = 2\n")
+    _commit(tmp_path, "edit")
+
+    _host_git(tmp_path, monkeypatch)
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in patch
+
+
 def test_export_patch_shows_hunks_under_a_tiny_big_file_threshold(
     tmp_path, monkeypatch
 ):
+    """`preserves`: still kills a reverted pin, now through a global
+    setting the fresh dir actually reads."""
     base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
-    subprocess.run(
-        ["git", "config", "core.bigFileThreshold", "1"], cwd=tmp_path, check=True
-    )
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+    _set_global(config, "core.bigFileThreshold", "1")
     _edit_and_commit_f(tmp_path)
 
     _assert_bare_diff_is_binary(tmp_path, base)
@@ -1705,6 +1850,8 @@ def test_export_patch_shows_hunks_under_a_tiny_big_file_threshold(
 def test_export_patch_shows_hunks_under_a_configured_attributes_file(
     tmp_path, monkeypatch
 ):
+    """`preserves`: still kills a reverted pin, now through a global
+    setting the fresh dir actually reads."""
     base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
     # Outside the repository on purpose: no commit here shows this file, and
     # that is exactly why `integrity`'s check on a committed `.gitattributes`
@@ -1713,11 +1860,8 @@ def test_export_patch_shows_hunks_under_a_configured_attributes_file(
     attrs_dir.mkdir()
     attributes = attrs_dir / "attributes"
     attributes.write_text("* -diff\n")
-    subprocess.run(
-        ["git", "config", "core.attributesFile", str(attributes)],
-        cwd=tmp_path,
-        check=True,
-    )
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+    _set_global(config, "core.attributesFile", str(attributes))
     _edit_and_commit_f(tmp_path)
 
     _assert_bare_diff_is_binary(tmp_path, base)
@@ -1949,10 +2093,11 @@ def test_export_patch_carries_no_color_when_the_worktree_forces_it(
     _commit(tmp_path, "edit")
 
     _host_git(tmp_path, monkeypatch)
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
     # First `color.ui` alone, then `color.diff` added on top — the two colour
     # rows of SA-0082's probe table, folded into one witness.
     for key in ("color.ui", "color.diff"):
-        subprocess.run(["git", "config", key, "always"], cwd=tmp_path, check=True)
+        _set_global(config, key, "always")
 
         bare = subprocess.run(
             ["git", "diff", f"{base}..HEAD"],
@@ -1985,9 +2130,8 @@ def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
     (tmp_path / "f.py").write_text("\n".join(lines) + "\n")
     _commit(tmp_path, "two edits, one line between their contexts")
 
-    subprocess.run(
-        ["git", "config", "diff.interHunkContext", "10"], cwd=tmp_path, check=True
-    )
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+    _set_global(config, "diff.interHunkContext", "10")
 
     # Prove the setting bites first: a bare diff in this same repo merges
     # the two edits into a single hunk.
