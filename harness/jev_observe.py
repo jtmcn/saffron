@@ -78,7 +78,7 @@ def lens_findings(lenses: list) -> list[Finding]:
 
 
 def finding_id(kind: Kind, spec_id: str, number: int, index: int) -> str:
-    """Stable across re-scores, because nothing in it changes when a round is scored again."""
+    """Stable across re-scores, because nothing in it changes when a review round is scored again."""
     return hashlib.sha256(f"{kind}|{spec_id}|{number}|{index}".encode()).hexdigest()[
         :16
     ]
@@ -102,7 +102,7 @@ SCORE_LEVELS = (
 
 
 @dataclass(frozen=True)
-class Round:
+class ReviewRound:
     kind: Kind
     spec_id: str
     number: int
@@ -118,8 +118,8 @@ def _noul(instructions: str) -> dict:
     return {"type": "noul", "instructions": instructions}
 
 
-def build_asks(r: Round) -> dict[str, dict]:
-    """Every question this round's kind asks, keyed `Q<n>_<subject>`.
+def build_asks(r: ReviewRound) -> dict[str, dict]:
+    """Every question this review round's kind asks, keyed `Q<n>_<subject>`.
 
     Plain dicts, which `system_one` accepts, so this module never imports the SDK.
     """
@@ -169,8 +169,8 @@ def build_asks(r: Round) -> dict[str, dict]:
     return asks
 
 
-def state(r: Round) -> dict[str, Any]:
-    """What Jev reads: the spec, this round's findings, the earlier ones, and the diff."""
+def state(r: ReviewRound) -> dict[str, Any]:
+    """What Jev reads: the spec, this review round's findings, the earlier ones, and the diff."""
 
     def rows(pairs: list[tuple[str, Finding]]) -> list[dict]:
         return [{"id": fid, **asdict(f)} for fid, f in pairs]
@@ -208,8 +208,10 @@ def distribution(answer: Any) -> dict[str, float]:
     return {str(k): v for k, v in answer.probabilities.items()}
 
 
-def observe(r: Round, client: Any, model: str = MODEL) -> tuple[str, list[Answer]]:
-    """One call per round, which TypeSafe measured as 12x cheaper than one per question."""
+def observe(
+    r: ReviewRound, client: Any, model: str = MODEL
+) -> tuple[str, list[Answer]]:
+    """One call per review round, which TypeSafe measured as 12x cheaper than one per question."""
     asks = build_asks(r)
     response = client.system_one(state(r), asks, model=model)
     answers = []
@@ -219,7 +221,7 @@ def observe(r: Round, client: Any, model: str = MODEL) -> tuple[str, list[Answer
     return response.model, answers
 
 
-def to_turtle(r: Round, model: str, answers: list[Answer]) -> str:
+def to_turtle(r: ReviewRound, model: str, answers: list[Answer]) -> str:
     """One earl:Assertion per answer. The outcome is always cantTell, because a score has no pass."""
     # json.dumps output is a valid Turtle string literal, since every escape it writes is one Turtle reads.
     lit = json.dumps
@@ -235,7 +237,7 @@ def to_turtle(r: Round, model: str, answers: list[Answer]) -> str:
             "  earl:result [ a earl:TestResult ; earl:outcome earl:cantTell ;\n"
             f"    jev:distribution {lit(json.dumps(a.distribution, sort_keys=True))}^^rdf:JSON ] ;\n"
             f"  jev:model {lit(model)} ;\n"
-            f"  jev:round {r.number} ;\n"
+            f"  jev:reviewRound {r.number} ;\n"
             f"  jev:commit {lit(r.commit)} .\n"
         )
     return "\n".join(parts)

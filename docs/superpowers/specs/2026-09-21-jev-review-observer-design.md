@@ -1,10 +1,11 @@
 # Jev observes the review loops, and nothing reads its scores yet
 
-Spec review and code review end when a reviewer runs out of findings. Round
-count is the only stop signal, and it says nothing about whether the last round
-mattered. Jev is TypeSafe's System One model. It returns typed, calibrated
-answers with no prose. This design adds Jev as an observer of every review
-round. It scores what each reviewer produced and writes the scores to disk.
+Spec review and code review end when a reviewer runs out of findings. Review
+round count is the only stop signal, and it says nothing about whether the
+last review round mattered. Jev is TypeSafe's System One model. It returns
+typed, calibrated answers with no prose. This design adds Jev as an observer
+of every review round. It scores what each reviewer produced and writes the
+scores to disk.
 
 Nothing reads the scores in this phase. They never change a gate result, a
 verdict, a queue order or a stop decision. The source note is
@@ -16,7 +17,7 @@ verdict, a queue order or a stop decision. The source note is
    `saffron/` never imports it. Onboarding a vendor this way touches zero lines
    of core, as §2.1 requires.
 2. **The spec loop driver runs it.** A new `driver.py jev` command scores one
-   round. The cell's REVIEW phase is scored after the task ends, from
+   review round. The cell's REVIEW phase is scored after the task ends, from
    `findings.json`, so `run_task` stays unchanged.
 3. **Reviewers emit a JSON block.** Both report formats end with a fenced
    `json` block of findings. The scorer never parses prose.
@@ -32,7 +33,7 @@ then REBUT.
 
 ## Questions
 
-Every question below is asked in one Jev call per round (Changed while
+Every question below is asked in one Jev call per review round (Changed while
 planning, item 3). `Noul` is the SDK's name for a yes-or-no question and
 returns the probability of yes.
 
@@ -41,9 +42,9 @@ returns the probability of yes.
 | Q1 | each finding | Which criterion does this affect? | Choice over the spec's criteria and `noMatch` |
 | Q2 | each finding | Severity | Score: 3 blocking, 2 should-fix, 1 nit, 0 noise |
 | Q3 | each finding | Would fixing it change the criterion's outcome? | Noul |
-| Q4 | each finding | Is it materially new against every earlier round? | Noul |
-| Q5 | each earlier finding | Does this round's diff address it? | Noul |
-| Q6 | each round | Would another round surface a blocker? | Noul |
+| Q4 | each finding | Is it materially new against every earlier review round? | Noul |
+| Q5 | each earlier finding | Does this review round's diff address it? | Noul |
+| Q6 | each review round | Would another review round surface a blocker? | Noul |
 | Q7 | each criterion | Is it testable as written? | Noul |
 | Q8 | each criterion | Does it define an evidence path? | Noul |
 | Q9 | each criterion | Does it conflict with another criterion? | Choice over `none` and the other criteria |
@@ -56,14 +57,16 @@ Which questions apply depends on the loop.
 | `pr-review` | Q1 to Q6 |
 | `cell` | Q1, Q2, Q3, Q6 |
 
-The cell's REVIEW is a single pass, so it has no earlier round for Q4 and Q5.
+The cell's REVIEW is a single pass, so it has no earlier review round for Q4
+and Q5.
 
-The state Jev sees for a round is the spec, the round's findings, the diff since
-the previous round, and every earlier round's findings.
+The state Jev sees for a review round is the spec, the review round's
+findings, the diff since the previous review round, and every earlier review
+round's findings.
 
 ## The record
 
-Each round writes one `jev.ttl`. Every answer becomes one `earl:Assertion` with
+Each review round writes one `jev.ttl`. Every answer becomes one `earl:Assertion` with
 these parts.
 
 - `earl:assertedBy jev:jev`.
@@ -73,14 +76,14 @@ these parts.
 - A result whose outcome is always `earl:cantTell`, because a choice or a score
   has no pass or fail.
 - The full probability distribution, as an `rdf:JSON` literal.
-- The model name from the response, the round number and the commit reviewed.
+- The model name from the response, the review round number and the commit reviewed.
 
 The distribution is kept whole because a flat split says the question was
 ambiguous, which the top answer alone hides.
 
-A finding's identity is a hash of the loop kind, the spec id, the round number
-and the finding's index in the JSON block. Re-scoring a round therefore keeps
-every id.
+A finding's identity is a hash of the loop kind, the spec id, the review round
+number and the finding's index in the JSON block. Re-scoring a review round
+therefore keeps every id.
 
 The terms live in their own namespace, `urn:software-factory:jev#`, not
 `ontology/factory.ttl`. `jev:jev`, one individual per question, and the
@@ -95,10 +98,10 @@ distribution property are declared inline in `to_turtle`, not by
 | `pr-review` | `~/.saffron/batches/spec-loop/SA-NNNN/pr-review/round-N/` |
 | `cell` | `~/.saffron/batches/v0/SA-NNNN/` |
 
-A round directory holds one `report-N.md` per seat, one `round.json` with the
-resolved commit and the diff's start, one merged `findings.json`, and
-`jev.ttl`. A `pr-review` round holds two reports, and both seats share the
-round number and the one findings file.
+A review round directory holds one `report-N.md` per seat, one `round.json`
+with the resolved commit and the diff's start, one merged `findings.json`,
+and `jev.ttl`. A `pr-review` review round holds two reports, and both seats
+share the review round number and the one findings file.
 
 ## The JSON block
 
@@ -122,16 +125,18 @@ driver.py jev SA-NNNN --kind spec-review|pr-review|cell [--report <path> ...]
 
 - `spec-review` and `pr-review` take the saved reviewer reports. `pr-review`
   takes one per seat.
-- The command numbers the round as one past the last recorded round.
+- The command numbers the review round as one past the last recorded review
+  round.
 - It records the reviewed commit. That commit is the spec branch head for a spec
   review and the PR head for a code review. The diff Jev sees runs from the
-  previous round's commit to this one.
+  previous review round's commit to this one.
 - `cell` reads `findings.json` from the batch tree and takes no report. The loop
   runs it right after `record`.
-- Re-scoring a round overwrites its `jev.ttl`.
+- Re-scoring a review round overwrites its `jev.ttl`.
 
 Exit codes follow `saffron/cli.py`. A missing or malformed JSON block exits
-`1` and writes no round directory. A missing key or a failed Jev call exits `2`.
+`1` and writes no review round directory. A missing key or a failed Jev call
+exits `2`.
 
 `SKILL.md` gains three lines, one after the spec review, one after step 2c's
 seats and one after `record`. Each line gives the command and says that a
@@ -166,8 +171,8 @@ fake that returns fixed answers.
 |---|---|---|
 | T1 | The fake answers every question, and pyoxigraph loads the Turtle | One assertion per answer, each distribution round-trips, the outcome is `cantTell`, the model is recorded, and a SPARQL query checks the shape |
 | T2 | The questions built for each loop | Q1's choices are the criteria and `noMatch`, `cell` asks no Q4 or Q5, only `spec-review` asks Q7 to Q9 |
-| T3 | Reading the JSON block | The last fenced `json` block wins, and a missing or malformed block exits `1` with no round directory |
-| T4 | Two rounds, then round 1 again | Rounds self-number, the diff spans the recorded commits, and ids survive a re-score |
+| T3 | Reading the JSON block | The last fenced `json` block wins, and a missing or malformed block exits `1` with no review round directory |
+| T4 | Two review rounds, then review round 1 again | Review rounds self-number, the diff spans the recorded commits, and ids survive a re-score |
 | T5 | `jev` with no key, and `status` with the SDK blocked | The first exits `2` before any call, and the second runs |
 | T6 | dropped (Changed while planning, item 1) | Jev's `.ttl` files sit outside the `shacl` gate's tree, so pyshacl has nothing to run against |
 
@@ -191,11 +196,11 @@ output goes to `docs/evidence/2026-09-21-jev-first-call.md`.
    `ty` checks every file, including `.claude/`. A group `make install`
    does not sync would fail the `types` gate. The `dev` group never ships
    in the `saffron` wheel.
-3. **One Jev call per round, not one per question group.** TypeSafe's
+3. **One Jev call per review round, not one per question group.** TypeSafe's
    parallel-questions cookbook measured one batched call as 12.2x cheaper
    and 10x faster, with no change to each answer.
-4. **Q4 is skipped in a round with no earlier round.** Every finding in
-   round 1 is new by definition.
+4. **Q4 is skipped in a review round with no earlier review round.** Every
+   finding in review round 1 is new by definition.
 5. **Q1 is skipped when the spec has no criteria, and Q9 when it has only
    one.** A choice with one option carries no information.
 6. **`--commit` is passed by the delegate.** It is the commit the reviewer
@@ -222,5 +227,6 @@ The source note's exit criteria stand, with two additions from its review.
 
 1. Jev's stop call must beat the reviewer's own severity. Without that
    comparison, calibration alone cannot show that Jev adds anything.
-2. Hand-labelling needs rounds run past the stop point. A loop that stopped
-   never shows whether one more round would have found a blocker.
+2. Hand-labelling needs review rounds run past the stop point. A loop that
+   stopped never shows whether one more review round would have found a
+   blocker.

@@ -1,5 +1,6 @@
-"""The spec loop driver's `jev` command: round numbering, the diff between
-rounds, re-scoring, and the exits that keep a failed call off the loop."""
+"""The spec loop driver's `jev` command: review round numbering, the diff
+between review rounds, re-scoring, and the exits that keep a failed call off
+the loop."""
 
 from __future__ import annotations
 

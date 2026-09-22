@@ -636,9 +636,20 @@ without its n is the shape item 69 charged the mutation-vs-lens record with.
 _Avoid_: bare "pass" — that is a gate status, and `_Avoid_` under **Attempt**
 already reserves it. Also "round", "sweep", "iteration".
 
-> These two are the only place Saffron reuses **run** and **pass**, and they are
-> qualified everywhere in prose for that reason. They name measurement of the
-> product, never the product: nothing under `saffron/` imports the harness.
+**Review round**: One reviewer's report on one spec or pull request, at one
+commit, in the spec loop's review cycle. A spec review in step 1b is one
+review round. Both seats of a step 2c pull request review count as one
+review round together. A cell's REVIEW counts as the cell's single review
+round. It happens outside any task, so it is never an attempt. It is
+numbered from 1, and Jev scores each one (`driver.py jev`).
+_Avoid_: bare "round", "iteration", and "pass".
+
+> These three are the only place Saffron reuses **run**, **pass**, and
+> **round**, and they are qualified everywhere in prose for that reason.
+> Scoring run and scoring pass name measurement of the product, never the
+> product: nothing under `saffron/` imports the harness. Review round names a
+> step in the spec loop, qualified the same way, because bare round already
+> names an attempt count.
 
 ---
 

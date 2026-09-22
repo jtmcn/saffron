@@ -31,7 +31,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from harness.jev_observe import Round
+    from harness.jev_observe import ReviewRound
     from saffron.gates.contract import GateResult
     from saffron.intake import Spec
 
@@ -1127,7 +1127,7 @@ def _spec_path(spec_id: str, given: str | None) -> Path | None:
 
 
 def _resolve_commit(ref: str, cwd: Path) -> str | int:
-    """`ref` as a SHA. A round stores and emits only SHAs, never a ref: a
+    """`ref` as a SHA. A review round stores and emits only SHAs, never a ref: a
     branch name re-resolves to a different commit on every re-score, and
     `origin/main` diffed against itself is empty (item F1)."""
     try:
@@ -1188,8 +1188,8 @@ def cmd_jev(args) -> int:
 
 def _jev_review(
     args, spec_id: str, spec_text: str, criteria: list[str]
-) -> tuple[Path, Round] | int:
-    """A spec or PR review round: numbered, diffed from the last round, saved before the call."""
+) -> tuple[Path, ReviewRound] | int:
+    """A spec or PR review round: numbered, diffed from the last review round, saved before the call."""
     from harness import jev_observe
 
     base = JEV_ROOT / "spec-loop" / spec_id / args.kind
@@ -1234,7 +1234,7 @@ def _jev_review(
             )
         except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
             return _fail(f"round {n}'s findings.json is corrupt: {exc}")
-    # Round 1 reads the whole PR from its merge base. Later rounds read only what changed.
+    # Review round 1 reads the whole PR from its merge base. Later review rounds read only what changed.
     span = f"{since}...{commit}" if number == 1 else f"{since}..{commit}"
     try:
         diff = _git("diff", span, cwd=args.root)
@@ -1251,14 +1251,14 @@ def _jev_review(
         json.dumps({"commit": commit, "since": since}) + "\n"
     )
     (directory / "findings.json").write_text(jev_observe.dump_findings(pairs))
-    return directory, jev_observe.Round(
+    return directory, jev_observe.ReviewRound(
         args.kind, spec_id, number, commit, spec_text, criteria, pairs, prior, diff
     )
 
 
 def _jev_cell(
     spec_id: str, spec_text: str, criteria: list[str]
-) -> tuple[Path, Round] | int:
+) -> tuple[Path, ReviewRound] | int:
     """The cell's REVIEW, read from its batch directory after the task ends."""
     from harness import jev_observe
 
@@ -1277,7 +1277,7 @@ def _jev_cell(
         (jev_observe.finding_id("cell", spec_id, 1, i), f)
         for i, f in enumerate(findings)
     ]
-    return directory, jev_observe.Round(
+    return directory, jev_observe.ReviewRound(
         "cell", spec_id, 1, commit, spec_text, criteria, pairs, [], diff
     )
 

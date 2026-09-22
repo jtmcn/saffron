@@ -107,7 +107,7 @@ def test_lens_findings_flatten_every_lens():
 
 def _round(
     kind="spec-review", findings=1, prior=0, criteria=("it parses", "it saves")
-) -> jo.Round:
+) -> jo.ReviewRound:
     made = [
         (
             jo.finding_id(kind, "SA-0001", 2, i),
@@ -122,7 +122,7 @@ def _round(
         )
         for i in range(prior)
     ]
-    return jo.Round(
+    return jo.ReviewRound(
         kind,
         "SA-0001",
         2,
@@ -260,7 +260,7 @@ PREFIX jev: <urn:software-factory:jev#>
 SELECT ?outcome ?dist ?model ?round ?commit WHERE {
   ?a a earl:Assertion ; earl:assertedBy jev:jev ; earl:test ?test ;
      earl:subject ?subject ; earl:mode earl:automatic ; earl:result ?r ;
-     jev:model ?model ; jev:round ?round ; jev:commit ?commit .
+     jev:model ?model ; jev:reviewRound ?round ; jev:commit ?commit .
   ?r earl:outcome ?outcome ; jev:distribution ?dist .
 }
 """
