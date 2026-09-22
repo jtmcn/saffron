@@ -1398,6 +1398,8 @@ _PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
 _ERROR_KILL = re.compile(r" - (?!AssertionError)\w+Error\b")
 # One space: a captured log line pads its level (`ERROR    root:...`).
 _SUMMARY_ROW = re.compile(r"^(FAILED|ERROR) \S")
+# Claude Code exports FORCE_COLOR, so a summary row can open with an escape code.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def cmd_probe(args) -> int:
@@ -1432,7 +1434,7 @@ def cmd_probe(args) -> int:
         target.write_bytes(original)
     if target.read_bytes() != original:
         return _fail(f"{args.file} was not restored — check it by hand")
-    output = (done.stdout + done.stderr).splitlines()
+    output = _ANSI.sub("", done.stdout + done.stderr).splitlines()
     failed = [line for line in output if _SUMMARY_ROW.match(line)]
     is_pytest = any("pytest" in part for part in command)
     if done.returncode == 0:
