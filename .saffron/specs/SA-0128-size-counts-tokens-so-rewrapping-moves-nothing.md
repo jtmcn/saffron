@@ -10,6 +10,7 @@ touches:
   - tests/test_size.py
   - tests/test_artifacts.py
   - tests/test_session.py
+  - tests/test_suite.py
   - tests/test_spec_loop_driver.py
 forbidden:
   - DESIGN.md
@@ -41,7 +42,6 @@ forbidden:
   - saffron/task.py
   - saffron/cli.py
   - tests/test_events.py
-  - tests/test_suite.py
   - tests/test_cli.py
   - tests/test_ledger.py
   - tests/test_ledger_fold_task.py
@@ -71,8 +71,8 @@ acceptance:
       One token deleted counts 1. One token replaced counts 2. A line of five
       tokens added counts 5, and removed counts 5. Two tokens swapped count
       2. A two-token line moved past an unchanged line counts 2. The
-      replacement of `beta alpha beta` by `alpha gamma beta` counts 2. Three
-      tokens removed from one file and added to another count 6.
+      replacement of `alpha beta alpha` by `beta gamma alpha gamma` counts
+      3. Three tokens removed from one file and added to another count 6.
     witness: tests/test_size.py::test_the_count_is_the_fewest_tokens_an_edit_of_each_files_stream_needs
   - claim: >-
       The `size` ceilings are 1300 changed tokens for `bug`, 3000 for
@@ -91,8 +91,24 @@ acceptance:
       rejection's message holds the failure message `size_gate` returns for
       a diff of that many tokens, and the tier it carries is `elevated`. At
       `standard` the estimate one line over raises nothing, and the advisory
-      sentence it returns names its price and the ceiling.
+      sentence it returns names its price and the ceiling. The rate is
+      `_TOKENS_PER_LINE` in `saffron.gates.core.size`, and
+      `saffron/agents/artifacts.py` imports that name from there and assigns
+      no name of its own to it.
     witness: tests/test_artifacts.py::test_the_plan_checkpoint_prices_an_estimate_at_four_tokens_a_line
+  - claim: >-
+      A file whose trimmed token streams hold more than 10^9 token pairs is
+      counted in full, never diffed. Trimming drops the tokens the two
+      streams share at their start and at their end. Such a file counts the
+      lengths of both trimmed streams, and the `size` summary names it and
+      says `past the token-diff bound, counted in full`. The witness drives
+      three one-line rewrites, each a line of distinct tokens replaced by the
+      same tokens reversed. At 30,000 tokens the product is 9 × 10^8, the
+      count is the exact 59998, and the summary names no file. At 32,000 it
+      is past the bound, the count is 64000, and the summary names the file.
+      A 40,000-token line re-wrapped onto 4,000 lines counts 0 and names no
+      file, since trimming leaves nothing to diff.
+    witness: tests/test_size.py::test_a_file_past_the_token_diff_bound_is_counted_in_full
 ---
 
 ## Context
@@ -171,6 +187,11 @@ in every file alike.
    lengths minus twice their longest common subsequence. Sum it over files.
    Header lines stay excluded by position, as today. Any other line, such
    as `\ No newline at end of file`, adds nothing to either stream.
+   Before diffing a file, trim the tokens its two streams share at the
+   start and at the end. If the trimmed lengths multiply past 10^9, count
+   both trimmed lengths in full and skip the diff. That overcounts, so it
+   errs toward blocking. The summary names each such file, as it names an
+   unreadable one (`saffron/gates/core/size.py:174-177`).
 2. **Re-measure the ceilings.** `bug` 1300, `feature` 3000, `refactor`
    4200. The default stays `refactor`'s. The notes give the method and every
    row.
@@ -178,11 +199,12 @@ in every file alike.
    tokens` where they say `changed lines` today.
 4. **Price the estimate.** The plan prompt asks for lines, and it stays as
    it is. So the checkpoint multiplies `estimated_lines` by 4 before it
-   compares. Declare the 4 in `saffron/gates/core/size.py` beside the
-   ceilings, with the measured ratio in its comment, and import it from
-   there. The rejection holds `size_gate`'s failure message for the priced
+   compares. Declare the 4 as `_TOKENS_PER_LINE` in
+   `saffron/gates/core/size.py` beside the ceilings, with the measured ratio
+   in its comment, and import it from there. The rejection holds `size_gate`'s failure message for the priced
    count. The advisory sentence `judge_estimate` returns names the price
-   and the ceiling. Change both inside `judge_estimate`. Rewrite the `estimated_lines` docstring, which stops being true.
+   and the ceiling. Change both inside `judge_estimate`. Rewrite the
+   `estimated_lines` docstring, which stops being true.
 5. **Keep `SA-0125`'s tests green.** Its six tests keep their names and move
    to the new arithmetic. The notes say how.
 
@@ -210,6 +232,11 @@ in every file alike.
   `tests/test_events.py` are `forbidden`. Change the checkpoint's sentence
   through the function that builds it, not through the event's renderer.
 - **Rows already in the ledger.** Past `size` summaries keep saying lines.
+- **A block moved far within one file.** Each hunk carries three context
+  lines (`saffron/cell/worktree.py:150`), so the streams hold only what the
+  hunks show. A block moved to a distant hunk of the same file counts about
+  twice the tokens of its visible context, not twice the block. A block
+  moved to another file counts twice its size. The operator accepted this.
 - **`saffron/cell/**`.** No line there names the unit or a ceiling.
   `plan_checkpoint` emits the sentence `judge_estimate` returns and
   re-words nothing. `SA-0126` edits `saffron/cell/session.py`, and this spec
@@ -218,7 +245,9 @@ in every file alike.
   estimate changed lines against `size.py`'s ceiling. They are
   `.claude/agents/spec-writer.md:59`, `.claude/agents/spec-reviewer.md:122`
   and `.claude/skills/create-saffron-spec/references/preflight.md:106`.
-  `.claude/**` is `forbidden`, so the operator rewrites them once this
+  The driver's `size` command has the help text "a branch's changed lines
+  against its ceiling" (`.claude/skills/run-saffron-spec-loop/driver.py:2741`).
+  `.claude/**` is `forbidden`, so the operator rewrites all four once this
   merges.
 
 ## Notes for the agent
@@ -226,8 +255,9 @@ in every file alike.
 **No mutants.** The counting is new code. The ceilings and the rate are new
 numbers. So no `find` text is known before you write them. Each witness
 is written to kill the wrong implementations listed below. A prototype ran
-the witnesses of criteria 1 to 3 against each of theirs. Criterion 4 drives
-`judge_estimate`, which `SA-0125` writes, so it was not run. `witness` will report `skip`.
+the witnesses of criteria 1, 2, 3 and 5 against each of theirs. Criterion 4
+drives `judge_estimate`, which `SA-0125` writes, so it was not run. `witness`
+will report `skip`.
 
 **Commit as each witness passes.** A long cell can reach its turn limit
 before its first commit.
@@ -241,30 +271,57 @@ unchanged lines' tokens with a new one. Judge each diff with
 way, with nine rows of `(before, after)` text in one dict.
 
 **Criterion 2.** Build each case as diff text with one file header block and
-one `@@` line, as `_diff` does. The `greedy` case and the `swapped` case
-must carry no context line, or a greedy matcher finds the fewest edits by
-luck. The `moved past` case is `-alpha beta`, ` keep`,
-`+alpha beta`. Assert on the count function directly. Keep its name, `_changed_lines`.
+one `@@` line, as `_diff` does. The `greedy` case is `-alpha beta alpha`
+and `+beta gamma alpha gamma`. Its streams share no first or last token, so
+trimming leaves it whole. The `moved past` case is `-alpha beta`, ` keep`,
+`+alpha beta`. Assert on the count function directly. Keep its name and
+its `int` result, `_changed_lines`.
 `tests/test_size.py:6-11` imports it at module scope. A new name there fails
 collection once `revert` restores the old source, and `revert` then reports
 `skip`. Import any name this change adds inside the test body.
 
-These wrong implementations each fail criterion 2 in the prototype:
+Each wrong implementation below was swapped into the prototype, and
+the witnesses of criteria 1, 2 and 5 were run against it:
 
-- `difflib.SequenceMatcher`, even with `autojunk=False`, counts the greedy
-  case as 4. It matches the longest block first, which is not the fewest
-  edits. Over the 97 past diffs it overcounted by up to 22% (`SA-0080`, 1524
-  against 1250).
-- Streams without context lines count the moved line as 0.
-- A token multiset per file counts the swap as 0.
-- One stream for the whole diff counts the cross-file case as 0.
-- The net difference of the two stream lengths counts a replacement as 0.
+- `difflib.SequenceMatcher` with `autojunk=False` counts the greedy case as
+  5. It fails criterion 2. Over the 97 past diffs it overcounted by up to
+  22% (`SA-0080`, 1524 against 1250).
+- Streams without context lines count the moved line as 0. It fails
+  criterion 2.
+- A token multiset per file counts the swap as 0. It fails criteria 2
+  and 5.
+- One stream for the whole diff counts the cross-file case as 0. It fails
+  criteria 2 and 5.
+- The net difference of the two stream lengths fails criteria 1, 2 and 5.
+- No bound fails criterion 5, with 63998 for the 32,000-token case.
+- A bound checked before trimming fails criterion 5, on the re-wrapped line.
+- A bound that counts in full and names no file fails criterion 5.
 
-A line-by-line count fails criteria 1 and 2 both. The prototype used a
-bit-parallel longest common subsequence over Python ints (Hyyrö, 2004). It
-took 6 ms on a past diff of 30,813 tokens, and 42 ms on a rewrite of
-20,000 tokens on each side. A textbook `n × m` table is correct and much
-slower on a large rewrite.
+A line-by-line count fails criteria 1 and 2 both.
+
+**The diff and its bound.** The prototype used a bit-parallel longest common
+subsequence over Python ints (Hyyrö, 2004). It built masks only over the
+shorter stream, and only for tokens the two streams share. Its memory then
+grows with the product of the two lengths, so the bound caps time and memory
+together. Measured through `size_gate` on this host:
+
+- `SA-0054`, the largest past diff at 30,813 tokens: 8 ms.
+- `DESIGN.md`, 38,520 tokens, every line re-spaced: 7 ms and 0 tokens, since
+  trimming leaves nothing.
+- `DESIGN.md` with every line shuffled: 5 ms. The product is 1.48 × 10^9,
+  so it is counted in full at 77040 and named.
+- `DESIGN.md` with its first half shuffled: 48 ms, exact at 31822.
+- The worst case under the bound, 31,600 distinct tokens reversed: 0.10 s
+  and 108 MB peak. At 60,000 tokens each side, unbounded, it took 0.23 s and
+  297 MB.
+
+Keep the diff bit-parallel or better. Quadratic-time dynamic programming
+over 31,600 tokens a side is 10^9 steps of Python.
+
+**Criterion 5.** Build each case with `_hunk`-style text: one `-` line and
+one `+` line, each holding every token. The prototype ran all three cases
+in 0.10 s. Assert the start of each summary and the named file. The phrase
+`past the token-diff bound, counted in full` is pinned by the claim.
 
 **Criterion 3.** Drive the six types with `_diff(added=n, removed=0)`. Write
 the ceilings as literals in the test, since the claim pins them. Assert the
@@ -278,8 +335,13 @@ the ceiling divided by 4, rounded down, and the rejected one is a line more.
 Write the 4 as a literal, since the claim pins it. Build the comparison diff
 as `_diff`-shaped text of that many single-token added lines. Assert that
 `size_gate`'s failure message is a substring of the rejection's text,
-and that the instance's tier is `elevated`. At `standard`, pass the over estimate with an empty `elevate_on`, and assert that
-the advisory sentence holds the price and the ceiling as numbers.
+and that the instance's tier is `elevated`. At `standard`, pass the over
+estimate with an empty `elevate_on`, and assert that the advisory sentence
+holds the price and the ceiling as numbers. Then parse
+`saffron/agents/artifacts.py` with `ast`. Assert an `ImportFrom` of
+`saffron.gates.core.size` naming `_TOKENS_PER_LINE`, and no assignment to
+that name in the module. Assert `saffron.gates.core.size._TOKENS_PER_LINE`
+is 4.
 
 These wrong implementations fail it:
 
@@ -287,6 +349,7 @@ These wrong implementations fail it:
 - pricing at any rate other than 4
 - a rejection naming the estimate's lines in place of the price
 - rejecting at `standard`
+- a rate constant declared in `saffron/agents/artifacts.py`
 
 At base the estimate one line over is accepted, because the base ceilings
 are lines.
@@ -302,6 +365,29 @@ rename none of these.
   tokens.
 - `tests/test_spec_loop_driver.py:160-179`: the new ceilings, and `1
   changed tokens`. Each branch there adds one file holding one token.
+- `tests/test_suite.py:195-217`,
+  `test_the_head_runs_tier_decides_what_blocks_not_the_baselines`: its patch
+  adds `+x` 601 times against the `feature` ceiling. Size it from
+  `_CEILINGS["feature"] + 1`, in the `@@` header and in the lines alike.
+- `_BIG_DIFF` at `tests/test_session.py:647-654`, and the comment over it,
+  which says the diff fails a `bug` spec's 300-line ceiling. It adds 310
+  lines of two tokens, 620 in all. Size it from `_CEILINGS["bug"]`, one token
+  a line and ten over, in the `@@` header too. Three tests reach it through
+  `_grow_the_diff_after_the_first_turn` and assert a `size` failure:
+  `test_a_size_failure_at_standard_does_not_enter_the_repair_loop`,
+  `test_the_same_size_failure_repairs_at_elevated_risk` and
+  `test_an_elevate_on_match_elevates_a_standard_spec_for_the_suite`.
+
+The prototype ran the whole suite with the new count and ceilings, and then
+with the base `size.py`. Nine tests failed only under the new count: the
+three `_BIG_DIFF` tests, the `tests/test_suite.py` test, the three driver
+cases, `tests/test_artifacts.py::test_a_plan_estimating_over_the_ceiling_is_rejected`,
+and one `format` case the prototype's own formatting caused. Everything
+listed here fixed all but the `tests/test_artifacts.py` test. `SA-0125`
+rewrites that one, and it is re-priced below. A grep over `tests/` for
+`diff-too-large`, `_CEILINGS`, `gate == "size"` and large `+` fixtures
+found no other test that trips `size`. `tests/test_implement.py:562` builds
+a `size` failure by hand and never runs the gate.
 - `SA-0125`'s three ceiling tests in `tests/test_artifacts.py`, at `:176`,
   `:187` and `:198` before it: an estimate "at the ceiling" becomes the
   ceiling divided by 4, rounded down, and "over" is one line more. A
@@ -327,8 +413,9 @@ diff is in your tree, and every `tests/test_session.py` line number it moves
 is found here by test name. It adds `exist_ok=True` to `_drive`'s gates
 directory, changes three salvage tests' state from `NOT_IMPLEMENTED` to
 `ORPHANED`, and adds four witnesses and a wall-cut helper. This spec edits
-none of those. In that file it edits only the three `SA-0125` witnesses
-above. `SA-0126`'s cells plan with `estimated_lines` of 10
+none of those. In that file it edits `_BIG_DIFF`, its comment and the
+`_CEILINGS` import it needs, and the three `SA-0125` witnesses above. The
+three tests that read `_BIG_DIFF` keep their bodies. `SA-0126`'s cells plan with `estimated_lines` of 10
 (`tests/test_session.py:234`), priced at 40 tokens, far inside every
 ceiling. So its tests need no change here.
 
@@ -388,12 +475,15 @@ test 1000 lines to 4200 tokens, 2 rows:
 ```
 
 **Size.** The host's `size` gate still counts lines when this cell runs, and
-the `feature` ceiling is 600. The prototype of criteria 1 to 3 measured 81
-changed lines in `tests/test_size.py` and 68 in `saffron/gates/core/size.py`,
-with almost no docstrings. Expect about 350 in all: 110 in `size.py`, 20 in
-`artifacts.py`, 160 in `tests/test_size.py`, 45 in `tests/test_artifacts.py`,
-20 in `tests/test_session.py` and 6 in `tests/test_spec_loop_driver.py`. The
-diff is measured from `SA-0126`'s head, so neither parent's lines count. `size`
+the `feature` ceiling is 600. The prototype of criteria 1, 2, 3 and 5, with
+the bound and every fixture above, measured 240 changed lines with almost no
+docstrings. That is 108 in `saffron/gates/core/size.py`, 110 in
+`tests/test_size.py`, 7 in `tests/test_session.py`, 6 in `tests/test_suite.py`
+and 9 in `tests/test_spec_loop_driver.py`. Expect about 400 in all: 140 in
+`size.py`, 20 in `artifacts.py`, 125 in `tests/test_size.py`, 65 in
+`tests/test_artifacts.py`, 30 in `tests/test_session.py`, 6 in
+`tests/test_suite.py` and 9 in `tests/test_spec_loop_driver.py`. The diff is
+measured from `SA-0126`'s head, so neither parent's lines count. `size`
 blocks here, because `risk` is `elevated`.
 
 **Prose.** Each touched file's `prose` count must not rise. `size.py`'s
