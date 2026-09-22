@@ -183,6 +183,12 @@ They run on repos the host built.
 dir. Neither vector moves the `changed_files` listing (measured above), so
 moving it would change code no failing witness could drive.
 
+**The replace-ref witness on the export path.**
+`test_export_patch_reads_through_a_planted_replacement`
+(`tests/test_worktree.py:1578`) passes without its pin once the fresh dir has
+no refs. The `changed_files`, `read_at_head` and `dirty_paths` replacement
+witnesses still guard `core.useReplaceRefs=false`.
+
 **A process still alive in the cell.** It could write into the fresh dir between
 its creation and the diff. The reads already run inside the cell, under the same
 trust.
@@ -227,7 +233,9 @@ cell:
 4. Write the object directory into its `objects/info/alternates` as an
    absolute path. A relative one resolves against the fresh dir.
 5. Run the diff with `--git-dir` naming it, `base_sha` against the resolved
-   sha, under `git_argv`'s env and every `-c` pin it holds now.
+   sha, under `git_argv`'s env and every `-c` pin it holds now. Pass the pins
+   through from `git_argv` and `DIFF_FLAGS`. Spelling one in the script text
+   makes its mutant's `find` match twice.
 6. Remove the dir, whether the diff succeeded or not. On the host test seam
    it is created on the operator's machine.
 
@@ -248,7 +256,7 @@ Pass a path to a shell as a positional argument, never inside the script text.
 - Criterion 2 writes the exclude line before the file. After the commit it
   asserts `git status --porcelain` prints nothing.
 - Criterion 3 plants `.git/info/attributes` as well, so the test fails at
-  base. Point `GIT_CONFIG_GLOBAL` at a file under `tmp_path` and write
+  base. Point `GIT_CONFIG_GLOBAL` at a file outside the repo and write
   `init.templateDir` there with `git config --file`. Keep the template dir
   outside the repo, as `tests/test_worktree.py:1712` keeps its attributes
   file, since `_commit` runs `add -A`. Prove the template bites: a plain
@@ -259,9 +267,12 @@ Pass a path to a shell as a positional argument, never inside the script text.
   cell's `tests` gate drives the `--object-format` half.
 
 **Criteria 4 to 7 move their setting.** Each of the four witnesses points
-`GIT_CONFIG_GLOBAL` at a file under `tmp_path`. It writes its setting there with
-`git config --file`, not into the worktree's `.git/config`. Keep each bare-diff
-check that proves the setting bites.
+`GIT_CONFIG_GLOBAL` at a file outside the repo, such as
+`Path(f"{tmp_path}-home") / "gitconfig"`. `tmp_path` is the repo, and `_commit`
+runs `add -A`. It writes its setting there with `git config --file`, not into
+the worktree's `.git/config`. Keep each bare-diff check that proves the setting
+bites. Change only where the setting is written, and keep new docstrings to one
+or two lines. The `size` gate blocks at `elevated`.
 
 **Never run `git config --global` in a test.** Write the file
 `GIT_CONFIG_GLOBAL` names with `git config --file`, so the write lands where the
