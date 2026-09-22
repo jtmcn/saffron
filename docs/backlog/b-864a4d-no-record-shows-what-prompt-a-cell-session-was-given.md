@@ -3,7 +3,7 @@ id: b-864a4d
 title: No record shows what prompt a cell session was given, so CLAUDE.md reaching a live cell is unverifiable
 status: open
 filed: 2026-09-22
-specs: []
+specs: [SA-0129]
 prs: []
 commits: []
 cites: [§5.3, §8]
@@ -30,8 +30,8 @@ Every recent task carries the same value, `1747509ede66`, whatever its
 
 - Each agent session a task starts records a SHA-256 of the prompt it sent.
   This covers IMPLEMENT, the criterion probe, each lens and the rebut verdict.
-- The same fact records the git blob sha of the `CLAUDE.md` read at
-  `base_sha`, or null for a repo with none.
+- Each task records a SHA-256 of the `CLAUDE.md` text read at `base_sha`, or
+  says it found none.
 - A test changes only `CLAUDE.md` at the base commit and shows both values
   change.
 
