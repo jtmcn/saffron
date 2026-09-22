@@ -252,6 +252,7 @@ to the operator (GOTCHAS, Recording).
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`.
+
 `drop SA-NNNN --why "…"` takes a spec out for good.
 
 ### c. Review it
