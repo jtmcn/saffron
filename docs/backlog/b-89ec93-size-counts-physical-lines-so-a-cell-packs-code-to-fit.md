@@ -4,7 +4,7 @@ title: The `size` gate counts physical lines, so a cell near its ceiling packs c
 status: open
 tier: 1
 filed: 2026-09-21
-specs: []
+specs: [SA-0128]
 prs: []
 commits: []
 cites: [§5.4]
