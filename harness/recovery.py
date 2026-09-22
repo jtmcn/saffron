@@ -73,8 +73,8 @@ def pinned_diff(repo: Path, base: str, head: str) -> str:
 
     The only spelling of `git diff` this module allows for comparing
     against a recorded `patch.diff`. Verified against all eight shipped
-    fixtures, this pin set reproduces every one. `core.abbrev=9`,
-    `diff.context=4` and `diff.algorithm=histogram` do not. That is
+    fixtures, this pin set reproduces every one. `--abbrev=9`,
+    `--unified=4` and `--diff-algorithm=histogram` do not. That is
     provenance for the values `DIFF_FLAGS` carries. `--abbrev=7` is what
     `auto` emitted on every fixture, not `auto` itself, and stays fixed
     so a bigger repo cannot silently change it."""
