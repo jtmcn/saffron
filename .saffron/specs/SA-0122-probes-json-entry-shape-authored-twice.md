@@ -60,9 +60,9 @@ acceptance:
       helper, and adds only its own `verdict`. Every other key in the entry,
       and its value, is the helper's, and the helper returns the same ten
       fields. The witness drives two passes. In one the baseline suite
-      answered green, and the entry's baseline failures are an empty list. In
-      the other the baseline suite raised, and all four baseline fields are
-      null.
+      answered with one failure that was already there, and the entry's
+      baseline failures list that one failure. In the other the baseline
+      suite raised, and all four baseline fields are null.
     witness: tests/test_corpus.py::test_the_driver_writes_each_probes_json_entry_from_the_shared_helper
 ---
 

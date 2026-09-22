@@ -76,7 +76,7 @@ acceptance:
       declared test path, an edit on a path outside the tree, an edit the
       mutator refuses to apply, and an edit whose criterion's witness is not
       in the set the `tests` gate collected. The mutator is entered for the
-      refused edit alone, and its reason is recorded word for word. No
+      refused edit alone, and the recorded summary quotes its reason. No
       witness runs, and the task ends `READY_FOR_REVIEW`.
     witness: tests/test_session.py::test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing
   - claim: >-
@@ -230,7 +230,9 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    (`saffron/cell/runtime.py:272-275`). Stop the same way, as
    `_probe_adequacy` stops on one (`saffron/cell/session.py:1400-1417`). A `tests` gate that
    answered `error` under an edit stops nothing, since the mutator's exit
-   restored the file.
+   restored the file. A `CellRuntimeError` out of step 5's read of the
+   survivor's line, or out of `findings.anchor`'s `read_head`, stops the
+   same way. That edit records `error` and files nothing.
 
 ## Out of scope
 

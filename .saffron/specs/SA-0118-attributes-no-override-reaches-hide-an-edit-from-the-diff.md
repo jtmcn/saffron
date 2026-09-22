@@ -235,7 +235,9 @@ cell:
 5. Run the diff with `--git-dir` naming it, `base_sha` against the resolved
    sha, under `git_argv`'s env and every `-c` pin it holds now. Pass the pins
    through from `git_argv` and `DIFF_FLAGS`. Spelling one in the script text
-   makes its mutant's `find` match twice.
+   makes its mutant's `find` match twice. Leave the global config
+   readable, so set neither `GIT_CONFIG_GLOBAL` nor `HOME` for the diff.
+   Criteria 4 to 7 kill their mutants only through that file.
 6. Remove the dir, whether the diff succeeded or not. On the host test seam
    it is created on the operator's machine.
 
