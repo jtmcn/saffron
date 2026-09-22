@@ -83,7 +83,7 @@ acceptance:
       replace: '    return "elevated"'
   - claim: >-
       A whole cell reads `elevate_on` from the policy at base. The witness
-      drives `run_one_cell` twice. The policy at base has an `elevate_on`
+      drives `run_one_cell` three times. The policy at base has an `elevate_on`
       naming one directory, and the working copy's policy names none. Each
       run has a `feature` plan 20 lines over the ceiling. The plan naming no
       path in that directory reaches the IMPLEMENT turn. That task does not
@@ -92,7 +92,9 @@ acceptance:
       file, ends `PLAN_REJECTED` after one turn. Its `PLAN: rejected` line
       names the ceiling and `elevated`. Its outcome reports `elevated` as the
       effective risk, the tier from the plan's files, never the baseline's
-      `standard`.
+      `standard`. A third plan within the ceiling names the same path and
+      carries a blocking question. It ends `PLAN_REJECTED` for that question,
+      and its outcome reports the baseline's `standard`.
     witness: tests/test_session.py::test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks
     mutant:
       file: saffron/repos/policy.py
@@ -102,9 +104,11 @@ acceptance:
       One function decides whether `size` blocks at a tier, and both of its
       readers call it. `size_blocks` in the gate suite module is public.
       `_advisory` calls it, and so does `judge_estimate` in the artifacts
-      module, which judges a plan's estimate. The witness reads each
-      caller's source as a syntax tree and finds a call to `size_blocks` in
-      both.
+      module, which judges a plan's estimate. Each decides by its answer.
+      The witness reads each caller's source as a syntax tree and finds a
+      call to `size_blocks` in both. It then replaces `size_blocks` with its
+      opposite in both modules. `_advisory` at `elevated` now lists `size`,
+      and `judge_estimate` over the ceiling at `standard` now raises.
     witness: tests/test_artifacts.py::test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_blocks
 ---
 
@@ -219,8 +223,8 @@ the checkpoint computes the tier from `spec.risk`, the plan's
   `elevate_on` path its diff never edits is rejected where `size` would not
   block. This spec does not reconcile them.
 - **The outcome's `advisory_gates` on a rejection.** It stays the
-  baseline's. A `PLAN_REJECTED` task never reaches PACKAGE, where the set
-  is read (`saffron/phases/package.py:826`).
+  baseline's. A `PLAN_REJECTED` task never reaches PACKAGE, which rewrites
+  the set (`saffron/phases/package.py:826`).
 - **The estimate as an instrument.** The item notes that one scope drew
   estimates of 620 and 520 from two cells. Replacing the estimate is a
   separate question. This spec changes only when it is enforced.
@@ -251,8 +255,9 @@ agreement mean something, as the notes on criterion 1 say.
 
 Criterion 4 declares a witness and no mutant, because its change is new
 code. Both `size_blocks` and `judge_estimate` are new, and so is the call in
-`_advisory`, whose spelling this spec cannot know. `witness` reports `skip`
-for it, and that skip is honest.
+`_advisory`, whose spelling this spec cannot know. The `witness` gate reads
+only criteria that declare a mutant, so it reports on criteria 1 to 3 and
+says nothing of criterion 4.
 
 **Commit as each witness passes.** A long cell can reach its turn limit
 before its first commit.
@@ -269,7 +274,8 @@ checkpoint's existing `try`, so a rejection gets its spend set at
 
 For Problem item 7, the prototype gave `PlanRejected` a class attribute
 beside `spent_usd`, defaulting to `None`. `judge_estimate` sets it to the
-tier on the rejection it raises. The `PLAN_REJECTED` branch reports that
+tier on the instance it raises, never on the class. A class assignment
+leaks the tier into every later rejection in one `saffron batch` process. The `PLAN_REJECTED` branch reports that
 tier when it is set, and `latest.effective_risk` otherwise.
 
 This shape keeps the 16 existing `validate_plan` calls in
@@ -326,13 +332,21 @@ at its default, which names none. `_stub_the_export`
 Pass the wider `touches` through `spec`, and list the `infra/` path second.
 Script the plan turn and one more `_turn()`. Count the turns in
 `cell.turns`, read the lines from `cell.watched`, and read
-`outcome.effective_risk` on the rejected run.
+`outcome.effective_risk` on the rejected run. Run the third plan last, with
+the same `base_policy`, an estimate within the ceiling, the `infra/` path
+second and one `blocking_questions` entry. Running it after the `size`
+rejection is what catches a tier set on the class.
 
 **Criterion 4's witness** follows `_source_calls` at
 `tests/test_cli.py:2260-2295`. It parses `inspect.getsource` of
 `suite._advisory` and of `artifacts.judge_estimate`, walks each tree for an
-`ast.Call` whose name is `size_blocks`, and asserts one in each. Import both
-modules inside the test body. At base `judge_estimate` does not exist, so
+`ast.Call` whose name is `size_blocks`, and asserts one in each. Then
+monkeypatch `size_blocks` to return its opposite in both
+`saffron.gates.suite` and `saffron.agents.artifacts`, with `raising=False`.
+Assert that `_advisory` at `elevated` now lists `size`, and that
+`judge_estimate` over the ceiling at `standard` raises. A caller that
+discards the answer fails this half. Import both modules inside the test
+body. At base `judge_estimate` does not exist, so
 the witness fails there with an `AttributeError`, not a collection error.
 
 **A prototype of this change ran at this base.** It followed the shape
