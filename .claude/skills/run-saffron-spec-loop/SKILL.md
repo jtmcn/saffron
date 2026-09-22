@@ -98,6 +98,16 @@ settle goes into that PR's `{KNOWN}` for the Spec seat (step 2c). Other concerns
 and notes are kept for step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
 after the edit merges.
 
+Save each review's final message to a file and score it with Jev. The scores
+are informational and nothing reads them yet. A non-zero exit is noted and the
+loop carries on.
+
+```bash
+env TYPESAFE_API_KEY="$(bash -c 'source ~/.secrets; printf %s "$TYPESAFE_API_KEY"')" \
+  uv run .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind spec-review \
+  --report <saved review> --commit <the base the reviewer read>
+```
+
 **Only a spec that has not run.** Editing one whose pull request is already
 open — which is what an operator wants to do after reading its review — stops
 the ledger's task matching it, so `snapshot --force` holds it out of the order
@@ -239,6 +249,9 @@ state that decided nothing keeps the spec pending, and `next` moves past it.
 Once the process has exited, an in-flight state is a **halt**: the cell stopped
 at a ceiling and nothing decided the task. `record` says so, and a halt goes
 to the operator (GOTCHAS, Recording).
+
+Then score the cell's own REVIEW the same way, with `--kind cell` and no
+`--report` or `--commit`.
 `drop SA-NNNN --why "…"` takes a spec out for good.
 
 ### c. Review it
@@ -253,6 +266,10 @@ to the operator (GOTCHAS, Recording).
    [REVIEW-PROMPT.md](REVIEW-PROMPT.md). The Spec seat's criterion walk is what
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
+
+   Save both seats' reports and score them as one round with
+   `--kind pr-review --report <spec seat> --report <standards seat> --commit <PR head>`,
+   the same command as step 1b.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe with the driver:
    `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.

@@ -141,3 +141,8 @@ trivial.
    A check you could not complete says so. It never reads as `checked`.
 3. **Assessment**, one sentence: runnable, runnable after the listed fixes, or
    not runnable.
+4. **Findings block**, last: a fenced `json` block restating the findings for
+   Jev (`driver.py jev`). Write `{"findings": [...]}`, one object per finding,
+   with `severity` (`blocker`, `concern` or `note`), `criterion` (its number,
+   or `null`), `file`, `line` and `claim`. A review with no findings writes an
+   empty list.

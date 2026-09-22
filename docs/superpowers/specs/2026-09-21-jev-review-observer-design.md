@@ -65,7 +65,7 @@ the previous round, and every earlier round's findings.
 Each round writes one `jev.ttl`. Every answer becomes one `earl:Assertion` with
 these parts.
 
-- `earl:assertedBy factory:jev`.
+- `earl:assertedBy jev:jev`.
 - `earl:subject`, the finding or criterion the question is about.
 - `earl:test`, the question, named by its code.
 - `earl:mode earl:automatic`.
@@ -81,9 +81,10 @@ A finding's identity is a hash of the loop kind, the spec id, the round number
 and the finding's index in the JSON block. Re-scoring a round therefore keeps
 every id.
 
-The new terms go into `ontology/factory.ttl`. They are `factory:jev`, one
-individual per question, and the distribution property.
-`uv run python -m ontology.render` then regenerates `CONTEXT.md` and the shapes.
+The terms live in their own namespace, `urn:software-factory:jev#`, not
+`ontology/factory.ttl`. `jev:jev`, one individual per question, and the
+distribution property are declared inline in `to_turtle`, not by
+`ontology.render` (Changed while planning, item 1).
 
 ### Where the files live
 
@@ -141,12 +142,15 @@ way `CLAUDE_CODE_OAUTH_TOKEN` is.
 
 ```
 env TYPESAFE_API_KEY=(bash -c 'source ~/.secrets; printf %s $TYPESAFE_API_KEY') \
-  uv run --group harness .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind cell
+  uv run .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind cell
 ```
 
-`typesafe-sdk` is pinned in a new `harness` dependency group, so `saffron` never
-installs it. The driver imports it only inside `jev`, so every other command
-runs without the group. No cell receives the key.
+`typesafe-sdk` is pinned in the existing `dev` dependency group, not a new
+`harness` group (Changed while planning, item 2). `ty` checks every file,
+including `.claude/`, so a group `make install` does not sync would fail
+the `types` gate. The `dev` group never ships in the `saffron` wheel. The
+driver imports it only inside `jev`, so a command that never calls Jev
+never runs that import. No cell receives the key.
 
 The request pins a dated model name, never `jev-latest`, so the recorded model
 names the model that answered.
@@ -158,12 +162,12 @@ fake that returns fixed answers.
 
 | Code | Test | Proves |
 |---|---|---|
-| T1 | The fake answers every question, and pyoxigraph loads the Turtle | One assertion per answer, each distribution round-trips, the outcome is `cantTell`, the model is recorded |
+| T1 | The fake answers every question, and pyoxigraph loads the Turtle | One assertion per answer, each distribution round-trips, the outcome is `cantTell`, the model is recorded, and a SPARQL query checks the shape |
 | T2 | The questions built for each loop | Q1's choices are the criteria and `noMatch`, `cell` asks no Q4 or Q5, only `spec-review` asks Q7 to Q9 |
 | T3 | Reading the JSON block | The last fenced `json` block wins, and a missing or malformed block exits `1` with no round directory |
 | T4 | Two rounds, then round 1 again | Rounds self-number, the diff spans the recorded commits, and ids survive a re-score |
 | T5 | `jev` with no key, and `status` with the SDK blocked | The first exits `2` before any call, and the second runs |
-| T6 | pyshacl over a written `jev.ttl` | It validates against `factory-shapes.ttl` after the render |
+| T6 | dropped (Changed while planning, item 1) | Jev's `.ttl` files sit outside the `shacl` gate's tree, so pyshacl has nothing to run against |
 
 Each test runs once against a mutant it must catch. T1 runs against a writer
 that drops the distribution. T4 runs against ids that include a timestamp.
@@ -171,6 +175,29 @@ that drops the distribution. T4 runs against ids that include a timestamp.
 One real call is made by hand, `--kind cell` on `SA-0117`. The response shape in
 this document comes from TypeSafe's docs, not from a measurement. The call's
 output goes to `docs/evidence/2026-09-21-jev-first-call.md`.
+
+## Changed while planning
+
+1. **Jev terms use their own namespace, `urn:software-factory:jev#`, not
+   `factory:`.** `tests/ontology/test_no_dead_terms.py` requires every
+   `factory:` term to have a query or shape that reads it. The design
+   assumed nothing reads these scores yet, so a `factory:` term would fail
+   that test. The `.ttl` files live under `~/.saffron/`, outside the
+   `shacl` gate's tree. T6 (pyshacl) is dropped. T1's SPARQL query checks
+   the shape instead.
+2. **`typesafe-sdk` goes in the `dev` group, not a new `harness` group.**
+   `ty` checks every file, including `.claude/`. A group `make install`
+   does not sync would fail the `types` gate. The `dev` group never ships
+   in the `saffron` wheel.
+3. **One Jev call per round, not one per question group.** TypeSafe's
+   parallel-questions cookbook measured one batched call as 12.2x cheaper
+   and 10x faster, with no change to each answer.
+4. **Q4 is skipped in a round with no earlier round.** Every finding in
+   round 1 is new by definition.
+5. **Q1 is skipped when the spec has no criteria, and Q9 when it has only
+   one.** A choice with one option carries no information.
+6. **`--commit` is passed by the delegate.** It is the commit the reviewer
+   read. For `cell` it comes from `patch.json`'s `head_sha`.
 
 ## Out of scope
 
