@@ -439,6 +439,16 @@ def _load_driver():
     return module
 
 
+def test_the_driver_passes_check_probe_this_repos_declared_globs():
+    """`TEST_PATHS` is this repo's own declared `integrity.test_paths` globs
+    now, not a path prefix — `check_probe` matches globs (backlog b-461729)."""
+    from saffron.repos.policy import load_policy
+
+    driver = _load_driver()
+    policy, _sha = load_policy(REPO)
+    assert list(driver.TEST_PATHS) == policy.integrity.test_paths
+
+
 PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
 # A second, distinct probe on a second file. Distinct on all three fields so
 # `_distinct` cannot collapse the pair into one.

@@ -64,7 +64,7 @@ def test_a_verdict_records_which_suite_answered_it():
         baseline=answered,
         mutate=_applies(),
         run_tests=lambda subset: answered,
-        test_paths=("tests/",),
+        test_paths=("tests/**",),
     )
     assert got.verdict == "survived"
     assert got.tool == "pytest 8.4.1"
@@ -81,7 +81,7 @@ def test_a_verdict_reached_without_a_suite_records_no_count():
         baseline=_result("pass"),
         mutate=_applies(),
         run_tests=lambda subset: pytest.fail("must not run"),
-        test_paths=("tests/",),
+        test_paths=("tests/**",),
     )
     assert got.verdict == "unproven"
     assert (got.tool, got.collected, got.summary) == (None, None, "")
@@ -107,7 +107,7 @@ def _refuses(reason: str):
     return mutate
 
 
-TEST_PATHS = ("tests/",)
+TEST_PATHS = ("tests/**",)
 
 
 def _check(probe=PROBE, **kwargs):
@@ -304,6 +304,90 @@ def test_a_probe_naming_a_path_outside_the_tree_never_reaches_the_cell():
     )
     assert got.verdict == "unproven"
     assert "inside the tree" in got.reason
+
+
+def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
+    """`check_probe` refuses on the one rule `revert` uses — `scope.matches`
+    over declared globs, on the normalised path, never a prefix and never
+    `fnmatch` — and on an empty declaration, in `probe_refusal`'s own order.
+    Both are asked before `mutate`, on one call."""
+    applied: list[str] = []
+
+    @contextlib.contextmanager
+    def _applies_and_records(mutant):
+        applied.append(mutant.file)
+        yield None
+
+    baseline = _result("pass")
+
+    # `**` covers every spelling of one file beneath it.
+    for spelling in (
+        "tests/test_report.py",
+        "./tests/test_report.py",
+        "saffron/../tests/test_report.py",
+    ):
+        got = probe_check.check_probe(
+            Mutant(file=spelling, find="assert x", replace=""),
+            baseline=baseline,
+            mutate=_applies_and_records,
+            run_tests=lambda subset: pytest.fail("must not run"),
+            test_paths=("tests/**",),
+        )
+        assert got.verdict == "unproven"
+        assert "test" in got.reason
+    assert applied == []
+
+    # `*` stops at a slash: one directory deeper is not covered, unlike
+    # `fnmatch`, which would wrongly refuse it (measured at base).
+    got = probe_check.check_probe(
+        Mutant(file="tests/sub/x.py", find="a", replace="b"),
+        baseline=baseline,
+        mutate=_applies_and_records,
+        run_tests=lambda subset: _result("pass"),
+        test_paths=("tests/*.py",),
+    )
+    assert got.verdict == "survived"
+    assert applied == ["tests/sub/x.py"]
+
+    # Outside the tree wins over an empty declaration when both are true:
+    # the order `probe_refusal` checks them in, pinned rather than incidental.
+    got = probe_check.check_probe(
+        Mutant(file="../outside.py", find="a", replace="b"),
+        baseline=baseline,
+        mutate=_applies_and_records,
+        run_tests=lambda subset: pytest.fail("must not run"),
+        test_paths=(),
+    )
+    assert got.verdict == "unproven"
+    assert got.reason == "../outside.py is not a relative path inside the tree"
+    assert applied == ["tests/sub/x.py"]
+
+    # No declared test paths at all: `revert`'s own refusal, word for word,
+    # and every path inside the tree is refused without entering the mutator.
+    got = probe_check.check_probe(
+        Mutant(file="saffron/x.py", find="a", replace="b"),
+        baseline=baseline,
+        mutate=_applies_and_records,
+        run_tests=lambda subset: pytest.fail("must not run"),
+        test_paths=(),
+    )
+    assert got.verdict == "unproven"
+    assert got.reason == (
+        "the repo declares no test paths, so source cannot be told from test"
+    )
+    assert applied == ["tests/sub/x.py"]
+
+    # A bare `tests` matches only the literal path `tests`, nothing beneath —
+    # as it refuses nothing there for `revert` either.
+    got = probe_check.check_probe(
+        Mutant(file="tests/test_report.py", find="a", replace="b"),
+        baseline=baseline,
+        mutate=_applies_and_records,
+        run_tests=lambda subset: _result("pass"),
+        test_paths=("tests",),
+    )
+    assert got.verdict == "survived"
+    assert applied == ["tests/sub/x.py", "tests/test_report.py"]
 
 
 def test_test_paths_has_no_default_so_forgetting_it_is_a_typeerror():

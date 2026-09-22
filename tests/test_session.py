@@ -2860,8 +2860,8 @@ def test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied(
 ):
     """Criterion 4: a probe whose file, normalised, matches a declared
     `integrity.test_paths` glob (never merely `tests/**`) is `unproven`
-    without the mutator ever being entered — checked host-side, on the
-    normalised path, not `check_probe`'s own prefix rule."""
+    without the mutator ever being entered — asked host-side, before any
+    cell, with the same rule `check_probe` itself would apply."""
     on_a_test_path = {
         "findings": [
             _adequacy_finding(_CONCERN_CLAIM, "./spec/a.py", "if x < 0:", "if False:")
@@ -2881,6 +2881,99 @@ def test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied(
     assert entry["probe_verdict"] == "unproven"
     assert "spec/a.py" in entry["reason"]
     assert cell.mutated == []
+
+
+def test_a_probed_review_no_probe_cell_could_answer_enters_none(monkeypatch, tmp_path):
+    """Criterion 2, with backlog item b-a70ec1 folded in: when nothing in a
+    review's probes could be answered in a Gate-only cell, none is asked for
+    — every probe is `unproven` with its own reason, and the task still ends
+    `READY_FOR_REVIEW`. Three reviews of two probes each: no `tests` gate
+    declared, no `test_paths` declared, and (with both declared) one probe on
+    a declared test path beside one outside the tree."""
+    import inspect
+
+    real_critic_cell = session.critic_cell
+    calls: list[str] = []
+
+    def _spy(**kwargs):
+        # By caller, because every cell here is created through one function.
+        if any(f.function == "_probe_adequacy" for f in inspect.stack()):
+            calls.append("called")
+            raise runtime.CellRuntimeError("must not be entered")
+        return real_critic_cell(**kwargs)
+
+    monkeypatch.setattr("saffron.cell.session.critic_cell", _spy)
+
+    two_probes = {
+        "findings": [
+            _adequacy_finding("c1", "src/a.py", "a", "A"),
+            _adequacy_finding("c2", "src/b.py", "b", "B"),
+        ]
+    }
+    scenarios = [
+        (
+            "no-tests-gate",
+            'gates: {}\nintegrity:\n  test_paths: ["spec/**"]\n',
+            (),
+            "this repo's head declares no `tests` gate, so nothing could "
+            "answer the probe",
+        ),
+        (
+            "no-test-paths",
+            "gates: {tests: {}}\n",
+            ("tests",),
+            "the repo declares no test paths, so source cannot be told from test",
+        ),
+    ]
+    for name, policy, gates, reason in scenarios:
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=_adequacy_turns(two_probes),
+            policy=policy,
+            gates=gates,
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert cell.mutated == []
+        entries = json.loads(
+            (tmp_path / name / "out" / "SY-1" / "probes.json").read_text()
+        )
+        assert [e["probe_verdict"] for e in entries] == ["unproven", "unproven"]
+        assert [e["reason"] for e in entries] == [reason, reason]
+
+    # Both declared, but `check_probe`'s own rule refuses every probe in the
+    # review: one on a declared test path, one outside the tree.
+    on_test_and_outside = {
+        "findings": [
+            _adequacy_finding("c1", "spec/a.py", "a", "A"),
+            _adequacy_finding("c2", "../outside.py", "b", "B"),
+        ]
+    }
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "test-path-and-outside",
+        cell=cell,
+        turns=_adequacy_turns(on_test_and_outside),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.mutated == []
+    entries = json.loads(
+        (
+            tmp_path / "test-path-and-outside" / "out" / "SY-1" / "probes.json"
+        ).read_text()
+    )
+    by_file = {e["probe"]["file"]: e for e in entries}
+    assert by_file["spec/a.py"]["probe_verdict"] == "unproven"
+    assert "test" in by_file["spec/a.py"]["reason"]
+    assert by_file["../outside.py"]["probe_verdict"] == "unproven"
+    assert "inside the tree" in by_file["../outside.py"]["reason"]
+
+    assert calls == []
 
 
 def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(

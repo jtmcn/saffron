@@ -11,7 +11,6 @@ import contextlib
 import hashlib
 import json
 import os
-import posixpath
 import re
 import time
 from collections import Counter
@@ -43,7 +42,6 @@ from saffron.events import (
 from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
-from saffron.gates.core.scope import matches
 from saffron.intake import Criterion, Mutant
 from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
@@ -1240,18 +1238,6 @@ def _gate_cell_suite(
         return suite.against(CellTree(container, cwd=repo), baseline)
 
 
-def _declared_test_path(file: str, test_paths: Sequence[str]) -> bool:
-    """`file`, normalised, against the repo's declared `integrity.test_paths`
-    globs — `scope.matches`, the rule `revert` uses, because `check_probe`'s
-    own `test_paths` compares prefixes and `saffron/probe.py` is forbidden
-    here (backlog item 117)."""
-    normalised = posixpath.normpath(file)
-    escapes = normalised == ".." or normalised.startswith("../")
-    if posixpath.isabs(normalised) or escapes:
-        return False
-    return any(matches(normalised, pattern) for pattern in test_paths)
-
-
 def _probe_adequacy(
     *,
     spec: CellSpec,
@@ -1325,19 +1311,16 @@ def _probe_adequacy(
             decide(p, probe_check.ProbeResult("unproven", reason, baseline=record))
 
     probes = review.distinct_probes(targets)
-    on_test_path = {
-        review.probe_key(p) for p in probes if _declared_test_path(p.file, test_paths)
+    refused = {
+        review.probe_key(p): reason
+        for p in probes
+        if (reason := probe_check.probe_refusal(p.file, test_paths)) is not None
     }
-    # The mutator is never entered for a declared test path (item 117).
+    # The mutator is never entered for a refused probe (item 117, b-461729).
     for p in probes:
-        if review.probe_key(p) in on_test_path:
-            decide(
-                p,
-                probe_check.ProbeResult(
-                    "unproven", f"{p.file} is a declared test path"
-                ),
-            )
-    remaining = [p for p in probes if review.probe_key(p) not in on_test_path]
+        if review.probe_key(p) in refused:
+            decide(p, probe_check.ProbeResult("unproven", refused[review.probe_key(p)]))
+    remaining = [p for p in probes if review.probe_key(p) not in refused]
     if not remaining:
         return entries
     if "tests" not in gates:
@@ -1395,7 +1378,7 @@ def _probe_adequacy(
                     baseline=baseline,
                     mutate=partial(worktree.source_mutated, container),
                     run_tests=run_tests,
-                    test_paths=(),  # the host already refused a test path above
+                    test_paths=test_paths,  # the same list every probe was asked about
                 )
             except runtime.CellRuntimeError as exc:
                 # A failed undo leaves the tree untrustworthy (item 117): no

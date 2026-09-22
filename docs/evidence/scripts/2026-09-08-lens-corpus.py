@@ -116,11 +116,11 @@ def _write_manifest(out: Path, fixtures: list[corpus.Fixture]) -> None:
         )
     )
 
-TEST_PATHS = ("tests/",)
-"""This repo's test root as a path prefix, which is not
-`policy.integrity.test_paths` — those are globs (`tests/**`) where
-`check_probe` compares normalised path prefixes. An edit to a test satisfies
-the number by construction, so `check_probe` requires this argument."""
+TEST_PATHS = ("tests/**",)
+"""This repo's own declared `integrity.test_paths` globs — `check_probe`
+matches globs now, the same rule `revert` uses, never a path prefix. An edit
+to a test satisfies the number by construction, so `check_probe` requires
+this argument."""
 
 
 def _tests_gate_in_cell(
