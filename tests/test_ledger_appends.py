@@ -148,7 +148,7 @@ def test_every_fact_carries_the_repo_it_belongs_to(ledger, record, task):
 
 
 def test_a_pre_record_task_files_no_fact(tmp_path, record):
-    # Name kept for `census`: the body now proves the backfill unreadable.
+    # Name kept for `census`: a backfilled task files under its new key.
     path = tmp_path / "ledger.db"
     plain = Ledger(path)
     repo_id = plain.upsert_repo("saffron", "/o", "/m.git", policy_sha="p")

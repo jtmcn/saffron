@@ -1443,7 +1443,7 @@ def test_two_tasks_cannot_share_one_record_key(tmp_path):
     second = ledger.create_task(
         run_id, spec_id="TE-9002", spec_sha="s" * 64, branch="saffron/TE-9002"
     )
-    # Both minted their own distinct key on create; force a collision by hand.
+    # Both minted their own distinct key on create. Force a collision by hand.
     ledger._db.execute(
         "UPDATE tasks SET record_key = ? WHERE task_id = ?", ("a" * 32, first)
     )

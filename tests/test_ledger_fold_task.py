@@ -42,7 +42,7 @@ _TABLE_SQL = {
 _TASK_SQL = _TABLE_SQL["tasks"]
 
 
-def _raw_rows(path: Path, sql: str, key: str | int) -> list[dict]:
+def _raw_rows(path: Path, sql: str, key: str) -> list[dict]:
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     try:
@@ -502,11 +502,11 @@ def test_the_fold_reaches_the_ledger_only_through_fold_task(tmp_path, record):
     real_strict.close()
 
 
-def _keyed(row: dict) -> dict:
+def _idless(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in _KEYS}
 
 
-_MINUTE_ONE = re.compile(r"^2001-01-01 \d{2}:\d{2}:\d{2}$")
+_CLOCK_DAY = re.compile(r"^2001-01-01 \d{2}:\d{2}:\d{2}$")
 
 
 class _MinuteClock(datetime):
@@ -516,17 +516,17 @@ class _MinuteClock(datetime):
 
     @classmethod
     def now(cls, tz=None):
-        del tz  # always UTC; kept only to match `datetime.now`'s signature
+        del tz  # Always UTC. Kept only to match `datetime.now`'s signature.
         cls.calls += 1
         return cls(2001, 1, 1, tzinfo=UTC) + timedelta(minutes=cls.calls - 1)
 
 
-def _assert_stamped_by_the_clock(path: Path, tables, key: str) -> None:
-    for table in tables:
-        for row in _raw_rows(path, _TABLE_SQL[table], key):
+def _assert_stamped_by_the_clock(path: Path, key: str) -> None:
+    for table, sql in _TABLE_SQL.items():
+        for row in _raw_rows(path, sql, key):
             for column, value in row.items():
                 if column.endswith("_at") and value is not None:
-                    assert _MINUTE_ONE.match(value), (table, column, value)
+                    assert _CLOCK_DAY.match(value), (table, column, value)
 
 
 def test_a_written_task_folds_back_with_the_times_its_facts_carry(
@@ -541,9 +541,9 @@ def test_a_written_task_folds_back_with_the_times_its_facts_carry(
     def check(key):
         into.fold_task(key, record.read(key))
         for sql in _TABLE_SQL.values():
-            fold_rows = [_keyed(r) for r in _raw_rows(fold_path, sql, key)]
-            assert fold_rows == [_keyed(r) for r in _raw_rows(source_path, sql, key)]
-        _assert_stamped_by_the_clock(fold_path, _TABLE_SQL, key)
+            fold_rows = [_idless(r) for r in _raw_rows(fold_path, sql, key)]
+            assert fold_rows == [_idless(r) for r in _raw_rows(source_path, sql, key)]
+        _assert_stamped_by_the_clock(fold_path, key)
 
     _drive_eleven_kinds(source, check)
     source.close()
@@ -553,8 +553,7 @@ def test_a_written_task_folds_back_with_the_times_its_facts_carry(
     _MinuteClock.calls = 0
     plain_path = tmp_path / "plain.db"
     plain = Ledger(plain_path)
-    plain_key, _ = _drive_eleven_kinds(plain, lambda _k: None)
-    _assert_stamped_by_the_clock(plain_path, ("tasks", "attempts"), plain_key)
+    _drive_eleven_kinds(plain, lambda k: _assert_stamped_by_the_clock(plain_path, k))
     plain.close()
 
 
@@ -707,10 +706,10 @@ def test_every_task_carries_a_record_key_with_or_without_a_record(tmp_path, reco
         assert all(_KEY_RE.match(k) for k in keys)
         opened.close()
 
-    # A record_key column already there, NULL — the additive ALTER's own shape.
+    # A record_key column already there and NULL, the additive ALTER's shape.
     backfilled(tmp_path / "null-column.db", SCHEMA, ("SA-C", "SA-D"))
 
-    # No such column at all — older still.
+    # No such column at all, which is older still.
     no_column_schema = SCHEMA.replace("    record_key TEXT,\n", "")
     assert no_column_schema != SCHEMA  # otherwise this proves nothing
     backfilled(tmp_path / "no-column.db", no_column_schema, ("SA-E", "SA-F"))
@@ -745,9 +744,6 @@ def _table_counts(ledger: Ledger) -> dict[str, int]:
     }
 
 
-_PASS_LINT = GateResult(gate="lint", status="pass")
-
-
 def _ten_missing_writes(ledger: Ledger, missing: int) -> None:
     calls = [
         lambda: ledger.set_task_state(missing, "IMPLEMENTING"),
@@ -758,7 +754,7 @@ def _ten_missing_writes(ledger: Ledger, missing: int) -> None:
         lambda: ledger.record_findings(missing, [_find("a", "note", "x", 1, "c")]),
         lambda: ledger.open_attempt(missing, phase="IMPLEMENT"),
         lambda: _close(ledger, missing, "s", None, None, 1, 0.1),
-        lambda: ledger.record_gate_result(_PASS_LINT, attempt_id=missing),
+        lambda: ledger.record_gate_result(_gate("lint", "ruff"), attempt_id=missing),
         lambda: ledger.record_rebuttal(missing, verdict="withdrawn", rebuttal="x"),
     ]
     for call in calls:
@@ -786,7 +782,7 @@ def test_a_write_naming_nothing_the_ledger_holds_raises_and_files_nothing(
 
 
 class _BustedApply(Exception):
-    """Never mistaken for one `_apply` might raise on its own."""
+    """Never mistaken for one `_apply` can raise on its own."""
 
 
 def _busted_apply(*_args: object, **_kwargs: object) -> None:
@@ -799,7 +795,7 @@ def _eleven_write_calls(ledger, run_id, task_id, attempt_id, finding_id):
         lambda: ledger.create_task(run_id, spec_id="SA-14", spec_sha="s", branch="b"),
         lambda: ledger.open_attempt(task_id, phase="IMPLEMENT"),
         lambda: _close(ledger, attempt_id, "s", None, None, 1, 0.1),
-        lambda: ledger.record_gate_result(_PASS_LINT, attempt_id=attempt_id),
+        lambda: ledger.record_gate_result(_gate("lint", "ruff"), attempt_id=attempt_id),
         lambda: ledger.set_task_state(task_id, "IMPLEMENTING"),
         lambda: ledger.record_findings(task_id, [_find("a", "note", "y", 2, "c2")]),
         lambda: ledger.record_rebuttal(finding_id, verdict="withdrawn", rebuttal="x"),

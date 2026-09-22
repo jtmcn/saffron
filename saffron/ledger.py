@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS repos (
 );
 
 -- One night's window and how it ended (§4.2.1). Timestamps are TEXT, matching
--- every other timestamp this module writes (`datetime('now')`, sortable as
+-- every other timestamp this module writes (UTC `%Y-%m-%d %H:%M:%S`, sortable as
 -- text) rather than inventing a second representation. `budget_usd` is known
 -- at start and required; `ended_at` and the running spend estimate are unset
 -- while the batch is still going, so both of those columns are nullable.
@@ -177,8 +177,8 @@ RECORD_KEY_INDEX = (
 
 
 class UnplacedRebuttal(Exception):
-    """A finding out of place, or a rebuttal naming no finding before it —
-    the record's own defect, which `fold()` prices as an unreadable task."""
+    """A finding out of place, or a rebuttal naming no finding before it.
+    Either is the record's own defect, priced by `fold()` as unreadable."""
 
 
 def _ledger_time(at: str) -> str:
@@ -192,7 +192,7 @@ def _inserted_id(cursor: sqlite3.Cursor) -> int:
 
     Measured, it is not None after a statement that inserted nothing — it
     reports the connection's *previous* insert, which is why `open_attempt`
-    guards on `rowcount` instead (see there, and `tests/test_ledger.py`). So
+    looks its task up first (see there, and `tests/test_ledger.py`). So
     this branch is defensive rather than reachable; it exists because
     `int(None)` would raise TypeError, reading as a caller passing rubbish
     rather than as a ledger that recorded nothing.
@@ -241,8 +241,7 @@ class Ledger:
                 "UPDATE tasks SET record_key = ? WHERE task_id = ?",
                 (new_task_key(), row["task_id"]),
             )
-        if keyless:
-            self._db.commit()
+        self._db.commit()
         # The fold upserts on `record_key`, so two rows sharing one would make
         # its `fetchone` pick one. SQLite counts NULLs distinct.
         self._db.execute(RECORD_KEY_INDEX)
@@ -477,6 +476,20 @@ class Ledger:
             raise ValueError(f"no attempt {payload['phase']!r} {payload['n']!r}")
         return int(row["attempt_id"])
 
+    def _attempt_of(self, attempt_id: int, what: str) -> sqlite3.Row:
+        row = self._db.execute(
+            "SELECT task_id, phase, n FROM attempts WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no attempt {attempt_id} to {what}")
+        return row
+
+    def _finding_count(self, task_id: int) -> int:
+        return self._db.execute(
+            "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
+        ).fetchone()["n"]
+
     def _finding_at(self, task_id: int, position: int) -> int | None:
         """The finding at `position` (1 for the first), or `None` if lost."""
         row = self._db.execute(
@@ -488,7 +501,7 @@ class Ledger:
 
     def _apply(self, fact: Fact, *, run_id: int | None = None) -> int | None:
         """Turn one task fact into rows. Commits nothing. `run_id` is a live
-        writer's own run; the fold passes none and falls back to `_run_for`."""
+        writer's own run. The fold passes none and falls back to `_run_for`."""
         payload = fact.payload
         at = _ledger_time(fact.at)
         if fact.kind == "task_created":
@@ -594,10 +607,7 @@ class Ledger:
             self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
             return None
         if fact.kind == "finding":
-            existing = self._db.execute(
-                "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
-            ).fetchone()["n"]
-            if payload["position"] != existing + 1:
+            if payload["position"] != self._finding_count(task_id) + 1:
                 raise UnplacedRebuttal(
                     f"task {fact.task_key}: finding at position "
                     f"{payload['position']} has no finding fact before it"
@@ -931,6 +941,8 @@ class Ledger:
             "JOIN repos r ON r.repo_id = rn.repo_id WHERE rn.run_id = ?",
             (run_id,),
         ).fetchone()
+        if envelope is None:
+            raise ValueError(f"no run {run_id} to create a task on")
         fact = Fact(
             kind="task_created",
             task_key=key,
@@ -1012,12 +1024,7 @@ class Ledger:
         num_turns: int,
         cost_usd_est: float,
     ) -> None:
-        owner = self._db.execute(
-            "SELECT task_id, phase, n FROM attempts WHERE attempt_id = ?",
-            (attempt_id,),
-        ).fetchone()
-        if owner is None:
-            raise ValueError(f"no attempt {attempt_id} to close")
+        owner = self._attempt_of(attempt_id, "close")
         fact = self._build_fact(
             owner["task_id"],
             "attempt_closed",
@@ -1120,11 +1127,9 @@ class Ledger:
     def record_findings(self, task_id: int, findings: Sequence[Finding]) -> list[int]:
         """Every finding the review produced, anchored or not, in the order the
         lenses reported them. Returns the ids in that same order — REBUT names
-        a finding by its position in it (`review.anchored_blockers`), and now
-        so does each fact's own `position`, 1 for the first."""
-        existing = self._db.execute(
-            "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
-        ).fetchone()["n"]
+        a finding by its position in it (`review.anchored_blockers`), and so
+        does each fact's own `position`, 1 for the first."""
+        existing = self._finding_count(task_id)
         facts = [
             self._build_fact(
                 task_id,
@@ -1210,12 +1215,7 @@ class Ledger:
                     ],
                 )
             return gate_result_id
-        owner = self._db.execute(
-            "SELECT task_id, phase, n FROM attempts WHERE attempt_id = ?",
-            (attempt_id,),
-        ).fetchone()
-        if owner is None:
-            raise ValueError(f"no attempt {attempt_id} to record a gate result against")
+        owner = self._attempt_of(attempt_id, "record a gate result against")
         fact = self._build_fact(
             owner["task_id"],
             "gate_result",
