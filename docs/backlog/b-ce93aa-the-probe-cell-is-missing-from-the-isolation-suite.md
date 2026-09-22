@@ -1,13 +1,14 @@
 ---
 id: b-ce93aa
 title: The probe cell's `env` is pinned by no test the operator runs by default
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-09-21
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [436c6e88]
 cites: [§2, §5.5]
 related: [b-a70ec1]
 ---
