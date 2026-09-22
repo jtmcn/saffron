@@ -206,7 +206,9 @@ def test_a_malformed_block_exits_1_and_writes_no_round(monkeypatch, loop):
 def test_no_key_exits_2_before_any_call(monkeypatch, loop):
     monkeypatch.delenv("TYPESAFE_API_KEY")
     one = _report(loop, "r1.md", [FINDING])
-    assert _review(monkeypatch, loop, "--report", one, "--commit", loop.commits[1]) == 2
+    # A resolvable base, so a key check moved below the round's creation is what fails here.
+    argv = ("--report", one, "--commit", loop.commits[1], "--base", loop.commits[0])
+    assert _review(monkeypatch, loop, *argv) == 2
     assert not loop.batches.exists() and loop.client.questions == {}
 
 
