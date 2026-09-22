@@ -212,7 +212,7 @@ Three other paths write it, and the run and the attempts tell them apart:
   task `ORPHANED` (`saffron/cell/session.py:2762-2765`).
 - A batch scan stamps a task left in flight `ORPHANED` and touches no run
   (`saffron/reconcile.py:174-177`). `create_run` opens every run as
-  `RUNNING` (`saffron/ledger.py:739-753`).
+  `RUNNING` (`saffron/ledger.py:755-769`).
 - A cell can return with its task in `REBUTTING` and its run `COMPLETE`
   (`saffron/cell/session.py:2579-2580`, `:2709-2710`, and
   `test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting`).
@@ -290,7 +290,7 @@ re-queues, and the second settles it. Editing the spec gives it a new
   `saffron/ledger.py`, which this spec forbids. Moving the query there is a
   follow-up once `SA-0123` lands.
 - **A ledger folded from the record.** `_run_for` inserts each folded run as
-  `RUNNING` (`saffron/ledger.py:486-489`). In a folded ledger no earlier cut
+  `RUNNING` (`saffron/ledger.py:461-466`). In a folded ledger no earlier cut
   matches, so the cap never fires and every cut re-queues, every night.
   Nothing live uses a folded ledger yet. Backlog item b-cafacd owns the
   `run_finished` fact that would fix it.
@@ -433,7 +433,7 @@ and `_drive` (`:966`), as the salvage tests at `:1336-1634` do.
 - The fourth task's trailing `IMPLEMENTING` attempt is an order `_drive_cell`
   never writes. `saffron/cell/session.py:199` is the only caller of `open_attempt` a cell
   reaches, and it passes no phase, so each attempt takes the task's state
-  (`saffron/ledger.py:995-1004`). `_drive_cell` never moves a task back to
+  (`saffron/ledger.py:991-1003`). `_drive_cell` never moves a task back to
   `IMPLEMENTING` after `saffron/cell/session.py:1772`. So on every ledger a cell writes, "every
   attempt is `IMPLEMENTING`" and "the last attempt is `IMPLEMENTING`" agree.
   The trailing attempt is there only so a cap reading the last attempt

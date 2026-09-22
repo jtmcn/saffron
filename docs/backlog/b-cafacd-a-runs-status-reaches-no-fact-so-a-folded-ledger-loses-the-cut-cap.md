@@ -29,7 +29,7 @@ No fact carries a run's status. `saffron/record/contract.py:32-33` declares
 `run_created` and `run_finished`, and nothing appends either.
 `saffron/record/fold.py:8-12` says `create_run` and `finish_run` append no
 fact, so a rebuild leaves `runs.status` unset. `_run_for` inserts each folded
-run as `RUNNING` (`saffron/ledger.py:486-489`). In a folded ledger no earlier
+run as `RUNNING` (`saffron/ledger.py:461-466`). In a folded ledger no earlier
 cut matches, so every cut re-queues, every night.
 
 The task facts cannot stand in. Take a wall cut that leaves one commit, then
