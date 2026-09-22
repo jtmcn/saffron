@@ -68,29 +68,16 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def pinned_diff(repo: Path, base: str, head: str) -> str:
-    """`git diff base..head`, pinned against every host git config measured
-    to move it — the only spelling of `git diff` this module allows for
-    comparing against a recorded `patch.diff`.
+    """`git diff base..head`, pinned by `worktree.DIFF_FLAGS` plus two of
+    `worktree.git_argv`'s `-c` overrides.
 
-    Starts from the cell's own export (`saffron/cell/worktree.py`'s
-    `DIFF_FLAGS` and its `_git`'s two `-c` overrides), which is not enough by
-    itself: measured against all eight shipped fixtures, `DIFF_FLAGS` plus
-    those two overrides still differs from the recorded patch under
-    `core.abbrev=12` or `diff.context=5` (`diff.noprefix=true`,
-    `diff.algorithm=patience` and `diff.suppressBlankEmpty=true` are already
-    covered by `--src-prefix`/`--dst-prefix`, the diff itself, and the
-    `-c diff.suppressBlankEmpty=false` override, respectively — verified,
-    not assumed). `--abbrev=7`, `--unified=3` and `--diff-algorithm=myers`
-    close the remaining two — `7` is not "git's default", which is
-    `core.abbrev=auto` and scales with the repo's object count, but what
-    `auto` actually emitted: all 28 `index` lines across all eight recorded
-    patches are 7 hex digits on both sides. Pinning what was measured, not
-    what `auto` happens to be today, is what keeps this working after this
-    repo outgrows auto-7 — copying `auto` would silently start failing at
-    that point instead. `3` matches every recorded patch's hunk headers the
-    same way. If a future fixture's recorded patch used a different width,
-    this would need to know that width rather than guess.
-    """
+    The only spelling of `git diff` this module allows for comparing
+    against a recorded `patch.diff`. Verified against all eight shipped
+    fixtures, this pin set reproduces every one. `core.abbrev=9`,
+    `diff.context=4` and `diff.algorithm=histogram` do not. That is
+    provenance for the values `DIFF_FLAGS` carries. `--abbrev=7` is what
+    `auto` emitted on every fixture, not `auto` itself, and stays fixed
+    so a bigger repo cannot silently change it."""
     return _git(
         repo,
         "-c",
@@ -99,9 +86,6 @@ def pinned_diff(repo: Path, base: str, head: str) -> str:
         "diff.suppressBlankEmpty=false",
         "diff",
         *DIFF_FLAGS,
-        "--abbrev=7",
-        "--unified=3",
-        "--diff-algorithm=myers",
         f"{base}..{head}",
     )
 

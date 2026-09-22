@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from saffron.agents.findings import Finding
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
@@ -356,15 +357,6 @@ def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
     mirror = ensure_mirror(origin, tmp_path / "mirror.git")
     with pytest.raises(PackageError):
         fetch_default_branch(mirror, str(tmp_path / "nowhere"))
-
-
-DIFF_FLAGS = [
-    "--src-prefix=a/",
-    "--dst-prefix=b/",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--no-renames",
-]
 
 
 @pytest.fixture
@@ -3074,9 +3066,8 @@ def test_unpackaged_work_adding_a_hidden_submodule_outside_its_touches_is_not_pu
     git(work, "update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},vendor/sub")
     git(work, "commit", "-qm", "add a hidden submodule")
     patch = packageable.outcome.task_dir / "patch.diff"
-    # This module's own DIFF_FLAGS (above) lacks --ignore-submodules=none;
-    # add it explicitly so the exported patch always carries the gitlink and
-    # only the listing under test decides whether `scope` ever sees it.
+    # Kept explicit: SA-0097's mutant deletes --ignore-submodules=none from
+    # DIFF_FLAGS, so only the listing under test decides if `scope` sees it.
     patch.write_text(
         git(
             work,
