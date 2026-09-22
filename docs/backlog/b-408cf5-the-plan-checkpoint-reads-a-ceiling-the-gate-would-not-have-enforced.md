@@ -4,7 +4,7 @@ title: The plan checkpoint refuses on a ceiling the `size` gate would not have e
 status: open
 tier: 1
 filed: 2026-09-19
-specs: []
+specs: [SA-0125]
 prs: []
 commits: []
 cites: [§5.3, §5.4]
