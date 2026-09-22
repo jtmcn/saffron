@@ -4,7 +4,7 @@ title: The per-turn wall clock has no salvage turn, and a `NOT_IMPLEMENTED` it c
 status: open
 tier: 1
 filed: 2026-09-19
-specs: []
+specs: [SA-0126]
 prs: []
 commits: []
 cites: [§4.2.1, §4.3]

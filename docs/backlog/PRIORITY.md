@@ -114,6 +114,7 @@ the loop's delegate ran by hand after every cell. Mutating the line behind
 each criterion found a witness hole in all five pull requests. A run over a
 real ledger found #355 leaving out 75 of 76 merged tasks. **b-36b551** is a
 wall cut that lost a cell's work and still settled its spec.
+**b-149df3** is its by-hand half: the glossary and §4.5 after `SA-0126`.
 
 **From the spec loop's run 9, 2026-09-19** (#375, #377): **b-408cf5**. A plan
 was refused on a ceiling its own `size` gate does not enforce, at the cost of a
@@ -168,6 +169,10 @@ is `protected`. They are items 65 and 72 again, with five more words.
 `b-0c1d69` was filed writing `SA-0113`, and it carries a `DESIGN.md`
 §5.4.1 paragraph beside its glossary entry. `b-25766a` is the newest, the
 record's own fact kinds, and it is 168 and 169 a third time.
+
+**Placed 2026-09-22**: **b-cafacd**, filed revising `SA-0126`. It is 170's
+neighbour. A run's status reaches no fact, so a folded ledger loses the cap
+on a cut spec's retries.
 
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical

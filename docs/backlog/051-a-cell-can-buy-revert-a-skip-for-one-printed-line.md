@@ -3,7 +3,7 @@ id: 51
 title: A cell can buy `revert` a `skip` for one printed line
 status: open
 tier: 1
-specs: []
+specs: [SA-0127]
 prs: []
 commits: []
 cites: [§2.1, §5.4, §9]
