@@ -4,7 +4,7 @@ title: Each fact kind is written by the ledger and read back by the fold, and no
 status: partial
 tier: 1
 filed: 2026-09-20
-specs: [SA-0117]
+specs: [SA-0117, SA-0123]
 prs: [418]
 commits: []
 cites: [§4.1, §4.6]
