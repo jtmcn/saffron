@@ -79,9 +79,9 @@ Coverage is not an adequacy check. `size.py` had full statement coverage, and
 its one partial branch was not the defect. A line whose removal left all its
 tests green was executed by every one of them (the evidence record above).
 
-This ADR is where the decision stands. Eight sentences in `DESIGN.md` and
-`CONTEXT.md` still carry older forms of it, and they are named under
-principle 30.
+This ADR is where the decision stands. The pull request that adds it rewrites
+six `DESIGN.md` sentences that carried older forms of it. Two more remain, and
+principle 30 names them.
 
 ## Principles
 
@@ -102,18 +102,9 @@ principle 30.
 - **20** departs. A spec in the worktree is agent-visible. `SA-0064`'s
   implementer read a mutant there (item 80). Whether a criterion session has
   read a witness there is not measured.
-- **30** departs. Eight sentences keep an older decision:
-  - §5.4 says `revert` answers lens #3's question.
-  - §5.4 gives the withdrawn cost reason for rejecting mutation testing.
-  - §5.4.1 says no gate applies a criterion probe.
-  - `CONTEXT.md`'s criterion probe entry says the same.
-  - §5.5.1 gives `size.py` full branch coverage, where the evidence record
-    measured 97%.
-  - §7's coverage theater row says the `revert` gate blocks it.
-  - §8 says `revert` replaced a whole lens.
-  - §11's table names `revert` alone against mutation testing.
-
-  Item b-37924b owns the criterion probe pair. No item owns the other six.
+- **30** departs. Two sentences still say no gate applies a criterion probe:
+  §5.4.1, and `CONTEXT.md`'s criterion probe entry. Item b-37924b owns both.
+  The same pull request rewrote the other six, in §5.4, §5.5.1, §7, §8 and §11.
 - **34** upholds. `revert` reports `skip` when its tests fail to import, and
   `witness` names every mutant that does not apply. Neither reads as green.
 - **44** departs. No live task shows the host applying a criterion probe. The
