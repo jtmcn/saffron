@@ -277,6 +277,25 @@ def test_round_refuses_report_alongside_it(monkeypatch, loop):
     assert _review(monkeypatch, loop, "--round", "1", "--report", extra) == 1
 
 
+def test_round_glob_ignores_a_non_numeric_suffix(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+    (base / "round-1.bak").mkdir()
+    three = _report(loop, "r3.md", [])
+    assert (
+        _review(monkeypatch, loop, "--report", three, "--commit", loop.commits[2]) == 0
+    )
+    assert (base / "round-3").is_dir()
+
+
+def test_a_corrupt_earlier_findings_file_exits_1_not_a_traceback(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+    (base / "round-1" / "findings.json").write_text("not json")
+    three = _report(loop, "r3.md", [])
+    assert (
+        _review(monkeypatch, loop, "--report", three, "--commit", loop.commits[2]) == 1
+    )
+
+
 def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
     cell = loop.batches / "v0" / "SA-0901"
     cell.mkdir(parents=True)

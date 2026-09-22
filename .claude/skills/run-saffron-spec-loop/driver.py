@@ -1193,7 +1193,11 @@ def _jev_review(
     from harness import jev_observe
 
     base = JEV_ROOT / "spec-loop" / spec_id / args.kind
-    done = sorted(int(p.name.removeprefix("round-")) for p in base.glob("round-*"))
+    done = sorted(
+        int(p.name.removeprefix("round-"))
+        for p in base.glob("round-*")
+        if p.name.removeprefix("round-").isdigit()
+    )
     if args.round is not None:
         number = args.round
         directory = base / f"round-{number}"
@@ -1224,9 +1228,12 @@ def _jev_review(
         return _fail(str(exc))
     prior: list = []
     for n in (n for n in done if n < number):
-        prior += jev_observe.load_findings(
-            (base / f"round-{n}" / "findings.json").read_text()
-        )
+        try:
+            prior += jev_observe.load_findings(
+                (base / f"round-{n}" / "findings.json").read_text()
+            )
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            return _fail(f"round {n}'s findings.json is corrupt: {exc}")
     # Round 1 reads the whole PR from its merge base. Later rounds read only what changed.
     span = f"{since}...{commit}" if number == 1 else f"{since}..{commit}"
     try:
