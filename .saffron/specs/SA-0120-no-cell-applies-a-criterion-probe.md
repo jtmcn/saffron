@@ -224,16 +224,17 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    `saffron/phases/review.py`. `LensReview.drop_rate` skips a finding whose
    claim starts with it. The drop rate says whether a lens is badly prompted
    (§5.5), and the lens never filed this one. `saffron/agents/findings.py` is
-   forbidden, so no field on `Finding` can mark it. `_from_report` strips a
-   leading `HOST_FILED` from a lens's claim, so a lens cannot leave its own
-   drop rate. In the witness, have the `adequacy` lens file nothing, so its
-   drop rate is `0.0` only if both survivors are skipped. Then build a
+   forbidden, so no field on `Finding` can mark it. `_from_report` strips
+   every leading `HOST_FILED` from a lens's claim, until none is left. So a
+   lens cannot leave its own drop rate. In the witness,
+   have the `adequacy` lens file nothing, so its drop rate is `0.0` when both
+   survivors are skipped. Then build a
    `LensReview("adequacy", ...)` directly with two unanchored findings. One
-   is the lens's own, with a probe whose verdict is `survived`. The other
+   is the lens's own `blocker`, with a probe whose verdict is `survived`. The other
    starts with `HOST_FILED`. Assert its drop rate is `1.0`. A rule keyed on
    the probe or its verdict fails that. Pass `_from_report` one adequacy
-   finding whose claim starts with `HOST_FILED`, and assert the claim it
-   returns does not.
+   finding whose claim starts with `HOST_FILED` twice, and assert the claim
+   it returns does not start with it.
 6. **When a raise stops the rest.** A `CellRuntimeError` out of the
    mutator's entry or exit leaves the tree unknown. `witness_gate` reports
    it as `error`, the same status a `tests` gate `error` gets
