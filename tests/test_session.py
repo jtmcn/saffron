@@ -2860,8 +2860,8 @@ def test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied(
 ):
     """Criterion 4: a probe whose file, normalised, matches a declared
     `integrity.test_paths` glob (never merely `tests/**`) is `unproven`
-    without the mutator ever being entered — asked host-side, before any
-    cell, with the same rule `check_probe` itself would apply."""
+    without the mutator ever being entered. The host asks before any cell,
+    with the same rule `check_probe` itself would apply."""
     on_a_test_path = {
         "findings": [
             _adequacy_finding(_CONCERN_CLAIM, "./spec/a.py", "if x < 0:", "if False:")
@@ -2885,8 +2885,8 @@ def test_a_probe_on_a_declared_test_path_is_recorded_unproven_and_never_applied(
 
 def test_a_probed_review_no_probe_cell_could_answer_enters_none(monkeypatch, tmp_path):
     """Criterion 2, with backlog item b-a70ec1 folded in: when nothing in a
-    review's probes could be answered in a Gate-only cell, none is asked for
-    — every probe is `unproven` with its own reason, and the task still ends
+    review's probes could be answered in a Gate-only cell, none is asked for.
+    Every probe is `unproven` with its own reason, and the task still ends
     `READY_FOR_REVIEW`. Three reviews of two probes each: no `tests` gate
     declared, no `test_paths` declared, and (with both declared) one probe on
     a declared test path beside one outside the tree."""

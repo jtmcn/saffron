@@ -140,9 +140,9 @@ def _repo_relative(file: str) -> str | None:
 def probe_refusal(file: str, test_paths: Sequence[str]) -> str | None:
     """Why a probe aimed at `file` is refused, or `None` if it may proceed.
 
-    The same rule and order `revert` uses: a path outside the tree first,
-    then no declared test paths at all, then a declared glob (`scope.matches`,
-    never a prefix, never `fnmatch`) the normalised path matches.
+    A path outside the tree first, then `revert`'s rule: no declared test
+    paths at all, then a declared glob (`scope.matches`, never a prefix, never
+    `fnmatch`) the normalised path matches.
     """
     target = _repo_relative(file)
     if target is None:

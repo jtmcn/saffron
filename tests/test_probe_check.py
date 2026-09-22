@@ -307,10 +307,10 @@ def test_a_probe_naming_a_path_outside_the_tree_never_reaches_the_cell():
 
 
 def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
-    """`check_probe` refuses on the one rule `revert` uses — `scope.matches`
+    """`check_probe` refuses on the one rule `revert` uses: `scope.matches`
     over declared globs, on the normalised path, never a prefix and never
-    `fnmatch` — and on an empty declaration, in `probe_refusal`'s own order.
-    Both are asked before `mutate`, on one call."""
+    `fnmatch`. It also refuses an empty declaration, in `probe_refusal`'s own
+    order. Both are asked before `mutate`, on one call."""
     applied: list[str] = []
 
     @contextlib.contextmanager
@@ -377,8 +377,8 @@ def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
     )
     assert applied == ["tests/sub/x.py"]
 
-    # A bare `tests` matches only the literal path `tests`, nothing beneath —
-    # as it refuses nothing there for `revert` either.
+    # A bare `tests` matches only the literal path `tests`, nothing beneath.
+    # It refuses nothing there for `revert` either.
     got = probe_check.check_probe(
         Mutant(file="tests/test_report.py", find="a", replace="b"),
         baseline=baseline,

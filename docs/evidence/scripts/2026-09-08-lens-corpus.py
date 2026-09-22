@@ -117,8 +117,8 @@ def _write_manifest(out: Path, fixtures: list[corpus.Fixture]) -> None:
     )
 
 TEST_PATHS = ("tests/**",)
-"""This repo's own declared `integrity.test_paths` globs — `check_probe`
-matches globs now, the same rule `revert` uses, never a path prefix. An edit
+"""This repo's own declared `integrity.test_paths` globs. `check_probe`
+matches them by the rule `revert` uses, never as a path prefix. An edit
 to a test satisfies the number by construction, so `check_probe` requires
 this argument."""
 

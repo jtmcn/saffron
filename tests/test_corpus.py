@@ -440,8 +440,8 @@ def _load_driver():
 
 
 def test_the_driver_passes_check_probe_this_repos_declared_globs():
-    """`TEST_PATHS` is this repo's own declared `integrity.test_paths` globs
-    now, not a path prefix — `check_probe` matches globs (backlog b-461729)."""
+    """`TEST_PATHS` is this repo's own declared `integrity.test_paths` globs,
+    because `check_probe` matches globs (backlog b-461729)."""
     from saffron.repos.policy import load_policy
 
     driver = _load_driver()
