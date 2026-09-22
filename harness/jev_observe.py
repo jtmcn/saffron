@@ -229,10 +229,16 @@ def observe(
 
 
 def to_turtle(r: ReviewRound, model: str, answers: list[Answer]) -> str:
-    """One earl:Assertion per answer. The outcome is always cantTell, because a score has no pass."""
+    """Declares jev:jev, one earl:TestCase per question code, and the jev
+    properties, then writes one earl:Assertion per answer. The outcome is
+    always cantTell, because a score has no pass."""
     # json.dumps output is a valid Turtle string literal, since every escape it writes is one Turtle reads.
     lit = json.dumps
-    parts = [_PREFIXES]
+    parts = [_PREFIXES, "jev:jev a earl:Assertor, earl:Software .\n"]
+    for code in sorted({a.question for a in answers}):
+        parts.append(f"jev:{code} a earl:TestCase .\n")
+    for prop in ("distribution", "model", "reviewRound", "commit"):
+        parts.append(f"jev:{prop} a rdf:Property .\n")
     for a in answers:
         subject = f"round-{r.number}" if a.subject == "round" else a.subject
         parts.append(

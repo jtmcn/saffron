@@ -283,6 +283,21 @@ def test_every_answer_becomes_one_assertion_carrying_its_distribution():
     model, answers = jo.observe(r, FakeClient())
     store = ox.Store()
     store.load(jo.to_turtle(r, model, answers).encode(), ox.RdfFormat.TURTLE)
+    assert store.query(
+        "PREFIX earl: <http://www.w3.org/ns/earl#> "
+        "PREFIX jev: <urn:software-factory:jev#> "
+        "ASK { jev:jev a earl:Assertor, earl:Software }"
+    )
+    for code in {a.question for a in answers}:
+        assert store.query(
+            "PREFIX earl: <http://www.w3.org/ns/earl#> "
+            f"PREFIX jev: <urn:software-factory:jev#> ASK {{ jev:{code} a earl:TestCase }}"
+        )
+    for prop in ("distribution", "model", "reviewRound", "commit"):
+        assert store.query(
+            "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> "
+            f"PREFIX jev: <urn:software-factory:jev#> ASK {{ jev:{prop} a rdf:Property }}"
+        )
     result = store.query(_QUERY)
     rows = list(cast(ox.QuerySolutions, result))
     assert len(rows) == len(answers)
