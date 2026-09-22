@@ -338,6 +338,7 @@ def test_a_ledger_that_predates_the_diff_stat_gains_it_as_null(tmp_path):
     reopened = Ledger(path)
     rows = {row["spec_id"]: row for row in reopened.queue_lines()}
     assert (rows["SA-0001"]["added"], rows["SA-0001"]["removed"]) == (3, 4)
+    assert [type(rows["SA-0001"][c]) for c in ("added", "removed")] == [int, int]
     assert rows["SA-0002"]["added"] is None and rows["SA-0002"]["removed"] is None
     reopened.close()
 

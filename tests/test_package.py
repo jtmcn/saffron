@@ -967,10 +967,9 @@ def _state(ledger, task_id):
 
 
 def _seed_stat(tmp_path, task_id, added=7, removed=7):
-    """A value every path's own write must overwrite to be caught making
-    it — opened on the fixture's own ledger file, never through `Ledger`,
-    so the seed is a fact about the row rather than a call the write path
-    could intercept."""
+    """A value every path's own write must overwrite. It is written through
+    `sqlite3` on the fixture's own ledger file, never through `Ledger`, so
+    the write path cannot intercept the seed."""
     con = sqlite3.connect(tmp_path / "l.db")
     con.execute(
         "UPDATE tasks SET added = ?, removed = ? WHERE task_id = ?",
@@ -989,9 +988,9 @@ def test_every_package_path_that_measured_the_diff_records_its_stat(
     monkeypatch, packageable, tmp_path
 ):
     """Every PACKAGE path that returns after `diff_stat` ran writes the stat
-    it measured — the four new-failures/body/lease/ready paths, plus a
-    second READY_FOR_REVIEW over a patch with no lines changed, a genuine
-    (0, 0) rather than the counterfeit `or None` would leave unmeasured."""
+    it measured. The four are new failures, body, lease and ready. A second
+    READY_FOR_REVIEW over a patch with no lines changed must store a
+    measured (0, 0), which a counterfeit `or None` would store as NULL."""
     task_id = packageable.task_id
 
     # 1: new failures on re-verification.
@@ -1033,7 +1032,7 @@ def test_every_package_path_that_measured_the_diff_records_its_stat(
     row = _state(packageable.ledger, task_id)
     assert (row["added"], row["removed"]) == (2, 1)
 
-    # 3: the branch moved underneath us — the lease is rejected.
+    # 3: the branch moved underneath us, so the lease is rejected.
     _seed_stat(tmp_path, task_id)
     git(
         packageable.work,
@@ -1063,8 +1062,8 @@ def test_every_package_path_that_measured_the_diff_records_its_stat(
     row = _state(packageable.ledger, task_id)
     assert (row["added"], row["removed"]) == (2, 1)
 
-    # 5: READY_FOR_REVIEW again, over a patch that adds one empty file — a
-    # measured (0, 0), not NULL and not the seed.
+    # 5: READY_FOR_REVIEW again, over a patch that adds one empty file. That
+    # is a measured (0, 0), not NULL and not the seed.
     _seed_stat(tmp_path, task_id)
     patch_path = packageable.outcome.task_dir / "patch.diff"
     original_patch = patch_path.read_text()
@@ -1098,7 +1097,7 @@ def test_every_package_path_that_returned_before_the_diff_was_measured_records_n
     packageable, tmp_path
 ):
     """Every PACKAGE path that returns before `diff_stat` ran leaves the
-    columns NULL — never the seeded 7/7, and never a counterfeit 0."""
+    columns NULL. That is never the seeded 7/7 and never a counterfeit 0."""
     task_id = packageable.task_id
     task_dir = packageable.outcome.task_dir
     patch_json_path = task_dir / "patch.json"
@@ -1158,7 +1157,7 @@ def test_every_package_path_that_returned_before_the_diff_was_measured_records_n
     queued = _queue_json_row(packageable.out_dir, "SA-0005")
     assert (queued["added"], queued["removed"]) == (0, 0)
 
-    # 4: a real conflict — run last, since it moves main for good.
+    # 4: a real conflict. It goes last, since it moves main for good.
     _seed_stat(tmp_path, task_id)
     (packageable.work / "f.txt").write_text("a\nb\nMAIN_TOOK_IT\nd\ne\n")
     git(packageable.work, "add", "-A")

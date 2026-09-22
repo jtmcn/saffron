@@ -240,9 +240,9 @@ def test_the_diff_stat_folds_back_as_written_and_null_where_unmeasured(
     tmp_path, record
 ):
     """`task_package`'s payload carries `added`/`removed` whether or not a
-    stat was measured, and `_apply` reads them with `payload.get` — so a
-    fact from before this change, missing the keys entirely, folds to NULL
-    exactly like a fact that carries them as `None`."""
+    stat was measured. `_apply` reads them with `payload.get`, so a fact
+    from before this change, with no such keys, folds to NULL. So does a
+    fact that carries them as `None`."""
     source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
     source = Ledger(source_path, record=record)
     into = Ledger(fold_path)
@@ -265,6 +265,14 @@ def test_the_diff_stat_folds_back_as_written_and_null_where_unmeasured(
     _pkg("SA-24")
     _pkg("SA-25", added=5, removed=5)
     _pkg("SA-25", added=5, removed=5)
+
+    facts20 = record.read(_key(source, ids["SA-20"]))
+    assert (facts20[-1].payload["added"], facts20[-1].payload["removed"]) == (2, 1)
+    last22 = record.read(_key(source, ids["SA-22"]))[-1].payload
+    assert "added" in last22 and "removed" in last22
+    assert last22["added"] is None and last22["removed"] is None
+    facts23 = record.read(_key(source, ids["SA-23"]))
+    assert all(f.kind != "task_package" for f in facts23)
 
     key25 = _key(source, ids["SA-25"])
     facts25 = record.read(key25)
@@ -294,8 +302,10 @@ def test_the_diff_stat_folds_back_as_written_and_null_where_unmeasured(
             row = _raw_rows(path, _TASK_SQL, key)[0]
             assert (row["added"], row["removed"]) == expected, (spec_id, path)
 
-    # SA-25's live source row still holds the real (5, 5) — only the folded
-    # copy of its second fact was stripped, so only the fold reads NULL.
+    # The record's second SA-25 fact was stripped after the source wrote its
+    # row. So the source reads (5, 5) and only the fold reads NULL.
+    source_row = _raw_rows(source_path, _TASK_SQL, key25)[0]
+    assert (source_row["added"], source_row["removed"]) == (5, 5)
     fold_row = _raw_rows(fold_path, _TASK_SQL, key25)[0]
     assert (fold_row["added"], fold_row["removed"]) == (None, None)
 
