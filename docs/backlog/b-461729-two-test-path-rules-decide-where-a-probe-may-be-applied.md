@@ -4,7 +4,7 @@ title: Two different test-path rules decide where a vacuity probe may be applied
 status: open
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0119]
 prs: []
 commits: []
 cites: [§5.5, §5.4]
