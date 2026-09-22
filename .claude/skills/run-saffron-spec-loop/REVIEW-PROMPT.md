@@ -111,3 +111,5 @@ Report, in this order:
    backlog.
 4. **Assessment** — ready, ready with the listed fixes, or not ready, in two
    sentences, for your remit alone.
+5. **Findings block**, last: the format `.claude/agents/spec-reviewer.md`
+   Report item 4 defines.

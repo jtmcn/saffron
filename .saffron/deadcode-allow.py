@@ -19,6 +19,13 @@ _.row_factory  # sqlite3 reads it on every query, saffron/ledger.py
 _.__getattr__  # module attribute hook: saffron/cell/runtime.py, saffron/phases/implement.py
 
 # Called from outside the scanned roots.
+_.parse_block  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.lens_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.dump_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.load_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.observe  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.to_turtle  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.number_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
 _.load_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
 _.calibrate_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
 _.graded_per_run  # docs/evidence/scripts/2026-09-08-lens-corpus.py

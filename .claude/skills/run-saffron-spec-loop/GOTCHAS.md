@@ -12,6 +12,11 @@ do; the measurement behind it follows.
   `sed -n 's/^export \(CLAUDE_CODE_OAUTH_TOKEN=\)/\1/p' ~/.secrets > <scratch>/cell.env`
   — pass it with `uv run --env-file`, and delete it when the loop ends.
   `~/.secrets` itself holds other keys, so it is never the `--env-file`.
+- **Scope the Jev key the same way, from a worktree session.** Write only
+  `TYPESAFE_API_KEY` to its own scratch file, under `umask 077`:
+  `sed -n 's/^export \(TYPESAFE_API_KEY=\)/\1/p' ~/.secrets > <scratch>/jev.env`.
+  Run with `uv run --env-file <scratch>/jev.env ...`. Never merge it into the
+  cell's env file, and delete it once the loop ends.
 - **Put the host's preflight allowlist on the invocation.** A development host
   that tolerates a listener (`docs/HOST-HARDENING.md`) needs
   `SAFFRON_ALLOW_HOST_PROCESS=<name>` on every `saffron cell`. The delegate's shell
