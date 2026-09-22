@@ -100,7 +100,7 @@ and `pyoxigraph` inside the functions that use them. T expected the operator to
 move them to runtime dependencies at merge. They are still in the `dev` group.
 Three files still say nothing under `saffron/` imports one: `pyproject.toml`,
 `ontology/render.py` and `ontology/design_record.py`. So `saffron chains` runs
-only where the dev group is installed.
+only where the dev group is installed (backlog item b-0adc85).
 
 Item 170 makes the commits on `refs/saffron/*` the authoritative record and the
 ledger an index folded from them. That reverses §4.6's first rule, and this
