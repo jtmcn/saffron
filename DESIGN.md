@@ -1688,3 +1688,4 @@ the ADR records, so a hand edit here is discarded.
 |---|---|---|---|
 | 1 | Decisions are recorded one per file as ADRs | accepted | 27, 29, 30, 40, 56, 57, 62 |
 | 2 | Core invokes declared gates, never tools | accepted | 12, 13, 14, 29, 30, 34, 36, 39, 41, 52, 54, 57 |
+| 3 | Tests are judged by targeted mutants, not a mutation tool | accepted | 6, 30, 45, 47, 48, 49, 56, 57 |
