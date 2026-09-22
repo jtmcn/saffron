@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -393,3 +394,104 @@ def test_other_commands_run_without_the_sdk():
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def _moved_base(loop) -> str:
+    """A base branch that moved on after the PR branched. It adds `c.py`."""
+    _git(loop.root, "checkout", "-q", "-b", "moved", loop.commits[0])
+    moved = _commit(loop.root, "c.py", "z = 3\n")
+    _git(loop.root, "checkout", "-q", "main")
+    return moved
+
+
+def test_the_first_round_diffs_from_the_merge_base_when_the_base_moved_on(
+    monkeypatch, loop
+):
+    moved = _moved_base(loop)
+    one = _report(loop, "r1.md", [FINDING])
+    argv = ("--report", one, "--commit", loop.commits[1], "--base", moved)
+    assert _review(monkeypatch, loop, *argv) == 0
+    diff = loop.client.state["diff"]
+    assert "a.py" in diff and "c.py" not in diff
+
+
+def test_a_restacked_pr_diffs_whole_from_its_new_merge_base(monkeypatch, loop):
+    first, second, _ = loop.commits
+    one = _report(loop, "r1.md", [FINDING])
+    argv = ("--report", one, "--commit", second, "--base", first)
+    assert _review(monkeypatch, loop, *argv) == 0
+    moved = _moved_base(loop)
+    _git(loop.root, "checkout", "-q", "-b", "restacked", moved)
+    _git(loop.root, "cherry-pick", second)
+    head = _commit(loop.root, "d.py", "w = 4\n")
+    two = _report(loop, "r2.md", [])
+    argv = ("--report", two, "--commit", head, "--base", moved)
+    assert _review(monkeypatch, loop, *argv) == 0
+    diff = loop.client.state["diff"]
+    assert "a.py" in diff and "d.py" in diff and "c.py" not in diff
+    base = loop.batches / "spec-loop" / "SA-0901" / "pr-review"
+    assert json.loads((base / "round-2" / "round.json").read_text())["base"] == moved
+
+
+def test_a_head_that_does_not_descend_from_the_last_diffs_whole(monkeypatch, loop):
+    first, second, _ = loop.commits
+    one = _report(loop, "r1.md", [FINDING])
+    argv = ("--report", one, "--commit", second, "--base", first)
+    assert _review(monkeypatch, loop, *argv) == 0
+    _git(loop.root, "checkout", "-q", "-b", "reopened", first)
+    head = _commit(loop.root, "d.py", "w = 4\n")
+    two = _report(loop, "r2.md", [])
+    assert _review(monkeypatch, loop, "--report", two, "--commit", head) == 0
+    diff = loop.client.state["diff"]
+    assert "d.py" in diff and "a.py" not in diff
+
+
+def test_a_base_merged_into_the_pr_diffs_whole_from_the_new_merge_base(
+    monkeypatch, loop
+):
+    first, second, _ = loop.commits
+    one = _report(loop, "r1.md", [FINDING])
+    argv = ("--report", one, "--commit", second, "--base", first)
+    assert _review(monkeypatch, loop, *argv) == 0
+    moved = _moved_base(loop)
+    _git(loop.root, "checkout", "-q", "-b", "merged", second)
+    _git(loop.root, "merge", "-q", "--no-edit", moved)
+    head = _commit(loop.root, "d.py", "w = 4\n")
+    two = _report(loop, "r2.md", [])
+    argv = ("--report", two, "--commit", head, "--base", moved)
+    assert _review(monkeypatch, loop, *argv) == 0
+    diff = loop.client.state["diff"]
+    assert "a.py" in diff and "d.py" in diff and "c.py" not in diff
+
+
+def test_a_rescore_reads_the_spec_the_reviewer_read(monkeypatch, loop):
+    _two_rounds(monkeypatch, loop)
+    (loop.root / "spec.md").write_text(SPEC + "- [ ] it was added later\n")
+    assert _review(monkeypatch, loop, "--round", "1") == 0
+    assert loop.client.state["spec"] == SPEC
+    assert list(loop.client.state["criteria"].values()) == ["it parses", "it saves"]
+
+
+def test_a_failed_rescore_clears_the_old_ttl(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+
+    class Down:
+        def system_one(self, *args, **kwargs):
+            raise TypeSafeError("down")
+
+    monkeypatch.setattr(driver, "_jev_client", Down)
+    assert _review(monkeypatch, loop, "--round", "1") == 2
+    assert not (base / "round-1" / "jev.ttl").exists()
+
+
+def test_a_cell_whose_review_predates_its_latest_run_is_refused(monkeypatch, loop):
+    cell = loop.batches / "v0" / "SA-0901"
+    cell.mkdir(parents=True)
+    (cell / "findings.json").write_text(json.dumps([]))
+    (cell / "patch.json").write_text(json.dumps({"head_sha": "feedbeef"}))
+    (cell / "patch.diff").write_text("diff --git a/t.py b/t.py\n")
+    (cell / "baseline.json").write_text("{}")
+    os.utime(cell / "findings.json", (1_000_000, 1_000_000))
+    argv = ("jev", "SA-0901", "--kind", "cell", "--spec", str(loop.root / "spec.md"))
+    assert _run(monkeypatch, *argv) == 1
+    assert loop.client.questions == {} and not (cell / "jev.ttl").exists()

@@ -99,8 +99,8 @@ distribution property are declared inline in `to_turtle`, not by
 | `cell` | `~/.saffron/batches/v0/SA-NNNN/` |
 
 A review round directory holds one `report-N.md` per seat, one `round.json`
-with the resolved commit and the diff's start, one merged `findings.json`,
-and `jev.ttl`. A `pr-review` review round holds two reports, and both seats
+with the resolved commit, the diff's start and the PR's base, the `spec.md`
+the reviewer read, one merged `findings.json`, and `jev.ttl`. A `pr-review` review round holds two reports, and both seats
 share the review round number and the one findings file.
 
 ## The JSON block

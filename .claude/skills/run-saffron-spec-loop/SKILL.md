@@ -273,11 +273,11 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
 
    ```bash
    driver.py jev SA-NNNN --kind pr-review --report <spec seat> \
-     --report <standards seat> --commit <PR head> --base <the PR's base SHA>
+     --report <standards seat> --commit <PR head> --base <the PR's base branch>
    ```
 
-   `--base` only matters for review round 1. A later review round reads the
-   previous review round's own commit.
+   Pass `--base` every review round. A later review round diffs from the
+   previous review round's commit, or from the merge base again after a restack.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe with the driver:
    `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.
