@@ -3,7 +3,7 @@ id: 50
 title: '`revert` produces no evidence for the spec shape it was built for'
 status: open
 tier: 1
-specs: []
+specs: [SA-0127]
 prs: []
 commits: []
 cites: [§5.4]
