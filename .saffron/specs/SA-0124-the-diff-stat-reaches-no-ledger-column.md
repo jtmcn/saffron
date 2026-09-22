@@ -44,13 +44,16 @@ risk: elevated
 acceptance:
   - claim: >-
       Each of the four PACKAGE paths that return after `diff_stat` ran writes
-      the stat it measured to the task's row. The four are new failures on
-      re-verification, a credential in the pull request body, a branch that
-      moved under the lease, and `READY_FOR_REVIEW`. The witness drives all
-      four in turn on one `packageable` task, whose diff adds 2 lines and
-      removes 1. Before each path it writes 7 and 7 into the row's two columns through a `sqlite3`
-      connection of its own. After each it asserts the path's own note or
-      state, then reads 2 and 1 through `queue_lines`. Today
+      the stat it measured to the task's row, a measured 0 included. The four
+      are new failures on re-verification, a credential in the pull request
+      body, a branch that moved under the lease, and `READY_FOR_REVIEW`. The
+      witness drives all four in turn on one `packageable` task, whose diff
+      adds 2 lines and removes 1. It then drives `READY_FOR_REVIEW` a second
+      time over a patch that adds one empty file, which measures 0 and 0.
+      Before each of the five runs it writes 7 and 7 into the row's two
+      columns through a `sqlite3` connection of its own. After each it asserts
+      the path's own note or state. It reads 2 and 1 through `queue_lines`
+      after the first four, and 0 and 0 after the fifth. Today
       `set_task_package` takes no stat and `tasks` has no column for one.
     witness: tests/test_package.py::test_every_package_path_that_measured_the_diff_records_its_stat
   - claim: >-
@@ -110,7 +113,9 @@ This spec is `SA-0123`'s child. `SA-0123` routes every ledger write method
 through `Ledger._apply`. Each method builds its fact, applies it, commits
 once, and then appends it. Write this change against that shape. The line
 numbers below were read at this spec's base, `cbb63af3`, before `SA-0123`
-landed. Those in `saffron/ledger.py` move before a cell runs.
+landed. Those in `saffron/ledger.py`, `tests/test_ledger.py` and
+`tests/test_ledger_fold_task.py` move before a cell runs, since `SA-0123`
+edits all three.
 
 What the code does today:
 
@@ -203,7 +208,8 @@ keys. `KINDS` in `saffron/record/contract.py:19-38` is unchanged, and
 from the ledger. NULL is the honest value, per §4.1's sentence above.
 
 **`replay.py`.** v0's replay measures its own stat into a `QueueLine`
-(`saffron/replay.py:49`) and writes no task row. Leave it.
+(`saffron/replay.py:49`). It writes a task row (`:55`) but never calls
+`set_task_package`, so its columns stay NULL. Leave it.
 
 ## Notes for the agent
 
@@ -264,10 +270,28 @@ reached:
   `patch.json` after it.
 - Conflict, last: push a commit to `main` that rewrites line 3 of `f.txt`.
 
+**Criterion 1's fifth run is a measured 0.** A `_finish` that passed
+`result.added or None` would store NULL for an empty diff. Two runs on the
+prototype tested it.
+
+- A patch that only changes `f.txt`'s mode does not reach `diff_stat`. Its
+  hunk carries no `index` line, so `apply_patch` raises `PackageError`: "git
+  fell back to direct application: the preimage blob is absent".
+- A patch that adds one empty file does reach it. Build it on a branch cut
+  from the fixture's base, and rewrite `patch.diff` from it. Its hunk carries
+  `index 0000000..e69de29`. PACKAGE reached `READY_FOR_REVIEW` with the
+  result's counts at 0 and 0, and the row read 0 and 0.
+
+The `or None` counterfeit passed all four witnesses without the fifth run
+(`4 passed`). With the fifth run, criterion 1's witness failed it. Run the
+fifth after the four, reusing the `gh` stub. The lease then reads the branch
+the fourth run pushed.
+
 The prototype's counterfeits and what they did. Defaulting `PackageResult`
 to 0 failed criterion 2. Dropping the stat from the lease path failed
 criterion 1. `COALESCE` in the column write failed criteria 2 and 3.
-Passing `None` through to the `QueueLine` failed criterion 2. A fold that
+Passing `None` through to the `QueueLine` failed criterion 2. A `_finish`
+passing `or None` to `set_task_package` failed criterion 1's fifth run. A fold that
 defaulted a missing key to 0, wrote `or None`, indexed the payload, or dropped
 the pair failed criterion 3. So did a writer that left the keys out. Adding
 the columns to `SCHEMA` alone failed criterion 4. Each witness failed with the
@@ -307,11 +331,11 @@ collection error, which it reads as `skip`. `tests/test_package.py` needs
 `sqlite3` for the seed. That import is fine, since the standard library holds
 it at base.
 
-**Size.** A prototype of this change at this base measured 266 changed lines
+**Size.** A prototype of this change at this base measured 278 changed lines
 after `ruff format`, before docstrings. It spent 21 in `saffron/ledger.py`,
-11 in `saffron/phases/package.py`, 130 in `tests/test_package.py`, 72 in
+11 in `saffron/phases/package.py`, 142 in `tests/test_package.py`, 72 in
 `tests/test_ledger_fold_task.py` and 32 in `tests/test_ledger.py`. Expect
-about 320 with docstrings. The `feature` ceiling is 600, and `size` blocks
+about 330 with docstrings. The `feature` ceiling is 600, and `size` blocks
 at `elevated`, which `saffron/ledger.py` makes this task.
 
 **Prose.** Each touched file's `prose` count must not rise. New comments and
