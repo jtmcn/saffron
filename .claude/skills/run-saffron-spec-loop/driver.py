@@ -1240,10 +1240,7 @@ def _jev_review(
         diff = _git("diff", span, cwd=args.root)
     except GitError as exc:
         return _fail(str(exc))
-    pairs = [
-        (jev_observe.finding_id(args.kind, spec_id, number, i), f)
-        for i, f in enumerate(findings)
-    ]
+    pairs = jev_observe.number_findings(args.kind, spec_id, number, findings)
     directory.mkdir(parents=True, exist_ok=True)
     for i, text in enumerate(reports, 1):
         (directory / f"report-{i}.md").write_text(text)
@@ -1273,10 +1270,7 @@ def _jev_cell(
     # below does not leave it looking current (item F7).
     (directory / "jev.ttl").unlink(missing_ok=True)
     findings = jev_observe.lens_findings(lenses)
-    pairs = [
-        (jev_observe.finding_id("cell", spec_id, 1, i), f)
-        for i, f in enumerate(findings)
-    ]
+    pairs = jev_observe.number_findings("cell", spec_id, 1, findings)
     return directory, jev_observe.ReviewRound(
         "cell", spec_id, 1, commit, spec_text, criteria, pairs, [], diff
     )

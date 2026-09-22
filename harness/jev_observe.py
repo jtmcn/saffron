@@ -84,6 +84,13 @@ def finding_id(kind: Kind, spec_id: str, number: int, index: int) -> str:
     ]
 
 
+def number_findings(
+    kind: Kind, spec_id: str, number: int, findings: list[Finding]
+) -> list[tuple[str, Finding]]:
+    """Every finding paired with its stable id, in report order."""
+    return [(finding_id(kind, spec_id, number, i), f) for i, f in enumerate(findings)]
+
+
 def dump_findings(pairs: list[tuple[str, Finding]]) -> str:
     return json.dumps([{"id": fid, **asdict(f)} for fid, f in pairs], indent=2) + "\n"
 

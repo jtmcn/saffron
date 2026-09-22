@@ -72,6 +72,18 @@ def test_a_finding_id_depends_only_on_where_the_finding_sits():
     assert a not in others and len(others) == 4
 
 
+def test_number_findings_pairs_each_finding_with_its_stable_id():
+    findings = [
+        jo.Finding("blocker", 1, "a.py", 3, "wrong"),
+        jo.Finding("note", None, None, None, "fine"),
+    ]
+    pairs = jo.number_findings("pr-review", "SA-0001", 2, findings)
+    assert pairs == [
+        (jo.finding_id("pr-review", "SA-0001", 2, 0), findings[0]),
+        (jo.finding_id("pr-review", "SA-0001", 2, 1), findings[1]),
+    ]
+
+
 def test_findings_round_trip_through_their_file():
     pairs = [
         (

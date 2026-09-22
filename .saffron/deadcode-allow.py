@@ -25,6 +25,7 @@ _.dump_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outsid
 _.load_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
 _.observe  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
 _.to_turtle  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
+_.number_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
 _.load_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
 _.calibrate_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
 _.graded_per_run  # docs/evidence/scripts/2026-09-08-lens-corpus.py
