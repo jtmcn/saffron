@@ -111,8 +111,5 @@ Report, in this order:
    backlog.
 4. **Assessment** — ready, ready with the listed fixes, or not ready, in two
    sentences, for your remit alone.
-5. **Findings block**, last: a fenced `json` block restating the findings for
-   Jev (`driver.py jev`). Write `{"findings": [...]}`, one object per finding,
-   with `severity` (`blocker`, `concern` or `note`), `criterion` (its number,
-   or `null`), `file`, `line` and `claim`. A review with no findings writes an
-   empty list.
+5. **Findings block**, last: the format `.claude/agents/spec-reviewer.md`
+   Report item 4 defines.
