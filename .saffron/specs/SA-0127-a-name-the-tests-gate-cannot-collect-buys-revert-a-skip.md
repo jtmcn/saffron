@@ -144,7 +144,7 @@ merges. Until then this repo's gate reports no `uncollected`, and `revert`
 judges it exactly as today. Items 50 and 51 close `partial` on this spec and
 close in full when that edit lands.
 
-That edit has three conditions to meet on a subset run whose collection
+That edit has four conditions to meet on a subset run whose collection
 failed:
 
 - It reports `pass` or `fail`, not the `error` it reports today
@@ -154,6 +154,8 @@ failed:
   subset, and the whole-suite census keeps its rule that a partial list is
   not a result.
 - It fills `uncollected` with the handed names it could not collect.
+- It never lists one name in both lists. Criterion 2 makes that an `error`,
+  so a printed line read as a name would abort the attempt.
 
 **Other repos' `tests` gates.** `runner.run_gate` turns a gate that exits
 non-zero with no failures into `error` (`saffron/gates/runner.py:157-163`).
@@ -203,7 +205,9 @@ silence items 50 and 51 exist to remove.
 **Where the summary note goes.** Carry the `uncollected` names on the verdict
 summaries the way `note` carries dropped names now
 (`saffron/gates/core/revert.py:135-141`). Both the `pass` and the `fail`
-verdicts carry it.
+verdicts carry it. Append it to `note` itself, as
+`saffron/gates/core/revert.py:206` already does. Leave the two summary
+f-strings unchanged, because criteria 5 and 6 put their mutants on them.
 
 **Comments that go stale.** `_argv_safe`'s docstring
 (`saffron/gates/core/revert.py:65-72`) says no name filter closes item 51.
@@ -219,9 +223,11 @@ no mutant. Build each reverted run as a `GateResult` in the test, as
 - Criterion 2's witness drives an empty and a non-empty `uncollected`. It
   drives a `pass` and a `fail` status, and failures keyed on an exception
   type. It drives a name both collected and listed, the two earlier skips,
-  a dropped option name and an exempted witness.
+  a dropped option name and an exempted witness. Each `error` asserts that
+  the summary names the unaccounted name.
 - Criterion 3's witness drives a `pass` with no failures, a `pass` with
-  failures keyed on the listed names, and a `fail`.
+  failures keyed on the listed names, and a `fail`. It also drives a `fail`
+  status whose failures are keyed on the listed names.
 - Criteria 4 to 6 are `preserves`. Their witnesses exist and pass now.
   Criterion 4's witness already asserts its summary. Add to the witnesses of
   criteria 5 and 6 an assertion that the summary equals the exact sentence
