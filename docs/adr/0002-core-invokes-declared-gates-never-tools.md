@@ -6,7 +6,7 @@ date: 2026-09-22
 supersedes: []
 superseded_by: []
 appendices: [C, F, H, I, M]
-principles: [12, 13, 14, 29, 34, 36, 39, 41, 44, 52, 54, 57]
+principles: [12, 13, 14, 29, 34, 36, 39, 41, 52, 54, 57]
 ---
 
 ## Context
@@ -63,7 +63,8 @@ paths from `policy.yaml`.
 
 `committed` reads `git status` in the cell, which widens core's in-cell git
 surface. It stays inside the rule, because the check is a pure function over
-paths. It is a stated residual, not a second exception.
+paths. The widened surface is the residual, and it is not a second
+exception.
 
 Which copy of a gate the host executes is a separate decision. §5.4 takes
 gates and policy from the export at `base_sha`, never from `/work` (Appendix N).
@@ -75,11 +76,11 @@ gates and policy from the export at `base_sha`, never from `/work` (Appendix N).
 - **13** upholds. `integrity` keeps the question in core and the tokens in
   `policy.yaml`.
 - **14** departs. The two repos §1.3 names are both Python, and Appendix I
-  measured an empty diff for one of them. §9 orders the tests. v2's empty diff
-  for a second repo comes first, and the dissimilar third repo comes at v3.
-  "Do not build v3 first" is why the decision stands before that test runs.
-- **29** upholds. §2.1 and §5.4.1 state both uses of the exception, `revert`
-  and `witness`, so the rule survives them.
+  measured an empty diff for one of them. The dissimilar third repo that C
+  names as the test comes at v3. §9 gives the reason to decide first: a
+  contract is cheap, and retrofitting one after core learns a language is not.
+- **29** upholds. §2.1 states the exception with `revert`, and §5.4.1 places
+  `witness` inside it, so the rule survives both.
 - **34** upholds. The contract carries `tool`, so a gate that ran and passed
   differs from one that never ran.
 - **36** upholds. A gate that breaks part-way reports `error` for the whole
@@ -88,23 +89,20 @@ gates and policy from the export at `base_sha`, never from `/work` (Appendix N).
   not from locating it.
 - **41** upholds. Core's own checks run on artifacts core owns, and demand no
   language of a repo's image.
-- **44** upholds. The cost of a gate is stated below as measured on this tree,
-  not as C's estimate.
 - **52** upholds. `census` compares collected sets and invokes nothing, which
   is the cheaper question answered.
-- **54** departs. A structure rule holds the `tool` invariant for Python gates
-  only. `.saffron/gates/format` is shell, and no rule reads it (backlog item
-  77).
+- **54** departs. The runner requires `tool` in every result, and checks that
+  it came from execution in one place only. A structure rule reads Saffron's
+  own Python gates. It skips the shell `format` gate (backlog item 77) and
+  every other repo's gates. Reading another repo's gate source needs core to
+  know its language, which this decision refuses.
 - **57** upholds. This ADR condenses §2.1, §5.4, §5.4.1 and §11. Each claim in
   the Decision is one of those sections restated, and nothing here widens them.
 
 ## Consequences
 
-The orchestrator holds no parser, and each repo translates its own tools.
-Appendix C estimated a gate at about 20 lines of shell. On this tree
-`.saffron/gates/format` is 25 lines of shell. `lint.py` is 56 lines of Python,
-`typecheck.py` 113 and `tests.py` 123. A repo with no analogue for a role omits
-the gate, and core changes nothing.
+The orchestrator holds no parser, and each repo translates its own tools. A
+repo with no analogue for a role omits the gate, and core changes nothing.
 
 No test asserts that onboarding touches zero lines of `saffron/`. Appendix I
 measured it once. §11 expects one field of the contract to be wrong for the
