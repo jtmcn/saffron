@@ -2,6 +2,7 @@
 id: b-602d00
 title: A stacked child names what it uses from its parent, and nothing checks those names before its cell starts
 status: open
+tier: 2
 filed: 2026-09-21
 specs: []
 prs: []

@@ -2,6 +2,7 @@
 id: b-e1afbb
 title: Work larger than one cell has no unit in Saffron, and no review reads its parts together
 status: open
+tier: 3
 filed: 2026-09-21
 specs: []
 prs: []

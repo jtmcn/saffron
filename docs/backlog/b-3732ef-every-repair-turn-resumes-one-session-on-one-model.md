@@ -2,6 +2,7 @@
 id: b-3732ef
 title: Every repair turn resumes the implementer's session on the default model, and the ledger cannot say which model ran
 status: open
+tier: 3
 filed: 2026-09-21
 specs: []
 prs: []
