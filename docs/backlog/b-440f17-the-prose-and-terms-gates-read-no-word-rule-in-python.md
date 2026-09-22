@@ -46,3 +46,7 @@ A hunk that adds an em-dash to a new comment fails the gate.
   six docstring sentences over 25 words. #418 added two em-dashes and a
   semicolon in a new `ponytail:` comment. The Standards seat found each one, and
   the `prose` gate passed all of them.
+- 2026-09-22: four more in the spec loop's run 13. #431 added seven em-dash
+  lines. #434 added eleven em-dashes, five semicolons, a hedge and six sentences
+  over 25 words. #436 added three em-dashes. #433 added a 43-word docstring
+  sentence. The Standards seat found each one.

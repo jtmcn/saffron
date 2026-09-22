@@ -109,7 +109,7 @@ host.
 A test red only in the cell is subtracted from every cell's result.
 
 **From the spec loop's run 8, 2026-09-19** (stack #351 ← #360 ← #355 ← #366 ←
-#353): **b-2750d5**, **b-a8270f**, then **b-36b551**. The first two are checks
+#353): ~~**b-2750d5**~~, **b-a8270f**, then **b-36b551**. The first two are checks
 the loop's delegate ran by hand after every cell. Mutating the line behind
 each criterion found a witness hole in all five pull requests. A run over a
 real ledger found #355 leaving out 75 of 76 merged tasks. **b-36b551** is a
@@ -142,15 +142,20 @@ being paid to satisfy a spec that cannot be satisfied.
 blocking `size` ceiling packed its SQL onto long lines, and passed. The gate
 rewards the reformat, and the operator asked for a fix soon.
 
+**From the spec loop's run 13** (2026-09-22): **b-4a63b7**. `revert` failed a
+witness REBUT added to kill a surviving probe, since the property it pins was
+already true at base. A correct diff ended `EXHAUSTED`, and the operator
+opened #433 by hand.
+
 ### Tier 2 — the morning after
 
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, ~~**37**~~,
-~~**38**~~), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, **103**,
+~~**38**~~), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, ~~**103**~~,
 ~~**104**~~, ~~**113**~~, **135**, and from stack #285: **147**, **146**, ~~**144**~~,
 **149**, **148**, ~~**142**~~, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
 from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**, and from run 7: **b-b5f379**, **b-60732c**, **b-eac388**, **b-bc54d1**, **b-63ac52**, ~~**b-122686**~~, ~~**b-afec7c**~~, and from `SA-0109`'s spec review: **b-7c41e0**, and from run 8: **b-044ae7**, **b-65e7e2**, **b-5e443c**, **b-5d5b56**, **b-952c34**, **b-60d804**, **b-4589be**, **b-6f7f8d**, and from the spec-writer
-measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, **b-a70ec1**, ~~**b-ce93aa**~~, **b-461729**, and from run 10: ~~**b-865399**~~, **b-1c7019**, **b-3e0dbe**, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, ~~**b-929465**~~, **b-250dc7**. Then **160**, which is what
+measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-461729**~~, and from run 10: ~~**b-865399**~~, **b-1c7019**, **b-3e0dbe**, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, ~~**b-929465**~~, **b-250dc7**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
@@ -195,11 +200,18 @@ the loop's report in core, and it needs design before a spec.
 **From the spec loop's run 12** (2026-09-21): **b-e8027b**. A re-snapshot
 released a hold whose spec edit was still open, and `next` named the old text.
 
+**From the spec loop's run 13** (2026-09-22): **b-66e82d**, **b-055fa3** and
+**b-a9ee32**. The first is why finding the gate behind #433's `EXHAUSTED` took
+reproducing every gate by hand. The second is a witness that fails once three
+local branches are pruned. The third opens when item b-b5f379 bumps the cell's
+git.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, **89**, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, **b-e403c1**, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: **b-5fa523**, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, ~~**89**~~, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, ~~**b-e403c1**~~, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: **b-5fa523**, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**, and from run 13: **b-542beb**, **b-37924b**,
+**b-b431c1**, **b-ac2f02**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved

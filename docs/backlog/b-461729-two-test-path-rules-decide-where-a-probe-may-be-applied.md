@@ -1,11 +1,12 @@
 ---
 id: b-461729
 title: Two different test-path rules decide where a vacuity probe may be applied
-status: open
+status: done
+closed: 2026-09-22
 tier: 2
 filed: 2026-09-19
 specs: [SA-0119]
-prs: []
+prs: [431]
 commits: []
 cites: [§5.5, §5.4]
 related: [117, b-98dc4d]
@@ -40,3 +41,5 @@ rather than read as "nothing is a test".
 ## Record
 
 - 2026-09-19: filed from the spec loop's run 9 (#375).
+- 2026-09-22: done, `SA-0119`, #431, in the spec loop's run 13. `revert`'s
+  glob rule decides where a probe applies, and an empty `test_paths` refuses it.
