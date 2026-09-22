@@ -25,7 +25,7 @@ from saffron.agents import context
 from saffron.agents.artifacts import EXTRACTION_PROMPT, parse_output_block
 from saffron.agents.findings import Finding, Severity, anchor
 from saffron.events import Event, PhaseStart, describe
-from saffron.gates.contract import GateResult
+from saffron.gates.contract import GateResult, GateStatus
 from saffron.intake import Criterion, Mutant
 from saffron.phases import implement
 
@@ -477,7 +477,7 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
 
 
 # `witness_gate`'s own status, over one criterion, in this record's words
-# (item b-2750d5): `pass` killed, `fail` survived, `error`/`skip` unchanged.
+# (item b-2750d5): `pass` killed, `fail` survived, `skip` unproven, `error` error.
 _CRITERION_PROBE_OUTCOMES = {
     "pass": "killed",
     "fail": "survived",
@@ -486,33 +486,32 @@ _CRITERION_PROBE_OUTCOMES = {
 }
 
 
-def criterion_probe_outcome(status: str) -> str:
-    """`witness_gate`'s status for one criterion, read as an outcome. Only the
-    four statuses `witness_gate` can return over a single declared mutant are
-    valid input — anything else is this module misreading its own contract."""
+def criterion_probe_outcome(status: GateStatus) -> str:
+    """`witness_gate`'s status for one criterion, read as an outcome. Its four
+    statuses over one criterion probe are the only valid input."""
     return _CRITERION_PROBE_OUTCOMES[status]
 
 
-def survivor_finding(criterion: Criterion, mutant: Mutant, content: str) -> Finding:
+def survivor_finding(criterion: Criterion, edit: Mutant, content: str) -> Finding:
     """The blocker filed when a criterion's own witness survives the edit its
     own session named for it (backlog item b-2750d5). `content` is the file at
-    head in the cell that applied and restored the edit; the line is where
-    `mutant.find` begins there, never a hunk line the edit may sit outside.
+    head in the cell that applied and restored the edit. The line is where
+    `edit.find` begins there, never a hunk line.
 
     Unanchored: the caller still runs this through `findings.anchor`, exactly
     as every other finding in a `LensReview` is."""
-    line = content.count("\n", 0, content.index(mutant.find)) + 1
+    line = content.count("\n", 0, content.index(edit.find)) + 1
     return Finding(
         lens="adequacy",
         severity="blocker",
-        file=mutant.file,
+        file=edit.file,
         line=line,
         claim=(
             f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
-            f"own edit applied to {mutant.file} — the claim was "
+            f"own edit applied to {edit.file}. The claim was "
             f"{criterion.claim!r}, and only that witness ran under the edit."
         ),
-        probe=mutant,
+        probe=edit,
         probe_verdict="survived",
     )
 

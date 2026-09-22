@@ -2680,8 +2680,8 @@ def _stub_probe_gates(monkeypatch, cell, *, gate_results, mutate=None, subsets=N
     through to the real gate runner. `worktree.source_mutated` becomes
     `mutate`, or a default that applies cleanly into `cell.mutated`.
 
-    `subsets`, given a list, collects each such call's own `subset` argument
-    — what a criterion-probe witness asserts one list per edit against."""
+    `subsets`, given a list, collects each such call's own `subset` argument.
+    A criterion-probe witness asserts one list per edit against it."""
     import saffron.gates.runner as runner_mod
 
     real_run_gate = runner_mod.run_gate
@@ -5976,8 +5976,8 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
 
 
 def _tests_result(status, **kw):
-    """A `tests` gate result, `pytest 8.0` by default — the shape every
-    criterion-probe witness below scripts through `_stub_probe_gates` and
+    """A `tests` gate result, `pytest 8.0` by default. Every
+    criterion-probe witness below scripts this shape through `_stub_probe_gates` and
     `_stub_the_runtime`'s own `gate_cell_suite`."""
     return GateResult(gate="tests", status=status, tool="pytest 8.0", **kw)
 
@@ -5988,18 +5988,18 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     """Criterion 1: an edit its own witness does not notice is filed as a
     host-filed `adequacy` blocker. Of two survivors, only the one anchored by
     the token rule (its `find` sits outside `_ANCHORING_DIFF`'s one-line
-    hunk) reaches `rebuttal.json`; the other only `findings.json`. Neither
-    moves the `adequacy` lens's own drop rate, which counts only its own."""
+    hunk) reaches `rebuttal.json`. The other reaches only `findings.json`.
+    Neither moves the `adequacy` lens's own drop rate, which counts only its own."""
     from saffron.agents.findings import Finding
-    from saffron.intake import Criterion
+    from saffron.intake import Criterion, Mutant
 
     first = Criterion(claim="the guard rejects a negative amount", witness="t.py::a")
     second = Criterion(claim="the total never goes negative", witness="t.py::b")
 
-    # Line 3 of `src/x.py`, outside the diff's `@@ -1 +1 @@` hunk, but its
-    # own line shares a token ("x") the diff changed — anchors by content.
+    # Line 3 of `src/x.py` sits outside the diff's `@@ -1 +1 @@` hunk.
+    # It shares a token ("x") the diff changed, so it anchors by content.
     anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
-    # No token the diff touched anywhere on its own line — does not anchor.
+    # No token the diff touched is on its own line, so it does not anchor.
     unanchored = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
 
     cell = _stub_the_runtime(
@@ -6024,8 +6024,8 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     }
 
     def _read_at_head(container, path):
-        # Torn down by the time criterion probes run — a read aimed at the
-        # critic cell must fail, never fall back to the real content.
+        # The critic cell is torn down before criterion probes run. A read
+        # aimed at it must fail, never fall back to the real content.
         return None if container == _CRITIC_CONTAINER else contents.get(path)
 
     monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
@@ -6055,22 +6055,25 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
     assert all(f["claim"].startswith(review.HOST_FILED) for f in adequacy["findings"])
     assert [f["anchored"] for f in adequacy["findings"]] == [True, False]
+    assert [f["lens"] for f in adequacy["findings"]] == ["adequacy", "adequacy"]
+    assert [f["line"] for f in adequacy["findings"]] == [3, 2]
     assert adequacy["drop_rate"] == 0.0  # neither survivor is the lens's own
-    # Each finding carries its own edit, in the spec's own order — never the
-    # other survivor's, and never dropped.
+    # Each finding carries its own edit, in the spec's own order. It is never
+    # the other survivor's, and never dropped.
     assert adequacy["findings"][0]["probe"] == anchors
     assert adequacy["findings"][1]["probe"] == unanchored
 
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
     (blocker,) = record["blockers"]
     assert blocker["claim"].startswith(review.HOST_FILED)
+    assert blocker["lens"] == "adequacy"
     assert blocker["probe_verdict"] == "survived"
     assert blocker["line"] == 3
     # The edit `_blocker_line` renders to the implementer for this survivor.
     assert blocker["probe"] == anchors
 
     # A lens's own unanchored finding still counts, whatever its probe
-    # verdict; a `HOST_FILED` one beside it must not move the rate.
+    # verdict. A `HOST_FILED` one, alike in every field but its claim, does not.
     own = Finding(
         lens="adequacy",
         severity="blocker",
@@ -6078,15 +6081,10 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
         line=1,
         claim="the lens's own claim",
         anchored=False,
+        probe=Mutant.model_validate(anchors),
+        probe_verdict="survived",
     )
-    host_filed = Finding(
-        lens="adequacy",
-        severity="blocker",
-        file="z.py",
-        line=1,
-        claim=f"{review.HOST_FILED}x",
-        anchored=True,
-    )
+    host_filed = own.model_copy(update={"claim": f"{review.HOST_FILED}x"})
     assert review.LensReview("adequacy", findings=[own, host_filed]).drop_rate == 1.0
 
     # A lens cannot file a claim starting with `HOST_FILED`: every leading
@@ -6094,15 +6092,16 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     spoofed = review._Reported(
         file="a.py", line=1, severity="blocker", claim=review.HOST_FILED * 2 + "spoofed"
     )
-    stripped = review._from_report("adequacy", [spoofed], 0.0)
-    assert not stripped.findings[0].claim.startswith(review.HOST_FILED)
+    for lens in review.LENSES:
+        stripped = review._from_report(lens, [spoofed], 0.0)
+        assert not stripped.findings[0].claim.startswith(review.HOST_FILED)
 
 
 def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
     monkeypatch, tmp_path
 ):
     """Criterion 2: an edit its own witness kills is `killed` and files
-    nothing; one under which the `tests` gate itself answers `error` is
+    nothing. An edit under which the `tests` gate itself answers `error` is
     `error`, with `witness_gate`'s own summary, and stops nothing after it.
     The witness drives three edits, in order: killed, `error`, killed."""
     from saffron.intake import Criterion
@@ -6164,9 +6163,9 @@ def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
     monkeypatch, tmp_path
 ):
     """Criterion 3: five entries nothing could answer are all `unproven` and
-    file nothing — no edit named, an edit on a declared test path, an edit
-    outside the tree, an edit the mutator refuses, and an edit whose
-    criterion's witness the `tests` gate never collected. The mutator is
+    file nothing. They are an entry with no edit, an edit on a declared test
+    path, an edit outside the tree, and an edit the mutator refuses. The fifth
+    is an edit whose witness the `tests` gate never collected. The mutator is
     entered for the refused edit alone, and its reason is quoted verbatim."""
     from saffron.intake import Criterion, Mutant
 
@@ -6188,8 +6187,8 @@ def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
     refusal_reason = "src/x.py carries uncommitted work, nothing to restore"
 
     @contextlib.contextmanager
-    def _refuses(_container, mutant):
-        cell.mutated.append(mutant)
+    def _refuses(_container, edit):
+        cell.mutated.append(edit)
         yield refusal_reason
 
     _stub_probe_gates(monkeypatch, cell, gate_results=[], mutate=_refuses)

@@ -1420,13 +1420,12 @@ def _apply_criterion_probes(
     note: Callable[[str, bool, str], None],
 ) -> None:
     """Every criterion probe's own edit, applied and asked of its own witness
-    (backlog item b-2750d5), in a Gate-only cell entered *after* `_probe_
-    adequacy`'s own is torn down — never inside the critic cell, the hole
-    `SA-0087` closed.
+    (backlog item b-2750d5). It runs in a Gate-only cell entered after
+    `_probe_adequacy`'s own is torn down, never inside the critic cell.
 
-    Mutates `entries` in place with each edit's outcome and summary, and
-    appends a survivor's `Finding` to the `adequacy` review in `reviews` —
-    the same in-place contract `_probe_adequacy` keeps with its caller.
+    Writes each edit's outcome and summary into `entries` in place. Appends a
+    survivor's `Finding` to the `adequacy` review in `reviews`, the same
+    in-place contract `_probe_adequacy` keeps with its caller.
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
@@ -1434,25 +1433,25 @@ def _apply_criterion_probes(
     from saffron.gates.core.witness import witness_gate
 
     paired = list(zip(spec.acceptance, entries, strict=True))
+    unknown_tree = (
+        "an earlier edit left this cell's tree in an unknown state, so nothing "
+        "after it was asked"
+    )
 
     def _unproven(pending: list[tuple[Criterion, dict]], reason: str) -> None:
         for _criterion, entry in pending:
             entry["outcome"] = "unproven"
             entry["summary"] = reason
 
-    # The mutator is never entered for an entry with no edit or a refused one
-    # (item 117's precedent, `probe_refusal` reused rather than re-derived).
+    # The mutator is never entered for an entry with no edit or a refused one.
     with_edit: list[tuple[Criterion, dict]] = []
     for criterion, entry in paired:
-        edit = entry["edit"]
-        if edit is None:
-            entry["outcome"] = "unproven"
-            entry["summary"] = "this session named no edit"
+        if entry["edit"] is None:
+            _unproven([(criterion, entry)], "this session named no edit")
             continue
-        refusal = probe_check.probe_refusal(edit["file"], test_paths)
+        refusal = probe_check.probe_refusal(entry["edit"]["file"], test_paths)
         if refusal is not None:
-            entry["outcome"] = "unproven"
-            entry["summary"] = refusal
+            _unproven([(criterion, entry)], refusal)
             continue
         with_edit.append((criterion, entry))
 
@@ -1491,15 +1490,15 @@ def _apply_criterion_probes(
         return
 
     with stack:
-        # Set only below: `witness_gate` reports a raise here and an
-        # ordinary gate `error` alike as `error`; this is what tells them apart.
+        # `witness_gate` reports a raise here and a gate `error` alike as
+        # `error`. Only this note tells them apart.
         stopped: str | None = None
 
         @contextlib.contextmanager
-        def _mutate(mutant: Mutant):
+        def _mutate(edit: Mutant):
             nonlocal stopped
             try:
-                with worktree.source_mutated(container, mutant) as reason:
+                with worktree.source_mutated(container, edit) as reason:
                     yield reason
             except runtime.CellRuntimeError as exc:
                 stopped = str(exc)
@@ -1520,9 +1519,9 @@ def _apply_criterion_probes(
                 raise
 
         for index, (criterion, entry) in enumerate(with_edit):
-            mutant = Mutant.model_validate(entry["edit"])
+            edit = Mutant.model_validate(entry["edit"])
             result = witness_gate(
-                acceptance=[criterion.model_copy(update={"mutant": mutant})],
+                acceptance=[criterion.model_copy(update={"mutant": edit})],
                 mutate=_mutate,
                 run_tests=_run_tests,
                 collected=collected,
@@ -1531,29 +1530,25 @@ def _apply_criterion_probes(
             entry["summary"] = result.summary
             if stopped is not None:
                 # `witness_gate` already reports this entry as `error`, with
-                # the summary kept above — `stopped` only ends the loop.
-                _unproven(
-                    with_edit[index + 1 :],
-                    "an earlier edit left this cell's tree in an unknown "
-                    "state, so nothing after it was asked",
-                )
+                # the summary kept above. `stopped` only ends the loop.
+                _unproven(with_edit[index + 1 :], unknown_tree)
                 return
             if entry["outcome"] != "survived":
                 continue
             try:
-                content = worktree.read_at_head(container, mutant.file)
-                finding = review.survivor_finding(criterion, mutant, content or "")
+                content = worktree.read_at_head(container, edit.file)
+                if content is None or edit.find not in content:
+                    entry["outcome"] = "error"
+                    entry["summary"] = "the survivor's line could not be read"
+                    continue
+                finding = review.survivor_finding(criterion, edit, content)
                 (anchored,) = anchor(
                     [finding], diff, read_head=partial(worktree.read_at_head, container)
                 )
             except runtime.CellRuntimeError as exc:
                 entry["outcome"] = "error"
                 entry["summary"] = f"the survivor's line could not be read: {exc}"
-                _unproven(
-                    with_edit[index + 1 :],
-                    "an earlier edit left this cell's tree in an unknown "
-                    "state, so nothing after it was asked",
-                )
+                _unproven(with_edit[index + 1 :], unknown_tree)
                 return
             adequacy.findings.append(anchored)
 
