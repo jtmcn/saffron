@@ -63,7 +63,9 @@ acceptance:
       `criterion-probes.json` records `survived`. Each survivor's claim
       starts with `review.HOST_FILED`. The `adequacy` lens's drop rate in
       `findings.json` counts only the findings the lens filed, so neither
-      survivor moves it.
+      survivor moves it. A lens's own unanchored finding still counts,
+      whatever its probe verdict. A lens cannot file a claim that starts
+      with `HOST_FILED`.
     witness: tests/test_session.py::test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker
   - claim: >-
       A criterion probe its criterion's witness kills records `killed` and
@@ -219,13 +221,19 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    `LensReview`'s findings. That list is what `findings.json`,
    `ledger.record_findings` and `review.review_state` read after it.
    Start its claim with a new `HOST_FILED` constant in
-   `saffron/phases/review.py`. `LensReview.drop_rate` and the count
-   `_describe` prints beside it skip a finding whose claim starts with it.
-   The drop rate says whether a lens is badly prompted (§5.5), and the lens
-   never filed this one. `saffron/agents/findings.py` is forbidden, so no
-   field on `Finding` can mark it. In the witness, have the `adequacy` lens
-   file nothing, so its drop rate is `0.0` only if both survivors are
-   skipped.
+   `saffron/phases/review.py`. `LensReview.drop_rate` skips a finding whose
+   claim starts with it. The drop rate says whether a lens is badly prompted
+   (§5.5), and the lens never filed this one. `saffron/agents/findings.py` is
+   forbidden, so no field on `Finding` can mark it. `_from_report` strips a
+   leading `HOST_FILED` from a lens's claim, so a lens cannot leave its own
+   drop rate. In the witness, have the `adequacy` lens file nothing, so its
+   drop rate is `0.0` only if both survivors are skipped. Then build a
+   `LensReview("adequacy", ...)` directly with two unanchored findings. One
+   is the lens's own, with a probe whose verdict is `survived`. The other
+   starts with `HOST_FILED`. Assert its drop rate is `1.0`. A rule keyed on
+   the probe or its verdict fails that. Pass `_from_report` one adequacy
+   finding whose claim starts with `HOST_FILED`, and assert the claim it
+   returns does not.
 6. **When a raise stops the rest.** A `CellRuntimeError` out of the
    mutator's entry or exit leaves the tree unknown. `witness_gate` reports
    it as `error`, the same status a `tests` gate `error` gets
@@ -246,6 +254,14 @@ over it through `witness_gate`, and file a survivor as a blocker for REBUT.
    same way. That edit records `error` and files nothing.
 
 ## Out of scope
+
+- The ledger's per-lens drop rate. `ledger.record_findings` stores each
+  survivor under `adequacy`, so a query over `findings.anchored` still counts
+  it (§5.5). `saffron/ledger.py` is forbidden, and the claim prefix lets a
+  later query filter on it.
+- A `preserves` criterion's survivor. It files a blocker like any other.
+  A witness the probe survives is a hole in a claim the pull request makes,
+  even when the hole predates the task.
 
 - How edits are authored. `review.run_criterion_probes`, its prompts and its
   sessions keep `SA-0113`'s behaviour. No cap on sessions.
