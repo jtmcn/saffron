@@ -389,6 +389,13 @@ never ran. A defect no findings block carried, such as one you found yourself,
 goes in `run-NN-unscored.json` beside the spec folders. Run 13's files show the
 shape.
 
+```bash
+uv run .claude/skills/run-saffron-spec-loop/driver.py labels   # every spec in the order
+```
+
+It exits 1 and names each gap: a scored round with no `labels.json`, a finding
+with no label or an unknown value, or a missing `blocker_followed` field.
+
 **Done when** every kept finding has an item, every spec's origin item names
 its PR, every fixed or kept finding the critic missed has a rejection line, and
-every scored review round has a `labels.json`.
+`driver.py labels` exits 0.

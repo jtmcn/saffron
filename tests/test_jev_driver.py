@@ -495,3 +495,62 @@ def test_a_cell_whose_review_predates_its_latest_run_is_refused(monkeypatch, loo
     argv = ("jev", "SA-0901", "--kind", "cell", "--spec", str(loop.root / "spec.md"))
     assert _run(monkeypatch, *argv) == 1
     assert loop.client.questions == {} and not (cell / "jev.ttl").exists()
+
+
+def _label_all(round_dir: Path, **override) -> None:
+    ids = [f["id"] for f in json.loads((round_dir / "findings.json").read_text())]
+    label = {
+        "verified": "real",
+        "disposition": "fixed-in-review",
+        "recurred_in": [],
+        "item": None,
+    }
+    doc = {
+        "blocker_followed": {
+            "next_spec_round": None,
+            "cell_review": None,
+            "pr_seats": None,
+        },
+        "findings": {fid: {**label, **override} for fid in ids},
+    }
+    (round_dir / "labels.json").write_text(json.dumps(doc))
+
+
+def test_labels_passes_only_when_every_scored_round_is_labelled(
+    monkeypatch, loop, capsys
+):
+    base = _two_rounds(monkeypatch, loop)
+    _label_all(base / "round-1")
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    assert "pr-review round-2  no labels.json" in capsys.readouterr().out
+
+    _label_all(base / "round-2")
+    assert _run(monkeypatch, "labels", "SA-0901") == 0
+    assert "2 scored review round(s), each labelled" in capsys.readouterr().out
+
+
+def test_labels_names_a_finding_with_no_label_or_an_unknown_value(
+    monkeypatch, loop, capsys
+):
+    base = _two_rounds(monkeypatch, loop)
+    _label_all(base / "round-2")
+    _label_all(base / "round-1", disposition="ignored")
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    assert "disposition='ignored'" in capsys.readouterr().out
+
+    doc = json.loads((base / "round-1" / "labels.json").read_text())
+    doc["findings"] = {}
+    del doc["blocker_followed"]["pr_seats"]
+    (base / "round-1" / "labels.json").write_text(json.dumps(doc))
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    out = capsys.readouterr().out
+    assert "has no label" in out
+    assert "blocker_followed needs" in out
+
+
+def test_labels_skips_a_round_jev_never_scored(monkeypatch, loop, capsys):
+    base = _two_rounds(monkeypatch, loop)
+    _label_all(base / "round-1")
+    (base / "round-2" / "jev.ttl").unlink()
+    assert _run(monkeypatch, "labels", "SA-0901") == 0
+    assert "1 scored review round(s)" in capsys.readouterr().out

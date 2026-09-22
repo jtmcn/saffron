@@ -1196,6 +1196,74 @@ def cmd_jev(args) -> int:
     return 0
 
 
+LABEL_VALUES = {
+    "verified": {"real", "not-a-defect", "unverified"},
+    "disposition": {
+        "fixed-pre-cell",
+        "fixed-in-review",
+        "deferred-to-seat",
+        "operator-decided",
+        "filed-backlog",
+        "no-action",
+    },
+}
+LABEL_RECURRED = {"cell-review", "pr-spec-seat", "pr-standards-seat"}
+LABEL_FOLLOWED = ("next_spec_round", "cell_review", "pr_seats")
+
+
+def _label_gaps(directory: Path) -> list[str]:
+    """Why one scored review round's `labels.json` does not grade its Jev answers."""
+    path = directory / "labels.json"
+    if not path.is_file():
+        return ["no labels.json"]
+    try:
+        doc = json.loads(path.read_text())
+        ids = [f["id"] for f in json.loads((directory / "findings.json").read_text())]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        return [f"unreadable: {exc}"]
+    gaps = []
+    followed = doc.get("blocker_followed")
+    if not isinstance(followed, dict) or any(k not in followed for k in LABEL_FOLLOWED):
+        gaps.append(f"blocker_followed needs {', '.join(LABEL_FOLLOWED)}")
+    labels = doc.get("findings") or {}
+    for fid in ids:
+        label = labels.get(fid)
+        if label is None:
+            gaps.append(f"{fid[:8]} has no label")
+            continue
+        for key, allowed in LABEL_VALUES.items():
+            if label.get(key) not in allowed:
+                gaps.append(f"{fid[:8]} {key}={label.get(key)!r}")
+        if not set(label.get("recurred_in", [])) <= LABEL_RECURRED:
+            gaps.append(f"{fid[:8]} recurred_in={label.get('recurred_in')!r}")
+    gaps += [
+        f"{fid[:8]} is labelled but not a finding" for fid in set(labels) - set(ids)
+    ]
+    return gaps
+
+
+def cmd_labels(args) -> int:
+    """Every Jev-scored review round of these specs carries a complete
+    `labels.json`, the outcome its scores are graded against later."""
+    specs = args.spec_ids or [row.spec_id for row in _load()]
+    bad = 0
+    scored = 0
+    for spec_id in specs:
+        for kind in ("spec-review", "pr-review"):
+            base = JEV_ROOT / "spec-loop" / spec_id / kind
+            for directory in sorted(base.glob("round-*")):
+                if not (directory / "jev.ttl").is_file():
+                    continue
+                scored += 1
+                for gap in _label_gaps(directory):
+                    bad += 1
+                    print(f"{spec_id}  {kind} {directory.name}  {gap}")
+    if bad:
+        return _fail(f"{bad} label gap(s) across {scored} scored review round(s)")
+    print(f"labels: {scored} scored review round(s), each labelled")
+    return 0
+
+
 def _jev_base(args) -> Path:
     return JEV_ROOT / "spec-loop" / args.spec_id / args.kind
 
@@ -2734,6 +2802,12 @@ def main() -> int:
     p.add_argument("--round", type=int, help="score a saved review round again")
     p.add_argument("--root", type=Path, default=REPO, help="the checkout git reads")
     p.set_defaults(func=cmd_jev)
+
+    p = sub.add_parser(
+        "labels", help="check every Jev-scored review round has its labels.json"
+    )
+    p.add_argument("spec_ids", nargs="*", help="default: every spec in the order")
+    p.set_defaults(func=cmd_labels)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.
