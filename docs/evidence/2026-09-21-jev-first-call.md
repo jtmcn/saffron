@@ -96,8 +96,8 @@ Exit code: 0.
 `observe()` in `harness/jev_observe.py` returns only `(response.model, answers)`, so the
 driver's Step 3 run did not expose `response.usage`. A second call was made outside the
 driver, building the identical round from the same batch files and calling
-`client.system_one` directly with `model="jev-latest"`, to read `response.usage` without
-writing any file. That call reported:
+`client.system_one` directly with `model="jev-latest"`. It read `response.usage` and wrote
+no file. That call reported:
 
 ```
 response.usage: input_tokens=23016 output_tokens=240
@@ -109,8 +109,11 @@ This number comes from a second, separate call, not from the run recorded above 
 
 - `response.model` came back as `"jev-1.13.0"`, a dated build number, even though the call
   passed `model="jev-latest"`. `models.list()` on the same day did not list `"jev-1.13.0"` as
-  a name. The design assumed `models.list()` would be where a dated name shows up; instead
+  a name. The design assumed `models.list()` would be where a dated name shows up. Instead,
   the dated name surfaces only in a scoring response's `model` field.
+
+## Where the record differed from the brief's Step 3 description
+
 - SA-0117's spec lists 14 acceptance criteria, not nine. The brief's expected count of four
   answers held regardless, because Q1 is one question no matter how many criteria it scores
   against.
