@@ -96,12 +96,16 @@ acceptance:
     witness: tests/test_session.py::test_a_second_cut_at_one_spec_sha_settles_the_spec
   - claim: >-
       A task `ORPHANED` by anything but a cut does not use up the retry. The
-      witness puts three such tasks at the spec's `spec_sha` in one ledger
+      witness puts four such tasks at the spec's `spec_sha` in one ledger
       first. One is a real cell killed by a raise out of its implement turn,
-      whose run ends `ABORTED`. One is a task a scan stamped `ORPHANED` while
-      its run was still `RUNNING`. One is a task whose run ended `COMPLETE`
-      with the task in `REBUTTING`, later stamped `ORPHANED`. A wall cut with
-      nothing committed then ends `ORPHANED`, and prints no cut-again line.
+      whose run ends `ABORTED`. The other three are built through `Ledger`'s
+      own methods, each with closed attempts, then stamped `ORPHANED`. One
+      holds one `IMPLEMENTING` attempt, and its run stays `RUNNING`, as a
+      scan's stamp leaves it. One holds an `IMPLEMENTING` attempt and then a
+      `REVIEWING` one, and its run ends `COMPLETE`. One holds `IMPLEMENTING`,
+      `REBUTTING` and `IMPLEMENTING` attempts in that order, and its run ends
+      `COMPLETE`. A wall cut with nothing committed then ends `ORPHANED`, and
+      prints no cut-again line.
     witness: tests/test_session.py::test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry
   - claim: >-
       An implement turn that crashes with nothing committed still gets no
@@ -220,12 +224,29 @@ Three other paths write it, and the run and the attempts tell them apart:
   state at that time (`saffron/ledger.py:991-1010`). So every attempt a cut
   task holds is in phase `IMPLEMENTING`.
 
+- An errored lens sends a task to `REVIEWING`
+  (`saffron/phases/review.py:616`), and the cell returns with its run
+  `COMPLETE`. A later scan
+  stamps that task `ORPHANED` as well.
+
 So a task `ORPHANED` by a cut is one whose run finished `COMPLETE` and whose
 attempts are all in phase `IMPLEMENTING`. `saffron/ledger.py` has no public
 method returning a run's status, and this spec forbids that file, which
 `SA-0123` and `SA-0124` both edit. `saffron/chain_walk.py:54` and
 `saffron/projection.py:287` read the ledger's tables through `ledger._db`
 already, and this spec does the same.
+
+**No fact carries the difference.** The record declares `run_created` and
+`run_finished` (`saffron/record/contract.py:32-33`), and nothing appends
+either. `saffron/record/fold.py:8-12` says a rebuild leaves `runs.status`
+unset. The task facts cannot stand in. Take a wall cut that leaves one
+commit, then a kill during the first gate suite. `_judge` records gate
+results only after the suite returns (`saffron/cell/session.py:2149-2162`).
+That task's facts are `task_created`, `task_state` `IMPLEMENTING`, two closed
+attempts in phase `IMPLEMENTING`, the second with subtype `error`, and
+`task_state` `ORPHANED`. A wall cut that stops with nothing committed and no
+budget to salvage writes the same facts. So the cap keys on `runs.status`, and
+backlog item b-cafacd owns a fact that would carry it.
 
 **Measured, not reasoned:** a session cut by the wall resumes. In `SA-0117`'s
 cell (`~/.saffron/batches/v0/SA-0117/events.jsonl`), line 806 reaps the cell
@@ -252,7 +273,11 @@ re-queues, and the second settles it. Editing the spec gives it a new
   item closes partial and that half stays open on it.
 - **The idle bound.** An idle cut is a stall, not a turn that ran out of
   time. It keeps ending `ended_without_finishing` and `NOT_IMPLEMENTED`, with
-  no salvage turn. Criterion 2's fifth cell pins that.
+  no salvage turn. Criterion 2's fifth cell pins that. One stall reads as the
+  wall. `exec_stream` names the bound `"wall"` once the wall is nearer than
+  the idle window (`saffron/cell/runtime.py:549-552`, `IDLE_TIMEOUT_S` at
+  `:176`). So a stall in a turn's last 300 seconds is a wall cut, and gets
+  the salvage turn, capped at `SALVAGE_MAX_TURNS`.
 - **The plan turn.** A plan turn that any bound cuts still ends
   `NOT_IMPLEMENTED` at `saffron/cell/session.py:1876-1897`. It has no salvage
   turn, and nothing is committed before a plan exists.
@@ -264,12 +289,26 @@ re-queues, and the second settles it. Editing the spec gives it a new
 - **A public ledger method for the cap's read.** It belongs in
   `saffron/ledger.py`, which this spec forbids. Moving the query there is a
   follow-up once `SA-0123` lands.
-- **`CONTEXT.md` and `DESIGN.md`.** `CONTEXT.md` §6 says each `TerminalEvent`
-  reason ends in `PLAN_REJECTED` or `NOT_IMPLEMENTED`, and defines `ORPHANED`
-  as a cell killed or crashed. `DESIGN.md` §4.5 lists when the supervisor
-  stamps `ORPHANED`. All three become incomplete here, and neither names the
-  one retry. Both files are protected, and backlog item b-149df3 owns them,
-  by hand.
+- **A ledger folded from the record.** `_run_for` inserts each folded run as
+  `RUNNING` (`saffron/ledger.py:486-489`). In a folded ledger no earlier cut
+  matches, so the cap never fires and every cut re-queues, every night.
+  Nothing live uses a folded ledger yet. Backlog item b-cafacd owns the
+  `run_finished` fact that would fix it.
+- **A re-queue that resumes the old task row.** The cap rests on each cell
+  minting its own task (`saffron/cell/session.py:1640`). `DESIGN.md` §4.2.1
+  says a re-queued spec resumes its task row (`DESIGN.md:384`), and
+  `saffron/scheduler.py:779-780` computes which one. Nothing passes that row
+  to a cell yet. If a re-queue ever resumes it, the cap's "an earlier task"
+  excludes the first cut's own row, and the cap stops firing with no error.
+  That change must re-key the cap. Backlog item b-149df3 records it too.
+- **`CONTEXT.md`, `DESIGN.md` and the spec loop's gotchas.** `CONTEXT.md` §6
+  says each `TerminalEvent` reason ends in `PLAN_REJECTED` or
+  `NOT_IMPLEMENTED`. It defines `ORPHANED` as a cell killed or crashed.
+  `DESIGN.md` §4.5 lists when the supervisor stamps `ORPHANED`.
+  `.claude/skills/run-saffron-spec-loop/GOTCHAS.md:57-59` and `:65` say a cut
+  with no room to salvage ends `NOT_IMPLEMENTED`. All become incomplete here,
+  and none names the one retry. The first two are protected, this spec
+  forbids the third, and backlog item b-149df3 owns all of them, by hand.
 - **The spec loop's watch pattern**
   (`.claude/skills/run-saffron-spec-loop/driver.py:810-818`) anchors only
   terminal states, and `ORPHANED` is not one. A change there belongs to
@@ -328,16 +367,21 @@ a test as removed.
 `"IMPLEMENT: cut off … spending one turn"` (`saffron/events.py:914`), citing
 `_S`. Its prefix must differ from every other row's.
 `test_the_table_did_not_quietly_lose_a_row` pins the count. `SA-0125` moves
-it from 63 to 64, and this spec moves it from 64 to 65. Add one sentence to
-that test's docstring naming this spec, as `SA-0085`'s sentence there does.
+it from 63 to 64, and this spec moves it from 64 to 65. That test's
+docstring (`tests/test_events.py:1207-1216`) is ten lines already, and
+`prose` blocks a docstring over ten (`.saffron/gates/prose.py:63`). So
+rewrite it within ten lines, naming this spec where `SA-0085` is named.
 
 **Comments that become false.** `TerminalReason`'s comments
 (`saffron/events.py:91-104`) and `Terminal`'s docstring (`:310-320`) say each
 cut-off reason is the turn ceiling's and ends in `NOT_IMPLEMENTED`. The
 comments at `saffron/cell/session.py:1991-1997` and `:2105-2109` say the
 same. The comment over `SALVAGE_MAX_TURNS` (`saffron/phases/implement.py:40-47`)
-says the salvage is spent only at the turn ceiling. Correct each one in a
-line or two, and change nothing else in `saffron/phases/implement.py`.
+says the salvage is spent only at the turn ceiling. Correct each comment
+in a line or two, and change nothing else in `saffron/phases/implement.py`.
+`Terminal`'s docstring is ten lines already, the most `prose` allows, so
+rewrite it within ten lines rather than adding one. Keep every docstring you
+touch, the three tests' below included, within ten lines.
 
 **Three existing tests assert the old state.** Each ends `NOT_IMPLEMENTED`
 after a turn-ceiling cut with nothing committed:
@@ -376,12 +420,22 @@ and `_drive` (`:966`), as the salvage tests at `:1336-1634` do.
   third cell's turn count, and its one cut-again line naming `task 2`. It
   also asserts that neither earlier cell's watch lines hold that line.
 - Criterion 4's killed cell scripts a `RuntimeError` as its implement turn,
-  under `pytest.raises`. Build the other two tasks through `Ledger`'s own
-  methods on the same file: `create_run`, `create_task`, `open_attempt` with
-  a `phase`, `close_attempt`, `set_task_state` and, for the third only,
-  `finish_run`. Take the repo id from the killed cell's `repos` row. Close
-  that `Ledger` before the next `_drive`. Assert each earlier row's state and
-  run status, the last cell's `ORPHANED`, and no cut-again line.
+  under `pytest.raises`. Build the other three tasks through `Ledger`'s own
+  methods on the same file: `create_run`, `create_task`, one `open_attempt`
+  with a `phase` and one `close_attempt` per attempt, then `set_task_state`
+  and, for the last two only, `finish_run` with `COMPLETE`. Their attempt
+  phases are exactly the ones the claim lists, in its order. Take the repo id
+  from the killed cell's `repos` row. Close that `Ledger` before the next
+  `_drive`. Assert each earlier row's state and run status, the last cell's
+  `ORPHANED`, and no cut-again line.
+- The fourth task's trailing `IMPLEMENTING` attempt is an order `_drive_cell`
+  never writes. `saffron/cell/session.py:199` is the only caller of `open_attempt` a cell
+  reaches, and it passes no phase, so each attempt takes the task's state
+  (`saffron/ledger.py:995-1004`). `_drive_cell` never moves a task back to
+  `IMPLEMENTING` after `saffron/cell/session.py:1772`. So on every ledger a cell writes, "every
+  attempt is `IMPLEMENTING`" and "the last attempt is `IMPLEMENTING`" agree.
+  The trailing attempt is there only so a cap reading the last attempt
+  fails.
 - Import `scheduler`'s two sets inside criterion 2's witness body. A
   module-scope import of a name the change adds makes the reverted run a
   collection error, which `revert` reads as `skip`. These two exist at base,
@@ -402,6 +456,11 @@ least one:
 - A cap keyed on the spec id without its `spec_sha`: criterion 3.
 - A cap on any earlier `ORPHANED` task, or one missing either the run's
   status or the attempts' phase: criterion 4.
+- A cap needing only some attempt in `IMPLEMENTING`: criterion 4, through
+  the `REVIEWING` and `REBUTTING` tasks.
+- A cap reading only the last attempt's phase: criterion 4, through the
+  `REBUTTING` task's trailing attempt. It passed every witness until that
+  attempt was added.
 
 One passes. Keying the wall on the exception's message passes, since the
 helper's message is `run_agent`'s, and it reads the same fact in production.
@@ -411,23 +470,30 @@ Key on `bound` anyway, as the runtime sets it.
 is in your tree.
 
 - `saffron/cell/session.py`: it edits `plan_checkpoint` (`:433-548` at this
-  base) and the call in `_drive_cell` (`:1792-1799`). This spec edits neither.
+  base) and the call in `_drive_cell` (`:1792-1799`). It also edits the
+  `PLAN_REJECTED` branch's `effective_risk` (`:1873`), to read the tier
+  `PlanRejected` carries on its instance. This spec edits none of them.
   Every line this spec cites past `:433` moves by what it adds.
+- `saffron/agents/artifacts.py` and `tests/test_artifacts.py`: `SA-0125`
+  sets the tier on `PlanRejected` and adds a behavioural half to its
+  criterion 4 witness there. This spec touches neither file.
 - `saffron/events.py`: both add a `FAMILIES` row, at different places. Keep
   both rows.
 - `tests/test_events.py`: both move the count in
   `test_the_table_did_not_quietly_lose_a_row` (`:1217-1218` at this base).
   After `SA-0125` it reads 64. Set it to 65.
 - `tests/test_session.py`: `SA-0125` edits ten `plan_checkpoint` calls from
-  `:282` to `:3517` and adds three witnesses. This spec's cited lines past
+  `:282` to `:3517` and adds three witnesses. Its criterion 3 witness drives
+  `_drive` three times, each in its own subdirectory, so the `exist_ok` this
+  spec adds to `_drive` changes nothing for it. This spec's cited lines past
   `:282` move. Find each test and helper by its name.
 
 **Commit as each witness passes**, before any full-suite run. Two cells of
 this item's own record lost everything to the wall during a final suite.
 
 **Size.** A prototype of this change at `46d2cd56`, without `SA-0125`,
-measured 278 changed lines. That is 65 in `session.py`, 19 in `events.py`,
-184 in `tests/test_session.py` and 10 in `tests/test_events.py`, with short
+measured 285 changed lines. That is 65 in `session.py`, 19 in `events.py`,
+191 in `tests/test_session.py` and 10 in `tests/test_events.py`, with short
 docstrings. The one comment in `saffron/phases/implement.py` adds about 4.
 The diff is measured from `SA-0125`'s head, so none of its lines count here.
 The `size` gate blocks at `elevated`, and a `feature` gets 600. Keep new

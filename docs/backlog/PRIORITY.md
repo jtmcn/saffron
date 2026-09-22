@@ -170,6 +170,10 @@ is `protected`. They are items 65 and 72 again, with five more words.
 §5.4.1 paragraph beside its glossary entry. `b-25766a` is the newest, the
 record's own fact kinds, and it is 168 and 169 a third time.
 
+**Placed 2026-09-22**: **b-cafacd**, filed revising `SA-0126`. It is 170's
+neighbour. A run's status reaches no fact, so a folded ledger loses the cap
+on a cut spec's retries.
+
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical
 part — nothing resolves a queued spec's `witness` node ids until a cell has been
