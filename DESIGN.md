@@ -1687,4 +1687,4 @@ the ADR records, so a hand edit here is discarded.
 | ADR | Title | Status | Principles |
 |---|---|---|---|
 | 1 | Decisions are recorded one per file as ADRs | accepted | 27, 29, 30, 40, 56, 57, 62 |
-| 2 | Core invokes declared gates, never tools | accepted | 12, 13, 14, 29, 34, 36, 39, 41 |
+| 2 | Core invokes declared gates, never tools | accepted | 12, 13, 14, 29, 34, 36, 39, 41, 44, 52, 54, 57 |
