@@ -57,7 +57,9 @@ acceptance:
       merge commit, including one made on the remote that the operator's
       checkout never pulled. A child stays refused, naming `EXHAUSTED`, when
       its parent's pushed commit sits on an unmerged branch, and when the
-      mirror does not hold the commit at all.
+      mirror does not hold the commit at all. The pinned `base_sha` decides,
+      not a mirror ref: a scan pinned by `saffron batch` gives the same
+      answers with the mirror's default branch moved back to the checkout's.
     witness: tests/test_cli.py::test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand
 ---
 
@@ -121,8 +123,8 @@ A parent whose work reached the default branch leaves its child refused
 whenever the parent's task ended in a state other than `MERGED`. The child
 waits forever, because nothing will ever write `MERGED` for that task. The
 only way out today is to retire the parent's spec to `done/` by hand, or to
-start the child with `saffron cell`. That command applies no refusal:
-`saffron/cli.py` calls `build_queue` once, inside `_resolve_queue`
+start the child with `saffron cell`. That command applies no `depends_on`
+refusal. `saffron/cli.py` calls `build_queue` once, inside `_resolve_queue`
 (`saffron/cli.py:567`).
 
 A child cut from `base_sha` is correct in this case. `task._resolve_stacked_on`
@@ -191,9 +193,11 @@ existing `_write_spec`, `_task_at`, `_repo` and `_sha` helpers. It loops over
 `sorted(DONE_STATES | REQUEUE_STATES)` in one plain `def`, with a fresh
 `Ledger` under `tmp_path` for each state. Do not parametrise it.
 
-- Three parent and child pairs. Parent A has two rows. One is at a spec sha
-  not on disk, and the callable accepts its push. The other is at its current
-  sha with no push. Parent B's row pushed a commit the callable rejects.
+- Three parent and child pairs. Parent A has two rows. Create first, so it
+  has the lower `task_id`, the row at a spec sha not on disk, whose push the
+  callable accepts. Then create the row at its current sha with no push.
+  `tasks_by_repo` orders by `task_id` (`saffron/ledger.py:724`), so an
+  implementation reading only the newest row per spec misses the push. Parent B's row pushed a commit the callable rejects.
   Parent C's row recorded no push. Record a push with `ledger.record_push`.
 - The callable records every sha it is asked about.
 - Assert A's child is a candidate and not refused, for every state. Assert the
@@ -220,6 +224,14 @@ parent in `depends_on`.
   candidate count and above `refusals:`. Assert the other two children are
   refused, each reason naming its parent and `EXHAUSTED`.
 
+- Then drive the pinned path `saffron batch` takes. `ensure_mirror` fetches
+  every ref from the checkout (`saffron/repos/mirror.py:63`), so on a rescan
+  the mirror's default branch can sit behind the pinned base. Move the
+  mirror's `refs/heads/<default>` back to the checkout's default branch with
+  `git update-ref`. Call `cli._resolve_queue` with `stamp_orphaned=False` and
+  a `task.PinnedBase` whose `base_sha` is the merge commit. Assert parent 1's
+  child is the one candidate and the other two children are the refusals.
+
 The fixture's origin is a local path, so no slug resolves and no `gh` runs.
 The tasks carry no `pr_url`, so `reconcile` asks nothing.
 
@@ -235,6 +247,8 @@ names the witness that failed.
 - Checking only that the mirror holds the commit: criterion 2.
 - Running the check in the operator's checkout: criterion 2, because the
   merge is on the remote only.
+- Testing ancestry against the mirror's `HEAD` or its default branch ref
+  instead of `base_sha`: criterion 2's pinned pass.
 
 **Every test you add must fail with this diff's source reverted.** Each
 witness fails at base by an assertion or a `TypeError`. Neither fails to
@@ -242,7 +256,7 @@ collect. Criterion 1's passes the new keyword, and criterion 2's child is
 refused. Import nothing new at module scope.
 
 **Size.** A `bug` gets 300 changed lines. The prototype of both criteria and
-their witnesses ran to 169 changed lines after `ruff format`. Allow about 200
+their witnesses ran to 185 changed lines after `ruff format`. Allow about 215
 with the docstrings.
 
 **Commit as each witness passes**, before the full suite runs.
