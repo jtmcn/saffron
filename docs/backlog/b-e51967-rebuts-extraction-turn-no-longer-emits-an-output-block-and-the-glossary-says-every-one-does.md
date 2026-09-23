@@ -1,12 +1,13 @@
 ---
 id: b-e51967
 title: REBUT's extraction turn stops emitting an `<output>` block once SA-0141 lands, and the glossary and §5.3 say every extraction turn does
-status: open
+status: done
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0141]
-prs: []
+closed: 2026-09-23
+specs: []
+prs: [499]
 commits: []
 cites: [§5.3]
 related: [b-4e0868, 42]
