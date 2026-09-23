@@ -61,6 +61,12 @@ These terms have exactly one meaning here. Use them and no synonyms.
    them and gives you `failures[]`. If you find yourself about to run the test
    suite to check your work, that is fine as ordinary development, but it is not
    the gate and it decides nothing.
+4. The host runs wrong versions of this change outside your turn. The
+   `witness` gate applies each mutant a criterion declares and runs that
+   criterion's witness against it. REVIEW names further wrong versions of the
+   change, and the host runs them. A task's notes can ask for those runs too,
+   but do not run them yourself: your turn is for making the witnesses and
+   the change pass.
 
 ## Hard rules
 
