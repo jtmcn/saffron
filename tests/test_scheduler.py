@@ -1821,8 +1821,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     """Re-measured 2026-09-22, a seventieth time: `SA-0131` queued for
     backlog item b-111c56, a parent merged by hand after `EXHAUSTED`. It
     edits the scheduler and the CLI, which no queued spec touches, so it
-    declares no `depends_on`. It sorts after `SA-0125` on priority and is
-    candidate 4 of 4. The refusals are unmoved.
+    declares no `depends_on`. It shares `SA-0130`'s priority and sorts after
+    it on id, so it is candidate 4 of 4. The refusals are unmoved.
 
     Re-measured 2026-09-22, a sixty-ninth time: `SA-0130` queued for
     backlog item b-2dea1c, the IMPLEMENT prompt saying who runs wrong versions

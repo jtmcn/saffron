@@ -58,8 +58,9 @@ acceptance:
       checkout never pulled. A child stays refused, naming `EXHAUSTED`, when
       its parent's pushed commit sits on an unmerged branch, and when the
       mirror does not hold the commit at all. The pinned `base_sha` decides,
-      not a mirror ref: a scan pinned by `saffron batch` gives the same
-      answers with the mirror's default branch moved back to the checkout's.
+      never a mirror ref. A pinned scan refuses the child when every mirror
+      ref sits ahead of the pin at the merge, and admits it when the mirror's
+      default branch sits behind the pin.
     witness: tests/test_cli.py::test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand
 ---
 
@@ -197,24 +198,32 @@ existing `_write_spec`, `_task_at`, `_repo` and `_sha` helpers. It loops over
   has the lower `task_id`, the row at a spec sha not on disk, whose push the
   callable accepts. Then create the row at its current sha with no push.
   `tasks_by_repo` orders by `task_id` (`saffron/ledger.py:724`), so an
-  implementation reading only the newest row per spec misses the push. Parent B's row pushed a commit the callable rejects.
-  Parent C's row recorded no push. Record a push with `ledger.record_push`.
+  implementation reading only the newest row per spec misses the push.
+  Parent B's row pushed a commit the callable rejects. Parent C's row
+  recorded no push. Record a push with `ledger.record_push`.
 - The callable records every sha it is asked about.
 - Assert A's child is a candidate and not refused, for every state. Assert the
   callable was asked about no sha but the two recorded ones. An
   implementation that skips a parent already merged asks about fewer, and
   passes.
 - For every state outside `DEPENDENCY_WAITING_STATES` and `MERGED`, assert B's
-  and C's children are refused.
+  and C's children are refused. `tests/test_scheduler.py` does not import
+  `DEPENDENCY_WAITING_STATES` at module scope, so import it inside the
+  function.
 
 **Criterion 2's witness.** Write it in `tests/test_cli.py` with
-`_repo_with_spec`, `_seed_repo` and `_seed_task`. Give the fixture three
-parents and their three children as `extra_specs`, each child naming its
-parent in `depends_on`.
+`_repo_with_spec`, `_seed_repo` and `_seed_task`. The fixture holds six
+specs. `_repo_with_spec` always writes `SY-1.md` from `spec_text`
+(`tests/test_cli.py:1296`), so `SY-1` is parent 1. The other five go in
+`extra_specs`, each child naming its parent in `depends_on`. Every parent
+has an `EXHAUSTED` task at its current sha, so no parent is a candidate.
 
 - Parent 1: a commit on `saffron/<id>`, pushed. Clone the bare origin into a
   second directory, merge that branch there with `--no-ff`, and push the
-  default branch. Leave the checkout's default branch where it was.
+  default branch. Leave the checkout's default branch where it was, and
+  check the checkout out on its default branch before the first queue.
+  `git clone --mirror` points the mirror's `HEAD` at the checkout's current
+  branch (`saffron/repos/mirror.py:67`).
 - Parent 2: a commit on its own branch, pushed and never merged.
 - Parent 3: a pushed sha of forty `b`s, which no repository holds.
 - One `EXHAUSTED` task per parent at its current spec sha, the way
@@ -224,13 +233,25 @@ parent in `depends_on`.
   candidate count and above `refusals:`. Assert the other two children are
   refused, each reason naming its parent and `EXHAUSTED`.
 
-- Then drive the pinned path `saffron batch` takes. `ensure_mirror` fetches
-  every ref from the checkout (`saffron/repos/mirror.py:63`), so on a rescan
-  the mirror's default branch can sit behind the pinned base. Move the
-  mirror's `refs/heads/<default>` back to the checkout's default branch with
-  `git update-ref`. Call `cli._resolve_queue` with `stamp_orphaned=False` and
-  a `task.PinnedBase` whose `base_sha` is the merge commit. Assert parent 1's
-  child is the one candidate and the other two children are the refusals.
+- Then drive the pinned path twice, calling `cli._resolve_queue` with
+  `stamp_orphaned=False` and a `task.PinnedBase`. A mirror ref can sit on
+  either side of a pinned base. PACKAGE's `fetch_default_branch`
+  (`saffron/phases/package.py:666`) moves the default branch ahead of a
+  night's `base_sha`. An attended `saffron queue` or `saffron cell` sharing
+  the mirror runs `ensure_mirror`, which fetches every ref from the checkout
+  (`saffron/repos/mirror.py:63`) and can move it behind. `saffron batch`
+  itself runs `ensure_mirror` once, in `check_readiness`
+  (`saffron/preflight.py:472`), before it pins
+  (`saffron/preflight.py:483`), and its rescan runs neither
+  (`saffron/cli.py:810-813`).
+- Ahead. Assert the mirror's default branch, `HEAD` and `FETCH_HEAD` all
+  resolve to the merge commit. Pin `base_sha` to the checkout's default
+  branch head from before the merge. Assert there is no candidate and
+  parent 1's child is refused, its reason naming `SY-1` and `EXHAUSTED`.
+- Behind. Move the mirror's `refs/heads/<default>` back to the checkout's
+  default branch with `git update-ref`. Pin `base_sha` to the merge commit.
+  Assert parent 1's child is the one candidate and the other two children
+  are the refusals.
 
 The fixture's origin is a local path, so no slug resolves and no `gh` runs.
 The tasks carry no `pr_url`, so `reconcile` asks nothing.
@@ -247,8 +268,10 @@ names the witness that failed.
 - Checking only that the mirror holds the commit: criterion 2.
 - Running the check in the operator's checkout: criterion 2, because the
   merge is on the remote only.
-- Testing ancestry against the mirror's `HEAD` or its default branch ref
-  instead of `base_sha`: criterion 2's pinned pass.
+- Testing ancestry against the mirror's `HEAD`, its `FETCH_HEAD` or its
+  default branch ref instead of `base_sha`: criterion 2's ahead pass.
+- Accepting a commit on either the pin or the mirror's `HEAD`: criterion 2's
+  ahead pass.
 
 **Every test you add must fail with this diff's source reverted.** Each
 witness fails at base by an assertion or a `TypeError`. Neither fails to
@@ -256,7 +279,7 @@ collect. Criterion 1's passes the new keyword, and criterion 2's child is
 refused. Import nothing new at module scope.
 
 **Size.** A `bug` gets 300 changed lines. The prototype of both criteria and
-their witnesses ran to 185 changed lines after `ruff format`. Allow about 215
+their witnesses ran to 200 changed lines after `ruff format`. Allow about 230
 with the docstrings.
 
 **Commit as each witness passes**, before the full suite runs.
