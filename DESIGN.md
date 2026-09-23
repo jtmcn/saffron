@@ -1691,4 +1691,4 @@ the ADR records, so a hand edit here is discarded.
 | 3 | A test is judged by an edit chosen to break it, not by a mutation tool | accepted | 1, 4, 5, 6, 15, 17, 20, 28, 30, 34, 44, 45, 47, 48, 49, 52, 56, 57, 61 |
 | 4 | The critic is host-invoked lenses, and any one blocker goes to REBUT | accepted | 4, 9, 15, 16, 17, 18, 27, 28, 29, 30, 34, 36, 42, 48, 50, 51, 55, 57, 58, 61 |
 | 5 | The ontology describes the run record and never controls execution | accepted | 10, 11, 23, 24, 25, 29, 30, 34, 36, 56, 57, 61, 62 |
-| 6 | Work larger than one cell is a composite spec, reviewed once at the joins | accepted | 2, 4, 12, 17, 25, 26, 29, 38, 40, 45, 49, 50 |
+| 6 | Work larger than one cell is a composite spec, reviewed once at the joins | accepted | 2, 4, 12, 15, 17, 25, 26, 28, 29, 34, 38, 40, 45, 48, 49, 50 |
