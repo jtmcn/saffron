@@ -1923,7 +1923,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-23, a seventy-eighth time: `SA-0138` queued for
+    """Re-measured 2026-09-23, a seventy-ninth time: the spec loop's run 16
+    moved `SA-0133` onto `SA-0139`, since both edit
+    `saffron/phases/implement.py`, `tests/test_implement.py` and
+    `tests/test_session.py`. It is refused on that, since `SA-0139` has not
+    run, and leaves the candidates.
+
+    Re-measured 2026-09-23, a seventy-eighth time: `SA-0138` queued for
     backlog item b-19b255, which counts a vacuity probe killed only when a
     test the diff adds fails. It edits `saffron/cell/session.py` and
     `tests/test_session.py`, which `SA-0133` also touches, so it declares
@@ -2380,9 +2386,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0129",
         "SA-0137",
         "SA-0139",
-        "SA-0133",
     ]
     assert [r.path.name[:7] for r in refusals] == [
+        "SA-0133",
         "SA-0134",
         "SA-0135",
         "SA-0136",

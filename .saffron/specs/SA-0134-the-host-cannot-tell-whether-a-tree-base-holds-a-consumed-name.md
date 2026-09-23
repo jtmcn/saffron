@@ -44,7 +44,9 @@ acceptance:
       colon as a path, and every path it is given is canonical and
       repo-relative. The path resolves when the tree at `sha` holds a
       regular file of mode `100644` or `100755`, a directory or a symlink
-      at that path. A path the tree does not hold is unresolved, and so is a prefix
+      at that path. A symlink resolves whether it points at a regular file,
+      at no path in the tree, or outside the tree. A path the tree does not
+      hold is unresolved, and so is a prefix
       of a directory's name. This claims nothing for any other spelling of
       a path, which `SA-0135` refuses at intake.
     witness: tests/test_mirror.py::test_a_consumed_path_resolves_when_the_tree_holds_a_file_a_directory_or_a_symlink_there
@@ -96,9 +98,12 @@ first turn is paid for. The item asks for a `consumes:` field and a refusal
 before the cell starts, as gate 0 refuses in §4.2.
 
 **This spec is the first of two.** Estimated whole, the change ran to about
-500 changed lines against the `feature` ceiling of 600
-(`saffron/gates/core/size.py:25`). Past `feature` cells touching six files
-landed between 250 and 660. So the check splits. This spec builds the
+500 changed lines. At 4 tokens a line (`saffron/gates/core/size.py:39`) that
+is about 2000 tokens, against the `feature` ceiling of 3000 tokens
+(`saffron/gates/core/size.py:26`, read at `c915d801`). Past `feature` cells
+touching six files landed between 250 and 660 lines, or 1000 to 2640
+tokens. The top of that range is past 2400, which is 80% of the ceiling. So
+the check splits. This spec builds the
 host's reader of a tree base. `SA-0135` stacks on it and adds the `consumes:` field, the refusal in
 `saffron/task.py`'s `run_task`, and the batch's handling of that refusal.
 The reader goes first so that no commit carries a field that parses and
@@ -187,13 +192,21 @@ the source reverted, a module-scope import of it fails collection. `revert`
 reads that as `skip`, so it checks nothing.
 
 **Criterion 1's witness** commits `exact.py`, an executable `run.sh`, a
-directory `pkg` holding `pkg/mod.py`, and a symlink `link.py` pointing at
-`exact.py`. It sets `run.sh`'s mode with `os.chmod` before the commit, so
-the tree records `100755`. It asserts that `exact.py`, `run.sh`, `pkg` and
-`link.py` each return an empty list. It asserts that `missing.py`,
+directory `pkg` holding `pkg/mod.py`, and three symlinks. `link.py` points
+at `exact.py`, `dangling.py` at `gone.py`, which the tree does not hold, and
+`escape.py` at `../outside.py`. It sets `run.sh`'s mode with `os.chmod`
+before the commit, so the tree records `100755`, and makes the links with
+`os.symlink`. It asserts that `exact.py`, `run.sh`, `pkg`, `link.py`,
+`dangling.py` and `escape.py` each return an empty list. It asserts that `missing.py`,
 `pkg/missing.py` and `pk` each return themselves. A check that the tree
 lists a path starting with the entry fails it on `pk`. A check for mode
-`100644` alone fails it on `run.sh`.
+`100644` alone fails it on `run.sh`. A path entry answered through
+`file_at` for every mode but `040000` raises `GitError` on `dangling.py`
+and on `escape.py`, and fails it there. Measured on 2026-09-23 at
+`c915d801` on host git 2.54.0. `git ls-tree` lists both links at mode
+`120000`, and `file_at` raises on `dangling.py` from `:251-255` and on
+`escape.py` from `:247-250`. A symlink to a directory or to another
+symlink takes the same branch as `dangling.py`, and no witness drives it.
 
 **Criterion 2's witness** uses the same tree. `exact.py` and `run.sh` each
 hold `run_task` and nothing else, and `pkg/mod.py` holds `helper` and
@@ -290,7 +303,7 @@ or a docstring as readily as in code. That is a limit of the check, and
 that starts or ends with punctuation, are left open, and no witness drives
 them.
 
-**Size.** About 40 changed lines of source and 160 of test. `file_at`
+**Size.** About 40 changed lines of source and 165 of test. `file_at`
 (`saffron/repos/mirror.py:231-259`) and its seven tests, which start at
 `tests/test_mirror.py:638` through `:694`, run to about 95 lines. This
 reader has more cases. A bare prototype measured 20 lines of source
