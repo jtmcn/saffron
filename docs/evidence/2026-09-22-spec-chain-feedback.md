@@ -218,3 +218,53 @@ Three classes recurred with no check behind them.
 Both round-2 concerns on `SA-0129` and `SA-0131` repeated their round-1
 class. Naming the class in the second review's prompt found more of it.
 Naming it in the writer's revision prompt did not stop it.
+
+# SA-0134, from item b-602d00
+
+One spec through `create-saffron-spec`. The writer split the item at about
+500 lines against the `feature` ceiling of 600. `SA-0134` is the reader of
+a tree base. `SA-0135` adds the `consumes:` field and the refusal, and is
+not written. The operator stacked `SA-0134` on `SA-0129` so that the
+child's `intake.py` edit follows `SA-0129`'s.
+
+## Cost
+
+| Step | Agent | Time | Tokens |
+|---|---|---|---|
+| Draft, with a prototype and the split | `spec-writer` | 22.5 min | 229k |
+| First review | `spec-reviewer` | 3.9 min | 63k |
+| Revise, with bare-mirror probes | `spec-writer` | 7.3 min | 64k |
+| Second review | `spec-reviewer` | 1.9 min | 44k |
+
+The second review's findings were applied by hand. No third review ran.
+
+## Findings by class
+
+| Round | Finding | Class | Check that should have caught it |
+|---|---|---|---|
+| 1 | Criterion 4 drove no path only the older commit held | A witness drives one member of a set | Pre-flight 1 |
+| 1 | "Exactly that path" was false, since `git ls-tree` normalises `./`, `//` and `.` | A claim about a tool, not run | Pre-flight 10 |
+| 1 | The child was handed three of the malformed shapes | A split's hand-off to the child | none |
+| 1 | The reader's exceptions were unnamed, one of them not `GitError` | A split's hand-off to the child | none |
+| 1 | No witness committed a `100755` file | A witness drives one member of a set | Pre-flight 1 |
+| 1 | A submodule was in neither set | A witness drives one member of a set | Pre-flight 1 |
+| 1 | A whole word also matches a comment | A design argument the documents do not support | Pre-flight 8 |
+| 1 | `file_at` has seven tests, not six | A claim about the tree | Pre-flight 5 |
+| 2 | Criterion 2 read no `100755` file's text | A witness drives one member of a set | Pre-flight 1 |
+| 2 | A path holding a colon could not be written | A split's hand-off to the child | none |
+| 2 | A `..` segment past the root was not measured | A claim about a tool, not run | Pre-flight 10 |
+| 2 | The decode depends on the host locale | A claim about the tree | Pre-flight 5 |
+| 2 | The text of `exact.py` was left open | A fixture's text left open | none |
+
+## What the pre-flight should learn
+
+1. **A split's hand-off is a class of its own.** Three findings were about
+   what the unwritten child inherits. Before review, list every input the
+   parent's function does not answer and every exception it raises. Hand
+   the list to the child's spec.
+2. **Probe a tool in the shape the code runs it.** The first reviewer probed
+   git in a worktree. The writer then probed a bare mirror through
+   `ensure_mirror` in a scratch test, and `saffron/../CLAUDE.md` resolved
+   there too. The operator's session could not run git outside its worktree.
+3. **A revision that adds a set member adds it to every criterion.** Round
+   1 added `100755` to criterion 1, and round 2 found criterion 2 without it.

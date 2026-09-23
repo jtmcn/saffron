@@ -155,6 +155,7 @@ for the `dead` gate until then.
   - a path with a `..` segment, as in `saffron/../CLAUDE.md`
   - a path with an empty segment, as in `saffron//task.py`
   - a path ending in `/`
+  - a path holding a colon, as in `weird:name.py`, which the reader splits
 
   A trailing `/` makes `git ls-tree` list the directory's children, so the
   reader would read the first child's mode and then a directory listing as
@@ -194,12 +195,17 @@ the tree records `100755`. It asserts that `exact.py`, `run.sh`, `pkg` and
 lists a path starting with the entry fails it on `pk`. A check for mode
 `100644` alone fails it on `run.sh`.
 
-**Criterion 2's witness** uses the same tree, with `run_task` as a word in
-`exact.py` and `helper` as a word in `pkg/mod.py`. `exact.py:run_task` and
+**Criterion 2's witness** uses the same tree. `exact.py` and `run.sh` each
+hold `run_task` and nothing else, and `pkg/mod.py` holds `helper` and
+nothing else. `exact.py:run_task`, `run.sh:run_task` and
 `link.py:run_task` resolve. `missing.py:run_task`, `pkg:helper` and
-`link.py:exact` do not, and `pkg:helper` raises nothing. These fail it: a
-search of every file under a directory, a call to `file_at` on a directory
-that raises, and a read of the symlink's own text.
+`link.py:exact` do not, and `pkg:helper` raises nothing. These fail it:
+
+- a search of every file under a directory
+- a call to `file_at` on a directory that raises
+- a read of the symlink's own text
+- a text read for mode `100644` alone, on `run.sh:run_task`, reasoned and
+  not run
 
 **Criterion 3's witness** calls the reader once per entry, so a failure
 names its case. Each file below holds its text and nothing else.
@@ -253,10 +259,12 @@ a refusal or an error, so the list is whole. Only the first has a witness.
 - `GitError`, for a `path:name` whose symlink is dangling, or points at a
   directory or at another symlink (`:251-255`).
 - `UnicodeDecodeError`, for a `path:name` whose file, or whose symlink's
-  target, is not UTF-8. `_run` decodes git's output as text and catches
-  only `OSError` (`saffron/repos/mirror.py:43-48`).
+  target, does not decode in the host locale's encoding, which is UTF-8 on
+  the host. `_run` decodes git's output as text and catches only `OSError`
+  (`saffron/repos/mirror.py:43-48`).
 - `GitError`, for an empty entry, an empty path, an absolute path or a bare
-  `..`, because `git ls-tree` exits 128 on each.
+  `..`, because `git ls-tree` exits 128 on each. A `..` segment that climbs
+  past the root likely does too, and was not measured.
 
 A path entry that names a submodule resolves, since `git ls-tree` lists it.
 No witness drives that either.
