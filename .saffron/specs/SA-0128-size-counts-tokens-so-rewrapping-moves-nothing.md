@@ -178,7 +178,7 @@ kind with a literal event, never with text `judge_estimate` builds
 - `tests/test_spec_loop_driver.py:160-179` pins the summary text and the
   ceilings 300, 600 and 1000.
 - `SA-0125` writes three witnesses in `tests/test_session.py` and rewrites
-  three ceiling tests in `tests/test_artifacts.py`. Five read `_CEILINGS` as
+  three ceiling tests in `tests/test_artifacts.py`. Four read `_CEILINGS` as
   a count of estimated lines. The ceiling tests also hold the literals
   `601` and `600` and the text `exceeds the feature ceiling of 600`.
   `SA-0125`'s fourth witness uses the literal estimate 601.
@@ -224,7 +224,7 @@ in every file alike.
    count. The advisory sentence `judge_estimate` returns names the
    estimate in lines, its price in tokens and the ceiling. Change both inside `judge_estimate`. Rewrite the
    `estimated_lines` docstring, which stops being true.
-5. **Keep `SA-0125`'s tests green.** Its six tests keep their names and move
+5. **Keep `SA-0125`'s tests green.** Its seven tests keep their names and move
    to the new arithmetic. The notes say how.
 
 ## Out of scope
@@ -338,7 +338,7 @@ the first case each one fails:
 | bound checked before trimming | first token replaced | 8, named |
 | estimate from every hunk line, context included (by arithmetic, not run) | shared ends, reversed | 12, named |
 | estimate as both trimmed streams in full | shared ends, reversed | 64000 |
-| estimate as both untrimmed streams in full | shared ends, reversed | 64004 |
+| estimate as both untrimmed streams in full | shared ends, reversed | 64006 |
 | no bound | shared ends, reversed | 63998, unnamed |
 | estimate that names no file | shared ends, reversed | 8, unnamed |
 
@@ -375,7 +375,7 @@ with one context line, ` keep`, before its `-` line. Trimming removes that
 line's token with the shared first token, so the right estimate stays 8,
 and an estimate that counts context lines gives 12. Write it
 so that trimming leaves exactly the 32,000 reversed tokens, a product of
-1.024 × 10^9, past the bound by 2.4%. Untrimmed streams in full count 64004.
+1.024 × 10^9, past the bound by 2.4%. Untrimmed streams in full count 64006.
 The sixth diff joins the shared-ends file and a second small file whose one
 line has one token replaced. Assert a count of 10, the first path named and
 the second absent. A fallback that estimates the whole diff once any file
@@ -395,8 +395,8 @@ Write the 4 as a literal, since the claim pins it. Build the comparison diff
 as `_diff`-shaped text of that many single-token added lines. Assert that
 `size_gate`'s failure message is a substring of the rejection's text,
 and that the instance's tier is `elevated`. At `standard`, pass the over
-estimate with an empty `elevate_on`, and assert that the advisory sentence
-holds the price and the ceiling as numbers. Then parse
+estimate with an empty `elevate_on`. Assert that the advisory sentence
+holds the estimate in lines, the price and the ceiling as numbers. Then parse
 `saffron/agents/artifacts.py` with `ast`. Assert an `ImportFrom` of
 `saffron.gates.core.size` naming `_TOKENS_PER_LINE`, and no assignment to
 that name in the module. Assert `saffron.gates.core.size._TOKENS_PER_LINE`
@@ -460,8 +460,9 @@ a `size` failure by hand and never runs the gate.
 - `test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands`:
   20 lines over becomes the ceiling divided by 4, plus 20. "Exactly the
   ceiling" becomes the ceiling divided by 4. The line still names the
-  estimate in lines. So its assertion on the estimate reads that re-priced
-  number. Its assertion on the ceiling reads the token ceiling.
+  estimate in lines. So its assertion on the estimate reads the new
+  estimate, the ceiling divided by 4 plus 20, not its price. Its assertion
+  on the ceiling reads the token ceiling.
 - `test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks`:
   the two runs 20 lines over move the same way. The third run's estimate
   within the ceiling becomes at most the ceiling divided by 4.
