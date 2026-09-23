@@ -598,7 +598,8 @@ Each name is the `kind` written to `events.jsonl` with `Event` appended, because
 **Fact kind**: What a record entry says it is: `task_created`, `task_state`,
 `task_package`, `task_push`, `task_merged_head`, `task_policy`, `attempt_opened`,
 `attempt_closed`, `gate_result`, `finding`, `rebuttal`, `decision`, `run_created`,
-`run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`.
+`run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`,
+`stack_layer`.
 The set is the record's whole alphabet, so it holds kinds nothing appends yet.
 > A fact is an entry in the record on `refs/saffron/*`. An event is a line of
 > `events.jsonl`. The two words do not merge.

@@ -35,6 +35,7 @@ KINDS = (
     "batch_created",
     "batch_closed",
     "repo_upserted",
+    "stack_layer",
 )
 
 
