@@ -98,11 +98,9 @@ It cites `DESIGN.md` §5.4, whose table sets the `size` ceilings.
 `EXHAUSTED`. Its prototype had measured 865. Each spec's estimate lived in
 its prose notes, where nothing reads it.
 
-This spec stacks on `SA-0128`, which stacks on `SA-0126`,
-which stacks on `SA-0125`.
-Every sentence below about current code was read at `c4344e46`. Sentences
-about the `size` gate after `SA-0128` cite that spec, because its cell
-writes that code.
+This spec depends on `SA-0128`. It merged, as did `SA-0126` and `SA-0125`
+beneath it. Every sentence below about current code was read at
+`c915d801`.
 
 **The spec model refuses an unknown key.** `Spec` declares
 `model_config = ConfigDict(extra="forbid")` (`saffron/intake.py:135`). Its
@@ -112,18 +110,16 @@ before it validates (`saffron/intake.py:193`). So an empty
 `estimated_lines:` reads as an omitted one. The six spec types are
 `SpecType` (`saffron/intake.py:25`).
 
-**The ceilings, in tokens after `SA-0128`.** At `c4344e46` `_CEILINGS` counts
-lines, `bug` 300, `feature` 600 and `refactor` 1000
-(`saffron/gates/core/size.py:25`). Every other type takes
-`_DEFAULT_CEILING` (`saffron/gates/core/size.py:34`). `size_gate` reads
-them as `_CEILINGS.get(spec_type, _DEFAULT_CEILING)`
-(`saffron/gates/core/size.py:172`). `SA-0128` makes the gate count
-whitespace-separated tokens. It re-measures the ceilings as `bug` 1300,
-`feature` 3000 and `refactor` 4200, with the default still `refactor`'s
-(`.saffron/specs/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:204-205`).
-It declares `_TOKENS_PER_LINE`, set to 4, in the same module, and its plan
-checkpoint prices a line estimate by it
-(`.saffron/specs/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:208-212`).
+**The ceilings, in tokens.** `SA-0128` made the gate count
+whitespace-separated tokens
+(`.saffron/specs/done/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:200-207`).
+`_CEILINGS` holds `bug` 1300, `feature` 3000 and `refactor` 4200
+(`saffron/gates/core/size.py:26`). Every other type takes
+`_DEFAULT_CEILING`, which is `refactor`'s (`saffron/gates/core/size.py:35`).
+`size_gate` reads them as `_CEILINGS.get(spec_type, _DEFAULT_CEILING)`
+(`saffron/gates/core/size.py:259`). The same module declares
+`_TOKENS_PER_LINE = 4`, an int (`saffron/gates/core/size.py:39`). The plan
+checkpoint prices a line estimate by it (`saffron/agents/artifacts.py:315`).
 
 **What `check` judges now.** `cmd_check` finds the spec through
 `_known_specs` (`.claude/skills/run-saffron-spec-loop/driver.py:1962`). It
@@ -136,8 +132,10 @@ on either (`:1977-1987`). No line of it reads a size estimate.
 **`DESIGN.md` §3.2 says "No `estimated_diff_lines`"** (`DESIGN.md:235`).
 Its reason is that a number from the model being gated is not a gate. The
 estimate here comes from the spec's author, and only the host-side driver
-reads it. No cell gate reads it, so the reason does not apply. `DESIGN.md`
-is `forbidden`, and the operator records the exception by hand.
+reads it. No cell gate reads it, so the reason does not apply. The operator
+agrees the exception holds. `DESIGN.md` is `forbidden`, so the operator
+edits §3.2 by hand in the spec loop's bookkeeping pull request. Leave it
+alone here.
 
 ## Problem
 
@@ -148,7 +146,7 @@ whose estimate is within 20% of its ceiling."
 1. **Declare the estimate in lines.** Add an optional `estimated_lines`
    field to `Spec`. It is a positive integer, `None` when omitted. It
    counts changed lines, the unit a spec's author estimates in, and the
-   unit `Plan.estimated_lines` uses (`saffron/agents/artifacts.py:70`).
+   unit `Plan.estimated_lines` uses (`saffron/agents/artifacts.py:77`).
    A boolean is refused, so
    `estimated_lines: true` is not read as one line.
 2. **Judge its price in `check`.** Multiply the estimate by
@@ -171,16 +169,19 @@ whose estimate is within 20% of its ceiling."
 
 ## Out of scope
 
-- **`judge_estimate`.** `SA-0125` writes it and `SA-0128` prices it
-  (`.saffron/specs/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:90-101`).
+- **`judge_estimate`.** `SA-0125` wrote it and `SA-0128` priced it
+  (`.saffron/specs/done/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:92-105`,
+  `saffron/agents/artifacts.py:299`).
   It takes a `Plan`, a risk and `elevate_on`, and it judges at the whole
   ceiling. This rule needs 80% and has no plan or tier, so `check` does
   not call it. Both share the gate's rate and table instead.
 - **The size gate itself.** `saffron/gates/**` stays forbidden.
 - **The prose that describes `check`.** The loop skill's section 1b says
   `check` exits 1 on either of two rules
-  (`.claude/skills/run-saffron-spec-loop/SKILL.md:67-68`). The operator
-  updates it and the writer guidance by hand.
+  (`.claude/skills/run-saffron-spec-loop/SKILL.md:67-68`). After this
+  change there are three, so that sentence goes false. The file is
+  `forbidden`, and the operator updates it and the writer guidance by hand
+  with the stack.
 - **`docs/agents/issue-tracker.md`'s frontmatter list.** It lists each
   field's default (`docs/agents/issue-tracker.md:13-16`). It stays as it is.
 - **Any other command.** `history`, `size` and the queue do not read the
@@ -200,7 +201,7 @@ comment of one or two lines. Refusing a boolean needs a strict integer.
 **The dead-code gate.** `driver.py` sits outside `ROOTS`
 (`.saffron/gates/dead.py:21-29`), so the driver's read does not count. The
 name is still read in a root, as `plan.estimated_lines`
-(`saffron/agents/artifacts.py:289`). Vulture matches names globally, so the
+(`saffron/agents/artifacts.py:315` and `:332`). Vulture matches names globally, so the
 new field is not reported. The gate passed on a prototype on 2026-09-22.
 
 **Where the judgement goes.** Import `_CEILINGS`, `_DEFAULT_CEILING` and
@@ -221,7 +222,8 @@ text (`.claude/skills/run-saffron-spec-loop/driver.py:2754`) and
 
 **The test file.** All four new witnesses go in
 `tests/test_spec_size_estimate.py`. `tests/test_spec_loop_driver.py` is
-forbidden, because `SA-0128` edits it. Import its helpers instead, as
+forbidden, so the two `preserves` witnesses in it stay as they are at base.
+Import its helpers instead, as
 `tests/test_batch.py:12` imports from `tests.test_scheduler`. Take
 `driver`, `_spec`, `_cell` and `_StubLedger` from
 `tests.test_spec_loop_driver`. Every name imported at module scope exists
@@ -229,9 +231,8 @@ at base, so the reverted run fails rather than failing to collect. Set the
 estimate on a built spec with `target.estimated_lines = n`, as the
 existing check tests set `target.max_turns`. Monkeypatch `_known_specs`,
 `_ledger_and_repo` and `_past_cells` as
-`test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others` does.
-Find that test and the one below by name, since `SA-0128` edits the same
-file above them.
+`test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others` does
+(`tests/test_spec_loop_driver.py:1367`).
 
 **Criterion 1's witness** calls `parse_spec` on frontmatter declaring 480,
 omitting the key, leaving it empty, and declaring 0, -3, 1.5, `many` and
@@ -299,16 +300,18 @@ asserts the `max_turns` blocker, no size blocker and return code 1. A
 judgement that returns early on a size blocker fails it.
 
 **The printed price is an integer.** Print it as the product of two
-integers, never as a float. The parent spec declares the rate as the integer 4
-(`.saffron/specs/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:208-212`).
-If its cell declares a float instead, the price prints as `2400.0` and
-criterion 2's witness fails.
+integers, never as a float. The rate is the int 4
+(`saffron/gates/core/size.py:39`), as the parent spec asked
+(`.saffron/specs/done/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:219-224`).
+Were it a float, the price would print as `2400.0` and criterion 2's
+witness would fail.
 
 **Size.** A prototype of the change measured 188 changed lines, 31 of
 source and 157 of test. Expect about 200 with the help text and the
 docstring. `SA-0112`, which added `check` to the same two kinds of file,
-landed at 243. The `feature` ceiling is 600 lines at `c4344e46` and 3000
-tokens after `SA-0128`. This spec declares no `estimated_lines` of its own,
+landed at 243. At 4 tokens a line, 200 lines price at about 800 tokens
+against the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`,
+`:39`). This spec declares no `estimated_lines` of its own,
 because intake at base refuses the key.
 
 **Measured wrong implementations.** On 2026-09-22 the
@@ -336,6 +339,7 @@ failed its witness:
 - a printed price that is the line count
 - a rate declared as the float `4.0`, which prints the price as `2400.0`
 
-The control `price >= 0.8 * ceiling` is exact, and it passed all four. `SA-0128`'s code does not exist at `c4344e46`. The operator's loop runs
-this list again at `SA-0128`'s branch head before this cell. Do not run it
-yourself.
+The control `price >= 0.8 * ceiling` is exact, and it passed all four.
+`SA-0128` has since merged with the same constants
+(`saffron/gates/core/size.py:26`, `:35`, `:39`). The operator's loop runs
+this list again at `c915d801` before this cell. Do not run it yourself.

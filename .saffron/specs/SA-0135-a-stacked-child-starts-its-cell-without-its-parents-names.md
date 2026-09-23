@@ -38,7 +38,7 @@ forbidden:
   - tests/test_batch.py
   - tests/test_intake.py
   - tests/test_scheduler.py
-budget_usd: 25
+budget_usd: 27
 max_attempts: 3
 max_turns: 150
 acceptance:
@@ -126,8 +126,10 @@ This spec adds the `consumes:` field and the refusal before the cell.
 `SA-0136` stacks on this one. It refuses nine malformed entry shapes at
 load and turns an unreadable entry into a refusal that names it. This
 spec keeps every exception the reader raises as an error. Whole, the two
-came to about 600 changed lines against the `feature` ceiling of 600
-(`saffron/gates/core/size.py:25`), so they split.
+came to about 600 changed lines. At 4 tokens a line
+(`saffron/gates/core/size.py:39`) that is about 2400 tokens, 80% of the
+`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`), so
+they split.
 
 **What the gap until `SA-0136` costs.** Until then a malformed entry
 reaches the reader, and `SA-0134`'s notes give what git does with each.
@@ -143,10 +145,9 @@ reaches the reader, and `SA-0134`'s notes give what git does with each.
   file that is not UTF-8. They are errors here. `SA-0136` makes them
   refusals.
 
-This spec stacks on `SA-0134`. Its tree base carries `SA-0125` through
-`SA-0129`, which change `saffron/intake.py`'s `Spec`. So `Spec` is cited
-by symbol below. Every other sentence about current code was read at
-`02af122a`.
+This spec stacks on `SA-0134`, which stacks on `SA-0129`. That spec
+changes `saffron/intake.py`'s `Spec`, so `Spec` is cited by symbol below.
+Every other sentence about current code was read at `c915d801`.
 
 **Where the refusal goes.** `run_task` resolves `stacked_on` from
 `_resolve_stacked_on` (`saffron/task.py:286-294`). It builds the
@@ -158,7 +159,7 @@ reach it. The module's docstring says the refusals stay outside
 
 **How a refusal leaves `run_task`.** `run_task` returns a `CellOutcome`
 (`saffron/task.py:230`). `saffron cell` exits with
-`CELL_EXIT.get(outcome.state, 1)` (`saffron/cli.py:416`). A batch's
+`CELL_EXIT.get(outcome.state, 1)` (`saffron/cli.py:449`). A batch's
 `_drive` calls `ledger.attach_run_to_batch(outcome.run_id, batch_id)`
 after every returned outcome (`saffron/batch.py:233`), and that raises
 for a run that does not exist (`saffron/ledger.py:865-866`). An exception
@@ -167,8 +168,8 @@ from the runner counts as an abort toward the breaker
 outcome with made-up ids. `CONTEXT.md` defines a **Refusal** as a task
 rejected before any cell starts (`CONTEXT.md:201`). Every refusal today
 writes no ledger row and ends in no state. The attended ones print
-`f"{spec.id:<10} refused  {reason}"` and return 1 (`saffron/cli.py:385`,
-`:395`).
+`f"{spec.id:<10} refused  {reason}"` and return 1 (`saffron/cli.py:418`,
+`:428`).
 
 **Where `Spec` reads a key.** `Spec` sets `extra="forbid"` and declares
 `depends_on` as a list defaulting empty (`saffron/intake.py`, class
@@ -195,7 +196,7 @@ checks it before the cell. Build four things.
    return a `Refused`. When `spec.consumes` is empty, call nothing.
 4. **The two callers.** `cli._run_cell` returns 1 for a `Refused` and prints
    nothing more. `cli._batch_runner`, `cli._batch`'s `runner` variable
-   (`saffron/cli.py:769`) and `run_batch`'s and `_drive`'s `runner`
+   (`saffron/cli.py:805`) and `run_batch`'s and `_drive`'s `runner`
    parameters (`saffron/batch.py:61`, `:147`) widen to
    `CellOutcome | Refused`. `_drive` skips the attach and the breaker's
    count for a `Refused`, and rescans as it does after any task.
@@ -223,16 +224,10 @@ checks it before the cell. Build four things.
   forbidden here.
 - **Where else a refusal shows.** A refusal at run time is not a scan
   refusal. The batch plan counts the spec as a candidate and leaves it out
-  of `refusals:` (`saffron/cli.py:696-703`). `saffron queue` offers it
+  of `refusals:` (`saffron/cli.py:739-745`). `saffron queue` offers it
   again every night, since nothing is written. The batch log prints
   `starting` before `refused` (`saffron/batch.py:203`). Backlog item
   b-32f492 holds this too.
-- **`SA-0131`'s overlap.** `SA-0131` also edits `saffron/cli.py` and
-  `tests/test_cli.py`, in `_resolve_queue` (`saffron/cli.py:492`) and
-  the batch's rescans (`saffron/cli.py:788-814`). This spec edits `_run_cell`,
-  `_batch_runner` and one line of `tests/test_cli.py`. Whichever runs
-  second is refused on the other's open pull request until it merges, so
-  no `depends_on` orders them.
 
 ## Notes for the agent
 
@@ -246,7 +241,7 @@ passes now.
 too. Widening `run_task`'s return fails it at two lines, measured on
 2026-09-23 with a prototype of the signatures. `tests/test_task.py:59`
 returns `run_task`'s value from a helper annotated `-> CellOutcome`.
-`tests/test_cli.py:2931` reads `.state` from `_batch_runner`'s result.
+`tests/test_cli.py:3052` reads `.state` from `_batch_runner`'s result.
 Narrow each with an `assert isinstance(..., CellOutcome)` and change
 nothing else in either file.
 
@@ -280,6 +275,11 @@ call and returns a `CellOutcome`. Replace `push_unpackaged_work` as
 `_resolve_stacked_on` returns `(None, None)` at once
 (`saffron/task.py:179-180`). For a stacked task, monkeypatch
 `saffron.task._resolve_stacked_on` to return the parent's head and branch.
+Every `Spec` the witnesses of criteria 3, 4 and 5 build declares a
+`depends_on`, such as `["SY-0"]`, stacked or not. Criterion 1's validator
+refuses a non-empty `consumes` without one, so `Spec(...)` raises before
+`run_task` is reached. With `repo_id=None` and `_resolve_stacked_on`
+unpatched, such a task still runs unstacked.
 
 **Criterion 1's witness** calls `parse_spec` on frontmatter that:
 

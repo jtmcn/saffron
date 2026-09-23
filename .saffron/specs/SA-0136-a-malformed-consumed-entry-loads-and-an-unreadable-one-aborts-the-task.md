@@ -88,18 +88,23 @@ acceptance:
     witness: tests/test_consumes.py::test_a_consumed_path_with_an_empty_segment_is_refused_at_load
   - claim: >-
       A path ending in `/`, such as `pkg/`, is refused at load in both
-      forms, with a `SpecError` that names the entry. `pkg` loads in both
-      forms.
+      forms, with a `SpecError` that names the entry. The entry is split at
+      its first colon, so `pkg/:Foo::bar` is refused too. `pkg` loads in
+      both forms, and so does `a.py:Foo::bar`.
     witness: tests/test_consumes.py::test_a_consumed_path_ending_in_a_slash_is_refused_at_load
   - claim: >-
-      An entry the reader cannot read refuses the task, and the reason names
-      it. That covers a `path:name` whose path is a submodule, a symlink
-      that leaves the tree, a dangling symlink, a symlink to a directory, a
-      symlink to another symlink, a file that is not UTF-8, and a symlink to
-      such a file. Given those seven, an entry whose path is absent and an
-      entry that resolves, `run_task` returns one `Refused` and never calls
-      `run_one_cell`. Its reason names the eight entries that did not
-      resolve, in the order given, and not the one that did.
+      An entry the reader cannot read for a named reason refuses the task,
+      and the reason names it. The named reasons are the three `file_at`
+      raises on and a file that is not UTF-8. They cover a `path:name` whose
+      path is a submodule, a symlink that leaves the tree, a dangling
+      symlink, a symlink to a directory, a symlink to another symlink, a
+      file that is not UTF-8, and a symlink to such a file. Given those
+      seven, an entry whose path is absent and an entry that resolves,
+      `run_task` returns one `Refused` and never calls `run_one_cell`. Its
+      reason names the eight entries that did not resolve, in the order
+      given, and not the one that did. Any other `GitError` at a commit the
+      mirror holds, such as a blob missing from the mirror, raises out of
+      `run_task` and is no refusal.
     witness: tests/test_consumes.py::test_an_unreadable_consumed_entry_refuses_the_task_and_names_it
   - claim: >-
       `has_commit(mirror, sha)` is true for a commit on the mirror's default
@@ -118,8 +123,9 @@ Backlog item **b-602d00**, filed 2026-09-21. It cites `DESIGN.md` §4.2.
 kept every exception the reader raises as an error. This spec closes the
 gap `SA-0135` left. It refuses nine malformed shapes at load, and it turns
 an entry the reader cannot read into a refusal that names it. The two
-were split from one estimate of about 600 changed lines against the
-`feature` ceiling of 600 (`saffron/gates/core/size.py:25`).
+were split from one estimate of about 600 changed lines. At 4 tokens a
+line (`saffron/gates/core/size.py:39`) that is about 2400 tokens, 80% of
+the `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`).
 
 **What the gap cost until now.** `SA-0134`'s notes give what git does with
 each malformed shape, measured on host git 2.54.0.
@@ -134,10 +140,10 @@ each malformed shape, measured on host git 2.54.0.
   `UnicodeDecodeError`, and `run_task` raises too. That charges the spec's
   own mistake to the host.
 
-This spec stacks on `SA-0135`, whose code does not exist at `02af122a`.
+This spec stacks on `SA-0135`, whose code does not exist at `c915d801`.
 Sentences about its code cite that spec. `Spec` is cited by symbol,
 because `SA-0129` and `SA-0135` move its lines. Every other sentence about
-current code was read at `02af122a`.
+current code was read at `c915d801`.
 
 **What `SA-0135` builds.** `run_task` takes the tree base as `stacked_on`
 or else `base.base_sha`. When `spec.consumes` is not empty, it calls
@@ -158,7 +164,10 @@ tree, and for one whose target is not a regular file
 reader raise `GitError` for a missing sha too, and its notes list every
 input it raises on. So one exception type means two things. No function in
 the module says whether the mirror holds a commit
-(`saffron/repos/mirror.py:60-305`).
+(`saffron/repos/mirror.py:60-305`). `GitError` is only "A git invocation
+that did not do what was asked" (`saffron/repos/mirror.py:39-40`). A
+corrupt object at a held commit raises it too. That is the host
+breaking, not the spec (CLAUDE.md, `error` ≠ `fail`).
 
 ## Problem
 
@@ -169,14 +178,20 @@ task as though the host had failed. Build three things.
    it at its first colon. Refuse an empty entry, an empty path, and an
    empty name after a colon. Refuse a path that is not canonical. A
    canonical path is repo-relative, its segments are non-empty and joined
-   by single slashes, and none is `.` or `..`. The message names the entry.
-2. **`has_commit(mirror, sha)`** in `saffron/repos/mirror.py`. It says
-   whether the mirror holds `sha` as a commit.
+   by single slashes, and none is `.` or `..`. The message quotes the
+   entry with `!r`.
+2. **`has_commit(mirror, sha)` and `UnreadablePath`** in
+   `saffron/repos/mirror.py`. `has_commit` says whether the mirror holds
+   `sha` as a commit. `UnreadablePath` subclasses `GitError`, and
+   `file_at` raises it at each of its three named raises
+   (`saffron/repos/mirror.py:248`, `:252`, `:257`). Its `_git` calls still
+   raise plain `GitError`.
 3. **The mapping, in `run_task`.** For a spec that consumes something, ask
    `has_commit` about the tree base first. A no raises `GitError`. Then
-   read each entry on its own. An entry for
-   which the reader raises `GitError` or `UnicodeDecodeError` joins the
-   unresolved ones, in the order given, and the reason names it.
+   read each entry on its own. An entry for which the reader raises
+   `UnreadablePath` or `UnicodeDecodeError` joins the unresolved ones, in
+   the order given, and the reason names it. Catch nothing else. Any
+   other exception raises out of `run_task` as it does at `SA-0135`.
 
 ## Out of scope
 
@@ -202,8 +217,11 @@ and no mutant, and `witness` will report `skip` for all eleven.
 `dead` gate ignores a function under that decorator
 (`.saffron/gates/dead.py:34`). `has_commit` goes beside `file_at`, and
 asks `git cat-file -e` about `<sha>^{commit}` through `_run`. It returns
-whether that exited 0. Name an unreadable entry in the reason with the
-first line of what was raised, in parentheses after it.
+whether that exited 0. `UnreadablePath` goes beside `GitError`. It must
+subclass it: every caller that catches `GitError` from `file_at` still
+catches it, and the `file_at` tests at `tests/test_mirror.py:674-702`
+expect `GitError` from all three sites. Name an unreadable entry in the
+reason with the first line of what was raised, in parentheses after it.
 
 **The witnesses.** All eleven go in `tests/test_consumes.py`, which
 `SA-0135` created. Import `has_commit` inside its test body, never at the
@@ -224,7 +242,10 @@ Each refused entry raises a `SpecError`, and the witness reads the
 validator's own message from it, as `exc.__cause__.errors()[0]["msg"]`.
 `parse_spec` raises the `SpecError` from the `ValidationError`
 (`saffron/intake.py:213`), so `__cause__` is that error. The assertion is
-that this message holds the entry. Do not assert on `str(exc)`. Pydantic
+`repr(entry) in msg`, for every refused entry. A bare `entry in msg` checks
+nothing for the empty entry, since `"" in msg` always holds. Nor does it
+for a bare `.`, since any message ending in a period holds one. Do not
+assert on `str(exc)`. Pydantic
 prints the whole input there as `input_value`, so the entry appears
 whatever the validator says. Measured on this repo's pydantic on
 2026-09-23: a validator raising `ValueError` gives a `msg` that starts
@@ -239,6 +260,13 @@ These fail them:
 
 - a check of the bare path form only
 - a validator message that does not name the entry
+- a generic message for the empty entry or a bare `.`, such as
+  "consumes entry is empty.", which holds neither `''` nor `'.'`
+- a split at the last colon, `entry.rpartition(":")`. It reads
+  `pkg/:Foo::bar` as the path `pkg/:Foo:` and the name `bar`, and loads
+  it. `SA-0134`'s reader splits at the first colon and reads `pkg/`, a
+  directory listing. Criterion 9's witness refuses `pkg/:Foo::bar`.
+- a refusal of any name holding a colon, which `a.py:Foo::bar` catches
 - a test for `./` anywhere with a check of the end, which refuses
   `pkg/v1./mod.py`
 - a test for `../` anywhere, which refuses `pkg/v1../mod.py`
@@ -256,7 +284,9 @@ These fail them:
   as `tests/test_mirror.py:101-109` does.
 - `out.md`, a symlink to `../outside`.
 - `gone.md`, a symlink to `missing.md`.
-- `dir.md`, a symlink to a directory `docs`.
+- `dir.md`, a symlink to a directory `docs`, which holds the file
+  `docs/a.md`. Git records no empty directory, so without that file
+  `dir.md` is only a dangling symlink.
 - `hop.md`, a symlink to `link.md`, itself a symlink to `real.py`.
 - `bytes.py`, holding the bytes `ff fe` and nothing else.
 - `bytes_link.py`, a symlink to `bytes.py`.
@@ -267,10 +297,30 @@ Its spec consumes `sub:x`, `out.md:x`, `gone.md:x`, `absent.py:x`,
 `real.py:run_task`, in that order. `absent.py:x` sits among the
 unreadable entries on purpose. It asserts a `Refused` and no call to the
 `run_one_cell` double. The reason holds the eight entries other than
-`real.py:run_task`, in order, and not that one. These fail it:
+`real.py:run_task`, in order, and not that one.
+
+Then the witness breaks `real.py` at a commit the mirror holds. It reads
+the blob's sha with `git rev-parse <sha>:real.py`, asserts that the loose
+object `<mirror>/objects/<first 2>/<other 38>` exists, and deletes it. No
+other file in the tree holds `real.py`'s text, so no other entry shares
+that blob. A spec consuming `real.py:run_task` alone must make `run_task`
+raise `GitError`, and the `run_one_cell` double must not be called.
+Measured on 2026-09-23 on host git 2.54.0, in a mirror from
+`git clone --mirror` of a local repo: the objects were loose, not packed.
+With the blob deleted, `cat-file -e <sha>^{commit}` exited 0,
+`ls-tree <sha> -- real.py` exited 0 with mode `100644`, and
+`show <sha>:real.py` exited 128 with "bad object". A later
+`fetch --prune origin` did not restore the blob. So `has_commit` says yes,
+and `file_at`'s own `_git` call raises a plain `GitError`.
+
+These fail it:
 
 - a read of the whole list that stops at the first exception
-- a catch of `GitError` alone, which lets the decode error out
+- a catch of `UnreadablePath` alone, which lets the decode error out
+- a catch of every `GitError`, which refuses the broken blob
+- `except Exception`, which refuses the broken blob too
+- `file_at` left raising plain `GitError` at its named sites, which
+  either refuses the broken blob or raises on the first unreadable entry
 - a reason that names an entry by index, or drops the exception's entry
 - the entries that raised first, then the unresolved ones
 - the unresolved entries first, then the ones that raised
@@ -308,10 +358,12 @@ merges, so it runs in the `tests` gate here. `SA-0135`'s criterion 8,
 that does not exist. So a `has_commit` call for a spec with no `consumes`
 fails it.
 
-**Size.** About 60 changed lines of source and 190 of test. The nine shape
-witnesses are short and alike.
+**Size.** About 75 changed lines of source and 250 of test. At 4 tokens a
+line that is about 1300 tokens, under 80% of the `feature` ceiling of 3000
+(`saffron/gates/core/size.py:26`). The nine shape witnesses are short and
+alike.
 
 **Measured.** The code was not prototyped. `SA-0134`'s reader and
-`SA-0135`'s check do not exist at `e843eb43`. The git and pydantic
+`SA-0135`'s check do not exist at `c915d801`. The git and pydantic
 behaviour above was measured. The operator's loop runs the
 wrong versions above before the cell. Do not run them yourself.

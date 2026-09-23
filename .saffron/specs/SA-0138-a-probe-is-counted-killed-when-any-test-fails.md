@@ -86,17 +86,22 @@ acceptance:
   - claim: >-
       In a task, each adequacy probe counts the tests the diff adds. Those
       are the names the probe cell's own baseline run collected that the
-      task's pre-turn baseline did not. The witness's base collects
-      `t.py::test_old`. Every attempt's suite and the probe cell collect it
-      and `t.py::test_new`.
-      Of two findings with distinct probes, the one under which only
+      task's pre-turn baseline did not. An attempt's suite stands in for
+      neither side. The witness's base collects `t.py::test_old`. Every
+      attempt's suite collects it and `t.py::test_added`. The probe cell's
+      baseline run collects those two and `t.py::test_new`. Of three
+      findings with distinct probes, the one under which only
       `t.py::test_old` fails reads `survived` and reaches REBUT as a
       blocker. Its `probes.json` entry holds `failures: []` and `uncounted:
-      ["t.py::test_old"]`. The one under which both fail reads `killed` and
-      becomes a `note`, with `failures: ["t.py::test_new"]` and `uncounted:
-      ["t.py::test_old"]`. Both entries carry every key an entry had at base,
-      plus `uncounted`. The REBUT prompt's line for the survivor shows its
-      probe and does not say the tests stayed green.
+      ["t.py::test_old"]`. The one under which `t.py::test_old` and
+      `t.py::test_new` fail reads `killed` and becomes a `note`, with
+      `failures: ["t.py::test_new"]` and `uncounted: ["t.py::test_old"]`.
+      The one under which `t.py::test_old` and `t.py::test_added` fail
+      reads `killed` and becomes a `note`, with `failures:
+      ["t.py::test_added"]` and `uncounted: ["t.py::test_old"]`. Every
+      entry carries every key an entry had at base, plus `uncounted`. The
+      REBUT prompt's line for the survivor shows its probe and does not say
+      the tests stayed green.
     witness: tests/test_session.py::test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_failure_recorded
   - claim: >-
       When the task's pre-turn baseline holds no `tests` result, an adequacy
@@ -242,6 +247,12 @@ re-derived from its run JSON and is not re-probed.
 text a mutant could name. Criterion 6 is `preserves` and names a test that
 exists now.
 
+**Size.** The review estimated about 465 changed lines, 450 to 580. At
+4 tokens a line (`saffron/gates/core/size.py`'s `_TOKENS_PER_LINE`) that is
+about 1860 tokens, 1800 to 2320, against the `feature` ceiling of 3000
+(`_CEILINGS`). Criterion 4's third finding adds about 15 lines, or 60
+tokens. Keep the `_drive` witnesses lean.
+
 **`saffron/probe.py`.**
 
 - `check_probe` takes a required keyword `counted: Collection[str] | None`.
@@ -313,19 +324,37 @@ notices.
   `_stub_the_runtime(suites=...)`, as
   `test_the_criteria_gate_reads_both_suites_and_invokes_nothing` does. For
   criterion 4, give the base `t.py::test_old` alone and every attempt
-  `t.py::test_old` and `t.py::test_new`. Script the probe cell's runs with
-  `_stub_probe_gates(gate_results=...)`. The first entry is its own baseline
-  run, and each later entry is one probe's run. Read the REBUT prompt from
-  `cell.turns`.
-- That arrangement was measured on a prototype, with `suites` holding the
-  base and then three head suites. The attempts reported `revert=skip`, not
-  an abort, and the task reached `REBUTTING` with `probes: 1 survived, 1
-  killed, 0 unproven`.
-- The prototype is outside the tree, at
+  `t.py::test_old` and `t.py::test_added`. Script the probe cell's runs
+  with `_stub_probe_gates(gate_results=...)`. The first entry is its own
+  baseline run, collecting all three names. Each later entry is one
+  probe's run. Read the REBUT prompt from `cell.turns`.
+- The three collections differ so that two wrong versions each turn one
+  `killed` into `survived`. This is worked by arithmetic, not run. The
+  design counts `{t.py::test_added, t.py::test_new}`.
+  - Head taken from the last attempt's suite, `latest.results`, in place
+    of the probe cell's baseline run. The counted set is
+    `{t.py::test_added}`. The `t.py::test_new` finding matches no counted
+    name. Its failures are names the probed run collected, so it reads
+    `survived`.
+  - `base_results` taken from `latest.results`. The counted set is
+    `{t.py::test_new}`, and the `t.py::test_added` finding reads
+    `survived` the same way.
+- The attempts add one name over the base, as the prototype's attempts
+  below did, and those reported `revert=skip`. `census` sees no removal.
+  `_spec()` declares no acceptance, so `criteria` has no witness to read.
+- An earlier arrangement was measured on a prototype. There every attempt
+  and the probe cell collected `t.py::test_old` and `t.py::test_new`, with
+  two findings. The attempts reported
+  `revert=skip`, not an abort, and the task reached `REBUTTING` with
+  `probes: 1 survived, 1 killed, 0 unproven`. The arrangement above adds
+  a name and a finding to it and is not measured.
+- Reviewer-only evidence, which a cell cannot open: that prototype sat on
+  the host, outside the tree, at
   `/private/tmp/claude-502/-Users-jm-Code-saffron/bda640fb-4a55-472f-bdc2-c6b44e02d13f/scratchpad/proto`.
-  Its `tests/test_session.py` ends with `test_proto_c4`, `test_proto_c5`
-  and `test_proto_c5_uncollected`. `PROTO_WRONG` in the environment selects
-  a wrong version. The rerun gave this table. Each cell is that test's
+  It no longer exists there. Its `tests/test_session.py` ended with
+  `test_proto_c4`, `test_proto_c5` and `test_proto_c5_uncollected`.
+  `PROTO_WRONG` in the environment selected a wrong version. The rerun gave
+  this table, under the earlier arrangement. Each cell is that test's
   result.
 
   | wrong version | c4 | c5 | c5, uncollected code |
@@ -339,6 +368,10 @@ notices.
   | `None` from `added_tests` as `frozenset()` | pass | fail | pass |
   | `counted=None` read as empty | pass | fail | pass |
   | `uncounted` left out of `probes.json` | fail | fail | pass |
+
+  The c4 column still holds under the new arrangement, by arithmetic. Every
+  head name counted makes the survivor read `killed`. The probe cell's run
+  against itself counts nothing, so both `killed` findings read `survived`.
 
 - The last column is why criterion 5 needs a collected code. With a failure
   whose code the probe cell's runs did not collect, both wrong versions
@@ -358,6 +391,8 @@ notices.
 - `added_tests` computed from the probe cell's run against itself, or
   every head name passed as `counted`.
 - `base_results` is `latest.results`, the last attempt's suite.
+- The head collection taken from `latest.results` in place of the probe
+  cell's baseline run. Only criterion 4's third collection kills it.
 - A `None` from `added_tests` turned into `frozenset()` in the session.
 - Any run with an unmatched failure read as `unproven`, or `uncounted`
   keeping only the first code.
