@@ -231,6 +231,10 @@ consumed name, which a cell cannot write.
 **b-cde96b**. Baseline subtraction hid a `preserves` mutant that survived at
 base on `SA-0127`. The second is the by-hand half of run 15's merges.
 
+**Placed 2026-09-23**, from asking whether to adopt Pydantic AI: **b-4e0868**.
+The pinned SDK can constrain the extraction turn to a schema. Items 42 and 60
+lost $6.20 to the shapes it rules out. A spike in a cell comes before any spec.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
