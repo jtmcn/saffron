@@ -28,6 +28,9 @@ factory:Rebuttal a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "rebut
 
 factory:Batch owl:disjointWith factory:Run .
 
+factory:SpecLoop a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "spec loop" .
+factory:SpecLoop owl:disjointWith factory:Batch, factory:Task .
+
 ## Entities
 
 factory:Spec               a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "spec" .

@@ -305,6 +305,53 @@ def test_a_delegate_acts_for_the_operator_never_as_one_nor_in_an_attempt(
     assert found == components, text
 
 
+_LOOP = (
+    ":d a factory:Delegate ; prov:actedOnBehalfOf :operator . :l a factory:SpecLoop ;"
+)
+
+
+@pytest.mark.parametrize(
+    ("graph", "components"),
+    [
+        (f"{_LOOP} prov:wasAssociatedWith :d .", set()),
+        (f"{_LOOP} prov:qualifiedAssociation [ prov:agent :d ] .", set()),
+        (":l a factory:SpecLoop .", {SH.QualifiedMinCountConstraintComponent}),
+        (
+            ":l a factory:SpecLoop ; prov:wasAssociatedWith :operator .",
+            {SH.QualifiedMinCountConstraintComponent},
+        ),
+        (
+            ":l a factory:SpecLoop ; prov:qualifiedAssociation [ prov:agent :operator ] .",
+            {SH.QualifiedMinCountConstraintComponent},
+        ),
+        (
+            f"{_LOOP} prov:wasAssociatedWith :d . :l a factory:Batch ; factory:budgetUsd 50.0 .",
+            {SH.NotConstraintComponent},
+        ),
+        (
+            f"{_LOOP} prov:wasAssociatedWith :d . :l a factory:Task ; "
+            "factory:endedInState factory:MERGED ; factory:riskTier factory:standard .",
+            {SH.NotConstraintComponent},
+        ),
+    ],
+    ids=[
+        "associated",
+        "qualified",
+        "no-agent",
+        "operator-only",
+        "operator-only-qualified",
+        "is-batch",
+        "is-task",
+    ],
+)
+def test_a_spec_loop_is_a_delegates_work_and_never_a_batch_or_a_task(
+    graph, components, shapes_graph
+):
+    conforms, found, text = _components(graph, shapes_graph)
+    assert conforms == (not components), text
+    assert found == components, text
+
+
 _IMPL = ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :operator ."
 _WROTE_DIFF = f":df a factory:Diff . {_ATTEMPT} prov:generated :df ;"
 _PROPOSED = f":sp a factory:ScopeProposal . {_ATTEMPT} prov:generated :sp ;"

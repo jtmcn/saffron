@@ -29,6 +29,7 @@ def test_vendored_vocabularies_parse(path):
         ("Batch", "http://www.w3.org/ns/prov#Activity"),
         ("Attempt", "http://www.w3.org/ns/prov#Activity"),
         ("GateSuite", "http://www.w3.org/ns/prov#Activity"),
+        ("SpecLoop", "http://www.w3.org/ns/prov#Activity"),
         ("Spec", "http://www.w3.org/ns/prov#Entity"),
         ("PullRequest", "http://www.w3.org/ns/prov#Entity"),
         ("Plan", "http://www.w3.org/ns/prov#Plan"),
