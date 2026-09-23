@@ -195,20 +195,46 @@ def in_scope(path: str) -> bool:
     return path in ROOT_FILES or path.startswith(INCLUDED_DIRS)
 
 
-def _comment_blocks(text: str) -> list[Hit]:
-    """Runs of full-line comments longer than `COMMENT_LIMIT`. `tokenize`, not a
-    regex, so a `#` inside a string is not a comment."""
-    lines = []
+def _comments(text: str) -> list[tokenize.TokenInfo] | None:
+    """Every comment in `text` but a shebang. `tokenize`, not a regex, so a `#`
+    inside a string is not a comment. `None` when `text` does not tokenize."""
     try:
-        for token in tokenize.generate_tokens(io.StringIO(text).readline):
-            if (
-                token.type == tokenize.COMMENT
-                and not token.line[: token.start[1]].strip()
-                and not token.string.startswith("#!")
-            ):
-                lines.append((token.start[0], token.string))
-    except (tokenize.TokenError, SyntaxError):
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, SyntaxError, ValueError):
+        return None
+    return [
+        t
+        for t in tokens
+        if t.type == tokenize.COMMENT and not t.string.startswith("#!")
+    ]
+
+
+_DOCUMENTED = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+
+
+def _documented(text: str) -> list[Any] | None:
+    """Every module, function and class in `text` with a docstring. `None` when
+    `text` does not parse."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, _DOCUMENTED)
+        and ast.get_docstring(node, clean=False) is not None
+    ]
+
+
+def _comment_blocks(text: str) -> list[Hit]:
+    """Runs of full-line comments longer than `COMMENT_LIMIT`."""
+    comments = _comments(text)
+    if comments is None:
         return []  # unparseable Python is the `lint` gate's to report
+    lines = [
+        (t.start[0], t.string) for t in comments if not t.line[: t.start[1]].strip()
+    ]
     found, run = [], []
     for number, comment in [*lines, (-1, "")]:
         if run and number != run[-1][0] + 1:
@@ -221,13 +247,9 @@ def _comment_blocks(text: str) -> list[Hit]:
 
 def _long_docstrings(text: str) -> list[Hit]:
     """Function, class and test docstrings longer than `DOCSTRING_LIMIT` lines."""
-    try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError):
-        return []  # unparseable Python is the `lint` gate's to report
     found = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+    for node in _documented(text) or []:
+        if isinstance(node, ast.Module):
             continue
         doc = ast.get_docstring(node, clean=False)
         if doc is not None and doc.count("\n") + 1 > DOCSTRING_LIMIT:
@@ -240,35 +262,32 @@ def _long_docstrings(text: str) -> list[Hit]:
 def _python_prose(text: str) -> str | None:
     """The comments and docstrings of `text`, at their own offsets, with the
     code blanked. `None` when `text` does not parse, which `lint` reports."""
+    comments, documented = _comments(text), _documented(text)
+    if comments is None or documented is None:
+        return None
+    # Split as `tokenize` reads, since `str.splitlines` also breaks on a form feed.
+    lines = io.StringIO(text).readlines()
     starts = [0]
-    for line in text.splitlines(keepends=True):
+    for line in lines:
         starts.append(starts[-1] + len(line))
+
+    def offset(lineno: int, col: int) -> int:
+        # `ast` columns count UTF-8 bytes, and the slice counts characters.
+        return starts[lineno - 1] + len(lines[lineno - 1].encode()[:col].decode())
+
     kept = list(_spaces(text))
 
     def keep(start: int, end: int, body: str) -> None:
         kept[start:end] = _spaces(text[start:end])
         kept[start : start + len(body)] = body
 
-    try:
-        for token in tokenize.generate_tokens(io.StringIO(text).readline):
-            if token.type == tokenize.COMMENT and not token.string.startswith("#!"):
-                start = starts[token.start[0] - 1] + token.start[1]
-                keep(start, start + len(token.string), " " + token.string[1:])
-        tree = ast.parse(text)
-    except (tokenize.TokenError, SyntaxError, ValueError):
-        return None
-    for node in ast.walk(tree):
-        if not isinstance(
-            node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-        ):
-            continue
-        first = node.body[0] if node.body else None
-        if ast.get_docstring(node, clean=False) is None or first is None:
-            continue
-        if first.end_lineno is None or first.end_col_offset is None:
-            continue
-        start = starts[first.lineno - 1] + first.col_offset
-        end = starts[first.end_lineno - 1] + first.end_col_offset
+    for token in comments:
+        start = starts[token.start[0] - 1] + token.start[1]
+        keep(start, start + len(token.string), " " + token.string[1:])
+    for node in documented:
+        first = node.body[0]
+        start = offset(first.lineno, first.col_offset)
+        end = offset(first.end_lineno, first.end_col_offset)
         # The quotes and any prefix are not prose. The escapes stay as written.
         keep(start, end, _QUOTES.sub(_blank, text[start:end]))
     return "".join(kept)
@@ -448,24 +467,20 @@ def _avoided(text: _Text) -> list[Hit]:
     return found
 
 
+def _words(text: _Text, path: str, gate: str, root: Path) -> list[Hit]:
+    return _style(text, path, root) if gate == "prose" else _avoided(text)
+
+
 def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     """Every hit `gate` reports for `text`, read as the file at `path`."""
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
     if path.endswith(".py"):
         body = _python_prose(text)
-        words: list[Hit] = []
-        if body is not None:
-            prepared = _Text(_prepare(body))
-            words = (
-                _style(prepared, path, root) if gate == "prose" else _avoided(prepared)
-            )
-        if gate != "prose":
-            return sorted(words, key=lambda f: (f.line, f.code))
-        return sorted(
-            _comment_blocks(text) + _long_docstrings(text) + words,
-            key=lambda f: (f.line, f.code),
-        )
+        found = [] if body is None else _words(_Text(_prepare(body)), path, gate, root)
+        if gate == "prose":
+            found += _comment_blocks(text) + _long_docstrings(text)
+        return sorted(found, key=lambda f: (f.line, f.code))
     try:
         rendered = _rendered(text, path, root)
     except ValueError as exc:
@@ -476,8 +491,7 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
         rendered = []
     for start, end in rendered:
         text = text[:start] + _spaces(text[start:end]) + text[end:]
-    prepared = _Text(_prepare(text))
-    found = _style(prepared, path, root) if gate == "prose" else _avoided(prepared)
+    found = _words(_Text(_prepare(text)), path, gate, root)
     return sorted(found, key=lambda f: (f.line, f.code))
 
 
@@ -496,7 +510,7 @@ def _listed(root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-# ponytail: every hit is one failure row per suite result (about 4,800 here
+# ponytail: every hit is one failure row per suite result (about 11,000 here
 # today), so rows grow with the prose; the ceiling is the ledger's size.
 # ponytail: identity includes the file, so an in-scope rename reads every hit
 # as new and fails `prose`, while `hooks/prose_limit.py` follows renames.

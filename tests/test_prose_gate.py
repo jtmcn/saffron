@@ -272,9 +272,9 @@ def test_a_mangled_closed_set_fails_rather_than_errors(tmp_path):
     result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
     assert result.status == "fail", result.summary
     # The copied `spans.py` is in scope for the Python rules, which this does not test.
-    assert [(f.file, f.code) for f in result.failures if f.file == "CONTEXT.md"] == [
-        ("CONTEXT.md", "rendered-span")
-    ]
+    assert [
+        (f.file, f.code) for f in result.failures if f.file != "ontology/spans.py"
+    ] == [("CONTEXT.md", "rendered-span")]
 
 
 def test_prose_errors_rather_than_passes_when_nothing_is_in_scope(tmp_path):
@@ -464,7 +464,7 @@ def _python_codes(text: str) -> list[tuple[int, str]]:
 
 
 def test_word_rules_read_python_comments_and_docstrings_but_not_strings():
-    # Runs 11 to 14: every Standards seat found em-dashes the gate passed (b-440f17).
+    # Runs 11 to 13: every Standards seat found em-dashes the gate passed (b-440f17).
     text = (
         '"""A module \u2014 dashed."""\n'
         "x = 1  # a; b\n"
@@ -483,7 +483,42 @@ def test_a_long_sentence_in_a_docstring_is_a_hit_on_its_first_line():
 
 
 def test_a_python_file_that_does_not_parse_gets_no_word_rules():
-    assert _python_codes("def f(:\n    # a; b\n") == []
+    assert _python_codes("x = = 1  # a; b\n") == []
+
+
+def test_a_docstring_with_non_ascii_text_ends_at_its_closing_quotes():
+    # `ast` counts columns in UTF-8 bytes, so a character count ran into the next line.
+    text = 'def f():\n    """' + "\u00e9" * 12 + ' ok."""\nx = 1; y = 2\n'
+    assert _python_codes(text) == []
+
+
+def test_a_form_feed_does_not_shift_a_comment_off_its_line():
+    text = "\x0c" * 20 + "x = 1\ny = 2  # a; b\n"
+    assert _python_codes(text) == [(2, "semicolon")]
+
+
+def test_an_em_dash_added_to_a_python_comment_is_new_at_head():
+    from saffron.gates.baseline import subtract_baseline
+    from saffron.gates.contract import Failure, GateResult
+
+    prose = _prose()
+
+    def result(text: str) -> GateResult:
+        failures = [
+            Failure(
+                file="saffron/x.py",
+                line=f.line,
+                code=f.code,
+                message=prose.MESSAGES[f.code],
+            )
+            for f in prose.check(text, "saffron/x.py", "prose", root=REPO)
+        ]
+        return GateResult(gate="prose", status="fail", tool="t", failures=failures)
+
+    base = [result("x = 1  # one \u2014 old\n")]
+    head = [result("y = 0\nx = 1  # one \u2014 old\nz = 2  # two \u2014 new\n")]
+    added = subtract_baseline(head, base)
+    assert [(n.failure.line, n.failure.code) for n in added] == [(3, "em-dash")]
 
 
 def test_scope_reaches_python_a_cell_writes_and_leaves_evidence_scripts():

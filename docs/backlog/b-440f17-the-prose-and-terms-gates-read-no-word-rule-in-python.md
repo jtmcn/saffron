@@ -55,5 +55,12 @@ A hunk that adds an em-dash to a new comment fails the gate.
 - 2026-09-22: done by hand, since `.saffron/**` is `protected`, so no cell can
   touch the gate. `check` now runs the word rules and `terms` over a `.py`
   file's comments and docstrings, with the code blanked. Strings that are not
-  docstrings stay out. The tree's `prose` hits rose from 5683 to 10971, and the
-  base subtraction carries them.
+  docstrings stay out. The tree's `prose` hits rose from 5683 to 10970, and the
+  baseline subtraction carries them.
+- 2026-09-22: review round. Every style rule reads Python, `filler` included,
+  which takes that rule from 178 hits to 532. `filler` is not on the list
+  `CLAUDE.md` names for new comments, but Markdown gets it and a comment is the
+  same prose. The one new `terms` hit, `saffron/intake.py:133`, is a false
+  positive: "Never a ticket" names the avoided word rather than using it. A
+  docstring column counts UTF-8 bytes, so a non-ASCII docstring read on into the
+  next line of code until the review fixed it.
