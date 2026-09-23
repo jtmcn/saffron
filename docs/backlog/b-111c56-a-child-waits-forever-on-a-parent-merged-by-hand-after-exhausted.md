@@ -4,7 +4,7 @@ title: A child waits on a parent that ended `EXHAUSTED` and then merged by hand,
 status: open
 tier: 3
 filed: 2026-09-22
-specs: [SA-0123, SA-0124]
+specs: [SA-0123, SA-0124, SA-0131]
 prs: [451, 459]
 commits: []
 cites: [§5.7]
