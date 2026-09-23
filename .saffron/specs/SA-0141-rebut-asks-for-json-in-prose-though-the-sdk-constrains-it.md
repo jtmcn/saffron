@@ -85,7 +85,8 @@ acceptance:
       records are the extraction turn's `structured_output`. The witness's
       extraction turn carries text holding a valid `<output>` block that
       argues finding 1, and a `structured_output` that marks it `fixed`. The
-      recorded rebuttal is `fixed`.
+      agent is called three times, and the recorded rebuttals are exactly one,
+      marked `fixed`.
     witness: tests/test_rebut.py::test_the_rebuttal_extraction_turn_asks_for_the_schema_and_records_its_structured_output
   - claim: >-
       Each verdict session is sent `output_format` equal to
@@ -94,33 +95,40 @@ acceptance:
       `review.REVIEW_TOOLS`. Its verdicts are its `structured_output`. The
       witness drives one blocker per lens in `review.LENSES`, so three verdict
       sessions. Each one's text holds a valid `<output>` block confirming its
-      finding, and its `structured_output` withdraws it. Every recorded
-      verdict is `withdrawn`.
+      finding, and its `structured_output` withdraws it. The agent is called
+      for exactly three verdict sessions, and the recorded verdicts are three,
+      each `withdrawn`.
     witness: tests/test_rebut.py::test_each_verdict_session_asks_for_the_schema_and_records_its_structured_output
   - claim: >-
       A rebuttal extraction turn whose `structured_output` is not a value
       `_Rebuttals` accepts records no rebuttal, and its error starts
-      `not the schema`. The witness drives three such turns, each with subtype
-      `success`, no `is_error`, and text holding a valid `<output>` block. Their
-      values are `None`, an entry whose `action` is `"maybe"`, and a valid
-      payload serialised to a JSON string. HEAD does not move in any of them,
-      so REBUT ends `REBUTTING` with that error in its `why`.
+      `not the schema`. The witness makes three `run_rebut` calls, one turn
+      each, with subtype `success`, no `is_error`, and text holding a valid
+      `<output>` block that argues finding 1. Their values are `None`, an
+      entry whose `action` is `"maybe"`, and a valid payload serialised to a
+      JSON string. HEAD does not move in any of them. Each call makes exactly
+      two agent calls, records no rebuttal, and ends `REBUTTING` with that
+      error in its `why`.
     witness: tests/test_rebut.py::test_a_rebuttal_turn_without_a_valid_structured_output_is_not_the_schema
   - claim: >-
       A verdict session whose `structured_output` is not a value `_Verdicts`
       accepts has no verdict, and its error starts `not the schema`. The
-      witness drives three such sessions through `run_rebut`, each with subtype
-      `success`, no `is_error`, and text holding a valid `<output>` block. Their
-      values are `None`, an entry whose `verdict` is `"maybe"`, and a valid
-      payload serialised to a JSON string. REBUT ends `REBUTTING` each time.
+      witness makes three `run_rebut` calls, each with one blocker, HEAD
+      moved, and a valid structured rebuttal marking it `fixed`. Each verdict
+      session has subtype `success`, no `is_error`, and text holding a valid
+      `<output>` block confirming the finding. Their values are `None`, an
+      entry whose `verdict` is `"maybe"`, and a valid payload serialised to a
+      JSON string. Each call makes exactly three agent calls. Its one lens
+      records no verdict and an error starting `not the schema`, and REBUT
+      ends `REBUTTING`.
     witness: tests/test_rebut.py::test_a_verdict_session_without_a_valid_structured_output_is_not_the_schema
   - claim: >-
       Neither REBUT turn asks for an `<output>` block. The witness reads
       `rebut.EXTRACT_PROMPT`, `rebut.VERDICT_TURN_PROMPT` and the
       `rebut-verdict.md` template. None holds `<output>`, the phrase
       `output block` in any case, or `artifacts.EXTRACTION_PROMPT`.
-      `rebut.EXTRACT_PROMPT` still holds `Do not change files.` and
-      `Do not run commands.`
+      `rebut.EXTRACT_PROMPT` holds `Do not change files.` and
+      `Do not run commands.`, each spelled on one line.
     witness: tests/test_context.py::test_rebuts_prompts_ask_for_no_output_block
   - claim: >-
       A lens that verdicts fewer blockers than it was asked about has still
@@ -251,6 +259,19 @@ this slice accepts.
 still delivered. Whether a turn ceiling can cut the tool call is not
 measured. If it does, the value is null and criterion 5 or 6 names the path.
 
+**A large result event in the log.** `EventLog.append` bounds an event whose
+JSON runs past `BOUND_CHARS`, 8192 characters (`saffron/events.py:61`,
+`:418-426`). A result event carrying a large value is then stored as a
+bounded line in `events.jsonl`. That line loses the turn's cost and token
+counts, and `saffron watch` loses its summary. The host reads the event
+before it emits it (`saffron/phases/implement.py:251-260`). So the value
+the host validates is whole. That is a ceiling this slice accepts.
+
+**The schema beside a system prompt file.** The spike sent string system
+prompts. After `SA-0140`, the runner hands the SDK a file reference. Whether
+`output_format` holds beside it is not measured. The operator's first live
+REBUT settles it.
+
 ## Notes for the agent
 
 **New code, so witnesses and no mutants.** The event key, the
@@ -281,13 +302,21 @@ also edits `run_verdict`, to wrap the `emit` it passes. Keep that wrapper.
 
 **The prompts.** Take the `{extraction}` slot out of `rebut-extract.md` and
 `verdict.md`. In its place, `rebut-extract.md` asks for the answer in the
-required structured format. It keeps `Do not change files.` and
-`Do not run commands.` The rebuttal turn resumes a session holding
-`Write`, `Edit` and `Bash`. In `rebut-verdict.md`, rewrite "What to emit" the
-same way. Keep its field list, its one-entry-per-finding rule, and the
-sentence about the disagreements table. `tests/test_context.py:387-388`
-reads that sentence in both files. Keep the `## The rebuttal` heading,
-which `tests/test_session.py` uses to find the verdict prompt.
+required structured format. It spells `Do not change files.` and
+`Do not run commands.` each on one line. `extraction.md` wraps the first
+across a line break, so a copy of its text fails criterion 7. The rebuttal
+turn resumes a session holding `Write`, `Edit` and `Bash`. In
+`rebut-verdict.md`, rewrite "What to emit" the same way. Keep these:
+
+- its field list and its one-entry-per-finding rule.
+- the sentence about the disagreements table, which
+  `tests/test_context.py:387-388` reads in both files.
+- the clause saying the diff under "The diff, after the rebuttal" below is
+  the change as it now stands
+  (`saffron/agents/prompts/rebut-verdict.md:49-51`).
+  `tests/test_rebut.py:505-509` pins it, guarding `SA-0091`'s fix.
+- the `## The rebuttal` heading, which `tests/test_session.py` uses to find
+  the verdict prompt.
 
 **Existing tests the change breaks, which you update.** Each feeds REBUT's
 payload as an `<output>` block in `text`. Move it onto `structured_output`.
@@ -303,21 +332,67 @@ payload as an `<output>` block in `text`. Move it onto `structured_output`.
   `_scripted_agent`, around line 2396.
 - `tests/test_context.py`: drop `verdict` and `rebut-extract` from the
   parametrised list at line 445.
-- `tests/test_agent_runner.py`: the exact-keys assertion above.
+- `tests/test_agent_runner.py`: the exact-keys assertion above, and
+  `SA-0140`'s `test_a_verdict_session_that_never_started_ends_rebut_gate_error`.
+  In that test, the stub result message of the lens that returns a valid
+  verdict set carries its payload as `structured_output`. So does the
+  scripted rebuttal extraction turn. Left in text, that lens reads
+  `not the schema`, and the test stops killing SA-0140's wrong version
+  "`GATE_ERROR` that needs every lens to fail".
+
+**The completion check.** After the change, no test places a `rebuttals` or
+`verdicts` payload in text, whether through `_block`, `_CLAIMED_FIX` or a
+literal `<output>`. A payload left there often fails nothing. Run this from
+the repo root:
+
+```
+uv run python -c "import re,pathlib; pat=re.compile(r'_block\(\s*(\{\s*)?\"(rebuttals|verdicts)\"|_block\(_CLAIMED_FIX\)|<output>[^<]*(rebuttals|verdicts)'); print(*[f'{p}:{p.read_text().count(chr(10),0,m.start())+1}' for p in sorted(pathlib.Path('tests').rglob('*.py')) for m in pat.finditer(p.read_text())], sep=chr(10))"
+```
+
+At base it prints 27 lines: 23 in `tests/test_session.py`, 2 in
+`tests/test_rebut.py` and 2 in `tests/test_events.py`. After the change,
+every line it prints falls inside the witnesses of criteria 3 to 6. Those
+place a conflicting block in text on purpose.
 
 **Witness 1.** Build each message as a `SimpleNamespace`, as the tests
 beside it do. Feed the first event to `run_agent` with a stream double that
 calls `on_line` with `json.dumps(event)`. `_stream` in
 `tests/test_implement.py` is one to copy. Assert the key with `in` before
-reading it, since `.get` passes a runner that omits it. Import nothing new at module
-scope. A name the change adds, imported there, turns the reverted run into a
-collection error, which `revert` reads as `skip`.
+reading it, since `.get` passes a runner that omits it.
+
+**Nothing new at module scope** in `tests/test_agent_runner.py`,
+`tests/test_implement.py`, `tests/test_rebut.py` or `tests/test_context.py`.
+That covers an import of a name the change adds, a module-level
+`AttemptResult(structured_output=...)`, and a constant built from one. Each
+turns the reverted run into a collection error, which `revert` reads as
+`skip` (`saffron/gates/core/revert.py:276-296`). Build them inside the test
+or its helpers.
 
 **Witnesses 3 to 6.** Drive `run_rebut` through `_run`, and read each
 call's options off `record`. For witness 4, compare each verdict call's
 options, minus `output_format`, to `implement.agent_options` built with that
 call's own `system_prompt`, `max_turns=20`, `budget_usd=2.0` and
-`review.REVIEW_TOOLS`.
+`review.REVIEW_TOOLS`. Witness 6 keeps `_run`'s default `moved=True`. With
+HEAD unmoved and a `fixed` rebuttal, `run_rebut` returns before any verdict
+session (`saffron/phases/rebut.py:514-518`). It then ends `REBUTTING` whatever
+the verdict code does.
+
+**Measured against a prototype on 2026-09-23.** The operator's delegate
+built a minimal change in a scratch worktree. It wrote witnesses 3 to 6 as
+their criteria describe them. With `rebut.py` and `implement.py` reverted, all
+four failed. Each wrong version below then ran against them:
+
+| Wrong version | Killed by |
+|---|---|
+| a null value read as a cue to parse the block | 5, 6 |
+| a block preferred over a value beside it | 3, 4, 5, 6 |
+| a string value parsed as JSON | 5, 6 |
+| `subtype == "success"` read as the value arriving | 5, 6 |
+| `rebut.py` as at base | 3, 4, 5, 6 |
+
+A variant of witness 6 with HEAD unmoved passed every one of them. That is
+the early-return route above. Witness 5 exercises only the rebuttal side and
+witness 6 only the verdict side, so each kill is that side's.
 
 **Wrong versions the witnesses must kill:**
 
