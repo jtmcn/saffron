@@ -271,8 +271,8 @@ def test_a_mangled_closed_set_fails_rather_than_errors(tmp_path):
     shutil.copy(REPO / "ontology" / "spans.py", tmp_path / "ontology" / "spans.py")
     result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
     assert result.status == "fail", result.summary
-    # The copied `spans.py` is in scope for `comment-block`, which this does not test.
-    assert [(f.file, f.code) for f in result.failures if f.code != "comment-block"] == [
+    # The copied `spans.py` is in scope for the Python rules, which this does not test.
+    assert [(f.file, f.code) for f in result.failures if f.file == "CONTEXT.md"] == [
         ("CONTEXT.md", "rendered-span")
     ]
 
@@ -454,8 +454,36 @@ def test_a_hash_in_a_string_or_after_code_is_not_a_comment_line():
     assert _comment_hits(text) == []
 
 
-def test_terms_reads_no_python():
-    assert _comment_hits("x = 1  # The agent runs in a sandbox.\n", gate="terms") == []
+def test_terms_reads_a_python_comment():
+    assert _comment_hits("x = 1  # The agent runs in a sandbox.\n", gate="terms") == [1]
+
+
+def _python_codes(text: str) -> list[tuple[int, str]]:
+    found = _prose().check(text, "saffron/x.py", "prose", root=REPO)
+    return [(f.line, f.code) for f in found]
+
+
+def test_word_rules_read_python_comments_and_docstrings_but_not_strings():
+    # Runs 11 to 14: every Standards seat found em-dashes the gate passed (b-440f17).
+    text = (
+        '"""A module \u2014 dashed."""\n'
+        "x = 1  # a; b\n"
+        "def f():\n"
+        '    """It might work."""\n'
+        '    s = "not \u2014 a docstring; nor this"\n'
+        "    return s\n"
+    )
+    assert _python_codes(text) == [(1, "em-dash"), (2, "semicolon"), (4, "hedge")]
+
+
+def test_a_long_sentence_in_a_docstring_is_a_hit_on_its_first_line():
+    words = " ".join(["word"] * 26)
+    text = f'def f():\n    """{words[:60]}\n    {words[60:]}."""\n'
+    assert _python_codes(text) == [(2, "sentence-length")]
+
+
+def test_a_python_file_that_does_not_parse_gets_no_word_rules():
+    assert _python_codes("def f(:\n    # a; b\n") == []
 
 
 def test_scope_reaches_python_a_cell_writes_and_leaves_evidence_scripts():

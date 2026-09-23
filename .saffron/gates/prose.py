@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The `prose` and `terms` gates: Saffron's house style and vocabulary over its living Markdown,
-and the length of the comments in its Python.
+and over the comments and docstrings of its Python.
 
 Design: `docs/superpowers/specs/2026-09-16-prose-ratchet-design.md`. Parsing
 adapts `strip_code` and `sentences` from AminBlg/SimpleEnglish
@@ -141,6 +141,7 @@ _QUOTED = re.compile(r'"[^"\n]*(?:\n[^"\n]*)?"|“[^”\n]*(?:\n[^”\n]*)?”')
 _BREAK = re.compile(r"(?<=[.!?:])\s+|\n[ \t]*\n\s*|\n(?=[ \t]*(?:[-*+]|\d+\.)[ \t])")
 _ITEM = re.compile(r"[ \t]*(?:[-*+]|\d+\.)[ \t]+(?:\[[ xX]\][ \t]+)?")
 _BOLD_TERM = re.compile(r"^\*\*([^*]+)\*\*", re.M)
+_QUOTES = re.compile(r"""\A[rRuUbB]*(?:\"\"\"|'''|"|')|(?:\"\"\"|'''|"|')\Z""")
 
 # Phrase -> (the Saffron term, its CONTEXT.md section). An entry is quoted on
 # that term's _Avoid_ line, and every hit in scope was a misuse when it entered.
@@ -234,6 +235,43 @@ def _long_docstrings(text: str) -> list[Hit]:
             excerpt = _excerpt(f"{node.name}: {first}")
             found.append(Hit(node.body[0].lineno, "docstring-length", excerpt))
     return found
+
+
+def _python_prose(text: str) -> str | None:
+    """The comments and docstrings of `text`, at their own offsets, with the
+    code blanked. `None` when `text` does not parse, which `lint` reports."""
+    starts = [0]
+    for line in text.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    kept = list(_spaces(text))
+
+    def keep(start: int, end: int, body: str) -> None:
+        kept[start:end] = _spaces(text[start:end])
+        kept[start : start + len(body)] = body
+
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type == tokenize.COMMENT and not token.string.startswith("#!"):
+                start = starts[token.start[0] - 1] + token.start[1]
+                keep(start, start + len(token.string), " " + token.string[1:])
+        tree = ast.parse(text)
+    except (tokenize.TokenError, SyntaxError, ValueError):
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+        ):
+            continue
+        first = node.body[0] if node.body else None
+        if ast.get_docstring(node, clean=False) is None or first is None:
+            continue
+        if first.end_lineno is None or first.end_col_offset is None:
+            continue
+        start = starts[first.lineno - 1] + first.col_offset
+        end = starts[first.end_lineno - 1] + first.end_col_offset
+        # The quotes and any prefix are not prose. The escapes stay as written.
+        keep(start, end, _QUOTES.sub(_blank, text[start:end]))
+    return "".join(kept)
 
 
 def _spaces(text: str) -> str:
@@ -415,10 +453,17 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
     if path.endswith(".py"):
+        body = _python_prose(text)
+        words: list[Hit] = []
+        if body is not None:
+            prepared = _Text(_prepare(body))
+            words = (
+                _style(prepared, path, root) if gate == "prose" else _avoided(prepared)
+            )
         if gate != "prose":
-            return []
+            return sorted(words, key=lambda f: (f.line, f.code))
         return sorted(
-            _comment_blocks(text) + _long_docstrings(text),
+            _comment_blocks(text) + _long_docstrings(text) + words,
             key=lambda f: (f.line, f.code),
         )
     try:
