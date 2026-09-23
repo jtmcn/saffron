@@ -25,7 +25,7 @@ Appendix Q moved every lens out of the implementer's container. Until rev 21
 each lens was a new conversation in the implementer's own cell.
 
 The decision is spread across §3.3, §5.5, §5.5.1, §5.6 and §11. Two rules
-live only in code. `saffron/cell/session.py` holds the budget exception, and
+live only in code. `saffron/cell/session.py` holds REBUT's budget check, and
 `saffron/phases/rebut.py` has the adequacy session answer the host's blockers.
 
 ## Decision
@@ -53,10 +53,13 @@ A finding is a claim. The host counts it only if it anchors, either inside a
 diff hunk or on a line that names an identifier the diff changed. A dropped
 finding is recorded with `anchored = false`, never deleted. The host also
 files blockers. A vacuity probe that survives promotes its finding, and a
-criterion probe that survives becomes an adequacy finding (ADR 3).
+criterion probe that survives becomes an adequacy finding (ADR 3). A
+criterion-probe session or probe cell that errors leaves its claim `unproven`,
+and the task goes on.
 
 Severity has three levels. A `blocker` goes to REBUT. A `concern` reaches the
-operator. A `note` appears in the pull request and is counted nowhere.
+operator. A `note` appears in the pull request and is counted in no severity
+total.
 
 There is no vote. Any one anchored blocker goes to REBUT, unless the task is
 already over its budget. No ceiling check stops REVIEW. REBUT checks the spend
@@ -75,7 +78,7 @@ verdict session that errors halts the task at `REBUTTING`.
 
 Any confirmed blocker reaches `READY_FOR_REVIEW`, whether the implementer
 argued against it or fixed it and stayed green. So do a withdrawn set and a
-green fix. A person adjudicates a confirmed blocker in the pull request.
+green fix. The operator adjudicates a confirmed blocker in the pull request.
 
 ## Principles
 
@@ -110,9 +113,9 @@ green fix. A person adjudicates a confirmed blocker in the pull request.
   budget check sends a task over its ceiling to `EXHAUSTED` with no rebuttal.
   That also narrows ADR 3's rule that a surviving probe reaches REBUT. §4.3's
   rule that every phase is bounded on spend has one too, since REVIEW is not.
-  Only a comment in `saffron/cell/session.py` states either. §5.5.1 cites §5.5
-  for REVIEW's exemption, and §5.5 has no such sentence (backlog item
-  b-26315b).
+  §5.5.1 states REVIEW's exemption but cites a §5.5 sentence that does not
+  exist. Only a comment in `saffron/cell/session.py` states REBUT's check
+  (backlog item b-26315b).
 - **30** departs. At least seven sentences still call the lenses disjoint,
   where L measured an overlap:
   - §4.6, §5.5 and §7's plausible-but-wrong row in `DESIGN.md`.
@@ -122,16 +125,20 @@ green fix. A person adjudicates a confirmed blocker in the pull request.
   - Backlog item 79.
 
   Backlog item b-ac97c0 owns these.
-- **34** upholds. A lens that errors stops the task, so an absent review never
-  reads as a clean one.
-- **36** upholds. A verdict set missing a blocker is an error, not a partial
-  result read as withdrawals.
+- **34** departs. A lens that errors stops the task, so an absent review never
+  reads as a clean one. A criterion-probe session that errors does not. Its
+  claim is filed `unproven`, and the watch line counts it as unnamed, the same
+  as a session that named no edit (backlog item b-7c88f8).
+- **36** departs. A verdict set missing a blocker is an error, not a partial
+  result read as withdrawals. A probe cell that errors part-way leaves every
+  later claim `unproven`, and the task reaches `READY_FOR_REVIEW` on the
+  partial set (backlog item b-7c88f8).
 - **42** upholds. The budget exit ends a reviewed diff with no pull request,
   and the pushed branch keeps it readable.
 - **48** upholds. The lenses look for what the gates did not check, which is
   why the critic runs after the gates pass.
-- **50** upholds. The critic does not replace the operator. A person merges,
-  and a person adjudicates an argued blocker.
+- **50** upholds. The critic does not replace the operator. The operator
+  merges and adjudicates an argued blocker.
 - **51** departs. The no-vote rule rests on disjoint lenses, and L measured two
   lenses filing one finding. No production check reads overlap. The scoring
   harness keeps one finding per defect per run, so it shows overlap only across
@@ -141,13 +148,14 @@ green fix. A person adjudicates a confirmed blocker in the pull request.
 - **55** upholds. Four routes reach `READY_FOR_REVIEW`. The fourth is a fix
   that committed and stayed green, whose blocker the verdict still confirmed.
   `rebuttal.json` tells the routes apart, and the sustained blockers alone do
-  not. Three routes share `EXHAUSTED` at REBUT. Only the budget exit writes no
+  not. Three routes share `EXHAUSTED` at REBUT, and item 132 owns the
+  definition that covers only one. Only the budget exit writes no
   `rebuttal.json`, and it emits a `Budget` event. §3.3 draws only the red
   re-run. The three halts sit in states `saffron/reconcile.py` counts as in
   flight, so a batch scan reads a deliberate halt as a crash. Item 120 owns
   that for `REBUTTING`, and backlog item b-032c3e for `REVIEWING`.
 - **57** upholds. This ADR condenses §3.3, §5.5, §5.5.1, §5.6 and §11. It adds
-  two rules no section states. The budget exception is in
+  two rules no section states. REBUT's budget check is in
   `saffron/cell/session.py`. The adequacy session answering host blockers is a
   stopgap that backlog item b-9ed36d holds open.
 - **58** upholds. A lens in the implementer's cell was a fresh conversation on
@@ -167,8 +175,9 @@ to argue or fix and one to extract. REBUT's budget is inherited as a
 remainder, not decided, and backlog item 120 holds that open.
 
 Whether the critic earns its cost is to be measured, not argued. §11 asks for
-the count of blockers the operator agrees with, and nothing records it yet. It names cutting a lens whose
-count trends toward zero as an option, not a rule. `harness/lens_scoring.py`
+the count of blockers the operator agrees with, and nothing records it yet.
+It names cutting a lens whose count trends toward zero as an option, not a
+rule. `harness/lens_scoring.py`
 scores the lenses against a fixture whose defects are declared (backlog
 item 79).
 

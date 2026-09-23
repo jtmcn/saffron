@@ -7,7 +7,7 @@ filed: 2026-09-22
 specs: []
 prs: []
 commits: []
-cites: [§4.2, §5.5]
+cites: [§4.2.1, §5.5]
 related: [120]
 ---
 
@@ -17,7 +17,7 @@ Found reviewing ADR 4, 2026-09-22.
 
 A lens that errors stops the task at `REVIEWING` on purpose, so an unrun lens
 never reads as a clean review (`saffron/phases/review.py`). `REVIEWING` is in
-`reconcile.IN_FLIGHT_STATES`, and §4.2's scan stamps an in-flight task
+`reconcile.IN_FLIGHT_STATES`, and §4.2.1's scan stamps an in-flight task
 `ORPHANED` before re-queueing it. The next queue then treats the halt as a
 crash and hands the task back out.
 
