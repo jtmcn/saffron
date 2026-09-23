@@ -80,7 +80,7 @@ acceptance:
       digests its `AgentEvent`s carry equal, in order and in number, the
       SHA-256 of each request the double received. The witness finds each
       of those session kinds among the requests by the turn prompt it
-      carries. Today no event carries a digest of any request.
+      carries. The notes name the sessions it does not drive. Today no event carries a digest of any request.
     witness: tests/test_session.py::test_every_session_a_task_starts_records_the_sha256_of_its_request
   - claim: >-
       Each task emits one `PreflightEvent` with step `claude_md`, which holds
@@ -253,7 +253,8 @@ the real `run_agent` for each scripted turn. It passes an `exec_stream`
 double that appends the stdin string it receives to that list. The double
 then feeds two lines back: a `text` event with the turn's text, and a
 `result` event built from the turn's `session_id`, `subtype`,
-`terminal_reason`, `num_turns`, `cost_usd_est` and `is_error`. Pass a
+`terminal_reason`, `num_turns` and `is_error`. The turn's `cost_usd_est`
+goes under the key `total_cost_usd`, which `run_agent` reads. Pass a
 `reap_cell` double too. A scripted `AgentFailed` that carries an
 `attempt` goes through the same route, so a turn-ceiling cut raises from
 the real `run_agent` as it would live. Any other scripted exception is
@@ -298,8 +299,14 @@ your base. Suppose a change emitted a digest only for IMPLEMENT's own
 calls in the session module. The lens, probe and rebuttal requests would
 then have none, and the in-order equality fails on it.
 
-**Criterion 3's witness** drives `_drive` three times with `capture=`, and
-selects `Preflight` events whose `step` is `claude_md`. Assert exactly one
+No cell drives the plan re-prompts (`saffron/cell/session.py:493`, `:526`),
+a lens re-prompt (`saffron/phases/review.py:268`) or the notes turn
+(`saffron/cell/session.py:2270`). Each calls the same `agent` callable, so
+criterion 1 covers them by construction.
+
+**Criterion 3's witness** drives `_drive` three times with `capture=`. Each
+cell gets its own subdirectory of `tmp_path` and its own `_stub_the_runtime`.
+The witness selects `Preflight` events whose `step` is `claude_md`. Assert exactly one
 in each cell. The first cell passes `claude_md` and `base_claude_md`
 with different text, as `tests/test_session.py:1273-1289` does. The second
 passes neither, so the stub's `file_at` returns `None`. The third passes
@@ -358,8 +365,9 @@ library and are fine.
 **Size.** The prototype measured 186 changed lines before `ruff format` and
 docstrings: 16 in source, 139 in `tests/test_session.py` and 31 in
 `tests/test_implement.py`. Formatted, with the fixture, the `_JOINED` row,
-the two `FAMILIES` rows and docstrings, expect about 330. The `feature`
-ceiling is 600, and `size` blocks at `elevated`, which
+the two `FAMILIES` rows and docstrings, expect about 330 lines. `SA-0128`
+moves `size` to tokens, with `feature` at 3000, and at its measured 4.19
+tokens a line this is about 1,400. It fits either unit, and `size` blocks at `elevated`, which
 `saffron/cell/session.py` makes this task.
 
 **Prose.** Each touched file's `prose` count must not rise. New comments and
