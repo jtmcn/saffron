@@ -41,10 +41,12 @@ max_turns: 120
 acceptance:
   - claim: >-
       `unresolved_consumes(mirror, sha, entries)` reads an entry with no
-      colon as a path. The path resolves when the tree at `sha` holds a
-      regular file, a directory or a symlink at exactly that path. A path
-      the tree does not hold is unresolved, and so is a prefix of a
-      directory's name.
+      colon as a path, and every path it is given is canonical and
+      repo-relative. The path resolves when the tree at `sha` holds a
+      regular file of mode `100644` or `100755`, a directory or a symlink
+      at that path. A path the tree does not hold is unresolved, and so is a prefix
+      of a directory's name. This claims nothing for any other spelling of
+      a path, which `SA-0135` refuses at intake.
     witness: tests/test_mirror.py::test_a_consumed_path_resolves_when_the_tree_holds_a_file_a_directory_or_a_symlink_there
   - claim: >-
       An entry `path:name` resolves when `path` at `sha` is a regular file,
@@ -104,7 +106,7 @@ changes nothing, the defect §4.2.1 names in item 18's words.
 
 This spec stacks on `SA-0129`, which the operator chose because `SA-0135`
 edits `saffron/intake.py` after it. Nothing here touches what `SA-0129`
-touches. Every sentence below about current code was read at `16065067`.
+touches. Every sentence below about current code was read at `1e543011`.
 
 **What the mirror module reads now.** Core knows git and nothing about
 languages (§2.1), and `saffron/repos/mirror.py` is where it reads the bare
@@ -140,9 +142,23 @@ for the `dead` gate until then.
   `SA-0135` wires this reader into `run_task` after `_resolve_stacked_on`
   returns (`saffron/task.py:286-294`) and before `run_one_cell`
   (`saffron/task.py:319`).
-- **Refusing a malformed entry.** Three shapes are the field's to refuse at
-  intake, in `SA-0135`. They are an absolute path, a path with a `..`
-  segment and a path ending in `/`. This reader is not asked about them.
+- **Refusing a malformed entry.** A canonical path is repo-relative. Its
+  segments are non-empty, joined by single slashes, and none is `.` or
+  `..`. `SA-0135` refuses every other entry at intake, and this reader
+  is not asked about them. The shapes it refuses are these.
+  - an empty entry
+  - an empty path, as in `:name`
+  - an empty name, as in `path:`
+  - an absolute path
+  - a bare `.`
+  - a path with a `.` segment, as in `saffron/./task.py`
+  - a path with a `..` segment, as in `saffron/../CLAUDE.md`
+  - a path with an empty segment, as in `saffron//task.py`
+  - a path ending in `/`
+
+  A trailing `/` makes `git ls-tree` list the directory's children, so the
+  reader would read the first child's mode and then a directory listing as
+  text. The Notes give what git did with each shape.
 - **The vocabulary and the refusal count.** `CONTEXT.md` has no entry for a
   consumed name, and §4.2.1 counts the refusals gate 0 makes. Both change
   with `SA-0135`, by hand.
@@ -155,7 +171,8 @@ no mutant, and `witness` will report `skip` for all six.
 **Where it goes.** Beside `file_at` in `saffron/repos/mirror.py`, with a
 docstring of ten lines or fewer. Split each entry at its first colon. Ask
 `_ls_tree_mode` first, so that a directory is answered before `file_at`
-could raise on it. Read a file or a symlink's text through `file_at`. Catch
+could raise on it. For a `path:name`, a tree's mode `040000` is
+unresolved, and every other mode goes to `file_at` for its text. Catch
 no `GitError`, because a sha the mirror lacks is an error and never an
 unresolved entry. Build the word test from the name escaped as literal
 text, bounded by a lookbehind and a lookahead over ASCII letters, digits
@@ -168,11 +185,14 @@ inside each test body, never in the module's import block at the top. With
 the source reverted, a module-scope import of it fails collection. `revert`
 reads that as `skip`, so it checks nothing.
 
-**Criterion 1's witness** commits `exact.py`, a directory `pkg` holding
-`pkg/mod.py`, and a symlink `link.py` pointing at `exact.py`. It asserts
-that `exact.py`, `pkg` and `link.py` each return an empty list. It asserts
-that `missing.py`, `pkg/missing.py` and `pk` each return themselves. A
-check that the tree lists a path starting with the entry fails it on `pk`.
+**Criterion 1's witness** commits `exact.py`, an executable `run.sh`, a
+directory `pkg` holding `pkg/mod.py`, and a symlink `link.py` pointing at
+`exact.py`. It sets `run.sh`'s mode with `os.chmod` before the commit, so
+the tree records `100755`. It asserts that `exact.py`, `run.sh`, `pkg` and
+`link.py` each return an empty list. It asserts that `missing.py`,
+`pkg/missing.py` and `pk` each return themselves. A check that the tree
+lists a path starting with the entry fails it on `pk`. A check for mode
+`100644` alone fails it on `run.sh`.
 
 **Criterion 2's witness** uses the same tree, with `run_task` as a word in
 `exact.py` and `helper` as a word in `pkg/mod.py`. `exact.py:run_task` and
@@ -202,11 +222,14 @@ These fail it:
 - the name used as a regular expression
 - a split at the last colon
 
-**Criterion 4's witness** commits `a.py` holding `first_name`, then a second
-commit that rewrites it to hold `second_name` and adds `new.py`. The mirror's
-`HEAD` is the second commit. At the first commit, `a.py:first_name`
-resolves, and `a.py:second_name` and `new.py` do not. At the second, the
-reverse holds. A reader of `HEAD` or of the default branch fails it.
+**Criterion 4's witness** commits `a.py` holding `first_name` and an
+`old.py`. A second commit rewrites `a.py` to hold `second_name`, deletes
+`old.py` and adds `new.py`. The mirror's `HEAD` is the second commit. At
+the first commit, `a.py:first_name` and `old.py` resolve, and
+`a.py:second_name` and `new.py` do not. At the second, the reverse holds.
+A reader of `HEAD` or of the default branch fails it. So does a path check
+that reads the history reaching `sha`, as `git log <sha> -- <path>` does,
+because at the second commit it still finds `old.py`.
 
 **Criterion 5's witness** passes `missing.py`, `exact.py`,
 `missing.py:run_task`, `exact.py:run_task` and `missing.py` again. It
@@ -218,19 +241,51 @@ result or a set fails it.
 `exact.py` and once with `exact.py:run_task`. Each raises `GitError`. A
 reader that reads a failed git call as an absent path fails it.
 
-**Left unclaimed, and why.** Take a `path:name` whose path is a submodule,
-a dangling symlink, or a symlink that leaves the tree. `file_at` raises
-`GitError` on each (`saffron/repos/mirror.py:247-259`). A file that is not
-UTF-8 raises from the decode. In a bare mirror, `git ls-tree` exits 128 on
-an absolute path or a `..` path. That was measured on host git 2.54.0 on
-2026-09-22, so those raise too. `SA-0135` refuses the path shapes before
-this reader sees them.
-What a non-ASCII neighbour does, and a name that starts or ends with
-punctuation, are left open, and no witness drives them.
+**What it raises, and on which inputs.** `SA-0135` maps each of these onto
+a refusal or an error, so the list is whole. Only the first has a witness.
 
-**Size.** About 40 changed lines of source and 150 of test. `file_at` and
-its six tests (`tests/test_mirror.py:635-702`) run to about 90 lines, and
-this reader has more cases. A bare prototype measured 20 lines of source
+- `GitError`, for any entry at a `sha` the mirror does not hold
+  (criterion 6).
+- `GitError`, for a `path:name` whose path is a submodule, from `file_at`'s
+  last branch (`saffron/repos/mirror.py:257-259`).
+- `GitError`, for a `path:name` whose path is a symlink that leaves the tree
+  (`:247-250`).
+- `GitError`, for a `path:name` whose symlink is dangling, or points at a
+  directory or at another symlink (`:251-255`).
+- `UnicodeDecodeError`, for a `path:name` whose file, or whose symlink's
+  target, is not UTF-8. `_run` decodes git's output as text and catches
+  only `OSError` (`saffron/repos/mirror.py:43-48`).
+- `GitError`, for an empty entry, an empty path, an absolute path or a bare
+  `..`, because `git ls-tree` exits 128 on each.
+
+A path entry that names a submodule resolves, since `git ls-tree` lists it.
+No witness drives that either.
+
+**What git did with each malformed shape.** Measured on 2026-09-22 in a
+bare mirror built by `ensure_mirror`, on host git 2.54.0. Each shape was
+passed to `git ls-tree <sha> -- <path>`.
+
+- `./CLAUDE.md`, `saffron//task.py`, `saffron/./task.py` and
+  `saffron/../CLAUDE.md` listed the canonical path's entry and exited 0.
+- `.` listed the root's children, and `saffron/` listed `saffron/task.py`.
+- `..` and `/CLAUDE.md` exited 128 with "outside repository".
+- The empty string exited 128 with "empty string is not a valid pathspec".
+- `git show <sha>:saffron/` printed `tree <sha>:saffron/` and a listing of
+  `task.py`. A prototype of this reader resolved `saffron/:task` against
+  that listing.
+- A prototype resolved `CLAUDE.md:`, an empty name, against a file holding
+  `y` and a newline.
+
+**Left unclaimed, and why.** A whole-word match finds a name in a comment
+or a docstring as readily as in code. That is a limit of the check, and
+`SA-0135`'s claim states it. What a non-ASCII neighbour does, and a name
+that starts or ends with punctuation, are left open, and no witness drives
+them.
+
+**Size.** About 40 changed lines of source and 160 of test. `file_at`
+(`saffron/repos/mirror.py:231-259`) and its seven tests, which start at
+`tests/test_mirror.py:638` through `:694`, run to about 95 lines. This
+reader has more cases. A bare prototype measured 20 lines of source
 and 115 of test, with no docstrings.
 
 **Measured wrong implementations.** On 2026-09-22 a prototype of the reader
@@ -251,6 +306,12 @@ reader in place, all six passed. Each of these failed at least one:
 - a sorted result, and a deduplicated one
 - a caught `GitError` read as unresolved
 - a search of every file in the tree
+
+A second prototype ran at `1e543011` on the same day, against criterion
+4's witness with `old.py` added. It passed, and a path check through
+`git log <sha> -- <path>` failed it on `old.py` at the second commit. The
+same prototype resolved `run.sh` at mode `100755`. That a check for mode
+`100644` alone fails criterion 1 is reasoned, and was not run.
 
 The control, a word test bounded by `\b`, passed all six. It is correct for
 every name the witnesses drive. The operator's loop runs this list again
