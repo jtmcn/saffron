@@ -23,10 +23,10 @@ specs, and nothing states the design they share, their order, or the values
 every part must match.
 
 **So large work is sequenced outside Saffron.** `docs/superpowers/plans/`
-holds 25 plans, and those with tasks carry 3 to 13 of them. 21 use the
+holds 26 plans, and those with tasks carry 3 to 13 of them. 20 require the
 superpowers subagent executor, which runs no task in a cell.
-`2026-09-04-batch-orchestration.md` ran each task as a spec through
-`saffron cell`, sequenced by the operator.
+`2026-08-31-operator-visibility.md` and `2026-09-04-batch-orchestration.md`
+ran each task as a spec through `saffron cell`, sequenced by the operator.
 
 **No review sees the seam between parts.** Each critic reads one task's diff
 (§5.5). Principle 40 states the gap: a reviewer scoped to one task cannot see
@@ -36,10 +36,11 @@ wave.
 
 ## Done looks like
 
-An ADR decides the shape. A spec then declares member specs, their order, and
-constraints every member inherits. Once the last member reaches
-`READY_FOR_REVIEW`, one review runs in a critic cell. It checks the joins
-between members.
+ADR 6 decides the shape. A composite spec declares member specs, their order,
+and constraints every member inherits. Once the last member reaches
+`READY_FOR_REVIEW`, one review runs in a critic cell over the tree the last
+member's critic read. It checks the joins between members. ADR 6's
+Consequences list what the spec that builds it must settle.
 
 ## Record
 
