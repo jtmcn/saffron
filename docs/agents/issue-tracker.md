@@ -105,6 +105,14 @@ GitHub issues remain in use only for research/evidence records under
   that does edit it (`saffron/scheduler.py`'s overlap refusal). Put such a file
   in `forbidden` instead, as `SA-0079` and `SA-0097` do.
 
+- **A spec names the wrong versions its witnesses must kill, and never asks
+  the cell to run them.** Each name is one sentence in `## Notes for the
+  agent`, such as "a fold that defaults a missing key to 0". The host runs
+  wrong versions against the diff: REVIEW's criterion probes and the Spec
+  seat's `driver.py probe` both do. A cell told to run twenty of them spends
+  its turns there. `SA-0123`'s IMPLEMENT and first REPAIR each hit the
+  fifteen-minute turn bound that way (backlog item b-2dea1c).
+
 - **A claim over a set names the set, and its witness drives every member.**
   A witness driving one member passes code handling one member. The claim the
   pull request renders then says more than the code does. Where the set is

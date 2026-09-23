@@ -130,7 +130,9 @@ from, which is `origin/main`, or the parent's pushed branch for a spec with
 run 7's second blocker on `SA-0100` was its first review's concern. Name the
 operator's decisions and the deferred findings in the prompt, so the review
 spends itself on what is still open. Nobody else reads your own edit, and two
-of run 7's blockers were in the delegate's edits.
+of run 7's blockers were in the delegate's edits. An edit that tightens a
+witness names the wrong version it must kill. Run 14's "the integers 3 and 4"
+named none, and the cell's `==` let `3.0` pass.
 
 Review the whole spec, not the edit. Checks 5 and 6 read it entire, and a report
 whose six lines cover a diff is not one. Run 5's re-reviews also found a witness
