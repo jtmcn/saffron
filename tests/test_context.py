@@ -336,8 +336,8 @@ def test_the_implement_prompt_leaves_running_wrong_versions_to_the_host():
     also asked the cell to run wrong versions of the change in its own turn.
     The wall bound cut that turn (item b-2dea1c). Outside the vocabulary and
     the spec body, the prompt must name the `witness` gate's mutants,
-    REVIEW's further wrong versions, and the host. It must tell the
-    implementer it runs none of them itself. Held for a spec declaring no
+    REVIEW's further wrong versions, and the host. Whether it forbids the
+    runs is REVIEW's to read. Held for a spec declaring no
     acceptance criteria and for one declaring a witnessed criterion."""
     from saffron.intake import Criterion
 
