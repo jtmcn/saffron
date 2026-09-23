@@ -71,13 +71,14 @@ acceptance:
       A path with a `.` segment, such as `pkg/./mod.py`, is refused at
       load in both forms, with a `SpecError` that names the entry. A segment
       that starts with a dot, as in `pkg/.hidden/mod.py`, loads in both
-      forms.
+      forms. So does a segment that ends with one, as in `pkg/v1./mod.py`.
     witness: tests/test_consumes.py::test_a_consumed_path_with_a_dot_segment_is_refused_at_load
   - claim: >-
       A path with a `..` segment is refused at load in both forms, with a
       `SpecError` that names the entry. That holds for `pkg/../mod.py`
       and for a bare `..`. A segment that starts with two dots, as in
-      `pkg/..hidden/mod.py`, loads in both forms.
+      `pkg/..hidden/mod.py`, loads in both forms. So does a segment that
+      ends with two, as in `pkg/v1../mod.py`.
     witness: tests/test_consumes.py::test_a_consumed_path_with_a_dot_dot_segment_is_refused_at_load
   - claim: >-
       A path with an empty segment, such as `pkg//mod.py`, is refused at
@@ -94,15 +95,15 @@ acceptance:
       it. That covers a `path:name` whose path is a submodule, a symlink
       that leaves the tree, a dangling symlink, a symlink to a directory, a
       symlink to another symlink, a file that is not UTF-8, and a symlink to
-      such a file. Given with one unresolved entry and one resolving entry,
-      `run_task` returns one `Refused` and never calls `run_one_cell`. Its
-      reason names the eight entries that did not resolve, in the order
-      given, and not the one that did.
+      such a file. Given those seven, an entry whose path is absent and an
+      entry that resolves, `run_task` returns one `Refused` and never calls
+      `run_one_cell`. Its reason names the eight entries that did not
+      resolve, in the order given, and not the one that did.
     witness: tests/test_consumes.py::test_an_unreadable_consumed_entry_refuses_the_task_and_names_it
   - claim: >-
       `has_commit(mirror, sha)` is true for a commit on the mirror's default
       branch and for a commit only another branch holds. It is false for
-      forty zeros.
+      forty zeros, and for the sha of a tree the mirror holds.
     witness: tests/test_consumes.py::test_has_commit_answers_whether_the_mirror_holds_a_commit
 ---
 
@@ -156,7 +157,7 @@ tree, and for one whose target is not a regular file
 reader raise `GitError` for a missing sha too, and its notes list every
 input it raises on. So one exception type means two things. No function in
 the module says whether the mirror holds a commit
-(`saffron/repos/mirror.py:60-262`).
+(`saffron/repos/mirror.py:60-305`).
 
 ## Problem
 
@@ -171,8 +172,8 @@ task as though the host had failed. Build three things.
 2. **`has_commit(mirror, sha)`** in `saffron/repos/mirror.py`. It says
    whether the mirror holds `sha` as a commit.
 3. **The mapping, in `run_task`.** For a spec that consumes something, ask
-   `has_commit` about the tree base first. A no raises `GitError` naming
-   the tree base. Then read each entry on its own. An entry for
+   `has_commit` about the tree base first. A no raises `GitError`. Then
+   read each entry on its own. An entry for
    which the reader raises `GitError` or `UnicodeDecodeError` joins the
    unresolved ones, in the order given, and the reason names it.
 
@@ -211,14 +212,32 @@ that passes with the source reverted. `revert` blocks such a test whether
 or not a criterion declares it.
 
 **Criteria 1 to 9** each call `parse_spec` on frontmatter with
-`depends_on: [SA-0001]` and one entry. Each refused entry raises a
-`SpecError` whose message holds the entry. Each loading entry comes back
-as written. For criteria 4 to 9 the witness drives the path alone and the
-path with `:run_task` after it, refused and loading alike. These fail
-them:
+`depends_on: [SA-0001]` and one entry. Each loading entry comes back as
+written. For criteria 4 to 9 the witness drives the path alone and the
+path with `:run_task` after it, refused and loading alike.
+
+Each refused entry raises a `SpecError`, and the witness reads the
+validator's own message from it, as `exc.__cause__.errors()[0]["msg"]`.
+`parse_spec` raises the `SpecError` from the `ValidationError`
+(`saffron/intake.py:213`), so `__cause__` is that error. The assertion is
+that this message holds the entry. Do not assert on `str(exc)`. Pydantic
+prints the whole input there as `input_value`, so the entry appears
+whatever the validator says. Measured on this repo's pydantic on
+2026-09-23: a validator raising `ValueError` gives a `msg` that starts
+`Value error, ` and then the validator's text.
+
+Quote every entry in the YAML the witness writes, as `"a.py:"` and
+`":run_task"`. Unquoted, PyYAML reads `a.py:` in a flow list as a mapping,
+and `:run_task` in one as a parser error, measured on 2026-09-23. Either
+way the entry never reaches the validator.
+
+These fail them:
 
 - a check of the bare path form only
-- a message that does not name the entry
+- a validator message that does not name the entry
+- a test for `./` anywhere with a check of the end, which refuses
+  `pkg/v1./mod.py`
+- a test for `../` anywhere, which refuses `pkg/v1../mod.py`
 - a test for any dot at a path's start, which refuses `.github`
 - a test for `..` anywhere in the path, which refuses `..hidden`
 - a check through `posixpath.normpath` that lets `saffron/` through
@@ -237,24 +256,43 @@ them:
 - `bytes_link.py`, a symlink to `bytes.py`.
 - `real.py`, holding `run_task`.
 
-Its spec consumes `sub:x`, `out.md:x`, `gone.md:x`, `dir.md:x`,
-`hop.md:x`, `bytes.py:x`, `bytes_link.py:x`, `real.py:run_task` and
-`absent.py:x`, in that order. It asserts a `Refused` and no call to the
+Its spec consumes `sub:x`, `out.md:x`, `gone.md:x`, `absent.py:x`,
+`dir.md:x`, `hop.md:x`, `bytes.py:x`, `bytes_link.py:x` and
+`real.py:run_task`, in that order. `absent.py:x` sits among the
+unreadable entries on purpose. It asserts a `Refused` and no call to the
 `run_one_cell` double. The reason holds the eight entries other than
 `real.py:run_task`, in order, and not that one. These fail it:
 
 - a read of the whole list that stops at the first exception
 - a catch of `GitError` alone, which lets the decode error out
 - a reason that names an entry by index, or drops the exception's entry
+- the entries that raised first, then the unresolved ones
+- the unresolved entries first, then the ones that raised
 
 A host whose locale decodes the bytes reads them as text holding no
 `x`. The entry is then unresolved, and the witness still holds.
 
 **Criterion 11's witness** builds a repo with a commit on `main` and a
 commit only a second branch holds. It reads both through `ensure_mirror`,
-which fetches every ref. It asserts true for both and false for forty
-zeros. `git rev-parse --verify` accepts forty zeros without looking them
-up, so a check through it fails the witness.
+which fetches every ref. It asserts true for both. It asserts false for
+forty zeros and for the first commit's tree, from
+`git rev-parse <sha>^{tree}`.
+
+Measured on 2026-09-23 in a bare mirror built by `ensure_mirror` under
+pytest's `tmp_path`, on host git 2.54.0.
+
+- `git cat-file -e <sha>^{commit}` exited 0 for both commits. For forty
+  zeros it exited 128 with "Not a valid object name". For a tree and for
+  a blob it exited 128 with "expected commit type".
+- `git cat-file -e <sha>`, with no `^{commit}`, exited 0 for the tree and
+  the blob. A check through it fails the witness on the tree.
+- `git rev-parse --verify` exited 0 for forty zeros, so a check through
+  it fails the witness. With `^{commit}` it exited 128 for zeros, the
+  tree and the blob, as `cat-file -e` did.
+- `file_at` on the bytes `ff fe` raised `UnicodeDecodeError` from the
+  `utf-8` codec.
+
+None of this was run with the cell image's git.
 
 **What stays guarded without a new test.** `SA-0135`'s criterion 5 witness
 passes a tree base the mirror lacks and expects `GitError`. A mapping that
@@ -267,6 +305,7 @@ fails it.
 **Size.** About 60 changed lines of source and 190 of test. The nine shape
 witnesses are short and alike.
 
-**Measured.** Nothing here was prototyped. `SA-0134`'s reader and
-`SA-0135`'s check do not exist at `02af122a`. The operator's loop runs the
+**Measured.** The code was not prototyped. `SA-0134`'s reader and
+`SA-0135`'s check do not exist at `e843eb43`. The git and pydantic
+behaviour above was measured. The operator's loop runs the
 wrong versions above before the cell. Do not run them yourself.

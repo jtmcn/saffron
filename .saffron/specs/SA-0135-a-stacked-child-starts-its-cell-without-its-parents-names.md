@@ -55,14 +55,14 @@ acceptance:
       The fixture spec
       `tests/fixtures/consumes/FX-0001-a-child-names-what-it-consumes.md`
       declares a `depends_on` and a `consumes` holding a path entry and a
-      `path:name` entry. `load_spec` reads it with both lists as the file
-      writes them.
+      `path:name` entry, each canonical under the nine rules `SA-0136`
+      adds. `load_spec` reads it with both lists as the file writes them.
     witness: tests/test_consumes.py::test_the_fixture_spec_declares_what_it_consumes_and_loads
   - claim: >-
       When an entry does not resolve at the tree base, `run_task` returns a
       `Refused` and never calls `run_one_cell`. It leaves no row in `tasks`
-      or `runs`. It prints one line, the spec id padded to ten, then
-      ` refused  `, then the refusal's `reason`. The reason names the tree
+      or `runs`. It prints one refused line, the spec id padded to ten,
+      then ` refused  `, then the refusal's `reason`. The reason names the tree
       base's first twelve characters and every unresolved entry as written,
       in the order given, and no entry that resolved. A name resolves as a
       whole word wherever it occurs, so one found only in a comment or only
@@ -94,7 +94,8 @@ acceptance:
       A batch whose runner returns a `Refused` attaches no run to the
       batch. The refusal neither counts toward the breaker nor resets its
       count. The batch rescans and starts the next candidate, and the
-      refused spec does not start again that night. Two refusals in a row
+      refused spec does not start again that night. The night does not
+      name it as a task left in flight. Two refusals in a row
       followed by a task that runs end `DRAINED` with that task run. An
       abort, a refusal and an abort end `INFRASTRUCTURE` before a fourth
       candidate starts.
@@ -212,6 +213,13 @@ checks it before the cell. Build four things.
 - **An event for the refusal.** The refused line is printed, as the
   attended refusals are. No event kind carries it, and `saffron/events.py`
   is forbidden.
+- **The lone `Ceilings` event a refusal leaves.** `run_task` emits
+  `Ceilings` before it resolves the tree base (`saffron/task.py:269-280`).
+  So a refused task's `events.jsonl` ends on that event. `saffron watch`
+  opens on the last `Ceilings` in a log (`saffron/watch.py:116-132`). It
+  then shows a task that never started, and hides the task before it.
+  Backlog item b-32f492 holds the fix, and `saffron/events.py` is
+  forbidden here.
 - **`SA-0131`'s overlap.** `SA-0131` also edits `saffron/cli.py` and
   `tests/test_cli.py`, in `_resolve_queue` (`saffron/cli.py:494`) and
   the batch's rescans (`saffron/cli.py:788-814`). This spec edits `_run_cell`,
@@ -240,9 +248,10 @@ takes `run_task` as the runner rather than importing it
 (`saffron/batch.py:17-19`). Importing the type is not importing the driver.
 Add a clause saying so. The prototype showed no import cycle.
 
-**Update `task.py`'s docstring.** Lines 17-21 say the refusals stay
-outside. Say which refusal now lives inside and why: the tree base is
-known only after `_resolve_stacked_on`. Keep `run_task`'s own docstring
+**Update `task.py`'s docstring.** Its first line says `run_task` puts a
+`CellOutcome` out (`saffron/task.py:1`), and a `Refused` can come out now.
+Lines 17-21 say the refusals stay outside. Say which refusal now lives
+inside and why: the tree base is known only after `_resolve_stacked_on`. Keep `run_task`'s own docstring
 within ten lines of change.
 
 **The witnesses.** All seven new ones go in `tests/test_consumes.py`.
@@ -283,7 +292,12 @@ when it is `[]`, and a field that refuses an empty list.
 `## Context`, `## Problem`, `## Out of scope` and `## Notes for the agent`.
 It is new Markdown, so the `prose` rules hold for its body from zero. Its
 witness reads the file with `load_spec` and compares both lists with the
-literal lists the test writes out.
+literal lists the test writes out. Every entry must be canonical. That
+means repo-relative, with non-empty segments joined by single slashes,
+none `.` or `..`, and no trailing `/`. A `path:name` entry needs a
+non-empty name. `SA-0136` refuses anything else at load. Its `forbidden`
+list holds `tests/fixtures/**`, so a non-canonical entry here would fail this
+witness there with no way to fix it.
 
 **Criterion 3's witness** commits a tree of four files.
 
@@ -331,15 +345,20 @@ double. A check that turns every `GitError` into a refusal fails it.
 **Criterion 6's witness** follows
 `test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts`
 (`tests/test_cli.py:1226-1265`). It sets the token with `monkeypatch`,
-since that module's autouse fixture does not apply here. Its spec declares
+since that module's autouse fixture does not apply here. It makes the same
+two patches that test makes. `saffron.phases.package.github_slug` returns
+a slug, so the local origin passes the forge check
+(`tests/test_cli.py:1243`). `saffron.task.run_one_cell` records that it
+was called (`tests/test_cli.py:1251`). Its spec declares
 `depends_on: [SY-0]` and `consumes: [missing.py]`. It asserts
 `cli._run_cell` returns 1, the refused line appears once in the captured
 output, and `tasks` is empty. A second print in `cli.py` fails it, and so
 does `CELL_EXIT.get` reached with a `Refused`.
 
 **Criterion 7's witness** drives `run_batch` twice with `FakeRunner`.
-Abort outcomes use `_outcome` with a run from `_spend`. The rescan returns
-the whole candidate list each time and counts its calls.
+Outcomes that ran use `_outcome` with a run from `_spend` at $1. The
+rescan returns the whole candidate list each time and counts its calls.
+Candidate ids match the spec id pattern, such as `TE-1`.
 
 - `R1`, `R2`, `C3`, where `R1` and `R2` return a `Refused` and `C3`
   returns `READY_FOR_REVIEW`. It expects `DRAINED`, calls to `R1`, `R2`
@@ -347,8 +366,19 @@ the whole candidate list each time and counts its calls.
 - `A1`, `R`, `A2`, `C4`, where `A1` and `A2` return `GATE_ERROR`. It
   expects `INFRASTRUCTURE` and calls to `A1`, `R` and `A2` only.
 
-These fail it: a refusal counted as an abort, a refusal that resets the
-count, an attach for a refusal, and no rescan after one.
+The batch's `budget_usd` is 100 in both, and `_candidate`'s default budget
+is 10. The budget check runs before the breaker's
+(`saffron/batch.py:195-200`). A budget that could not cover `C4` would end
+the second sequence `BUDGET` before the breaker spoke.
+
+These fail it:
+
+- a refusal counted as an abort
+- a refusal that resets the count
+- an attach for a refusal
+- no rescan after one
+- the refused spec taken out of the set of started specs
+- a refusal named as a task left in flight
 
 **Criterion 8** guards the empty case. That test hands `run_task` a mirror
 path that does not exist (`tests/test_task.py:76-80`), so any git call for
@@ -362,7 +392,20 @@ The batch witness follows the breaker tests, which run 35 to 42 lines each
 `02af122a`. It gave `Refused` a `reason` and widened `run_task`,
 `_batch_runner`, `cli._batch`'s `runner` and `run_batch`'s `runner`. `ty`
 then reported the two test lines above and nothing else. `tests/test_batch.py`
-and `tests/test_task.py` passed. The witnesses themselves were not run,
-because `SA-0134`'s reader does not exist at `02af122a`. The operator's
-loop runs the wrong versions above before the cell. Do not run them
-yourself.
+and `tests/test_task.py` passed. Criteria 1 to 6 were not run, because
+`SA-0134`'s reader does not exist at `02af122a`.
+
+Criterion 7 was measured on 2026-09-23, in a scratch copy of the tree at
+`e843eb43`. The copy held a minimal `Refused` and a `_drive` branch that
+rescans and continues for one, and the two sequences above. With that
+branch both passed. Each wrong version failed these sequences:
+
+- counted as an abort: both
+- resets the count: the second
+- attaches a run: both
+- no rescan: the first
+- taken out of the started set: both
+- named as in flight: the first
+
+The operator's loop runs the other criteria's wrong versions before the
+cell. Do not run them yourself.
