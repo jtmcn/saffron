@@ -150,6 +150,11 @@ _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished"
 not yet do. It hands a step over once a gate, lens or phase can do it.
 _Avoid_: "batch" (unattended, with one budget over every task), bare "run", "night".
 
+**Spec chain**: A delegate's turning of one backlog item into a spec, through the
+`spec-writer` and `spec-reviewer` agents, until its review rounds stop. It ends at
+a spec a cell can run and starts no cell. The spec loop runs that spec.
+_Avoid_: "spec loop" (that runs specs), "spec creation loop".
+
 **Run**: One task's pin, owning the `base_sha` its gates and policy are read at, its
 **preflight outcome** and its baseline. A batch holds one run per task. Every run of
 one repo in a batch shares the `base_sha` the batch pinned for that repo. A stacked
