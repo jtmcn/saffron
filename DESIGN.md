@@ -645,7 +645,7 @@ hosts whose `tests` results are not comparable, and nothing in a gate result
 says so.
 
 **`FROM` is therefore an argument, and the default is the measurement.**
-`images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-bookworm` and
+`images/cell-base.python.Dockerfile` is `FROM python:3.12-slim-trixie` and
 that is what this project is built and measured against; `BASE_IMAGE` changes
 nothing for a host that can pull it. (The default path does change, on purpose:
 three variables point pip, requests and uv at the system CA store and

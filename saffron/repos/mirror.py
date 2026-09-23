@@ -160,7 +160,7 @@ def diff_stat(mirror: Path, base: str, head: str) -> tuple[int, int]:
     """
     summary = _git(mirror, "diff", *DIFF_FLAGS, "--shortstat", f"{base}..{head}")
     # `--unified` turns the patch back on, and `--no-patch` empties the output on
-    # git 2.39.5 (measured in `saffron/cell:saffron`): read only the summary line.
+    # git 2.39.5 (measured, not on 2.47 or 2.54): read only the summary line.
     first_line = summary.splitlines()[0] if summary else ""
     added = _ADDED.search(first_line)
     removed = _REMOVED.search(first_line)

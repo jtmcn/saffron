@@ -2091,7 +2091,7 @@ def test_export_patch_carries_no_color_when_the_worktree_forces_it(
     """Every line of the patch, the `diff --git` header the host parses
     included, carries terminal escape codes when the global config forces
     colour on, whether through `color.ui` or through `color.diff`. `--no-color`, not
-    a `-c color.ui=never` override: probed on git 2.39.5 and 2.54, the
+    a `-c color.ui=never` override: probed on git 2.39.5, 2.47 and 2.54, the
     override does not undo `color.diff=always`.
     """
     _isolated_repo(tmp_path, monkeypatch)

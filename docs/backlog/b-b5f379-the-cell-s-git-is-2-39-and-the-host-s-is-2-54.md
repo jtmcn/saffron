@@ -1,12 +1,13 @@
 ---
 id: b-b5f379
 title: The cell's git is 2.39 and the host's is 2.54, so a git behaviour measured on one side fails on the other
-status: open
+status: done
+closed: 2026-09-23
 tier: 2
 filed: 2026-09-18
 by_hand: true
 specs: []
-prs: []
+prs: [488]
 commits: []
 cites: [§5.1.2, §5.4]
 related: [173, 176]
@@ -58,3 +59,12 @@ This goes by hand: a cell runs inside the image it would change, and
 
 - 2026-09-18: filed from run 7, with the trixie git version measured. No other
   work is done.
+- 2026-09-23: done by hand. The base is `python:3.12-slim-trixie`, and
+  `/opt/saffron/provenance` reads Debian 13, Python 3.12.14 and git 2.47.3.
+  Both images were rebuilt, and `uv run pytest -m cell` passed 22 of 22.
+  `docs/evidence/scripts/2026-09-13-history-and-diff-pins.sh` and the five
+  `2026-09-21-*` probes printed the host's output on 2.47, except for commit
+  hashes. On 2.47, `--no-patch` keeps the summary line, as it does on 2.54.
+  The five comments citing 2.39 now name 2.47 as well. The optional version
+  test is not done. The bump opens item b-a9ee32 in the cell: a global
+  `attr.tree` hides an edit on 2.47.3, measured the same day.
