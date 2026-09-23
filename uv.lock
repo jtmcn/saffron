@@ -433,16 +433,16 @@ version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
+    { name = "pyoxigraph" },
+    { name = "pyshacl" },
     { name = "pyyaml" },
+    { name = "rdflib" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "ast-grep-cli" },
-    { name = "pyoxigraph" },
-    { name = "pyshacl" },
     { name = "pytest" },
-    { name = "rdflib" },
     { name = "ruff" },
     { name = "ty" },
     { name = "typesafe-sdk" },
@@ -452,16 +452,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "pyoxigraph", specifier = ">=0.4" },
+    { name = "pyshacl", specifier = ">=0.26" },
     { name = "pyyaml" },
+    { name = "rdflib", specifier = ">=7" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "ast-grep-cli", specifier = "==0.45.3" },
-    { name = "pyoxigraph", specifier = ">=0.4" },
-    { name = "pyshacl", specifier = ">=0.26" },
     { name = "pytest", specifier = ">=8" },
-    { name = "rdflib", specifier = ">=7" },
     { name = "ruff", specifier = ">=0.16.3" },
     { name = "ty", specifier = "==0.0.77" },
     { name = "typesafe-sdk", specifier = "==0.7.1" },

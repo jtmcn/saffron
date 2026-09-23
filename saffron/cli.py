@@ -1006,7 +1006,7 @@ _DIFF_LENGTH_CAVEAT = (
 def _chains(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron chains`: materialize the projection over the whole ledger and
     print its comparison with the checked walk. Exits 0 whatever it finds."""
-    # graph libraries are dev-only (pyproject.toml)
+    # deferred so only this command pays the graph libraries' import cost
     import saffron.chain_walk as chain_walk
 
     output_path = args.home / "projection.ttl"

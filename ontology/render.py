@@ -1,7 +1,8 @@
 """Renders the surfaces derived from `ontology/factory.ttl`.
 
-Dev-only and deliberately outside `saffron/`: `pyproject.toml` states that
-nothing under `saffron/` imports a graph library, and this module imports two.
+Deliberately outside `saffron/`: nothing there imports this module.
+`saffron/projection.py` and `saffron/chain_walk.py` import the graph libraries
+themselves, for `saffron chains`.
 """
 
 from __future__ import annotations

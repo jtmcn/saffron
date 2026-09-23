@@ -64,6 +64,7 @@ uv run saffron reconcile --repo .          # ask GitHub what happened to open pu
 uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
 uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
 uv run saffron fold --repo <mirror> --into <ledger.db>    # rebuild a ledger from the record
+uv run saffron chains                      # compare Q4 with the checked walk over every merged task
 ```
 
 `saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a

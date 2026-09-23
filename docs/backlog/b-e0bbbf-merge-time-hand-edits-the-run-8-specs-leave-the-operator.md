@@ -1,12 +1,13 @@
 ---
 id: b-e0bbbf
 title: Merge-time hand edits that `SA-0107` and `SA-0108` hand to the operator
-status: open
+status: done
+closed: 2026-09-22
 tier: 3
 filed: 2026-09-19
 by_hand: true
-specs: []
-prs: []
+specs: [SA-0107, SA-0108]
+prs: [355, 366]
 commits: []
 cites: []
 related: [b-d6bff7, b-606ea3, b-946f03]
@@ -42,3 +43,9 @@ libraries, the three packages move out of `dev` with `uv.lock` regenerated, and
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-09-22: Done by hand. `rdflib`, `pyshacl` and `pyoxigraph` move to
+  `dependencies`, with `uv.lock` regenerated. None of the four sentences
+  denies that `saffron/` imports them any more. The comment at `saffron/cli.py:1009`
+  gives the deferred import's real reason, and `CLAUDE.md` lists
+  `saffron chains`. The ontology ADR's draft found
+  the move missing.

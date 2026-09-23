@@ -7,9 +7,14 @@ license = "MIT"
 license-files = ["LICENSE"]
 # No claude-agent-sdk: the host is architecturally forbidden to import it
 # (§2.1), and images/cell-base.python.Dockerfile installs it where it is used.
+# The graph libraries are runtime: `saffron chains` imports them from
+# saffron/projection.py and saffron/chain_walk.py (Appendix T).
 dependencies = [
     "pydantic>=2",
+    "pyoxigraph>=0.4",
+    "pyshacl>=0.26",
     "pyyaml",
+    "rdflib>=7",
 ]
 
 [project.scripts]
@@ -18,8 +23,6 @@ saffron = "saffron.cli:main"
 [dependency-groups]
 # ruff is declared, not assumed: the `format` and `lint` gates run it inside a
 # cell, where a globally-installed host binary does not exist.
-# pyoxigraph and pyshacl are test-only: SA-0001 validates the ontology, and
-# nothing under saffron/ imports either (the emitter is a later, conditional task).
 # ty is pinned exactly, not floored: the `types` gate parses its JSON output
 # and it is pre-1.0 — a schema change on a routine resolve would turn a batch
 # red overnight rather than at review. ast-grep-cli and vulture are pinned for
@@ -33,9 +36,6 @@ dev = [
     "ty==0.0.77",
     "ast-grep-cli==0.45.3",
     "vulture==2.16",
-    "pyoxigraph>=0.4",
-    "pyshacl>=0.26",
-    "rdflib>=7",
     # The spec loop's `jev` command calls it. Pinned because Jev launched 2026-09-15 and its API moves.
     "typesafe-sdk==0.7.1",
 ]
