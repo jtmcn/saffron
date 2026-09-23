@@ -1818,7 +1818,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-22, a seventieth time: `SA-0131` queued for
+    """Re-measured 2026-09-22, a seventy-first time: `SA-0133` queued for
+    backlog item b-864a4d, a digest of each session's request and of the
+    task's `CLAUDE.md` in the event log. It edits the cell session, the
+    event table and `tests/test_session.py`, which `SA-0126` and `SA-0128`
+    edit too, so it declares `depends_on: [SA-0128]`. It is refused on that,
+    since `SA-0128` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-22, a seventieth time: `SA-0131` queued for
     backlog item b-111c56, a parent merged by hand after `EXHAUSTED`. It
     edits the scheduler and the CLI, which no queued spec touches, so it
     declares no `depends_on`. It shares `SA-0130`'s priority and sorts after
@@ -2217,7 +2224,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0130",
         "SA-0131",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0126", "SA-0128", "SA-0129"]
+    assert [r.path.name[:7] for r in refusals] == [
+        "SA-0126",
+        "SA-0128",
+        "SA-0129",
+        "SA-0133",
+    ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

@@ -121,6 +121,44 @@ sweep is the check pre-flight 6 lacks for any spec that changes a gate's unit.
 3. **Assign spec ids and stack order before parallel drafting.** Both paid off
    here: no collision, and the bookkeeping took one pass per layer.
 
+---
+
+# SA-0133, from item b-864a4d
+
+One spec, one review round. The item asks for a digest of each agent
+request and of the `CLAUDE.md` a task read. It depends on `SA-0128`, the end
+of the queued `SA-0125` to `SA-0128` chain.
+
+## Cost
+
+| Step | Agent | Time | Tokens |
+|---|---|---|---|
+| Draft, with a prototype | `spec-writer` | 26.4 min | 222k |
+| First review | `spec-reviewer` | 9.4 min | 142k |
+
+The operator settled the design in the dispatch: which string to hash, which
+event carries each digest, and no ledger or record change. The draft
+returned no question.
+
+## First review: no blocker, three concerns, three notes
+
+| Finding | Severity | Class | Check that should have caught it | Outcome |
+|---|---|---|---|---|
+| Criterion 2 claimed every session, and three kinds went undriven | concern | A claim's witness drives one member of a set | Pre-flight 1 | Applied in the notes |
+| Criterion 3's three cells could share one repo once `SA-0126` lands | concern | A parent spec changes a helper the witness uses | None | Applied |
+| The prototype ran at a base with none of the parent chain built | concern | A parent spec changes a helper the witness uses | None | Left, since no base carries the chain yet |
+| Criterion 2 could declare criterion 1's mutant | note | A claim's witness drives one member of a set | Pre-flight 1 | Left, since intake's rule on a shared mutant is unread |
+| The size note used lines after `SA-0128` moves `size` to tokens | note | Size or ceilings | Pre-flight 7 | Applied |
+| The harness named `cost_usd_est` where `run_agent` reads `total_cost_usd` | note | A name the spec leans on that the base lacks | Pre-flight 3 | Applied |
+
+## What the next run should change
+
+1. **Read the parent specs as edits to the base.** Three of the six findings
+   came from what `SA-0126` and `SA-0128` change once built. They affect a
+   test helper, the `size` unit, and the prototype's base. No pre-flight check
+   reads a queued parent's notes for the helpers and units this spec leans
+   on. That is the next check for a spec with a `depends_on`.
+
 # Spec chain feedback, 2026-09-22 (evening): SA-0129, SA-0130 and SA-0131
 
 Three specs from the spec loop's run 14 summary. Three writers ran in
