@@ -101,9 +101,16 @@ Verify each blocker before acting on it: read its line at `origin/main`.
   round, it goes into that PR's `{KNOWN}` for the Spec seat instead.
 - A blocker with no word goes to the operator, as `scope` does.
 
-A concern the cell's diff will
-settle goes into that PR's `{KNOWN}` for the Spec seat (step 2c). Other concerns
-and notes are kept for step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
+A concern that names a wrong implementation a witness would pass is yours to
+fix in the spec, as a `witness` blocker is. Add the case that kills it, and
+name the wrong version beside it. This holds when the arrangement is
+`unmeasured` because its code does not exist at `base`: work the case by
+arithmetic and say so in the spec. Run 15 sent `SA-0126`'s concern about the
+re-queue cap's key to the Spec seat instead. The in-cell lens found one term
+of it at the cost of a REBUT, and the seat found two more. A concern no witness
+can settle, such as what a prompt sentence means, goes into that PR's
+`{KNOWN}` for the Spec seat (step 2c). Other concerns and notes are kept for
+step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
 after the edit merges.
 
 Save each reviewer's whole final report to a file, verbatim, and score it
