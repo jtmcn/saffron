@@ -28,8 +28,6 @@ factory:Rebuttal a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "rebut
 
 factory:Batch owl:disjointWith factory:Run .
 
-# A delegate's work outside any task. Each step it does by hand is one the
-# factory does not yet do.
 factory:SpecLoop a owl:Class ; rdfs:subClassOf prov:Activity ; rdfs:label "spec loop" .
 factory:SpecLoop owl:disjointWith factory:Batch, factory:Task .
 
