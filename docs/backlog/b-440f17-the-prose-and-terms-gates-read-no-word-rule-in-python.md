@@ -1,12 +1,14 @@
 ---
 id: b-440f17
 title: The `prose` and `terms` gates read no word rule in a Python comment or docstring, so three pull requests in one loop shipped what `CLAUDE.md` forbids
-status: open
+status: done
 tier: 2
 filed: 2026-09-21
+closed: 2026-09-22
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [dcfd854]
 cites: []
 related: [b-6a9707, b-08a36a]
 ---
@@ -50,3 +52,8 @@ A hunk that adds an em-dash to a new comment fails the gate.
   lines. #434 added eleven em-dashes, five semicolons, a hedge and six sentences
   over 25 words. #436 added three em-dashes. #433 added a 43-word docstring
   sentence. The Standards seat found each one.
+- 2026-09-22: done by hand, since `.saffron/**` is `protected`, so no cell can
+  touch the gate. `check` now runs the word rules and `terms` over a `.py`
+  file's comments and docstrings, with the code blanked. Strings that are not
+  docstrings stay out. The tree's `prose` hits rose from 5683 to 10971, and the
+  base subtraction carries them.
