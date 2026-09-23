@@ -196,7 +196,7 @@ first because it removes the findings that need no judgement, which was three
 of the first review's six. ~~**b-929465**~~ and ~~**b-ea1d13**~~ are done by
 #392, which leaves the two above.
 
-**From the spec loop's run 11** (2026-09-21): **b-440f17** first. The `prose`
+**From the spec loop's run 11** (2026-09-21): ~~**b-440f17**~~ first. The `prose`
 gate let three pull requests in a row ship what `CLAUDE.md` forbids, and each
 review spent a pass on it. Then **b-490c9c**, **b-61993a**, **b-f45f73**,
 **b-8d5e55** and **b-0de0b3**. The last is the operator's decision to generate
