@@ -36,8 +36,11 @@ The *Extraction turn* entry in `CONTEXT.md` says the turn emits either a
 schema-constrained value or an `<output>` block, and that the host validates
 both. `DESIGN.md` §5.3 records what the pinned SDK measured, citing
 `docs/evidence/2026-09-23-structured-output-spike.md`. It names which turns
-use the schema. Both land after `SA-0141` merges, not before.
+use the schema. Both land in `SA-0141`'s pull request, so the cell's REBUT
+sessions read the new rule.
 
 ## Record
 
 - 2026-09-23: filed with `SA-0141`, the first slice of b-4e0868.
+- 2026-09-23: done by hand in `SA-0141`'s pull request, by the operator's
+  decision. The earlier chain for `SA-0138` to `SA-0140` set the same rule.

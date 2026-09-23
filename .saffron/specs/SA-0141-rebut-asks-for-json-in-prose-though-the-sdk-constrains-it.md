@@ -242,13 +242,13 @@ item 42's open question.
 **A fallback to the `<output>` block.** A turn sent `output_format` is read
 from `structured_output` only. Criteria 3 to 6 witness it.
 
-**`DESIGN.md` §5.3 and `CONTEXT.md`'s Extraction turn.** §5.3 says the SDK
-has no first-class structured-output guarantee. The glossary says an
-extraction turn emits a validated `<output>` block. Both become false for
-REBUT here. Both files are `protected`, so the edit is by hand after merge,
-under backlog item **b-e51967**. Until then, both REBUT sessions read that
-glossary entry. It sits in the glossary's section 2. IMPLEMENT and REVIEW
-both inject section 2 (`saffron/agents/context.py:30-31`).
+**`DESIGN.md` §5.3 and `CONTEXT.md`'s Extraction turn.** Both are
+`protected`, so the operator edited them by hand in this spec's pull
+request, under backlog item **b-e51967**. §5.3 now records what the pinned
+SDK measured. The glossary entry now says REBUT's turns return a
+schema-constrained value. That entry sits in the glossary's section 2, which
+IMPLEMENT and REVIEW both inject (`saffron/agents/context.py:30-31`). So both
+REBUT sessions read the new rule. Both files stay forbidden.
 
 **What the schema says to the model.** The schema is sent as
 `model_json_schema()` generates it, docstrings included as `description`.
