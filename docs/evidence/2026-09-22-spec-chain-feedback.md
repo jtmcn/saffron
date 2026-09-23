@@ -123,7 +123,7 @@ sweep is the check pre-flight 6 lacks for any spec that changes a gate's unit.
 
 ---
 
-# SA-0129, from item b-864a4d
+# SA-0133, from item b-864a4d
 
 One spec, one review round. The item asks for a digest of each agent
 request and of the `CLAUDE.md` a task read. It depends on `SA-0128`, the end

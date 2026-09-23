@@ -3,7 +3,7 @@ id: b-864a4d
 title: No record shows what prompt a cell session was given, so CLAUDE.md reaching a live cell is unverifiable
 status: open
 filed: 2026-09-22
-specs: [SA-0129]
+specs: [SA-0133]
 prs: []
 commits: []
 cites: [§5.3, §8]

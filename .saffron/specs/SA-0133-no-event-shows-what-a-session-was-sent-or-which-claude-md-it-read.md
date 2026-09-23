@@ -1,5 +1,5 @@
 ---
-id: SA-0129
+id: SA-0133
 title: No event shows what an agent session was sent or which `CLAUDE.md` its task read, so the standing instructions reaching a live cell cannot be checked
 type: feature
 priority: 3
