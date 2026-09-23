@@ -302,8 +302,12 @@ file's bytes before it yields a result message, since the agent CLI reads it
 at spawn. Assert the value equals `{"type": "file", "path": path}`, that
 `path` is a `str` and absolute, and that it does not resolve under `cwd`.
 Assert the two sessions' paths differ. After `run_agent` returns, assert the
-file no longer exists. For the third session, drop `system_prompt` from the
-options and assert it is absent from the keyword arguments the stub recorded.
+file no longer exists. Compare whole dicts, never a subset. The keyword
+arguments the stub recorded equal the sent options, with `system_prompt`
+replaced by that file value, plus `resume` for the second session. For the
+third session, drop `system_prompt` from the options and assert the recorded
+arguments equal the sent options exactly. A subset check passes a path sent
+inside `options`, which the real `ClaudeAgentOptions(**options)` rejects.
 
 **Witness 2.** Call `implement.run_agent` with a one-line system prompt and a
 log list. The stub's `query` records the path the SDK received and yields
@@ -317,7 +321,12 @@ runs the command with `subprocess.run(command, check=True)`, so the host's
 `/tmp` stands in for the cell's. Assert `AgentFailed`, a log of exactly
 `["session", "reap", "exec"]`, and that the recorded path no longer exists.
 Remove the path in a `finally` with `missing_ok=True`, so a red run leaves
-nothing in `/tmp`.
+nothing in `/tmp`. Also assert
+`inspect.signature(implement.run_agent).parameters["exec_"].default is runtime.exec_`.
+Production reaches `run_agent` through the partial at
+`saffron/cell/session.py:1832`, which passes no `exec_`, so the default is
+the only value production uses. Monkeypatching `runtime.exec_` cannot stand
+in, because the default binds at import.
 
 **Witness 3.** Drive `rebut.run_rebut` with one anchored blocker per lens. Its
 `agent` double answers a call carrying `resume` with scripted rebuttal turns.
@@ -383,8 +392,11 @@ it applied. Witness 1's host-chosen path is not measured.
 - A removal of a fixed path, or of any path but the one this session's SDK
   received.
 - A runner that picks its own path and ignores the one the host sent.
+- An `exec_` defaulting to `None`, with the removal guarded on it, which
+  every double-injecting witness passes and production never runs.
+- A path sent inside `options` and forwarded to the SDK.
 
-Two existing tests in `tests/test_implement.py` guard the host half's other
+Six existing tests in `tests/test_implement.py` guard the host half's other
 edge. The five kill tests there pass `options={}`. A removal on such a
 kill reaches the default `runtime.exec_`, which `tests/conftest.py` refuses. A path key sent with no system prompt fails
 the whole-request comparison at `:523`.
