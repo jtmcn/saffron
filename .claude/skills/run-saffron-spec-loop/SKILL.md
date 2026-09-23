@@ -91,9 +91,17 @@ each with its spec's path, `base: origin/main`, and
 run this step from an up-to-date `main`; a spec that exists only on a branch
 is reviewed at that branch's head.
 
-Verify each blocker before acting on it: read its line at `origin/main`. A
-verified blocker goes to the operator before that spec's cell, as a question:
-fix the spec, run it as written, or drop it. A concern the cell's diff will
+Verify each blocker before acting on it: read its line at `origin/main`.
+`spec-reviewer` marks each blocker by what its fix changes, and that word routes it:
+
+- `scope` goes to the operator before that spec's cell, as a question: fix
+  the spec, run it as written, or drop it.
+- `build` is yours to fix in the spec before the cell.
+- `witness` is yours to fix in rounds 1 to 3. From a spec's fourth review
+  round, it goes into that PR's `{KNOWN}` for the Spec seat instead.
+- A blocker with no word goes to the operator, as `scope` does.
+
+A concern the cell's diff will
 settle goes into that PR's `{KNOWN}` for the Spec seat (step 2c). Other concerns
 and notes are kept for step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
 after the edit merges.
@@ -139,7 +147,7 @@ exist (#306). Both sat in text the first review passed. An edited child needs
 one re-review rather than two, and the parent-branch review below is that one.
 
 **A review with no blocker and no concern ends the round.** Its notes go to
-step 5. `SA-0100` took five reviews in run 7. Each of the middle three found
+step 5. From round 4, a review whose only blockers are `witness` ends it too. `SA-0100` took five reviews in run 7. Each of the middle three found
 a new witness hole. Expect more than one round on a spec with several
 criteria. Until the edit merges, `hold SA-NNNN --why "#N"` keeps `next` off
 the spec, whose old text a cell would otherwise run. The re-snapshot after the
@@ -186,8 +194,8 @@ code does not exist yet, so a finding that rests on the parent is expected
 there. Review it again at its parent's pushed branch
 (`base: origin/saffron/<parent id>`) before its own cell starts.
 
-**Done when** every spec in the order has a report with six check lines, and
-every verified blocker has the operator's answer. Every unmeasured fixture was run.
+**Done when** every spec in the order has a report with six check lines.
+Every verified blocker is fixed, deferred to `{KNOWN}`, or answered by the operator. Every unmeasured fixture was run.
 
 ## 2. Run each spec
 

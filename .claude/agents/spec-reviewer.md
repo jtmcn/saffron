@@ -135,7 +135,12 @@ trivial.
 
 1. **Findings**, most severe first, one bullet each: severity; file:line; the
    rule or criterion it breaks, quoted with its own file:line; what is wrong;
-   the evidence; the fix.
+   the evidence; the fix. A blocker also names what its fix changes, as one
+   of three words:
+   - `scope`: the spec's goal or scope, or a decision `DESIGN.md` or an ADR
+     records.
+   - `build`: what the cell builds, inside the spec's scope.
+   - `witness`: only a test or probe that proves a criterion.
 2. **Checks**: exactly six lines, one per check, each either
    `checked: <check> — <what you read>` or `found: <check> — findings <n, …>`.
    A check you could not complete says so. It never reads as `checked`.
@@ -144,5 +149,5 @@ trivial.
 4. **Findings block**, last: a fenced `json` block restating the findings for
    Jev (`driver.py jev`). Write `{"findings": [...]}`, one object per finding,
    with `severity` (`blocker`, `concern` or `note`), `criterion` (its number,
-   or `null`), `file`, `line` and `claim`. A review with no findings writes an
-   empty list.
+   or `null`), `file`, `line` and `claim`. A blocker's object adds `fixes`,
+   its word from item 1. A review with no findings writes an empty list.
