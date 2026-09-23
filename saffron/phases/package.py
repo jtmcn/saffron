@@ -582,8 +582,8 @@ class PackageResult:
     pushed_sha: str = ""
     branch: str = ""
     note: str = ""
-    added: int = 0
-    removed: int = 0
+    added: int | None = None
+    removed: int | None = None
 
 
 def package(
@@ -962,6 +962,8 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
         result.branch,
         result.pushed_sha,
         result.pr_url,
+        added=result.added,
+        removed=result.removed,
     )
     index_report.append_queue_line(
         out_dir,
@@ -972,8 +974,8 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             attempts=outcome.attempts,
             cost_usd_est=outcome.spent_usd,
             concerns=anchored_concerns(outcome.reviews),
-            added=result.added,
-            removed=result.removed,
+            added=result.added or 0,
+            removed=result.removed or 0,
             link=result.pr_url,
             note=result.note,
             risk=outcome.effective_risk,
