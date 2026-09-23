@@ -133,6 +133,12 @@ on either (`:1977-1987`). No line of it reads a size estimate.
 `_known_specs` parses every spec under `SPECS_DIR` and its `done/`
 (`.claude/skills/run-saffron-spec-loop/driver.py:1686-1697`).
 
+**`DESIGN.md` §3.2 says "No `estimated_diff_lines`"** (`DESIGN.md:235`).
+Its reason is that a number from the model being gated is not a gate. The
+estimate here comes from the spec's author, and only the host-side driver
+reads it. No cell gate reads it, so the reason does not apply. `DESIGN.md`
+is `forbidden`, and the operator records the exception by hand.
+
 ## Problem
 
 A spec's estimate of its own size is prose, so no command can refuse a spec
@@ -296,8 +302,7 @@ judgement that returns early on a size blocker fails it.
 integers, never as a float. The parent spec declares the rate as the integer 4
 (`.saffron/specs/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:208-212`).
 If its cell declares a float instead, the price prints as `2400.0` and
-criterion 2's witness fails. Check the rate's type again at `SA-0128`'s
-branch head.
+criterion 2's witness fails.
 
 **Size.** A prototype of the change measured 188 changed lines, 31 of
 source and 157 of test. Expect about 200 with the help text and the
@@ -306,7 +311,7 @@ landed at 243. The `feature` ceiling is 600 lines at `c4344e46` and 3000
 tokens after `SA-0128`. This spec declares no `estimated_lines` of its own,
 because intake at base refuses the key.
 
-**Measured wrong implementations, to run again.** On 2026-09-22 the
+**Measured wrong implementations.** On 2026-09-22 the
 prototype ran at `c4344e46` with a stand-in for `SA-0128`'s constants: the
 token ceilings above and `_TOKENS_PER_LINE = 4` in
 `saffron/gates/core/size.py`, and nothing else of `SA-0128`. With the source
@@ -331,5 +336,6 @@ failed its witness:
 - a printed price that is the line count
 - a rate declared as the float `4.0`, which prints the price as `2400.0`
 
-The control `price >= 0.8 * ceiling` is exact, and it passed all four. `SA-0128`'s code does not exist at `c4344e46`. So run this list
-again at `SA-0128`'s branch head before the cell, against the real gate.
+The control `price >= 0.8 * ceiling` is exact, and it passed all four. `SA-0128`'s code does not exist at `c4344e46`. The operator's loop runs
+this list again at `SA-0128`'s branch head before this cell. Do not run it
+yourself.

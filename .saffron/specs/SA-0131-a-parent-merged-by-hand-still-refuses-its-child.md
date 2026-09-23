@@ -48,7 +48,9 @@ acceptance:
       `DONE_STATES` and `REQUEUE_STATES`, and for a row at a spec sha the
       parent no longer has on disk. A parent whose pushed commit the callable
       rejects, or whose rows record no push, is refused as it is today. The
-      callable is asked about recorded pushed commits and nothing else.
+      callable is asked about recorded pushed commits and nothing else. An
+      exception the callable raises leaves `build_queue` unchanged, never
+      read as a rejection.
     witness: tests/test_scheduler.py::test_a_parent_whose_pushed_commit_reached_the_default_branch_satisfies_its_child
   - claim: >-
       `saffron queue` answers that callable from the mirror, against the
@@ -60,7 +62,9 @@ acceptance:
       mirror does not hold the commit at all. The pinned `base_sha` decides,
       never a mirror ref. A pinned scan refuses the child when every mirror
       ref sits ahead of the pin at the merge, and admits it when the mirror's
-      default branch sits behind the pin.
+      default branch sits behind the pin. Asked with a mirror git cannot
+      read, the callable raises `GitError` rather than answering no, so a
+      check that never ran is not reported as a refusal.
     witness: tests/test_cli.py::test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand
 ---
 
@@ -168,7 +172,8 @@ text a mutant could pin for it.
 **The keyword.** Add it to `build_queue` after `markers`, defaulting to
 `None`. `None` means nothing is asked, and the queue is exactly today's. Every
 existing call passes none, so every existing test pins that. Say what the
-keyword is in `build_queue`'s docstring, beside `markers`, in the same shape.
+keyword is in `build_queue`'s docstring, beside `markers`, in the same shape
+but without that paragraph's em-dash, which the `prose` gate counts.
 Update the module docstring's list where it says a `depends_on` is satisfied
 only by a `MERGED` task (`saffron/scheduler.py:10`).
 
@@ -177,14 +182,32 @@ only by a `MERGED` task (`saffron/scheduler.py:10`).
 rows from `ledger.tasks_by_repo(repo_id)`, which carries `pushed_sha`.
 `tasks_by_spec` does not carry it, and `saffron/ledger.py` is forbidden. Read
 every row, across every spec sha and every state. Pass the callable only a
-non-empty `pushed_sha`. Leave `_dependency_refusal` unchanged: a spec in
+non-empty `pushed_sha`. Each push costs two git calls on every scan.
+So asking only about parents that some spec's `depends_on` names is allowed.
+Skip those already in `merged_anywhere` too. Leave `_dependency_refusal` unchanged: a spec in
 `merged_anywhere` already returns `None` there.
 
 **The callable `saffron queue` passes.** Write it in `saffron/cli.py` beside
-`_retirement_markers_at`, taking the mirror and `base_sha`. It runs
-`git merge-base --is-ancestor <sha> <base_sha>` in the mirror and returns
-whether the exit code is 0. Exit 1 means not an ancestor. Exit 128 means the
-mirror lacks the commit. Both are `False`, and neither raises. Run it in the
+`_retirement_markers_at`, taking the mirror and `base_sha`. It asks git two
+questions in the mirror. `git merge-base --is-ancestor` alone cannot tell a
+missing commit from an unreadable mirror, because both exit 128.
+
+1. `git rev-parse --verify --quiet <sha>^{commit}`. Exit 1 means the mirror
+   lacks the commit, so return `False`.
+2. `git merge-base --is-ancestor <sha> <base_sha>`. Exit 0 returns `True`,
+   and exit 1 returns `False`.
+
+Any other exit from either raises `git_mirror.GitError` naming the command.
+`main`'s handler turns that into exit 2, as it does when
+`export_saffron_dir` meets a broken mirror earlier in `_resolve_queue`.
+Measured 2026-09-22 on git 2.54 on the host and git 2.39.5 in
+`saffron/cell-base:python`. The first command exits 1 for a missing commit
+and 128 for a missing mirror, on both. Run each command as
+`git -C <mirror>`, not with `cwd=<mirror>`. A missing directory as `cwd`
+raises `FileNotFoundError` before git runs. `git_mirror._git` raises on
+every nonzero exit, so it cannot read these exit codes. Unlike
+`_retirement_markers_at`, which swallows `GitError` on purpose, this
+callable and its callers let it propagate. Run it in the
 mirror, never the operator's checkout. A merge made on GitHub is absent from
 a checkout that has not pulled, and criterion 2's witness merges on the remote
 only.
@@ -206,6 +229,9 @@ existing `_write_spec`, `_task_at`, `_repo` and `_sha` helpers. It loops over
   callable was asked about no sha but the two recorded ones. An
   implementation that skips a parent already merged asks about fewer, and
   passes.
+- Last, once per test, pass a callable that raises `git_mirror.GitError`
+  and assert with `pytest.raises` that `build_queue` raises it. This kills
+  a `build_queue` that catches the error and answers no.
 - For every state outside `DEPENDENCY_WAITING_STATES` and `MERGED`, assert B's
   and C's children are refused. `tests/test_scheduler.py` does not import
   `DEPENDENCY_WAITING_STATES` at module scope, so import it inside the
@@ -253,6 +279,10 @@ has an `EXHAUSTED` task at its current sha, so no parent is a candidate.
   Assert parent 1's child is the one candidate and the other two children
   are the refusals.
 
+- Last, call the callable directly with a mirror path that does not exist
+  and parent 1's pushed sha. Assert it raises `GitError`. Then call it with
+  the real mirror and forty `b`s, and assert it returns `False`.
+
 The fixture's origin is a local path, so no slug resolves and no `gh` runs.
 The tasks carry no `pr_url`, so `reconcile` asks nothing.
 
@@ -264,7 +294,13 @@ names the witness that failed.
 - Crediting only `EXHAUSTED` rows, or only the two dead states: criterion 1.
 - Reading only the newest row per spec: criterion 1.
 - Leaving the callable unwired in `_resolve_queue`: criterion 2.
-- Treating every exit code but 1 as landed: criterion 2.
+- Treating every exit code but 1 as landed: criterion 2, on the prototype
+  that had no `rev-parse` step. With that step first, `merge-base` sees only
+  commits the mirror holds, so this now passes the witness. A corrupt
+  mirror is the only exposure left.
+- Treating every nonzero exit as not landed, or catching `GitError` in
+  `build_queue`: criteria 1 and 2's raising cases. Reasoned, not run, since
+  the prototype predates them.
 - Checking only that the mirror holds the commit: criterion 2.
 - Running the check in the operator's checkout: criterion 2, because the
   merge is on the remote only.

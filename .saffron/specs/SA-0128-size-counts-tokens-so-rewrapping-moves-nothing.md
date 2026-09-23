@@ -67,12 +67,14 @@ acceptance:
       For each file in a diff, `size` counts the tokens added and removed by
       the shortest edit between that file's old and new token streams. Each
       stream holds the file's context lines and its removed or added lines, in
-      diff order. The witness drives nine diffs. One token inserted counts 1.
+      diff order. The witness drives ten diffs. One token inserted counts 1.
       One token deleted counts 1. One token replaced counts 2. A line of five
       tokens added counts 5, and removed counts 5. Two tokens swapped count
       2. A two-token line moved past an unchanged line counts 2. The
       replacement of `alpha beta alpha` by `beta gamma alpha gamma` counts
       3. Three tokens removed from one file and added to another count 6.
+      A five-token line removed in one hunk and added in a later hunk of the
+      same file, with one context line in each hunk, counts 4.
     witness: tests/test_size.py::test_the_count_is_the_fewest_tokens_an_edit_of_each_files_stream_needs
   - claim: >-
       The `size` ceilings are 1300 changed tokens for `bug`, 3000 for
@@ -112,7 +114,8 @@ acceptance:
       replaced by the same tokens reversed counts the exact 59998 and names
       no file. A line of 32,000 distinct tokens between a shared first and a
       shared last token, replaced by the same line with the 32,000 reversed,
-      counts 8 and names the file. A 40,000-token line with only its first
+      and with one unchanged context line before them, counts 8 and names
+      the file. A 40,000-token line with only its first
       token replaced counts 2 and names no file, and so does the same line
       with only its last token replaced. A 40,000-token line re-wrapped onto
       4,000 added lines counts 0 and names no file.
@@ -176,9 +179,9 @@ kind with a literal event, never with text `judge_estimate` builds
 ## Problem
 
 `SA-0117` ran at `elevated`. The ledger holds a `size` result of 1035
-changed lines over its `refactor` ceiling of 1000, then one of 979. Fourteen
+changed lines over its `refactor` ceiling of 1000, then one of 979. Thirteen
 lines of `saffron/ledger.py` now run past 88 characters, the longest to 193
-(`saffron/ledger.py:511`). The rest of that file writes SQL over several
+(`saffron/ledger.py:517`). The rest of that file writes SQL over several
 lines. Ruff ignores `E501` (`pyproject.toml:86`), and no gate objects. A cell that writes
 readable code pays for it in `size`, and one that packs it does not.
 
@@ -232,7 +235,8 @@ in every file alike.
   and item 4 prices them.
 - **`DESIGN.md` §5.4's table row.** It says `diff lines` and names the old
   ceilings (`DESIGN.md:815`). It is `protected`, and the operator rewrites it
-  by hand after this merges.
+  by hand after this merges. Until then the row is stale on purpose, and a
+  lens that cites it against this diff is answered here.
 - **The spec-loop skill's docs and driver.** `.claude/**` is `forbidden`.
   Its prose about sizing in lines is the operator's to update. The driver
   calls `size_gate` and prints its summary as is
@@ -286,7 +290,10 @@ unchanged lines' tokens with a new one. Judge each diff with
 way, with nine rows of `(before, after)` text in one dict.
 
 **Criterion 2.** Build each case as diff text with one file header block and
-one `@@` line, as `_diff` does. The `greedy` case is `-alpha beta alpha`
+one `@@` line, as `_diff` does. The two-hunk case is the exception. Its one
+file has two `@@` lines. The first hunk holds `-A B C D E` and ` x`, and the
+second holds ` y` and `+A B C D E`. Per file, the streams share `A B C D E`
+and the count is 4. Streams rebuilt at each `@@` count 10. The `greedy` case is `-alpha beta alpha`
 and `+beta gamma alpha gamma`. Its streams share no first or last token, so
 trimming leaves it whole. The `moved past` case is `-alpha beta`, ` keep`,
 `+alpha beta`. Assert on the count function directly. Keep its name and
@@ -308,6 +315,8 @@ the witnesses of criteria 1, 2 and 5 were run against it:
 - One stream for the whole diff counts the cross-file case as 0. It fails
   criteria 2 and 5.
 - The net difference of the two stream lengths fails criteria 1, 2 and 5.
+- Streams reset at each `@@` line count the two-hunk case as 10. They fail
+  criterion 2. This case was added after the prototype ran, by arithmetic.
 
 These wrong versions of the trim, the bound and the estimate were each run
 against criterion 5's witness. Its cases run in order, and the table names
@@ -319,6 +328,7 @@ the first case each one fails:
 | trim at the end only | last token replaced | 8, named |
 | no trim | first token replaced | 8, named |
 | bound checked before trimming | first token replaced | 8, named |
+| estimate from every hunk line, context included (by arithmetic, not run) | shared ends, reversed | 12, named |
 | estimate as both trimmed streams in full | shared ends, reversed | 64000 |
 | estimate as both untrimmed streams in full | shared ends, reversed | 64004 |
 | no bound | shared ends, reversed | 63998, unnamed |
@@ -348,10 +358,14 @@ over 31,600 tokens a side is 10^9 steps of Python.
 **Criterion 5.** Build each file as diff text by hand: one `diff --git`
 header, the `---` and `+++` lines, one `@@` line, then its `-` and `+` lines.
 No helper at base builds it. The four one-line cases hold every token on a
-single `-` line and a single `+` line. The re-wrap case has one `-` line and
+single `-` line and a single `+` line, and the shared-ends case adds one
+context line. The re-wrap case has one `-` line and
 4,000 `+` lines of ten tokens each. The prototype ran all five cases in
 0.12 s. For each, assert the start of the summary, and whether it holds the
 file's path followed by the phrase the claim pins. Write the shared-ends case
+with one context line, ` keep`, before its `-` line. Trimming removes that
+line's token with the shared first token, so the right estimate stays 8,
+and an estimate that counts context lines gives 12. Write it
 so that trimming leaves exactly the 32,000 reversed tokens, a product of
 1.024 × 10^9, past the bound by 2.4%. Untrimmed streams in full count 64004.
 
