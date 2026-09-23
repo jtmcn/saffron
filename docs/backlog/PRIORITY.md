@@ -218,6 +218,8 @@ git.
 **From comparing Saffron with the superpowers skills** (2026-09-21):
 **b-602d00**. A stacked child whose parent built its names differently pays for
 a cell overnight and packages nothing mergeable. A host check refuses it first.
+Then **b-343c21**, filed writing `SA-0134`. It is the glossary entry for a
+consumed name, which a cell cannot write.
 
 
 ### Tier 3 — real, not urgent
