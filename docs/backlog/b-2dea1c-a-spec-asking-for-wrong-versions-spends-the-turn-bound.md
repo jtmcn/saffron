@@ -4,7 +4,7 @@ title: A spec that asks the cell to run its wrong versions spends the fifteen-mi
 status: open
 tier: 3
 filed: 2026-09-22
-specs: [SA-0123]
+specs: [SA-0123, SA-0130]
 prs: [451]
 commits: []
 cites: [§4.3]
