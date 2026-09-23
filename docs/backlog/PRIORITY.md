@@ -242,6 +242,10 @@ a cell overnight and packages nothing mergeable. A host check refuses it first.
 Then **b-343c21**, filed writing `SA-0134`. It is the glossary entry for a
 consumed name, which a cell cannot write.
 
+**Placed 2026-09-23**, from writing `SA-0142`: **b-466005**. It is the
+glossary entry for a stack batch, its order and a predecessor, which a cell
+cannot write.
+
 
 **Placed 2026-09-23**, from the spec loop's run 15: ~~**b-6377cf**~~, then
 **b-cde96b**. Baseline subtraction hid a `preserves` mutant that survived at

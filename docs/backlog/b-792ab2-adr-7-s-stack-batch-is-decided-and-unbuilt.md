@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: []
+specs: [SA-0142]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -44,3 +44,7 @@ escalations.
 
 - 2026-09-23: filed with ADR 7 (#496). The build specs follow on the next
   layer of that stack.
+- 2026-09-23: step 1 came to about 4300 changed tokens against the
+  `feature` ceiling of 3000, so it splits in three. `SA-0142` builds the
+  stack order in `build_queue`. The handoff and the layers' record follow
+  as two more specs.
