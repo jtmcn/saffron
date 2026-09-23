@@ -287,12 +287,17 @@ def test_the_plan_checkpoint_prices_an_estimate_at_four_tokens_a_line():
         assert str(over_ceiling) in advisory
         assert str(over_ceiling * 4) in advisory
         assert str(ceiling) in advisory
+        assert advisory.startswith("advisory estimate: ")
+        assert "the tier from the plan's files" in advisory
 
-    tree = ast.parse(Path("saffron/agents/artifacts.py").read_text())
+    tree = ast.parse(Path(artifacts.__file__).read_text())
     imported = any(
         isinstance(node, ast.ImportFrom)
         and node.module == "saffron.gates.core.size"
-        and any(alias.name == "_TOKENS_PER_LINE" for alias in node.names)
+        and any(
+            alias.name == "_TOKENS_PER_LINE" and alias.asname is None
+            for alias in node.names
+        )
         for node in ast.walk(tree)
     )
     assigned = any(

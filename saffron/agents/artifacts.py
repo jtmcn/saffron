@@ -75,8 +75,8 @@ class Plan(BaseModel):
     risks: list[str] = Field(default_factory=list)
     blocking_questions: list[str] = Field(default_factory=list)
     estimated_lines: int = Field(gt=0)
-    """Added + removed lines, priced at `_TOKENS_PER_LINE` tokens each
-    against the same ceiling `size_gate` takes off the real diff's tokens.
+    """Added + removed lines, priced at `_TOKENS_PER_LINE` tokens each,
+    then judged against the token ceiling `size_gate` applies to the diff.
     Required, not defaulted: a ceiling nothing estimates against is not a
     control (§5.3's plan checkpoint spends zero model calls to reject early)."""
 
@@ -329,8 +329,8 @@ def judge_estimate(
         raise rejected
 
     return (
-        f"advisory estimate: {plan.estimated_lines} lines priced at "
-        f"{priced} changed tokens exceeds the {spec_type} ceiling of "
+        f"advisory estimate: {plan.estimated_lines} lines, priced at "
+        f"{priced} changed tokens, exceed the {spec_type} ceiling of "
         f"{ceiling}, and `size` is advisory at {tier}, the tier from the "
         f"plan's files, so the plan stands"
     )

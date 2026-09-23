@@ -22,7 +22,7 @@ from saffron.gates.core.integrity import _BINARY, _FILE_HEADER
 from saffron.gates.core.scope import matches
 
 # bug / feature / refactor ceilings, re-measured in tokens against 97 past
-# diffs. A value is the fewest past rows it disagrees with on pass or block.
+# diffs. Each value disagrees with the fewest past rows on pass or block.
 _CEILINGS = {"bug": 1300, "feature": 3000, "refactor": 4200}
 
 # `test`, `docs` and `chore` specs have no ceiling in §5.4 — an omission, not a
@@ -39,7 +39,7 @@ _DEFAULT_CEILING = _CEILINGS["refactor"]
 _TOKENS_PER_LINE = 4
 
 # A file whose two trimmed token streams multiply past this many pairs is
-# not diffed exactly. Past the bound costs 0.10s and 108MB, measured.
+# not diffed exactly. The worst case under it measured 0.10s and 108MB.
 _TOKEN_DIFF_BOUND = 10**9
 
 
@@ -47,13 +47,10 @@ def _file_blocks(diff: str) -> list[tuple[str, list[str], list[str], int]]:
     """Every file block that carries a hunk, as its path, its two token
     streams, and its physical changed-line count.
 
-    The old stream holds every context and removed line's tokens, in
-    order. The new stream holds every context and added line's tokens,
-    in order. Both accumulate across a file's whole set of hunks, never
-    reset at a `@@` line, so a block moved between two hunks of one file
-    counts as one edit. Header lines are skipped by position, before a
-    block's first `@@`, the same rule the old line count used. A block
-    with no `@@` at all contributes nothing.
+    The old stream holds context and removed tokens, the new one context
+    and added tokens, in order. Neither resets at a `@@` line, so a block
+    moved between hunks of one file counts as one edit. Header lines are
+    skipped by position, before a block's first `@@`.
     """
     blocks: list[tuple[str, list[str], list[str], int]] = []
     path = ""
@@ -117,12 +114,8 @@ def _trim_shared_ends(old: list[str], new: list[str]) -> tuple[list[str], list[s
 
 
 def _lcs_length(a: list[str], b: list[str]) -> int:
-    """The length of the longest common subsequence of `a` and `b`, by the
-    bit-parallel algorithm over machine words (Hyyrö, 2004), run here over
-    Python's arbitrary-width ints. Masks are built only for the shorter
-    sequence, and only for the tokens the two sequences share. Time and
-    memory both grow with the product of the two lengths, the same bound
-    `_token_counts` checks before calling this."""
+    """LCS length by bit-parallel LCS (Hyyrö, 2004) over Python ints.
+    Cost grows with `len(a) * len(b)`, which `_TOKEN_DIFF_BOUND` caps."""
     if len(a) > len(b):
         a, b = b, a
     width = len(a)
@@ -160,11 +153,8 @@ def _token_counts(diff: str) -> list[tuple[str, int, bool]]:
 
 
 def _changed_lines(diff: str) -> int:
-    """The fewest tokens an edit of every file's two streams needs, summed
-    over the diff. See `_token_counts` for the per-file rule. The name
-    stays the same as before: a test imports it at module scope, and a
-    rename would fail collection once `revert` restores the old source,
-    before the mutant it exists to catch is even reached."""
+    """Changed tokens summed over files (see `_token_counts`). The name
+    predates the unit."""
     return sum(count for _path, count, _estimated in _token_counts(diff))
 
 
@@ -233,7 +223,7 @@ def size_gate(
     task legitimately adding a PNG inside `touches` renders the same way as the
     `-diff` trick, and no diff can tell them apart. So the refusal is spent
     where the verdict is load-bearing — at `elevated` — and below it the
-    readable lines are counted and the unreadable file is named in the summary.
+    readable tokens are counted and the unreadable file is named in the summary.
 
     ponytail: this guarantee is *this gate's* alone. `integrity` refuses the
     identical shape — unreadable and inside `touches` — at every tier, so a
@@ -247,7 +237,7 @@ def size_gate(
     inside `touches` at `elevated` and reach `GATE_ERROR` on purpose — charged
     to nobody, no repair turn, exit 2. Same ceiling `integrity` already carries
     and the same upgrade path: git reports added lines in `--numstat` for a
-    file it renders as binary, so the count is recoverable without the content.
+    file it renders as binary, so an estimate is recoverable without the content.
 
     Past that check, `pass`/`fail` only: a diff this gate can read never
     produces `error` for size reasons — a large diff is the task's problem,

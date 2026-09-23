@@ -199,7 +199,7 @@ def test_the_count_is_the_fewest_tokens_an_edit_of_each_files_stream_needs():
     )
 
     cross_file = _one_hunk(["-p q r"], path="src/a.py") + _one_hunk(
-        ["+s t u"], path="src/b.py"
+        ["+p q r"], path="src/b.py"
     )
     assert _changed_lines(cross_file) == 6
 
