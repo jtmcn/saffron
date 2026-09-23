@@ -237,6 +237,17 @@ factory:DelegateShape a sh:NodeShape ;
         sh:qualifiedValueShape [ sh:class factory:Attempt ] ;
         sh:qualifiedMaxCount 0 ] .
 
+# A spec loop is a delegate's work, in either association form. It starts tasks
+# but is never one, and never a batch.
+factory:SpecLoopShape a sh:NodeShape ;
+    sh:targetClass factory:SpecLoop ;
+    sh:not [ sh:or ( [ sh:class factory:Batch ] [ sh:class factory:Task ] ) ] ;
+    sh:property [
+        sh:path [ sh:alternativePath (
+            ( prov:qualifiedAssociation prov:agent ) prov:wasAssociatedWith ) ] ;
+        sh:qualifiedValueShape [ sh:class factory:Delegate ] ;
+        sh:qualifiedMinCount 1 ] .
+
 # The implementer acts for the operator, directly or through a delegate, and
 # every attempt of its that wrote a diff carries the plan the host validated. A
 # scope proposal or a rejected plan ends an attempt with no diff (§5.3, §5.3.1).

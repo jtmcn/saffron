@@ -145,6 +145,12 @@ reasons, and `INFRASTRUCTURE` outranks it.
 _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished",
 "timeout" for `UNTIL`.
 
+**Spec loop**: A delegate's pass over the queued specs, each through an attended
+`saffron cell`, into one stack. Each step it does by hand is one the factory does
+not yet do. It hands a step over once a gate, lens or phase can do it. Each cell
+it starts is a task in no batch.
+_Avoid_: "batch" (unattended, with one budget over every task), bare "run", "night".
+
 **Run**: One task's pin, owning the `base_sha` its gates and policy are read at, its
 **preflight outcome** and its baseline. A batch holds one run per task. Every run of
 one repo in a batch shares the `base_sha` the batch pinned for that repo. A stacked

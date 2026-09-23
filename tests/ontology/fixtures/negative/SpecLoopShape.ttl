@@ -1,0 +1,7 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix : <urn:software-factory:data:> .
+
+# A spec loop the operator runs with no delegate. The loop is a delegate's work.
+:operator a factory:Operator .
+:loop a factory:SpecLoop ; prov:wasAssociatedWith :operator .
