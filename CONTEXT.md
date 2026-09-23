@@ -374,7 +374,9 @@ finding's probe in a gate-only cell, unless the probe edits a declared test path
 fixture's cell. No gate applies one. Its outcome is inverted from a mutant's: a
 vacuity probe that *survives* the suite is the finding confirmed, where a mutant that
 survives its witness is the finding.
-During a task the verdict decides the finding. `survived` makes it a `blocker`, `killed`
+During a task only a failure of a test the diff adds kills a probe. A new failure of any
+other test is recorded beside the verdict and does not kill it. The corpus harness still
+counts every test it collected. During a task the verdict decides the finding. `survived` makes it a `blocker`, `killed`
 makes it a `note`, and `unproven` leaves the severity the lens filed.
 _Avoid_: "mutant" for one — a mutant is declared by a criterion, is withheld from the
 implementer, and must be killed. _Avoid_ "mutation testing" for the corpus number: one probe

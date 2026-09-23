@@ -1923,7 +1923,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-23, a seventy-seventh time: `SA-0139` queued for
+    """Re-measured 2026-09-23, a seventy-eighth time: `SA-0138` queued for
+    backlog item b-19b255, which counts a vacuity probe killed only when a
+    test the diff adds fails. It edits `saffron/cell/session.py` and
+    `tests/test_session.py`, which `SA-0133` also touches, so it declares
+    `depends_on: [SA-0133]`. It is refused on that, since `SA-0133` has not
+    run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, a seventy-seventh time: `SA-0139` queued for
     backlog item b-6377cf, a `witness` survivor at base that the baseline no
     longer cancels. It also edits `saffron/phases/implement.py`,
     `tests/test_implement.py` and `tests/test_session.py`, which `SA-0133`
@@ -2375,7 +2382,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0139",
         "SA-0133",
     ]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0134", "SA-0135", "SA-0136"]
+    assert [r.path.name[:7] for r in refusals] == [
+        "SA-0134",
+        "SA-0135",
+        "SA-0136",
+        "SA-0138",
+    ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
