@@ -147,3 +147,8 @@ this. They would replace the queue, and every row above is task state.
 **2026-09-22.** Once `SA-0124` merges, `tasks` holds the diff stat in two
 columns. §6's "stored in no column at all" at `DESIGN.md:1221` is then false,
 so this item's rewrite of that paragraph must cover it.
+
+**2026-09-22.** The operator settled this item's direction while approving
+`SA-0124`: "we want the db to be derived, not the source of truth". The record
+on `refs/saffron/*` is authoritative, and the ledger is folded from it. The
+`DESIGN.md` and `CONTEXT.md` rewrite is still to do by hand.

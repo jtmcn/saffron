@@ -851,3 +851,41 @@ delegate verified each one before it was fixed or kept.
   **Bucket 2**, a comment saying the opposite of the code. **Open.**
 - `SA-0122` (#436): new comments carried em-dashes.
   **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+
+## 2026-09-22, `SA-0123` and `SA-0124` (the spec loop's run 14, fixes in #451, #459)
+
+Run 14 of the spec loop. `SA-0123` ended `EXHAUSTED` before REVIEW ran, so no
+in-cell lens saw it. `SA-0124`'s three lenses raised nothing. These are what
+the two independent seats found after each cell. The delegate verified each
+one before it was fixed or kept.
+
+- `SA-0123` (#451): criterion 1's ledger with no record checked its times only
+  after the last write. A `set_task_state` that stamped `datetime('now')` with
+  no record attached survived, since later writes overwrote it.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #451.
+- `SA-0123` (#451): the diff was 1001 changed lines against a ceiling of 1000.
+  **Bucket 1.** **Landed:** `size`, which caught it. Review brought it to 999.
+- `SA-0123` (#451): two lookups were written twice, and `create_task` on an
+  unknown run raised `TypeError`.
+  **Bucket 2**, one source and a clear error. **Landed:** a review commit on
+  #451.
+- `SA-0123` (#451): three comments and docstrings were false after the change.
+  **Bucket 2**, a comment the diff made false. Fixed in a review commit on #451,
+  with no gate that reads it. **Open.**
+- `SA-0123` (#451): new Python comments carried em-dashes, semicolons and a
+  hedge.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0123` (#451): three new witnesses read rows through `ledger._db`, which
+  the spec forbade.
+  **Bucket 2.** **Open:** item b-49329e.
+- `SA-0124` (#459): criterion 3's witness read no fact payload. A writer that
+  left a key out when its value was `None` passed.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #459.
+- `SA-0124` (#459): criterion 4 compared with `==`, so a migration that added
+  `REAL` columns passed with 3.0 and 4.0.
+  **Bucket 1.** **Landed:** a review commit on #459.
+- `SA-0124` (#459): new Python comments carried em-dashes and docstring
+  sentences of over 40 words.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0124` (#459): a test docstring called a raw `UPDATE` "a fact".
+  **Bucket 2**, vocabulary no gate reads in Python. **Open.**

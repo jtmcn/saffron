@@ -64,3 +64,7 @@ A hunk that adds an em-dash to a new comment fails the gate.
   positive: "Never a ticket" names the avoided word rather than using it. A
   docstring column counts UTF-8 bytes, so a non-ASCII docstring read on into the
   next line of code until the review fixed it.
+- 2026-09-22: two more in the spec loop's run 14. #451 added em-dashes, three
+  semicolons and a hedge in new comments. #459 added eight em-dashes and two
+  docstring sentences of over 40 words. The Standards seat found each one, and
+  the `prose` gate passed all of them.
