@@ -4,7 +4,7 @@ title: A spec estimated near its `size` ceiling runs unsplit, and two cells in a
 status: open
 tier: 2
 filed: 2026-09-22
-specs: []
+specs: [SA-0129]
 prs: []
 commits: []
 cites: [§5.4]
