@@ -1079,7 +1079,7 @@ _CASES: list[tuple[Event, str]] = [
             spec_id="x",
             reason="cut_off_no_salvage_room",
             spent_usd_est=9.0,
-            detail="$9.00 of $9.00",
+            detail="$9.00 of $9.00 — cut off at the turn ceiling",
         ),
         "budget: $9.00 of $9.00 — cut off at the turn ceiling with nothing "
         "committed, no room left to salvage",
@@ -1207,15 +1207,13 @@ def test_the_table_did_not_quietly_lose_a_row():
     """AC2 again, and the mutation neither assertion above catches: deleting
     three rows — `unstacked:`, `baseline errored in`, `PACKAGE: (pr_url)` —
     left every test in this file passing. The table is the proof the
-    kinds cover all 64 call sites and is what `SA-0030`/`SA-0031` read to find
-    their work, so losing a row silently is the failure that matters.
+    kinds cover every call site, and losing a row silently is the failure
+    that matters.
 
-    `SA-0030` and `SA-0031` migrate these call sites and will move this count.
-    That is the point: moving it is a deliberate edit, not a silent one.
-    `SA-0085` moved it again, deliberately, for the one new line shape it adds
-    — a witness already green at base_sha, named on the baseline's own event."""
-    assert len(FAMILIES) == 63
-    assert len({f.prefix for f in FAMILIES}) == 63
+    `SA-0085` and `SA-0125` each moved this count. `SA-0126` moves it again
+    for the cut-again `IMPLEMENT:` line."""
+    assert len(FAMILIES) == 65
+    assert len({f.prefix for f in FAMILIES}) == 65
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
@@ -1591,9 +1589,9 @@ def test_a_phase_or_terminal_detail_is_clipped():
             detail=long_detail,
         )
     )
-    assert cut_off_line == (
-        f"budget: {clipped} — cut off at the turn ceiling with nothing "
-        "committed, no room left to salvage"
+    assert (
+        cut_off_line
+        == f"budget: {clipped} with nothing committed, no room left to salvage"
     )
 
 

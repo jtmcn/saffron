@@ -209,11 +209,19 @@ class GateSuite:
         )
 
 
+def size_blocks(tier: str) -> bool:
+    """Whether the `size` gate blocks at `tier` (§5.6): only at `elevated`.
+
+    The one rule both `_advisory` and the plan checkpoint's `judge_estimate`
+    ask, so the diff-time and plan-time rules cannot diverge."""
+    return tier == "elevated"
+
+
 def _advisory(tier: str, policy: Policy) -> frozenset[str]:
     """`blocking: false` is advisory at every tier; `size` and `witness` are
     advisory unless the tier is elevated (§5.4, §5.4.1, §5.6)."""
     advisory = {name for name, decl in policy.gates.items() if not decl.blocking}
-    if tier != "elevated":
+    if not size_blocks(tier):
         advisory.add("size")
     if not witness_blocking(cast(RiskTier, tier)):
         advisory.add("witness")

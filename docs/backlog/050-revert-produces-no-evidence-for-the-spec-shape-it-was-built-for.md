@@ -1,10 +1,10 @@
 ---
 id: 50
 title: '`revert` produces no evidence for the spec shape it was built for'
-status: open
+status: partial
 tier: 1
 specs: [SA-0127]
-prs: []
+prs: [476]
 commits: []
 cites: [§5.4]
 related: [49]
@@ -45,4 +45,7 @@ this item asks for. **Tier 1** with 51.
   instruction a gate makes unnecessary. The loop's review reran the reverted
   suite by hand. With the lookup made lazy the same run gives 6 failed and
   153 passed, every new witness failing by assertion.
-
+- 2026-09-23: `SA-0127` reached `READY_FOR_REVIEW` as #476 at $10.28 of $18,
+  in the spec loop's run 15. `GateResult` carries `uncollected` and `revert`
+  reads it. This closes in full when the operator fills the field in
+  `.saffron/gates/tests.py` by hand. `SA-0127` retires to `done/`.

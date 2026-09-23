@@ -21,6 +21,7 @@ from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
+from saffron.gates.core.size import _CEILINGS
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
@@ -277,6 +278,223 @@ def _block(plan):
     return f"Here is the plan.\n<output>\n{json.dumps(plan)}\n</output>"
 
 
+def _checkpoint_plan(spec, plan, elevate_on):
+    """The one call site the criterion-1 cases drive the plan checkpoint
+    through, so no loop below needs its own closure (B023)."""
+    agent = _agent(_block(plan))
+    return session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=spec,
+        protected=[],
+        elevate_on=elevate_on,
+        agent=agent,
+        emit=lambda _event: None,
+    )
+
+
+def _lines_patch(n):
+    """A single file block, one hunk header, then `n` added lines: exactly
+    what `size_gate`'s `_changed_lines` counts, whatever the filename."""
+    return "".join(
+        [
+            "diff --git a/x.py b/x.py\n",
+            "--- a/x.py\n+++ b/x.py\n",
+            f"@@ -0,0 +1,{n} @@\n",
+            "+x\n" * n,
+        ]
+    )
+
+
+# The three routes to a tier at plan time (§5.6): none, the spec's own
+# `elevated`, and an `elevate_on` path in the plan's files.
+_TIER_ROUTES = ("no_elevate_on_path", "declared_elevated", "elevate_on_path")
+
+
+def _route_plan_and_risk(route, estimate):
+    if route == "elevate_on_path":
+        files = ["tests/test_x.py", "infra/deploy.tf"]
+    else:
+        files = ["src/x.py", "tests/test_x.py"]
+    risk = "elevated" if route == "declared_elevated" else "standard"
+    plan = _PLAN | {"files_to_change": files, "estimated_lines": estimate}
+    return plan, risk
+
+
+def test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block():
+    """AC1: the checkpoint rejects a plan on its estimate exactly where the
+    `size` gate would block the real diff, never more, never less."""
+    from pathlib import Path
+
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
+    from tests.test_suite import _Spec, _Tree
+
+    touches = ["src/**", "infra/**", "tests/**"]
+    policy = policy_mod.Policy(
+        gates={"lint": policy_mod.GateDeclaration()}, elevate_on=["infra/**"]
+    )
+
+    for spec_type in ("bug", "feature", "refactor", "docs"):
+        ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+        for route in _TIER_ROUTES:
+            for estimate in (ceiling // 4, ceiling // 4 + 1):
+                plan, risk = _route_plan_and_risk(route, estimate)
+                priced = estimate * _TOKENS_PER_LINE
+                blocks = priced > ceiling and route != "no_elevate_on_path"
+
+                suite = GateSuite(
+                    gates={"lint": Path("/gates/.saffron/gates/lint")},
+                    spec=_Spec(risk=risk, touches=touches, spec_type=spec_type),
+                    policy=policy,
+                    diff_base="base",
+                )
+                comparison = suite.against(
+                    _Tree(changed=plan["files_to_change"], patch=_lines_patch(priced)),
+                    suite.baseline(_Tree()),
+                )
+                size_failures = [
+                    nf for nf in comparison.new_failures if nf.gate == "size"
+                ]
+                case = (spec_type, route, estimate)
+                assert len(size_failures) == (1 if blocks else 0), case
+
+                spec = _spec(risk=risk, touches=touches, spec_type=spec_type)
+                if blocks:
+                    with pytest.raises(artifacts.PlanRejected) as excinfo:
+                        _checkpoint_plan(spec, plan, policy.elevate_on)
+                    message = str(excinfo.value)
+                    assert size_failures[0].failure.message in message, case
+                    assert "size" in message, case
+                    assert "elevated" in message, case
+                else:
+                    _checkpoint_plan(spec, plan, policy.elevate_on)
+
+
+def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
+    """AC2: `size` advisory at `standard` records one event and the plan
+    stands. Exactly at the ceiling, the checkpoint says nothing at all."""
+    from saffron.gates.core.size import _CEILINGS
+
+    ceiling = _CEILINGS["feature"]
+    spec = _spec(risk="standard", spec_type="feature")
+
+    over = _PLAN | {
+        "files_to_change": ["src/x.py", "tests/test_x.py"],
+        "estimated_lines": ceiling // 4 + 20,
+    }
+    events = []
+    session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=spec,
+        protected=[],
+        elevate_on=[],
+        agent=_agent(_block(over)),
+        emit=events.append,
+    )
+    assert len(events) == 1
+    line = describe(events[0])
+    assert line.startswith("PLAN:")
+    assert str(over["estimated_lines"]) in line
+    assert str(ceiling) in line
+    assert "size" in line
+    assert "advisory" in line
+    assert "standard" in line
+    assert "plan's files" in line
+
+    at_ceiling = _PLAN | {
+        "files_to_change": ["src/x.py", "tests/test_x.py"],
+        "estimated_lines": ceiling // 4,
+    }
+    no_events = []
+    session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=spec,
+        protected=[],
+        elevate_on=[],
+        agent=_agent(_block(at_ceiling)),
+        emit=no_events.append,
+    )
+    assert no_events == []
+
+
+_ELEVATE_ON_INFRA = 'gates: {}\nelevate_on: ["infra/**"]\n'
+
+
+def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
+    monkeypatch, tmp_path
+):
+    """AC3: a whole cell reads `elevate_on` from the policy at base, never
+    from the working copy, and reports the plan's own tier on a rejection."""
+    from saffron.gates.core.size import _CEILINGS
+
+    ceiling = _CEILINGS["feature"]
+    touches = ["src/**", "infra/**", "tests/**"]
+    spec = _spec(risk="standard", touches=touches, spec_type="feature")
+
+    no_infra_path = _PLAN | {
+        "files_to_change": ["src/x.py", "tests/test_x.py"],
+        "estimated_lines": ceiling // 4 + 20,
+    }
+    cell1 = _stub_the_runtime(monkeypatch)
+    outcome1, _ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "run1",
+        cell=cell1,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(no_infra_path)), _turn()],
+    )
+    assert outcome1.state == "READY_FOR_REVIEW"
+    assert len(cell1.turns) >= 2
+    assert any(
+        line.startswith("PLAN:") and "advisory" in line for line in cell1.watched
+    )
+
+    with_infra_path = _PLAN | {
+        "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
+        "estimated_lines": ceiling // 4 + 20,
+    }
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "run2",
+        cell=cell2,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(with_infra_path))],
+    )
+    assert outcome2.state == "PLAN_REJECTED"
+    assert len(cell2.turns) == 1
+    (rejected_line,) = [
+        line for line in cell2.watched if line.startswith("PLAN: rejected")
+    ]
+    assert str(ceiling) in rejected_line
+    assert "elevated" in rejected_line
+    assert outcome2.effective_risk == "elevated"
+
+    blocking_question = _PLAN | {
+        "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
+        "estimated_lines": ceiling // 4 - 10,
+        "blocking_questions": ["which environment does this ship to?"],
+    }
+    cell3 = _stub_the_runtime(monkeypatch)
+    outcome3, _ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "run3",
+        cell=cell3,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(blocking_question))],
+    )
+    assert outcome3.state == "PLAN_REJECTED"
+    assert outcome3.effective_risk == "standard"
+
+
 def test_an_accepted_plan_costs_exactly_one_turn():
     agent = _agent(_block(_PLAN))
     attempt, raw, spent = session.plan_checkpoint(
@@ -284,6 +502,7 @@ def test_an_accepted_plan_costs_exactly_one_turn():
         options={},
         spec=_spec(),
         protected=["DESIGN.md"],
+        elevate_on=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -303,6 +522,7 @@ def test_a_plan_outside_touches_is_rejected_without_a_second_turn():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -316,6 +536,7 @@ def test_output_that_is_not_the_schema_is_re_prompted_exactly_once():
         options={},
         spec=_spec(),
         protected=[],
+        elevate_on=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -340,6 +561,7 @@ def test_a_turn_with_no_session_id_is_never_resumed():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -353,6 +575,7 @@ def test_a_second_schema_failure_rejects_rather_than_asking_again():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -378,6 +601,7 @@ def test_a_proposal_outside_touches_ends_the_checkpoint_in_one_turn():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -397,6 +621,7 @@ def test_a_refused_proposal_is_reprompted_and_a_plan_can_follow():
         options={},
         spec=_spec(),
         protected=[],
+        elevate_on=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -417,6 +642,7 @@ def test_a_proposal_refused_twice_ends_as_plan_rejected():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -472,6 +698,7 @@ def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
             options={},
             spec=cell_spec,
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -644,13 +871,14 @@ _DIFF = """diff --git a/src/x.py b/src/x.py
 +def x(): ...
 """
 
-# A diff `size` fails against a `bug` spec's 300-line ceiling. Built, not
-# hand-written: what matters is the count, not the content.
+# A diff `size` fails against a `bug` spec's token ceiling, ten tokens
+# over it, one token a line. Built, not hand-written.
+_BIG_LINES = _CEILINGS["bug"] + 10
 _BIG_DIFF = (
     "diff --git a/src/x.py b/src/x.py\n"
     "--- a/src/x.py\n"
     "+++ b/src/x.py\n"
-    "@@ -1,1 +1,310 @@\n" + "".join(f"+line {n}\n" for n in range(310))
+    f"@@ -1,1 +1,{_BIG_LINES} @@\n" + "".join(f"+line{n}\n" for n in range(_BIG_LINES))
 )
 
 
@@ -935,6 +1163,26 @@ def _cut_off_turn(cost=0.4):
     )
 
 
+def _wall_cut_turn(cost=0.4, *, bound="wall"):
+    """What `run_agent` raises when a time bound ends a turn with no result
+    event at all: `session_id=None`, `subtype="error"`, no
+    `terminal_reason`, `bound` set to what the runtime named the wait.
+    `bound="idle"` is the same shape for the idle bound's own cell. Never a
+    turn ceiling's `error_max_turns`/`max_turns`."""
+    attempt = implement.AttemptResult(
+        session_id=None,
+        subtype="error",
+        terminal_reason=None,
+        num_turns=0,
+        cost_usd_est=cost,
+        is_error=True,
+        bound=bound,
+    )
+    return implement.AgentFailed(
+        f"the agent produced no result event, was cut by the {bound} bound", attempt
+    )
+
+
 def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
@@ -996,7 +1244,7 @@ def _drive(
     vs `Attempt.decision`, say).
     """
     repo = tmp_path / "repo"
-    (repo / ".saffron" / "gates").mkdir(parents=True)
+    (repo / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
     for name in gates:
         # `load_policy` refuses a declared gate whose executable is missing
         # or not +x, so a policy naming one needs a real file behind it.
@@ -1377,8 +1625,8 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
 
 def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
     """The budget ceiling is honoured before the salvage turn is spent, never
-    after: a task with no room left ends exactly as it did before this
-    control existed, and the watch line names the ceiling that stopped it."""
+    after. A task with no room left is cut, and this being its first cut at
+    the spec_sha, it ends ORPHANED."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     outcome, _ledger = _drive(
         monkeypatch,
@@ -1390,7 +1638,7 @@ def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
         ],
         spec=_spec(budget_usd=12.0),
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == "ORPHANED"
     # No third turn: nothing left to spend it with.
     assert len(cell.turns) == 2
     assert any(
@@ -1401,9 +1649,9 @@ def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
 def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
     monkeypatch, tmp_path
 ):
-    """The salvage turn is a chance, not a guarantee: if it still leaves
-    zero commits, the task ends NOT_IMPLEMENTED, and the watch line says the
-    turn ceiling cut it off rather than the agent finishing with nothing.
+    """The salvage turn is a chance, not a guarantee. If it still leaves zero
+    commits, this first cut at the spec_sha ends ORPHANED. The watch line
+    says the turn ceiling cut it off, not the agent finishing with nothing.
 
     The *clean-tree* shape, deliberately: `_stub_the_runtime`'s `dirty_paths`
     returns `[]`, so the host checkpoint below finds nothing to save. A dirty
@@ -1419,7 +1667,7 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
             _turn(cost=0.05),
         ],
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == "ORPHANED"
     assert len(cell.turns) == 3
     assert any("cut off and could not be salvaged" in line for line in cell.watched)
     assert not any("finished and produced nothing" in line for line in cell.watched)
@@ -1584,8 +1832,8 @@ def test_a_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
     """`commit_dirty` raises on any non-zero git exit, so a commit hook
     rejecting the host checkpoint arrives as a `CellRuntimeError`. Letting it
     out of the salvage path books exit 2, charged to nobody, on a task that
-    earned `NOT_IMPLEMENTED` — `error` collapsed into `fail`, on the one path
-    where the tree is known dirty and the agent already failed to commit it."""
+    earned `ORPHANED` — `error` collapsed into `fail`, on the one path where
+    the tree is known dirty and the agent already failed to commit it."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     monkeypatch.setattr(
         "saffron.cell.worktree.dirty_paths", lambda _c: ["saffron/cell/session.py"]
@@ -1606,7 +1854,7 @@ def test_a_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
         ],
     )
     # The outcome the task earned, and the exit code that goes with it.
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == "ORPHANED"
     assert any("the host checkpoint failed" in line for line in cell.watched)
     assert any("cut off and could not be salvaged" in line for line in cell.watched)
 
@@ -1631,6 +1879,328 @@ def test_a_salvage_ceiling_never_exceeds_the_turn_ceiling_it_is_salvaging(
     )
     assert implement.SALVAGE_MAX_TURNS > 3  # or this test proves nothing
     assert cell.turn_options[2]["max_turns"] == 3
+
+
+def test_a_turn_cut_by_the_wall_with_nothing_committed_is_salvaged(
+    monkeypatch, tmp_path
+):
+    """SA-0126: the wall clock now earns SA-0028's salvage turn too. The
+    salvage turn resumes the plan turn's own session, since a wall kill's
+    AttemptResult carries no session id of its own."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _wall_cut_turn(cost=0.4),
+            _turn(cost=0.1),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.turns[2] == implement.SALVAGE_PROMPT
+    assert cell.resumes[2] == "sess-1"
+    assert cell.turn_options[2]["max_turns"] == implement.SALVAGE_MAX_TURNS
+    announced = [
+        line for line in cell.watched if "spending one turn to salvage" in line
+    ]
+    assert len(announced) == 1
+    assert "wall" in announced[0]
+    assert "turn ceiling" not in announced[0]
+
+
+def test_every_cut_that_leaves_nothing_committed_halts_for_the_next_scan(
+    monkeypatch, tmp_path
+):
+    """Five zero-commit cells, each its own ledger. The turn ceiling and the
+    wall clock both salvage when there is room, and both refuse when there
+    is not. Either way both end ORPHANED on their first cut. The idle
+    bound reaches neither: no salvage, and it settles NOT_IMPLEMENTED."""
+    from saffron import scheduler
+
+    cell_a = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_a, ledger_a = _drive(
+        monkeypatch,
+        tmp_path / "a",
+        cell=cell_a,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+    )
+    cell_b = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_b, ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "b",
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+    )
+    cell_c = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_c, ledger_c = _drive(
+        monkeypatch,
+        tmp_path / "c",
+        cell=cell_c,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    cell_d = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_d, ledger_d = _drive(
+        monkeypatch,
+        tmp_path / "d",
+        cell=cell_d,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=12.0)],
+        spec=_spec(budget_usd=12.0),
+    )
+    cell_e = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_e, ledger_e = _drive(
+        monkeypatch,
+        tmp_path / "e",
+        cell=cell_e,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4, bound="idle")],
+    )
+
+    def _state(ledger):
+        (row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+        return row["state"]
+
+    assert [
+        _state(led) for led in (ledger_a, ledger_b, ledger_c, ledger_d, ledger_e)
+    ] == ["ORPHANED", "ORPHANED", "ORPHANED", "ORPHANED", "NOT_IMPLEMENTED"]
+    assert [
+        outcome_a.state,
+        outcome_b.state,
+        outcome_c.state,
+        outcome_d.state,
+        outcome_e.state,
+    ] == ["ORPHANED", "ORPHANED", "ORPHANED", "ORPHANED", "NOT_IMPLEMENTED"]
+    assert "ORPHANED" in scheduler.REQUEUE_STATES
+    assert "ORPHANED" not in scheduler.DONE_STATES
+    assert len(cell_a.turns) == 3
+    assert len(cell_b.turns) == 3
+    assert len(cell_c.turns) == 2
+    assert len(cell_d.turns) == 2
+    assert len(cell_e.turns) == 2
+
+    def _bound_line(cell):
+        matches = [
+            line
+            for line in cell.watched
+            if "spending one turn to salvage" in line
+            or "no room left to salvage" in line
+        ]
+        assert len(matches) == 1
+        return matches[0]
+
+    assert "turn ceiling" in _bound_line(cell_a) and "wall" not in _bound_line(cell_a)
+    assert "wall" in _bound_line(cell_b) and "turn ceiling" not in _bound_line(cell_b)
+    assert "turn ceiling" in _bound_line(cell_c) and "wall" not in _bound_line(cell_c)
+    assert "wall" in _bound_line(cell_d) and "turn ceiling" not in _bound_line(cell_d)
+
+
+def test_a_second_cut_at_one_spec_sha_settles_the_spec(monkeypatch, tmp_path):
+    """The re-queue cap fires only for a task cut at the *same* spec_sha. Task 1
+    is cut at a different one and does not count. Task 2 is the first real
+    cut at the spec's own spec_sha and ends ORPHANED. Task 3 is the
+    second, and settles NOT_IMPLEMENTED, naming task 2 as the one before."""
+    other_sha = "b" * 64
+    target = _spec()  # spec_sha "a" * 64, the default
+
+    cell1 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome1, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=replace(target, spec_sha=other_sha),
+    )
+    cell2 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome2, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+        spec=target,
+    )
+    cell3 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome3, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell3,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=target,
+    )
+
+    assert outcome1.state == "ORPHANED"
+    assert outcome2.state == "ORPHANED"
+    assert outcome3.state == "NOT_IMPLEMENTED"
+    rows = ledger._db.execute(
+        "SELECT task_id, state FROM tasks ORDER BY task_id"
+    ).fetchall()
+    assert [(r["task_id"], r["state"]) for r in rows] == [
+        (1, "ORPHANED"),
+        (2, "ORPHANED"),
+        (3, "NOT_IMPLEMENTED"),
+    ]
+    assert len(cell3.turns) == 3
+    named = [line for line in cell3.watched if "cut again at this spec_sha" in line]
+    assert len(named) == 1
+    assert "task 2" in named[0]
+    assert not any("cut again at this spec_sha" in line for line in cell1.watched)
+    assert not any("cut again at this spec_sha" in line for line in cell2.watched)
+
+
+def test_the_cap_is_scoped_to_the_specs_own_id_not_only_its_sha(monkeypatch, tmp_path):
+    """The cap's key is repo, spec id and spec_sha together. Task 1 is cut at
+    a different spec id that happens to share this spec_sha, and must not
+    count. Task 2 is this spec's own first cut, and still ends ORPHANED
+    rather than being told task 1 came before it."""
+    target = _spec()  # spec_id "SY-1", spec_sha "a" * 64, the defaults
+
+    cell1 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome1, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=replace(target, spec_id="SY-2"),
+    )
+    cell2 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome2, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+        spec=target,
+    )
+
+    assert outcome1.state == "ORPHANED"
+    assert outcome2.state == "ORPHANED"
+    assert not any("cut again at this spec_sha" in line for line in cell2.watched)
+
+
+def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp_path):
+    """ORPHANED written by a raise, a scan's stamp, an errored lens or a
+    rebuttal that commits nothing must never feed the cap. Neither does a
+    cut-shaped task in another state or another repo. None of the tasks
+    ahead of this real wall cut counts, so the last cell still ends
+    ORPHANED, its own first cut."""
+    cell1 = _stub_the_runtime(monkeypatch, commits=0)
+    with pytest.raises(RuntimeError):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=cell1,
+            turns=[_turn(_block(_PLAN)), RuntimeError("boom")],
+        )
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    (repo_row,) = ledger._db.execute("SELECT repo_id FROM repos").fetchall()
+    repo_id = repo_row["repo_id"]
+    spec_id, spec_sha, branch = "SY-1", "a" * 64, "saffron/SY-1"
+
+    def _closed(task_id, phase):
+        attempt_id = ledger.open_attempt(task_id, phase=phase)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s",
+            subtype="success",
+            terminal_reason="completed",
+            num_turns=1,
+            cost_usd_est=0.1,
+        )
+
+    # Task 2: one IMPLEMENTING attempt. A scan's stamp leaves its run RUNNING.
+    run2 = ledger.create_run(repo_id, "b" * 40)
+    task2 = ledger.create_task(run2, spec_id, spec_sha, branch=branch)
+    _closed(task2, "IMPLEMENTING")
+    ledger.set_task_state(task2, "ORPHANED")
+
+    # Task 3: IMPLEMENTING then REVIEWING, run COMPLETE.
+    run3 = ledger.create_run(repo_id, "b" * 40)
+    task3 = ledger.create_task(run3, spec_id, spec_sha, branch=branch)
+    _closed(task3, "IMPLEMENTING")
+    _closed(task3, "REVIEWING")
+    ledger.set_task_state(task3, "ORPHANED")
+    ledger.finish_run(run3, "COMPLETE")
+
+    # Task 4: IMPLEMENTING, REBUTTING, IMPLEMENTING, run COMPLETE. The
+    # trailing IMPLEMENTING attempt is what a last-attempt-only cap would miss.
+    run4 = ledger.create_run(repo_id, "b" * 40)
+    task4 = ledger.create_task(run4, spec_id, spec_sha, branch=branch)
+    _closed(task4, "IMPLEMENTING")
+    _closed(task4, "REBUTTING")
+    _closed(task4, "IMPLEMENTING")
+    ledger.set_task_state(task4, "ORPHANED")
+    ledger.finish_run(run4, "COMPLETE")
+
+    # Cut-shaped but not ORPHANED: a rate-limited task re-queues, and one
+    # already settled is not a halt.
+    for state in ("RATE_LIMITED", "NOT_IMPLEMENTED"):
+        run = ledger.create_run(repo_id, "b" * 40)
+        task = ledger.create_task(run, spec_id, spec_sha, branch=branch)
+        _closed(task, "IMPLEMENTING")
+        ledger.set_task_state(task, state)
+        ledger.finish_run(run, "COMPLETE")
+
+    # Cut-shaped and ORPHANED, but in another repo.
+    other_repo = ledger.upsert_repo("other", "/elsewhere", "/elsewhere.git", None)
+    run_other = ledger.create_run(other_repo, "b" * 40)
+    task_other = ledger.create_task(run_other, spec_id, spec_sha, branch=branch)
+    _closed(task_other, "IMPLEMENTING")
+    ledger.set_task_state(task_other, "ORPHANED")
+    ledger.finish_run(run_other, "COMPLETE")
+
+    ledger.close()
+
+    cell5 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome5, ledger5 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell5,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+        spec=_spec(spec_sha=spec_sha),
+    )
+
+    task1_state = ledger5._db.execute(
+        "SELECT state FROM tasks WHERE task_id = 1"
+    ).fetchone()["state"]
+    run1_status = ledger5._db.execute(
+        "SELECT rn.status FROM runs rn JOIN tasks t ON t.run_id = rn.run_id "
+        "WHERE t.task_id = 1"
+    ).fetchone()["status"]
+    assert task1_state == "ORPHANED"
+    assert run1_status == "ABORTED"
+
+    states = {
+        r["task_id"]: r["state"]
+        for r in ledger5._db.execute("SELECT task_id, state FROM tasks").fetchall()
+    }
+    statuses = {
+        r["run_id"]: r["status"]
+        for r in ledger5._db.execute("SELECT run_id, status FROM runs").fetchall()
+    }
+    assert states[task2] == "ORPHANED" and statuses[run2] == "RUNNING"
+    assert states[task3] == "ORPHANED" and statuses[run3] == "COMPLETE"
+    assert states[task4] == "ORPHANED" and statuses[run4] == "COMPLETE"
+    assert outcome5.state == "ORPHANED"
+    assert not any("cut again at this spec_sha" in line for line in cell5.watched)
 
 
 def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
@@ -3519,6 +4089,7 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=_crash,
             emit=lambda _event: None,
         )

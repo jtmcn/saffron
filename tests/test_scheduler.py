@@ -1798,6 +1798,111 @@ def test_a_parent_that_is_neither_retired_nor_merged_names_both_checks(
     assert "no task in the ledger says it merged" in reason
 
 
+def test_a_parent_whose_pushed_commit_reached_the_default_branch_satisfies_its_child(
+    tmp_path,
+):
+    """`SA-0131`: a parent whose task never wrote `MERGED` still satisfies
+    its child once `pushed_landed` says its recorded push reached the
+    default branch. True whatever state that row carries, and whatever the
+    ledger's other rows for the same parent say."""
+    from saffron.scheduler import DEPENDENCY_WAITING_STATES
+
+    def _recording(accept):
+        seen = []
+
+        def landed(sha):
+            seen.append(sha)
+            return sha == accept
+
+        return seen, landed
+
+    sha_a, sha_b = "1" * 40, "2" * 40
+    # Parent A gets two rows below. B's push is rejected, C records none.
+    parents = ["TE-1", "TE-3", "TE-5"]
+    children = ["TE-2", "TE-4", "TE-6"]
+
+    for state in sorted(DONE_STATES | REQUEUE_STATES):
+        directory = tmp_path / f"specs-{state}"
+        directory.mkdir()
+        for parent, child in zip(parents, children, strict=True):
+            _write_spec(directory, f"{parent}.md", id=parent, touches=[f"{parent}.py"])
+            _write_spec(
+                directory,
+                f"{child}.md",
+                id=child,
+                touches=[f"{child}.py"],
+                depends_on=[parent],
+            )
+        ledger = Ledger(tmp_path / f"ledger-{state}.db")
+        repo_id = _repo(ledger)
+
+        # A's older row carries the accepted push, at a sha this scan no
+        # longer has on disk. Its newer row records no push at all.
+        old_row = _task_at(
+            ledger, repo_id, spec_id="TE-1", spec_sha="stale-sha-a", state="REJECTED"
+        )
+        ledger.record_push(old_row, sha_a)
+        # B's older row records no push, so a scan reading only each spec's
+        # oldest row never asks about B's push.
+        _task_at(
+            ledger, repo_id, spec_id="TE-3", spec_sha="stale-sha-b", state="REJECTED"
+        )
+        for parent in parents:
+            row = _task_at(
+                ledger,
+                repo_id,
+                spec_id=parent,
+                spec_sha=_sha(directory / f"{parent}.md"),
+                state=state,
+            )
+            if parent == "TE-3":  # B's own row: a push the callable rejects.
+                ledger.record_push(row, sha_b)
+
+        asked, pushed_landed = _recording(sha_a)
+        candidates, refusals = build_queue(
+            directory, repo_id, ledger, pushed_landed=pushed_landed
+        )
+
+        assert "TE-2" in [c.spec.id for c in candidates]
+        assert not any(r.path.name == "TE-2.md" for r in refusals)
+        # Only rows carrying a `pushed_sha` are ever asked, and none at all
+        # once `MERGED` already credits every parent on its own.
+        expected_asked = set() if state == "MERGED" else {sha_a, sha_b}
+        assert set(asked) == expected_asked
+
+        if state not in DEPENDENCY_WAITING_STATES and state != "MERGED":
+            assert any(r.path.name == "TE-4.md" for r in refusals)
+            assert any(r.path.name == "TE-6.md" for r in refusals)
+
+        ledger.close()
+
+    # A callable that cannot answer must not be read as "no": `build_queue`
+    # propagates it rather than catching it and reporting a false refusal.
+    from saffron.repos.mirror import GitError
+
+    directory = tmp_path / "specs-raises"
+    directory.mkdir()
+    _write_spec(directory, "TE-1.md", id="TE-1", touches=["a.py"])
+    _write_spec(directory, "TE-2.md", id="TE-2", touches=["b.py"], depends_on=["TE-1"])
+    ledger = Ledger(tmp_path / "ledger-raises.db")
+    repo_id = _repo(ledger)
+    row = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-1",
+        spec_sha=_sha(directory / "TE-1.md"),
+        state="EXHAUSTED",
+    )
+    ledger.record_push(row, sha_a)
+
+    def raising(_sha):
+        raise GitError("mirror unreadable")
+
+    with pytest.raises(GitError):
+        build_queue(directory, repo_id, ledger, pushed_landed=raising)
+    ledger.close()
+
+
 def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
     """One line in a morning queue: an operator who clears the first and meets
     the second tomorrow has lost a night the line could have saved."""
@@ -1818,7 +1923,7 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-23, a seventy-third time: `SA-0135` and `SA-0136`
+    """Re-measured 2026-09-23, a seventy-fourth time: `SA-0135` and `SA-0136`
     queued for backlog item b-602d00, the second and third of three.
     `SA-0135` adds the `consumes:` field and refuses a task whose entry does
     not resolve at its tree base. `SA-0136` refuses a malformed entry at
@@ -1826,6 +1931,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     before, so `SA-0135` declares `depends_on: [SA-0134]` and `SA-0136`
     declares `depends_on: [SA-0135]`. Both are refused on that, since
     neither parent has run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, a seventy-third time: the spec loop's run 15
+    retired `SA-0125`, `SA-0126`, `SA-0127`, `SA-0128`, `SA-0130` and
+    `SA-0131` to `done/`. `SA-0129` and `SA-0133` depend on `SA-0128`, which
+    `done/` now satisfies, so both are candidates. `SA-0134` is still refused
+    on `SA-0129`.
 
     Re-measured 2026-09-22, a seventy-second time: `SA-0134` queued for
     backlog item b-602d00, a reader that says whether a tree base holds a
@@ -2235,21 +2346,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == [
-        "SA-0127",
-        "SA-0125",
-        "SA-0130",
-        "SA-0131",
-    ]
-    assert [r.path.name[:7] for r in refusals] == [
-        "SA-0126",
-        "SA-0128",
-        "SA-0129",
-        "SA-0133",
-        "SA-0134",
-        "SA-0135",
-        "SA-0136",
-    ]
+    assert [c.spec.id for c in candidates] == ["SA-0129", "SA-0133"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0134", "SA-0135", "SA-0136"]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

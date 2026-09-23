@@ -1,11 +1,12 @@
 ---
 id: b-89ec93
 title: The `size` gate counts physical lines, so a cell near its ceiling packs code onto long lines to pass
-status: open
+status: done
 tier: 1
 filed: 2026-09-21
+closed: 2026-09-23
 specs: [SA-0128]
-prs: []
+prs: [483]
 commits: []
 cites: [§5.4]
 related: [40, b-408cf5]
@@ -43,3 +44,8 @@ past cells.
 
 - 2026-09-21: filed from the spec loop's run 12 (#418). The operator suggested
   a line size that depends on content.
+- 2026-09-23: `SA-0128`'s cell halted at `REBUTTING` at $19.75 of $24, in the
+  spec loop's run 15. The lens's re-judge session could not start, because
+  its argument list was too long. The operator took the branch by hand as #483.
+  `size` now counts tokens by a per-file token diff. `SA-0128` retires to
+  `done/`.

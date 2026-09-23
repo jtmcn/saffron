@@ -1,11 +1,12 @@
 ---
 id: b-36b551
 title: The per-turn wall clock has no salvage turn, and a `NOT_IMPLEMENTED` it caused settles the spec
-status: open
+status: done
 tier: 1
 filed: 2026-09-19
+closed: 2026-09-23
 specs: [SA-0126]
-prs: []
+prs: [478]
 commits: []
 cites: [§4.2.1, §4.3]
 related: [119, 34, 4]
@@ -64,3 +65,7 @@ so no spec has to repeat it.
   cut by the wall in both IMPLEMENT and REPAIR. It had committed once before the
   first cut, and the host checkpointed the second. The cut IMPLEMENT turn reports
   $1.52, and the cell's total was $30.70, so the cut turn's spend looks lost.
+- 2026-09-23: `SA-0126` reached `READY_FOR_REVIEW` as #478 at $22.12 of $24,
+  in the spec loop's run 15. A wall cut now gets the salvage turn, and a first
+  cut with nothing committed ends `ORPHANED`. `SA-0126` retires to `done/`.
+  The glossary half stays with b-149df3.

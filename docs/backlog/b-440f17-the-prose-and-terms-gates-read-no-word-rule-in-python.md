@@ -68,3 +68,7 @@ A hunk that adds an em-dash to a new comment fails the gate.
   semicolons and a hedge in new comments. #459 added eight em-dashes and two
   docstring sentences of over 40 words. The Standards seat found each one, and
   the `prose` gate passed all of them.
+- 2026-09-23: recurred in every pull request of the spec loop's run 15. It showed
+  three new shapes. Attribute docstrings are never read (#476). A comment
+  joined to an old block by bare `#` lines adds no hit (#476). A file's net
+  count lets deleted hits offset new ones (#483).

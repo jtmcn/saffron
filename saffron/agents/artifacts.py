@@ -18,7 +18,9 @@ from pydantic import BaseModel, Field, ValidationError
 
 from saffron.agents import context
 from saffron.gates.core.scope import matches
-from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING
+from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
+from saffron.gates.suite import size_blocks
+from saffron.repos.policy import effective_risk
 
 EXTRACTION_PROMPT = context.turn_prompt("extraction")
 
@@ -28,9 +30,14 @@ _BLOCK = re.compile(r"<output>(.*?)</output>", re.DOTALL)
 class PlanRejected(Exception):
     """The plan failed host-side validation. No *implementation* token is spent
     — but the checkpoint's own turns were, and a shape rejection is final only
-    after a second one has run. `plan_checkpoint` sets `spent_usd`."""
+    after a second one has run. `plan_checkpoint` sets `spent_usd`.
+
+    `risk_tier` is set on the raised instance alone, never on the class, by
+    `judge_estimate`. A class assignment would leak one task's tier into
+    every later rejection in the same `saffron batch` process."""
 
     spent_usd: float = 0.0
+    risk_tier: str | None = None
 
 
 class PlanNotSchema(PlanRejected):
@@ -68,7 +75,8 @@ class Plan(BaseModel):
     risks: list[str] = Field(default_factory=list)
     blocking_questions: list[str] = Field(default_factory=list)
     estimated_lines: int = Field(gt=0)
-    """Added + removed, the same count `size_gate` takes off the real diff.
+    """Added + removed lines, priced at `_TOKENS_PER_LINE` tokens each,
+    then judged against the token ceiling `size_gate` applies to the diff.
     Required, not defaulted: a ceiling nothing estimates against is not a
     control (§5.3's plan checkpoint spends zero model calls to reject early)."""
 
@@ -285,12 +293,44 @@ def validate_plan(
             "acceptance criteria that cannot fail are prose"
         )
 
-    ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
-    if plan.estimated_lines > ceiling:
-        raise PlanRejected(
-            f"plan's own estimate of {plan.estimated_lines} changed lines "
-            f"exceeds the {spec_type} ceiling of {ceiling} — the diff `size` "
-            "gate will fail on before a single edit is made"
-        )
-
     return plan
+
+
+def judge_estimate(
+    plan: Plan,
+    spec_type: str,
+    risk: str,
+    elevate_on: list[str],
+) -> str | None:
+    """Judge the plan's own priced estimate against `size`'s ceiling, at the
+    tier `effective_risk` derives from the plan's own `files_to_change`. A
+    forecast, since no diff exists yet (§5.6).
+
+    `None` within the ceiling. Over it and `size_blocks` says the tier
+    blocks: raises `PlanRejected`, carrying a copy of the `size` gate's
+    failure message that a test pins to `size_gate`'s own. Over it and
+    advisory: returns the sentence the checkpoint emits instead of rejecting.
+    """
+    ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+    priced = plan.estimated_lines * _TOKENS_PER_LINE
+    if priced <= ceiling:
+        return None
+
+    tier = effective_risk(risk, plan.files_to_change, elevate_on)
+    gate_message = (
+        f"{priced} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
+    )
+    if size_blocks(tier):
+        rejected = PlanRejected(
+            f"plan's own estimate exceeds the {spec_type} ceiling at {tier}, "
+            f"where `size` blocks: {gate_message}"
+        )
+        rejected.risk_tier = tier
+        raise rejected
+
+    return (
+        f"advisory estimate: {plan.estimated_lines} lines, priced at "
+        f"{priced} changed tokens, exceed the {spec_type} ceiling of "
+        f"{ceiling}, and `size` is advisory at {tier}, the tier from the "
+        f"plan's files, so the plan stands"
+    )
