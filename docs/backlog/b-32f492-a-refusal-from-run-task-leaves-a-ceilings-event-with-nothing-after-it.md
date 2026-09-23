@@ -24,6 +24,13 @@ lone `Ceilings`, with no event that says the task was refused.
 boundary (`saffron/watch.py:116-132`). On a refused task it opens on that
 lone event. It shows a task that never started and hides the task before it.
 
+The refusal is also missing where a morning reader counts refusals. The
+batch plan lists the spec as a candidate and leaves it out of `refusals:`
+(`saffron/cli.py:696-703`). `saffron queue` offers it every night, because
+nothing is written. The batch log prints `starting` before `refused`
+(`saffron/batch.py:203`). §4.2 says a refusal lands in the morning queue as
+one line.
+
 `SA-0135` cannot fix it, because `saffron/events.py` is forbidden there.
 
 ## Done looks like

@@ -68,15 +68,16 @@ acceptance:
       forms.
     witness: tests/test_consumes.py::test_a_bare_dot_consumed_path_is_refused_at_load
   - claim: >-
-      A path with a `.` segment, such as `pkg/./mod.py`, is refused at
-      load in both forms, with a `SpecError` that names the entry. A segment
-      that starts with a dot, as in `pkg/.hidden/mod.py`, loads in both
+      A path with a `.` segment is refused at load in both forms, with a
+      `SpecError` that names the entry. That holds for `pkg/./mod.py`, for
+      `pkg/.`, and for a path whose first segment is `.`. A segment that starts with a dot, as in `pkg/.hidden/mod.py`, loads in both
       forms. So does a segment that ends with one, as in `pkg/v1./mod.py`.
     witness: tests/test_consumes.py::test_a_consumed_path_with_a_dot_segment_is_refused_at_load
   - claim: >-
       A path with a `..` segment is refused at load in both forms, with a
-      `SpecError` that names the entry. That holds for `pkg/../mod.py`
-      and for a bare `..`. A segment that starts with two dots, as in
+      `SpecError` that names the entry. That holds for `pkg/../mod.py`,
+      for `pkg/..`, for a path whose first segment is `..`, and for a bare
+      `..`. A segment that starts with two dots, as in
       `pkg/..hidden/mod.py`, loads in both forms. So does a segment that
       ends with two, as in `pkg/v1../mod.py`.
     witness: tests/test_consumes.py::test_a_consumed_path_with_a_dot_dot_segment_is_refused_at_load
@@ -214,7 +215,10 @@ or not a criterion declares it.
 **Criteria 1 to 9** each call `parse_spec` on frontmatter with
 `depends_on: [SA-0001]` and one entry. Each loading entry comes back as
 written. For criteria 4 to 9 the witness drives the path alone and the
-path with `:run_task` after it, refused and loading alike.
+path with `:run_task` after it, refused and loading alike. For a first
+segment of `.` or `..`, criteria 6 and 7 drive `./mod.py` and `../mod.py`.
+The criteria describe them in words, because the scope check reads a
+literal path in a claim as one outside `touches`.
 
 Each refused entry raises a `SpecError`, and the witness reads the
 validator's own message from it, as `exc.__cause__.errors()[0]["msg"]`.
@@ -240,7 +244,9 @@ These fail them:
 - a test for `../` anywhere, which refuses `pkg/v1../mod.py`
 - a test for any dot at a path's start, which refuses `.github`
 - a test for `..` anywhere in the path, which refuses `..hidden`
-- a check through `posixpath.normpath` that lets `saffron/` through
+- a test for `/./` or `/../` inside the path, which lets a first or last
+  segment of `.` or `..` load
+- a check through `posixpath.normpath` that lets `pkg/` through
 - a check that refuses everything, which a loading entry catches
 
 **Criterion 10's witness** commits a tree through `_plain_repo` from

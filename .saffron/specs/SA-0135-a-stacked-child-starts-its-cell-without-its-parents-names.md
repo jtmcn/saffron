@@ -175,7 +175,8 @@ writes no ledger row and ends in no state. The attended ones print
 `Spec`). `parse_spec` drops a key whose value is `None` before it
 validates, and turns a `ValidationError` into `SpecError`
 (`saffron/intake.py`, function `parse_spec`). `discover_specs` turns a
-`SpecError` into a `DiscoveryFailure` (`saffron/intake.py:346-347`).
+`SpecError` into a `DiscoveryFailure` (`saffron/intake.py`, function
+`discover_specs`).
 
 ## Problem
 
@@ -220,8 +221,14 @@ checks it before the cell. Build four things.
   then shows a task that never started, and hides the task before it.
   Backlog item b-32f492 holds the fix, and `saffron/events.py` is
   forbidden here.
+- **Where else a refusal shows.** A refusal at run time is not a scan
+  refusal. The batch plan counts the spec as a candidate and leaves it out
+  of `refusals:` (`saffron/cli.py:696-703`). `saffron queue` offers it
+  again every night, since nothing is written. The batch log prints
+  `starting` before `refused` (`saffron/batch.py:203`). Backlog item
+  b-32f492 holds this too.
 - **`SA-0131`'s overlap.** `SA-0131` also edits `saffron/cli.py` and
-  `tests/test_cli.py`, in `_resolve_queue` (`saffron/cli.py:494`) and
+  `tests/test_cli.py`, in `_resolve_queue` (`saffron/cli.py:492`) and
   the batch's rescans (`saffron/cli.py:788-814`). This spec edits `_run_cell`,
   `_batch_runner` and one line of `tests/test_cli.py`. Whichever runs
   second is refused on the other's open pull request until it merges, so
