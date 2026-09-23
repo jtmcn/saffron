@@ -128,7 +128,7 @@ batch tree instead. A reconstruction of 68 stored rows on 2026-09-17 found
 half. The page an operator reads at 06:30 and the ledger are two accounts, and
 nothing says which one to believe.
 
-**Placed 2026-09-20, from an architecture review**: **b-fd1468**. The ledger
+**Placed 2026-09-20, from an architecture review**: ~~**b-fd1468**~~. The ledger
 writes each fact kind and the fold reads it back in a second module. It makes
 170's rebuild test hold by construction rather than kind by kind.
 
@@ -150,6 +150,10 @@ opened #433 by hand.
 
 ### Tier 2 — the morning after
 
+**From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
+landed within 25 lines of the `refactor` ceiling, and the second crossed it.
+`driver.py check` reads no size estimate, so nothing asks for the split.
+
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, ~~**37**~~,
 ~~**38**~~), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, ~~**103**~~,
@@ -160,7 +164,7 @@ measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, ~~
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
-**Placed 2026-09-20**: **171**, ~~**177**~~, **168**, **169**, ~~**b-606ea3**~~,
+**Placed 2026-09-20**: ~~**171**~~, ~~**177**~~, **168**, **169**, ~~**b-606ea3**~~,
 ~~**b-f2a9d1**~~, ~~**b-0c1d69**~~ and **b-25766a**. 171 and 177 are 170's neighbours. One holds a
 diff stat no authoritative record carries, and the other minted a run per task
 where `CONTEXT.md` defined one per repo. #444 redefined **Run**. The last five are vocabulary a cell
@@ -196,7 +200,7 @@ first because it removes the findings that need no judgement, which was three
 of the first review's six. ~~**b-929465**~~ and ~~**b-ea1d13**~~ are done by
 #392, which leaves the two above.
 
-**From the spec loop's run 11** (2026-09-21): **b-440f17** first. The `prose`
+**From the spec loop's run 11** (2026-09-21): ~~**b-440f17**~~ first. The `prose`
 gate let three pull requests in a row ship what `CLAUDE.md` forbids, and each
 review spent a pass on it. Then **b-490c9c**, **b-61993a**, **b-f45f73**,
 **b-8d5e55** and **b-0de0b3**. The last is the operator's decision to generate
@@ -215,8 +219,8 @@ git.
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
-~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, **87**, ~~**89**~~, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, ~~**b-e403c1**~~, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: **b-5fa523**, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**, and from run 13: **b-542beb**, **b-37924b**,
-**b-b431c1**, **b-ac2f02**.
+~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, ~~**87**~~, ~~**89**~~, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-e0bbbf**, and from run 9: **b-0e20e9**, ~~**b-e403c1**~~, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: **b-5fa523**, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**, and from run 13: **b-542beb**, **b-37924b**,
+**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, **b-111c56**, **b-2dea1c**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved

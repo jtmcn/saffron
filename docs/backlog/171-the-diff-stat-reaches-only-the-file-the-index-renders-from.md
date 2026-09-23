@@ -1,11 +1,12 @@
 ---
 id: 171
 title: The diff stat reaches only the file the index renders from, so no authoritative record holds it
-status: open
+status: done
 tier: 2
 filed: 2026-09-17
+closed: 2026-09-22
 specs: [SA-0124]
-prs: []
+prs: [459]
 commits: []
 cites: [§5.7, §6]
 related: [165, 170]
@@ -73,3 +74,8 @@ Carved out of item 170 rather than left inside it, for the reason item 160 was
 carved out of item 141: the two halves have different owners. A sentence inside a
 by-hand architectural item lands when that architecture lands, and this one needs
 a cell and a few lines.
+- 2026-09-22: `SA-0124` reached `READY_FOR_REVIEW` as #459 at $10.39 of $24,
+  in the spec loop's run 14. The stat is now in the `task_package` fact, and
+  the fold rebuilds two `tasks` columns from it. The operator chose that shape
+  on 2026-09-22, since the record is to be the source of truth and the ledger
+  derived from it. `SA-0124` retires to `done/`.

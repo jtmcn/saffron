@@ -58,8 +58,9 @@ And optionally:
    with a git fixture and five witnesses runs 500 lines on its own.
    `saffron/gates/core/size.py` holds the ceiling and
    `.saffron/policy.yaml`'s `elevate_on` says when the gate blocks.
-   **Done when** the estimate is 100 lines or more under that ceiling. An
-   estimate above that line splits into a parent and children with
+   **Done when** the estimate is under 80% of that ceiling. `SA-0117` and
+   `SA-0123` both landed within 25 lines of 1000. An estimate at or above
+   that line splits into a parent and children with
    `depends_on`, and you write the parent. A split leads your report, ahead of
    the files you wrote, and names each child you would write next: the caller
    dispatches those, and reads the rest of your report knowing what is missing.
@@ -119,7 +120,9 @@ reading its line and the review's error becomes the spec's.
    and leave the spec as it is.
 3. **Fix the rest in the spec's own terms.** A claim you widen names the
    witness reaching the new half, in the same edit. A witness you change gets
-   step 7's check 3, adversary and all.
+   step 7's check 3, adversary and all. An edit that tightens a witness names
+   the wrong version it must kill. `SA-0124`'s "the integers 3 and 4" named
+   none, and the cell compared with `==`, so `3.0` passed.
 4. **Re-run steps 4 to 7.** A criterion the review added moves the size
    estimate, and the bookkeeping follows the spec.
 

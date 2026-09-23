@@ -1,12 +1,14 @@
 ---
 id: b-440f17
 title: The `prose` and `terms` gates read no word rule in a Python comment or docstring, so three pull requests in one loop shipped what `CLAUDE.md` forbids
-status: open
+status: done
 tier: 2
 filed: 2026-09-21
+closed: 2026-09-22
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [dcfd854]
 cites: []
 related: [b-6a9707, b-08a36a]
 ---
@@ -50,3 +52,19 @@ A hunk that adds an em-dash to a new comment fails the gate.
   lines. #434 added eleven em-dashes, five semicolons, a hedge and six sentences
   over 25 words. #436 added three em-dashes. #433 added a 43-word docstring
   sentence. The Standards seat found each one.
+- 2026-09-22: done by hand, since `.saffron/**` is `protected`, so no cell can
+  touch the gate. `check` now runs the word rules and `terms` over a `.py`
+  file's comments and docstrings, with the code blanked. Strings that are not
+  docstrings stay out. The tree's `prose` hits rose from 5683 to 10970, and the
+  baseline subtraction carries them.
+- 2026-09-22: review round. Every style rule reads Python, `filler` included,
+  which takes that rule from 178 hits to 532. `filler` is not on the list
+  `CLAUDE.md` names for new comments, but Markdown gets it and a comment is the
+  same prose. The one new `terms` hit, `saffron/intake.py:133`, is a false
+  positive: "Never a ticket" names the avoided word rather than using it. A
+  docstring column counts UTF-8 bytes, so a non-ASCII docstring read on into the
+  next line of code until the review fixed it.
+- 2026-09-22: two more in the spec loop's run 14. #451 added em-dashes, three
+  semicolons and a hedge in new comments. #459 added eight em-dashes and two
+  docstring sentences of over 40 words. The Standards seat found each one, and
+  the `prose` gate passed all of them.

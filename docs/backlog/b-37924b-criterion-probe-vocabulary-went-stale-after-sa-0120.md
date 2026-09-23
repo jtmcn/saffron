@@ -1,12 +1,12 @@
 ---
 id: b-37924b
 title: '`witness_gate`''s summaries call a criterion probe a mutant, and two protected files say no gate applies one'
-status: open
+status: partial
 tier: 3
 filed: 2026-09-22
 by_hand: true
 specs: [SA-0120]
-prs: [434]
+prs: [434, 447]
 commits: []
 cites: [§5.4.1]
 related: [b-2750d5, b-0c1d69]
@@ -34,3 +34,5 @@ host does today. By hand, since `DESIGN.md` and `CONTEXT.md` are protected.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
+- 2026-09-22: #447 rewrote the `DESIGN.md` and `CONTEXT.md` sentences. The
+  `witness_gate` summaries and `Finding.probe`'s docstring remain.

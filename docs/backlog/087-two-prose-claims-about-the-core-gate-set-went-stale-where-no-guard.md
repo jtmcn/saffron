@@ -1,11 +1,12 @@
 ---
 id: 87
 title: Two prose claims about the core gate set went stale where no guard reaches
-status: open
+status: done
 tier: 3
+closed: 2026-09-22
 specs: []
-prs: []
-commits: []
+prs: [446]
+commits: [1b9e6701, 057f674d]
 cites: [§2.1, §5.4.1, §7]
 related: [71, 72]
 by_hand: true
@@ -43,3 +44,17 @@ both sentences corrected by hand — `DESIGN.md` is
 Worth deciding separately whether the `revert`/`witness` distinction deserves a
 `CONTEXT.md` §4 line of its own, since three files now state it in three
 wordings. Half an hour.
+
+## Record
+
+**Status: done, 2026-09-22, by hand.** The docstring half went first. The
+`1b9e6701` refactor rewrote `witness_blocking`'s docstring, and it now names
+`saffron.gates.suite` as the reader. The `DESIGN.md` half landed with ADR 2
+(#446, `057f674d`). §7's row now says core never runs a tool, and it names
+`revert` and `witness` as the gates that invoke the declared `tests` gate.
+The same commit corrects §5.4, which called `revert` the one place core
+reaches into the toolchain.
+
+The `CONTEXT.md` §4 question is answered by ADR 2. The `revert`/`witness`
+distinction now has one statement, in
+`docs/adr/0002-core-invokes-declared-gates-never-tools.md`.

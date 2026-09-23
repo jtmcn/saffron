@@ -298,6 +298,51 @@ def test_a_ledger_that_predates_the_package_columns_keeps_its_rows(tmp_path):
     ledger.close()
 
 
+def test_a_ledger_that_predates_the_diff_stat_gains_it_as_null(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` does not alter, so an existing ledger has
+    neither column. A row it already held keeps NULL rather than a
+    counterfeit 0, since no diff for it was ever measured."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace("    added       INTEGER,\n    removed     INTEGER,\n", "")
+    assert before != SCHEMA  # otherwise this test proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0002', 't', 'READY_FOR_REVIEW', 'saffron/SA-0002')"""
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    rows = {row["spec_id"]: row for row in ledger.queue_lines()}
+    assert rows["SA-0001"]["added"] is None and rows["SA-0001"]["removed"] is None
+    assert rows["SA-0002"]["added"] is None and rows["SA-0002"]["removed"] is None
+    ledger.set_task_package(
+        rows["SA-0001"]["task_id"],
+        "READY_FOR_REVIEW",
+        "b",
+        "c" * 40,
+        "u",
+        added=3,
+        removed=4,
+    )
+    ledger.close()
+
+    reopened = Ledger(path)
+    rows = {row["spec_id"]: row for row in reopened.queue_lines()}
+    assert (rows["SA-0001"]["added"], rows["SA-0001"]["removed"]) == (3, 4)
+    assert [type(rows["SA-0001"][c]) for c in ("added", "removed")] == [int, int]
+    assert rows["SA-0002"]["added"] is None and rows["SA-0002"]["removed"] is None
+    reopened.close()
+
+
 def test_an_attempt_records_what_the_turn_was(ledger, task):
     _, task_id = task
     ledger.set_task_state(task_id, "IMPLEMENTING")

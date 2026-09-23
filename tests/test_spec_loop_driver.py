@@ -1798,6 +1798,29 @@ def test_a_probe_that_only_raised_is_not_killed_under_real_pytest(
     assert capsys.readouterr().out.startswith("killed only by errors")
 
 
+def test_a_probe_reads_pytests_summary_through_forced_colour(
+    tmp_path, monkeypatch, capsys
+):
+    # Claude Code exports FORCE_COLOR, and pytest then colours its summary rows.
+    monkeypatch.setenv("FORCE_COLOR", "3")
+    (tmp_path / "mod.py").write_text("class C:\n    value = 1\n")
+    (tmp_path / "test_mod.py").write_text(
+        "import mod\n\n\ndef test_value():\n    assert mod.C.value == 1\n"
+    )
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+
+    assert (
+        driver.cmd_probe(
+            _probe(tmp_path, "value = 1", "other = 1", *command, "test_mod.py")
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    assert out.startswith("killed only by errors")
+    assert "\x1b[" not in out
+
+
 def test_a_probe_whose_command_is_missing_fails_and_restores(tmp_path, capsys):
     (tmp_path / "mod.py").write_text("x = 1\n")
 

@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
     policy_sha TEXT,
     prompt_sha  TEXT,
+    added       INTEGER,
+    removed     INTEGER,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     record_key TEXT,
     merged_head_sha TEXT
@@ -232,6 +234,10 @@ class Ledger:
             self._db.execute(
                 "ALTER TABLE tasks ADD COLUMN spent_usd_est REAL NOT NULL DEFAULT 0.0"
             )
+        if "added" not in existing:
+            self._db.execute("ALTER TABLE tasks ADD COLUMN added INTEGER")
+        if "removed" not in existing:
+            self._db.execute("ALTER TABLE tasks ADD COLUMN removed INTEGER")
         # Every task carries a key now, backfilled if it has none yet.
         keyless = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key IS NULL"
@@ -586,12 +592,15 @@ class Ledger:
             return None
         if fact.kind == "task_package":
             self._db.execute(
-                "UPDATE tasks SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?, updated_at = ? WHERE task_id = ?",
+                "UPDATE tasks SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?, "
+                "added = ?, removed = ?, updated_at = ? WHERE task_id = ?",
                 (
                     payload["state"],
                     payload["branch"],
                     payload["pushed_sha"],
                     payload["pr_url"],
+                    payload.get("added"),
+                    payload.get("removed"),
                     at,
                     task_id,
                 ),
@@ -1104,6 +1113,9 @@ class Ledger:
         branch: str,
         pushed_sha: str,
         pr_url: str,
+        *,
+        added: int | None = None,
+        removed: int | None = None,
     ) -> None:
         """PACKAGE's own write-back, after `finish_run` (§5.7). The state it
         sets — `READY_FOR_REVIEW`, or `MERGE_FAILED` on the four paths where
@@ -1111,7 +1123,9 @@ class Ledger:
         on the task: `reconcile` (`saffron/reconcile.py`) revises a
         `READY_FOR_REVIEW` row once GitHub records what the operator decided.
         `MERGE_FAILED` is not revised — it is not in `PR_PENDING_STATES`,
-        because it reaches the operator with no pull request to ask about."""
+        because it reaches the operator with no pull request to ask about.
+        `added`/`removed` are `None` on the four paths that return before
+        `diff_stat` ran."""
         fact = self._build_fact(
             task_id,
             "task_package",
@@ -1120,6 +1134,8 @@ class Ledger:
                 "branch": branch,
                 "pushed_sha": pushed_sha,
                 "pr_url": pr_url,
+                "added": added,
+                "removed": removed,
             },
         )
         self._commit_and_append(fact)
@@ -1247,7 +1263,7 @@ class Ledger:
             self._db.execute(
                 """SELECT r.name AS repo, t.spec_id, t.state, t.risk, t.task_id,
                           t.branch, t.budget_usd, t.pushed_sha, t.pr_url,
-                          t.spent_usd_est
+                          t.spent_usd_est, t.added, t.removed
                    FROM tasks t
                    JOIN runs  ON runs.run_id = t.run_id
                    JOIN repos r ON r.repo_id = runs.repo_id

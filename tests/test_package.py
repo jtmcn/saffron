@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 import subprocess
 import subprocess as sp
 from pathlib import Path
@@ -963,6 +964,212 @@ def packageable(monkeypatch, tmp_path):
 
 def _state(ledger, task_id):
     return next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
+
+
+def _seed_stat(tmp_path, task_id, added=7, removed=7):
+    """A value every path's own write must overwrite. It is written through
+    `sqlite3` on the fixture's own ledger file, never through `Ledger`, so
+    the write path cannot intercept the seed."""
+    con = sqlite3.connect(tmp_path / "l.db")
+    con.execute(
+        "UPDATE tasks SET added = ?, removed = ? WHERE task_id = ?",
+        (added, removed, task_id),
+    )
+    con.commit()
+    con.close()
+
+
+def _queue_json_row(out_dir, spec_id):
+    rows = json.loads((out_dir / "queue.json").read_text())
+    return next(r for r in rows if r["spec_id"] == spec_id)
+
+
+def test_every_package_path_that_measured_the_diff_records_its_stat(
+    monkeypatch, packageable, tmp_path
+):
+    """Every PACKAGE path that returns after `diff_stat` ran writes the stat
+    it measured. The four are new failures, body, lease and ready. A second
+    READY_FOR_REVIEW over a patch with no lines changed must store a
+    measured (0, 0), which a counterfeit `or None` would store as NULL."""
+    task_id = packageable.task_id
+
+    # 1: new failures on re-verification.
+    _seed_stat(tmp_path, task_id)
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(
+            NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))
+        ),
+    )
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    assert result.state == "MERGE_FAILED"
+    assert "new failures re-verifying" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert (row["added"], row["removed"]) == (2, 1)
+
+    # 2: a credential in the body.
+    _seed_stat(tmp_path, task_id)
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: _reverified())
+    packageable.outcome.reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[
+                Finding(
+                    lens="correctness",
+                    severity="concern",
+                    file="f.txt",
+                    line=3,
+                    claim=f"the key {FAKE_KEY} is hardcoded here",
+                    anchored=True,
+                )
+            ],
+        )
+    ]
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    packageable.outcome.reviews = []
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the body" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert (row["added"], row["removed"]) == (2, 1)
+
+    # 3: the branch moved underneath us, so the lease is rejected.
+    _seed_stat(tmp_path, task_id)
+    git(
+        packageable.work,
+        "push",
+        "-q",
+        str(packageable.remote),
+        "cell:refs/heads/saffron/SA-0005",
+    )
+    monkeypatch.setattr("saffron.phases.package.remote_sha", lambda *a, **k: "")
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    monkeypatch.setattr("saffron.phases.package.remote_sha", remote_sha)
+    assert result.state == "MERGE_FAILED" and result.pushed_sha == ""
+    assert "moved underneath us" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert (row["added"], row["removed"]) == (2, 1)
+
+    # 4: READY_FOR_REVIEW.
+    _seed_stat(tmp_path, task_id)
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(
+            argv, 0, stdout="https://github.com/o/r/pull/1\n"
+        ),
+        **packageable.kwargs,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    row = _state(packageable.ledger, task_id)
+    assert (row["added"], row["removed"]) == (2, 1)
+
+    # 5: READY_FOR_REVIEW again, over a patch that adds one empty file. That
+    # is a measured (0, 0), not NULL and not the seed.
+    _seed_stat(tmp_path, task_id)
+    patch_path = packageable.outcome.task_dir / "patch.diff"
+    original_patch = patch_path.read_text()
+    git(packageable.work, "checkout", "-q", "-b", "cell-empty", packageable.base)
+    (packageable.work / "empty.txt").touch()
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "add an empty file")
+    empty_patch = (
+        git(packageable.work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n"
+    )
+    git(packageable.work, "checkout", "-q", "main")
+    git(packageable.work, "branch", "-D", "cell-empty")
+    patch_path.write_text(empty_patch)
+    try:
+        result = package(
+            packageable.outcome,
+            gh=lambda argv: sp.CompletedProcess(
+                argv, 0, stdout="https://github.com/o/r/pull/2\n"
+            ),
+            **packageable.kwargs,
+        )
+    finally:
+        patch_path.write_text(original_patch)
+    assert result.state == "READY_FOR_REVIEW"
+    assert (result.added, result.removed) == (0, 0)
+    row = _state(packageable.ledger, task_id)
+    assert (row["added"], row["removed"]) == (0, 0)
+
+
+def test_every_package_path_that_returned_before_the_diff_was_measured_records_no_stat(
+    packageable, tmp_path
+):
+    """Every PACKAGE path that returns before `diff_stat` ran leaves the
+    columns NULL. That is never the seeded 7/7 and never a counterfeit 0."""
+    task_id = packageable.task_id
+    task_dir = packageable.outcome.task_dir
+    patch_json_path = task_dir / "patch.json"
+    patch_diff_path = task_dir / "patch.diff"
+    original_patch_json = patch_json_path.read_text()
+    original_patch_diff = patch_diff_path.read_text()
+
+    # 1: the parent is gone.
+    _seed_stat(tmp_path, task_id)
+    cell_head = git(packageable.work, "rev-parse", "cell")
+    patch_json_path.write_text(
+        json.dumps({"base_sha": packageable.base, "tree_base": cell_head})
+    )
+    result = package(
+        packageable.outcome,
+        gh=_no_gh,
+        parent_branch="saffron/SA-0020",
+        **packageable.kwargs,
+    )
+    patch_json_path.write_text(original_patch_json)
+    assert result.state == "MERGE_FAILED"
+    assert "saffron/SA-0020 is gone" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert row["added"] is None and row["removed"] is None
+    queued = _queue_json_row(packageable.out_dir, "SA-0005")
+    assert (queued["added"], queued["removed"]) == (0, 0)
+
+    # 2: a credential in the patch.
+    _seed_stat(tmp_path, task_id)
+    git(packageable.work, "checkout", "-q", "cell")
+    (packageable.work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "the agent hardcoded a key")
+    leaked_patch = (
+        git(packageable.work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n"
+    )
+    git(packageable.work, "checkout", "-q", "main")
+    patch_diff_path.write_text(leaked_patch)
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    patch_diff_path.write_text(original_patch_diff)
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the patch" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert row["added"] is None and row["removed"] is None
+    queued = _queue_json_row(packageable.out_dir, "SA-0005")
+    assert (queued["added"], queued["removed"]) == (0, 0)
+
+    # 3: a credential in an agent commit subject.
+    _seed_stat(tmp_path, task_id)
+    packageable.outcome.agent_subjects = [f"fix: use {FAKE_KEY}"]
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    packageable.outcome.agent_subjects = []
+    assert result.state == "MERGE_FAILED"
+    assert "credential in the commit subjects" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert row["added"] is None and row["removed"] is None
+    queued = _queue_json_row(packageable.out_dir, "SA-0005")
+    assert (queued["added"], queued["removed"]) == (0, 0)
+
+    # 4: a real conflict. It goes last, since it moves main for good.
+    _seed_stat(tmp_path, task_id)
+    (packageable.work / "f.txt").write_text("a\nb\nMAIN_TOOK_IT\nd\ne\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+    result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    assert result.state == "MERGE_FAILED"
+    assert "conflicts with main" in result.note
+    row = _state(packageable.ledger, task_id)
+    assert row["added"] is None and row["removed"] is None
+    queued = _queue_json_row(packageable.out_dir, "SA-0005")
+    assert (queued["added"], queued["removed"]) == (0, 0)
 
 
 def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):

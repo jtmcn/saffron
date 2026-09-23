@@ -1818,12 +1818,37 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-22, a sixty-seventh time: `SA-0133` queued for
+    """Re-measured 2026-09-22, a seventy-first time: `SA-0133` queued for
     backlog item b-864a4d, a digest of each session's request and of the
     task's `CLAUDE.md` in the event log. It edits the cell session, the
     event table and `tests/test_session.py`, which `SA-0126` and `SA-0128`
     edit too, so it declares `depends_on: [SA-0128]`. It is refused on that,
     since `SA-0128` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-22, a seventieth time: `SA-0131` queued for
+    backlog item b-111c56, a parent merged by hand after `EXHAUSTED`. It
+    edits the scheduler and the CLI, which no queued spec touches, so it
+    declares no `depends_on`. It shares `SA-0130`'s priority and sorts after
+    it on id, so it is candidate 4 of 4. The refusals are unmoved.
+
+    Re-measured 2026-09-22, a sixty-ninth time: `SA-0130` queued for
+    backlog item b-2dea1c, the IMPLEMENT prompt saying who runs wrong versions
+    of the change. It edits `implement.md` and `tests/test_context.py`, which no
+    queued spec touches, so it declares no `depends_on`. It sorts after
+    `SA-0125` on priority and is candidate 3 of 3. The refusals are unmoved.
+
+    Re-measured 2026-09-22, a sixty-eighth time: `SA-0123` (item
+    b-fd1468) and `SA-0124` (item 171) merged and retire to `done/`. `SA-0123`
+    was candidate 1, and `SA-0124` was refused on its `depends_on`. The
+    candidates are `SA-0127` then `SA-0125`, and the refusals `SA-0126`,
+    `SA-0128` and `SA-0129`.
+
+    Re-measured 2026-09-22, a sixty-seventh time: `SA-0129` queued for
+    backlog item b-db95e1, `driver.py check` refusing a spec whose declared
+    estimate, priced in tokens, sits within 20% of its `size` ceiling. It
+    reads `SA-0128`'s token ceilings and rate, so it declares
+    `depends_on: [SA-0128]`. It is refused on that, since `SA-0128` has not
+    run. The candidates are unmoved.
 
     Re-measured 2026-09-22, a sixty-sixth time: `SA-0128` queued for
     backlog item b-89ec93, `size` counting tokens rather than lines. It edits
@@ -2193,11 +2218,16 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0123", "SA-0127", "SA-0125"]
+    assert [c.spec.id for c in candidates] == [
+        "SA-0127",
+        "SA-0125",
+        "SA-0130",
+        "SA-0131",
+    ]
     assert [r.path.name[:7] for r in refusals] == [
-        "SA-0124",
         "SA-0126",
         "SA-0128",
+        "SA-0129",
         "SA-0133",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
