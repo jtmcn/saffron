@@ -150,6 +150,10 @@ opened #433 by hand.
 
 ### Tier 2 — the morning after
 
+**From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
+landed within 25 lines of the `refactor` ceiling, and the second crossed it.
+`driver.py check` reads no size estimate, so nothing asks for the split.
+
 Operator visibility parts 2 and 3 — `SA-0032`–`SA-0039`, with the plan's Task 6
 rewritten onto **42** — then Task 11's by-hand documents (**36**, ~~**37**~~,
 ~~**38**~~), plus **43**, **48**, **52**, **60**, **66**, **67**, ~~**72**~~, **98**, ~~**103**~~,

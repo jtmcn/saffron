@@ -1818,7 +1818,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-22, a sixty-sixth time: `SA-0128` queued for
+    """Re-measured 2026-09-22, a sixty-seventh time: `SA-0129` queued for
+    backlog item b-db95e1, `driver.py check` refusing a spec whose declared
+    estimate, priced in tokens, sits within 20% of its `size` ceiling. It
+    reads `SA-0128`'s token ceilings and rate, so it declares
+    `depends_on: [SA-0128]`. It is refused on that, since `SA-0128` has not
+    run. The candidates are unmoved.
+
+    Re-measured 2026-09-22, a sixty-sixth time: `SA-0128` queued for
     backlog item b-89ec93, `size` counting tokens rather than lines. It edits
     `tests/test_session.py`, which `SA-0126` edits too, so it declares
     `depends_on: [SA-0126]`. It is refused on that, since `SA-0126` has not
@@ -2187,7 +2194,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
     assert [c.spec.id for c in candidates] == ["SA-0123", "SA-0127", "SA-0125"]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0124", "SA-0126", "SA-0128"]
+    assert [r.path.name[:7] for r in refusals] == [
+        "SA-0124",
+        "SA-0126",
+        "SA-0128",
+        "SA-0129",
+    ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

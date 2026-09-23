@@ -120,3 +120,63 @@ sweep is the check pre-flight 6 lacks for any spec that changes a gate's unit.
    reached the operator and cost a round of questions.
 3. **Assign spec ids and stack order before parallel drafting.** Both paid off
    here: no collision, and the bookkeeping took one pass per layer.
+
+# Spec chain feedback, 2026-09-22 (evening): SA-0129, SA-0130 and SA-0131
+
+Three specs from the spec loop's run 14 summary. Three writers ran in
+parallel, each in its own worktree. Two other items of the five landed by
+hand: #463 (b-440f17, `prose` reading Python) and #464 (the writer rules).
+The child `SA-0132` is drafted and waits for `SA-0129` and `SA-0131` to merge.
+
+## Cost
+
+| Spec | Step | Time |
+|---|---|---|
+| SA-0129 | draft, with a prototype | 12.4 min |
+| SA-0129 | revise to wait on SA-0128 (operator decision) | about 7 min |
+| SA-0129 | first review, then revise | 3.8 min, 5.2 min |
+| SA-0129 | second review, then revise with measurement | 4.2 min, 6.0 min |
+| SA-0130 | draft, then move the witness to `test_context.py` | 11.6 min, 5.1 min |
+| SA-0130 | first review, then revise | 2.0 min, 5.0 min |
+| SA-0130 | second review, fixed by the delegate | 2.8 min |
+| SA-0131 | draft of parent and child, with prototypes | 29.0 min |
+| SA-0131 | first review, then revise with measurement | 2.6 min, 5.3 min |
+| SA-0131 | second review, then revise with measurement | 5.1 min, 5.2 min |
+
+No round found a blocker. Round 2's concerns on `SA-0129` and `SA-0131`
+were settled by running each wrong version on the writer's prototype, not
+by a third review.
+
+## Findings by class
+
+| Spec | Round | Finding | Class | Check that should have caught it |
+|---|---|---|---|---|
+| SA-0129 | 1 | Every driven boundary divided exactly | Driven values share a shape the claim does not require | none |
+| SA-0129 | 1 | The clear line beside a size blocker was unpinned | Two criteria disagreeing on one input | Pre-flight 2 |
+| SA-0129 | 2 | Every driven ceiling had a whole-token 80% | Driven values share a shape the claim does not require | none |
+| SA-0129 | 2 | No no-rows run watched the clear line | A witness drives one member of a set | Pre-flight 1 |
+| SA-0130 | 1 | The dictated text said the host runs every listed wrong version | A claim about the system the dictated text makes | none |
+| SA-0130 | 2 | The dictated text could override `CLAUDE.md`'s run against unfixed code | A claim about the system the dictated text makes | none |
+| SA-0131 | 1 | A check against the mirror's default ref passed | A fixture makes two sources of one fact agree | none |
+| SA-0131 | 1 | The parent's rows had no stated order | A fixture makes two sources of one fact agree | none |
+| SA-0131 | 1 | `saffron cell` was said to apply no refusal | A claim about the tree | Pre-flight 5 |
+| SA-0131 | 2 | The mirror's `HEAD` and `FETCH_HEAD` agreed with the pin | A fixture makes two sources of one fact agree | none |
+| SA-0131 | 2 | A stated reason was false for `saffron batch` | A claim about the tree | Pre-flight 5 |
+
+## What the pre-flight should learn
+
+Three classes recurred with no check behind them.
+
+1. **Driven values that share a shape.** Before review, list each value a
+   witness drives and name one property they all share that the claim does
+   not promise. Exact division, a multiple of 5 and a whole token count were
+   each found one round apart on `SA-0129`.
+2. **Two sources of one fact.** For each fact a check reads, list every
+   place the fixture holds it: a pinned sha, a mirror ref, `HEAD`,
+   `FETCH_HEAD`, a ledger state. Make at least one pass hold them apart.
+3. **Text the cell is told to write.** Check each sentence a spec dictates
+   against the code, and against the rest of the prompt it lands in.
+
+Both round-2 concerns on `SA-0129` and `SA-0131` repeated their round-1
+class. Naming the class in the second review's prompt found more of it.
+Naming it in the writer's revision prompt did not stop it.
