@@ -89,13 +89,15 @@ Ceiling = Literal["budget_usd", "max_attempts", "max_turns"]
 CeilingSource = Literal["flag", "spec", "default"]
 
 TerminalReason = Literal[
-    # Cut off at the turn ceiling with no budget left to attempt a salvage turn.
+    # Cut off at the turn ceiling or the wall clock (SA-0126), with no budget
+    # left to attempt a salvage turn.
     "cut_off_no_salvage_room",
-    # Cut off at the turn ceiling, a salvage turn ran, and nothing was recovered.
+    # Cut off at the turn ceiling or the wall clock, a salvage turn ran, and
+    # nothing was recovered.
     "cut_off_salvage_failed",
-    # Ended without finishing and produced nothing — an idle or wall-clock
-    # bound, a provider wall, or a crash. `subtype`/`terminal_reason` carry
-    # which. Not "cut off": the turn ceiling did not fire.
+    # Ended without finishing and produced nothing — an idle bound, a
+    # provider wall, or a crash. `subtype`/`terminal_reason` carry which.
+    # Not "cut off": neither bound the salvage turn answers fired.
     "ended_without_finishing",
     # Finished on its own and produced nothing. Doneness is measured, never
     # argued with: this is a different fact from being cut off.
@@ -310,13 +312,13 @@ class Terminal:
     """One of the five ways an IMPLEMENT turn ends with zero commits — the
     supervisor separates five, and a `cut_off: bool` would re-collapse exactly
     what SA-0028 pulled apart. `subtype`/`terminal_reason` are only meaningful
-    on `ended_without_finishing`, where the runtime's own reason is what makes
-    "an idle bound", "a provider wall" and "a crash" distinguishable at all.
-    `detail` carries the rejection text on `plan_rejected` or a failure note
-    on the salvage branches.
+    on `ended_without_finishing`. `detail` carries the rejection text on
+    `plan_rejected`, which bound cut it on `cut_off_no_salvage_room`
+    (SA-0126), or a failure note on the salvage branches.
 
-    Not a `TerminalState`. CONTEXT.md §6 keeps the two names deliberately
-    distinct: each reason ends in `PLAN_REJECTED` or `NOT_IMPLEMENTED`."""
+    Not a `TerminalState`. `plan_rejected` ends in `PLAN_REJECTED`. Every
+    other reason ends in `NOT_IMPLEMENTED` or, a cut-off's first time at a
+    `spec_sha`, `ORPHANED`."""
 
     timestamp: float
     spec_id: str
@@ -810,9 +812,10 @@ def describe(event: Event) -> str:
 
     if isinstance(event, Terminal):
         if event.reason == "cut_off_no_salvage_room":
+            # SA-0126: which bound cut it lives inside `detail` now.
             return (
-                f"budget: {_clean(event.detail, _DETAIL_BOUND)} — cut off at "
-                "the turn ceiling with nothing committed, no room left to salvage"
+                f"budget: {_clean(event.detail, _DETAIL_BOUND)} with nothing "
+                "committed, no room left to salvage"
             )
         if event.reason == "cut_off_salvage_failed":
             return (
@@ -913,6 +916,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("IMPLEMENT: system prompt", _S, PhaseStart),
     _Family("IMPLEMENT: the session failed", _S, PhaseStart),
     _Family("IMPLEMENT: cut off … spending one turn", _S, PhaseStart),
+    _Family("IMPLEMENT: cut again at this spec_sha", _S, PhaseStart),
     _Family("IMPLEMENT: N commit(s)", _S, Attempt),
     _Family("IMPLEMENT: the turn ended without finishing", _S, Terminal),
     _Family("IMPLEMENT: finished and produced nothing", _S, Terminal),

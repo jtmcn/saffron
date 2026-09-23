@@ -385,6 +385,42 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
     )
 
 
+def previous_cut_orphan(
+    ledger: Ledger, repo_id: int, spec: CellSpec, task_id: int
+) -> int | None:
+    """The retry cap (SA-0126, backlog item b-36b551). Only the first
+    zero-commit cut at one `spec_sha` earns `ORPHANED`, and the next settles
+    as `NOT_IMPLEMENTED`. No fact says "orphaned by a cut" apart from the
+    other three paths that write it, so this reads `ledger._db` directly, as
+    `chain_walk._task_rows` does. A cut task's run finished `COMPLETE` while
+    every attempt it holds stayed phase `IMPLEMENTING`, the state
+    `_drive_cell` never leaves before this return fires. Scoped to this
+    repo, spec id and `spec_sha`, excluding `task_id` itself. Call only when
+    a bound cut this task and nothing survived the salvage.
+    """
+    row = ledger._db.execute(
+        """
+        SELECT t.task_id
+          FROM tasks t
+          JOIN runs rn ON rn.run_id = t.run_id
+         WHERE rn.repo_id = ?
+           AND t.spec_id = ?
+           AND t.spec_sha = ?
+           AND t.task_id != ?
+           AND t.state = 'ORPHANED'
+           AND rn.status = 'COMPLETE'
+           AND NOT EXISTS (
+               SELECT 1 FROM attempts a
+                WHERE a.task_id = t.task_id AND a.phase != 'IMPLEMENTING'
+           )
+         ORDER BY t.task_id
+         LIMIT 1
+        """,
+        (repo_id, spec.spec_id, spec.spec_sha, task_id),
+    ).fetchone()
+    return int(row["task_id"]) if row is not None else None
+
+
 def require_session(session_id: str | None) -> str:
     """Every turn after the first resumes, so a missing session_id is fatal.
 
@@ -2009,10 +2045,17 @@ def _drive_cell(
             )
         )
 
-        if commits == 0 and cut_off_at_turn_ceiling(implemented):
-            # The agent did not decide it was finished — the turn ceiling cut
-            # it off with the work still in /work, uncommitted, about to die
-            # with the volume at teardown (SA-0025: $14.61, 141 turns, zero
+        # Decided once, from the implement turn's own attempt: SA-0028's turn
+        # ceiling, or, since SA-0126, the wall clock.
+        turn_ceiling_cut = cut_off_at_turn_ceiling(implemented)
+        wall_cut = implemented.bound == "wall"
+        cut_by_bound = turn_ceiling_cut or wall_cut
+        bound_word = "the turn ceiling" if turn_ceiling_cut else "the wall clock"
+
+        if commits == 0 and cut_by_bound:
+            # The agent did not decide it was finished — a bound cut it off
+            # with the work still in /work, uncommitted, about to die with
+            # the volume at teardown (SA-0025: $14.61, 141 turns, zero
             # commits, $5.39 unspent). One more turn, resumed on the same
             # session, asking only for a commit. The budget ceiling is
             # checked *before* it is spent, never after (§4.3).
@@ -2023,14 +2066,17 @@ def _drive_cell(
                         spec_id=spec.spec_id,
                         reason="cut_off_no_salvage_room",
                         spent_usd_est=spent,
-                        detail=f"${spent:.2f} of ${spec.budget_usd:.2f}",
+                        detail=(
+                            f"${spent:.2f} of ${spec.budget_usd:.2f} — "
+                            f"cut off at {bound_word}"
+                        ),
                     )
                 )
             else:
                 _phase_start(
                     "IMPLEMENT",
                     "IMPLEMENT",
-                    "cut off at the turn ceiling with nothing committed — "
+                    f"cut off at {bound_word} with nothing committed — "
                     "spending one turn to salvage it",
                 )
                 # Clamped: a spec with a `max_turns` below the salvage
@@ -2100,8 +2146,8 @@ def _drive_cell(
                     # refusing the commit arrives here as a runtime error. It is
                     # the repo's code being wrong, not the runtime breaking:
                     # letting it out books exit 2, charged to nobody, on a task
-                    # that earned `NOT_IMPLEMENTED` (error ≠ fail). The
-                    # `commits_ahead` re-measure below still decides.
+                    # that earned `ORPHANED` or `NOT_IMPLEMENTED` (error ≠
+                    # fail). The `commits_ahead` re-measure below still decides.
                     _phase_start(
                         "IMPLEMENT", "SALVAGE", f"the host checkpoint failed — {broke}"
                     )
@@ -2124,10 +2170,10 @@ def _drive_cell(
                         )
                     )
         elif commits == 0 and implement_failed:
-            # Neither cut off at the turn ceiling nor finished: an idle or
-            # wall-clock bound, a provider wall, a crash. Saying "finished"
-            # here would collapse a third fact into the two this spec exists
-            # to separate, and a retry is warranted for this one.
+            # Neither cut off nor finished: an idle bound, a provider wall, a
+            # crash. Saying "finished" here would collapse a third fact into
+            # the two this spec exists to separate, and a retry is warranted
+            # for this one.
             emit(
                 Terminal(
                     timestamp=time.time(),
@@ -2153,10 +2199,23 @@ def _drive_cell(
             )
 
         if commits == 0:
-            ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
+            # SA-0126: a bound's first cut at a `spec_sha` re-queues as
+            # `ORPHANED`. An earlier such task settles this one instead.
+            state = "NOT_IMPLEMENTED"
+            if cut_by_bound:
+                earlier = previous_cut_orphan(ledger, repo_id, spec, task_id)
+                if earlier is not None:
+                    _phase_start(
+                        "IMPLEMENT",
+                        "IMPLEMENT",
+                        f"cut again at this spec_sha — task {earlier}",
+                    )
+                else:
+                    state = "ORPHANED"
+            ledger.set_task_state(task_id, state)
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
-                state="NOT_IMPLEMENTED",
+                state=state,
                 task_id=task_id,
                 run_id=run_id,
                 task_dir=task_dir,

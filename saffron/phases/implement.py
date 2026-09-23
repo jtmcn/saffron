@@ -37,10 +37,11 @@ PLAN_PROMPT = context.turn_prompt("plan")
 
 IMPLEMENT_PROMPT = context.turn_prompt("implement")
 
-# session.py's one-turn salvage (SA-0028): spent only when the implement turn
-# was cut off at its own turn ceiling with the worktree still at zero commits
-# — the gap `committed` does not cover because a cell that never reaches GATE
-# is never gated. Bounded far below an ordinary implement turn's own
+# session.py's one-turn salvage (SA-0028, extended to the wall clock by
+# SA-0126): spent when the implement turn was cut off at its own turn ceiling
+# or by the wall clock, with the worktree still at zero commits — the gap
+# `committed` does not cover because a cell that never reaches GATE is never
+# gated. Bounded far below an ordinary implement turn's own
 # `max_turns`: this is a `git add`/`git commit` of what already exists, not a
 # second attempt at the task. A run once spent 141 turns and $11.68 doing
 # correct work it never committed; a salvage that could itself run that long

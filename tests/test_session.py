@@ -1162,6 +1162,26 @@ def _cut_off_turn(cost=0.4):
     )
 
 
+def _wall_cut_turn(cost=0.4, *, bound="wall"):
+    """What `run_agent` raises when a time bound ends a turn with no result
+    event at all: `session_id=None`, `subtype="error"`, no
+    `terminal_reason`, `bound` set to what the runtime named the wait.
+    `bound="idle"` is the same shape for the idle bound's own cell. Never a
+    turn ceiling's `error_max_turns`/`max_turns`."""
+    attempt = implement.AttemptResult(
+        session_id=None,
+        subtype="error",
+        terminal_reason=None,
+        num_turns=0,
+        cost_usd_est=cost,
+        is_error=True,
+        bound=bound,
+    )
+    return implement.AgentFailed(
+        f"the agent produced no result event, was cut by the {bound} bound", attempt
+    )
+
+
 def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
@@ -1223,7 +1243,7 @@ def _drive(
     vs `Attempt.decision`, say).
     """
     repo = tmp_path / "repo"
-    (repo / ".saffron" / "gates").mkdir(parents=True)
+    (repo / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
     for name in gates:
         # `load_policy` refuses a declared gate whose executable is missing
         # or not +x, so a policy naming one needs a real file behind it.
@@ -1604,8 +1624,8 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
 
 def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
     """The budget ceiling is honoured before the salvage turn is spent, never
-    after: a task with no room left ends exactly as it did before this
-    control existed, and the watch line names the ceiling that stopped it."""
+    after. A task with no room left is cut, and this being its first cut at
+    the spec_sha, it settles ORPHANED. The watch line names the bound."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     outcome, _ledger = _drive(
         monkeypatch,
@@ -1617,7 +1637,7 @@ def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
         ],
         spec=_spec(budget_usd=12.0),
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == "ORPHANED"
     # No third turn: nothing left to spend it with.
     assert len(cell.turns) == 2
     assert any(
@@ -1628,9 +1648,9 @@ def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
 def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
     monkeypatch, tmp_path
 ):
-    """The salvage turn is a chance, not a guarantee: if it still leaves
-    zero commits, the task ends NOT_IMPLEMENTED, and the watch line says the
-    turn ceiling cut it off rather than the agent finishing with nothing.
+    """The salvage turn is a chance, not a guarantee. If it still leaves zero
+    commits, this first cut at the spec_sha settles ORPHANED. The watch line
+    says the turn ceiling cut it off, not the agent finishing with nothing.
 
     The *clean-tree* shape, deliberately: `_stub_the_runtime`'s `dirty_paths`
     returns `[]`, so the host checkpoint below finds nothing to save. A dirty
@@ -1646,7 +1666,7 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
             _turn(cost=0.05),
         ],
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == "ORPHANED"
     assert len(cell.turns) == 3
     assert any("cut off and could not be salvaged" in line for line in cell.watched)
     assert not any("finished and produced nothing" in line for line in cell.watched)
@@ -1811,8 +1831,8 @@ def test_a_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
     """`commit_dirty` raises on any non-zero git exit, so a commit hook
     rejecting the host checkpoint arrives as a `CellRuntimeError`. Letting it
     out of the salvage path books exit 2, charged to nobody, on a task that
-    earned `NOT_IMPLEMENTED` — `error` collapsed into `fail`, on the one path
-    where the tree is known dirty and the agent already failed to commit it."""
+    earned `ORPHANED` — `error` collapsed into `fail`, on the one path where
+    the tree is known dirty and the agent already failed to commit it."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     monkeypatch.setattr(
         "saffron.cell.worktree.dirty_paths", lambda _c: ["saffron/cell/session.py"]
@@ -1833,7 +1853,7 @@ def test_a_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort(
         ],
     )
     # The outcome the task earned, and the exit code that goes with it.
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == "ORPHANED"
     assert any("the host checkpoint failed" in line for line in cell.watched)
     assert any("cut off and could not be salvaged" in line for line in cell.watched)
 
@@ -1858,6 +1878,310 @@ def test_a_salvage_ceiling_never_exceeds_the_turn_ceiling_it_is_salvaging(
     )
     assert implement.SALVAGE_MAX_TURNS > 3  # or this test proves nothing
     assert cell.turn_options[2]["max_turns"] == 3
+
+
+def test_a_turn_cut_by_the_wall_with_nothing_committed_is_salvaged(
+    monkeypatch, tmp_path
+):
+    """SA-0126: the wall clock now earns SA-0028's salvage turn too. The
+    salvage turn resumes the plan turn's own session, since a wall kill's
+    AttemptResult carries no session id of its own."""
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _wall_cut_turn(cost=0.4),
+            _turn(cost=0.1),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.turns[2] == implement.SALVAGE_PROMPT
+    assert cell.resumes[2] == "sess-1"
+    assert cell.turn_options[2]["max_turns"] == implement.SALVAGE_MAX_TURNS
+    announced = [
+        line for line in cell.watched if "spending one turn to salvage" in line
+    ]
+    assert len(announced) == 1
+    assert "wall" in announced[0]
+    assert "turn ceiling" not in announced[0]
+
+
+def test_every_cut_that_leaves_nothing_committed_halts_for_the_next_scan(
+    monkeypatch, tmp_path
+):
+    """Five zero-commit cells, each its own ledger. The turn ceiling and the
+    wall clock both salvage when there is room, and both refuse when there
+    is not. Either way both settle ORPHANED on their first cut. The idle
+    bound reaches neither: no salvage, and it settles NOT_IMPLEMENTED."""
+    from saffron import scheduler
+
+    cell_a = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_a, ledger_a = _drive(
+        monkeypatch,
+        tmp_path / "a",
+        cell=cell_a,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+    )
+    cell_b = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_b, ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "b",
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+    )
+    cell_c = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_c, ledger_c = _drive(
+        monkeypatch,
+        tmp_path / "c",
+        cell=cell_c,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    cell_d = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_d, ledger_d = _drive(
+        monkeypatch,
+        tmp_path / "d",
+        cell=cell_d,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=12.0)],
+        spec=_spec(budget_usd=12.0),
+    )
+    cell_e = _stub_the_runtime(monkeypatch, commits=0)
+    outcome_e, ledger_e = _drive(
+        monkeypatch,
+        tmp_path / "e",
+        cell=cell_e,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4, bound="idle")],
+    )
+
+    def _state(ledger):
+        (row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+        return row["state"]
+
+    assert [
+        _state(led) for led in (ledger_a, ledger_b, ledger_c, ledger_d, ledger_e)
+    ] == ["ORPHANED", "ORPHANED", "ORPHANED", "ORPHANED", "NOT_IMPLEMENTED"]
+    assert [
+        outcome_a.state,
+        outcome_b.state,
+        outcome_c.state,
+        outcome_d.state,
+        outcome_e.state,
+    ] == ["ORPHANED", "ORPHANED", "ORPHANED", "ORPHANED", "NOT_IMPLEMENTED"]
+    assert "ORPHANED" in scheduler.REQUEUE_STATES
+    assert "ORPHANED" not in scheduler.DONE_STATES
+    assert len(cell_a.turns) == 3
+    assert len(cell_b.turns) == 3
+    assert len(cell_c.turns) == 2
+    assert len(cell_d.turns) == 2
+    assert len(cell_e.turns) == 2
+
+    def _bound_line(cell):
+        matches = [
+            line
+            for line in cell.watched
+            if "spending one turn to salvage" in line
+            or "no room left to salvage" in line
+        ]
+        assert len(matches) == 1
+        return matches[0]
+
+    assert "turn ceiling" in _bound_line(cell_a) and "wall" not in _bound_line(cell_a)
+    assert "wall" in _bound_line(cell_b) and "turn ceiling" not in _bound_line(cell_b)
+    assert "turn ceiling" in _bound_line(cell_c) and "wall" not in _bound_line(cell_c)
+    assert "wall" in _bound_line(cell_d) and "turn ceiling" not in _bound_line(cell_d)
+
+
+def test_a_second_cut_at_one_spec_sha_settles_the_spec(monkeypatch, tmp_path):
+    """The retry cap fires only for a task cut at the *same* spec_sha. Task 1
+    is cut at a different one and does not count. Task 2 is the first real
+    cut at the spec's own spec_sha and settles ORPHANED. Task 3 is the
+    second, and settles NOT_IMPLEMENTED, naming task 2 as the one before."""
+    other_sha = "b" * 64
+    target = _spec()  # spec_sha "a" * 64, the default
+
+    cell1 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome1, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=replace(target, spec_sha=other_sha),
+    )
+    cell2 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome2, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+        spec=target,
+    )
+    cell3 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome3, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell3,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=target,
+    )
+
+    assert outcome1.state == "ORPHANED"
+    assert outcome2.state == "ORPHANED"
+    assert outcome3.state == "NOT_IMPLEMENTED"
+    rows = ledger._db.execute(
+        "SELECT task_id, state FROM tasks ORDER BY task_id"
+    ).fetchall()
+    assert [(r["task_id"], r["state"]) for r in rows] == [
+        (1, "ORPHANED"),
+        (2, "ORPHANED"),
+        (3, "NOT_IMPLEMENTED"),
+    ]
+    assert len(cell3.turns) == 3
+    named = [line for line in cell3.watched if "cut again at this spec_sha" in line]
+    assert len(named) == 1
+    assert "task 2" in named[0]
+    assert not any("cut again at this spec_sha" in line for line in cell1.watched)
+    assert not any("cut again at this spec_sha" in line for line in cell2.watched)
+
+
+def test_the_cap_is_scoped_to_the_specs_own_id_not_only_its_sha(monkeypatch, tmp_path):
+    """The cap's key is repo, spec id and spec_sha together. Task 1 is cut at
+    a different spec id that happens to share this spec_sha, and must not
+    count. Task 2 is this spec's own first cut, and still settles ORPHANED
+    rather than being told task 1 came before it."""
+    target = _spec()  # spec_id "SY-1", spec_sha "a" * 64, the defaults
+
+    cell1 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome1, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.05),
+        ],
+        spec=replace(target, spec_id="SY-2"),
+    )
+    cell2 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome2, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+        spec=target,
+    )
+
+    assert outcome1.state == "ORPHANED"
+    assert outcome2.state == "ORPHANED"
+    assert not any("cut again at this spec_sha" in line for line in cell2.watched)
+
+
+def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp_path):
+    """ORPHANED written by a raise, a scan's own stamp, or a rebuttal that
+    commits nothing must never feed the cap. Four such tasks sit ahead of a
+    real wall cut at the same spec_sha, and none of them counts as a
+    predecessor: the fifth cell still settles ORPHANED, its own first cut."""
+    cell1 = _stub_the_runtime(monkeypatch, commits=0)
+    with pytest.raises(RuntimeError):
+        _drive(
+            monkeypatch,
+            tmp_path,
+            cell=cell1,
+            turns=[_turn(_block(_PLAN)), RuntimeError("boom")],
+        )
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    (repo_row,) = ledger._db.execute("SELECT repo_id FROM repos").fetchall()
+    repo_id = repo_row["repo_id"]
+    spec_id, spec_sha, branch = "SY-1", "a" * 64, "saffron/SY-1"
+
+    def _closed(task_id, phase):
+        attempt_id = ledger.open_attempt(task_id, phase=phase)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s",
+            subtype="success",
+            terminal_reason="completed",
+            num_turns=1,
+            cost_usd_est=0.1,
+        )
+
+    # Task 2: one IMPLEMENTING attempt. A scan's stamp leaves its run RUNNING.
+    run2 = ledger.create_run(repo_id, "b" * 40)
+    task2 = ledger.create_task(run2, spec_id, spec_sha, branch=branch)
+    _closed(task2, "IMPLEMENTING")
+    ledger.set_task_state(task2, "ORPHANED")
+
+    # Task 3: IMPLEMENTING then REVIEWING, run COMPLETE.
+    run3 = ledger.create_run(repo_id, "b" * 40)
+    task3 = ledger.create_task(run3, spec_id, spec_sha, branch=branch)
+    _closed(task3, "IMPLEMENTING")
+    _closed(task3, "REVIEWING")
+    ledger.set_task_state(task3, "ORPHANED")
+    ledger.finish_run(run3, "COMPLETE")
+
+    # Task 4: IMPLEMENTING, REBUTTING, IMPLEMENTING, run COMPLETE. The
+    # trailing IMPLEMENTING attempt is what a last-attempt-only cap would miss.
+    run4 = ledger.create_run(repo_id, "b" * 40)
+    task4 = ledger.create_task(run4, spec_id, spec_sha, branch=branch)
+    _closed(task4, "IMPLEMENTING")
+    _closed(task4, "REBUTTING")
+    _closed(task4, "IMPLEMENTING")
+    ledger.set_task_state(task4, "ORPHANED")
+    ledger.finish_run(run4, "COMPLETE")
+
+    ledger.close()
+
+    cell5 = _stub_the_runtime(monkeypatch, commits=0)
+    outcome5, ledger5 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell5,
+        turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+        spec=_spec(spec_sha=spec_sha),
+    )
+
+    task1_state = ledger5._db.execute(
+        "SELECT state FROM tasks WHERE task_id = 1"
+    ).fetchone()["state"]
+    run1_status = ledger5._db.execute(
+        "SELECT rn.status FROM runs rn JOIN tasks t ON t.run_id = rn.run_id "
+        "WHERE t.task_id = 1"
+    ).fetchone()["status"]
+    assert task1_state == "ORPHANED"
+    assert run1_status == "ABORTED"
+
+    states = {
+        r["task_id"]: r["state"]
+        for r in ledger5._db.execute("SELECT task_id, state FROM tasks").fetchall()
+    }
+    statuses = {
+        r["run_id"]: r["status"]
+        for r in ledger5._db.execute("SELECT run_id, status FROM runs").fetchall()
+    }
+    assert states[task2] == "ORPHANED" and statuses[run2] == "RUNNING"
+    assert states[task3] == "ORPHANED" and statuses[run3] == "COMPLETE"
+    assert states[task4] == "ORPHANED" and statuses[run4] == "COMPLETE"
+    assert outcome5.state == "ORPHANED"
+    assert not any("cut again at this spec_sha" in line for line in cell5.watched)
 
 
 def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
