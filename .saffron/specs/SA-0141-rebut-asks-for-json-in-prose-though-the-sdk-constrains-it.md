@@ -168,8 +168,8 @@ The spike ran on the host, not in a cell. Its SDK and bundled CLI are the
 wheel a cell installs.
 
 Four queued specs edit files this one edits, and all four are its parents.
-`SA-0140` edits the runner's `_run` and `run_verdict`. `SA-0133` and
-`SA-0139` edit `implement.py`. `SA-0138` edits `rebut.py`'s `_blocker_line`
+`SA-0140` edits the runner's `_run`, `run_verdict` and `run_agent`.
+`SA-0133` and `SA-0139` edit `implement.py` too. `SA-0138` edits `rebut.py`'s `_blocker_line`
 and adds session tests that script REBUT. The line numbers below were read
 at `23c39a62` and move before a cell runs.
 
@@ -287,8 +287,8 @@ exact-keys assertion in
 
 **`implement.py`.** Give `AttemptResult` a `structured_output` field
 defaulting to `None`. Fill it from the result event in `run_agent`'s
-success path. Nothing else in `run_agent` changes. `SA-0133` edits the same
-function, and this spec is cut after it lands.
+success path. Nothing else in `run_agent` changes. `SA-0133` and `SA-0140`
+edit the same function, and this spec is cut after both land.
 
 **`rebut.py`.** Send the extraction call `options` merged with
 `output_format`, as a new dict. Never mutate the `options` the rebuttal turn
@@ -327,7 +327,11 @@ payload as an `<output>` block in `text`. Move it onto `structured_output`.
   each REBUT turn scripted with a `rebuttals` or `verdicts` payload. That
   includes tests the parents add. A test that scripts REBUT as runner lines
   through `exec_stream` moves the payload onto its result line's
-  `structured_output`.
+  `structured_output`. `SA-0133` adds a keyword to `_drive` whose
+  `exec_stream` double builds each `result` line from five named fields and
+  the cost. Make that double copy the turn's `structured_output` onto the
+  line too. Without it, a migrated turn reaches `run_agent` as `None`, and
+  nothing fails.
 - `tests/test_events.py`: the two REBUT payloads handed to
   `_scripted_agent`, around line 2396.
 - `tests/test_context.py`: drop `verdict` and `rebut-extract` from the
@@ -351,8 +355,19 @@ uv run python -c "import re,pathlib; pat=re.compile(r'_block\(\s*(\{\s*)?\"(rebu
 
 At base it prints 27 lines: 23 in `tests/test_session.py`, 2 in
 `tests/test_rebut.py` and 2 in `tests/test_events.py`. After the change,
-every line it prints falls inside the witnesses of criteria 3 to 6. Those
-place a conflicting block in text on purpose.
+every line it prints falls inside the witnesses of criteria 3 to 6, or in a
+helper only they call. Those place a conflicting block in text on purpose.
+
+The grep reads text, so it misses a payload built from a variable or a
+helper, which a parent's test can use. So also list every dict key
+spelled as a literal:
+
+```
+git grep -n -E "[\"'](rebuttals|verdicts)[\"']\s*:" -- tests
+```
+
+Read each hit, and confirm its payload reaches `structured_output` and not
+`text`.
 
 **Witness 1.** Build each message as a `SimpleNamespace`, as the tests
 beside it do. Feed the first event to `run_agent` with a stream double that
