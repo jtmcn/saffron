@@ -28,3 +28,6 @@ Each gate result after REBUT is an event in `events.jsonl`, and the
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
+- 2026-09-23: recurred in run 15. `SA-0128`'s attempt 1 failed `census` (3)
+  and `dead` (1), and `events.jsonl` carried the counts with no identities.
+  The ids came from the batch record only after the cell exited.

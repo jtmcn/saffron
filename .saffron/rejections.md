@@ -889,3 +889,62 @@ one before it was fixed or kept.
   **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
 - `SA-0124` (#459): a test docstring called a raw `UPDATE` "a fact".
   **Bucket 2**, vocabulary no gate reads in Python. **Open.**
+
+## 2026-09-23, `SA-0125` to `SA-0131` (the spec loop's run 15, stack #484)
+
+Run 15 of the spec loop. These are what the two independent seats found after
+each cell and the in-cell critic did not raise, or raised below blocker. The
+delegate verified each one before it was fixed or kept.
+
+- `SA-0125` (#473): criterion 3's first run asserted only that the plan was
+  not rejected, so a checkpoint that raised after its advisory line passed.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #473.
+- `SA-0125` (#473): the advisory line never named its tier as the plan's
+  forecast, which the claim asked for.
+  **Bucket 1.** **Landed:** a review commit on #473.
+- `SA-0125` (#473): `plan_checkpoint`'s docstring grew from 14 to 18 lines.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0125` (#473): `judge_estimate` restates `size`'s failure message.
+  **Bucket 2**, one source. **Open:** item b-a90136.
+- `SA-0127` (#476): `revert` read `uncollected` names it never handed, so a
+  never-handed key turned a `skip` into a blocking `fail`. The contract lens
+  raised it as a concern.
+  **Bucket 1.** **Landed:** a review commit on #476.
+- `SA-0127` (#476): no witness drove an errored or unenumerated run that fills
+  `uncollected`. The adequacy lens's probe on it was counted killed by an
+  unrelated format test.
+  **Bucket 1**, the probe runner. **Landed:** a review commit on #476.
+  **Open:** item b-19b255.
+- `SA-0127` (#476): the new attribute docstring carried a semicolon and an
+  em-dash, and a new five-line comment joined an old block.
+  **Bucket 1**, the `prose` gate reaching Python. **Open:** item b-440f17.
+- `SA-0126` (#478): the re-queue cap's state and repo terms had no witness. A
+  re-queued `RATE_LIMITED` task could settle the next cut.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #478.
+- `SA-0126` (#478): six test docstrings said a first cut "settles"
+  `ORPHANED`, and "retry cap" used a word on two _Avoid_ lines.
+  **Bucket 2**, vocabulary no gate reads in Python. **Landed:** a review commit
+  on #478.
+- `SA-0130` (#480): the new prompt step forbade every wrong version, so it
+  overrode `CLAUDE.md`'s one run of a new test against unfixed code.
+  **Bucket 2**, the meaning of prompt text. **Landed:** a review commit on #480.
+- `SA-0130` (#480): the step had no blank line before it, so its witness read
+  step 3's "host".
+  **Bucket 1.** **Landed:** a review commit on #480.
+- `SA-0131` (#481): a scan reading only each spec's oldest row passed
+  criterion 1, and no case reached `merge-base`'s error branch.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #481.
+- `SA-0131` (#481): the git helper restated `git_mirror._run` without its
+  missing-binary wrap.
+  **Bucket 2**, one source. **Landed:** a review commit on #481.
+- `SA-0128` (#483): criterion 2's cross-file case moved different tokens, so
+  one stream for the whole diff passed it.
+  **Bucket 1.** **Landed:** a review commit on #483.
+- `SA-0128` (#483): the bound comment credited its measurement to the wrong
+  side of the bound, and three new docstrings ran long past the gate's net
+  count.
+  **Bucket 1**, the `prose` gate reaching Python. **Landed:** a review commit
+  on #483. **Open:** item b-440f17.
+- `SA-0128` (#483): repair pinned three test ids to the old ceilings to keep
+  `census` green.
+  **Bucket 2.** **Open:** item b-f30189.

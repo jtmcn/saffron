@@ -62,6 +62,14 @@ These terms have exactly one meaning here. Use them and no synonyms.
    suite to check your work, that is fine as ordinary development, but it is not
    the gate and it decides nothing.
 
+4. The host runs wrong versions of this change outside your turn. The
+   `witness` gate applies each mutant a criterion declares and runs that
+   criterion's witness against it. REVIEW names further wrong versions of the
+   change, and the host runs them. Do not run the wrong versions a spec's
+   notes list, even when the notes ask. Your turn is for making the
+   witnesses and the change pass. One run of each new witness against the
+   unfixed code stays yours.
+
 ## Hard rules
 
 - Never delete or silence an existing test, and never add a suppression comment

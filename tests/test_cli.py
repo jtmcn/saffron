@@ -1942,6 +1942,127 @@ def test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state
     assert "queue: 0 candidate(s)" in out
 
 
+def _dep_spec(spec_id, depends_on=None):
+    dep = f"depends_on:\n  - {depends_on}\n" if depends_on else ""
+    return (
+        f"---\nid: {spec_id}\ntitle: t\ntype: chore\n{dep}---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+
+
+_ID = ("-c", "user.email=t@t", "-c", "user.name=T")
+
+
+def _pushed_branch(repo, branch, filename):
+    """A commit on its own branch, pushed. Returns that commit's sha."""
+    _git(repo, "checkout", "-q", "-b", branch)
+    (repo / filename).write_text("x\n")
+    _git(repo, "add", "-A")
+    _git(repo, *_ID, "commit", "-qm", branch)
+    sha = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "push", "-q", "origin", branch)
+    return sha
+
+
+def test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand(tmp_path, capsys):
+    """`SA-0131`: a parent's task ends `EXHAUSTED`, and the operator opens a
+    pull request from its branch by hand and merges it with a merge commit.
+    The child is admitted anyway, because its parent's recorded push reached
+    the default branch, whatever the ledger row still says."""
+    sy3_text, sy5_text = _dep_spec("SY-3"), _dep_spec("SY-5")
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo-pushed-landed",
+        extra_specs={
+            "SY-2.md": _dep_spec("SY-2", "SY-1"),
+            "SY-3.md": sy3_text,
+            "SY-4.md": _dep_spec("SY-4", "SY-3"),
+            "SY-5.md": sy5_text,
+            "SY-6.md": _dep_spec("SY-6", "SY-5"),
+        },
+    )
+    default_name = _git(repo, "symbolic-ref", "--short", "HEAD")
+    pre_merge_head = _git(repo, "rev-parse", "HEAD")
+    remote = tmp_path / "repo-pushed-landed-remote.git"
+
+    # SY-1's branch, merged by hand on a second clone with a merge commit.
+    parent1_sha = _pushed_branch(repo, "saffron/SY-1", "p1.txt")
+    _git(repo, "checkout", "-q", default_name)
+    merge_clone = tmp_path / "repo-pushed-landed-merge-clone"
+    subprocess.run(["git", "clone", "-q", str(remote), str(merge_clone)], check=True)
+    _git(merge_clone, "fetch", "-q", "origin", "saffron/SY-1")
+    _git(merge_clone, *_ID, "merge", "--no-ff", "-q", "-m", "m", "origin/saffron/SY-1")
+    merge_sha = _git(merge_clone, "rev-parse", "HEAD")
+    _git(merge_clone, "push", "-q", "origin", default_name)
+
+    # SY-3's branch, pushed and never merged. SY-5's pushed sha never exists.
+    parent2_sha = _pushed_branch(repo, "saffron/SY-3", "p2.txt")
+    _git(repo, "checkout", "-q", default_name)
+    parent3_sha = "b" * 40
+
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    url = package.real_remote(repo)
+    repo_id = _seed_repo(ledger, url)
+    for spec_id, text, pushed_sha in (
+        ("SY-1", _A_SPEC, parent1_sha),
+        ("SY-3", sy3_text, parent2_sha),
+        ("SY-5", sy5_text, parent3_sha),
+    ):
+        task_id = _seed_task(
+            ledger,
+            repo_id,
+            spec_id=spec_id,
+            state="EXHAUSTED",
+            spec_sha=hashlib.sha256(text.encode()).hexdigest(),
+        )
+        ledger.record_push(task_id, pushed_sha)
+    ledger.close()
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    out = capsys.readouterr().out
+    assert out.index("SY-2") < out.index("refusals:")
+    sy4_reason = next(line for line in out.splitlines() if "SY-4.md:" in line)
+    assert "SY-3" in sy4_reason and "EXHAUSTED" in sy4_reason
+    sy6_reason = next(line for line in out.splitlines() if "SY-6.md:" in line)
+    assert "SY-5" in sy6_reason and "EXHAUSTED" in sy6_reason
+
+    # The pinned path, driven on either side of the merge.
+    ledger = Ledger(home / "ledger.db")
+    mirror = cli._mirror_path(repo, home)
+    assert _git(mirror, "rev-parse", f"refs/heads/{default_name}") == merge_sha
+    assert _git(mirror, "rev-parse", "HEAD") == merge_sha
+    assert _git(mirror, "rev-parse", "FETCH_HEAD") == merge_sha
+
+    ahead = task.PinnedBase(mirror=mirror, url=url, base_sha=pre_merge_head)
+    resolved_ahead = cli._resolve_queue(
+        repo, home, ledger, stamp_orphaned=False, pinned=ahead
+    )
+    assert resolved_ahead.candidates == []
+    ahead_reason = next(
+        r.reason for r in resolved_ahead.refusals if r.path.name == "SY-2.md"
+    )
+    assert "SY-1" in ahead_reason and "EXHAUSTED" in ahead_reason
+
+    _git(mirror, "update-ref", f"refs/heads/{default_name}", pre_merge_head)
+    behind = task.PinnedBase(mirror=mirror, url=url, base_sha=merge_sha)
+    resolved_behind = cli._resolve_queue(
+        repo, home, ledger, stamp_orphaned=False, pinned=behind
+    )
+    assert [c.spec.id for c in resolved_behind.candidates] == ["SY-2"]
+    assert {r.path.name for r in resolved_behind.refusals} == {"SY-4.md", "SY-6.md"}
+    ledger.close()
+
+    with pytest.raises(cli.git_mirror.GitError):
+        cli._pushed_landed(tmp_path / "no-such-mirror", merge_sha, parent1_sha)
+    with pytest.raises(cli.git_mirror.GitError):
+        cli._pushed_landed(mirror, "c" * 40, parent1_sha)
+    assert cli._pushed_landed(mirror, merge_sha, "b" * 40) is False
+
+
 def test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state(
     tmp_path, monkeypatch, capsys
 ):

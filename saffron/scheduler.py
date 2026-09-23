@@ -7,9 +7,10 @@ This is the second and third of `SA-0009`'s split. `SA-0015` built the
 §4.2.1's six refusals: an open pull request from another task already
 targeting this spec, a `touches` overlap with an open pull request's changed
 files, an acceptance criterion naming a path no `touches` pattern matches,
-and a `depends_on` no `MERGED` task satisfies. That is five of the six refusals gate 0
+and a `depends_on` that no `MERGED` task or landed push satisfies. That is five of the six refusals gate 0
 describes — the sixth, a repo that failed preflight, is a batch-level check
-outside `build_queue`'s job.
+outside `build_queue`'s job. A landed push counts only when the caller
+passes `pushed_landed` (`SA-0131`).
 
 `SA-0023` adds the seventh §4.2.1 now counts: `protected_touch_refusal`
 refuses a spec whose declared `touches` collides with a literal entry in the
@@ -50,6 +51,10 @@ from saffron.ledger import Ledger
 # or whoever `gh` happens to be logged in as. Not imported from there: that
 # module is forbidden to this spec, so the shape is copied, not shared.
 GhRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+# Whether one recorded `pushed_sha` reached the default branch (`SA-0131`).
+# `cli._pushed_landed` is the real implementation, bound to a mirror.
+PushedLanded = Callable[[str], bool]
 
 
 def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -731,6 +736,7 @@ def build_queue(
     gh: GhRunner = run_gh,
     protected: Sequence[str] = (),
     markers: Sequence[tuple[str, str]] = (),
+    pushed_landed: PushedLanded | None = None,
 ) -> tuple[list[Candidate], list[Refusal]]:
     """Turn the specs `discover_specs` found in `directory` into an ordered
     queue and a list of refusals.
@@ -761,6 +767,13 @@ def build_queue(
     reads the mirror itself, the same reason it never reads `policy.yaml` —
     the caller already has it open. `()`, the default, reproduces exactly the
     queue every caller before `SA-0027` got.
+
+    `pushed_landed` answers whether one recorded `pushed_sha` reached the
+    default branch, for a `depends_on` parent whose task never wrote
+    `MERGED` (`SA-0131`). This function never reads the mirror itself, the
+    same reason it skips `policy.yaml`: the caller already holds one, bound
+    to this scan's own `base_sha`. `None`, the default, asks nothing, and
+    reproduces exactly the queue every caller before `SA-0131` got.
 
     Ordered by `spec.priority` (lower runs first), then by `discover_specs`'
     filename order to break ties — `sorted` is stable and `discover_specs`
@@ -795,6 +808,26 @@ def build_queue(
         for (spec_id, _sha), rows in existing.items()
         if any(row["state"] == DEPENDENCY_MERGED for row in rows)
     )
+
+    # `SA-0131`'s third admission: a parent whose push landed on the default
+    # branch some other way, read only for ids a `depends_on` names.
+    if pushed_landed is not None and repo_id is not None:
+        named = {dep for discovered in specs for dep in discovered.spec.depends_on}
+        pending = named - merged_anywhere
+        if pending:
+            landed: set[str] = set()
+            # `tasks_by_repo`, not `tasks_by_spec`: only it carries `pushed_sha`.
+            for row in ledger.tasks_by_repo(repo_id):
+                spec_id = row["spec_id"]
+                if spec_id not in pending or spec_id in landed:
+                    continue
+                pushed_sha = row["pushed_sha"]
+                if not pushed_sha:
+                    continue
+                if pushed_landed(pushed_sha):
+                    landed.add(spec_id)
+            merged_anywhere = merged_anywhere | frozenset(landed)
+
     # Every other state is read only at the sha the spec has on disk now.
     states_at_current_sha = {
         discovered.spec.id: [

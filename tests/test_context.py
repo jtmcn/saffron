@@ -331,6 +331,50 @@ def test_the_implement_prompt_never_calls_scope_proposal_diagnose_only():
     )
 
 
+def test_the_implement_prompt_leaves_running_wrong_versions_to_the_host():
+    """Step 3 tells the implementer the host runs the gates. SA-0123's notes
+    also asked the cell to run wrong versions of the change in its own turn.
+    The wall bound cut that turn (item b-2dea1c). Outside the vocabulary and
+    the spec body, the prompt must name the `witness` gate's mutants,
+    REVIEW's further wrong versions, and the host. Whether it forbids the
+    runs is REVIEW's to read. Held for a spec declaring no
+    acceptance criteria and for one declaring a witnessed criterion."""
+    from saffron.intake import Criterion
+
+    root = Path(__file__).parent.parent
+    template = (root / "saffron/agents/prompts/implement.md").read_text()
+    spec_body = "(the task body)"
+    vocabulary = context.sections_for("IMPLEMENT", REAL_CONTEXT_MD)
+
+    witness_blocks = [
+        context.witnesses_block([]),
+        context.witnesses_block(
+            [
+                Criterion(
+                    claim="the box ticks",
+                    witness="tests/test_criteria.py::test_a",
+                )
+            ]
+        ),
+    ]
+    for witnesses in witness_blocks:
+        prompt = context.build_system_prompt(
+            "IMPLEMENT",
+            REAL_CONTEXT_MD,
+            template=template,
+            spec=spec_body,
+            constraints=context.constraints_block(["src/**"], [], []),
+            witnesses=witnesses,
+            standing_instructions="",
+        )
+        remainder = prompt.replace(vocabulary, "").replace(spec_body, "")
+        paragraphs = remainder.split("\n\n")
+        assert any(
+            "mutant" in p and "`witness`" in p and "REVIEW" in p and "host" in p
+            for p in paragraphs
+        ), remainder
+
+
 _PROMPTS = context.PROMPTS_DIR
 
 

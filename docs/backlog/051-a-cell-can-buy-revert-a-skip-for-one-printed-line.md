@@ -1,10 +1,10 @@
 ---
 id: 51
 title: A cell can buy `revert` a `skip` for one printed line
-status: open
+status: partial
 tier: 1
 specs: [SA-0127]
-prs: []
+prs: [476]
 commits: []
 cites: [§2.1, §5.4, §9]
 related: [50]
@@ -56,3 +56,7 @@ exists for this class never fires. That is a control reading as present while
 not applying — Appendix I's founding defect — and the item is explicit that no
 name filter closes it, because telling a real node id from an invented one is
 language knowledge §2.1 keeps out of core. **Contract or nothing.**
+- 2026-09-23: `SA-0127` reached `READY_FOR_REVIEW` as #476 at $10.28 of $18,
+  in the spec loop's run 15. `GateResult` carries `uncollected` and `revert`
+  reads it. This closes in full when the operator fills the field in
+  `.saffron/gates/tests.py` by hand. `SA-0127` retires to `done/`.

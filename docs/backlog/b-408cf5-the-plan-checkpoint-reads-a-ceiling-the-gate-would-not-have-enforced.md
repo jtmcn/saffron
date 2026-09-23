@@ -1,11 +1,12 @@
 ---
 id: b-408cf5
 title: The plan checkpoint refuses on a ceiling the `size` gate would not have enforced
-status: open
+status: done
 tier: 1
 filed: 2026-09-19
+closed: 2026-09-23
 specs: [SA-0125]
-prs: []
+prs: [473]
 commits: []
 cites: [§5.3, §5.4]
 related: [40, b-17fb8b]
@@ -47,3 +48,7 @@ can be checked against that gate's own verdict.
   turn made 18 `pytest` calls while compacting toward 600 lines, and the 900s turn
   wall cut it (`saffron/cell/session.py:65`). The fixture it compacted lacks cases
   the spec named. `SA-0116`'s spec now tells the cell by hand (#407).
+- 2026-09-23: `SA-0125` reached `READY_FOR_REVIEW` as #473 at $12.36 of $22,
+  in the spec loop's run 15. The checkpoint now rejects an estimate only where
+  `size` would block, and records an advisory line elsewhere. `SA-0125`
+  retires to `done/`.

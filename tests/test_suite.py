@@ -197,16 +197,19 @@ def test_the_head_runs_tier_decides_what_blocks_not_the_baselines():
     """The baseline's diff is empty, so it never elevates; a head that crosses
     `elevate_on` must block on `size` even though the baseline called it
     advisory (§5.6)."""
+    from saffron.gates.core.size import _CEILINGS
+
     policy = Policy(
         gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
         elevate_on=["infra/**"],
     )
     suite = _suite(policy=policy)
+    over = _CEILINGS["feature"] + 1
     oversized = "".join(
         [
             "diff --git a/infra/x.tf b/infra/x.tf\n",
-            "--- a/infra/x.tf\n+++ b/infra/x.tf\n@@ -0,0 +1,601 @@\n",
-            "+x\n" * 601,
+            f"--- a/infra/x.tf\n+++ b/infra/x.tf\n@@ -0,0 +1,{over} @@\n",
+            "+x\n" * over,
         ]
     )
     baseline = suite.baseline(_Tree())
