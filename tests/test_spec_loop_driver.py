@@ -161,10 +161,13 @@ def repo(empty_repo):
 @pytest.mark.parametrize(
     ("lower", "upper", "spec_type", "ceiling"),
     [
-        ("main", "a", "bug", 300),
-        ("a", "b", "feature", 600),
-        ("main", "c", "test", 1000),
+        ("main", "a", "bug", 1300),
+        ("a", "b", "feature", 3000),
+        ("main", "c", "test", 4200),
     ],
+    # Pinned, not derived: a re-measured ceiling is not a removed test, and
+    # census reads the node id, not the row it was parametrized with.
+    ids=["main-a-bug-300", "a-b-feature-600", "main-c-test-1000"],
 )
 def test_size_counts_a_branch_against_the_gates_own_ceiling(
     repo, lower, upper, spec_type, ceiling
@@ -175,7 +178,8 @@ def test_size_counts_a_branch_against_the_gates_own_ceiling(
     result = driver._size(lower, upper, spec_type, [], cwd=tmp)
     assert result.status == "pass"
     assert (
-        result.summary == f"1 changed lines within the {spec_type} ceiling of {ceiling}"
+        result.summary
+        == f"1 changed tokens within the {spec_type} ceiling of {ceiling}"
     )
 
 

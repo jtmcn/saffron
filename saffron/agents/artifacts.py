@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from saffron.agents import context
 from saffron.gates.core.scope import matches
-from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING
+from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
 from saffron.gates.suite import size_blocks
 from saffron.repos.policy import effective_risk
 
@@ -75,7 +75,8 @@ class Plan(BaseModel):
     risks: list[str] = Field(default_factory=list)
     blocking_questions: list[str] = Field(default_factory=list)
     estimated_lines: int = Field(gt=0)
-    """Added + removed, the same count `size_gate` takes off the real diff.
+    """Added + removed lines, priced at `_TOKENS_PER_LINE` tokens each
+    against the same ceiling `size_gate` takes off the real diff's tokens.
     Required, not defaulted: a ceiling nothing estimates against is not a
     control (§5.3's plan checkpoint spends zero model calls to reject early)."""
 
@@ -301,8 +302,8 @@ def judge_estimate(
     risk: str,
     elevate_on: list[str],
 ) -> str | None:
-    """Judge the plan's own estimate against `size`'s ceiling, at the tier
-    `effective_risk` derives from the plan's own `files_to_change`. A
+    """Judge the plan's own priced estimate against `size`'s ceiling, at the
+    tier `effective_risk` derives from the plan's own `files_to_change`. A
     forecast, since no diff exists yet (§5.6).
 
     `None` within the ceiling. Over it and `size_blocks` says the tier
@@ -311,13 +312,13 @@ def judge_estimate(
     advisory: returns the sentence the checkpoint emits instead of rejecting.
     """
     ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
-    if plan.estimated_lines <= ceiling:
+    priced = plan.estimated_lines * _TOKENS_PER_LINE
+    if priced <= ceiling:
         return None
 
     tier = effective_risk(risk, plan.files_to_change, elevate_on)
     gate_message = (
-        f"{plan.estimated_lines} changed lines exceeds the {spec_type} "
-        f"ceiling of {ceiling}"
+        f"{priced} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
     )
     if size_blocks(tier):
         rejected = PlanRejected(
@@ -328,7 +329,8 @@ def judge_estimate(
         raise rejected
 
     return (
-        f"advisory estimate: {plan.estimated_lines} changed lines exceeds "
-        f"the {spec_type} ceiling of {ceiling}, and `size` is advisory at "
-        f"{tier}, the tier from the plan's files, so the plan stands"
+        f"advisory estimate: {plan.estimated_lines} lines priced at "
+        f"{priced} changed tokens exceeds the {spec_type} ceiling of "
+        f"{ceiling}, and `size` is advisory at {tier}, the tier from the "
+        f"plan's files, so the plan stands"
     )

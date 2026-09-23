@@ -21,6 +21,7 @@ from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
+from saffron.gates.core.size import _CEILINGS
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
@@ -325,7 +326,7 @@ def test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block(
     `size` gate would block the real diff, never more, never less."""
     from pathlib import Path
 
-    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
     from tests.test_suite import _Spec, _Tree
 
     touches = ["src/**", "infra/**", "tests/**"]
@@ -336,9 +337,10 @@ def test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block(
     for spec_type in ("bug", "feature", "refactor", "docs"):
         ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
         for route in _TIER_ROUTES:
-            for estimate in (ceiling, ceiling + 1):
+            for estimate in (ceiling // 4, ceiling // 4 + 1):
                 plan, risk = _route_plan_and_risk(route, estimate)
-                blocks = estimate > ceiling and route != "no_elevate_on_path"
+                priced = estimate * _TOKENS_PER_LINE
+                blocks = priced > ceiling and route != "no_elevate_on_path"
 
                 suite = GateSuite(
                     gates={"lint": Path("/gates/.saffron/gates/lint")},
@@ -347,9 +349,7 @@ def test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block(
                     diff_base="base",
                 )
                 comparison = suite.against(
-                    _Tree(
-                        changed=plan["files_to_change"], patch=_lines_patch(estimate)
-                    ),
+                    _Tree(changed=plan["files_to_change"], patch=_lines_patch(priced)),
                     suite.baseline(_Tree()),
                 )
                 size_failures = [
@@ -380,7 +380,7 @@ def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
 
     over = _PLAN | {
         "files_to_change": ["src/x.py", "tests/test_x.py"],
-        "estimated_lines": ceiling + 20,
+        "estimated_lines": ceiling // 4 + 20,
     }
     events = []
     session.plan_checkpoint(
@@ -404,7 +404,7 @@ def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
 
     at_ceiling = _PLAN | {
         "files_to_change": ["src/x.py", "tests/test_x.py"],
-        "estimated_lines": ceiling,
+        "estimated_lines": ceiling // 4,
     }
     no_events = []
     session.plan_checkpoint(
@@ -435,7 +435,7 @@ def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
 
     no_infra_path = _PLAN | {
         "files_to_change": ["src/x.py", "tests/test_x.py"],
-        "estimated_lines": ceiling + 20,
+        "estimated_lines": ceiling // 4 + 20,
     }
     cell1 = _stub_the_runtime(monkeypatch)
     outcome1, _ledger1 = _drive(
@@ -455,7 +455,7 @@ def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
 
     with_infra_path = _PLAN | {
         "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
-        "estimated_lines": ceiling + 20,
+        "estimated_lines": ceiling // 4 + 20,
     }
     cell2 = _stub_the_runtime(monkeypatch)
     outcome2, _ledger2 = _drive(
@@ -478,7 +478,7 @@ def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
 
     blocking_question = _PLAN | {
         "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
-        "estimated_lines": ceiling - 10,
+        "estimated_lines": ceiling // 4 - 10,
         "blocking_questions": ["which environment does this ship to?"],
     }
     cell3 = _stub_the_runtime(monkeypatch)
@@ -871,13 +871,14 @@ _DIFF = """diff --git a/src/x.py b/src/x.py
 +def x(): ...
 """
 
-# A diff `size` fails against a `bug` spec's 300-line ceiling. Built, not
-# hand-written: what matters is the count, not the content.
+# A diff `size` fails against a `bug` spec's token ceiling, ten tokens
+# over it, one token a line. Built, not hand-written.
+_BIG_LINES = _CEILINGS["bug"] + 10
 _BIG_DIFF = (
     "diff --git a/src/x.py b/src/x.py\n"
     "--- a/src/x.py\n"
     "+++ b/src/x.py\n"
-    "@@ -1,1 +1,310 @@\n" + "".join(f"+line {n}\n" for n in range(310))
+    f"@@ -1,1 +1,{_BIG_LINES} @@\n" + "".join(f"+line{n}\n" for n in range(_BIG_LINES))
 )
 
 

@@ -35,6 +35,23 @@ def _plan(**overrides) -> str:
     return "<output>" + json.dumps(payload) + "</output>"
 
 
+def _lines_diff(n: int, path: str = "src/x.py") -> str:
+    """A single-file diff of `n` single-token added lines: `size_gate`
+    counts it as exactly `n` changed tokens."""
+    return (
+        "\n".join(
+            [
+                f"diff --git a/{path} b/{path}",
+                f"--- a/{path}",
+                f"+++ b/{path}",
+                f"@@ -0,0 +1,{n} @@",
+                *(f"+line{i}" for i in range(n)),
+            ]
+        )
+        + "\n"
+    )
+
+
 def test_the_output_block_is_extracted_from_surrounding_prose():
     text = 'Here you go:\n<output>{"a": 1}</output>\nHope that helps.'
     assert parse_output_block(text) == '{"a": 1}'
@@ -177,50 +194,122 @@ def test_a_plan_estimating_over_the_ceiling_is_rejected():
     """`validate_plan` no longer holds the ceiling check. It clears the
     plan, and `judge_estimate` at `elevated` is what rejects it."""
     from saffron.agents.artifacts import judge_estimate
+    from saffron.gates.core.size import _CEILINGS
 
+    ceiling = _CEILINGS["feature"]
     plan = validate_plan(
-        _plan(estimated_lines=601),
+        _plan(estimated_lines=ceiling // 4 + 1),
         touches=TOUCHES,
         forbidden=[],
         protected=[],
         spec_type="feature",
     )
-    with pytest.raises(PlanRejected, match="exceeds the feature ceiling of 600"):
+    with pytest.raises(PlanRejected, match=f"exceeds the feature ceiling of {ceiling}"):
         judge_estimate(plan, "feature", "elevated", [])
 
 
 def test_a_plan_estimating_at_the_ceiling_is_accepted():
     from saffron.agents.artifacts import judge_estimate
+    from saffron.gates.core.size import _CEILINGS
 
+    ceiling = _CEILINGS["feature"]
     plan = validate_plan(
-        _plan(estimated_lines=600),
+        _plan(estimated_lines=ceiling // 4),
         touches=TOUCHES,
         forbidden=[],
         protected=[],
         spec_type="feature",
     )
-    assert plan.estimated_lines == 600
+    assert plan.estimated_lines == ceiling // 4
     assert judge_estimate(plan, "feature", "elevated", []) is None
 
 
 def test_validate_plan_and_size_gate_agree_on_the_ceiling():
-    """The same table `size_gate` enforces the diff against — a plan
-    `judge_estimate` cleared and then blown up by the agent's actual diff is a different bug, but
-    a plan checked against a *different* number than the gate uses is this one."""
+    """The same table `size_gate` enforces the diff against. A plan
+    `judge_estimate` cleared, then blown up by the agent's own diff, is a
+    different bug. This one is a plan checked against the wrong number."""
     from saffron.agents.artifacts import judge_estimate
     from saffron.gates.core.size import _CEILINGS
 
+    ceiling = _CEILINGS["bug"]
     plan = validate_plan(
-        _plan(estimated_lines=_CEILINGS["bug"] + 1),
+        _plan(estimated_lines=ceiling // 4 + 1),
         touches=TOUCHES,
         forbidden=[],
         protected=[],
         spec_type="bug",
     )
-    with pytest.raises(
-        PlanRejected, match=f"exceeds the bug ceiling of {_CEILINGS['bug']}"
-    ):
+    with pytest.raises(PlanRejected, match=f"exceeds the bug ceiling of {ceiling}"):
         judge_estimate(plan, "bug", "elevated", [])
+
+
+def test_the_plan_checkpoint_prices_an_estimate_at_four_tokens_a_line():
+    """Criterion 4: the plan's own estimate is in lines. `judge_estimate`
+    prices it at `_TOKENS_PER_LINE` tokens a line, then compares it to the
+    same ceiling `size_gate` reads off the real diff's tokens."""
+    import ast
+    from pathlib import Path
+
+    from saffron.agents import artifacts
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, size_gate
+
+    for spec_type in ("bug", "feature", "refactor", "docs"):
+        ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+        at_ceiling = ceiling // 4
+        over_ceiling = at_ceiling + 1
+
+        within = validate_plan(
+            _plan(estimated_lines=at_ceiling),
+            touches=TOUCHES,
+            forbidden=[],
+            protected=[],
+            spec_type=spec_type,
+        )
+        assert artifacts.judge_estimate(within, spec_type, "elevated", []) is None
+
+        over = validate_plan(
+            _plan(estimated_lines=over_ceiling),
+            touches=TOUCHES,
+            forbidden=[],
+            protected=[],
+            spec_type=spec_type,
+        )
+        gate_result = size_gate(_lines_diff(over_ceiling * 4), spec_type, touches=[])
+        assert gate_result.status == "fail"
+
+        with pytest.raises(PlanRejected) as excinfo:
+            artifacts.judge_estimate(over, spec_type, "elevated", [])
+        assert gate_result.failures[0].message in str(excinfo.value)
+        assert excinfo.value.risk_tier == "elevated"
+
+        advisory = artifacts.judge_estimate(over, spec_type, "standard", [])
+        assert advisory is not None
+        assert str(over_ceiling) in advisory
+        assert str(over_ceiling * 4) in advisory
+        assert str(ceiling) in advisory
+
+    tree = ast.parse(Path("saffron/agents/artifacts.py").read_text())
+    imported = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "saffron.gates.core.size"
+        and any(alias.name == "_TOKENS_PER_LINE" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    assigned = any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_TOKENS_PER_LINE"
+            for target in node.targets
+        )
+        for node in ast.walk(tree)
+    )
+    assert imported
+    assert not assigned
+
+    from saffron.gates.core.size import _TOKENS_PER_LINE
+
+    assert _TOKENS_PER_LINE == 4
+    assert type(_TOKENS_PER_LINE) is int
 
 
 def test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_blocks(
@@ -234,6 +323,7 @@ def test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_
     opposite makes a caller that discards the answer fail the second."""
     from saffron.agents import artifacts
     from saffron.gates import suite
+    from saffron.gates.core.size import _CEILINGS
     from saffron.repos.policy import Policy
     from tests.test_cli import _source_calls
 
@@ -249,7 +339,7 @@ def test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_
     assert "size" in suite._advisory("elevated", Policy(gates={}))
 
     plan = validate_plan(
-        _plan(estimated_lines=601),
+        _plan(estimated_lines=_CEILINGS["feature"] // 4 + 1),
         touches=TOUCHES,
         forbidden=[],
         protected=[],

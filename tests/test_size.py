@@ -22,7 +22,7 @@ def _diff(added: int, removed: int, *, path: str = "src/a.py") -> str:
         f"@@ -1,{removed} +1,{added} @@",
     ]
     lines += [f"+line{i}" for i in range(added)]
-    lines += [f"-line{i}" for i in range(removed)]
+    lines += [f"-gone{i}" for i in range(removed)]
     return "\n".join(lines) + "\n"
 
 
@@ -119,9 +119,10 @@ def test_a_diff_one_line_over_the_refactor_ceiling_fails():
 
 
 def test_the_ceiling_is_added_plus_removed_not_either_side_alone():
-    # 200 added + 200 removed is over the bug ceiling (300) even though
-    # neither side alone is.
-    result = size_gate(_diff(added=200, removed=200), "bug", touches=[])
+    # Half the bug ceiling plus one on each side is within it alone, but
+    # summed the two sides are one token over.
+    half = _CEILINGS["bug"] // 2 + 1
+    result = size_gate(_diff(added=half, removed=half), "bug", touches=[])
     assert result.status == "fail"
 
 
@@ -167,6 +168,160 @@ def test_the_summary_names_the_count_and_the_ceiling():
     assert str(ceiling) in result.summary
 
 
+def _one_hunk(lines, path="src/a.py"):
+    """A single-file, single-hunk diff around hand-picked hunk content.
+    `_changed_lines` never validates the `@@` numbers, so a fixed header is
+    fine for every case below."""
+    return (
+        "\n".join(
+            [
+                f"diff --git a/{path} b/{path}",
+                f"--- a/{path}",
+                f"+++ b/{path}",
+                "@@ -1,1 +1,1 @@",
+                *lines,
+            ]
+        )
+        + "\n"
+    )
+
+
+def test_the_count_is_the_fewest_tokens_an_edit_of_each_files_stream_needs():
+    assert _changed_lines(_one_hunk(["+x"])) == 1
+    assert _changed_lines(_one_hunk(["-x"])) == 1
+    assert _changed_lines(_one_hunk(["-x", "+y"])) == 2
+    assert _changed_lines(_one_hunk(["+a b c d e"])) == 5
+    assert _changed_lines(_one_hunk(["-a b c d e"])) == 5
+    assert _changed_lines(_one_hunk(["-A B", "+B A"])) == 2
+    assert _changed_lines(_one_hunk(["-alpha beta", " keep", "+alpha beta"])) == 2
+    assert (
+        _changed_lines(_one_hunk(["-alpha beta alpha", "+beta gamma alpha gamma"])) == 3
+    )
+
+    cross_file = _one_hunk(["-p q r"], path="src/a.py") + _one_hunk(
+        ["+s t u"], path="src/b.py"
+    )
+    assert _changed_lines(cross_file) == 6
+
+    two_hunk = (
+        "\n".join(
+            [
+                "diff --git a/src/a.py b/src/a.py",
+                "--- a/src/a.py",
+                "+++ b/src/a.py",
+                "@@ -1,2 +1,1 @@",
+                "-A B C D E",
+                " x",
+                "@@ -3,1 +3,6 @@",
+                " y",
+                "+A B C D E",
+            ]
+        )
+        + "\n"
+    )
+    assert _changed_lines(two_hunk) == 4
+
+
+def test_each_type_is_judged_against_its_re_measured_ceiling_in_tokens():
+    ceilings = {
+        "bug": 1300,
+        "feature": 3000,
+        "refactor": 4200,
+        "test": 4200,
+        "docs": 4200,
+        "chore": 4200,
+    }
+    for spec_type, ceiling in ceilings.items():
+        at = size_gate(_diff(added=ceiling, removed=0), spec_type, touches=[])
+        assert at.status == "pass"
+        assert at.summary == (
+            f"{ceiling} changed tokens within the {spec_type} ceiling of {ceiling}"
+        )
+
+        over = size_gate(_diff(added=ceiling + 1, removed=0), spec_type, touches=[])
+        assert over.status == "fail"
+        message = (
+            f"{ceiling + 1} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
+        )
+        assert over.summary == message
+        assert over.failures[0].message == message
+
+
+_ESTIMATE_PHRASE = "past the token-diff bound, estimated at 4 tokens a changed line"
+
+
+def test_a_file_past_the_token_diff_bound_is_estimated_from_its_changed_lines():
+    # Under the bound: an exact reversal of 30,000 distinct tokens. LCS of a
+    # sequence and its exact reverse is 1, so the count is exact: 59998.
+    under_tokens = [f"r{i}" for i in range(30_000)]
+    under = _one_hunk(
+        ["-" + " ".join(under_tokens), "+" + " ".join(reversed(under_tokens))],
+        path="src/under.py",
+    )
+    result = size_gate(under, "bug", touches=[])
+    assert result.summary.startswith("59998 changed tokens")
+    assert "src/under.py" not in result.summary
+
+    # Past the bound: 32,000 reversed tokens behind a shared first and
+    # last token, and one unchanged context line, trim to a 1.024e9 product.
+    middle = [f"m{i}" for i in range(32_000)]
+    old_line = "FIRST " + " ".join(middle) + " LAST"
+    new_line = "FIRST " + " ".join(reversed(middle)) + " LAST"
+    shared = _one_hunk([" keep", "-" + old_line, "+" + new_line], path="src/shared.py")
+    result = size_gate(shared, "bug", touches=[])
+    assert result.summary.startswith("8 changed tokens")
+    assert f"src/shared.py {_ESTIMATE_PHRASE}" in result.summary
+
+    # First token of a 40,000-token line replaced: trimming the shared
+    # suffix leaves one token each side, well under the bound.
+    big = [f"b{i}" for i in range(40_000)]
+    first_new = big.copy()
+    first_new[0] = "REPLACED"
+    first = _one_hunk(
+        ["-" + " ".join(big), "+" + " ".join(first_new)], path="src/first.py"
+    )
+    result = size_gate(first, "bug", touches=[])
+    assert result.summary.startswith("2 changed tokens")
+    assert "src/first.py" not in result.summary
+
+    # Last token of the same shape of line replaced: the mirror case.
+    last_new = big.copy()
+    last_new[-1] = "REPLACED"
+    last = _one_hunk(
+        ["-" + " ".join(big), "+" + " ".join(last_new)], path="src/last.py"
+    )
+    result = size_gate(last, "bug", touches=[])
+    assert result.summary.startswith("2 changed tokens")
+    assert "src/last.py" not in result.summary
+
+    # The same 40,000 tokens re-wrapped onto 4,000 added lines: identical
+    # content and order, so trimming leaves nothing.
+    wrap_lines = ["+" + " ".join(big[i : i + 10]) for i in range(0, len(big), 10)]
+    wrap = _one_hunk(["-" + " ".join(big), *wrap_lines], path="src/wrap.py")
+    result = size_gate(wrap, "bug", touches=[])
+    assert result.summary.startswith("0 changed tokens")
+    assert "src/wrap.py" not in result.summary
+
+    # A sixth diff: the shared-ends file beside a small file with one token
+    # replaced. The small file is diffed exactly and stays unnamed.
+    other = _one_hunk(["-one", "+two"], path="src/other.py")
+    combined = shared + other
+    result = size_gate(combined, "bug", touches=[])
+    assert result.summary.startswith("10 changed tokens")
+    assert f"src/shared.py {_ESTIMATE_PHRASE}" in result.summary
+    assert "src/other.py" not in result.summary
+
+    # A seventh diff: two files both past the bound. Both must be named,
+    # not only the first, so a join that silently drops the rest is caught.
+    shared2 = _one_hunk(
+        [" keep", "-" + old_line, "+" + new_line], path="src/shared2.py"
+    )
+    two_estimated = shared + shared2
+    result = size_gate(two_estimated, "bug", touches=[])
+    assert result.summary.startswith("16 changed tokens")
+    assert f"src/shared.py, src/shared2.py {_ESTIMATE_PHRASE}" in result.summary
+
+
 def _real_repo(tmp_path, files):
     """Same helper shape as `test_integrity.py`'s `_repo`: a real git history,
     not a hand-written fixture — the string git actually emits for a `-diff`
@@ -201,6 +356,46 @@ def _real_diff(tmp_path, run, changes):
         text=True,
         check=True,
     ).stdout
+
+
+# Nine ways to move whitespace without changing a token. Each is wrapped in
+# an unchanged line before and after, so the move sits inside a hunk.
+_WHITESPACE_MOVES = {
+    "a line split in two": ("alpha beta gamma delta\n", "alpha beta\ngamma delta\n"),
+    "two lines joined": ("alpha beta\ngamma delta\n", "alpha beta gamma delta\n"),
+    "a string spread over five lines packed onto one": (
+        "alpha\nbeta\ngamma\ndelta\nepsilon\n",
+        "alpha beta gamma delta epsilon\n",
+    ),
+    "a block re-indented": ("alpha\nbeta\n", "    alpha\n    beta\n"),
+    "spaces widened inside a line": ("alpha beta\n", "alpha    beta\n"),
+    "a tab replacing spaces": ("alpha beta\n", "alpha\tbeta\n"),
+    "a blank line added": ("alpha\n", "alpha\n\n"),
+    "a blank line removed": ("alpha\n\n", "alpha\n"),
+    "trailing spaces added": ("alpha beta\n", "alpha beta   \n"),
+}
+
+
+def test_a_change_that_only_moves_whitespace_counts_no_tokens(tmp_path):
+    for index, (name, (before, after)) in enumerate(_WHITESPACE_MOVES.items()):
+        plain_dir = tmp_path / f"plain{index}"
+        plain_dir.mkdir()
+        content_before = f"keep_before token{index}\n{before}keep_after token{index}\n"
+        content_after = f"keep_before token{index}\n{after}keep_after token{index}\n"
+        run = _real_repo(plain_dir, {"a.py": content_before})
+        diff = _real_diff(plain_dir, run, {"a.py": content_after})
+        result = size_gate(diff, "bug", touches=[])
+        assert result.summary.startswith("0 changed tokens"), name
+
+        # The same move, plus one replaced token on a wrapping line: the
+        # move still counts nothing, and the replaced token counts 2.
+        paired_dir = tmp_path / f"paired{index}"
+        paired_dir.mkdir()
+        paired_after = f"keep_before changed{index}\n{after}keep_after token{index}\n"
+        run = _real_repo(paired_dir, {"a.py": content_before})
+        diff = _real_diff(paired_dir, run, {"a.py": paired_after})
+        result = size_gate(diff, "bug", touches=[])
+        assert result.summary.startswith("2 changed tokens"), name
 
 
 def test_a_gitattributes_hidden_rewrite_errors_when_the_file_is_in_touches(tmp_path):
@@ -262,7 +457,7 @@ def test_a_readable_change_still_counts_beside_an_undeclared_binary_block(tmp_pa
 
     result = size_gate(diff, "bug", touches=["b.py"])
     assert result.status == "pass"
-    assert "1 changed lines" in result.summary
+    assert "3 changed tokens" in result.summary
 
 
 def test_a_real_binary_inside_touches_is_refused_where_the_gate_blocks(tmp_path):
