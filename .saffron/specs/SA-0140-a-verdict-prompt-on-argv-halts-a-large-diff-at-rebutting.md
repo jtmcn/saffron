@@ -302,8 +302,12 @@ file's bytes before it yields a result message, since the agent CLI reads it
 at spawn. Assert the value equals `{"type": "file", "path": path}`, that
 `path` is a `str` and absolute, and that it does not resolve under `cwd`.
 Assert the two sessions' paths differ. After `run_agent` returns, assert the
-file no longer exists. Compare whole dicts, never a subset. The keyword
-arguments the stub recorded equal the sent options, with `system_prompt`
+file no longer exists. Compare whole dicts, never a subset. Take
+`copy.deepcopy(options)` before each call, and build every expected dict
+from that copy. After the call, assert the caller's `options` still equals
+it. `saffron/cell/session.py:1813` builds one dict that the plan, implement
+and repair turns reuse. The keyword
+arguments the stub recorded equal the copied options, with `system_prompt`
 replaced by that file value, plus `resume` for the second session. For the
 third session, drop `system_prompt` from the options and assert the recorded
 arguments equal the sent options exactly. A subset check passes a path sent
@@ -395,6 +399,8 @@ it applied. Witness 1's host-chosen path is not measured.
 - An `exec_` defaulting to `None`, with the removal guarded on it, which
   every double-injecting witness passes and production never runs.
 - A path sent inside `options` and forwarded to the SDK.
+- A host that writes the path into, or pops `system_prompt` from, the
+  caller's `options` dict, which a later turn reuses.
 
 Six existing tests in `tests/test_implement.py` guard the host half's other
 edge. The five kill tests there pass `options={}`. A removal on such a
