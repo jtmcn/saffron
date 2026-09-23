@@ -268,7 +268,7 @@ def test_the_marker_after_a_context_line_parses(tmp_path):
 
 def test_a_bent_prefix_errors_rather_than_passing(tmp_path):
     """`diff.noprefix`, not `diff.srcPrefix`: the latter landed in git 2.45,
-    and on the 2.39 the cell image carries it was ignored — so this asserted
+    and on the 2.39 the cell image carried until item b-b5f379 it was ignored — so this asserted
     the gate's answer to a diff that was never bent, and read `fail`. The
     bentness is asserted before the gate is asked about it."""
     run = _repo(tmp_path, {"src/a.py": "x = 1\n"})

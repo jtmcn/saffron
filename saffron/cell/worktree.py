@@ -156,7 +156,7 @@ DIFF_FLAGS = (
     "--ignore-submodules=none",
     # color.ui=always or color.diff=always paints the patch with escape
     # codes, `diff --git` headers included. The flag, not `-c color.ui=never`
-    # — probed on git 2.39.5 and 2.54, the override does not undo
+    # — probed on git 2.39.5, 2.47 and 2.54, the override does not undo
     # `color.diff=always`.
     "--no-color",
     # diff.interHunkContext widens how close two hunks must be before they
@@ -180,7 +180,7 @@ def git_argv(*args: str) -> list[str]:
     # differ`, so no lens reads its hunks (backlog item 103).
     # GIT_GRAFT_FILE, GIT_SHALLOW_FILE: a planted grafts or shallow file re-parents
     # the history `commits_ahead` counts (backlog item 110). No flag pins
-    # either, and `exec_` takes no env; measured on git 2.39.5 and 2.54.
+    # either, and `exec_` takes no env; measured on git 2.39.5, 2.47 and 2.54.
     # advice.graftFileDeprecated=false: setting `GIT_GRAFT_FILE` alone makes
     # git print its eight-line "grafts is deprecated" hint on stderr on every
     # call, present or not — measured the same way as the two vars above.

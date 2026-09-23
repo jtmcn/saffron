@@ -8,7 +8,7 @@
 # binary at all. glibc is the requirement; the distribution is not.
 #
 # A host with no registry passes a base from images/bootstrap-base.sh (§5.1.2).
-ARG BASE_IMAGE=python:3.12-slim-bookworm
+ARG BASE_IMAGE=python:3.12-slim-trixie
 FROM ${BASE_IMAGE}
 
 # Debian's python3 only when the base has none: beside the default's 3.12 it
