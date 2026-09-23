@@ -4,7 +4,7 @@ title: A lens's verdict session gets its prompt through argv, so a large diff ha
 status: open
 tier: 1
 filed: 2026-09-23
-specs: []
+specs: [SA-0140]
 prs: []
 commits: []
 cites: [§5.5, §5.6]

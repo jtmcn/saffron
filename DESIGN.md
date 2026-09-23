@@ -268,9 +268,10 @@ Design notes:
                        the code, and no model call has happened yet (§5.4)
   NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
                        a dead seam here would have returned an earned state
-  GATE_ERROR       ◀── a gate errored, the two suites drifted, or the critic cell
-                       met a binary stub the export cannot carry: infrastructure,
-                       and never charged to the task (§5.4, §5.5)
+  GATE_ERROR       ◀── a gate errored, the two suites drifted, the critic cell
+                       met a binary stub the export cannot carry, or a verdict
+                       session never started: infrastructure, and never charged
+                       to the task (§5.4, §5.5, §5.6)
   SCOPE_REVIEW     ◀── also from IMPLEMENTING: an implementer whose declared
                        `touches` cannot satisfy the criteria proposes a set
                        instead of writing a plan, and the proposal ends the
