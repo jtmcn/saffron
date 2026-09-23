@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142]
+specs: [SA-0142, SA-0143, SA-0144]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -48,3 +48,8 @@ escalations.
   `feature` ceiling of 3000, so it splits in three. `SA-0142` builds the
   stack order in `build_queue`. The handoff and the layers' record follow
   as two more specs.
+- 2026-09-23: the rest of step 1 splits in two. `SA-0143` hands each task
+  its predecessor's branch in `run_stack_batch`. `SA-0144` adds the
+  `--stack` flags on `saffron batch` and `saffron queue`. `SA-0142` now
+  stacks on `SA-0136`, so one chain carries all three. The layers' record
+  becomes `SA-0145`, and build steps 2 to 9 take `SA-0146` to `SA-0153`.

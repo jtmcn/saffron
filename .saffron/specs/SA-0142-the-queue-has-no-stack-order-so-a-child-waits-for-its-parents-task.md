@@ -3,7 +3,7 @@ id: SA-0142
 title: The queue has no stack order, so a child waits for its parent's task and a parent in another stack admits it
 type: feature
 priority: 1
-depends_on: []
+depends_on: [SA-0136]
 touches:
   - saffron/scheduler.py
   - tests/test_scheduler.py
@@ -102,14 +102,15 @@ that order is admissible, although the parent has no task yet. A spec with
 a `depends_on` entry outside the order, and not on the default branch, is
 refused. Cutting it from the task below would drop that entry's code.
 
-**This spec is the first of three.** It builds the order and its refusals
+**This spec is the first of four.** It builds the order and its refusals
 as a mode of `build_queue`. Whole, step 1 was estimated at 4300 changed tokens
 against the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`), so
-it splits. The two after it are proposed, not written:
+it splits. The three after it:
 
-- `SA-0143` hands each task's pushed branch and head to the next. It adds
-  `saffron batch --stack`, which runs this order once, with no rescan.
-- `SA-0144` records the stack's layers in the ledger.
+- `SA-0143` hands each task's pushed branch and head to the next, in
+  `run_stack_batch`, which runs this order once, with no rescan.
+- `SA-0144` adds `saffron batch --stack` and `saffron queue --stack`.
+- `SA-0145` records the stack's layers in the ledger. It is not written yet.
 
 **What `build_queue` does today.** Every sentence here was read at
 `5ee4dd76`.
@@ -166,10 +167,10 @@ taken, because neither spec is ever ready.
 
 ## Out of scope
 
-- **Running the order.** `saffron batch --stack`, the handoff through
-  `run_task`, and the refusal of a failed task's descendants are
-  `SA-0143`'s. Until it lands, stack mode has no production caller.
-- **The record of the stack's layers.** That is `SA-0144`'s. A new fact
+- **Running the order.** The handoff through `run_task` and the refusal
+  of a failed task's descendants are `SA-0143`'s. `saffron batch --stack`
+  is `SA-0144`'s. Until it lands, stack mode has no production caller.
+- **The record of the stack's layers.** That is `SA-0145`'s. A new fact
   kind needs `KINDS`, `ontology/factory.ttl` and `CONTEXT.md` to move
   together, and no cell can write `CONTEXT.md` (backlog item b-25766a).
 - **Gate 0's overlap exemption for the batch's own tasks.** That is step 2
@@ -183,6 +184,11 @@ taken, because neither spec is ever ready.
   `.claude/**` is forbidden here.
 
 ## Notes for the agent
+
+**Why this spec depends on `SA-0136`.** `SA-0143` edits `task.py`,
+`batch.py` and `cli.py` after `SA-0136`'s chain, and only `depends_on[0]`
+stacks (`saffron/task.py:133-136`). So this spec sits between the two, and
+`SA-0143`'s tree holds its code.
 
 **Every new criterion is new code.** Stack mode has no text at base a
 mutant could pin. So criteria 1 to 4 declare a witness and no mutant, and

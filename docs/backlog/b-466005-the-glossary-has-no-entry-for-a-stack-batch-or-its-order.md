@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142]
+specs: [SA-0142, SA-0143, SA-0144]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -45,3 +45,6 @@ The **Refusal** entry names the stack order's refusal. This lands after
 ## Record
 
 - 2026-09-23: filed with `SA-0142`.
+- 2026-09-23: `SA-0143` uses "predecessor" and "stack batch" in its
+  claims. It names the pair it hands `run_task` a `Handoff`, a code name
+  with no glossary entry. `SA-0144` adds the `--stack` flag.
