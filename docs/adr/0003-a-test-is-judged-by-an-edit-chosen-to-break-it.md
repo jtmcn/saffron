@@ -6,7 +6,7 @@ date: 2026-09-22
 supersedes: []
 superseded_by: []
 appendices: [A, K, L]
-principles: [4, 5, 6, 15, 17, 20, 30, 34, 44, 45, 47, 48, 49, 52, 56, 57]
+principles: [1, 4, 5, 6, 15, 17, 20, 28, 30, 34, 44, 45, 47, 48, 49, 52, 56, 57, 61]
 ---
 
 ## Context
@@ -23,10 +23,11 @@ and it changed five times.
   the suite per mutant. §11 corrected that reason. `mutmut` does not rerun per
   mutant, and it ran inside the window
   (`docs/evidence/2026-08-25-mutation-testing-vs-a-lens.md`).
-- 2026-09-02. §5.5 had argued that `revert` answered test quality for free.
-  §5.5.1 withdrew that on measurement. `revert` asks whether the new tests test
-  anything, not whether they test each thing. So lens #3 became test adequacy.
-  Blast radius was retired. The escape Appendix L records fell in its remit.
+- 2026-09-02. §5.5 argued until then that `revert` answered test quality for
+  free. §5.5.1 withdrew that on measurement. `revert` asks whether the new tests
+  test anything, not whether they test each thing. So lens #3 became test
+  adequacy. Blast radius was retired. The escape Appendix L records fell in its
+  remit.
 - 2026-09-05. Nine tests passed every gate, all three lenses and a human read,
   and guarded nothing. Each was found by running a mutation. §5.4.1 added
   `witness` for that case (backlog item 69).
@@ -38,8 +39,8 @@ and it changed five times.
 ## Decision
 
 Whether a test guards a behaviour is answered by running an edit chosen to
-break that behaviour. No mutation-testing tool sweeps the diff. Four checks
-share the question, and each asks it differently.
+break that behaviour. No mutation-testing tool sweeps the diff. Two gates and
+two host-run probes share the question, and each asks it differently.
 
 - `revert` reverts the diff's source files, keeps its test files, and requires
   the new tests to fail. It asks whether the tests test anything.
@@ -47,17 +48,19 @@ share the question, and each asks it differently.
   the claim's witness to fail. It asks whether that one claim is guarded.
 - A criterion probe is an edit a fresh session names to make one claim false.
   The session is never told which test is the claim's witness. The host applies
-  the edit in its own gate-only cell and runs `witness_gate` over it. If the
-  witness survives, the finding is an `adequacy` blocker.
+  the edit in its own gate-only cell and runs the claim's witness over it, as
+  the `witness` gate does. A surviving witness files an `adequacy` blocker.
 - Lens #3, `adequacy`, reads the diff and names, per finding, a vacuity probe.
   That is the smallest edit that keeps the suite green while the behaviour
   breaks. The lens runs nothing. The host applies the probe in a gate-only cell
   and runs the repo's `tests` gate (`SA-0109`). `survived` makes the finding a
   `blocker`, and `killed` makes it a `note`.
 
-A probe of either kind is `unproven` when no edit is named or the edit targets
-a declared test path. An `unproven` probe is never applied, and the finding
-keeps the severity it was filed at.
+A probe of either kind is `unproven` in three cases. No edit is named, the edit
+targets a declared test path, or the cell could not apply or answer it. The
+first two are refused before any edit is applied. An `unproven` vacuity
+probe leaves its finding at the severity the lens filed. An `unproven`
+criterion probe files no finding.
 
 ADR 2 names only the spec's mutant among the edits core applies. The two probe
 runs are host steps inside the same rule. The host invokes a gate the repo
@@ -80,17 +83,20 @@ its one partial branch was not the defect. A line whose removal left all its
 tests green was executed by every one of them (the evidence record above).
 
 This ADR is where the decision stands. The pull request that adds it rewrites
-six `DESIGN.md` sentences that carried older forms of it. Two more remain, and
-principle 30 names them.
+every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
 
 ## Principles
 
+- **1** departs. A spec's mutant needs the operator to know in advance the text
+  that breaks a claim. A criterion probe upholds the principle, because a fresh
+  session names that edit and the operator does not.
 - **4** departs. Both withholdings live in the cell. The spec file sits in the
   worktree, so a spec's mutant is withheld from the prompt only. The criterion
   session reads files under `/work`, where the spec names every witness.
-- **5** departs. A test REBUT adds to kill a surviving probe belongs to no
-  criterion, so `revert` fails it. One task ended `EXHAUSTED` with a correct
-  diff that way (backlog item b-4a63b7).
+- **5** departs. A test REBUT adds for a property already true at base still
+  passes once the source is reverted. No `preserves` criterion declares it, so
+  `revert` fails it. One task ended `EXHAUSTED` with a correct diff that way
+  (backlog item b-4a63b7).
 - **6** departs. A surviving probe is a blocker, and blocking teaches the
   cheapest satisfaction. `SA-0079` killed the named edit and left a near
   neighbour surviving. Coverage stays advisory for the same reason.
@@ -100,18 +106,26 @@ principle 30 names them.
 - **17** upholds. `parse_spec` refuses a spec that discloses its own mutant
   before a cell starts.
 - **20** departs. A spec in the worktree is agent-visible. `SA-0064`'s
-  implementer read a mutant there (item 80). Whether a criterion session has
-  read a witness there is not measured.
-- **30** departs. Two sentences still say no gate applies a criterion probe:
-  §5.4.1, and `CONTEXT.md`'s criterion probe entry. Item b-37924b owns both.
-  The same pull request rewrote the other six, in §5.4, §5.5.1, §7, §8 and §11.
-- **34** upholds. `revert` reports `skip` when its tests fail to import, and
-  `witness` names every mutant that does not apply. Neither reads as green.
-- **44** departs. No live task shows the host applying a criterion probe. The
-  three cells of run 13 ran before #434 merged.
+  implementer read a mutant there (item 80). No measurement shows whether a
+  criterion session reads a witness there.
+- **28** departs. The anchor rule was written for lens findings, and a
+  criterion-probe survivor now passes through it. One that does not anchor
+  stays in the record and never reaches REBUT. A `preserves` claim's probe is
+  the likeliest to edit code outside the diff. The ledger's drop rate still
+  counts a host-filed survivor against the lens (backlog item b-b431c1).
+- **30** upholds. The pull request rewrites every sentence that still stated
+  an older form, in §5.4, §5.4.1, §5.5.1, §7, §11 and `CONTEXT.md`. It deletes
+  §8's claim that `revert` replaced a lens.
+- **34** departs. `witness` names every mutant that does not apply. `revert`
+  reports `skip` when its tests fail to import, and the PR body renders that
+  skip as a gate the repo does not declare. ADR 2 records that a `skip` reads
+  as passing. Backlog item 50 owns the case.
+- **44** departs. No live task shows the host applying a criterion probe. Run
+  13's cells ran before #434 merged.
 - **45** upholds. Mutation now reaches every claim that names a witness,
   through a criterion probe, whether or not its spec declares a mutant. It
-  misses a claim with no witness, and a probe that is `unproven`.
+  misses a claim with no witness, a probe that ends `unproven` or `error`, and
+  a survivor that does not anchor.
 - **47** upholds. Coverage is the proxy the adequacy question rejects.
 - **48** upholds. The lens and the criterion session look for what no gate
   thought to check, and the host then turns what they name into a check.
@@ -125,23 +139,25 @@ principle 30 names them.
 - **56** upholds. The 2026-08-25 measurement rejected two mutation tools for
   this gate loop, and nothing more. §11 names the constraints that would admit
   `mutmut`.
-- **57** upholds. This ADR condenses five `DESIGN.md` sections, two appendices
-  and six backlog records, and dates each change. It uses the glossary's three
-  names, mutant, vacuity probe and criterion probe, rather than one general
-  term.
+- **57** upholds. This ADR condenses five `DESIGN.md` sections, three
+  appendices and seven backlog records, and dates each change. It uses the
+  glossary's three names, mutant, vacuity probe and criterion probe, rather
+  than one general term.
+- **61** departs. The criterion probe's tests run it on fixtures only, so they
+  verify the probe and not a task. Principle 44's live run is what is missing.
 
 ## Consequences
 
 A spec that claims a behaviour names a witness, or no probe reaches the claim.
 A spec creating new code declares no mutant, because a mutant cannot pin text
-the implementer has not written. Its claims still get criterion probes.
+the implementer is yet to write. Its claims still get criterion probes.
 
-`revert` is file-level, so a file that is half test and half source reverts
-whole or not at all. When the reverted tests fail to import, `revert` reports
-`skip`, not green (backlog item 50). It also fails a test REBUT adds, which
+`revert` is file-level (§5.4). When the reverted tests fail to import, `revert`
+reports `skip`, and the PR body misreports the reason (backlog item 50). It
+also fails a test REBUT adds for a property already true at base, which item
 b-4a63b7 records as open.
 
 `witness` as a suite gate is advisory at `standard` and blocking at `elevated`.
 A surviving probe of either kind is a blocker for REBUT, whatever the tier, once
 its finding anchors to the diff. A criterion-probe survivor that does not anchor
-is dropped.
+stays in the record and never reaches REBUT.

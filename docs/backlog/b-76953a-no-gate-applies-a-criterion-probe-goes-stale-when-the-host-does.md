@@ -1,12 +1,13 @@
 ---
 id: b-76953a
 title: Two protected sentences say no gate applies a criterion probe, and after `SA-0120` the host applies every one
-status: open
+status: done
 tier: 3
 filed: 2026-09-21
+closed: 2026-09-22
 by_hand: true
 specs: []
-prs: []
+prs: [447]
 commits: []
 cites: [§5.4.1]
 related: [b-2750d5, b-0c1d69]
@@ -36,3 +37,6 @@ and files a survivor as a blocker for REBUT. `CONTEXT.md` changes through
 ## Record
 
 - 2026-09-21: filed by hand with `SA-0120`. It waits on that spec's merge.
+- 2026-09-22: done by #447. Both sentences say the host applies each
+  criterion probe in a gate-only cell, and an anchored survivor is a blocker for
+  REBUT.
