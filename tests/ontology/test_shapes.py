@@ -321,6 +321,10 @@ _LOOP = (
             {SH.QualifiedMinCountConstraintComponent},
         ),
         (
+            ":l a factory:SpecLoop ; prov:qualifiedAssociation [ prov:agent :operator ] .",
+            {SH.QualifiedMinCountConstraintComponent},
+        ),
+        (
             f"{_LOOP} prov:wasAssociatedWith :d . :l a factory:Batch ; factory:budgetUsd 50.0 .",
             {SH.NotConstraintComponent},
         ),
@@ -330,7 +334,15 @@ _LOOP = (
             {SH.NotConstraintComponent},
         ),
     ],
-    ids=["associated", "qualified", "no-agent", "operator-only", "is-batch", "is-task"],
+    ids=[
+        "associated",
+        "qualified",
+        "no-agent",
+        "operator-only",
+        "operator-only-qualified",
+        "is-batch",
+        "is-task",
+    ],
 )
 def test_a_spec_loop_is_a_delegates_work_and_never_a_batch_or_a_task(
     graph, components, shapes_graph
