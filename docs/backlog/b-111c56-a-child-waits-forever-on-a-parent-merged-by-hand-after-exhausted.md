@@ -1,11 +1,12 @@
 ---
 id: b-111c56
 title: A child waits on a parent that ended `EXHAUSTED` and then merged by hand, because the ledger never learns of the merge
-status: open
+status: done
 tier: 3
 filed: 2026-09-22
+closed: 2026-09-23
 specs: [SA-0123, SA-0124, SA-0131]
-prs: [451, 459]
+prs: [451, 459, 481]
 commits: []
 cites: [§5.7]
 related: [b-4a63b7, b-e8027b]
@@ -41,3 +42,6 @@ and whose branch then merged.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 14.
+- 2026-09-23: `SA-0131` reached `READY_FOR_REVIEW` as #481 at $14.33 of $18,
+  in the spec loop's run 15. `build_queue` now admits a child whose parent's
+  recorded push reached the default branch. `SA-0131` retires to `done/`.

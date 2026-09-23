@@ -1,11 +1,12 @@
 ---
 id: b-2dea1c
 title: A spec that asks the cell to run its wrong versions spends the fifteen-minute turn bound on them
-status: open
+status: done
 tier: 3
 filed: 2026-09-22
+closed: 2026-09-23
 specs: [SA-0123, SA-0130]
-prs: [451]
+prs: [451, 480]
 commits: []
 cites: [§4.3]
 related: [b-2750d5, b-36b551]
@@ -38,3 +39,7 @@ to ask.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 14.
+- 2026-09-23: `SA-0130` reached `READY_FOR_REVIEW` as #480 at $3.13 of $12,
+  in the spec loop's run 15. The IMPLEMENT prompt now says the host runs wrong
+  versions. Review narrowed it, so a new witness's run against the unfixed
+  code stays with the implementer. `SA-0130` retires to `done/`.
