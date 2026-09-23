@@ -7,11 +7,10 @@ This is the second and third of `SA-0009`'s split. `SA-0015` built the
 §4.2.1's six refusals: an open pull request from another task already
 targeting this spec, a `touches` overlap with an open pull request's changed
 files, an acceptance criterion naming a path no `touches` pattern matches,
-and a `depends_on` no `MERGED` task satisfies. That is five of the six refusals gate 0
+and a `depends_on` that no `MERGED` task or landed push satisfies. That is five of the six refusals gate 0
 describes — the sixth, a repo that failed preflight, is a batch-level check
-outside `build_queue`'s job. `SA-0131` widens the fourth: a `depends_on`
-parent whose recorded push reached the default branch some other way now
-satisfies it too, given a caller that can answer that question.
+outside `build_queue`'s job. A landed push counts only when the caller
+passes `pushed_landed` (`SA-0131`).
 
 `SA-0023` adds the seventh §4.2.1 now counts: `protected_touch_refusal`
 refuses a spec whose declared `touches` collides with a literal entry in the
@@ -810,7 +809,7 @@ def build_queue(
         if any(row["state"] == DEPENDENCY_MERGED for row in rows)
     )
 
-    # `SA-0131`'s third admission: a parent whose push landed the default
+    # `SA-0131`'s third admission: a parent whose push landed on the default
     # branch some other way, read only for ids a `depends_on` names.
     if pushed_landed is not None and repo_id is not None:
         named = {dep for discovered in specs for dep in discovered.spec.depends_on}

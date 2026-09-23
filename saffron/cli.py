@@ -332,9 +332,7 @@ def _retirement_markers_at(mirror: Path, base_sha: str) -> list[tuple[str, str]]
 
 
 def _run_git(mirror: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(mirror), *args], capture_output=True, text=True
-    )
+    return git_mirror._run(["git", "-C", str(mirror), *args])
 
 
 def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
@@ -614,7 +612,7 @@ def _resolve_queue(
             # comment anywhere in the tree, not something `.saffron/`'s own
             # archive carries (`SA-0027`).
             markers=_retirement_markers_at(mirror, base_sha),
-            # Bound to this run's own mirror and pin, never re-derived
+            # Bound to this scan's own mirror and pin, never re-derived
             # (`SA-0131`).
             pushed_landed=lambda sha: _pushed_landed(mirror, base_sha, sha),
             gh=_guarded_gh(gh_failures),

@@ -1842,6 +1842,11 @@ def test_a_parent_whose_pushed_commit_reached_the_default_branch_satisfies_its_c
             ledger, repo_id, spec_id="TE-1", spec_sha="stale-sha-a", state="REJECTED"
         )
         ledger.record_push(old_row, sha_a)
+        # B's older row records no push, so a scan reading only each spec's
+        # oldest row never asks about B's push.
+        _task_at(
+            ledger, repo_id, spec_id="TE-3", spec_sha="stale-sha-b", state="REJECTED"
+        )
         for parent in parents:
             row = _task_at(
                 ledger,

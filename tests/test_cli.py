@@ -2058,6 +2058,8 @@ def test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand(tmp_path, ca
 
     with pytest.raises(cli.git_mirror.GitError):
         cli._pushed_landed(tmp_path / "no-such-mirror", merge_sha, parent1_sha)
+    with pytest.raises(cli.git_mirror.GitError):
+        cli._pushed_landed(mirror, "c" * 40, parent1_sha)
     assert cli._pushed_landed(mirror, merge_sha, "b" * 40) is False
 
 
