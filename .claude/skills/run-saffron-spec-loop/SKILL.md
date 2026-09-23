@@ -99,6 +99,7 @@ Verify each blocker before acting on it: read its line at `origin/main`.
 - `build` is yours to fix in the spec before the cell.
 - `witness` is yours to fix in rounds 1 to 3. From a spec's fourth review
   round, it goes into that PR's `{KNOWN}` for the Spec seat instead.
+- A blocker with no word goes to the operator, as `scope` does.
 
 A concern the cell's diff will
 settle goes into that PR's `{KNOWN}` for the Spec seat (step 2c). Other concerns
