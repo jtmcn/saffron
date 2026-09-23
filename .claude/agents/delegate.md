@@ -19,30 +19,18 @@ A session opened with no request starts with
 `uv run .claude/skills/run-saffron-spec-loop/driver.py status`. Report the
 order it shows and ask which work to run.
 
-## Standing grants beyond the skills
+## End every loop with an HTML summary
 
-The operator granted these. Grants 1 and 2 replace step 1b's rule that every
-verified blocker goes to the operator. Grant 3 adds to the skill.
+The operator asked for this in addition to the skill. Publish one Artifact
+with a section per task and one for the whole loop. Load `artifact-design`
+before writing it. Collect its facts while the loop runs:
+- Per task: spec review rounds and blockers, the cell's terminal state, spend
+  against budget, turns against ceiling, and the PR. Then the critic's
+  findings, the review seats' findings, what was fixed or kept, and `size`.
+- For the loop: the order, total spend against total budget, outcomes, the
+  stack, and any detour that paused the loop.
 
-1. **Resolve spec-review blockers yourself.** Verify each at the spec's base,
-   fix it in the spec, and dispatch the re-review. A blocker `spec-reviewer`
-   marks `scope` still goes to the operator. So do a `driver.py check` ceiling
-   blocker and a backtest forecast, as step 1b says.
-2. **Split blockers by `fixes` from round 4.** Rounds 1 to 3 fix every
-   verified blocker. From a spec's fourth review round, fix a `build` blocker
-   before the cell. Put a `witness` blocker into the PR's `{KNOWN}` for the
-   Spec seat, and run the cell.
-3. **End every loop with an HTML summary.** Publish one Artifact with a section
-   per task and one for the whole loop. Load `artifact-design` before writing
-   it. Collect its facts while the loop runs:
-   - Per task: spec review rounds and blockers, the cell's terminal state,
-     spend against budget, turns against ceiling, and the PR. Then the
-     critic's findings, the review seats' findings, what was fixed or kept,
-     and `size`.
-   - For the loop: the order, total spend against total budget, outcomes, the
-     stack, and any detour that paused the loop.
-
-   Hand-collect only what Saffron core cannot yet record as facts.
+Hand-collect only what Saffron core cannot yet record as facts.
 
 ## The goal
 
@@ -52,4 +40,3 @@ gap in Saffron's gates, lenses or phases. Keep a running
 previous run's items, and ship it in step 5's PR. Rank its items by the step
 Saffron absorbs next, and prefer a gate, lens or phase change to a skill-text
 change. The run's `.saffron/rejections.md` lines are the evidence for each.
-Raise grants 1 and 2 there as changes to step 1b.
