@@ -51,10 +51,14 @@ acceptance:
       line estimate, its price, the ceiling and the words `parent and
       children`, and the command exits 1. An estimate one line under that
       boundary prints no such line. It prints one line that starts `size: `
-      and holds the same three numbers. This holds for each of the six spec
+      and holds the same three numbers. A size blocker counts with the
+      turns and budget blockers, so `check: ceilings clear this shape's
+      history` does not print beside it. Under the boundary, with the
+      ceilings clear, that line prints. This holds for each of the six spec
       types, with and without past cells of the spec's shape, for a spec
       read from its file, and for whatever rate, table entry and default
-      the module holds when `check` runs.
+      the module holds when `check` runs. A boundary that falls between two
+      whole lines rounds up, so the first line at or past it blocks.
     witness: tests/test_spec_size_estimate.py::test_check_blocks_an_estimate_at_80_percent_of_its_types_size_ceiling
   - claim: >-
       A spec that declares no `estimated_lines` draws no size blocker from
@@ -151,9 +155,11 @@ whose estimate is within 20% of its ceiling."
      `size: estimated_lines=599 (2396 tokens at 4 a line) is under 80% of the feature ceiling of 3000 tokens`
    - Not declared: `size: no estimated_lines declared`
 3. **Exit 1 on a size blocker, rows or no rows.** The early return with no
-   rows must not skip the size judgement. The turns and budget blockers,
-   the concern and the `check: ceilings clear this shape's history` line
-   keep their rules unchanged.
+   rows must not skip the size judgement. A size blocker counts with the
+   turns and budget blockers. So `check: ceilings clear this shape's
+   history` (`.claude/skills/run-saffron-spec-loop/driver.py:1986`) prints
+   only when none of the three blocks and no concern prints. The turns and
+   budget blockers and the concern keep their rules unchanged.
 
 ## Out of scope
 
@@ -192,10 +198,12 @@ new field is not reported. The gate passed on a prototype on 2026-09-22.
 **Where the judgement goes.** Import `_CEILINGS`, `_DEFAULT_CEILING` and
 `_TOKENS_PER_LINE` from `saffron.gates.core.size` inside the function that
 judges, as `_size` imports `size_gate`
-(`.claude/skills/run-saffron-spec-loop/driver.py:600-601`). Every `saffron`
-import in `driver.py` sits inside a function. Criterion 2's witness patches
-the module's names and expects `check` to see the patch, so a module-scope
-import fails it. Never copy the numbers. Compare in integers,
+(`.claude/skills/run-saffron-spec-loop/driver.py:600-601`). Criterion 2's
+witness rebinds `_TOKENS_PER_LINE` and `_DEFAULT_CEILING` on the module and
+expects `check` to see the new values. So a module-scope import of either
+name fails it. Only the `TYPE_CHECKING` block imports from `saffron` at
+module scope
+(`.claude/skills/run-saffron-spec-loop/driver.py:33-36`). Never copy the numbers. Compare in integers,
 `5 * price >= 4 * ceiling`, so no float rounding moves the boundary. Run it
 before the early return at
 `.claude/skills/run-saffron-spec-loop/driver.py:1975`. Count a size blocker
@@ -233,10 +241,15 @@ it, first with no rows and then with one clear row of the same type from
 `_cell`. Each blocker asserts the return code 1 and one `blocker: ` line
 holding the estimate, its price and the ceiling as whole words, and
 `parent and children`. Each pass asserts the return code 0, no `blocker: `
-line and one `size: ` line holding the same three numbers. Then, with
+line and one `size: ` line holding the same three numbers. With the clear
+row, each blocker asserts the `check: ceilings clear this shape's
+history` line is absent, and each pass asserts it is present. Then, with
 `monkeypatch`, it sets `_CEILINGS["feature"]` to 3500, `_DEFAULT_CEILING`
 to 5000 and `_TOKENS_PER_LINE` to 5. It drives the new boundary and one
-under it for `feature` and for `docs`. Last, it writes a `feature` spec
+under it for `feature` and for `docs`. After undoing those patches, it sets
+`_CEILINGS["feature"]` to 3000 and `_TOKENS_PER_LINE` to 7. That boundary is
+12000 tokens over 35, or 342.86 lines. So 343 blocks and 342 does not.
+Every other boundary the witness drives divides exactly. Last, it writes a `feature` spec
 file declaring the boundary into a temporary `SPECS_DIR`, as
 `test_known_specs_skips_a_missing_done_directory` does, and leaves
 `_known_specs` unpatched. That run exits 1. These wrong implementations
@@ -245,6 +258,10 @@ fail it:
 - the line estimate compared with the token ceiling, unpriced
 - a literal rate of 4
 - a strict `>` at the boundary
+- a threshold in lines rounded down, such as
+  `estimated_lines >= 4 * ceiling // (5 * rate)` or
+  `int(0.8 * ceiling / rate)`, which blocks 342 at rate 7
+- the ceilings-clear line printed beside a size blocker, or never printed
 - one ceiling for every type
 - a literal default of 4200
 - a copy of the ceilings in `driver.py`
@@ -264,8 +281,8 @@ both blocker lines and return code 1. With the estimate one under, it
 asserts the `max_turns` blocker, no size blocker and return code 1. A
 judgement that returns early on a size blocker fails it.
 
-**Size.** A prototype of the change measured 159 changed lines, 29 of
-source and 130 of test. Expect about 200 with the help text and the
+**Size.** A prototype of the change measured 174 changed lines, 31 of
+source and 143 of test. Expect about 200 with the help text and the
 docstring. `SA-0112`, which added `check` to the same two kinds of file,
 landed at 243. The `feature` ceiling is 600 lines at `c4344e46` and 3000
 tokens after `SA-0128`. This spec declares no `estimated_lines` of its own,
@@ -281,6 +298,8 @@ failed its witness:
 - an unpriced estimate
 - a literal rate of 4
 - a strict `>`
+- a threshold in lines rounded down, in both spellings above
+- the ceilings-clear line beside a size blocker, and that line never printed
 - a literal default of 4200
 - a copied ceiling table
 - one ceiling for every type
