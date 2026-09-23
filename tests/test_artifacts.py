@@ -204,8 +204,8 @@ def test_a_plan_estimating_at_the_ceiling_is_accepted():
 
 
 def test_validate_plan_and_size_gate_agree_on_the_ceiling():
-    """The same table `size_gate` enforces the diff against — a plan cleared
-    here and then blown up by the agent's actual diff is a different bug, but
+    """The same table `size_gate` enforces the diff against — a plan
+    `judge_estimate` cleared and then blown up by the agent's actual diff is a different bug, but
     a plan checked against a *different* number than the gate uses is this one."""
     from saffron.agents.artifacts import judge_estimate
     from saffron.gates.core.size import _CEILINGS
@@ -229,32 +229,16 @@ def test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_
     """Criterion 4: `_advisory` and `judge_estimate` both decide through
     `size_blocks`, never a copy of its own comparison.
 
-    AST over `inspect.getsource`, so a comment naming `size_blocks` does not
-    satisfy the first half. A caller that discards the answer fails the
-    second, the same structural proof `tests/test_cli.py::_source_calls`
-    uses."""
-    import ast
-    import inspect
-
+    `tests/test_cli.py::_source_calls` reads the AST, so a comment naming
+    `size_blocks` does not satisfy the first half. The monkeypatched
+    opposite makes a caller that discards the answer fail the second."""
     from saffron.agents import artifacts
     from saffron.gates import suite
     from saffron.repos.policy import Policy
+    from tests.test_cli import _source_calls
 
-    def _calls_size_blocks(fn) -> bool:
-        tree = ast.parse(inspect.getsource(fn))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            called = (
-                func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
-            )
-            if called == "size_blocks":
-                return True
-        return False
-
-    assert _calls_size_blocks(suite._advisory)
-    assert _calls_size_blocks(artifacts.judge_estimate)
+    assert _source_calls(suite._advisory, "size_blocks")
+    assert _source_calls(artifacts.judge_estimate, "size_blocks")
 
     def opposite(tier: str) -> bool:
         return tier != "elevated"

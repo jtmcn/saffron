@@ -306,9 +306,9 @@ def judge_estimate(
     forecast, since no diff exists yet (§5.6).
 
     `None` within the ceiling. Over it and `size_blocks` says the tier
-    blocks: raises `PlanRejected`, carrying the `size` gate's own failure
-    text. Over it and advisory: returns the sentence the checkpoint emits
-    instead of rejecting.
+    blocks: raises `PlanRejected`, carrying a copy of the `size` gate's
+    failure message that a test pins to `size_gate`'s own. Over it and
+    advisory: returns the sentence the checkpoint emits instead of rejecting.
     """
     ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
     if plan.estimated_lines <= ceiling:
@@ -321,14 +321,14 @@ def judge_estimate(
     )
     if size_blocks(tier):
         rejected = PlanRejected(
-            f"plan's own estimate exceeds the {spec_type} ceiling at {tier} "
-            f"— the `size` gate will fail on this diff: {gate_message}"
+            f"plan's own estimate exceeds the {spec_type} ceiling at {tier}, "
+            f"where `size` blocks: {gate_message}"
         )
         rejected.risk_tier = tier
         raise rejected
 
     return (
-        f"plan's own estimate of {plan.estimated_lines} changed lines "
-        f"exceeds the {spec_type} ceiling of {ceiling} — `size` is advisory "
-        f"at {tier}, so the plan stands"
+        f"advisory estimate: {plan.estimated_lines} changed lines exceeds "
+        f"the {spec_type} ceiling of {ceiling}, and `size` is advisory at "
+        f"{tier}, the tier from the plan's files, so the plan stands"
     )

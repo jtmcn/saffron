@@ -278,8 +278,8 @@ def _block(plan):
 
 
 def _checkpoint_plan(spec, plan, elevate_on):
-    """The one call site every §5.6-forecast case below drives the plan
-    checkpoint through, so no loop below needs its own closure (B023)."""
+    """The one call site the criterion-1 cases drive the plan checkpoint
+    through, so no loop below needs its own closure (B023)."""
     agent = _agent(_block(plan))
     return session.plan_checkpoint(
         "cell",
@@ -305,8 +305,8 @@ def _lines_patch(n):
     )
 
 
-# The three ways §5.6 reaches `elevated` at plan time: none of them, the
-# spec's own declaration, and an `elevate_on` path in the plan's files.
+# The three routes to a tier at plan time (§5.6): none, the spec's own
+# `elevated`, and an `elevate_on` path in the plan's files.
 _TIER_ROUTES = ("no_elevate_on_path", "declared_elevated", "elevate_on_path")
 
 
@@ -400,6 +400,7 @@ def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
     assert "size" in line
     assert "advisory" in line
     assert "standard" in line
+    assert "plan's files" in line
 
     at_ceiling = _PLAN | {
         "files_to_change": ["src/x.py", "tests/test_x.py"],
@@ -446,7 +447,8 @@ def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
         base_policy=_ELEVATE_ON_INFRA,
         turns=[_turn(_block(no_infra_path)), _turn()],
     )
-    assert outcome1.state != "PLAN_REJECTED"
+    assert outcome1.state == "READY_FOR_REVIEW"
+    assert len(cell1.turns) >= 2
     assert any(
         line.startswith("PLAN:") and "advisory" in line for line in cell1.watched
     )

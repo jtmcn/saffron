@@ -453,10 +453,6 @@ def plan_checkpoint(
     proposal that does not is refused rather than recorded, and — unlike an
     ordinary content rejection — gets the same one bounded re-prompt a shape
     failure gets, so refusing it cannot itself become the plan's escape hatch.
-
-    `elevate_on` is the policy's own list, read at `base_sha`. The plan's
-    own `files_to_change` are judged against it for §5.6's forecast tier,
-    since no diff exists yet.
     """
     from saffron.agents import artifacts
 
@@ -1890,7 +1886,7 @@ def _drive_cell(
                 task_dir=task_dir,
                 spent_usd=rejected.spent_usd,
                 # The plan's own forecast tier when `judge_estimate` rejected
-                # it, the baseline's tier for every other rejection, as before.
+                # it, the baseline's tier for every other rejection.
                 effective_risk=(
                     rejected.risk_tier
                     if rejected.risk_tier is not None

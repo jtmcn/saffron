@@ -213,7 +213,7 @@ def size_blocks(tier: str) -> bool:
     """Whether the `size` gate blocks at `tier` (§5.6): only at `elevated`.
 
     The one rule both `_advisory` and the plan checkpoint's `judge_estimate`
-    ask, so the diff-time and plan-time answers cannot silently diverge."""
+    ask, so the diff-time and plan-time rules cannot diverge."""
     return tier == "elevated"
 
 
