@@ -54,17 +54,19 @@ acceptance:
       and holds the same three numbers. A size blocker counts with the
       turns and budget blockers, so `check: ceilings clear this shape's
       history` does not print beside it. Under the boundary, with the
-      ceilings clear, that line prints. This holds for each of the six spec
+      ceilings clear, that line prints. With no past cells it never prints. This holds for each of the six spec
       types, with and without past cells of the spec's shape, for a spec
       read from its file, and for whatever rate, table entry and default
       the module holds when `check` runs. A boundary that falls between two
-      whole lines rounds up, so the first line at or past it blocks.
+      whole lines rounds up, so the first line at or past it blocks. So
+      does 80% of a ceiling that is not a whole number of tokens.
     witness: tests/test_spec_size_estimate.py::test_check_blocks_an_estimate_at_80_percent_of_its_types_size_ceiling
   - claim: >-
       A spec that declares no `estimated_lines` draws no size blocker from
       `check`. It prints the line `size: no estimated_lines declared` and
       exits 0 when the ceilings clear, with and without past cells of the
-      spec's shape.
+      spec's shape. The ceilings-clear line prints with a clear past cell
+      and not with none.
     witness: tests/test_spec_size_estimate.py::test_check_names_a_missing_estimate_and_blocks_nothing_for_it
   - claim: >-
       A size blocker does not replace the ceilings judgement. A spec with
@@ -243,14 +245,17 @@ holding the estimate, its price and the ceiling as whole words, and
 `parent and children`. Each pass asserts the return code 0, no `blocker: `
 line and one `size: ` line holding the same three numbers. With the clear
 row, each blocker asserts the `check: ceilings clear this shape's
-history` line is absent, and each pass asserts it is present. Then, with
+history` line is absent, and each pass asserts it is present. Every run
+with no rows, here and below, asserts that line is absent. Then, with
 `monkeypatch`, it sets `_CEILINGS["feature"]` to 3500, `_DEFAULT_CEILING`
 to 5000 and `_TOKENS_PER_LINE` to 5. It drives the new boundary and one
 under it for `feature` and for `docs`. After undoing those patches, it sets
 `_CEILINGS["feature"]` to 3000 and `_TOKENS_PER_LINE` to 7. That boundary is
 12000 tokens over 35, or 342.86 lines. So 343 blocks and 342 does not.
-Every other boundary the witness drives divides exactly. Last, it writes a `feature` spec
-file declaring the boundary into a temporary `SPECS_DIR`, as
+Then it sets `_CEILINGS["feature"]` to 3001 at the rate of 4. Its 80% is
+2400.8 tokens, so 601 lines block and 600 lines, 2400 tokens, do not. Every
+other ceiling the witness drives is a multiple of 5. Last, it writes a
+`feature` spec file declaring the boundary into a temporary `SPECS_DIR`, as
 `test_known_specs_skips_a_missing_done_directory` does, and leaves
 `_known_specs` unpatched. That run exits 1. These wrong implementations
 fail it:
@@ -261,6 +266,10 @@ fail it:
 - a threshold in lines rounded down, such as
   `estimated_lines >= 4 * ceiling // (5 * rate)` or
   `int(0.8 * ceiling / rate)`, which blocks 342 at rate 7
+- a threshold in tokens rounded down, such as `price >= 4 * ceiling // 5`,
+  `price >= int(0.8 * ceiling)` or `price >= ceiling // 5 * 4`, which
+  blocks 600 lines against 3001
+- the ceilings-clear line printed with no rows once an estimate is declared
 - the ceilings-clear line printed beside a size blocker, or never printed
 - one ceiling for every type
 - a literal default of 4200
@@ -272,8 +281,10 @@ fail it:
 
 **Criterion 3's witness** builds a spec with no estimate, with no rows and
 then with one clear row. Each run asserts return code 0, the exact line
-`size: no estimated_lines declared`, and no `blocker: ` line. A missing
-estimate read as zero prints the under-80% line and fails it.
+`size: no estimated_lines declared`, and no `blocker: ` line. It asserts
+the ceilings-clear line is absent with no rows and present with the clear
+row. A missing estimate read as zero prints the under-80% line and fails
+it.
 
 **Criterion 4's witness** sets `max_turns` to 10 against one `bug` row
 whose peak is 41, the `_cell` default. With the estimate at the boundary it asserts
@@ -281,8 +292,15 @@ both blocker lines and return code 1. With the estimate one under, it
 asserts the `max_turns` blocker, no size blocker and return code 1. A
 judgement that returns early on a size blocker fails it.
 
-**Size.** A prototype of the change measured 174 changed lines, 31 of
-source and 143 of test. Expect about 200 with the help text and the
+**The printed price is an integer.** Print it as the product of two
+integers, never as a float. The parent spec declares the rate as the integer 4
+(`.saffron/specs/SA-0128-size-counts-tokens-so-rewrapping-moves-nothing.md:208-212`).
+If its cell declares a float instead, the price prints as `2400.0` and
+criterion 2's witness fails. Check the rate's type again at `SA-0128`'s
+branch head.
+
+**Size.** A prototype of the change measured 188 changed lines, 31 of
+source and 157 of test. Expect about 200 with the help text and the
 docstring. `SA-0112`, which added `check` to the same two kinds of file,
 landed at 243. The `feature` ceiling is 600 lines at `c4344e46` and 3000
 tokens after `SA-0128`. This spec declares no `estimated_lines` of its own,
@@ -299,6 +317,8 @@ failed its witness:
 - a literal rate of 4
 - a strict `>`
 - a threshold in lines rounded down, in both spellings above
+- a threshold in tokens rounded down, in all three spellings above
+- the ceilings-clear line printed with no rows once an estimate is declared
 - the ceilings-clear line beside a size blocker, and that line never printed
 - a literal default of 4200
 - a copied ceiling table
@@ -309,6 +329,7 @@ failed its witness:
 - a lax `int`
 - a missing estimate read as zero
 - a printed price that is the line count
+- a rate declared as the float `4.0`, which prints the price as `2400.0`
 
-`SA-0128`'s code does not exist at `c4344e46`. So run this list
+The control `price >= 0.8 * ceiling` is exact, and it passed all four. `SA-0128`'s code does not exist at `c4344e46`. So run this list
 again at `SA-0128`'s branch head before the cell, against the real gate.
