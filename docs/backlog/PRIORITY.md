@@ -32,6 +32,10 @@ That is the gate now.
 
 ### Tier 1 — breaks at 03:00 with nobody watching
 
+**b-792ab2** leads tier 1 from 2026-09-23. The operator asked for a loop that runs
+every queued spec with little input, and ADR 7 decides how. Its build specs
+come before the rest of this tier.
+
 Soundness first: **79**, ~~**69**~~, **117** (69 answered by running the probe the lens
 already names), **93**, **94**, ~~**109**~~ (filed 2026-09-12; it
 leaks a mutant wherever 80 stores one), ~~**114**~~ (109's other path, to the critic),
