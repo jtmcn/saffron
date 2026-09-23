@@ -1,7 +1,8 @@
 ---
 id: b-0adc85
 title: "`saffron chains` imports graph libraries only the dev group installs, and three files still say nothing under saffron/ imports one"
-status: open
+status: done
+closed: 2026-09-22
 tier: 3
 filed: 2026-09-22
 by_hand: true
@@ -40,3 +41,6 @@ them.
 ## Record
 
 - 2026-09-22: filed from ADR 5. ADR 5's Consequences records it.
+- 2026-09-22: Done by hand with b-e0bbbf, which tracked the same move and
+  named a fourth sentence, in
+  `tests/ontology/test_vocabulary_agrees_with_code.py`. Both close in #472.

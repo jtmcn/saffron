@@ -8,8 +8,7 @@ reader yet.
 
 **The appendix and ADR records are authoritative.** This module reads them and
 renders three indexes into `DESIGN.md` from them, the opposite direction from `render.py`'s
-vocabulary renders. Dev-only and outside `saffron/`: nothing there imports a
-graph library.
+vocabulary renders. It sits outside `saffron/`, and nothing there imports it.
 """
 
 import re

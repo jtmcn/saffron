@@ -19,7 +19,7 @@ still fall through to a documented default rather than a raise, so they are not
 a closed set on the code side and are not checked here.
 
 This reads the code; it does not make the code read the ontology. Nothing under
-`saffron/` imports a graph library or the generator, and `pyproject.toml` says so.
+`saffron/` imports the generator, and no scheduling decision reads a triple (§1.4).
 """
 
 import re
