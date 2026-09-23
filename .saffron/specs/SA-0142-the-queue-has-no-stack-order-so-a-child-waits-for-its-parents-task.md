@@ -43,7 +43,8 @@ acceptance:
       With `stack=True`, `build_queue` returns its candidates in stack order.
       It takes one spec at a time. Each time it takes, from the specs not yet
       taken whose every `depends_on` entry is taken or on the default branch,
-      the one with the lowest `priority`, then the lowest spec id. So a spec
+      the one with the lowest `priority`, then the lowest spec id as a
+      string. So a spec
       follows each of its entries in the order, at `depends_on[0]` and at a
       later entry. A tie never falls back to filename order.
     witness: tests/test_scheduler.py::test_a_stack_order_takes_every_dependency_first_then_priority_then_id
@@ -200,20 +201,27 @@ to let `_refuse` skip its dependency loop when the caller asks. Keep
 that no id is a substring of another, such as `TE-11` and `TE-22`. A reason
 check with `in` is otherwise vacuous.
 
-**Criterion 1's witness** writes five specs and asserts the exact order.
+**Criterion 1's witness** writes six specs and asserts the exact order.
 
 - `TE-5` at priority 3, with no `depends_on`.
 - `TE-1` at priority 1, depending on `TE-5`.
 - `TE-3` at priority 1, in a file that sorts first by name.
 - `TE-2` at priority 1, in a file that sorts after `TE-3`'s.
 - `TE-4` at priority 1, with `depends_on: [TE-2, TE-5]`.
+- `TE-6` at priority 4, with no `depends_on`.
 
-The stack order is `TE-2`, `TE-3`, `TE-5`, `TE-1`, `TE-4`. These fail it:
+The stack order is `TE-2`, `TE-3`, `TE-5`, `TE-1`, `TE-4`, `TE-6`. These
+fail it:
 
 - a sort by priority alone, which puts `TE-1` before `TE-5`
 - filename order for a tie, which puts `TE-3` before `TE-2`
 - ordering by `depends_on[0]` alone, which puts `TE-4` before `TE-5`
 - a depth-first walk that puts each parent right before its first child
+- a layered order, which takes every ready spec in a round before it looks
+  again, or sorts by depth first. It puts `TE-6` before `TE-1`.
+
+The comparison of ids is as strings. Real ids are zero-padded, so string
+order is id order, as `driver.py`'s `_sequence` compares them.
 
 **Criterion 2's witness** passes a `pushed_landed` that accepts one sha.
 
@@ -261,7 +269,8 @@ eight refusals once, and no dependency refusal. It follows the existing
 test for each refusal. It calls `build_queue` with and without `stack`, on
 the same arguments. It asserts the two refusal sets are equal as
 `(path.name, reason)` pairs and hold eight entries. The two candidate lists
-must hold the same ids. A stack path that skips one check, or rewords its
+must hold the same set of ids. The assertion ignores their order, because a
+tie breaks on id in one mode and on filename in the other. A stack path that skips one check, or rewords its
 reason, fails it.
 
 **Criterion 5** needs no new test. Its mutant makes a waiting parent refuse
