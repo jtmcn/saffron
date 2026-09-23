@@ -331,6 +331,41 @@ def _retirement_markers_at(mirror: Path, base_sha: str) -> list[tuple[str, str]]
         return []
 
 
+def _run_git(mirror: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(mirror), *args], capture_output=True, text=True
+    )
+
+
+def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
+    """Whether `pushed_sha` reached `base_sha` in `mirror` (`SA-0131`).
+
+    `rev-parse --verify --quiet` checks existence first, since `merge-base
+    --is-ancestor` alone exits 128 for both a missing commit and an
+    unreadable mirror. Ancestry is then decided against `base_sha`, never
+    `mirror`'s own `HEAD` or default branch ref, which can sit on either
+    side of a pin. Any other exit raises `git_mirror.GitError`, propagated
+    rather than swallowed the way `_retirement_markers_at` swallows it.
+    """
+    verify = _run_git(
+        mirror, "rev-parse", "--verify", "--quiet", f"{pushed_sha}^{{commit}}"
+    )
+    if verify.returncode == 1:
+        return False
+    if verify.returncode != 0:
+        raise git_mirror.GitError(
+            f"git rev-parse --verify {pushed_sha}: {verify.stderr.strip()}"
+        )
+    ancestor = _run_git(mirror, "merge-base", "--is-ancestor", pushed_sha, base_sha)
+    if ancestor.returncode == 0:
+        return True
+    if ancestor.returncode == 1:
+        return False
+    raise git_mirror.GitError(
+        f"git merge-base {pushed_sha}..{base_sha}: {ancestor.stderr.strip()}"
+    )
+
+
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # Checked before the image build, not at the cell door: `session` forwards
     # this only if it is set, so a missing one reached the agent as "Not logged
@@ -579,6 +614,9 @@ def _resolve_queue(
             # comment anywhere in the tree, not something `.saffron/`'s own
             # archive carries (`SA-0027`).
             markers=_retirement_markers_at(mirror, base_sha),
+            # Bound to this run's own mirror and pin, never re-derived
+            # (`SA-0131`).
+            pushed_landed=lambda sha: _pushed_landed(mirror, base_sha, sha),
             gh=_guarded_gh(gh_failures),
         )
 

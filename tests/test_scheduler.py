@@ -1798,6 +1798,106 @@ def test_a_parent_that_is_neither_retired_nor_merged_names_both_checks(
     assert "no task in the ledger says it merged" in reason
 
 
+def test_a_parent_whose_pushed_commit_reached_the_default_branch_satisfies_its_child(
+    tmp_path,
+):
+    """`SA-0131`: a parent whose task never wrote `MERGED` still satisfies
+    its child once `pushed_landed` says its recorded push reached the
+    default branch. True whatever state that row carries, and whatever the
+    ledger's other rows for the same parent say."""
+    from saffron.scheduler import DEPENDENCY_WAITING_STATES
+
+    def _recording(accept):
+        seen = []
+
+        def landed(sha):
+            seen.append(sha)
+            return sha == accept
+
+        return seen, landed
+
+    sha_a, sha_b = "1" * 40, "2" * 40
+    # Parent A gets two rows below. B's push is rejected, C records none.
+    parents = ["TE-1", "TE-3", "TE-5"]
+    children = ["TE-2", "TE-4", "TE-6"]
+
+    for state in sorted(DONE_STATES | REQUEUE_STATES):
+        directory = tmp_path / f"specs-{state}"
+        directory.mkdir()
+        for parent, child in zip(parents, children, strict=True):
+            _write_spec(directory, f"{parent}.md", id=parent, touches=[f"{parent}.py"])
+            _write_spec(
+                directory,
+                f"{child}.md",
+                id=child,
+                touches=[f"{child}.py"],
+                depends_on=[parent],
+            )
+        ledger = Ledger(tmp_path / f"ledger-{state}.db")
+        repo_id = _repo(ledger)
+
+        # A's older row carries the accepted push, at a sha this scan no
+        # longer has on disk. Its newer row records no push at all.
+        old_row = _task_at(
+            ledger, repo_id, spec_id="TE-1", spec_sha="stale-sha-a", state="REJECTED"
+        )
+        ledger.record_push(old_row, sha_a)
+        for parent in parents:
+            row = _task_at(
+                ledger,
+                repo_id,
+                spec_id=parent,
+                spec_sha=_sha(directory / f"{parent}.md"),
+                state=state,
+            )
+            if parent == "TE-3":  # B's own row: a push the callable rejects.
+                ledger.record_push(row, sha_b)
+
+        asked, pushed_landed = _recording(sha_a)
+        candidates, refusals = build_queue(
+            directory, repo_id, ledger, pushed_landed=pushed_landed
+        )
+
+        assert "TE-2" in [c.spec.id for c in candidates]
+        assert not any(r.path.name == "TE-2.md" for r in refusals)
+        # Only rows carrying a `pushed_sha` are ever asked, and none at all
+        # once `MERGED` already credits every parent on its own.
+        expected_asked = set() if state == "MERGED" else {sha_a, sha_b}
+        assert set(asked) == expected_asked
+
+        if state not in DEPENDENCY_WAITING_STATES and state != "MERGED":
+            assert any(r.path.name == "TE-4.md" for r in refusals)
+            assert any(r.path.name == "TE-6.md" for r in refusals)
+
+        ledger.close()
+
+    # A callable that cannot answer must not be read as "no": `build_queue`
+    # propagates it rather than catching it and reporting a false refusal.
+    from saffron.repos.mirror import GitError
+
+    directory = tmp_path / "specs-raises"
+    directory.mkdir()
+    _write_spec(directory, "TE-1.md", id="TE-1", touches=["a.py"])
+    _write_spec(directory, "TE-2.md", id="TE-2", touches=["b.py"], depends_on=["TE-1"])
+    ledger = Ledger(tmp_path / "ledger-raises.db")
+    repo_id = _repo(ledger)
+    row = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-1",
+        spec_sha=_sha(directory / "TE-1.md"),
+        state="EXHAUSTED",
+    )
+    ledger.record_push(row, sha_a)
+
+    def raising(_sha):
+        raise GitError("mirror unreadable")
+
+    with pytest.raises(GitError):
+        build_queue(directory, repo_id, ledger, pushed_landed=raising)
+    ledger.close()
+
+
 def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
     """One line in a morning queue: an operator who clears the first and meets
     the second tomorrow has lost a night the line could have saved."""
