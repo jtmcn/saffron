@@ -70,10 +70,8 @@ def _argv_safe(name: str) -> bool:
     spelled inside `test_paths` as easily as outside them. Named in
     backlog item 51 rather than papered over here, and the drop is
     reported in the summary so the attempt is at least visible. A runner
-    that fills `GateResult.uncollected` closes the buyable-`skip` shape too.
-    `zzz::bogus` then reads as an accounted-for name, not a run this gate
-    must distrust. This repo's own `tests` gate does not fill it yet
-    (backlog item 50), so the drop below still carries the weight.
+    that fills `GateResult.uncollected` reads such an id as uncollected, so
+    the `skip` is gone. This repo's `tests` gate does not fill it yet (item 50).
     """
     return not name.startswith("-")
 
@@ -329,8 +327,8 @@ def revert_gate(
     # in exactly one of `collected` or `uncollected`, checked against `subset`.
     listed: set[str] = set()
     if reverted_result.uncollected is not None:
-        listed = set(reverted_result.uncollected)
         handed = set(subset)
+        listed = set(reverted_result.uncollected) & handed
         unaccounted = sorted(
             (handed - collected - listed) | (handed & collected & listed)
         )
@@ -346,7 +344,6 @@ def revert_gate(
             )
         if listed:
             # Rides the same channel a dropped option name already uses.
-            # Criteria 5/6 pin the two summaries below, untouched here.
             note += (
                 f" — {len(listed)} handed name(s) the reverted run could not "
                 f"collect, read as failed without their source: "
@@ -363,12 +360,9 @@ def revert_gate(
     # correct spec. `criteria._side` has the same hole and it degrades to
     # `skip`; here the blast radius is the opposite way round. Closing either
     # means obliging the `tests` role to key its failures, which is item 50.
-    #
-    # `collected | listed`, not `collected` alone. A runner filling
-    # `uncollected` (item 50) can key a failure on a name it never
-    # collected. That is the shape this gate exists to catch, and it is
-    # readable evidence, not noise. `listed` stays empty when the runner
-    # skips `uncollected`, so this is unchanged for every other runner.
+
+    # `listed` too: a runner filling `uncollected` can key a failure on a
+    # handed name it never collected. Empty when the field is `None`.
     if failed and not (failed & (collected | listed)):
         return GateResult(
             gate="revert",

@@ -746,6 +746,26 @@ def test_a_handed_name_the_reverted_run_does_not_account_for_is_an_error():
         lambda s: GateResult(gate="tests", status="error", summary="x")
     )
     assert unreadable.status == "skip"
+    # The two earlier skips hold even when the run fills `uncollected`.
+    errored_listing = _revert(
+        lambda s: GateResult(
+            gate="tests", status="error", collected=[], uncollected=list(s)
+        )
+    )
+    assert errored_listing.status == "skip"
+    assert "no readable verdict" in errored_listing.summary
+    unenumerated_listing = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=None,
+            uncollected=list(s),
+            failures=[Failure(file=n, code=n, message="x") for n in s],
+        )
+    )
+    assert unenumerated_listing.status == "skip"
+    assert "nothing to read" in unenumerated_listing.summary
 
     # Listed in both: the run double-answered the same question, so `error`.
     both = _revert(lambda s: _tests_uncollected(collected=s, uncollected=s))
@@ -792,6 +812,20 @@ def test_a_handed_name_the_reverted_run_does_not_account_for_is_an_error():
         results=[_tests("t.py::test_a", new, f"--deselect={new}")],
     )
     assert dropped_both.status == "pass"
+    assert "could not collect" not in dropped_both.summary
+
+    # A name the gate was never handed, listed and keyed on, is not evidence.
+    unhanded_key = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=list(s),
+            uncollected=["AssertionError"],
+            failures=[Failure(file="t.py", code="AssertionError", message="x")],
+        ),
+    )
+    assert unhanded_key.status == "skip" and "node id" in unhanded_key.summary
 
     # With no `uncollected` at all, a `fail` run keyed on the handed name
     # with `collected=[]` is still today's `skip`.

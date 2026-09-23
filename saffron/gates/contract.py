@@ -72,16 +72,15 @@ class GateResult(BaseModel):
     """Identifiers this gate enumerated — for a test runner, its node ids.
 
     Opaque to core: never split, never parsed, never assumed to contain a
-    path (§2.1). `census` and `criteria` read it. `None` means the runner
+    path (§2.1). `census`, `criteria` and `revert` read it. `None` means the runner
     does not enumerate, which is a `skip`; `[]` means it enumerated nothing,
     which is not the same fact (§5.4)."""
     uncollected: list[str] | None = None
     """Handed names this gate was asked for and could not collect.
 
-    Only `revert` reads it, hands it a subset, and reads this back for that
-    subset alone. `None` means the gate does not report this; `[]` means it
-    accounts for every handed name in `collected` instead — not the same
-    fact, the way `[]` and `None` differ for `collected` above."""
+    Only `revert` reads it, and only for the subset it handed the gate.
+    `None` means the gate does not report it. `[]` means `collected` holds
+    every handed name. The two differ as they do for `collected`."""
     failures: list[Failure] = Field(default_factory=list)
     summary: str = ""
     duration_ms: int | None = Field(default=None, ge=0)
