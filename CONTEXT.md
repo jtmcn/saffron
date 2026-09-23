@@ -331,12 +331,15 @@ Per repo; never compared across repos.
 `(gate, file, code, normalized message)` — never on line number, which the diff
 moves. The comparison **counts**: identities collide legitimately, so one baseline
 failure cancels one head failure, not all of them. Only new failures are a task's
-problem.
+problem. A `witness` survivor is the one exception. The baseline never cancels a
+`witness` failure coded `survived-mutant`, so a survivor at base is still new at
+head. The spec declared that mutant, so killing it is the task's work.
 _Avoid_: "regression" *as a noun for a new failure*. ("Regression test" remains the
 ordinary term for a test and is fine.) _Avoid_ also "real failure".
 
 **Pre-existing failure**: A baseline failure. Reported in the batch header, charged
-to nobody.
+to nobody. A `witness` survivor at base is not subtracted, so it is also a new
+failure at head (see **New failure**).
 
 **Repair**: The bounded loop in which the agent receives gate output and responds.
 The agent never runs the gates and never reports gate status.

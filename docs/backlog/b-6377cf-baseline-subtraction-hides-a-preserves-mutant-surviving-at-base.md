@@ -4,7 +4,7 @@ title: Baseline subtraction hides a `preserves` witness whose mutant survives at
 status: open
 tier: 2
 filed: 2026-09-23
-specs: []
+specs: [SA-0139]
 prs: []
 commits: []
 cites: [§5.4, §5.5.1]

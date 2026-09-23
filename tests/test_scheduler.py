@@ -1923,7 +1923,15 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-23, a seventy-sixth time: `SA-0140` queued for
+    """Re-measured 2026-09-23, a seventy-seventh time: `SA-0139` queued for
+    backlog item b-6377cf, a `witness` survivor at base that the baseline no
+    longer cancels. It also edits `saffron/phases/implement.py`,
+    `tests/test_implement.py` and `tests/test_session.py`, which `SA-0133`
+    touches too. Overlap refuses only against an open pull request, so both
+    stay candidates, and it declares no `depends_on`. At priority 2 it is the
+    fourth of five candidates. The refusals are unmoved.
+
+    Re-measured 2026-09-23, a seventy-sixth time: `SA-0140` queued for
     backlog item b-8487de. The SDK gets the system prompt as a file, and a
     verdict session that never started ends REBUT `GATE_ERROR`. It edits
     `images/agent_runner.py`, `saffron/phases/rebut.py` and
@@ -2364,6 +2372,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0140",
         "SA-0129",
         "SA-0137",
+        "SA-0139",
         "SA-0133",
     ]
     assert [r.path.name[:7] for r in refusals] == ["SA-0134", "SA-0135", "SA-0136"]
