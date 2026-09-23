@@ -98,7 +98,7 @@ acceptance:
       a diff of that many tokens, and the tier it carries is `elevated`. At
       `standard` the estimate one line over raises nothing, and the advisory
       sentence it returns names the estimate in lines, its price and the
-      ceiling. The rate is
+      ceiling. The rate is the int 4, declared as
       `_TOKENS_PER_LINE` in `saffron.gates.core.size`, and
       `saffron/agents/artifacts.py` imports that name from there and assigns
       no name of its own to it.
@@ -118,7 +118,9 @@ acceptance:
       the file. A 40,000-token line with only its first
       token replaced counts 2 and names no file, and so does the same line
       with only its last token replaced. A 40,000-token line re-wrapped onto
-      4,000 added lines counts 0 and names no file.
+      4,000 added lines counts 0 and names no file. A sixth diff holds the
+      shared-ends file and a small file with one token replaced. It counts
+      10 and names only the shared-ends file.
     witness: tests/test_size.py::test_a_file_past_the_token_diff_bound_is_estimated_from_its_changed_lines
 ---
 
@@ -129,8 +131,8 @@ gate and its ceilings are `DESIGN.md` §5.4. The core/repo boundary it must
 keep is §2.1, and the plan checkpoint is §5.3.
 
 This spec stacks on `SA-0126`, which stacks on `SA-0125`. Every sentence
-below about current code was read at `0531fcd7` on 2026-09-22 and re-read at
-`ca1e5494`, which changes no source. Sentences about the plan checkpoint's
+below about current code was read at `0531fcd7` on 2026-09-22. Line numbers
+were re-read at `fc869738`, the head of `SA-0126`'s reviewed branch. Sentences about the plan checkpoint's
 estimate cite `SA-0125` itself, because its cell writes that code.
 
 **The gate counts physical lines.**
@@ -152,15 +154,18 @@ estimate cite `SA-0125` itself, because its cell writes that code.
 **The plan checkpoint reads the same table.** `saffron/agents/artifacts.py:21`
 imports `_CEILINGS` and `_DEFAULT_CEILING`. `Plan.estimated_lines` says it
 is "the same count `size_gate` takes off the real diff"
-(`saffron/agents/artifacts.py:70-73`). The plan prompt asks for the estimate
+(`saffron/agents/artifacts.py:77-80`). The plan prompt asks for the estimate
 in lines (`saffron/agents/prompts/implement.md:26-29`). `SA-0125` moves the
 ceiling check out of `validate_plan` into `judge_estimate` in
 `saffron/agents/artifacts.py`. It returns `None` within the ceiling. Over
 it, it raises `PlanRejected` where `size_blocks` says `size` blocks, with
 the tier set on that instance. Otherwise it returns the advisory sentence,
 which `plan_checkpoint` emits as it is (`.saffron/specs/SA-0125-the-plan-checkpoint-rejects-on-a-ceiling-size-would-not-enforce.md:265-281`). So the rejection text and the advisory text are both built
-in `saffron/agents/artifacts.py`. The `FAMILIES` row `SA-0125` adds cites
-`plan_checkpoint` and pins no sentence. `tests/test_events.py` pairs each
+in `saffron/agents/artifacts.py`. The `FAMILIES` row `SA-0125` adds is
+`PLAN: advisory estimate` (`saffron/events.py:912`), so it pins how the
+advisory sentence begins. `SA-0125`'s review made the sentence start
+`advisory estimate: ` and name the tier as "the tier from the plan's
+files". Keep both when you re-price it. `tests/test_events.py` pairs each
 kind with a literal event, never with text `judge_estimate` builds
 (`tests/test_events.py:1174-1180`).
 
@@ -173,8 +178,10 @@ kind with a literal event, never with text `judge_estimate` builds
 - `tests/test_spec_loop_driver.py:160-179` pins the summary text and the
   ceilings 300, 600 and 1000.
 - `SA-0125` writes three witnesses in `tests/test_session.py` and rewrites
-  three ceiling tests in `tests/test_artifacts.py`. All six read `_CEILINGS`
-  as a count of estimated lines (lines 286-339 of its spec).
+  three ceiling tests in `tests/test_artifacts.py`. Five read `_CEILINGS` as
+  a count of estimated lines. The ceiling tests also hold the literals
+  `601` and `600` and the text `exceeds the feature ceiling of 600`.
+  `SA-0125`'s fourth witness uses the literal estimate 601.
 
 ## Problem
 
@@ -259,9 +266,10 @@ in every file alike.
   `.claude/agents/spec-writer.md:59`, `.claude/agents/spec-reviewer.md:122`
   and `.claude/skills/create-saffron-spec/references/preflight.md:106`.
   The driver's `size` command has the help text "a branch's changed lines
-  against its ceiling" (`.claude/skills/run-saffron-spec-loop/driver.py:2741`).
+  against its ceiling" (`.claude/skills/run-saffron-spec-loop/driver.py:2743`).
   `.claude/**` is `forbidden`, so the operator rewrites all four once this
-  merges.
+  merges. Until then that help text is stale on purpose, and a lens that
+  cites it is answered here.
 
 ## Notes for the agent
 
@@ -360,7 +368,7 @@ header, the `---` and `+++` lines, one `@@` line, then its `-` and `+` lines.
 No helper at base builds it. The four one-line cases hold every token on a
 single `-` line and a single `+` line, and the shared-ends case adds one
 context line. The re-wrap case has one `-` line and
-4,000 `+` lines of ten tokens each. The prototype ran all five cases in
+4,000 `+` lines of ten tokens each. The prototype ran the first five cases in
 0.12 s. For each, assert the start of the summary, and whether it holds the
 file's path followed by the phrase the claim pins. Write the shared-ends case
 with one context line, ` keep`, before its `-` line. Trimming removes that
@@ -368,6 +376,11 @@ line's token with the shared first token, so the right estimate stays 8,
 and an estimate that counts context lines gives 12. Write it
 so that trimming leaves exactly the 32,000 reversed tokens, a product of
 1.024 × 10^9, past the bound by 2.4%. Untrimmed streams in full count 64004.
+The sixth diff joins the shared-ends file and a second small file whose one
+line has one token replaced. Assert a count of 10, the first path named and
+the second absent. A fallback that estimates the whole diff once any file
+passes the bound counts 16, and one that names every path names both. This
+case was added after the prototype ran, by arithmetic.
 
 **Criterion 3.** Drive the six types with `_diff(added=n, removed=0)`. Write
 the ceilings as literals in the test, since the claim pins them. Assert the
@@ -387,7 +400,8 @@ holds the price and the ceiling as numbers. Then parse
 `saffron/agents/artifacts.py` with `ast`. Assert an `ImportFrom` of
 `saffron.gates.core.size` naming `_TOKENS_PER_LINE`, and no assignment to
 that name in the module. Assert `saffron.gates.core.size._TOKENS_PER_LINE`
-is 4.
+equals 4 and that its type is `int`. A float `4.0` passes `==` and prints
+prices as `2400.0`, which `SA-0129` cannot read.
 
 These wrong implementations fail it:
 
@@ -411,11 +425,11 @@ rename none of these.
   tokens.
 - `tests/test_spec_loop_driver.py:160-179`: the new ceilings, and `1
   changed tokens`. Each branch there adds one file holding one token.
-- `tests/test_suite.py:195-217`,
+- `tests/test_suite.py:199-217`,
   `test_the_head_runs_tier_decides_what_blocks_not_the_baselines`: its patch
   adds `+x` 601 times against the `feature` ceiling. Size it from
   `_CEILINGS["feature"] + 1`, in the `@@` header and in the lines alike.
-- `_BIG_DIFF` at `tests/test_session.py:647-654`, and the comment over it,
+- `_BIG_DIFF` at `tests/test_session.py:874-881`, and the comment over it,
   which says the diff fails a `bug` spec's 300-line ceiling. It adds 310
   lines of two tokens, 620 in all. Size it from `_CEILINGS["bug"]`, one token
   a line and ten over, in the `@@` header too. Three tests reach it through
@@ -435,13 +449,14 @@ rewrites that one, and it is re-priced below. A grep over `tests/` for
 found no other test that trips `size`. `tests/test_implement.py:562` builds
 a `size` failure by hand and never runs the gate.
 - `SA-0125`'s three ceiling tests in `tests/test_artifacts.py`, at `:176`,
-  `:187` and `:198` before it: an estimate "at the ceiling" becomes the
+  `:192` and `:206`: an estimate "at the ceiling" becomes the
   ceiling divided by 4, rounded down, and "over" is one line more. A
   literal `600` or `601` becomes a value read from `_CEILINGS`.
 - `test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block`:
   the two estimates become the ceiling divided by 4 and one line more. The
   patch each `GateSuite` judges carries that estimate times 4 changed
-  tokens, so the count of `size` failures stays 8.
+  tokens, so the count of `size` failures stays 8. Its expectation
+  `blocks = estimate > ceiling` moves to the price as well.
 - `test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands`:
   20 lines over becomes the ceiling divided by 4, plus 20. "Exactly the
   ceiling" becomes the ceiling divided by 4. The line still names the
@@ -451,10 +466,10 @@ a `size` failure by hand and never runs the gate.
   the two runs 20 lines over move the same way. The third run's estimate
   within the ceiling becomes at most the ceiling divided by 4.
 
-`SA-0125`'s fourth witness,
-`test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_blocks`,
-needs no change if its estimate over the ceiling is written from
-`_CEILINGS`. Priced at 4, it stays over. Change it only if it fails.
+- `SA-0125`'s fourth witness,
+  `test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_blocks`:
+  its literal estimate 601 prices to 2404, within 3000, so the test fails.
+  Write it as `_CEILINGS["feature"] // 4 + 1`.
 
 **Where `SA-0126` meets this spec.** Read `SA-0126` before starting. Its
 diff is in your tree, and every `tests/test_session.py` line number it moves
