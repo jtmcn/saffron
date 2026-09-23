@@ -1923,7 +1923,16 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-23, a seventy-third time: the spec loop's run 15
+    """Re-measured 2026-09-23, a seventy-fourth time: `SA-0135` and `SA-0136`
+    queued for backlog item b-602d00, the second and third of three.
+    `SA-0135` adds the `consumes:` field and refuses a task whose entry does
+    not resolve at its tree base. `SA-0136` refuses a malformed entry at
+    load and an unreadable one before the cell. Each stacks on the one
+    before, so `SA-0135` declares `depends_on: [SA-0134]` and `SA-0136`
+    declares `depends_on: [SA-0135]`. Both are refused on that, since
+    neither parent has run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, a seventy-third time: the spec loop's run 15
     retired `SA-0125`, `SA-0126`, `SA-0127`, `SA-0128`, `SA-0130` and
     `SA-0131` to `done/`. `SA-0129` and `SA-0133` depend on `SA-0128`, which
     `done/` now satisfies, so both are candidates. `SA-0134` is still refused
@@ -2338,7 +2347,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
     assert [c.spec.id for c in candidates] == ["SA-0129", "SA-0133"]
-    assert [r.path.name[:7] for r in refusals] == ["SA-0134"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0134", "SA-0135", "SA-0136"]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

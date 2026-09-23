@@ -268,3 +268,54 @@ The second review's findings were applied by hand. No third review ran.
    there too. The operator's session could not run git outside its worktree.
 3. **A revision that adds a set member adds it to every criterion.** Round
    1 added `100755` to criterion 1, and round 2 found criterion 2 without it.
+
+# SA-0135 and SA-0136, the rest of b-602d00
+
+The writer that drafted `SA-0134` was resumed for both. Its first estimate
+of the whole second half was about 610 lines against 600, so it split
+again. `SA-0135` adds the field and a refusal from `run_task`. `SA-0136`
+refuses nine malformed shapes at load and maps an unreadable entry to a
+refusal. The operator chose no new task state: `Refused(reason)` writes no
+ledger row, as `CONTEXT.md`'s Refusal already says.
+
+## Cost
+
+| Step | Agent | Time | Tokens |
+|---|---|---|---|
+| Size estimate and split proposal | `spec-writer`, resumed | 3.2 min | 260k |
+| Draft both, with a ty prototype | `spec-writer`, resumed | 15.6 min | 339k |
+| SA-0135 first review | `spec-reviewer` | 9.5 min | 151k |
+| SA-0136 first review | `spec-reviewer` | 5.4 min | 88k |
+| Revise both, with the batch run measured | `spec-writer`, resumed | 12.1 min | 394k |
+| SA-0135 second review | `spec-reviewer` | 7.1 min | 134k |
+| SA-0136 second review | `spec-reviewer` | 3.9 min | 77k |
+
+The second reviews' findings were applied by hand. No third review ran.
+
+## Findings by class
+
+| Spec | Round | Finding | Class | Check that should have caught it |
+|---|---|---|---|---|
+| SA-0135 | 1 | "Prints one line" while `Ceilings` and `stacked on` print first | Output other code emits around the change | none |
+| SA-0135 | 1 | A refusal leaves a lone `Ceilings` event for `saffron watch` | Output other code emits around the change | none |
+| SA-0135 | 1 | The batch sequences were argued, not run | An arrangement argued rather than run | Pre-flight 10 |
+| SA-0135 | 2 | The run-time refusal is missing from the plan's `refusals:` and from `saffron queue` | Output other code emits around the change | none |
+| SA-0136 | 1 | The only unresolved entry came last, so a two-list join passed | A witness drives one member of a set | Pre-flight 1 |
+| SA-0136 | 1 | The error text holds the entry whatever the validator says | A claim about a tool, not run | Pre-flight 10 |
+| SA-0136 | 1 | No segment ending in a dot was driven | A witness drives one member of a set | Pre-flight 1 |
+| SA-0136 | 1 | SA-0135's fixture was not required canonical | A split's hand-off to the child | none |
+| SA-0136 | 2 | A `.` or `..` segment was driven only inside a path | A witness drives one member of a set | Pre-flight 1 |
+
+## What the pre-flight should learn
+
+1. **Output around the change is a class of its own.** Three findings on
+   `SA-0135` were lines other code already prints or records beside the
+   new one: the ceilings line, the events log, the batch plan and the
+   queue. Before review, list every place the path the change runs through
+   prints or records, and say what each shows for the new outcome.
+2. **A position is a member of a set.** Both `SA-0136` rounds found a set
+   the witness drove only in one position. That was the unresolved entry
+   last, then a dot segment only inside a path. Pre-flight 1 should ask
+   where each member sits, as well as which members are driven.
+3. **The hand-off class recurred across a split.** The parent's fixture
+   had to meet rules the child adds, and the child could not edit it.

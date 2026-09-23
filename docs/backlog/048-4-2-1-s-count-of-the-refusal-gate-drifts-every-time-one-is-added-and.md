@@ -55,3 +55,11 @@ count matches what `_refuse` applies — it fails the moment the ninth lands,
 which no sweep does. Whether that check is cheap is unmeasured: it needs the
 refusals enumerable by something other than reading `_refuse`, and no registry
 exists.
+
+## Record
+
+- 2026-09-23: two more refusals are queued. ADR 6 adds a ninth at gate 0,
+  a member whose `depends_on` disagrees with its composite. `SA-0135` and
+  `SA-0136` add one in `run_task`, after the tree base resolves, when a
+  consumed entry does not resolve or cannot be read. That one is not a gate
+  0 refusal. Decide whether §4.2.1's count includes it once `SA-0136` merges.
