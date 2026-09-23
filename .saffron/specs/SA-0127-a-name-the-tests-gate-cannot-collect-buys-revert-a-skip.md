@@ -162,9 +162,14 @@ non-zero with no failures into `error` (`saffron/gates/runner.py:157-163`).
 This repo's gate always exits 0 (`.saffron/gates/tests.py:14-16`). A gate
 filling `uncollected` for a run with no failures has to exit 0 as well.
 
-**`DESIGN.md`.** §5.4's contract text, and §5.5.1's account of the `revert`
-`skip` on an import failure (`DESIGN.md:1066`). The operator writes both by
-hand.
+**`DESIGN.md`.** §5.4's rule that "partial results are not results" has no
+per-failure `error` vocabulary (`DESIGN.md:788`). The operator amended that
+bullet by hand before this cell. A handed subset that accounts for every
+name, as collected or as `uncollected`, is not a partial result. The
+whole-suite census keeps the rule. A lens that cites the bullet's first
+sentence against this diff misses that exception. §5.4's contract list
+and §5.5.1's account of the `revert` `skip` on an import failure
+(`DESIGN.md:1067`) are still the operator's to write after merge.
 
 **`census`, `criteria` and `witness`.** None of them reads the new field.
 
@@ -223,8 +228,11 @@ no mutant. Build each reverted run as a `GateResult` in the test, as
 - Criterion 2's witness drives an empty and a non-empty `uncollected`. It
   drives a `pass` and a `fail` status, and failures keyed on an exception
   type. It drives a name both collected and listed, the two earlier skips,
-  a dropped option name and an exempted witness. Each `error` asserts that
-  the summary names the unaccounted name.
+  a dropped option name and an exempted witness. It drives a failure keyed
+  on a handed name the run neither collected nor listed, and expects
+  `error`. That case kills a check that counts `failures[].code` as
+  accounted for. Each `error` asserts that the summary names the
+  unaccounted name.
 - Criterion 3's witness drives a `pass` with no failures, a `pass` with
   failures keyed on the listed names, and a `fail`. It also drives a `fail`
   status whose failures are keyed on the listed names.

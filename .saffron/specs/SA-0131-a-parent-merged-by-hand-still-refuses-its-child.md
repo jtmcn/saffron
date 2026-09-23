@@ -60,7 +60,9 @@ acceptance:
       mirror does not hold the commit at all. The pinned `base_sha` decides,
       never a mirror ref. A pinned scan refuses the child when every mirror
       ref sits ahead of the pin at the merge, and admits it when the mirror's
-      default branch sits behind the pin.
+      default branch sits behind the pin. Asked with a mirror git cannot
+      read, the callable raises `GitError` rather than answering no, so a
+      check that never ran is not reported as a refusal.
     witness: tests/test_cli.py::test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand
 ---
 
@@ -181,10 +183,21 @@ non-empty `pushed_sha`. Leave `_dependency_refusal` unchanged: a spec in
 `merged_anywhere` already returns `None` there.
 
 **The callable `saffron queue` passes.** Write it in `saffron/cli.py` beside
-`_retirement_markers_at`, taking the mirror and `base_sha`. It runs
-`git merge-base --is-ancestor <sha> <base_sha>` in the mirror and returns
-whether the exit code is 0. Exit 1 means not an ancestor. Exit 128 means the
-mirror lacks the commit. Both are `False`, and neither raises. Run it in the
+`_retirement_markers_at`, taking the mirror and `base_sha`. It asks git two
+questions in the mirror. `git merge-base --is-ancestor` alone cannot tell a
+missing commit from an unreadable mirror, because both exit 128.
+
+1. `git rev-parse --verify --quiet <sha>^{commit}`. Exit 1 means the mirror
+   lacks the commit, so return `False`.
+2. `git merge-base --is-ancestor <sha> <base_sha>`. Exit 0 returns `True`,
+   and exit 1 returns `False`.
+
+Any other exit from either raises `git_mirror.GitError` naming the command.
+`main`'s handler turns that into exit 2, as it does when
+`export_saffron_dir` meets a broken mirror earlier in `_resolve_queue`.
+Measured 2026-09-22 on git 2.54 on the host and git 2.39.5 in
+`saffron/cell-base:python`. The first command exits 1 for a missing commit
+and 128 for a missing mirror, on both. Run it in the
 mirror, never the operator's checkout. A merge made on GitHub is absent from
 a checkout that has not pulled, and criterion 2's witness merges on the remote
 only.
@@ -253,6 +266,10 @@ has an `EXHAUSTED` task at its current sha, so no parent is a candidate.
   Assert parent 1's child is the one candidate and the other two children
   are the refusals.
 
+- Last, call the callable directly with a mirror path that does not exist
+  and parent 1's pushed sha. Assert it raises `GitError`. Then call it with
+  the real mirror and forty `b`s, and assert it returns `False`.
+
 The fixture's origin is a local path, so no slug resolves and no `gh` runs.
 The tasks carry no `pr_url`, so `reconcile` asks nothing.
 
@@ -265,6 +282,9 @@ names the witness that failed.
 - Reading only the newest row per spec: criterion 1.
 - Leaving the callable unwired in `_resolve_queue`: criterion 2.
 - Treating every exit code but 1 as landed: criterion 2.
+- Treating every nonzero exit as not landed: criterion 2's unreadable
+  mirror, which must raise. Not run on the prototype, which predates this
+  case.
 - Checking only that the mirror holds the commit: criterion 2.
 - Running the check in the operator's checkout: criterion 2, because the
   merge is on the remote only.

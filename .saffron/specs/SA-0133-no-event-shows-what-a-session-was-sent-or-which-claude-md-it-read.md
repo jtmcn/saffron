@@ -82,6 +82,10 @@ acceptance:
       of those session kinds among the requests by the turn prompt it
       carries. The notes name the sessions it does not drive. Today no event carries a digest of any request.
     witness: tests/test_session.py::test_every_session_a_task_starts_records_the_sha256_of_its_request
+    mutant:
+      file: saffron/phases/implement.py
+      find: stdin_data=request,
+      replace: 'stdin_data=request + "\n",'
   - claim: >-
       Each task emits one `PreflightEvent` with step `claude_md`, which holds
       the SHA-256 hex of the `CLAUDE.md` text read at `base_sha`, or says none
@@ -228,9 +232,10 @@ names a mutant of a line that exists at base, and its witness must catch
 that mutant. Criterion 1's mutant changes the string sent to the runner, so a
 digest of anything but those bytes fails. Criterion 3's mutant reads a
 different file, so a digest not taken from the read fails. Criterion 4's
-mutant drops `CLAUDE.md` from IMPLEMENT's system prompt. Criterion 2 is new
-behaviour with no line at base to mutate, so it declares a witness alone,
-and `witness` reports `skip` for it.
+mutant drops `CLAUDE.md` from IMPLEMENT's system prompt. Criterion 2 relies
+on criterion 1's emission, so it declares the same mutant. With a newline
+appended, the bytes each double receives no longer hash to the digest
+`run_agent` emits, and the equality fails in every cell.
 
 **Commit as each witness passes.** A long cell can reach its turn limit
 before its first commit.
