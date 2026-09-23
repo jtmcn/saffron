@@ -69,7 +69,11 @@ def _argv_safe(name: str) -> bool:
     line in a new test file, and no name filter closes that: a bogus id can be
     spelled inside `test_paths` as easily as outside them. Named in
     backlog item 51 rather than papered over here, and the drop is
-    reported in the summary so the attempt is at least visible.
+    reported in the summary so the attempt is at least visible. A runner
+    that fills `GateResult.uncollected` closes the buyable-`skip` shape too.
+    `zzz::bogus` then reads as an accounted-for name, not a run this gate
+    must distrust. This repo's own `tests` gate does not fill it yet
+    (backlog item 50), so the drop below still carries the weight.
     """
     return not name.startswith("-")
 
@@ -278,7 +282,10 @@ def revert_gate(
         # `tests` gate reports `error` ("pytest exited N with no parsed
         # failures") rather than `fail`, because a collection error prints no
         # line its regex or its `FAILED ` fallback can read. `DESIGN.md` §5.4
-        # says that exact case must report green.
+        # says that exact case must report green. A runner that instead
+        # reports `fail` or `pass` with the failed-to-import names in
+        # `uncollected` (backlog item 50) skips this branch and is judged
+        # below. This repo's own gate does not do that yet.
         #
         # `skip` rather than `pass`, for the reason the three nothings above
         # are skips: a run that produced no trustworthy result is not evidence
@@ -317,6 +324,35 @@ def revert_gate(
             summary="the reverted run reported no collected tests — nothing to read",
         )
     collected = set(reverted_result.collected)
+
+    # A runner filling `uncollected` (item 50) must place each handed name
+    # in exactly one of `collected` or `uncollected`, checked against `subset`.
+    listed: set[str] = set()
+    if reverted_result.uncollected is not None:
+        listed = set(reverted_result.uncollected)
+        handed = set(subset)
+        unaccounted = sorted(
+            (handed - collected - listed) | (handed & collected & listed)
+        )
+        if unaccounted:
+            return GateResult(
+                gate="revert",
+                status="error",
+                summary=(
+                    "the reverted run left "
+                    f"{len(unaccounted)} handed name(s) unaccounted for: "
+                    f"{', '.join(unaccounted[:3])}"
+                ),
+            )
+        if listed:
+            # Rides the same channel a dropped option name already uses.
+            # Criteria 5/6 pin the two summaries below, untouched here.
+            note += (
+                f" — {len(listed)} handed name(s) the reverted run could not "
+                f"collect, read as failed without their source: "
+                f"{', '.join(sorted(listed)[:3])}"
+            )
+
     failed = {f.code for f in reverted_result.failures}
     # ponytail: "at least one overlap", not "every code is a node id" — the
     # same ceiling `criteria._side` names, and the same upgrade path
@@ -327,7 +363,13 @@ def revert_gate(
     # correct spec. `criteria._side` has the same hole and it degrades to
     # `skip`; here the blast radius is the opposite way round. Closing either
     # means obliging the `tests` role to key its failures, which is item 50.
-    if failed and not (failed & collected):
+    #
+    # `collected | listed`, not `collected` alone. A runner filling
+    # `uncollected` (item 50) can key a failure on a name it never
+    # collected. That is the shape this gate exists to catch, and it is
+    # readable evidence, not noise. `listed` stays empty when the runner
+    # skips `uncollected`, so this is unchanged for every other runner.
+    if failed and not (failed & (collected | listed)):
         return GateResult(
             gate="revert",
             status="skip",

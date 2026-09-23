@@ -118,3 +118,25 @@ def test_a_gate_that_reports_no_names_is_not_a_gate_that_collected_none():
     would report every base name removed on the second."""
     result = parse_gate_json(json.dumps({"gate": "lint", "status": "pass"}), "lint")
     assert result.collected is None
+
+
+def test_a_gate_may_report_the_names_it_could_not_collect():
+    """`uncollected` gives `revert` a third answer, distinct from `collected`
+    holding the name and from the name being absent from every list: a name
+    a gate sent, an empty list, and no key at all are three different facts,
+    and the third parses to `None`."""
+    sent = parse_gate_json(
+        json.dumps(
+            {"gate": "tests", "status": "fail", "uncollected": ["t.py::test_a"]}
+        ),
+        "tests",
+    )
+    assert sent.uncollected == ["t.py::test_a"]
+
+    empty = parse_gate_json(
+        json.dumps({"gate": "tests", "status": "pass", "uncollected": []}), "tests"
+    )
+    assert empty.uncollected == []
+
+    absent = parse_gate_json(json.dumps({"gate": "tests", "status": "pass"}), "tests")
+    assert absent.uncollected is None

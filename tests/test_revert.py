@@ -94,6 +94,9 @@ def test_a_new_test_that_passes_without_the_source_is_a_failure():
     # much as on the passing one — a verdict without it reads as a gate that
     # never ran.
     assert result.tool == "pytest 8.3.2"
+    # Pinned to the exact string, not a substring: with no `uncollected`
+    # reported, nothing here appends to it (backlog items 50/51).
+    assert result.summary == "1 of 1 new test(s) passed without their source"
     # And the restore still ran on the passing (green) path, not only the
     # exceptional ones.
     assert ("restore", ["pkg/a.py"]) in log
@@ -355,6 +358,9 @@ def test_a_reverted_run_that_enumerated_nothing_still_passes():
         run_tests=run_tests,
     )
     assert result.status == "pass", result
+    # Pinned to the exact string, not a substring: with no `uncollected`
+    # reported, nothing here appends to it (backlog items 50/51).
+    assert result.summary == "1 new test(s) failed without their source, as required"
 
 
 def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error():
@@ -678,3 +684,164 @@ def test_a_mutant_naming_a_test_file_does_not_exempt_its_witness():
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
+
+
+def _tests_uncollected(*, collected=(), uncollected=None, failed=()):
+    """A `tests` gate result that also fills `uncollected`, the shape
+    backlog item 50 asks a runner for."""
+    return GateResult(
+        gate="tests",
+        status="fail" if failed else "pass",
+        tool="pytest 8.3.2",
+        collected=list(collected),
+        uncollected=None if uncollected is None else list(uncollected),
+        failures=[Failure(file=n, code=n, message="assert") for n in failed],
+    )
+
+
+def _revert(run_tests, *, acceptance=(), results=None, changed_files=("pkg/a.py",)):
+    return revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=results or [_tests("t.py::test_a", "t.py::test_new")],
+        acceptance=list(acceptance),
+        changed_files=list(changed_files),
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+    )
+
+
+def test_a_handed_name_the_reverted_run_does_not_account_for_is_an_error():
+    """Backlog item 50's other half. A runner that fills `uncollected` must
+    place every handed name in exactly one of `collected` or `uncollected`.
+    A name left out, or listed in both, breaks that contract, so this gate
+    reports `error`, not `fail` or `skip` (`error` != `fail`). Checked
+    against `subset`, never `candidates`: a dropped option name or an
+    exempted witness is never handed, so neither is ever asked about."""
+    new = "t.py::test_new"
+
+    # Accounted for by `collected` alone, and by `uncollected` alone.
+    assert (
+        _revert(
+            lambda s: _tests_uncollected(collected=s, uncollected=[], failed=s)
+        ).status
+        == "pass"
+    )
+    assert _revert(lambda s: _tests_uncollected(uncollected=s)).status == "pass"
+
+    # The two pre-existing skips still fire once `uncollected` is filled.
+    keyed_elsewhere = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=list(s),
+            uncollected=[],
+            failures=[Failure(file=n, code="AssertionError", message="x") for n in s],
+        )
+    )
+    assert keyed_elsewhere.status == "skip" and "node id" in keyed_elsewhere.summary
+    unreadable = _revert(
+        lambda s: GateResult(gate="tests", status="error", summary="x")
+    )
+    assert unreadable.status == "skip"
+
+    # Listed in both: the run double-answered the same question, so `error`.
+    both = _revert(lambda s: _tests_uncollected(collected=s, uncollected=s))
+    assert both.status == "error" and new in both.summary
+
+    # Listed in neither, though a failure is keyed on it: still `error`.
+    # A failure code alone is not enough to count as accounted for.
+    neither = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=[],
+            uncollected=[],
+            failures=[Failure(file=n, code=n, message="x") for n in s],
+        )
+    )
+    assert neither.status == "error" and new in neither.summary
+
+    # A dropped option name and an exempted witness are never handed.
+    exempt = Criterion(
+        claim="unrelated",
+        witness="t.py::test_exempt",
+        mutant={"file": "elsewhere.py", "find": "a", "replace": "b"},
+    )
+    dropped_and_exempt = _revert(
+        lambda s: _tests_uncollected(collected=s, uncollected=[], failed=s),
+        acceptance=[exempt],
+        results=[_tests("t.py::test_a", new, "t.py::test_exempt", f"--deselect={new}")],
+    )
+    assert dropped_and_exempt.status == "pass"
+
+    # A dropped name the run lists in both `collected` and `uncollected`
+    # is still never handed. The both-lists rule checks handed names alone.
+    dropped_both = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=[new, f"--deselect={new}"],
+            uncollected=[f"--deselect={new}"],
+            failures=[Failure(file=new, code=new, message="x")],
+        ),
+        results=[_tests("t.py::test_a", new, f"--deselect={new}")],
+    )
+    assert dropped_both.status == "pass"
+
+    # With no `uncollected` at all, a `fail` run keyed on the handed name
+    # with `collected=[]` is still today's `skip`.
+    unchanged = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=[],
+            failures=[Failure(file=n, code=n, message="x") for n in s],
+        )
+    )
+    assert unchanged.status == "skip"
+
+
+def test_each_verdict_names_the_tests_the_reverted_run_could_not_collect():
+    """A name listed in `uncollected` reads as a test that failed without
+    its source. Every verdict's summary names it, whichever status or
+    failure keying the run reports."""
+    new = "t.py::test_new"
+
+    # `pass`, enumerated, no failures at all.
+    no_failures = _revert(lambda s: _tests_uncollected(uncollected=s))
+    assert no_failures.status == "pass" and new in no_failures.summary
+
+    # `fail`, enumerated, with a failure keyed on the listed name itself.
+    keyed_on_listed = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=[],
+            uncollected=list(s),
+            failures=[Failure(file=n, code=n, message="x") for n in s],
+        )
+    )
+    assert keyed_on_listed.status == "pass" and new in keyed_on_listed.summary
+
+    # One handed name uncollected, the other ran and passed cleanly. The
+    # summary still names the uncollected one, and the theater is still caught.
+    kept = "t.py::test_kept"
+    mixed = _revert(
+        lambda s: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.3.2",
+            collected=[kept],
+            uncollected=[new],
+        ),
+        results=[_tests("t.py::test_a", new, kept)],
+    )
+    assert mixed.status == "fail" and new in mixed.summary
+    assert [f.file for f in mixed.failures] == [kept]
