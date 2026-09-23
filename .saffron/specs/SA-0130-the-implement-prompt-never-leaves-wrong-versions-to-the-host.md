@@ -1,6 +1,6 @@
 ---
 id: SA-0130
-title: The IMPLEMENT prompt never says the host runs a spec's wrong versions, so a cell spends its turn bound running them
+title: The IMPLEMENT prompt never says who runs wrong versions of the change, so a cell spends its turn bound running the ones its spec lists
 type: bug
 priority: 3
 depends_on: []
@@ -39,8 +39,8 @@ acceptance:
   - claim: >-
       The IMPLEMENT system prompt, assembled from `implement.md` and
       `CONTEXT.md` by `build_system_prompt`, carries a paragraph of its own
-      that names both mutants and the host. The paragraph sits outside the
-      injected vocabulary and the task body. It holds for a spec that
+      that names mutants, the `witness` gate, REVIEW and the host. The
+      paragraph sits outside the injected vocabulary and the task body. It holds for a spec that
       declares acceptance criteria and for one that declares none.
     witness: tests/test_context.py::test_the_implement_prompt_leaves_running_wrong_versions_to_the_host
 ---
@@ -57,12 +57,14 @@ new witness against wrong versions of the change, and to report what each
 run printed
 (`.saffron/specs/done/SA-0123-the-write-methods-keep-their-own-sql-beside-apply.md:387-391`).
 The cell's IMPLEMENT turn and its first REPAIR turn were both cut by the
-wall bound (`~/.saffron/batches/v0/SA-0123/events.jsonl`, lines 1084 and 2061). That
+wall bound. That was read from the cell's `events.jsonl` on the host on
+2026-09-22 and is recorded in the item, so it cannot be read at base. That
 bound is `TURN_TIMEOUT_S = 900.0` (`saffron/cell/session.py:63`, §4.3). The
 item records the rest: IMPLEMENT spent $4.17, and the task ended `EXHAUSTED`
 at $38.20.
 
-The host already runs wrong versions outside the agent's turn. The `witness`
+The host already runs two kinds of wrong version outside the agent's turn,
+and neither is a list in a spec's prose. The `witness`
 gate applies each criterion's declared mutant and runs its witness
 (`saffron/gates/core/witness.py:8-13`, §5.4.1). REVIEW asks one fresh session
 per criterion for an edit that breaks the claim
@@ -105,9 +107,11 @@ the agent nothing about its own turn.
   this task's pull request body from the ledger and skips that template
   (`.github/pull_request_template.md:2-4`).
 - **The sense of the sentence.** The witness pins where the paragraph sits
-  and that it names mutants and the host. It cannot tell a paragraph giving
-  the runs to the host from one giving them to the agent. REVIEW's lenses
-  read that.
+  and the four things it names. It cannot tell a paragraph that tells the
+  agent not to run the listed wrong versions from one that tells it to.
+  REVIEW's lenses read that.
+- **A host run of the wrong versions a spec lists in prose.** Nothing runs
+  those today, and this spec adds nothing that would.
 - **The turns and the call site.** The witness calls
   `build_system_prompt` the way `saffron/cell/session.py:1750-1762` does, and
   drives no cell. So it does not observe which turns run under the string,
@@ -128,12 +132,20 @@ prompt, so every turn of the session carries it. A turn prompt under
 `prompts/turns/` reaches one turn only, as a user message, and the witness
 reads the system prompt.
 
-**What it says.** A spec's task text can list wrong versions of the change
-that its witnesses must kill. Running each one against the witnesses is the
-host's job, even when the task text asks the agent to do it. The agent's
-turn is for writing the witnesses and making them and the change pass. Name
-mutants in the paragraph, and the host. Keep it to one paragraph: the
-witness reads one.
+**What it says.** Three facts, in one paragraph.
+
+- The host's `witness` gate applies each mutant a criterion declares, and
+  runs that criterion's witness against it.
+- REVIEW names further wrong versions of the change, and the host runs
+  those.
+- The implementer does not run the wrong versions its task text lists. That
+  holds even for a task text that asks it to. Its turn is for making the
+  witnesses and the change pass.
+
+Keep "mutant" for the declared edit. That is what `CONTEXT.md:347` defines
+it as, and a wrong version a spec lists in prose is not one. Name REVIEW in
+bare caps and the gate as `witness` in backticks, as the vocabulary does.
+Keep it to one paragraph: the witness reads one.
 
 **Prose rules bind this file.** The `prose` gate reaches
 `saffron/agents/prompts/implement.md` (`tests/test_prose_gate.py:338`), and
@@ -153,13 +165,15 @@ over one `Criterion`. Import `Criterion` inside the test body, as
 `tests/test_context.py:204` does. From each prompt remove the vocabulary
 text, `context.sections_for("IMPLEMENT", <CONTEXT.md>)`, and the spec body
 you passed. Then assert that one paragraph of what is left, split on blank
-lines, names both mutants and the host. Do not read `implement.md` on its
+lines, names all four of: `mutant`, the backticked `witness`, `REVIEW` and
+`host`. Do not read `implement.md` on its
 own: the claim is about the assembled prompt.
 
-**Remove the vocabulary before you search.** Measured on this base: without
-that step, a search of the IMPLEMENT prompt for one paragraph naming both
-mutants and the host passes with `implement.md` unchanged. The vocabulary's
-**Vacuity probe** entry is such a paragraph (`CONTEXT.md:357`).
+**Remove the vocabulary before you search.** The claim excludes it, and a
+vocabulary entry can name these words. Measured on this base, the
+**Vacuity probe** entry (`CONTEXT.md:357`) already names both mutants and the
+host. No entry names all four today, so the step does not change the base
+result. It keeps the witness true to the claim if one comes to.
 
 **This is new text, so the criterion declares no mutant.** Its spelling is
 yours, and a mutant must match text exactly. The `witness` gate will report
@@ -176,8 +190,10 @@ paragraph added to `implement.md` passed it.
   `review-adequacy.md` alone, each a lens prompt.
 - The paragraph added to `criterion-probe.md` alone.
 - The paragraph added to `rebut-verdict.md` alone.
-
-- A sentence naming mutants and the host added to `context.witnesses_block`
+- A paragraph in `implement.md` naming mutants and the host alone. It gives
+  a spec's listed wrong versions to the host. It names neither the
+  `witness` gate nor REVIEW.
+- A sentence naming all four added to `context.witnesses_block`
   alone. It reaches only the prompt with a criterion, so the assembly with
   none fails. That file is outside `touches` in any case.
 
