@@ -1689,3 +1689,4 @@ the ADR records, so a hand edit here is discarded.
 | 2 | Core invokes declared gates, never tools | accepted | 12, 13, 14, 29, 30, 34, 36, 39, 41, 52, 54, 57 |
 | 3 | A test is judged by an edit chosen to break it, not by a mutation tool | accepted | 1, 4, 5, 6, 15, 17, 20, 28, 30, 34, 44, 45, 47, 48, 49, 52, 56, 57, 61 |
 | 4 | The critic is host-invoked lenses, and any one blocker goes to REBUT | accepted | 4, 9, 15, 16, 17, 18, 27, 28, 29, 30, 34, 36, 42, 48, 50, 51, 55, 57, 58, 61 |
+| 5 | The ontology describes the run record and never controls execution | accepted | 10, 11, 23, 24, 25, 29, 34, 36, 56, 57, 61, 62 |
