@@ -4,7 +4,7 @@ title: A stacked child names what it uses from its parent, and nothing checks th
 status: open
 tier: 2
 filed: 2026-09-21
-specs: []
+specs: [SA-0134]
 prs: []
 commits: []
 cites: [§4.2]

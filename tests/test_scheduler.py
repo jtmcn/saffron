@@ -1818,7 +1818,15 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-22, a seventy-first time: `SA-0133` queued for
+    """Re-measured 2026-09-22, a seventy-second time: `SA-0134` queued for
+    backlog item b-602d00, a reader that says whether a tree base holds a
+    path or a name. It is the first of two, and `SA-0135` wires it in. It
+    edits `saffron/repos/mirror.py` and `tests/test_mirror.py`, which no
+    queued spec touches. It declares `depends_on: [SA-0129]`, because its
+    child edits `saffron/intake.py` after `SA-0129`. It is refused on that,
+    since `SA-0129` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-22, a seventy-first time: `SA-0133` queued for
     backlog item b-864a4d, a digest of each session's request and of the
     task's `CLAUDE.md` in the event log. It edits the cell session, the
     event table and `tests/test_session.py`, which `SA-0126` and `SA-0128`
@@ -2229,6 +2237,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0128",
         "SA-0129",
         "SA-0133",
+        "SA-0134",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
