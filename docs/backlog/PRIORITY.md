@@ -234,6 +234,8 @@ base on `SA-0127`. The second is the by-hand half of run 15's merges.
 **Placed 2026-09-23**, from asking whether to adopt Pydantic AI: **b-4e0868**.
 The pinned SDK can constrain the extraction turn to a schema. Items 42 and 60
 lost $6.20 to the shapes it rules out. A spike in a cell comes before any spec.
+Then **b-e51967**, filed writing `SA-0141`. It is the by-hand edit to §5.3
+and the glossary once REBUT's turns use the schema.
 
 ### Tier 3 — real, not urgent
 

@@ -1923,7 +1923,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-23, a seventy-ninth time: the spec loop's run 16
+    """Re-measured 2026-09-23, an eightieth time: `SA-0141` queued for
+    backlog item b-4e0868, which sends REBUT's two structured turns a schema
+    through the SDK's `output_format`. It edits files `SA-0133`, `SA-0138`,
+    `SA-0139` and `SA-0140` also touch, so it declares all four in
+    `depends_on`. It is refused on that, since none has run. The candidates
+    are unmoved.
+
+    Re-measured 2026-09-23, a seventy-ninth time: the spec loop's run 16
     moved `SA-0133` onto `SA-0139`, since both edit
     `saffron/phases/implement.py`, `tests/test_implement.py` and
     `tests/test_session.py`. It is refused on that, since `SA-0139` has not
@@ -2393,6 +2400,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0135",
         "SA-0136",
         "SA-0138",
+        "SA-0141",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
