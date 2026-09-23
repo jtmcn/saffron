@@ -370,8 +370,8 @@ per finding, chosen by the lens to make its own case, is not a sample of the mut
 claim false. During REVIEW the host starts one session per criterion in the critic cell.
 Each session sees one claim and the diff, and is never told which test is its witness.
 Its edits are recorded in `criterion-probes.json`. A criterion probe that survives its own
-criterion's witness is the finding: nothing guards the claim. No gate applies one yet
-(backlog item b-2750d5).
+criterion's witness is the finding: nothing guards the claim. The host applies each one in
+a gate-only cell, and a survivor that anchors to the diff is a blocker for REBUT (`SA-0120`).
 _Avoid_: "mutant" for one. A mutant is declared in a criterion, and a criterion probe is
 named by a session that wrote neither the code nor the witness. _Avoid_ "vacuity probe" for
 one. A lens names a vacuity probe against the tests, and a criterion probe targets a claim.
