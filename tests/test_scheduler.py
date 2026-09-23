@@ -1818,7 +1818,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-22, a sixty-ninth time: `SA-0130` queued for
+    """Re-measured 2026-09-22, a seventieth time: `SA-0131` queued for
+    backlog item b-111c56, a parent merged by hand after `EXHAUSTED`. It
+    edits the scheduler and the CLI, which no queued spec touches, so it
+    declares no `depends_on`. It sorts after `SA-0125` on priority and is
+    candidate 4 of 4. The refusals are unmoved.
+
+    Re-measured 2026-09-22, a sixty-ninth time: `SA-0130` queued for
     backlog item b-2dea1c, the IMPLEMENT prompt saying who runs wrong versions
     of the change. It edits `implement.md` and `tests/test_context.py`, which no
     queued spec touches, so it declares no `depends_on`. It sorts after
@@ -2205,7 +2211,12 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0127", "SA-0125", "SA-0130"]
+    assert [c.spec.id for c in candidates] == [
+        "SA-0127",
+        "SA-0125",
+        "SA-0130",
+        "SA-0131",
+    ]
     assert [r.path.name[:7] for r in refusals] == ["SA-0126", "SA-0128", "SA-0129"]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
