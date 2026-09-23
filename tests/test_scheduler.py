@@ -1821,11 +1821,6 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     """Re-measured 2026-09-22, a sixty-ninth time: `SA-0130` queued for
     backlog item b-2dea1c, the IMPLEMENT prompt saying who runs wrong versions
     of the change. It edits `implement.md` and `tests/test_context.py`, which no
-
-
-    Re-measured 2026-09-22, a sixty-ninth time: `SA-0130` queued for
-    backlog item b-2dea1c, the IMPLEMENT prompt leaving a spec's wrong versions
-    to the host. It edits `implement.md` and `tests/test_context.py`, which no
     queued spec touches, so it declares no `depends_on`. It sorts after
     `SA-0125` on priority and is candidate 3 of 3. The refusals are unmoved.
 

@@ -137,7 +137,8 @@ reads the system prompt.
 - The host's `witness` gate applies each mutant a criterion declares, and
   runs that criterion's witness against it.
 - REVIEW names further wrong versions of the change, and the host runs
-  those.
+  them. It skips a vacuity probe that edits a declared test path
+  (`CONTEXT.md:358-359`), so say "runs them" without "every".
 - The implementer does not run the wrong versions its task text lists. That
   holds even for a task text that asks it to. Its turn is for making the
   witnesses and the change pass.
@@ -146,6 +147,15 @@ Keep "mutant" for the declared edit. That is what `CONTEXT.md:347` defines
 it as, and a wrong version a spec lists in prose is not one. Name REVIEW in
 bare caps and the gate as `witness` in backticks, as the vocabulary does.
 Keep it to one paragraph: the witness reads one.
+
+**Leave the single run against unfixed code standing.** The same system
+prompt carries this repo's `CLAUDE.md` as standing instructions
+(`saffron/cell/session.py:1605`). Its `CLAUDE.md:217-218` trusts a new test only
+after a run against the unfixed code. The wrapper says
+the prompt's other rules win on disagreement (`saffron/agents/context.py:149`).
+So word the third fact to cover only the wrong versions a task text lists. A
+broader sentence would override that one run, which each new witness needs.
+`CLAUDE.md` is forbidden, so the paragraph is worded around it.
 
 **Prose rules bind this file.** The `prose` gate reaches
 `saffron/agents/prompts/implement.md` (`tests/test_prose_gate.py:338`), and
