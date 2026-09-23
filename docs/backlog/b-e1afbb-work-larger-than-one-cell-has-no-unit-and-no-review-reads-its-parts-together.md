@@ -23,10 +23,10 @@ specs, and nothing states the design they share, their order, or the values
 every part must match.
 
 **So large work is sequenced outside Saffron.** `docs/superpowers/plans/`
-holds 25 plans, and those with tasks carry 3 to 13 of them. 21 use the
+holds 26 plans, and those with tasks carry 3 to 13 of them. 20 require the
 superpowers subagent executor, which runs no task in a cell.
-`2026-09-04-batch-orchestration.md` ran each task as a spec through
-`saffron cell`, sequenced by the operator.
+`2026-08-31-operator-visibility.md` and `2026-09-04-batch-orchestration.md`
+ran each task as a spec through `saffron cell`, sequenced by the operator.
 
 **No review sees the seam between parts.** Each critic reads one task's diff
 (§5.5). Principle 40 states the gap: a reviewer scoped to one task cannot see
