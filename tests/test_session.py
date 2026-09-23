@@ -277,6 +277,222 @@ def _block(plan):
     return f"Here is the plan.\n<output>\n{json.dumps(plan)}\n</output>"
 
 
+def _checkpoint_plan(spec, plan, elevate_on):
+    """The one call site every §5.6-forecast case below drives the plan
+    checkpoint through, so no loop below needs its own closure (B023)."""
+    agent = _agent(_block(plan))
+    return session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=spec,
+        protected=[],
+        elevate_on=elevate_on,
+        agent=agent,
+        emit=lambda _event: None,
+    )
+
+
+def _lines_patch(n):
+    """A single file block, one hunk header, then `n` added lines: exactly
+    what `size_gate`'s `_changed_lines` counts, whatever the filename."""
+    return "".join(
+        [
+            "diff --git a/x.py b/x.py\n",
+            "--- a/x.py\n+++ b/x.py\n",
+            f"@@ -0,0 +1,{n} @@\n",
+            "+x\n" * n,
+        ]
+    )
+
+
+# The three ways §5.6 reaches `elevated` at plan time: none of them, the
+# spec's own declaration, and an `elevate_on` path in the plan's files.
+_TIER_ROUTES = ("no_elevate_on_path", "declared_elevated", "elevate_on_path")
+
+
+def _route_plan_and_risk(route, estimate):
+    if route == "elevate_on_path":
+        files = ["tests/test_x.py", "infra/deploy.tf"]
+    else:
+        files = ["src/x.py", "tests/test_x.py"]
+    risk = "elevated" if route == "declared_elevated" else "standard"
+    plan = _PLAN | {"files_to_change": files, "estimated_lines": estimate}
+    return plan, risk
+
+
+def test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block():
+    """AC1: the checkpoint rejects a plan on its estimate exactly where the
+    `size` gate would block the real diff, never more, never less."""
+    from pathlib import Path
+
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING
+    from tests.test_suite import _Spec, _Tree
+
+    touches = ["src/**", "infra/**", "tests/**"]
+    policy = policy_mod.Policy(
+        gates={"lint": policy_mod.GateDeclaration()}, elevate_on=["infra/**"]
+    )
+
+    for spec_type in ("bug", "feature", "refactor", "docs"):
+        ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+        for route in _TIER_ROUTES:
+            for estimate in (ceiling, ceiling + 1):
+                plan, risk = _route_plan_and_risk(route, estimate)
+                blocks = estimate > ceiling and route != "no_elevate_on_path"
+
+                suite = GateSuite(
+                    gates={"lint": Path("/gates/.saffron/gates/lint")},
+                    spec=_Spec(risk=risk, touches=touches, spec_type=spec_type),
+                    policy=policy,
+                    diff_base="base",
+                )
+                comparison = suite.against(
+                    _Tree(
+                        changed=plan["files_to_change"], patch=_lines_patch(estimate)
+                    ),
+                    suite.baseline(_Tree()),
+                )
+                size_failures = [
+                    nf for nf in comparison.new_failures if nf.gate == "size"
+                ]
+                case = (spec_type, route, estimate)
+                assert len(size_failures) == (1 if blocks else 0), case
+
+                spec = _spec(risk=risk, touches=touches, spec_type=spec_type)
+                if blocks:
+                    with pytest.raises(artifacts.PlanRejected) as excinfo:
+                        _checkpoint_plan(spec, plan, policy.elevate_on)
+                    message = str(excinfo.value)
+                    assert size_failures[0].failure.message in message, case
+                    assert "size" in message, case
+                    assert "elevated" in message, case
+                else:
+                    _checkpoint_plan(spec, plan, policy.elevate_on)
+
+
+def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
+    """AC2: `size` advisory at `standard` records one event and the plan
+    stands. Exactly at the ceiling, the checkpoint says nothing at all."""
+    from saffron.gates.core.size import _CEILINGS
+
+    ceiling = _CEILINGS["feature"]
+    spec = _spec(risk="standard", spec_type="feature")
+
+    over = _PLAN | {
+        "files_to_change": ["src/x.py", "tests/test_x.py"],
+        "estimated_lines": ceiling + 20,
+    }
+    events = []
+    session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=spec,
+        protected=[],
+        elevate_on=[],
+        agent=_agent(_block(over)),
+        emit=events.append,
+    )
+    assert len(events) == 1
+    line = describe(events[0])
+    assert line.startswith("PLAN:")
+    assert str(over["estimated_lines"]) in line
+    assert str(ceiling) in line
+    assert "size" in line
+    assert "advisory" in line
+    assert "standard" in line
+
+    at_ceiling = _PLAN | {
+        "files_to_change": ["src/x.py", "tests/test_x.py"],
+        "estimated_lines": ceiling,
+    }
+    no_events = []
+    session.plan_checkpoint(
+        "cell",
+        options={},
+        spec=spec,
+        protected=[],
+        elevate_on=[],
+        agent=_agent(_block(at_ceiling)),
+        emit=no_events.append,
+    )
+    assert no_events == []
+
+
+_ELEVATE_ON_INFRA = 'gates: {}\nelevate_on: ["infra/**"]\n'
+
+
+def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
+    monkeypatch, tmp_path
+):
+    """AC3: a whole cell reads `elevate_on` from the policy at base, never
+    from the working copy, and reports the plan's own tier on a rejection."""
+    from saffron.gates.core.size import _CEILINGS
+
+    ceiling = _CEILINGS["feature"]
+    touches = ["src/**", "infra/**", "tests/**"]
+    spec = _spec(risk="standard", touches=touches, spec_type="feature")
+
+    no_infra_path = _PLAN | {
+        "files_to_change": ["src/x.py", "tests/test_x.py"],
+        "estimated_lines": ceiling + 20,
+    }
+    cell1 = _stub_the_runtime(monkeypatch)
+    outcome1, _ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "run1",
+        cell=cell1,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(no_infra_path)), _turn()],
+    )
+    assert outcome1.state != "PLAN_REJECTED"
+    assert any(
+        line.startswith("PLAN:") and "advisory" in line for line in cell1.watched
+    )
+
+    with_infra_path = _PLAN | {
+        "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
+        "estimated_lines": ceiling + 20,
+    }
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "run2",
+        cell=cell2,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(with_infra_path))],
+    )
+    assert outcome2.state == "PLAN_REJECTED"
+    assert len(cell2.turns) == 1
+    (rejected_line,) = [
+        line for line in cell2.watched if line.startswith("PLAN: rejected")
+    ]
+    assert str(ceiling) in rejected_line
+    assert "elevated" in rejected_line
+    assert outcome2.effective_risk == "elevated"
+
+    blocking_question = _PLAN | {
+        "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
+        "estimated_lines": ceiling - 10,
+        "blocking_questions": ["which environment does this ship to?"],
+    }
+    cell3 = _stub_the_runtime(monkeypatch)
+    outcome3, _ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "run3",
+        cell=cell3,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(blocking_question))],
+    )
+    assert outcome3.state == "PLAN_REJECTED"
+    assert outcome3.effective_risk == "standard"
+
+
 def test_an_accepted_plan_costs_exactly_one_turn():
     agent = _agent(_block(_PLAN))
     attempt, raw, spent = session.plan_checkpoint(
@@ -284,6 +500,7 @@ def test_an_accepted_plan_costs_exactly_one_turn():
         options={},
         spec=_spec(),
         protected=["DESIGN.md"],
+        elevate_on=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -303,6 +520,7 @@ def test_a_plan_outside_touches_is_rejected_without_a_second_turn():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -316,6 +534,7 @@ def test_output_that_is_not_the_schema_is_re_prompted_exactly_once():
         options={},
         spec=_spec(),
         protected=[],
+        elevate_on=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -340,6 +559,7 @@ def test_a_turn_with_no_session_id_is_never_resumed():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -353,6 +573,7 @@ def test_a_second_schema_failure_rejects_rather_than_asking_again():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -378,6 +599,7 @@ def test_a_proposal_outside_touches_ends_the_checkpoint_in_one_turn():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -397,6 +619,7 @@ def test_a_refused_proposal_is_reprompted_and_a_plan_can_follow():
         options={},
         spec=_spec(),
         protected=[],
+        elevate_on=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -417,6 +640,7 @@ def test_a_proposal_refused_twice_ends_as_plan_rejected():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -472,6 +696,7 @@ def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
             options={},
             spec=cell_spec,
             protected=[],
+            elevate_on=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -3519,6 +3744,7 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
             options={},
             spec=_spec(),
             protected=[],
+            elevate_on=[],
             agent=_crash,
             emit=lambda _event: None,
         )

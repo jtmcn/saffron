@@ -436,6 +436,7 @@ def plan_checkpoint(
     options: dict,
     spec: CellSpec,
     protected: list[str],
+    elevate_on: list[str],
     agent: Callable[..., AttemptResult],
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> tuple[AttemptResult, str, float]:
@@ -452,6 +453,10 @@ def plan_checkpoint(
     proposal that does not is refused rather than recorded, and — unlike an
     ordinary content rejection — gets the same one bounded re-prompt a shape
     failure gets, so refusing it cannot itself become the plan's escape hatch.
+
+    `elevate_on` is the policy's own list, read at `base_sha`. The plan's
+    own `files_to_change` are judged against it for §5.6's forecast tier,
+    since no diff exists yet.
     """
     from saffron.agents import artifacts
 
@@ -504,7 +509,7 @@ def plan_checkpoint(
                     proposal, artifacts.parse_output_block(attempt.text)
                 )
             try:
-                artifacts.validate_plan(
+                plan = artifacts.validate_plan(
                     attempt.text,
                     touches=spec.touches,
                     forbidden=spec.forbidden,
@@ -533,6 +538,19 @@ def plan_checkpoint(
                 )
                 spent += attempt.cost_usd_est
                 continue
+            advisory = artifacts.judge_estimate(
+                plan, spec.spec_type, spec.risk, elevate_on
+            )
+            if advisory is not None:
+                emit(
+                    PhaseStart(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        phase="IMPLEMENT",
+                        label="PLAN",
+                        detail=advisory,
+                    )
+                )
             return attempt, artifacts.parse_output_block(attempt.text), spent
     except artifacts.ScopeProposed as proposed:
         # Same accounting `PlanRejected` gets, for the same reason (§4.1): the
@@ -1794,6 +1812,7 @@ def _drive_cell(
                 options=options,
                 spec=spec,
                 protected=policy.protected,
+                elevate_on=policy.elevate_on,
                 agent=agent,
                 emit=emit,
             )
@@ -1870,7 +1889,13 @@ def _drive_cell(
                 run_id=run_id,
                 task_dir=task_dir,
                 spent_usd=rejected.spent_usd,
-                effective_risk=latest.effective_risk,
+                # The plan's own forecast tier when `judge_estimate` rejected
+                # it, the baseline's tier for every other rejection, as before.
+                effective_risk=(
+                    rejected.risk_tier
+                    if rejected.risk_tier is not None
+                    else latest.effective_risk
+                ),
                 advisory_gates=sorted(latest.advisory_gates),
             )
         except implement.AgentFailed as failed:

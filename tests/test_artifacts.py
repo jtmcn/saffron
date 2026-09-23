@@ -174,17 +174,24 @@ def test_a_plan_missing_estimated_lines_is_rejected():
 
 
 def test_a_plan_estimating_over_the_ceiling_is_rejected():
+    """`validate_plan` no longer holds the ceiling check. It clears the
+    plan, and `judge_estimate` at `elevated` is what rejects it."""
+    from saffron.agents.artifacts import judge_estimate
+
+    plan = validate_plan(
+        _plan(estimated_lines=601),
+        touches=TOUCHES,
+        forbidden=[],
+        protected=[],
+        spec_type="feature",
+    )
     with pytest.raises(PlanRejected, match="exceeds the feature ceiling of 600"):
-        validate_plan(
-            _plan(estimated_lines=601),
-            touches=TOUCHES,
-            forbidden=[],
-            protected=[],
-            spec_type="feature",
-        )
+        judge_estimate(plan, "feature", "elevated", [])
 
 
 def test_a_plan_estimating_at_the_ceiling_is_accepted():
+    from saffron.agents.artifacts import judge_estimate
+
     plan = validate_plan(
         _plan(estimated_lines=600),
         touches=TOUCHES,
@@ -193,24 +200,79 @@ def test_a_plan_estimating_at_the_ceiling_is_accepted():
         spec_type="feature",
     )
     assert plan.estimated_lines == 600
+    assert judge_estimate(plan, "feature", "elevated", []) is None
 
 
 def test_validate_plan_and_size_gate_agree_on_the_ceiling():
     """The same table `size_gate` enforces the diff against — a plan cleared
     here and then blown up by the agent's actual diff is a different bug, but
     a plan checked against a *different* number than the gate uses is this one."""
+    from saffron.agents.artifacts import judge_estimate
     from saffron.gates.core.size import _CEILINGS
 
+    plan = validate_plan(
+        _plan(estimated_lines=_CEILINGS["bug"] + 1),
+        touches=TOUCHES,
+        forbidden=[],
+        protected=[],
+        spec_type="bug",
+    )
     with pytest.raises(
         PlanRejected, match=f"exceeds the bug ceiling of {_CEILINGS['bug']}"
     ):
-        validate_plan(
-            _plan(estimated_lines=_CEILINGS["bug"] + 1),
-            touches=TOUCHES,
-            forbidden=[],
-            protected=[],
-            spec_type="bug",
-        )
+        judge_estimate(plan, "bug", "elevated", [])
+
+
+def test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_blocks(
+    monkeypatch,
+):
+    """Criterion 4: `_advisory` and `judge_estimate` both decide through
+    `size_blocks`, never a copy of its own comparison.
+
+    AST over `inspect.getsource`, so a comment naming `size_blocks` does not
+    satisfy the first half. A caller that discards the answer fails the
+    second, the same structural proof `tests/test_cli.py::_source_calls`
+    uses."""
+    import ast
+    import inspect
+
+    from saffron.agents import artifacts
+    from saffron.gates import suite
+    from saffron.repos.policy import Policy
+
+    def _calls_size_blocks(fn) -> bool:
+        tree = ast.parse(inspect.getsource(fn))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = (
+                func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            )
+            if called == "size_blocks":
+                return True
+        return False
+
+    assert _calls_size_blocks(suite._advisory)
+    assert _calls_size_blocks(artifacts.judge_estimate)
+
+    def opposite(tier: str) -> bool:
+        return tier != "elevated"
+
+    monkeypatch.setattr(suite, "size_blocks", opposite, raising=False)
+    monkeypatch.setattr(artifacts, "size_blocks", opposite, raising=False)
+
+    assert "size" in suite._advisory("elevated", Policy(gates={}))
+
+    plan = validate_plan(
+        _plan(estimated_lines=601),
+        touches=TOUCHES,
+        forbidden=[],
+        protected=[],
+        spec_type="feature",
+    )
+    with pytest.raises(PlanRejected):
+        artifacts.judge_estimate(plan, "feature", "standard", [])
 
 
 def test_the_artifact_is_hashed_at_validation():

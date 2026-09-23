@@ -906,6 +906,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PLAN: not the schema", _PC, PhaseStart),
     _Family("PLAN: the session failed", _S, PhaseStart),
     _Family("PLAN: accepted", _S, PhaseStart),
+    _Family("PLAN: advisory estimate", _PC, PhaseStart),
     _Family("PLAN: rejected", _S, Terminal),
     _Family("{outcome}: $N spent, session …", _S, TaskOutcome),
     _Family("rate limit: rejected — stopping, not exhausted", _S, TaskOutcome),

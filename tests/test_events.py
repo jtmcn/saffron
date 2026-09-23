@@ -1212,10 +1212,10 @@ def test_the_table_did_not_quietly_lose_a_row():
 
     `SA-0030` and `SA-0031` migrate these call sites and will move this count.
     That is the point: moving it is a deliberate edit, not a silent one.
-    `SA-0085` moved it again, deliberately, for the one new line shape it adds
-    — a witness already green at base_sha, named on the baseline's own event."""
-    assert len(FAMILIES) == 63
-    assert len({f.prefix for f in FAMILIES}) == 63
+    `SA-0085` moved it for a witness already green at base_sha, and this spec
+    moves it again for the plan checkpoint's own advisory `PLAN:` line."""
+    assert len(FAMILIES) == 64
+    assert len({f.prefix for f in FAMILIES}) == 64
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
