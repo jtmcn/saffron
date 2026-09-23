@@ -201,17 +201,18 @@ to let `_refuse` skip its dependency loop when the caller asks. Keep
 that no id is a substring of another, such as `TE-11` and `TE-22`. A reason
 check with `in` is otherwise vacuous.
 
-**Criterion 1's witness** writes six specs and asserts the exact order.
+**Criterion 1's witness** writes seven specs and asserts the exact order.
 
 - `TE-5` at priority 3, with no `depends_on`.
 - `TE-1` at priority 1, depending on `TE-5`.
 - `TE-3` at priority 1, in a file that sorts first by name.
 - `TE-2` at priority 1, in a file that sorts after `TE-3`'s.
-- `TE-4` at priority 1, with `depends_on: [TE-2, TE-5]`.
+- `TE-4` at priority 1, with `depends_on: [TE-3, TE-5]`.
 - `TE-6` at priority 4, with no `depends_on`.
+- `TE-7` at priority 2, with no `depends_on`.
 
-The stack order is `TE-2`, `TE-3`, `TE-5`, `TE-1`, `TE-4`, `TE-6`. These
-fail it:
+The stack order is `TE-2`, `TE-3`, `TE-7`, `TE-5`, `TE-1`, `TE-4`, `TE-6`.
+These fail it, each measured on this arrangement:
 
 - a sort by priority alone, which puts `TE-1` before `TE-5`
 - filename order for a tie, which puts `TE-3` before `TE-2`
@@ -219,6 +220,10 @@ fail it:
 - a depth-first walk that puts each parent right before its first child
 - a layered order, which takes every ready spec in a round before it looks
   again, or sorts by depth first. It puts `TE-6` before `TE-1`.
+- `driver.py`'s `_sequence`, which ranks most descendants before id. It puts
+  `TE-3` before `TE-2`.
+- a parent that takes its most urgent descendant's priority, which puts
+  `TE-5` before `TE-7`
 
 The comparison of ids is as strings. Real ids are zero-padded, so string
 order is id order, as `driver.py`'s `_sequence` compares them.
@@ -227,8 +232,8 @@ order is id order, as `driver.py`'s `_sequence` compares them.
 
 - `TE-11`, `TE-12` depending on it, and `TE-13` depending on `TE-12`. None
   has a task.
-- `TE-21` with a `MERGED` task. `TE-31` depends on `TE-21` and `TE-11`, in
-  that order.
+- `TE-21` with a `MERGED` task at a stale `spec_sha`, as the landed-push
+  test does. `TE-31` depends on `TE-21` and `TE-11`, in that order.
 - `TE-22` retired to `done/`. `TE-32` depends on it.
 - `TE-23` at `READY_FOR_REVIEW` with a recorded push the callable accepts.
   `TE-33` depends on it.
@@ -238,7 +243,10 @@ refused. These
 fail it:
 
 - admitting an entry only once it has a task
-- ignoring a landed push, or a retired spec
+- reading `MERGED` only at the current `spec_sha`
+- ignoring a landed push, or a retired spec. A build that ignores the push
+  and admits waiting tasks passes this witness, and criterion 3's `TE-51`
+  fails it.
 - the stack rule at `depends_on[0]` and today's rule at a later entry, which
   refuses `TE-31`
 
