@@ -107,10 +107,11 @@ GitHub issues remain in use only for research/evidence records under
 
 - **A spec names the wrong versions its witnesses must kill, and never asks
   the cell to run them.** Each name is one sentence in `## Notes for the
-  agent`, such as "a fold that defaults a missing key to 0". The host runs
-  wrong versions against the diff: REVIEW's criterion probes and the Spec
-  seat's `driver.py probe` both do. A cell told to run twenty of them spends
-  its turns there. `SA-0123`'s IMPLEMENT and first REPAIR each hit the
+  agent`, such as "a fold that defaults a missing key to 0". They are for
+  the readers who run them. The `witness` gate applies a criterion's declared
+  mutant, REVIEW's criterion probes run the wrong versions REVIEW names, and
+  the spec loop's Spec seat probes the rest with `driver.py probe`. A cell
+  told to run twenty of them spends its turns there. `SA-0123`'s IMPLEMENT and first REPAIR each hit the
   fifteen-minute turn bound that way (backlog item b-2dea1c).
 
 - **A claim over a set names the set, and its witness drives every member.**
