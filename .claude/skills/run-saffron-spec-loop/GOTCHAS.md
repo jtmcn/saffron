@@ -76,10 +76,12 @@ do; the measurement behind it follows.
 
 ## Why attended cells, not `saffron batch`
 
-`run_batch` resolves its candidates once, at start, so a child whose parent has
-not run yet is refused, and it runs cells back to back with no pause for review
-commits before a child is cut from its parent's branch. A batch is the tool for
-independent specs nobody reviews between cells.
+`run_batch` rescans after every task (`SA-0106`), so a child whose parent
+packages that night runs that night. Two gaps remain. It runs cells back to
+back, with no pause for review commits before a child is cut from its parent's
+branch. A spec with no `depends_on` is cut from the default branch, so a batch
+yields siblings rather than one stack. ADR 7's stack batch chains every task,
+and trades the review commits for an end review and follow-up specs.
 
 ## Reviewing
 
