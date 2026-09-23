@@ -1625,7 +1625,7 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
 def test_a_cut_off_turn_over_budget_is_not_salvaged(monkeypatch, tmp_path):
     """The budget ceiling is honoured before the salvage turn is spent, never
     after. A task with no room left is cut, and this being its first cut at
-    the spec_sha, it settles ORPHANED. The watch line names the bound."""
+    the spec_sha, it ends ORPHANED."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
     outcome, _ledger = _drive(
         monkeypatch,
@@ -1649,7 +1649,7 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
     monkeypatch, tmp_path
 ):
     """The salvage turn is a chance, not a guarantee. If it still leaves zero
-    commits, this first cut at the spec_sha settles ORPHANED. The watch line
+    commits, this first cut at the spec_sha ends ORPHANED. The watch line
     says the turn ceiling cut it off, not the agent finishing with nothing.
 
     The *clean-tree* shape, deliberately: `_stub_the_runtime`'s `dirty_paths`
@@ -1914,7 +1914,7 @@ def test_every_cut_that_leaves_nothing_committed_halts_for_the_next_scan(
 ):
     """Five zero-commit cells, each its own ledger. The turn ceiling and the
     wall clock both salvage when there is room, and both refuse when there
-    is not. Either way both settle ORPHANED on their first cut. The idle
+    is not. Either way both end ORPHANED on their first cut. The idle
     bound reaches neither: no salvage, and it settles NOT_IMPLEMENTED."""
     from saffron import scheduler
 
@@ -2002,9 +2002,9 @@ def test_every_cut_that_leaves_nothing_committed_halts_for_the_next_scan(
 
 
 def test_a_second_cut_at_one_spec_sha_settles_the_spec(monkeypatch, tmp_path):
-    """The retry cap fires only for a task cut at the *same* spec_sha. Task 1
+    """The re-queue cap fires only for a task cut at the *same* spec_sha. Task 1
     is cut at a different one and does not count. Task 2 is the first real
-    cut at the spec's own spec_sha and settles ORPHANED. Task 3 is the
+    cut at the spec's own spec_sha and ends ORPHANED. Task 3 is the
     second, and settles NOT_IMPLEMENTED, naming task 2 as the one before."""
     other_sha = "b" * 64
     target = _spec()  # spec_sha "a" * 64, the default
@@ -2064,7 +2064,7 @@ def test_a_second_cut_at_one_spec_sha_settles_the_spec(monkeypatch, tmp_path):
 def test_the_cap_is_scoped_to_the_specs_own_id_not_only_its_sha(monkeypatch, tmp_path):
     """The cap's key is repo, spec id and spec_sha together. Task 1 is cut at
     a different spec id that happens to share this spec_sha, and must not
-    count. Task 2 is this spec's own first cut, and still settles ORPHANED
+    count. Task 2 is this spec's own first cut, and still ends ORPHANED
     rather than being told task 1 came before it."""
     target = _spec()  # spec_id "SY-1", spec_sha "a" * 64, the defaults
 
@@ -2095,10 +2095,11 @@ def test_the_cap_is_scoped_to_the_specs_own_id_not_only_its_sha(monkeypatch, tmp
 
 
 def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp_path):
-    """ORPHANED written by a raise, a scan's own stamp, or a rebuttal that
-    commits nothing must never feed the cap. Four such tasks sit ahead of a
-    real wall cut at the same spec_sha, and none of them counts as a
-    predecessor: the fifth cell still settles ORPHANED, its own first cut."""
+    """ORPHANED written by a raise, a scan's stamp, an errored lens or a
+    rebuttal that commits nothing must never feed the cap. Neither does a
+    cut-shaped task in another state or another repo. None of the tasks
+    ahead of this real wall cut counts, so the last cell still ends
+    ORPHANED, its own first cut."""
     cell1 = _stub_the_runtime(monkeypatch, commits=0)
     with pytest.raises(RuntimeError):
         _drive(
@@ -2147,6 +2148,23 @@ def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp
     _closed(task4, "IMPLEMENTING")
     ledger.set_task_state(task4, "ORPHANED")
     ledger.finish_run(run4, "COMPLETE")
+
+    # Cut-shaped but not ORPHANED: a rate-limited task re-queues, and one
+    # already settled is not a halt.
+    for state in ("RATE_LIMITED", "NOT_IMPLEMENTED"):
+        run = ledger.create_run(repo_id, "b" * 40)
+        task = ledger.create_task(run, spec_id, spec_sha, branch=branch)
+        _closed(task, "IMPLEMENTING")
+        ledger.set_task_state(task, state)
+        ledger.finish_run(run, "COMPLETE")
+
+    # Cut-shaped and ORPHANED, but in another repo.
+    other_repo = ledger.upsert_repo("other", "/elsewhere", "/elsewhere.git", None)
+    run_other = ledger.create_run(other_repo, "b" * 40)
+    task_other = ledger.create_task(run_other, spec_id, spec_sha, branch=branch)
+    _closed(task_other, "IMPLEMENTING")
+    ledger.set_task_state(task_other, "ORPHANED")
+    ledger.finish_run(run_other, "COMPLETE")
 
     ledger.close()
 

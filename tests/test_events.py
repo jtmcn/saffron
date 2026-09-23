@@ -1210,8 +1210,8 @@ def test_the_table_did_not_quietly_lose_a_row():
     kinds cover every call site, and losing a row silently is the failure
     that matters.
 
-    `SA-0085` moved this count once. `SA-0126` moves it again for the wall
-    clock's own cut-again `IMPLEMENT:` line."""
+    `SA-0085` and `SA-0125` each moved this count. `SA-0126` moves it again
+    for the cut-again `IMPLEMENT:` line."""
     assert len(FAMILIES) == 65
     assert len({f.prefix for f in FAMILIES}) == 65
 

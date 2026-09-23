@@ -388,13 +388,13 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
 def previous_cut_orphan(
     ledger: Ledger, repo_id: int, spec: CellSpec, task_id: int
 ) -> int | None:
-    """The retry cap (SA-0126, backlog item b-36b551). Only the first
+    """The re-queue cap (SA-0126, backlog item b-36b551). Only the first
     zero-commit cut at one `spec_sha` earns `ORPHANED`, and the next settles
     as `NOT_IMPLEMENTED`. No fact says "orphaned by a cut" apart from the
     other three paths that write it, so this reads `ledger._db` directly, as
     `chain_walk._task_rows` does. A cut task's run finished `COMPLETE` while
     every attempt it holds stayed phase `IMPLEMENTING`, the state
-    `_drive_cell` never leaves before this return fires. Scoped to this
+    `_drive_cell` never leaves before its zero-commit return. Scoped to this
     repo, spec id and `spec_sha`, excluding `task_id` itself. Call only when
     a bound cut this task and nothing survived the salvage.
     """
