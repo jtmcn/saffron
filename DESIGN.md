@@ -268,9 +268,10 @@ Design notes:
                        the code, and no model call has happened yet (§5.4)
   NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
                        a dead seam here would have returned an earned state
-  GATE_ERROR       ◀── a gate errored, the two suites drifted, or the critic cell
-                       met a binary stub the export cannot carry: infrastructure,
-                       and never charged to the task (§5.4, §5.5)
+  GATE_ERROR       ◀── a gate errored, the two suites drifted, the critic cell
+                       met a binary stub the export cannot carry, or a verdict
+                       session never started: infrastructure, and never charged
+                       to the task (§5.4, §5.5, §5.6)
   SCOPE_REVIEW     ◀── also from IMPLEMENTING: an implementer whose declared
                        `touches` cannot satisfy the criteria proposes a set
                        instead of writing a plan, and the proposal ends the
@@ -776,7 +777,7 @@ Everything downstream is built on this and nothing else:
 
 - **The repair loop is language-agnostic** because it feeds `failures[]` back to the agent as structured text. It never parses compiler output; that translation is the gate's job, and it belongs in the repo where someone knows the tool.
 - **Baseline subtraction works** because failures are comparable by **`(gate, file, code, normalized message)`** — deliberately *not* including `line`. A task that inserts thirty lines near the top of a file moves every pre-existing failure below it, so a line-keyed baseline entry stops matching and an untouched failure reads as new. The repair loop would then spend attempts on pre-existing code, which is the exact thing baselines exist to prevent: the countermeasure defeating itself on nearly every diff that is not append-only. `line` is carried for display and for anchoring (§5.5); it is never part of the identity. **An identity that includes a coordinate the change moves is not an identity.**
-- **The subtraction counts; it is not a set difference.** Normalizing the message means collapsing the digit runs that embed the coordinate — and in one file, two failures of one rule often differ *only* in those digits, so they normalize to one identity legitimately. Under set semantics a single pre-existing failure then cancels every head failure sharing that identity, and genuinely new ones vanish. Baseline subtraction is therefore a multiset operation: one baseline failure cancels one head failure. The known consequence is that where N of M colliding failures are new, the ones *reported* may name a pre-existing line — acceptable, because `line` was already display-only. Found by review after v0's replays, which happened not to contain the shape (Appendix H).
+- **The subtraction counts; it is not a set difference.** Normalizing the message means collapsing the digit runs that embed the coordinate — and in one file, two failures of one rule often differ *only* in those digits, so they normalize to one identity legitimately. Under set semantics a single pre-existing failure then cancels every head failure sharing that identity, and genuinely new ones vanish. Baseline subtraction is therefore a multiset operation: one baseline failure cancels one head failure. One identity is exempt. A `witness` survivor at base is not subtracted, so it cancels nothing and is still new at head (§5.4.1). The known consequence is that where N of M colliding failures are new, the ones *reported* may name a pre-existing line — acceptable, because `line` was already display-only. Found by review after v0's replays, which happened not to contain the shape (Appendix H).
 - **`skip` is a first-class status**, so a repo simply omits gates it has no analogue for. A repo with no type system declares no `types` gate; nothing in core changes.
 - **`error` is distinct from `fail`** — the gate itself broke (toolchain missing, DB down). It never counts as a task failure, it aborts the attempt and surfaces as an infrastructure problem. Conflating these is how you get an agent spending four attempts "fixing" a crashed linter.
 - **`tool` is what distinguishes "ran and passed" from "didn't run",** and v0 shipped without it at the cost of a silently green replay (Appendix H). `{"status":"pass","failures":[]}` is bit-for-bit identical whether the linter found nothing or the linter was not on `PATH` and a shell script swallowed the error. So the contract requires an opaque tool identifier **obtained by executing the tool** — `ruff --version`, not a string literal. A gate that cannot run its tool cannot produce the field. The host stores it per gate result and treats a `tool` that differs between a run's baseline and its head as grounds to distrust the subtraction rather than report it.
@@ -922,7 +923,7 @@ for n in 1..max_attempts:
     agent.repair(new_failures)                              # resumed session
 ```
 
-- **Only new failures count.** Failures on `base_sha` are pre-existing and not this task's problem. Otherwise every task inherits your flaky tests and burns its budget on them.
+- **Only new failures count.** Failures on `base_sha` are pre-existing and not this task's problem. Otherwise every task inherits your flaky tests and burns its budget on them. The one exception is a `witness` survivor at base, which is not subtracted. The spec declared its mutant, so killing it is work the task was given (§5.4.1).
 - **No-progress detection.** The same new-failure set two attempts running — same identity as above, and counted the same way, for the same reason — means the agent is stuck; stop paying. Comparing raw bytes instead would make this dead code, because every repair shifts line numbers, so a permanently stuck agent would look like it were making progress forever. Counted rather than set-compared because fixing three of four colliding failures is progress and a set cannot see it. Optionally escalate once to a fresh session rather than a resumed one — sometimes the accumulated context *is* the problem.
 - **`EXHAUSTED` is a respectable outcome.** A task that can't pass its own gates in four tries is telling you the spec was underspecified or the codebase is hostile at that point. Both worth knowing.
 - **The budget stop shares it, deliberately.** A task the spend ceiling stops before its next turn is `EXHAUSTED` too, and in the ledger and the morning queue that is indistinguishable from four failed attempts — the distinction lives only on the watch line. Accepted for v0.5, which is attended: the operator is reading that line as it happens, and the `tasks` row carries the budget and the spend. It stops being acceptable when the queue is read the next morning instead of watched, so v1 splits it — the two have opposite remedies, raise the budget versus rewrite the spec.
@@ -1018,7 +1019,8 @@ not have run yet. `SA-0062` specified the opposite order and passed review
 `size` already carries, and for the same reason: an elevated diff is one where a
 plausible-looking wrong change hurts most, and a claim guarded by nothing is
 exactly that. A spec declaring no mutants reports `skip`, so this cannot fail a
-task retroactively.
+task retroactively. A survivor at base is not subtracted (§5.4), so at `elevated`
+it blocks until the task kills its mutant.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
@@ -1070,7 +1072,7 @@ This section argued until 2026-09-02 that lens #3 in a naive design would be "te
 
 **What the lens is.** A prompted critic (`saffron/agents/prompts/review-adequacy.md`) holding no tool that can run anything: no test runner, no interpreter, no mutation harness — all three priced against this remit and rejected in the evidence above. It cannot mutate a line and watch a test fail, so every finding instead names the smallest edit that would keep the suite green while the behaviour breaks. That is what makes a finding checkable in one command by someone who *can* run one, rather than a claim about coverage the lens has no way to have confirmed.
 
-**The host runs the probe the lens names** (`SA-0109`). After REVIEW, the host applies each anchored adequacy finding's vacuity probe in a gate-only cell. A probe that edits a declared test path is `unproven` and never applied. For the rest, the host runs the repo's `tests` gate over the probed tree. The verdict decides the finding. `survived` makes it a `blocker`, because the suite stayed green with the behaviour broken. `killed` demotes it to a `note`. `unproven` leaves the severity the lens filed, and a probe the cell could not apply or answer is `unproven`, never `killed`. The lens still runs nothing.
+**The host runs the probe the lens names** (`SA-0109`). After REVIEW, the host applies each anchored adequacy finding's vacuity probe in a gate-only cell. A probe that edits a declared test path is `unproven` and never applied. For the rest, the host runs the repo's `tests` gate over the probed tree. Only a failure of a test the diff adds kills a probe (`SA-0138`). Any other new failure is recorded beside the verdict and kills nothing. The verdict decides the finding. `survived` makes it a `blocker`, because no test the diff adds noticed the behaviour break. `killed` demotes it to a `note`. `unproven` leaves the severity the lens filed, and a probe the cell could not apply or answer is `unproven`, never `killed`. The lens still runs nothing.
 
 **Blast radius is retired, not deferred.** It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands — but it was never built, because it was gated on a risk tier nothing wires, and the gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering: all three prompts still route callers-and-downstream findings away to "the blast-radius lens", so that class is now owned by nobody and is suppressed at three seats rather than merely uncovered at one. Left as-is on purpose — a `Not yours` list edited to release the remit would scatter it across three lenses, which is the overlap §5.5 spends its no-voting rule on.
 
@@ -1303,7 +1305,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **Core demands a language of every target repo** | A core probe or check executes something only one ecosystem has | Core probes run in the base image core owns, never in a repo's cell image (§2.1, Appendix I) |
 | **A tool-output parser silently stops matching** | Gates regex an unversioned CLI string that a version bump rewords | Same two guards — the exit code disagrees with the empty parse, and `tool` records the bump (§5.4) |
 | **A crashed test worker reads as a code failure** | A lost worker's `code` field looks like an assertion failure's | Partial results are not results: the gate returns `error` for the whole run, charged to nobody (§5.4) |
-| **New failures cancelled by a pre-existing one** | Normalization collapses the digits that tell colliding failures apart | Baseline subtraction is a multiset operation — one baseline failure cancels one head failure (§5.4) |
+| **New failures cancelled by a pre-existing one** | Normalization collapses the digits that tell colliding failures apart | Baseline subtraction is a multiset operation — one baseline failure cancels one head failure (§5.4). A `witness` survivor at base is not subtracted (§5.4.1) |
 | **A replayed PR drags `main` into its own diff** | `M^1` is `main` at merge time, not the branch point | Base is the merge base of the two parents; a squash's sole parent already is one (Appendix H) |
 
 ### 7.1 Cost model

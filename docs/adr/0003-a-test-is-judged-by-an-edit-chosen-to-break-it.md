@@ -35,6 +35,8 @@ and it changed five times.
   names (`SA-0109`, #375). §5.5.1 recorded it on 2026-09-21.
 - 2026-09-22. The host began to apply criterion probes (`SA-0120`, #434,
   backlog item b-2750d5).
+- 2026-09-23. A vacuity probe killed only by a format test read as caught
+  (backlog item b-19b255). Only a test the diff adds now kills one (`SA-0138`).
 
 ## Decision
 
@@ -53,12 +55,15 @@ two host-run probes share the question, and each asks it differently.
 - Lens #3, `adequacy`, reads the diff and names, per finding, a vacuity probe.
   That is the smallest edit that keeps the suite green while the behaviour
   breaks. The lens runs nothing. The host applies the probe in a gate-only cell
-  and runs the repo's `tests` gate (`SA-0109`). `survived` makes the finding a
+  and runs the repo's `tests` gate (`SA-0109`). Only a failure of a test the
+  diff adds kills the probe (`SA-0138`). `survived` makes the finding a
   `blocker`, and `killed` makes it a `note`.
 
 A probe of either kind is `unproven` in three cases. No edit is named, the edit
 targets a declared test path, or the cell could not apply or answer it. The
-first two are refused before any edit is applied. An `unproven` vacuity
+first two are refused before any edit is applied. A vacuity probe has two more.
+The run cannot say which tests the diff added, or no new failure names a test
+the run collected. An `unproven` vacuity
 probe leaves its finding at the severity the lens filed. An `unproven`
 criterion probe files no finding.
 
