@@ -4,7 +4,7 @@ title: A global `attr.tree` hides an edit through `export_patch`'s fresh git dir
 status: open
 tier: 2
 filed: 2026-09-22
-specs: [SA-0118]
+specs: [SA-0118, SA-0137]
 prs: [433]
 commits: []
 cites: [§2]
