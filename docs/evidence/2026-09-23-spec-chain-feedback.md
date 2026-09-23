@@ -134,3 +134,60 @@ prototype in place of a third review.
 5. **Parallel specs collide in one test.** Each spec rewrites the queue smoke
    test's docstring and pinned lists in `tests/test_scheduler.py`. Stacking
    three meant squashing each branch and resolving that file twice.
+
+# Third chain, 2026-09-23: SA-0141
+
+One spec from item b-4e0868, the first slice of moving REBUT's two
+structured turns onto the SDK's `output_format`. The item asked for a spike
+before any spec. The spike ran first, in two runs, and cost $1.30. Its
+record is `2026-09-23-structured-output-spike.md`.
+
+## Rounds and cost
+
+| Step | Time | Tokens |
+|---|---|---|
+| Spike, two runs by the operator | about 2 min | $1.30 |
+| Draft | 15.1 min | 172k |
+| First review | 8.7 min | 140k |
+| Revise, with a prototype | 6.9 min | 33k |
+| Second review | 6.3 min | 133k |
+| Fixes by hand | none | none |
+
+Neither review found a blocker. The first found five concerns and three
+notes. The second found two concerns and three notes. The delegate applied
+the second round's fixes by hand instead of a writer round.
+
+## Findings by class
+
+| Finding | Class | Check that missed it |
+|---|---|---|
+| A witness reached `REBUTTING` by an early return | Arrangement argued, not run | Pre-flight 10 |
+| A parent's new test would go weaker unmigrated | Change breaking a live test | Pre-flight 6 |
+| A payload left in text fails nothing | Migration whose miss fails nothing | none |
+| A pinned sentence missing from the keep-list | Rendered sentence the change edits | Second chain's lesson 2 |
+| `revert` turns a module-scope name into a skip | Witness discipline | Pre-flight 1 |
+| The completion grep misses a variable payload | Migration whose miss fails nothing | none |
+| A parent's test double drops the new field | Change breaking a live test | none |
+| A parent's revised scope was not named | Claim about the tree | Pre-flight 5 |
+
+No finding touched the SDK's behaviour. Every claim the spike measured held
+through both reviews.
+
+## What the pre-flight should learn
+
+1. **Measure an external API before the writer starts.** The spike's second
+   run used the production option shape. It settled a risk no reader could:
+   whether `tools` and `dontAsk` hide the `StructuredOutput` tool. The
+   writer then cited measurements, and no review questioned one.
+2. **Prototype before the first review, not after it.** The first review's
+   main concern was an arrangement. The writer's prototype then settled it
+   in 7 minutes. Run the wrong versions before dispatching the reviewer.
+3. **A migration needs a check that reads structure.** A payload moved from
+   one field to another passes wherever it is left behind. A text grep
+   misses one built from a variable. Name every carrier: helpers, doubles,
+   literals. List the dict keys the payload is spelled with.
+4. **A parent's tests are invisible at base.** Two findings were about test
+   doubles a parent spec adds. For each parent, list the doubles its notes
+   describe and whether each carries what this spec moves.
+5. **The second chain's lesson 2 applies here too.** Grepping every literal
+   in the edited prompts would have caught the missing keep-list sentence.

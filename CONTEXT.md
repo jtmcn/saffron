@@ -190,8 +190,10 @@ IMPLEMENT session. Deliberately *not* a phase — the planner and the implemente
 the same session.
 _Avoid_: "the planning phase", "the plan step", "PLAN".
 
-**Extraction turn**: A tool-less turn that resumes a session solely to emit a
-validated `<output>` block. How every structured artifact is produced.
+**Extraction turn**: A tool-less turn that resumes a session solely to emit one
+structured artifact, which the host validates. REBUT's turns return it as a
+schema-constrained value. Every other extraction turn emits an `<output>` block.
+How every structured artifact is produced.
 _Avoid_: "the JSON step", "parsing the output".
 
 **Control artifact**: A host-consumed file an agent produces — `plan.json`,

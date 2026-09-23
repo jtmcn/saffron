@@ -4,6 +4,7 @@ title: The extraction turn asks for JSON in prose, though the pinned SDK can con
 status: open
 tier: 2
 filed: 2026-09-23
+specs: [SA-0141]
 cites: [§5.3]
 related: [42, 60]
 ---
@@ -69,5 +70,9 @@ that choice waits on the observer's record, and this item does not make it.
 
 ## Record
 
-- 2026-09-23: filed from a session asking whether to adopt Pydantic AI. The answer was no. The extraction turn already does what
-  Pydantic AI offers, and the SDK option does it more cheaply.
+- 2026-09-23: filed from a session asking whether to adopt Pydantic AI.
+  The answer was no. The extraction turn already does what Pydantic AI
+  offers, and the SDK option does it more cheaply.
+- 2026-09-23: `SA-0141` written, the first slice. It covers REBUT's rebuttal
+  extraction turn and its verdict sessions. REVIEW, the plan checkpoint and
+  the notes turn are later slices.

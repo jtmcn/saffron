@@ -725,6 +725,8 @@ The Agent SDK has no first-class structured-output guarantee, and asking an agen
 
 This applies uniformly to `plan.json`, `scope.json`, and critic findings. It costs one cheap turn per artifact and removes an entire class of "the agent wrote prose around the JSON" failure.
 
+**The pinned SDK now constrains the answer to a schema.** The first sentence of this section was true when it was written. It is false for `claude-agent-sdk==0.2.142`, the version the cell image pins. `output_format` takes a JSON schema, and `ResultMessage.structured_output` returns the value. It holds on a resumed session and under the production option shape (`docs/evidence/2026-09-23-structured-output-spike.md`). REBUT's rebuttal turn and its verdict sessions use it (`SA-0141`). Neither asks for an `<output>` block. The host still validates the value with Pydantic, because the runner that reports it runs inside the cell. A turn that cannot satisfy its schema still ends `success`, with a null value, so the null is the failure and the subtype is not. A schema whose top level is not an object is refused, which is why the plan checkpoint's plan-or-scope union has not moved. The other extraction turns still emit the block (backlog item b-4e0868).
+
 The session opens by writing `plan.json` before touching anything:
 
 ```json
