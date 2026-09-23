@@ -34,7 +34,7 @@ The first review found no blocker, so no revision ran.
 | 1 | note | The turns ceiling is argued from a row of another shape | Size or ceilings | Pre-flight 7 |
 
 The first concern was answered, not applied: `SAFFRON_BASE_IMAGE` is unset
-on this host. The second waits for the pull request's CI run. The notes were
+on this host. The second waits for the cell's pull request, the first CI run of the witness. The notes were
 left as they stand.
 
 ## What the pre-flight should learn
