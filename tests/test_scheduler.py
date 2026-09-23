@@ -1818,7 +1818,16 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-22, a seventy-second time: `SA-0134` queued for
+    """Re-measured 2026-09-23, a seventy-third time: `SA-0135` and `SA-0136`
+    queued for backlog item b-602d00, the second and third of three.
+    `SA-0135` adds the `consumes:` field and refuses a task whose entry does
+    not resolve at its tree base. `SA-0136` refuses a malformed entry at
+    load and an unreadable one before the cell. Each stacks on the one
+    before, so `SA-0135` declares `depends_on: [SA-0134]` and `SA-0136`
+    declares `depends_on: [SA-0135]`. Both are refused on that, since
+    neither parent has run. The candidates are unmoved.
+
+    Re-measured 2026-09-22, a seventy-second time: `SA-0134` queued for
     backlog item b-602d00, a reader that says whether a tree base holds a
     path or a name. It is the first of two, and `SA-0135` wires it in. It
     edits `saffron/repos/mirror.py` and `tests/test_mirror.py`, which no
@@ -2238,6 +2247,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0129",
         "SA-0133",
         "SA-0134",
+        "SA-0135",
+        "SA-0136",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
