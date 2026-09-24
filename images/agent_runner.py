@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 # A tool input carries whole file bodies; the commit is the record of what was
@@ -41,6 +42,10 @@ _STEP_USAGE_KEYS = (
 # message_id, each reporting the same usage. Module state on purpose: one
 # runner process is one run_agent call, so this outlives nothing it shouldn't.
 _seen_assistant_message_ids: set[str] = set()
+
+# Whether `query()` yielded a message this run: tells a never-started session
+# apart from one that ran and produced nothing usable (reset in `main()`).
+_query_yielded = False
 
 
 def _usage_counts(usage: Any, keys: tuple[str, ...]) -> dict[str, Any]:
@@ -157,28 +162,49 @@ def events(message: Any) -> list[dict[str, Any]]:
 
 
 async def _run(request: dict[str, Any]) -> int:
+    global _query_yielded
     from claude_agent_sdk import ClaudeAgentOptions, query
 
     options = dict(request.get("options") or {})
     if request.get("resume"):
         options["resume"] = request["resume"]
 
+    # A string system prompt travels as a file, never an argument list
+    # (backlog b-8487de). `path` is the host's own choice, sent beside it.
+    prompt_path = request.get("system_prompt_path")
+    if prompt_path:
+        Path(prompt_path).write_bytes(str(options["system_prompt"]).encode("utf-8"))
+        options["system_prompt"] = {"type": "file", "path": prompt_path}
+
     saw_result = False
-    async for message in query(
-        prompt=request["prompt"], options=ClaudeAgentOptions(**options)
-    ):
-        for event in events(message):
-            _emit(event)
-            saw_result = saw_result or event["type"] == "result"
+    try:
+        async for message in query(
+            prompt=request["prompt"], options=ClaudeAgentOptions(**options)
+        ):
+            _query_yielded = True
+            for event in events(message):
+                _emit(event)
+                saw_result = saw_result or event["type"] == "result"
+    finally:
+        if prompt_path:
+            Path(prompt_path).unlink(missing_ok=True)
     return 0 if saw_result else 1
 
 
 def main() -> int:
+    global _query_yielded
+    _query_yielded = False
     try:
         request = json.load(sys.stdin)
         return asyncio.run(_run(request))
     except Exception as exc:  # noqa: BLE001 — a crash in here must still be an event
-        _emit({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
+        _emit(
+            {
+                "type": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+                "query_yielded": _query_yielded,
+            }
+        )
         return 1
 
 

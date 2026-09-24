@@ -330,6 +330,51 @@ def test_without_a_credential_the_agent_fails_rather_than_reporting_success():
         runtime.remove_network(network)
 
 
+@pytest.mark.cell
+def test_a_verdict_sized_system_prompt_reaches_the_cli_without_an_argument_list_error():
+    """The real argument list, not a stub (backlog b-8487de). A system prompt
+    this size used to make the agent CLI fail to spawn. `init` shows it
+    parsed its arguments and began a session instead. Whether the CLI emits
+    `init` before it fails for want of a credential is unmeasured until this
+    runs."""
+    network = "saffron-test-runner-net-prompt"
+    container = "saffron-test-runner-cell-prompt"
+    runtime.remove_container(container)
+    runtime.remove_network(network)
+    runtime.create_network(network)
+    watched: list = []
+    try:
+        runtime.run_detached(
+            container,
+            image.BASE_TAG,
+            command=["sleep", "infinity"],
+            network=network,
+            env={"CLAUDE_CONFIG_DIR": "/agent-state"},
+        )
+        with pytest.raises(implement.AgentFailed) as raised:
+            implement.run_agent(
+                container,
+                prompt="say hello",
+                options={"max_turns": 1, "system_prompt": "s" * (1024 * 1024)},
+                spec_id="SY-1",
+                emit=watched.append,
+                timeout_s=180,
+            )
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_network(network)
+    assert "Argument list too long" not in str(raised.value)
+    assert "Failed to start" not in str(raised.value)
+    inits = [
+        e.event
+        for e in watched
+        if getattr(e, "event", None)
+        and e.event.get("type") == "system"
+        and e.event.get("subtype") == "init"
+    ]
+    assert inits, "no init system event seen"
+
+
 def test_a_rate_limit_event_is_not_a_passthrough():
     """The only ceiling the cell is subject to rather than reporting (§5.1).
     Dropped, a rejected window reaches the host as four failed repair
@@ -360,3 +405,405 @@ def test_a_rate_limit_event_is_not_mistaken_for_a_result():
     )
     (event,) = runner.events(message)
     assert event["type"] == "rate_limit"
+
+
+# --- backlog b-8487de: the system prompt travels as a file, and a verdict
+# session that never started is told apart from one that ran ---
+
+
+def _stub_module(query):
+    """A fake `claude_agent_sdk`, recording what it was constructed with.
+    A `SimpleNamespace`, not a real module: `sys.modules` accepts anything
+    with the right attributes, and needs none of a module's own."""
+
+    class _Options:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    return SimpleNamespace(ClaudeAgentOptions=_Options, query=query)
+
+
+def _run_runner_in_process(monkeypatch, stub, stdin_data, on_line):
+    """Feeds `runner.main()` a request on stdin, and each printed line to
+    `on_line`. Stands in for a real `exec -i` across the three witnesses
+    below, all of which run the same runner code the base image installs."""
+    import io
+
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", stub)
+    old_stdin, old_stdout = sys.stdin, sys.stdout
+    sys.stdin = io.StringIO(stdin_data)
+    captured = io.StringIO()
+    sys.stdout = captured
+    try:
+        returncode = runner.main()
+    finally:
+        sys.stdin, sys.stdout = old_stdin, old_stdout
+    for line in captured.getvalue().splitlines():
+        on_line(line)
+    return runtime.Completed(returncode, captured.getvalue(), "")
+
+
+def _exec_stream_via_runner(monkeypatch, stub):
+    def _exec_stream(container, command, *, stdin_data, on_line, **_kwargs):
+        return _run_runner_in_process(monkeypatch, stub, stdin_data, on_line)
+
+    return _exec_stream
+
+
+def _no_reap(container, **_kwargs):
+    return runtime.Completed(0, "", "")
+
+
+def _no_exec(container, command, **_kwargs):
+    return runtime.Completed(0, "", "")
+
+
+def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
+    monkeypatch, tmp_path
+):
+    import copy
+
+    from saffron.agents.findings import Finding
+    from saffron.phases import rebut
+
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    prompts_dir = Path(rebut.__file__).resolve().parents[1] / "agents" / "prompts"
+    context_md = (Path(rebut.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
+
+    blocker = Finding(
+        lens="correctness", severity="blocker", file="a.py", line=1, claim="c"
+    )
+    big_diff = "diff --git a/x b/x\n" + ("+" + "é" * 100 + "\n") * 3000
+    big_prompt = rebut.verdict_prompt(
+        "correctness",
+        blockers=[(1, blocker)],
+        rebuttal=rebut.RebuttalTurn(),
+        context_md=context_md,
+        claude_md=None,
+        prompts_dir=prompts_dir,
+        spec_body="fix it",
+        reviewed_diff=big_diff,
+        diff=big_diff,
+    )
+    assert len(big_prompt.encode("utf-8")) >= 200_000
+    assert not big_prompt.isascii()
+
+    options = implement.agent_options(
+        system_prompt=big_prompt, cwd=str(cwd), max_turns=3, budget_usd=1.0
+    )
+
+    def _recorder():
+        record: dict = {}
+
+        async def _query(prompt, options):
+            record["kwargs"] = options.kwargs
+            sp = options.kwargs.get("system_prompt")
+            if isinstance(sp, dict):
+                record["bytes_while_running"] = Path(sp["path"]).read_bytes()
+            yield SimpleNamespace(
+                subtype="success",
+                num_turns=1,
+                session_id="sess-out",
+                total_cost_usd=0.05,
+                terminal_reason="completed",
+                is_error=False,
+            )
+
+        return record, _query
+
+    # Session 1: no resume, the huge non-ASCII prompt as the turn text too.
+    record1, query1 = _recorder()
+    before1 = copy.deepcopy(options)
+    implement.run_agent(
+        "cell",
+        prompt=big_prompt,
+        options=options,
+        spec_id="SY-1",
+        exec_stream=_exec_stream_via_runner(monkeypatch, _stub_module(query1)),
+    )
+    assert options == before1
+    path1 = record1["kwargs"]["system_prompt"]["path"]
+    assert isinstance(path1, str)
+    assert Path(path1).is_absolute()
+    assert not Path(path1).is_relative_to(cwd)
+    assert record1["kwargs"] == before1 | {
+        "system_prompt": {"type": "file", "path": path1}
+    }
+    assert record1["bytes_while_running"].decode("utf-8") == big_prompt
+    assert not Path(path1).exists()
+
+    # Session 2: the same options object, resumed, one-character turn prompt.
+    record2, query2 = _recorder()
+    before2 = copy.deepcopy(options)
+    implement.run_agent(
+        "cell",
+        prompt="x",
+        options=options,
+        resume="sess-old",
+        spec_id="SY-1",
+        exec_stream=_exec_stream_via_runner(monkeypatch, _stub_module(query2)),
+    )
+    assert options == before2
+    path2 = record2["kwargs"]["system_prompt"]["path"]
+    assert path2 != path1
+    assert record2["kwargs"] == before2 | {
+        "system_prompt": {"type": "file", "path": path2},
+        "resume": "sess-old",
+    }
+    assert record2["bytes_while_running"].decode("utf-8") == big_prompt
+    assert not Path(path2).exists()
+
+    # Session 3: no system prompt at all. Nothing new reaches the SDK.
+    options3 = {k: v for k, v in options.items() if k != "system_prompt"}
+    record3, query3 = _recorder()
+    before3 = copy.deepcopy(options3)
+    implement.run_agent(
+        "cell",
+        prompt="p3",
+        options=options3,
+        spec_id="SY-1",
+        exec_stream=_exec_stream_via_runner(monkeypatch, _stub_module(query3)),
+    )
+    assert options3 == before3
+    assert record3["kwargs"] == before3
+    assert "system_prompt" not in record3["kwargs"]
+
+
+def test_a_session_a_bound_kills_leaves_no_prompt_file_in_the_cell(monkeypatch):
+    import inspect
+    import subprocess
+
+    assert (
+        inspect.signature(implement.run_agent).parameters["exec_"].default
+        is runtime.exec_
+    )
+
+    options = implement.agent_options(
+        system_prompt="p", cwd="/work", max_turns=1, budget_usd=1.0
+    )
+
+    def _one_kill(bound: str) -> tuple[list[str], dict]:
+        log: list[str] = []
+        recorded: dict = {}
+
+        async def _query(prompt, options):
+            recorded["path"] = options.kwargs["system_prompt"]["path"]
+            if False:  # pragma: no cover, makes this an empty async generator
+                yield
+
+        stub = _stub_module(_query)
+
+        def _exec_stream(container, command, *, stdin_data, on_line, **_kwargs):
+            # Runs for real, so the runner's own `finally` removes the path.
+            # This stands in for a reap that never let that `finally` run.
+            _run_runner_in_process(monkeypatch, stub, stdin_data, lambda _l: None)
+            Path(recorded["path"]).write_bytes(b"leftover")
+            log.append("session")
+            return runtime.Completed(124, "", "", timed_out=True, bound=bound)
+
+        def _reap(container, **_kwargs):
+            log.append("reap")
+            return runtime.Completed(0, "", "")
+
+        def _exec(container, command, **_kwargs):
+            log.append("exec")
+            return subprocess.run(command, check=True)
+
+        try:
+            with pytest.raises(implement.AgentFailed):
+                implement.run_agent(
+                    "cell",
+                    prompt="p",
+                    options=options,
+                    spec_id="SY-1",
+                    exec_stream=_exec_stream,
+                    reap_cell=_reap,
+                    exec_=_exec,
+                )
+            assert not Path(recorded["path"]).exists()
+        finally:
+            Path(recorded.get("path", "")).unlink(missing_ok=True)
+        return log, recorded
+
+    for bound in ("idle", "wall"):
+        log, _recorded = _one_kill(bound)
+        assert log == ["session", "reap", "exec"]
+
+
+def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch):
+    import json as _json
+
+    from saffron.agents.findings import Finding
+    from saffron.phases import rebut
+
+    prompts_dir = Path(rebut.__file__).resolve().parents[1] / "agents" / "prompts"
+    context_md = (Path(rebut.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
+
+    class _CLIConnectionError(Exception):
+        pass
+
+    def _assistant(text=None, empty=False):
+        content = [] if empty else [SimpleNamespace(text=text)]
+        return SimpleNamespace(content=content, model="claude-test")
+
+    def _result_message():
+        return SimpleNamespace(
+            subtype="success",
+            num_turns=1,
+            session_id="sess-v",
+            total_cost_usd=0.05,
+            terminal_reason="completed",
+            is_error=False,
+        )
+
+    def _query_valid(finding):
+        async def _query(prompt, options):
+            payload = _json.dumps(
+                {
+                    "verdicts": [
+                        {"finding": finding, "verdict": "withdrawn", "reason": "ok"}
+                    ]
+                }
+            )
+            yield _assistant(f"<output>{payload}</output>")
+            yield _result_message()
+
+        return _query
+
+    async def _query_never_started(prompt, options):
+        if False:  # pragma: no cover, raises before any yield
+            yield
+        raise _CLIConnectionError(
+            "Failed to start Claude Code: [Errno 7] Argument list too long"
+        )
+
+    async def _query_started_then_raises(prompt, options):
+        yield _assistant(empty=True)
+        raise _CLIConnectionError(
+            "Failed to start Claude Code: [Errno 7] Argument list too long"
+        )
+
+    def _silent_wall_kill(container, command, *, stdin_data, on_line, **_kwargs):
+        return runtime.Completed(124, "", "", timed_out=True, bound="wall")
+
+    def _es(query):
+        return _exec_stream_via_runner(monkeypatch, _stub_module(query))
+
+    def _blocker(lens, n):
+        return Finding(
+            lens=lens, severity="blocker", file="a.py", line=n, claim=f"claim {n}"
+        )
+
+    def _rebuttal_block(n):
+        payload = _json.dumps(
+            {
+                "rebuttals": [
+                    {"finding": i, "action": "argued", "argument": "a"}
+                    for i in range(1, n + 1)
+                ]
+            }
+        )
+        return f"<output>{payload}</output>"
+
+    def _agent(rebuttal_texts, verdict_scripts):
+        calls = {"n": 0}
+        scripts = iter(verdict_scripts)
+
+        def agent(container, *, prompt, options, resume=None, emit, **_kwargs):
+            calls["n"] += 1
+            if resume is not None:
+                return implement.AttemptResult(
+                    session_id="sess-1",
+                    subtype="success",
+                    terminal_reason="completed",
+                    num_turns=1,
+                    cost_usd_est=0.05,
+                    text=rebuttal_texts[calls["n"] - 1],
+                )
+            exec_stream, reap_cell, exec_ = next(scripts)
+            return implement.run_agent(
+                container,
+                prompt=prompt,
+                options=options,
+                spec_id="SY-1",
+                emit=emit,
+                exec_stream=exec_stream,
+                reap_cell=reap_cell,
+                exec_=exec_,
+            )
+
+        return agent
+
+    def _rebut(blockers, verdict_scripts):
+        return rebut.run_rebut(
+            "cell",
+            blockers=blockers,
+            options=implement.agent_options(
+                system_prompt="s", max_turns=5, budget_usd=2.0
+            ),
+            session_id="sess-1",
+            spec_body="fix the gap",
+            context_md=context_md,
+            claude_md=None,
+            prompts_dir=prompts_dir,
+            max_turns=5,
+            budget_usd=2.0,
+            head_moved=lambda: True,
+            rerun_gates=lambda: None,
+            critic_container=lambda: "critic-cell",
+            diff=lambda _critic: "diff",
+            agent=_agent(
+                [_rebuttal_block(len(blockers)), _rebuttal_block(len(blockers))],
+                verdict_scripts,
+            ),
+            spec_id="SY-1",
+            reviewed_diff="diff",
+            emit=lambda _e: None,
+        )
+
+    # Run A: correctness valid, contract never started, adequacy started then
+    # raised. Only `contract` is named: it is the only one that never started.
+    result_a = _rebut(
+        [
+            _blocker("correctness", 1),
+            _blocker("contract", 2),
+            _blocker("adequacy", 3),
+        ],
+        [
+            (_es(_query_valid(1)), _no_reap, _no_exec),
+            (_es(_query_never_started), _no_reap, _no_exec),
+            (_es(_query_started_then_raises), _no_reap, _no_exec),
+        ],
+    )
+    assert result_a.state == "GATE_ERROR"
+    assert "contract" in result_a.why
+    assert "Argument list too long" in result_a.why
+    assert "correctness" not in result_a.why
+    assert "adequacy" not in result_a.why
+
+    # Run B: correctness reuses A's "started then raised" session, contract is
+    # a silent bound kill with no runner output at all. Neither never started.
+    result_b = _rebut(
+        [_blocker("correctness", 1), _blocker("contract", 2)],
+        [
+            (_es(_query_started_then_raises), _no_reap, _no_exec),
+            (_silent_wall_kill, _no_reap, _no_exec),
+        ],
+    )
+    assert result_b.state == "REBUTTING"
+
+    # Run C: correctness reuses A's "started then raised" session again,
+    # contract reuses A's own never-started session.
+    result_c = _rebut(
+        [_blocker("correctness", 1), _blocker("contract", 2)],
+        [
+            (_es(_query_started_then_raises), _no_reap, _no_exec),
+            (_es(_query_never_started), _no_reap, _no_exec),
+        ],
+    )
+    assert result_c.state == "GATE_ERROR"
+    assert "contract" in result_c.why
+    assert "correctness" not in result_c.why

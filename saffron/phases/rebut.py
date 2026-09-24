@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, ValidationError
 from saffron.agents import context
 from saffron.agents.artifacts import parse_output_block
 from saffron.agents.findings import Finding
-from saffron.events import Event, PhaseStart, describe
+from saffron.events import Agent, Event, PhaseStart, describe
 from saffron.phases import implement, review
 
 VERDICT_PROMPT_FILE = "rebut-verdict.md"
@@ -85,6 +85,9 @@ class LensVerdicts:
     verdicts: list[Verdict] = field(default_factory=list)
     cost_usd: float = 0.0
     error: str | None = None
+    # Set only when `error` is too: the runner reported that `query` yielded
+    # no message before this session raised (backlog b-8487de).
+    never_started: bool = False
 
 
 @dataclass
@@ -259,6 +262,19 @@ def verdict_prompt(
     )
 
 
+def _never_started(event: Event) -> bool:
+    """The runner reported that `query` yielded no message before this
+    session raised (backlog b-8487de). `event.event` is `None` for a reap
+    line, a quarantined raw line or a host-authored fact. None of those
+    say whether `query` ran, so they pass over rather than reset this."""
+    return (
+        isinstance(event, Agent)
+        and event.event is not None
+        and event.event.get("type") == "error"
+        and event.event.get("query_yielded") is False
+    )
+
+
 def run_verdict(
     container: str,
     *,
@@ -279,13 +295,22 @@ def run_verdict(
         budget_usd=budget_usd,
         tools=review.REVIEW_TOOLS,
     )
+    never_started = False
+
+    def _watch(event: Event) -> None:
+        nonlocal never_started
+        never_started = never_started or _never_started(event)
+        emit(event)
+
     try:
         attempt = agent(
-            container, prompt=VERDICT_TURN_PROMPT, options=options, emit=emit
+            container, prompt=VERDICT_TURN_PROMPT, options=options, emit=_watch
         )
     except implement.AgentFailed as failed:
         cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
-        return LensVerdicts(lens, cost_usd=cost, error=str(failed))
+        return LensVerdicts(
+            lens, cost_usd=cost, error=str(failed), never_started=never_started
+        )
     try:
         report = _Verdicts.model_validate(json.loads(parse_output_block(attempt.text)))
     except (ValueError, ValidationError) as exc:
@@ -328,6 +353,12 @@ def rebut_state(
             "REBUTTING",
             f"the rebuttal moved no commit and made no argument: {detail}",
         )
+    if never_started := [v for v in verdicts if v.error and v.never_started]:
+        # Infrastructure, not the critic's output (§3.3). No other lens is
+        # named, whatever else in `verdicts` also carries an error.
+        names = [v.lens for v in never_started]
+        detail = "; ".join(v.error or "" for v in never_started)
+        return "GATE_ERROR", f"{names} never started: {detail}"
     if errored := [v.lens for v in verdicts if v.error]:
         return "REBUTTING", f"{errored} produced no verdict — the rebuttal is unjudged"
     confirmed = [
