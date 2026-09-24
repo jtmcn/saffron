@@ -1955,10 +1955,31 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
     return None
 
 
+def _size_blocker(target: Spec) -> str | None:
+    """Prints how `estimated_lines` prices against the `size` ceiling of the
+    spec's type. Returns a blocker at or above 80% of that ceiling."""
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
+
+    lines = target.estimated_lines
+    if lines is None:
+        print("size: no estimated_lines declared")
+        return None
+    ceiling = _CEILINGS.get(target.type, _DEFAULT_CEILING)
+    price = lines * _TOKENS_PER_LINE
+    head = f"estimated_lines={lines} ({price} tokens at {_TOKENS_PER_LINE} a line) is"
+    tail = f"80% of the {target.type} ceiling of {ceiling} tokens"
+    # Integers only, so no float rounding moves the boundary.
+    if 5 * price >= 4 * ceiling:
+        return f"{head} at or above {tail}, split into a parent and children"
+    print(f"size: {head} under {tail}")
+    return None
+
+
 def cmd_check(args) -> int:
     """Judge a spec's ceilings against cells of its own shape, before a cell
     runs — the arithmetic `_ceilings_line` renders, turned into an exit
-    status."""
+    status. A declared `estimated_lines` priced at or above 80% of its type's
+    `size` ceiling blocks too, with or without past cells."""
     specs = _known_specs()
     target = specs.get(args.spec_id)
     if target is None:
@@ -1972,10 +1993,19 @@ def cmd_check(args) -> int:
         ledger.close()
     rows = _select_rows(target, cells)
     print(_ceilings_line(target, rows))
+    size_blocker = _size_blocker(target)
     if not rows:
-        return 0
+        if size_blocker:
+            print(f"blocker: {size_blocker}")
+        return 1 if size_blocker else 0
     blockers = [
-        b for b in (_turns_blocker(target, rows), _budget_blocker(target, rows)) if b
+        b
+        for b in (
+            _turns_blocker(target, rows),
+            _budget_blocker(target, rows),
+            size_blocker,
+        )
+        if b
     ]
     for blocker in blockers:
         print(f"blocker: {blocker}")
@@ -2751,7 +2781,9 @@ def main() -> int:
     p.set_defaults(func=cmd_history)
 
     p = sub.add_parser(
-        "check", help="judge a spec's ceilings against cells of its shape"
+        "check",
+        help="judge a spec's ceilings against cells of its shape, "
+        "and its estimated_lines against its size ceiling",
     )
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_check)
