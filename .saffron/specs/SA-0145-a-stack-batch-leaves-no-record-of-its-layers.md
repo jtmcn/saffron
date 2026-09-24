@@ -1,0 +1,279 @@
+---
+id: SA-0145
+title: A stack batch leaves no record of its layers, so nothing can say which task each one was cut from
+type: feature
+priority: 1
+depends_on: [SA-0144]
+touches:
+  - saffron/ledger.py
+  - saffron/batch.py
+  - tests/test_batch.py
+forbidden:
+  - DESIGN.md
+  - CONTEXT.md
+  - CLAUDE.md
+  - README.md
+  - pyproject.toml
+  - uv.lock
+  - .saffron/**
+  - .claude/**
+  - ontology/**
+  - tests/ontology/**
+  - docs/**
+  - images/**
+  - harness/**
+  - records/**
+  - saffron/task.py
+  - saffron/cli.py
+  - saffron/scheduler.py
+  - saffron/intake.py
+  - saffron/events.py
+  - saffron/record/**
+  - saffron/repos/**
+  - saffron/cell/**
+  - saffron/gates/**
+  - saffron/phases/**
+  - tests/test_task.py
+  - tests/test_cli.py
+  - tests/test_scheduler.py
+  - tests/test_ledger.py
+  - tests/test_ledger_fold_task.py
+budget_usd: 24
+max_attempts: 3
+max_turns: 140
+acceptance:
+  - claim: >-
+      `run_stack_batch` writes one `stack_layers` row for each task that
+      returned `READY_FOR_REVIEW`, and for no other. On a ledger with a
+      record it appends one `stack_layer` fact for each, under that task's
+      record key. The row holds the batch's id as text, the layer's
+      position from 1 among layers only, the spec id, the task's record key,
+      the record key of the layer below or `NULL`, the layer below's
+      `pushed_sha` or `NULL`, and generation 0. The witness drives
+      `EXHAUSTED`, `MERGE_FAILED`, `GATE_ERROR`, a `Refused` and a raise
+      between layers. It drives a ledger with a record and one without. And
+      `run_batch`, given the same results, writes no row.
+    witness: tests/test_batch.py::test_a_stack_batch_records_one_layer_for_each_task_that_reached_review
+  - claim: >-
+      Folding the record rebuilds the `stack_layers` rows the batch wrote. A
+      fold into a fresh ledger whose task ids differ from the writer's gives
+      the same rows. A fold into the ledger that wrote them leaves them as
+      they were, three and no more.
+    witness: tests/test_batch.py::test_the_stack_layers_fold_back_from_the_record_alone
+---
+
+## Context
+
+Backlog item **b-792ab2**, step 1 of its Done. It cites `DESIGN.md` §4.1
+and §4.2.1. ADR 7
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
+decides a stack batch. Section 1 of
+`docs/superpowers/specs/2026-09-23-stack-batch-design.md` is the design,
+and its **Recording** paragraph names this table.
+
+A stack batch runs the queued specs into one pull request stack. Each task
+that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
+from its head. That task is the next layer's **predecessor**. A task that
+misses `READY_FOR_REVIEW` adds no layer.
+
+**This spec is the last of four.** `SA-0142` builds the stack order.
+`SA-0143` builds `run_stack_batch` in `saffron/batch.py`, which runs that
+order and hands each task its predecessor's branch. `SA-0144` adds
+`saffron batch --stack`, which calls it. This spec records each layer, so
+the driver's `stack` and `status` can read the stack from the ledger in a
+later step.
+
+**What the tree base holds.** This spec's tree base is `SA-0144`'s head.
+Only `depends_on[0]` stacks (`saffron/task.py:133-136`), and the chain
+`SA-0142`, `SA-0143`, `SA-0144` is what puts `run_stack_batch` and
+`Refused` there. Every line number below was read at `71ef7909`. The
+chain edits `batch.py`, so read its lines there by symbol.
+
+**The fact kind exists and nothing places it.** `stack_layer` is in `KINDS`
+(`saffron/record/contract.py:38`). `Ledger._apply` places eleven kinds and
+raises on any other (`saffron/ledger.py:508-649`). So a `stack_layer` fact
+today aborts the fold (`saffron/record/fold.py:59-63`).
+
+**How a write reaches the record.** Each write method builds one fact with
+`_build_fact` and hands it to `_commit_and_append`
+(`saffron/ledger.py:372-404`). That applies the fact through `_apply`,
+commits, then appends it when the ledger holds a record. No production
+caller builds a `Ledger` with a record yet (`saffron/ledger.py:3-4`). So in
+production the row is written and no fact is kept. A test builds one with
+`MemoryRecord` (`saffron/record/memory.py`).
+
+**Why the row is keyed on record keys.** `fold_task` drops a task's rows and
+applies its facts again (`saffron/ledger.py:406-434`). Each task row is
+inserted again and takes a new `task_id`, which a fresh ledger mints in its
+own sequence. The record key is carried on the fact
+(`saffron/ledger.py:517-529`). The fold rebuilds no `batches` row
+(`saffron/record/fold.py:8-13`), so a reference to `batches` fails on a
+fresh ledger, with `foreign_keys=ON` (`saffron/ledger.py:215`).
+
+**Where the batch id is known.** `_build_fact` takes the fact's
+`batch_key` from `runs.batch_id` (`saffron/ledger.py:374-391`). In
+`_drive`, `runner(candidate)` (`saffron/batch.py:208`) returns before
+`ledger.attach_run_to_batch` runs (`:233`). So a fact built inside a runner wrapper,
+before that attach, carries no batch.
+
+## Problem
+
+Build three things.
+
+1. **The table.** Add `stack_layers` to `SCHEMA` in `saffron/ledger.py`,
+   with no reference to another table:
+
+   | column | type |
+   |---|---|
+   | `task_key` | `TEXT PRIMARY KEY` |
+   | `batch_key` | `TEXT` |
+   | `position` | `INTEGER NOT NULL` |
+   | `spec_id` | `TEXT NOT NULL` |
+   | `predecessor_key` | `TEXT` |
+   | `predecessor_head` | `TEXT` |
+   | `generation` | `INTEGER NOT NULL` |
+
+   `SCHEMA` runs on every open (`saffron/ledger.py:216`), so a ledger file
+   from before gains the table.
+2. **The fact and its placement.** Add `Ledger.record_stack_layer`. It takes
+   the layer's `task_id`, its position, the predecessor's `task_id` or
+   `None`, and the generation. It looks up the predecessor's record key
+   and `pushed_sha`, and builds one `stack_layer` fact under the layer's
+   own key. The payload carries the position, the spec id, the
+   predecessor's key and head, and the generation, never a `task_id`. It
+   writes through `_commit_and_append`. `_apply` places the fact as one
+   `stack_layers` row, with `batch_key` from the fact. `_drop_task_rows`
+   deletes the task's `stack_layers` row, so a fold into a ledger that
+   already holds it replaces it.
+3. **The writer.** `run_stack_batch` calls `record_stack_layer` once for
+   each task that returns `READY_FOR_REVIEW`. The row names the batch
+   `run_stack_batch` opened. Generation is 0, because every task here is
+   a queued spec.
+
+Two docstring sentences in `saffron/ledger.py` become false. "Only the
+eleven kinds" (`:6`) becomes twelve. "Eight of the nine tables" (`:11`)
+becomes nine of ten. Update both.
+
+## Out of scope
+
+- **Reading the table.** The driver's `status` and `stack`, and the queue
+  page's stack view, are later steps of b-792ab2.
+- **The handoff's own head.** The row holds the predecessor's
+  `pushed_sha`, the head PACKAGE pushed. `cli._stack_runner` fetches the
+  branch head from the origin, and hands the layer that head. The two
+  differ only after a hand push to the branch before the fetch.
+  `saffron/cli.py` is forbidden here, so the fetched head is left to the
+  finishing layer, step 8.
+- **Generation 1.** Follow-up specs are step 7 of b-792ab2.
+- **Gate 0's overlap exemption.** That is step 2.
+- **The `batches` row in a fold.** The fold rebuilds no batch
+  (`saffron/record/fold.py:8-13`). The row keeps the batch's id as text,
+  as the fact carries it.
+- **`DESIGN.md` §4.1's schema sketch.** It lists no `record_key` column
+  today, and it gains no `stack_layers` here. `DESIGN.md` is protected.
+- **The vocabulary.** `CONTEXT.md` has no entry for a layer. Backlog item
+  b-466005 files it by hand.
+
+## Notes for the agent
+
+**Both criteria are new code.** No text at the tree base places a
+`stack_layer` fact or names the table. So both declare a witness and no
+mutant, and `witness` reports `skip` for them.
+
+**Import every new name inside the test body.** `run_stack_batch` and
+`Refused` are at the tree base. `record_stack_layer` and the table are
+not.
+
+**How `run_stack_batch` learns its batch is your choice.** A fact built
+before `_drive`'s attach has no `batch_key`, and criterion 1 fails. One
+way is a keyword on `_drive` that receives each outcome after the attach,
+with the batch id. `run_batch` must pass none, and write no row.
+
+**Both witnesses share one arrangement.** Write a runner class in
+`tests/test_batch.py` that takes the ledger, a repo id and a script of
+results. Each call records the spec id and the predecessor's, or `None`.
+For a `Refused` it returns one and creates nothing. For any other result
+it creates a run and a task for the spec id. It records a push of a sha
+unique to that spec. For `READY_FOR_REVIEW` and `MERGE_FAILED` it calls
+`set_task_package` with that state and sha. It then returns
+`_outcome(state=..., run_id=..., task_id=...)`, or raises after creating
+the task. Its predecessor argument defaults to `None`, so `run_batch` can
+call it too. Use `_candidate` and `_ready`, a budget of 100 and
+`until=None`.
+
+The script, in order:
+
+| order | spec | result | layer |
+|---|---|---|---|
+| 1 | `TE-7` | `READY_FOR_REVIEW` | 1, below it nothing |
+| 2 | `TE-3` | `GATE_ERROR` | none |
+| 3 | `TE-9` | `READY_FOR_REVIEW` | 2, below it `TE-7` |
+| 4 | `TE-1` | raises `RuntimeError` | none |
+| 5 | `TE-5` | `EXHAUSTED` | none |
+| 6 | `TE-8` | `MERGE_FAILED` | none |
+| 7 | `TE-2` | a `Refused` | none |
+| 8 | `TE-6` | `READY_FOR_REVIEW` | 3, below it `TE-9` |
+
+No two aborts are adjacent, so the breaker never fires, and the stop
+reason is `DRAINED`.
+
+**Criterion 1's witness** runs the script through `run_stack_batch` on a
+`Ledger` built with a `MemoryRecord`. It reads `stack_layers` ordered by
+`position`. It asserts exactly three rows, each column equal to the table
+above. `batch_key` is `str` of the batch's id, read as `_latest_batch_id`
+does. `task_key` is `ledger.record_key` of that spec's task.
+`predecessor_head` is the sha pushed for the spec below. It asserts
+exactly three `stack_layer` facts in the record, one under each layer's
+key, and none under another task's key. It runs the script again on a
+`Ledger` with no record, and asserts the same three rows by the same
+rules. Then it runs the script through `run_batch` on a third ledger,
+with a rescan that returns the same candidates, and asserts no row.
+These fail it:
+
+- a position counted over every task run, which gives 1, 3 and 8
+- a row for `MERGE_FAILED`, which packaged and pushed
+- a predecessor taken as the last task run, or the last with a push
+- the layer's own `pushed_sha` as `predecessor_head`
+- a `task_id` stored where a record key goes
+- a fact built before the attach, whose `batch_key` is `None`
+- a hook in `_drive` that `run_batch` fires too
+- a row written and no fact appended, or a fact appended and no row
+
+**Criterion 2's witness** runs the script through `run_stack_batch` on a
+`Ledger` built with a `MemoryRecord`. It reads the three rows as dicts.
+It opens a fresh `Ledger` with no record and creates one unrelated repo,
+run and task there first. So every folded task gets a different
+`task_id` from its source row. It calls `saffron.record.fold.fold` with
+the record and the fresh ledger, and asserts its rows equal the
+source's. It then calls `fold` with the record and the source ledger
+itself, and asserts the source's rows are unchanged, three and no more.
+These fail it:
+
+- `_apply` with no branch for `stack_layer`, which aborts the fold
+- a predecessor stored as a `task_id`, or looked up by one at fold time
+- `_drop_task_rows` that leaves the row, which raises on the primary key
+- a reference from `batch_key` to `batches`, which a fresh ledger lacks
+
+Measured on 2026-09-23 at `71ef7909`, with the script's seven tasks
+written by hand and no layer. After one unrelated task, `fold` gave every
+task a `task_id` one above its source row. A second `fold` into the
+source ledger folded all seven with none skipped.
+
+**What the witnesses leave undriven.** A layer whose predecessor has no
+`pushed_sha` is not driven. PACKAGE writes `READY_FOR_REVIEW` through
+`set_task_package`, whose `pushed_sha` is a required `str`
+(`saffron/ledger.py:1109-1119`). Record `NULL` there all the same. The in-flight states,
+`RATE_LIMITED` and `PREFLIGHT_FAILED` are not driven. Test for
+`READY_FOR_REVIEW` alone, so each of them adds no layer.
+
+**The `prose` gate** counts every new comment and docstring. Write none
+with an em dash, a semicolon, a contraction, the perfect tense or a
+sentence over 25 words. Keep each docstring within ten lines.
+
+**Commit as each witness passes**, before the full suite runs.
+
+**Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
+`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). About
+75 changed lines in `ledger.py` at 4.8 tokens a line, and 35 in
+`batch.py` at 6.3, are about 580 tokens. About 150 lines of test at 3.4
+are about 510. That is about 1100 tokens.

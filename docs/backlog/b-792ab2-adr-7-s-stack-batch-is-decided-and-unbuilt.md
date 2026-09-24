@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -53,3 +53,5 @@ escalations.
   `--stack` flags on `saffron batch` and `saffron queue`. `SA-0142` now
   stacks on `SA-0136`, so one chain carries all three. The layers' record
   becomes `SA-0145`, and build steps 2 to 9 take `SA-0146` to `SA-0153`.
+- 2026-09-23: `SA-0145` records each layer in a `stack_layers` table,
+  keyed on record keys so a fold rebuilds it. It depends on `SA-0144`.
