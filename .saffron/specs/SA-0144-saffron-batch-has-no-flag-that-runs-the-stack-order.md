@@ -46,13 +46,17 @@ acceptance:
       `saffron batch --stack` calls `_resolve_queue` once, with `stack=True`,
       `stamp_orphaned=True` and the pinned base. It hands that call's
       candidates, in order, to `run_stack_batch` with the runner
-      `_stack_runner` returns. It never calls `run_batch`.
+      `_stack_runner` returns. It never calls `run_batch`. When readiness
+      fails, it exits 2 and prints the failed step. When `_resolve_queue`
+      raises, it exits 2 and prints that the queue could not be resolved.
+      Each leaves a batch row closed `INFRASTRUCTURE`.
     witness: tests/test_cli.py::test_saffron_batch_stack_plans_once_and_runs_that_order
   - claim: >-
       `saffron queue --stack` prints the candidates of `build_queue` with
       `stack=True` in the stack order, and its refusals. The witness drives
       a child whose parent has no task, which only the stack order admits,
-      and a spec whose entry is declared nowhere.
+      and a spec whose entry is declared nowhere. The same repo without
+      `--stack` lists the parent alone and refuses the child.
     witness: tests/test_cli.py::test_queue_stack_prints_the_stack_order
   - claim: >-
       Without `--stack`, `saffron queue` prints what it printed before.
@@ -108,12 +112,20 @@ Add `--stack` to `saffron batch` and to `saffron queue`.
 2. `saffron queue --stack` passes `stack=True` and prints as today.
 3. `saffron batch --stack` resolves once with `stack=True`. It builds the
    runner with `_stack_runner` and calls `run_stack_batch` in place of
-   `run_batch`, with no rescan. It keeps the readiness check, the printed
+   `run_batch`, with no rescan. The `repo_id` it passes `_stack_runner`
+   is a callable that asks `ledger.resolve_repo_id(pinned.url)` for each
+   task, the lookup `_resolve_queue` makes (`saffron/cli.py:576`). It is
+   not the opening scan's value, which is `None` on a repo's first night. It keeps the readiness check, the printed
    plan and the exit codes it has today. Its runner before readiness
    passes takes a candidate and a predecessor, as `run_stack_batch`'s
    runner does.
 
 Without `--stack`, both commands behave as today.
+
+`_batch`'s docstring says `run_batch` is the only caller of
+`create_batch` and `close_batch` in this module, and that the exit codes
+are `run_batch`'s stop reasons (`saffron/cli.py:757-762`). Reword both
+sentences to name `run_stack_batch` too.
 
 ## Out of scope
 
@@ -142,31 +154,75 @@ and change nothing else in them.
 
 **Criterion 1's witness** follows
 `test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans`
-(`tests/test_cli.py:2692-2753`), with `_readiness_passes`. It fakes
-`_resolve_queue` to record its keywords and return `SY-2` then `SY-1`. It
-fakes `cli.run_stack_batch` to record its candidates and runner and return
-`DRAINED`. It fakes `cli.run_batch` to fail the test.
-`main([..., "batch", "--stack"])` returns 0. It asserts one
-`_resolve_queue` call, with `stack=True`, `stamp_orphaned=True` and a
-pinned base. It then calls the recorded runner with `SY-2` and `None`,
-with `cli.run_task` replaced, and asserts a handoff of two `None`s. These
-fail it:
+(`tests/test_cli.py:2692-2753`). It fakes `cli.run_batch` to fail the
+test in all three of its cases.
+
+- **Readiness passes**, with `_readiness_passes`. It fakes
+  `_resolve_queue` to record its keywords and return `SY-2` then `SY-1`.
+  It fakes `cli._stack_runner` to record its keywords and return a
+  sentinel object. It fakes `cli.run_stack_batch` to record its
+  candidates and runner and return `DRAINED`.
+  `main([..., "batch", "--stack"])` returns 0. It asserts one
+  `_resolve_queue` call, with `stack=True`, `stamp_orphaned=True` and a
+  pinned base. It asserts the candidates, in order, and that the runner
+  is the sentinel. It then calls the real `_stack_runner` with the
+  recorded keywords, with `cli.run_task` replaced. It calls that runner
+  with `SY-2` and `None`. It asserts the `handoff` equals
+  `Handoff(stacked_on=None, target_branch=None)`, a real instance, which
+  `None` is not.
+- **Readiness fails**, as
+  `test_a_readiness_failure_names_the_step_that_failed` sets it up
+  (`tests/test_cli.py:2972-2993`), with the real `run_stack_batch`. It
+  expects exit 2, the step and detail printed, and the newest `batches`
+  row closed `INFRASTRUCTURE`.
+- **`_resolve_queue` raises**, as
+  `test_any_raise_resolving_the_queue_still_closes_the_batch_row` sets it
+  up (`tests/test_cli.py:3632-3657`), with the real `run_stack_batch`. It
+  expects exit 2, `batch: the queue could not be resolved:` and the
+  raise's text, and the row closed `INFRASTRUCTURE`. It expects no
+  `readiness failed`, as
+  `test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line` does
+  (`tests/test_cli.py:3661-3683`).
+
+These fail it:
 
 - a rescan on the stack path
 - `run_batch` called with the stack order
 - `_batch_runner`'s runner handed to the stack loop
+- a two-argument wrapper over `_batch_runner` that drops the predecessor
 - `stack` left at its default in the one call
+- a stack branch placed inside `if readiness.ok`
+- a stack path that hands the loop a readiness check blind to the scan's
+  raise, which prints `DRAINED` and exits 0
 
 **Criterion 2's witness** uses `_repo_with_spec`
 (`tests/test_cli.py:1268`). `SY-1` has priority 1 and
 `depends_on: [SY-2]`. `SY-2` has priority 3. `SY-3` depends on `SY-9`,
 which no spec declares. It runs `queue --stack` and reads the lines after
 `queue:`. The candidates are `SY-2` then `SY-1`, and a refusal line names
-`SY-3` and `SY-9`. The same repo without `--stack` lists `SY-2` alone.
-These fail it:
+`SY-3` and `SY-9`. The same repo without `--stack` lists `SY-2` alone
+and refuses `SY-1`. These fail it:
 
 - a flag parsed and not passed
 - candidates sorted by priority, which puts `SY-1` first
+- `_queue` passing `stack=True` always, which the default half catches
+
+That default half guards criterion 3. Its witness writes one spec with no
+`depends_on` (`tests/test_cli.py:1318-1321`). So a `_queue` that always
+passes `stack=True` prints the same bytes there.
+
+Measured on 2026-09-23 at `71ef7909`, the default half printed:
+
+```
+reconcile: nothing moved
+queue: 1 candidate(s)
+  SY-2       priority=3  .saffron/specs/SY-2.md
+refusals: 2
+  .saffron/specs/SY-1.md: depends_on SY-2 has no task at its current spec_sha, so nothing says it merged: it has not run, or not since it was last edited
+  .saffron/specs/SY-3.md: depends_on SY-9 is not among the specs in this directory, not retired to done/ as shipped, and no task in the ledger says it merged
+```
+
+The stack half needs `SA-0142`'s head and was not run.
 
 **The `prose` gate** counts every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
@@ -174,7 +230,7 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** About 45 changed lines of source and 110 of test. `SA-0131`'s
+**Size.** About 50 changed lines of source and 170 of test. `SA-0131`'s
 cell measured 4.3 tokens a line in `saffron/cli.py` and 4.0 in
-`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 620 tokens
+`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 870 tokens
 of the 3000 ceiling (`saffron/gates/core/size.py:26`).

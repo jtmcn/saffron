@@ -40,7 +40,7 @@ forbidden:
   - tests/test_package.py
 budget_usd: 27
 max_attempts: 3
-max_turns: 160
+max_turns: 175
 pending_symbols:
   - saffron/batch.py::run_stack_batch
   - saffron/cli.py::_stack_runner
@@ -64,8 +64,9 @@ acceptance:
       refuse, and none twice. In the witness no spec has a `depends_on`.
       It hands each task the last task before it that returned
       `READY_FOR_REVIEW`, and `None` before any has. A task adds no layer
-      when it returns any other state, a `Refused`, or raises. The witness drives `EXHAUSTED`,
-      `MERGE_FAILED`, `GATE_ERROR`, a `Refused` and a raise.
+      when it returns any other state, a `Refused`, or raises. The witness
+      drives `EXHAUSTED`, `MERGE_FAILED`, `GATE_ERROR`, a `Refused` and a
+      raise.
     witness: tests/test_batch.py::test_a_stack_batch_hands_each_task_the_last_task_that_reached_review
   - claim: >-
       `run_stack_batch` never runs a spec that reaches, through a
@@ -73,10 +74,12 @@ acceptance:
       missed `READY_FOR_REVIEW`. It reaches it directly or through a spec
       refused this way. The batch emits one line for each such spec, its id
       padded to ten, then ` refused  `, then a reason naming every spec it
-      reaches that missed. A spec that reaches none of them still runs. The
-      witness drives a child, a grandchild and a later entry, each of a
-      spec that ended `EXHAUSTED`. It drives a spec that reaches two that
-      missed, one by a raise and one by a `Refused`.
+      reaches that missed. An entry outside the batch never counts as a
+      miss. A spec that reaches none of them still runs, on the last layer
+      as its predecessor. The witness drives a child, a grandchild and a
+      later entry, each of a spec that ended `MERGE_FAILED`. It drives a
+      spec that reaches two that missed, one by a raise and one by a
+      `Refused`. It drives a spec whose second entry is outside the batch.
     witness: tests/test_batch.py::test_a_stack_batch_refuses_every_descendant_of_a_task_that_missed_review
   - claim: >-
       A runner that raises counts toward the breaker in a stack batch. Two
@@ -181,8 +184,8 @@ Build four things.
    add `_stack_runner`. It takes the same keywords and returns the runner
    `run_stack_batch` takes. Given a predecessor, it calls
    `fetch_parent_branch` on the pinned mirror and url with the branch
-   `run_task` gave that predecessor's task. It lets any exception from the
-   fetch propagate. It calls `run_task` with the resulting `Handoff`.
+   `scheduler._branch` names for that predecessor's spec id. It lets any
+   exception from the fetch propagate. It calls `run_task` with the resulting `Handoff`.
 
 No production code calls `run_stack_batch` or `_stack_runner` until
 `SA-0144`. So both are `pending_symbols`, and the `dead` gate defers them
@@ -200,9 +203,9 @@ while this spec is open.
 - **The later steps of b-792ab2.** They are the end review, the
   rate-limit wait and spec review in the batch. Follow-up specs, the
   finishing layer and the queue page's stack view are later steps too.
-- **`repo_id` after the first task.** A stack batch never rescans, so the
-  runner keeps the opening scan's `repo_id`. On a repo's first night it is
-  `None`. At `be9a9f90`, with a handoff, `run_task` reads it only in
+- **`repo_id` per task.** `_stack_runner` takes `repo_id` as a callable,
+  as `_batch_runner` does. `SA-0144` passes one that asks the ledger for
+  each task. At `be9a9f90`, with a handoff, `run_task` reads it only in
   `push_unpackaged_work`, which looks for another waiting task of the same
   spec (`saffron/phases/package.py:1097-1104`). A stack batch runs each
   spec once, so that check has nothing to find.
@@ -234,11 +237,13 @@ their lines. `_drive` counts a raise as an abort
 (`saffron/batch.py:209-227`). From `SA-0135` it also skips the attach and
 the breaker's count for a `Refused`.
 
-**Name the branch once.** `run_task` names each task's branch
-`saffron/<spec id>` (`saffron/task.py:306`). Put that in one function in
-`task.py` that `run_task` and the stack runner both call.
-`saffron/phases/package.py:649` keeps its own copy, and `phases/` is
-forbidden here.
+**Name the branch once.** `scheduler._branch` already names it
+(`saffron/scheduler.py:162-163`), and `task.py` already imports from
+`scheduler` (`saffron/task.py:46`). Import `_branch` and call it where
+`run_task` builds its `CellSpec` (`saffron/task.py:306`) and in
+`_stack_runner`. Add no new function. Three copies stay as they are,
+because their files are forbidden here: `saffron/phases/package.py:649`,
+`saffron/phases/package.py:1067` and `saffron/replay.py:59`.
 
 **Criterion 1's witness** follows `_drive` in `tests/test_task.py:23-83`.
 It replaces `run_one_cell` with a double that records the `CellSpec` and
@@ -294,25 +299,38 @@ row by row, and the stop reason is `DRAINED`. These fail it:
 - a raise or a `Refused` that leaves the task as predecessor
 - the order sorted by id or priority
 
+**One predicate.** "Is a layer" and "missed" are one test and its
+negation: the result is a `CellOutcome` whose state is
+`READY_FOR_REVIEW`. Criterion 3 drives the layer half for each result,
+and criterion 4 the miss half for `MERGE_FAILED`, a raise and a
+`Refused`.
+
 **Criterion 4's witness** passes this order.
 
-- `TE-11` returns `EXHAUSTED`.
+- `TE-11` returns `MERGE_FAILED`.
 - `TE-12` depends on `TE-11`. `TE-13` depends on `TE-12`.
 - `TE-14` returns `READY_FOR_REVIEW`.
 - `TE-15` depends on `TE-14` and `TE-11`, in that order.
 - `TE-16` raises. `TE-17` returns a `Refused`.
 - `TE-18` depends on `TE-16` and `TE-17`.
 - `TE-19` depends on `TE-14` and returns `READY_FOR_REVIEW`.
+- `TE-20` depends on `TE-14` and `TE-99`, in that order, and returns
+  `READY_FOR_REVIEW`. No spec in the order is `TE-99`.
 
 It collects `emit`'s lines. It asserts the runner saw `TE-11`, `TE-14`,
-`TE-16`, `TE-17` and `TE-19` only, and `TE-19`'s predecessor is `TE-14`.
-It asserts exactly one refused line each for `TE-12`, `TE-13`, `TE-15`
-and `TE-18`. It asserts none for `TE-11`, `TE-14`, `TE-16` and `TE-19`.
+`TE-16`, `TE-17`, `TE-19` and `TE-20` only. `TE-19`'s predecessor is
+`TE-14`, and `TE-20`'s is `TE-19`. It asserts exactly one refused line
+each for `TE-12`, `TE-13`, `TE-15` and `TE-18`. It asserts none for
+`TE-11`, `TE-14`, `TE-16`, `TE-19` and `TE-20`, and none names
+`TE-20`.
 It asserts nothing about a line for `TE-17`'s own `Refused`. `TE-12`'s
-and `TE-13`'s name `TE-11`. `TE-15`'s names `TE-11` and not `TE-14`. `TE-18`'s names
-`TE-16` and `TE-17`. These fail it:
+and `TE-13`'s name `TE-11`. `TE-15`'s names `TE-11` and not `TE-14`.
+`TE-18`'s names `TE-16` and `TE-17`. These fail it:
 
 - a check of `depends_on[0]` alone, which runs `TE-15`
+- a predecessor taken from `depends_on[0]`, which hands `TE-20` `TE-14`
+- a refusal unless every entry became a layer, which refuses `TE-20`
+- a miss test that leaves out `MERGE_FAILED`, which runs `TE-12`
 - children refused and grandchildren run, which runs `TE-13`
 - a grandchild's reason that names only `TE-12`
 - a raise, or a `Refused`, not counted as a miss
@@ -343,7 +361,9 @@ turns a raise into a `Refused` fails it.
 - It replaces `cli.run_task` with a double that records `handoff`.
 
 It asserts the mirror has no `refs/heads/saffron/SY-9000`, then drives
-three calls.
+three calls. That check reads `refs/heads` only. The mirror also holds
+`refs/remotes/origin/saffron/SY-9000`, copied from the checkout, so the
+objects are there before the fetch.
 
 - With predecessor `SY-9000`, the handoff is the pushed head and
   `saffron/SY-9000`. The mirror's `refs/heads/saffron/SY-9000` is that head.
@@ -361,7 +381,8 @@ These fail it:
 Measured on 2026-09-23 at `be9a9f90`, with these helpers and
 `fetch_parent_branch` called directly. Before the fetch the mirror had no
 such ref. After it, the ref and the returned head both equalled the pushed
-head. `saffron/SY-7777` raised `ParentGone`.
+head. `saffron/SY-7777` raised `ParentGone`. The mirror's refs then
+included `refs/remotes/origin/saffron/SY-9000`.
 
 **The `prose` gate** counts every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
@@ -369,8 +390,8 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** About 125 changed lines of source and 280 of test. `SA-0131`'s
+**Size.** About 120 changed lines of source and 290 of test. `SA-0131`'s
 cell measured 4.3 tokens a line in `saffron/cli.py` and 4.0 in
-`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 1630
+`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 1640
 tokens of the 3000 ceiling (`saffron/gates/core/size.py:26`). Keep test
 docstrings short.
