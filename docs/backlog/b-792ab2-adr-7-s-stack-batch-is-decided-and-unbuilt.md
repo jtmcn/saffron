@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153, SA-0154]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -72,3 +72,7 @@ escalations.
   top down within a reserve held from the batch budget. It records each
   lens of each layer as reviewed, error or not reached, in an `end_reviews`
   table the fold rebuilds.
+- 2026-09-23: `SA-0154` adds the join lens and a critic cell seeded at a
+  layer's head. It wires the end review into `saffron batch --stack`, with
+  a reserve of a quarter of `--budget`. Its `StackReview` hands `SA-0147`
+  the join's review and each layer's.

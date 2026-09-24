@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153, SA-0154]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -62,3 +62,7 @@ The **Refusal** entry names the stack order's refusal. This lands after
 - 2026-09-23: `SA-0153` holds a reserve for the end review and records a
   lens not reached. "End-review reserve" and a lens's end-review status
   join the entries above.
+- 2026-09-23: `SA-0154` adds the join lens, and a critic cell seeded at a
+  layer's pushed head with no patch applied. "Join lens" joins the entries
+  above. The **Critic cell** entry widens to a cell with no implementer of
+  its own, as ADR 6's Consequences ask.
