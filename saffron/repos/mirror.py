@@ -220,6 +220,7 @@ def export_saffron_dir(mirror: Path, sha: str, dest: Path) -> Path:
 
 _REGULAR_MODES = {"100644", "100755"}
 _SYMLINK_MODE = "120000"
+_TREE_MODE = "040000"
 
 
 def _ls_tree_mode(mirror: Path, sha: str, path: str) -> str | None:
@@ -279,7 +280,7 @@ def unresolved_consumes(mirror: Path, sha: str, entries: list[str]) -> list[str]
         mode = _ls_tree_mode(mirror, sha, path)
         if not sep:
             resolved = mode is not None
-        elif mode is None or mode == "040000":
+        elif mode is None or mode == _TREE_MODE:
             resolved = False
         else:
             text = file_at(mirror, sha, path)

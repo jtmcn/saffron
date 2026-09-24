@@ -711,8 +711,7 @@ def test_file_at_raises_on_a_directory_at_the_path(tmp_path, origin):
 def _consumes_tree(tmp_path):
     """A file, an executable file, a directory, and three symlinks, one
     exact, one dangling, one escaping the tree. `exact.py` and `run.sh` each
-    hold `run_task`, and `pkg/mod.py` holds `helper`. Shared by criteria 1
-    and 2, which the spec says read the same tree."""
+    hold `run_task`, and `pkg/mod.py` holds `helper`."""
     repo = _plain_repo(tmp_path, "consumes")
     (repo / "exact.py").write_text("run_task\n")
     (repo / "run.sh").write_text("run_task\n")
@@ -754,6 +753,11 @@ def test_a_consumed_name_is_read_from_the_file_its_path_names(tmp_path):
 
     not_resolving = ["missing.py:run_task", "pkg:helper", "link.py:exact"]
     assert unresolved_consumes(mirror, sha, not_resolving) == not_resolving
+
+    # A symlink `file_at` cannot follow raises, never reads as unresolved.
+    for entry in ("dangling.py:run_task", "escape.py:run_task"):
+        with pytest.raises(GitError):
+            unresolved_consumes(mirror, sha, [entry])
 
 
 def test_a_consumed_name_matches_only_as_a_whole_word(tmp_path):
