@@ -99,14 +99,15 @@ first turn is paid for. The item asks for a `consumes:` field and a refusal
 before the cell starts, as gate 0 refuses in §4.2.
 
 **This spec is the first of three.** Estimated whole, the change ran to about
-500 changed lines. At 4 tokens a line (`saffron/gates/core/size.py:39`) that
-is about 2000 tokens, against the `feature` ceiling of 3000 tokens
-(`saffron/gates/core/size.py:26`, read at `c915d801`). Past `feature` cells
-touching six files landed between 250 and 660 lines, or 1000 to 2640
-tokens. The top of that range is past 2400, which is 80% of the ceiling. So
-the check splits. This spec builds the
-host's reader of a tree base. `SA-0135` stacks on it and adds the `consumes:` field, the refusal in
-`saffron/task.py`'s `run_task`, and the batch's handling of that refusal.
+800 changed lines: about 200 here and about 600 in the two that stack on it.
+At 4 tokens a line (`saffron/gates/core/size.py:39`) that is about 3200
+tokens, past the `feature` ceiling of 3000 tokens
+(`saffron/gates/core/size.py:26`, read at `c915d801`). So the change splits.
+This spec builds the host's reader of a tree base. `SA-0135` stacks on it
+and adds the `consumes:` field, the refusal in `saffron/task.py`'s
+`run_task`, and the batch's handling of that refusal. `SA-0136` stacks on
+`SA-0135`. It refuses nine malformed entry shapes at load, and turns an
+entry the reader cannot read into a refusal.
 The reader goes first so that no commit carries a field that parses and
 changes nothing, the defect §4.2.1 names in item 18's words.
 
@@ -142,8 +143,9 @@ for the `dead` gate until then.
 
 ## Out of scope
 
-- **The `consumes:` field, its intake rules, and the fixture spec that uses
-  it.** `SA-0135` adds them. `saffron/intake.py` is forbidden here.
+- **The `consumes:` field and the fixture spec that uses it.** `SA-0135`
+  adds them, and `SA-0136` adds the intake rules on each entry.
+  `saffron/intake.py` is forbidden here.
 - **The refusal before the cell, and the batch's handling of it.**
   `SA-0135` wires this reader into `run_task` after `_resolve_stacked_on`
   returns (`saffron/task.py:286-294`) and before `run_one_cell`
@@ -161,7 +163,10 @@ for the `dead` gate until then.
   - a path with a `..` segment, as in `saffron/../CLAUDE.md`
   - a path with an empty segment, as in `saffron//task.py`
   - a path ending in `/`
-  - a path holding a colon, as in `weird:name.py`, which the reader splits
+
+  A path holding a colon, as in `weird:name.py`, cannot be written as an
+  entry. It splits at its first colon and loads. At run time it comes back
+  unresolved, which `SA-0135`'s criterion 3 drives.
 
   A trailing `/` makes `git ls-tree` list the directory's children, so the
   reader would read the first child's mode and then a directory listing as
