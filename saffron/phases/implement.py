@@ -219,7 +219,7 @@ def run_agent(
     downstream of it (SA-0041).
     """
     # A string system prompt travels as a file, never an argument list
-    # (backlog b-8487de). `options` itself is never written into.
+    # (backlog item b-8487de). `options` itself is never written into.
     system_prompt = options.get("system_prompt")
     prompt_path = (
         f"/tmp/saffron-system-prompt-{uuid.uuid4().hex}"

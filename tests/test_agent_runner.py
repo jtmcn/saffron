@@ -1,7 +1,7 @@
-"""The in-cell runner's event mapping, without the SDK and without a key.
+"""The in-cell runner, without the SDK and without a key.
 
-`query()` is never called here: the mapping is fed fake message objects, which
-is the only part of the runner that can be checked on the host at all.
+Most tests feed the event mapping fake message objects. The system-prompt
+witnesses drive `main` in-process against a stub `claude_agent_sdk`.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ import pytest
 from saffron.cell import runtime
 from saffron.phases import implement
 from saffron.repos import image
+from tests.test_implement import _no_reap
+from tests.test_rebut import CONTEXT_MD, PROMPTS, _blocker
 
 RUNNER_PATH = Path(__file__).resolve().parents[1] / "images" / "agent_runner.py"
 
@@ -450,10 +452,6 @@ def _exec_stream_via_runner(monkeypatch, stub):
     return _exec_stream
 
 
-def _no_reap(container, **_kwargs):
-    return runtime.Completed(0, "", "")
-
-
 def _no_exec(container, command, **_kwargs):
     return runtime.Completed(0, "", "")
 
@@ -463,27 +461,20 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
 ):
     import copy
 
-    from saffron.agents.findings import Finding
     from saffron.phases import rebut
 
     cwd = tmp_path / "work"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-
-    prompts_dir = Path(rebut.__file__).resolve().parents[1] / "agents" / "prompts"
-    context_md = (Path(rebut.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
-
-    blocker = Finding(
-        lens="correctness", severity="blocker", file="a.py", line=1, claim="c"
-    )
+    blocker = _blocker()
     big_diff = "diff --git a/x b/x\n" + ("+" + "é" * 100 + "\n") * 3000
     big_prompt = rebut.verdict_prompt(
         "correctness",
         blockers=[(1, blocker)],
         rebuttal=rebut.RebuttalTurn(),
-        context_md=context_md,
+        context_md=CONTEXT_MD,
         claude_md=None,
-        prompts_dir=prompts_dir,
+        prompts_dir=PROMPTS,
         spec_body="fix it",
         reviewed_diff=big_diff,
         diff=big_diff,
@@ -525,6 +516,7 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
         exec_stream=_exec_stream_via_runner(monkeypatch, _stub_module(query1)),
     )
     assert options == before1
+    assert isinstance(record1["kwargs"]["system_prompt"], dict)
     path1 = record1["kwargs"]["system_prompt"]["path"]
     assert isinstance(path1, str)
     assert Path(path1).is_absolute()
@@ -535,25 +527,28 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
     assert record1["bytes_while_running"].decode("utf-8") == big_prompt
     assert not Path(path1).exists()
 
-    # Session 2: the same options object, resumed, one-character turn prompt.
+    # Session 2: resumed, with a one-character system prompt and turn prompt,
+    # so a file written only for a large prompt fails here.
+    options2 = {**options, "system_prompt": "é"}
     record2, query2 = _recorder()
-    before2 = copy.deepcopy(options)
+    before2 = copy.deepcopy(options2)
     implement.run_agent(
         "cell",
         prompt="x",
-        options=options,
+        options=options2,
         resume="sess-old",
         spec_id="SY-1",
         exec_stream=_exec_stream_via_runner(monkeypatch, _stub_module(query2)),
     )
-    assert options == before2
+    assert options2 == before2
+    assert isinstance(record2["kwargs"]["system_prompt"], dict)
     path2 = record2["kwargs"]["system_prompt"]["path"]
     assert path2 != path1
     assert record2["kwargs"] == before2 | {
         "system_prompt": {"type": "file", "path": path2},
         "resume": "sess-old",
     }
-    assert record2["bytes_while_running"].decode("utf-8") == big_prompt
+    assert record2["bytes_while_running"].decode("utf-8") == "é"
     assert not Path(path2).exists()
 
     # Session 3: no system prompt at all. Nothing new reaches the SDK.
@@ -574,7 +569,6 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
 
 def test_a_session_a_bound_kills_leaves_no_prompt_file_in_the_cell(monkeypatch):
     import inspect
-    import subprocess
 
     assert (
         inspect.signature(implement.run_agent).parameters["exec_"].default
@@ -625,7 +619,8 @@ def test_a_session_a_bound_kills_leaves_no_prompt_file_in_the_cell(monkeypatch):
                 )
             assert not Path(recorded["path"]).exists()
         finally:
-            Path(recorded.get("path", "")).unlink(missing_ok=True)
+            if "path" in recorded:
+                Path(recorded["path"]).unlink(missing_ok=True)
         return log, recorded
 
     for bound in ("idle", "wall"):
@@ -634,20 +629,13 @@ def test_a_session_a_bound_kills_leaves_no_prompt_file_in_the_cell(monkeypatch):
 
 
 def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch):
-    import json as _json
-
-    from saffron.agents.findings import Finding
     from saffron.phases import rebut
-
-    prompts_dir = Path(rebut.__file__).resolve().parents[1] / "agents" / "prompts"
-    context_md = (Path(rebut.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
 
     class _CLIConnectionError(Exception):
         pass
 
-    def _assistant(text=None, empty=False):
-        content = [] if empty else [SimpleNamespace(text=text)]
-        return SimpleNamespace(content=content, model="claude-test")
+    # Every prompt path a raising session received. Each must be gone after.
+    raised_paths: list[str] = []
 
     def _result_message():
         return SimpleNamespace(
@@ -661,19 +649,20 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
 
     def _query_valid(finding):
         async def _query(prompt, options):
-            payload = _json.dumps(
+            payload = json.dumps(
                 {
                     "verdicts": [
                         {"finding": finding, "verdict": "withdrawn", "reason": "ok"}
                     ]
                 }
             )
-            yield _assistant(f"<output>{payload}</output>")
+            yield _assistant(SimpleNamespace(text=f"<output>{payload}</output>"))
             yield _result_message()
 
         return _query
 
     async def _query_never_started(prompt, options):
+        raised_paths.append(options.kwargs["system_prompt"]["path"])
         if False:  # pragma: no cover, raises before any yield
             yield
         raise _CLIConnectionError(
@@ -681,7 +670,8 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
         )
 
     async def _query_started_then_raises(prompt, options):
-        yield _assistant(empty=True)
+        raised_paths.append(options.kwargs["system_prompt"]["path"])
+        yield _assistant()
         raise _CLIConnectionError(
             "Failed to start Claude Code: [Errno 7] Argument list too long"
         )
@@ -692,13 +682,8 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     def _es(query):
         return _exec_stream_via_runner(monkeypatch, _stub_module(query))
 
-    def _blocker(lens, n):
-        return Finding(
-            lens=lens, severity="blocker", file="a.py", line=n, claim=f"claim {n}"
-        )
-
     def _rebuttal_block(n):
-        payload = _json.dumps(
+        payload = json.dumps(
             {
                 "rebuttals": [
                     {"finding": i, "action": "argued", "argument": "a"}
@@ -746,9 +731,9 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
             ),
             session_id="sess-1",
             spec_body="fix the gap",
-            context_md=context_md,
+            context_md=CONTEXT_MD,
             claude_md=None,
-            prompts_dir=prompts_dir,
+            prompts_dir=PROMPTS,
             max_turns=5,
             budget_usd=2.0,
             head_moved=lambda: True,
@@ -764,14 +749,15 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
             emit=lambda _e: None,
         )
 
-    # Run A: correctness valid, contract never started, adequacy started then
+    # Case A: correctness valid, contract never started, adequacy started then
     # raised. Only `contract` is named: it is the only one that never started.
+    blockers_a = [
+        _blocker("correctness", line=1),
+        _blocker("contract", line=2),
+        _blocker("adequacy", line=3),
+    ]
     result_a = _rebut(
-        [
-            _blocker("correctness", 1),
-            _blocker("contract", 2),
-            _blocker("adequacy", 3),
-        ],
+        blockers_a,
         [
             (_es(_query_valid(1)), _no_reap, _no_exec),
             (_es(_query_never_started), _no_reap, _no_exec),
@@ -783,11 +769,16 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     assert "Argument list too long" in result_a.why
     assert "correctness" not in result_a.why
     assert "adequacy" not in result_a.why
+    recorded = {
+        v["lens"]: v.get("never_started")
+        for v in result_a.as_dict(blockers_a)["verdicts"]
+    }
+    assert recorded == {"correctness": False, "contract": True, "adequacy": False}
 
-    # Run B: correctness reuses A's "started then raised" session, contract is
+    # Case B: correctness reuses A's "started then raised" session, contract is
     # a silent bound kill with no runner output at all. Neither never started.
     result_b = _rebut(
-        [_blocker("correctness", 1), _blocker("contract", 2)],
+        [_blocker("correctness", line=1), _blocker("contract", line=2)],
         [
             (_es(_query_started_then_raises), _no_reap, _no_exec),
             (_silent_wall_kill, _no_reap, _no_exec),
@@ -795,10 +786,10 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     )
     assert result_b.state == "REBUTTING"
 
-    # Run C: correctness reuses A's "started then raised" session again,
+    # Case C: correctness reuses A's "started then raised" session again,
     # contract reuses A's own never-started session.
     result_c = _rebut(
-        [_blocker("correctness", 1), _blocker("contract", 2)],
+        [_blocker("correctness", line=1), _blocker("contract", line=2)],
         [
             (_es(_query_started_then_raises), _no_reap, _no_exec),
             (_es(_query_never_started), _no_reap, _no_exec),
@@ -807,3 +798,5 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     assert result_c.state == "GATE_ERROR"
     assert "contract" in result_c.why
     assert "correctness" not in result_c.why
+    assert len(raised_paths) == 5
+    assert not any(Path(p).exists() for p in raised_paths)

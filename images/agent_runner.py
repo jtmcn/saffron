@@ -43,7 +43,7 @@ _STEP_USAGE_KEYS = (
 # runner process is one run_agent call, so this outlives nothing it shouldn't.
 _seen_assistant_message_ids: set[str] = set()
 
-# Whether `query()` yielded a message this run: tells a never-started session
+# Whether `query()` yielded a message this session: tells a never-started session
 # apart from one that ran and produced nothing usable (reset in `main()`).
 _query_yielded = False
 
@@ -170,7 +170,7 @@ async def _run(request: dict[str, Any]) -> int:
         options["resume"] = request["resume"]
 
     # A string system prompt travels as a file, never an argument list
-    # (backlog b-8487de). `path` is the host's own choice, sent beside it.
+    # (backlog item b-8487de). `path` is the host's own choice, sent beside it.
     prompt_path = request.get("system_prompt_path")
     if prompt_path:
         Path(prompt_path).write_bytes(str(options["system_prompt"]).encode("utf-8"))

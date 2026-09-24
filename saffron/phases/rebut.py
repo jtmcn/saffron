@@ -86,7 +86,7 @@ class LensVerdicts:
     cost_usd: float = 0.0
     error: str | None = None
     # Set only when `error` is too: the runner reported that `query` yielded
-    # no message before this session raised (backlog b-8487de).
+    # no message before this session raised (backlog item b-8487de).
     never_started: bool = False
 
 
@@ -119,6 +119,7 @@ class RebutResult:
                     "lens": v.lens,
                     "error": v.error,
                     "cost_usd": v.cost_usd,
+                    "never_started": v.never_started,
                     "verdicts": [d.model_dump() for d in v.verdicts],
                 }
                 for v in self.verdicts
@@ -264,7 +265,7 @@ def verdict_prompt(
 
 def _never_started(event: Event) -> bool:
     """The runner reported that `query` yielded no message before this
-    session raised (backlog b-8487de). `event.event` is `None` for a reap
+    session raised (backlog item b-8487de). `event.event` is `None` for a reap
     line, a quarantined raw line or a host-authored fact. None of those
     say whether `query` ran, so they pass over rather than reset this."""
     return (
