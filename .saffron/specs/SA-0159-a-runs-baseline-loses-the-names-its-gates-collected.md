@@ -150,7 +150,10 @@ then creates a task on the run, opens an attempt, and records a `tests`
 result under the attempt that collects `["t.py::x"]`. `baseline_results`
 returns the three `collected` values in order. A second `Ledger` opened on
 the same file returns the same. `attempt_results` for the attempt returns
-`collected=None`. These fail it, each measured:
+`collected=None`. The `baseline_names` table then holds exactly two rows, for
+`tests` and `census`, read through `ledger._db` as `tests/test_ledger.py:672`
+does. That fails a build which writes a row for the attempt and gates only
+the read. These fail it, each measured:
 
 - no names kept
 - an empty list kept as `None`, or `None` kept as an empty list
