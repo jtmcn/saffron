@@ -28,12 +28,13 @@ A merged spec covers each step of the build order in
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md`.
 
 1. The handoff, and the record of the stack's layers.
-2. Gate 0's open pull request check exempts the batch's own tasks.
+2. Folded into step 7.
 3. The Spec and Standards end-review lenses, and the join lens.
 4. Qualification of end-review findings in host code.
 5. A rate limit waits in a stack batch.
 6. Spec review inside the batch.
-7. Spec writing, and follow-up specs.
+7. Spec writing, and follow-up specs. Gate 0's open pull request check
+   exempts the batch's own tasks when it plans them.
 8. The finishing layer.
 9. The stack view on the queue page.
 
@@ -55,3 +56,6 @@ escalations.
   becomes `SA-0145`, and build steps 2 to 9 take `SA-0146` to `SA-0153`.
 - 2026-09-23: `SA-0145` records each layer in a `stack_layers` table,
   keyed on record keys so a fold rebuilds it. It depends on `SA-0144`.
+- 2026-09-23: step 2 folds into step 7. A stack batch plans once, before
+  any of its own pull requests exist, so only follow-ups meet the check.
+  Steps 3 to 9 take `SA-0146` to `SA-0152`.

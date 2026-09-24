@@ -74,16 +74,21 @@ other state adds no layer. The next task starts from the same head the failed
 one used. Each `depends_on` descendant of the failed task is refused with a
 reason that names it.
 
-**Gate 0's open-PR overlap check exempts the batch's own tasks.** Every lower
-layer's PR is open and often touches nearby files. Without the exemption,
-stack mode refuses its own second task. Backlog item 59 exempted a
-declared chain, and no item covers a stack's layers yet.
+**Gate 0's open-PR overlap check needs no exemption at plan time.** The plan
+is made once, before any of the batch's own PRs exist, so the check has
+nothing of the batch's to refuse. Follow-ups are planned against the open
+stack, so step 7 exempts the batch's own tasks there. Backlog item 59
+exempted a declared chain, and no item covers a stack's layers yet.
 
-**Recording.** A ledger table `stack_layers` holds `batch_id`, `position`,
-`spec_id`, `task_id`, `predecessor_task_id` and `generation`. Generation 0 is
-a queued spec, and generation 1 is a follow-up. Under item 170's direction, a
-record fact carries the same row and the ledger folds it. The driver's `stack`
-and `status` read this table in place of `.saffron-loop/order.json`.
+**Recording.** Each layer is a `stack_layer` fact (added by hand in
+`75edb212`), and the ledger folds it into a `stack_layers` table. The table
+keys on record keys, since a fold re-mints task ids: `task_key`,
+`batch_key`, `position`, `spec_id`, `predecessor_key`, `predecessor_head` and
+`generation`. It has no foreign key, because the fold rebuilds no `batches`
+row. `predecessor_head` is the predecessor's `pushed_sha` when the layer is
+recorded. Generation 0 is a queued spec, and generation 1 is a follow-up. The
+driver's `stack` and `status` read this table in place of
+`.saffron-loop/order.json`.
 
 **Unchanged.** Each cell takes its baseline on its own starting tree, the
 predecessor's head (§4.4 step 2). A batch without `--stack` behaves as today.
@@ -287,15 +292,19 @@ three small specs before any full run.
 
 One spec per step. Each step ships usable on its own.
 
-1. Handoff and `stack_layers`.
-2. The overlap exemption.
-3. The seat lenses and the join lens.
-4. Qualification.
-5. The rate-limit wait.
-6. Spec review in the batch.
-7. Spec writing and follow-ups.
-8. The finishing layer.
-9. The stack view on the queue page.
+1. Handoff and `stack_layers`, as four specs: the stack order (`SA-0142`),
+   the handoff (`SA-0143`), the `--stack` flags (`SA-0144`) and the layers'
+   record (`SA-0145`).
+2. Folded into step 7. A plan made once has no open PR of its own to exempt.
+3. The seat lenses and the join lens (`SA-0146`).
+4. Qualification (`SA-0147`).
+5. The rate-limit wait (`SA-0148`).
+6. Spec review in the batch (`SA-0149`).
+7. Spec writing and follow-ups, with the overlap exemption (`SA-0150`).
+8. The finishing layer (`SA-0151`).
+9. The stack view on the queue page (`SA-0152`).
+
+These ids are provisional. A step that splits takes the next free id.
 
 Steps 1 to 5 run through today's loop. From step 6 on, each step shortens the
 loop that builds the next one.
