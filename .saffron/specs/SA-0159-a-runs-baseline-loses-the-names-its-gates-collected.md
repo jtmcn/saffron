@@ -46,7 +46,9 @@ acceptance:
       `Ledger.baseline_results(run_id)` returns each result's `collected`
       as the run recorded it. A list of names comes back in its own order,
       an empty list as an empty list, and `None` as `None`. A ledger opened
-      again on the same file returns the same.
+      again on the same file returns the same. An attempt's result keeps no
+      names, so `attempt_results` still returns `collected=None` for one
+      recorded with names.
     witness: tests/test_ledger.py::test_a_runs_baseline_keeps_the_names_each_gate_collected
   - claim: >-
       The `gate_results` table still carries exactly the columns §4.1
@@ -94,7 +96,9 @@ returns `collected=None` for every result.
 
 **Why a table of its own.** `tests/test_ledger.py:665-682` pins the
 columns of `gate_results` to §4.1's listing, and `DESIGN.md` is protected.
-So the names cannot be a new column there.
+So the names cannot be a new column there. The table is `baseline_names`.
+`baseline_collected` already names a `probes.json` entry key
+(`saffron/probe.py:263`).
 
 **What it gains on its own.** A host reader can tell, from the ledger
 alone, which tests a run's base collected. With a task's head suite, that
@@ -106,14 +110,19 @@ same way.
 
 `baseline_results` cannot say which tests existed at a run's base.
 
-Add `baseline_collected` to `SCHEMA` in `saffron/ledger.py`, with
+Add `baseline_names` to `SCHEMA` in `saffron/ledger.py`, with
 `gate_result_id INTEGER PRIMARY KEY` and `names TEXT NOT NULL`, and no
 reference to another table. When `record_gate_result` writes a run's
 result whose `collected` is not `None`, it writes one row in the same
 transaction, the names as a JSON list. `_results` reads that row back into
-`collected`, and a result with no row reads as `None`. An attempt's result
-writes no row, and reads as it does today. The module docstring names the
-tables the ledger holds, and `baseline_collected` joins them.
+`collected`, by its `gate_result_id`, and a result with no row reads as
+`None`. An attempt's result writes no row, and reads as it does today.
+
+The module docstring's "Eight of the nine tables" (`saffron/ledger.py:11`)
+counts the tables §4.1 lists, and §4.1 does not gain this one. Keep that
+count. `SA-0145` adds a sentence naming `stack_layers` as a table §4.1 does
+not list, and `SA-0153` adds `end_reviews` to it. Add `baseline_names` to
+that sentence.
 
 ## Out of scope
 
@@ -134,24 +143,37 @@ now.
 
 **Criterion 1's witness** opens a `Ledger` with no record in `tmp_path`,
 and creates one repo and one run. It records three results under the run,
-in order: `tests` collecting `["t.py::b", "t.py::a"]`, `census` collecting
-`[]`, and `lint` collecting `None`. `baseline_results` returns the three
-`collected` values in that order. It opens a second `Ledger` on the same
-file and asserts the same. These fail it, each measured:
+in order. `tests` collects `["t.py::e", "t.py::b", "t.py::d", "t.py::a",
+"t.py::c"]`, `lint` collects `None` and `census` collects `[]`. With `None`
+in the middle, names read back by position land on the wrong result. It
+then creates a task on the run, opens an attempt, and records a `tests`
+result under the attempt that collects `["t.py::x"]`. `baseline_results`
+returns the three `collected` values in order. A second `Ledger` opened on
+the same file returns the same. `attempt_results` for the attempt returns
+`collected=None`. These fail it, each measured:
 
 - no names kept
 - an empty list kept as `None`, or `None` kept as an empty list
 - a result with no row read as an empty list
 - the names sorted, or kept as a set
+- names rows written for attempt results too
+- the stored names zipped onto the results by position
 
 **How the list was measured.** A throwaway script ran on 2026-09-23 at
-`3699aeb8`. It subclassed `Ledger` with the table and both methods, and
-ran the witness above. The right build passed, and each wrong version
-listed failed.
+`a016d524`. It subclassed `Ledger` with the table, `record_gate_result`
+and `_results`, and ran the witness above. The right build passed, and
+each wrong version listed failed. The set build ran under `PYTHONHASHSEED`
+0 to 11 and failed under each. A set of five names keeps their order by
+chance one time in 120.
 
-**What the witness leaves undriven.** A run recorded before the table
-existed. `SCHEMA` runs on every open, so the table is created then, and
-that run reads `None`.
+**What the witness leaves undriven.**
+
+- A run recorded before the table existed. `SCHEMA` runs on every open, so
+  the table is created then, and that run reads `None`.
+- The single transaction. A names row written outside the gate row's
+  transaction would survive a failure between the two, and no cheap
+  arrangement injects one. Write both inside the one `with self._db:`
+  block that `record_gate_result` already opens for a run's result.
 
 **The `prose` gate** counts every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
@@ -160,4 +182,5 @@ sentence over 25 words.
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `bug` ceiling of 1300 tokens (`saffron/gates/core/size.py:26`). A
 prototype counted by `size_gate` itself came to 119, 69 in `ledger.py` and
-50 in the test. Docstrings and comments bring it to about 200.
+50 in the test. The attempt result, the longer list and the docstring
+sentence bring it to about 250.
