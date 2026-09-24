@@ -94,8 +94,9 @@ acceptance:
       prompt names `probe`, `find` and `replace` in backticks, and the
       Standards prompt names no `probe`. The Standards prompt file holds
       the value of `worktree.WORKTREE_MOUNT`, where it reads the files the
-      standing instructions name. Neither prompt file names `CONTEXT.md`, `DESIGN.md` or
-      `driver.py`.
+      standing instructions name. It holds the phrase "is Saffron's process
+      glossary, not this repository's", said of its vocabulary. Neither
+      prompt file names `CONTEXT.md`, `DESIGN.md` or `driver.py`.
     witness: tests/test_end_review.py::test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields
   - claim: >-
       `end_review.review_layer(container, fields, ...)` runs the Spec lens
@@ -104,7 +105,8 @@ acceptance:
       `end_review_prompt`, the read-only review tools, and the `max_turns`
       and `budget_usd` it was given. It returns their two `LensReview`s in
       that order. A Spec finding keeps the probe it carried, and a Spec
-      finding whose output omits the `probe` key keeps none. It anchors nothing, so a finding on a
+      finding whose output omits the `probe` key keeps none. The Standards
+      lens keeps the default report model. It anchors nothing, so a finding on a
       changed line keeps `anchored` false. A Spec lens whose session fails
       comes back with its error and its cost, and the Standards lens still
       runs.
@@ -212,7 +214,8 @@ Build four things.
      seat's: vocabulary, the stated invariants and conventions, and one
      source. It judges vocabulary against the repository's own standing
      instructions and any glossary they name. `{vocabulary}` is Saffron's
-     process glossary, not the repository's, and the prompt says so. It leaves format, lint,
+     process glossary, not the repository's. The prompt says so in the
+     phrase criterion 2 names. It leaves format, lint,
      types and structure to the gates. It names no probe.
 
    Core knows nothing of one repository (§2.1). So neither file names
@@ -263,8 +266,10 @@ spec is open (`.saffron/gates/dead.py:4-6`).
 - **Running the lenses over a stack.** `SA-0153` owns the order down from
   the top and the reserve. It owns a layer the end review did not reach,
   and the record of each layer's end review. `SA-0153` also records the
-  findings. It passes the spec body with its criteria appended, as REVIEW
-  does (`saffron/cell/session.py:2526`).
+  findings. It passes `spec.body` alone. REVIEW appends
+  `context.criteria_section` to it (`saffron/cell/session.py:2526`), but
+  here the Spec lens's `{criteria}` slot carries the criteria, so the
+  append would send them twice.
 - **The join lens.** Its prompt, its fields and its run are `SA-0154`'s.
 - **The critic cell a layer is read in.** It is seeded at the layer's
   pushed head. `review_layer` takes a container name, and `SA-0154` builds
@@ -333,9 +338,10 @@ It asserts:
 - `T9`'s fields: spec `TE-9`, its branch and URL, `base` `7`, `head` `9`.
 - `T7`'s fields: `base` `d`, `head` `e`.
 - `T9`'s `known` has one line holding "q first half second half",
-  `blocker` and `z.py:8`. One line holds "k middle", `note` and `y.py:5`.
-  One holds "b last {braces}", `concern`, `x.py:3`, `withdrawn` and "r1
-  argued". The three appear in that order.
+  `blocker`, `correctness` and `z.py:8`. One line holds "k middle",
+  `note`, `adequacy` and `y.py:5`. One holds "b last {braces}", `concern`,
+  `contract`, `x.py:3`, `withdrawn` and "r1 argued". The three appear in
+  that order.
 - `known` holds none of "c4", "c7", "c8", "c5" and "c6".
 - `ValueError` for `T9c`'s key, for `T11`'s and for `T12`'s.
 
@@ -354,30 +360,26 @@ These fail it, each measured:
 - `known` gathered from every task of the spec, which holds "c6"
 - `known` sorted by severity, by file and line, or by claim
 - `known` with no severity on a line, or no verdict and rebuttal
+- a `known` line without its lens
 - rebuttals listed apart from the findings they answer
 - a claim or a rebuttal whose newline is kept
 
-**Criterion 2's witness** builds `LayerFields` directly: `TE-9`, its
-branch, a URL, `base` `7`, `head` `9`, and a `known` holding
-"b last {braces}". The spec body is "Fix the {gap}, and keep {{this}} as
+**Criterion 2's witness** builds `LayerFields` directly: `TE-9`, the
+branch `saffron/layer-b`, the URL `https://h/pull/41`, `base` `7`, `head`
+`9`, and a `known` holding "b last {braces}". The spec body is "Fix the {gap}, and keep {{this}} as
 written." The diff holds `{}`. `claude_md` is two lines, and the witness
 looks for `context.standing_instructions(claude_md)` whole. It passes two
 criteria, one plain and one `preserves`, with distinct witness ids. It
-passes one `touches` path and one `forbidden` path. It reads
-`CONTEXT.md` from the repository root, as `tests/test_review.py:18` does.
+passes one `touches` path and one `forbidden` path. The spec id appears
+in no other value, so it reaches the prompt only through `{spec_id}`.
+It reads `CONTEXT.md` from the repository root, as `tests/test_review.py:18` does.
 For each lens it asserts each value appears verbatim, with
 `context.sections_for("REVIEW", CONTEXT_MD)` as the vocabulary. It checks
 the range as the two shas joined by `..`. It checks the other text in a
 whitespace-flattened copy. It reads each prompt file for the three names
-it must not hold, and the Standards file for `worktree.WORKTREE_MOUNT`.
-
-**The Standards lens's vocabulary is the repository's.** `{vocabulary}`
-is Saffron's own `CONTEXT.md`, read from Saffron's root
-(`saffron/cell/session.py:1798`). It holds the REVIEW sections with the
-_Avoid_ lines stripped (`saffron/agents/context.py:28-31`, `:41`, `:58`). It names the factory's
-terms. The Standards lens judges the diff's words against the target
-repository's standing instructions and any glossary they name, read from
-the worktree. Its prompt says which is which. These fail it, each measured:
+it must not hold. It reads the Standards file for
+`worktree.WORKTREE_MOUNT` and for the glossary phrase, in a
+whitespace-flattened copy. These fail it, each measured:
 
 - both lenses on one file
 - `base` and `head` swapped
@@ -391,6 +393,22 @@ the worktree. Its prompt says which is which. These fail it, each measured:
 - a Standards prompt file that never names the worktree mount
 - a Standards prompt that asks for a `probe`
 - a prompt with no "do not manufacture one", or no vocabulary slot
+- a Standards prompt judging vocabulary against `{vocabulary}`
+- a Spec prompt with no `{spec_id}` slot
+
+**The Standards lens's vocabulary is the repository's.** `{vocabulary}`
+is Saffron's own `CONTEXT.md`, read from Saffron's root
+(`saffron/cell/session.py:1798`). It holds the REVIEW sections with the
+_Avoid_ lines stripped (`saffron/agents/context.py:28-31`, `:41`,
+`:58`). It names the factory's terms. The Standards lens judges the diff's words against the target
+repository's standing instructions and any glossary they name, read from
+the worktree. Its prompt says which is which, in the phrase criterion 2
+names.
+
+**The constraints block is the implementer's rules, and the lens only
+reads them.** `constraints_block` speaks to an implementer ("the only paths
+you may change", `saffron/agents/context.py:76`). So the Spec prompt
+introduces it as the rules the implementer was held to.
 
 **Criterion 3's witness** calls `review_layer` twice, with a container
 name, `max_turns` 17 and `budget_usd` 1.25. Its diff carries the `---` and
@@ -408,7 +426,9 @@ reply would hide a lens that never ran, or one that ran twice.
   for the *i*th lens, `spec` then `standards`. The result's lenses are
   `spec` then `standards`, and neither has an error. The first finding's
   probe equals the `Mutant` it carried, and the second's is `None`. No
-  returned finding is anchored.
+  returned finding is anchored. `review.reported_model("standards")` is
+  `review.reported_model("correctness")`, so the Standards lens keeps the
+  default model.
 - Second call: the Spec lens raises `implement.AgentFailed` with an
   attempt costing 0.4. It asserts two calls, the Spec review's error set
   and cost 0.4, and the Standards finding returned.
@@ -422,6 +442,7 @@ These fail it, each measured:
 - a fixed budget, or a fixed `max_turns`
 - the second lens resuming the first lens's session
 - each lens's findings run through `findings.anchor`
+- the Standards lens on the optional-probe model
 - the Spec lens on the default model, which refuses the probe
 - the Spec lens on `adequacy`'s model, which requires one
 - a nullable `probe` with no default, which pydantic reads as required
@@ -439,7 +460,9 @@ patched for each model. The right build passed each witness, and every
 wrong version listed failed. After the first spec review all three ran
 again, with `T9`'s findings reordered, the criteria and constraints slots,
 and the nullable model. The round-1 order let a sort by file or by claim
-pass, since it matched the recorded order. The double's strictness decided no case in
+pass, since it matched the recorded order. After the second review they
+ran once more. That run added each `known` line's lens, the glossary
+phrase, a branch and URL free of the spec id, and the Standards model. The double's strictness decided no case in
 that run. A lax double failed each wrong version too, on the call count or
 the Standards finding. It stays strict, because a later edit to the
 witness would lose that. The nullable model accepts `"probe": null` and
@@ -484,6 +507,7 @@ About 100 lines in `saffron/end_review.py` at 5.5 is about 550, and 8 in
 `review.py` about 40. About 210 test lines at 4.8 is about 1010. That is
 about 2300 tokens of the `feature` ceiling of 3000
 (`saffron/gates/core/size.py:26`). The criteria and constraints slots, the
-Standards lens's `/work` reading and their asserts add about 190 more, for
-about 2490 in all. Keep the prompts near the length of
+Standards lens's `/work` reading and their asserts add about 190 more.
+The second review's asserts and the glossary phrase add about 40. That is
+about 2530 in all. Keep the prompts near the length of
 `criterion-probe.md` (56 lines), not of the in-cell lenses'.
