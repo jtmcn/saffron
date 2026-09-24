@@ -1,0 +1,424 @@
+---
+id: SA-0146
+title: No lens can read a layer of a stack, because the Spec and Standards seats exist only as a hand prompt
+type: feature
+priority: 1
+depends_on: [SA-0145]
+touches:
+  - saffron/end_review.py
+  - saffron/phases/review.py
+  - saffron/agents/prompts/end-review-spec.md
+  - saffron/agents/prompts/end-review-standards.md
+  - tests/test_end_review.py
+forbidden:
+  - DESIGN.md
+  - CONTEXT.md
+  - CLAUDE.md
+  - README.md
+  - pyproject.toml
+  - uv.lock
+  - .saffron/**
+  - .claude/**
+  - ontology/**
+  - tests/ontology/**
+  - docs/**
+  - images/**
+  - harness/**
+  - records/**
+  - saffron/task.py
+  - saffron/cli.py
+  - saffron/batch.py
+  - saffron/scheduler.py
+  - saffron/intake.py
+  - saffron/ledger.py
+  - saffron/events.py
+  - saffron/record/**
+  - saffron/repos/**
+  - saffron/cell/**
+  - saffron/gates/**
+  - saffron/phases/rebut.py
+  - saffron/phases/implement.py
+  - saffron/phases/package.py
+  - saffron/agents/context.py
+  - saffron/agents/findings.py
+  - saffron/agents/artifacts.py
+  - saffron/agents/prompts/review-correctness.md
+  - saffron/agents/prompts/review-contract.md
+  - saffron/agents/prompts/review-adequacy.md
+  - saffron/agents/prompts/turns/**
+  - tests/test_review.py
+  - tests/test_context.py
+  - tests/test_batch.py
+  - tests/test_ledger.py
+budget_usd: 27
+max_attempts: 3
+max_turns: 150
+pending_symbols:
+  - saffron/end_review.py::layer_fields
+  - saffron/end_review.py::review_layer
+acceptance:
+  - claim: >-
+      `end_review.layer_fields(ledger, task_key)` returns the `LayerFields`
+      of the `stack_layers` row that key names. `base` is the row's
+      `predecessor_head` when the row names a predecessor, and the layer's
+      run's `base_sha` when it names none. `head` is the layer's own
+      `pushed_sha`, and `spec_id`, `branch` and `pr_url` are its task's.
+      `known` holds one line for each finding an in-cell lens filed on that
+      task, in the order they were recorded. Each line carries the
+      finding's severity, lens, `file:line` and claim, and its verdict and
+      rebuttal where REBUT recorded them. Each run of whitespace inside a
+      claim or a rebuttal becomes one space. `known` holds no finding of
+      another task, nor of a lens outside `review.LENSES`. It raises
+      `ValueError` for a key that names no layer, a layer with no pushed
+      head, and a layer whose predecessor had no head. The witness drives
+      the three in-cell lenses and the lenses `spec`, `standards` and
+      `join`. It drives all three severities, a finding with a verdict and
+      one without, a claim and a rebuttal that hold a newline, and a
+      predecessor pushed again after the layer was recorded. It drives
+      tasks of the same spec before and after the layer.
+    witness: tests/test_end_review.py::test_a_layers_fields_come_from_its_own_row_and_its_own_task
+  - claim: >-
+      `end_review.end_review_prompt(lens, fields, ...)` fills that lens's
+      own file from `END_LENSES`, whose keys are `spec` then `standards`,
+      each on its own file. Each of the two prompts carries REVIEW's
+      vocabulary, the spec body, the diff, the spec id, the branch, the
+      pull request URL, `known` and the standing instructions, each
+      verbatim, and the range as `<base>..<head>`. Braces in the spec body
+      and in `known` pass through. Each carries the sentence "do not
+      manufacture one" in any case, the three severities and the fields
+      `file`, `line`, `severity` and `claim`, each in backticks. The Spec
+      prompt names `probe`, `find` and `replace` in backticks, and the
+      Standards prompt names no `probe`. Neither prompt file names
+      `CONTEXT.md`, `DESIGN.md` or `driver.py`.
+    witness: tests/test_end_review.py::test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields
+  - claim: >-
+      `end_review.review_layer(container, fields, ...)` runs the Spec lens
+      and then the Standards lens through `review.run_lens`, in
+      `container`. Each is a fresh session with its own prompt from
+      `end_review_prompt`, the read-only review tools, and the `max_turns`
+      and `budget_usd` it was given. It returns their two `LensReview`s in
+      that order. A Spec finding keeps the probe it carried, and a Spec
+      finding with none keeps none. It anchors nothing, so a finding on a
+      changed line keeps `anchored` false. A Spec lens whose session fails
+      comes back with its error and its cost, and the Standards lens still
+      runs.
+    witness: tests/test_end_review.py::test_a_layer_is_read_by_the_spec_lens_then_the_standards_lens
+  - claim: >-
+      `review.LENSES` still names the three in-cell lenses, so no cell's
+      REVIEW runs an end-review lens.
+    witness: tests/test_review.py::test_the_declared_lenses_are_the_three_that_run
+    preserves: true
+  - claim: >-
+      A correctness finding still carries no probe field.
+    witness: tests/test_review.py::test_a_correctness_finding_carries_no_probe_field_at_all
+    preserves: true
+---
+
+## Context
+
+Backlog item **b-792ab2**, step 3 of its Done. It cites `DESIGN.md` §2.1,
+§5.3 and §5.5. ADR 7
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
+decides a stack batch. Section 2 of
+`docs/superpowers/specs/2026-09-23-stack-batch-design.md`, "The end review",
+is the design.
+
+A stack batch runs the queued specs into one pull request stack. Each task
+that reaches `READY_FOR_REVIEW` is a **layer**, cut from the head of the
+layer below it, its **predecessor**. Once the last queued task settles, one
+**end review** reads the stack. Two end-review lenses, Spec and Standards,
+read each layer. One join lens reads the joins between layers. ADR 7 takes
+four exceptions to ADR 4 for them. None of the three is one of ADR 4's
+declared lenses.
+
+**This spec is the first of three for step 3.** It builds the two seat
+lenses: their prompts, their fields filled from the ledger, and one call
+that runs both on a layer. `SA-0153` runs them over a stack after the batch
+settles. It adds the reserve, the order down from the top, and the record
+of each layer's end review, reviewed or not. `SA-0154` adds the join lens
+and the critic cell a layer is read in, and wires the end review into
+`saffron batch --stack`. `SA-0147` then qualifies the findings.
+
+**What the tree base holds.** This spec's tree base is `SA-0145`'s head.
+Only `depends_on[0]` stacks (`saffron/task.py:133-136`), and the chain
+`SA-0142` to `SA-0145` puts `stack_layers` and `Ledger.record_stack_layer`
+there. `SA-0145` keys each row on record keys. Its columns are `task_key`,
+`batch_key`, `position`, `spec_id`, `predecessor_key`, `predecessor_head`
+and `generation`. `predecessor_head` is the predecessor's `pushed_sha` when
+the layer was recorded. Every other line number below was read at
+`0b1b4b96`.
+
+**The two seats today.** `.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md`
+holds them as a delegate's hand prompt: an Opening (`:29-44`), the Spec seat
+(`:46-72`), the Standards seat (`:74-92`) and the Report rules (`:94-115`).
+The delegate fills nine fields by hand (`:15-27`). For a stacked spec, `{BASE}`
+is a merge base with the parent's branch (`:17-18`). `{KNOWN}` is the in-cell findings the delegate
+checked, and any blocker a lens withdrew at REBUT (`:25-27`).
+
+**How a lens runs today.** `review.LENSES` maps each in-cell lens to its
+prompt file (`saffron/phases/review.py:39-43`). `lens_prompt` fills that
+file through `context.build_system_prompt` (`:168-188`). That call passes
+the spec body around `str.format`, so braces in it pass through, and every
+other value goes in as a `format` argument (`saffron/agents/context.py:190-198`).
+`run_lens` runs one fresh session with `REVIEW_TOOLS`
+(`saffron/phases/review.py:35`, `:208-234`). It parses the findings against
+`reported_model(lens)` (`:102-111`). That model forbids any extra field
+(`:58-70`), and only `adequacy` maps to one that requires a `probe`
+(`:73-82`). A failed session comes back as a `LensReview` with its error
+and its cost (`:237-241`).
+
+**Where the fields live.** `Ledger.findings(task_id)` returns a task's
+findings in the order they were recorded (`saffron/ledger.py:1190-1196`).
+Each row carries `lens`, `severity`, `file`, `line`, `claim`, `anchored`,
+REBUT's `verdict` and the `rebuttal` (`:153-165`). A task's run carries the
+`base_sha` it was pinned at (`saffron/cell/session.py:1689`). An unstacked
+cell's tree base is that `base_sha` (`saffron/cell/session.py:293-301`).
+Reading `ledger._db` from another module has precedent in
+`chain_walk._task_rows` (`saffron/chain_walk.py:54`) and
+`session.previous_cut_orphan` (`saffron/cell/session.py:394-401`).
+
+## Problem
+
+Build four things.
+
+1. **Two prompt files.** Add `saffron/agents/prompts/end-review-spec.md`
+   and `end-review-standards.md`, taken from the two seats in
+   `REVIEW-PROMPT.md`. Each is a system prompt for a read-only session in
+   a critic cell, over one layer that already reached `READY_FOR_REVIEW`.
+   It emits the `<output>` block the in-cell lenses emit, and each finding
+   has `file`, `line`, `severity` and `claim`.
+   - The **Spec** lens asks whether the diff does what the spec asks, no
+     more and no less. It walks each acceptance criterion to the
+     `file:line` that satisfies it, as the seat does
+     (`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md:51-57`). A criterion
+     nothing satisfies is a finding, and so is one a comment alone
+     satisfies. A criterion whose witness would pass a wrong version gets a
+     finding with a `probe` of `file`, `find` and `replace`. `find` matches exactly once in that file at the layer's
+     head. The host runs the probe later, because the lens holds no tool
+     that runs anything. The lens then looks past the criteria, as the
+     seat does
+     (`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md:60-63`).
+   - The **Standards** lens asks whether the diff follows what the
+     repository wrote down: its standing instructions and the files they
+     name. Its three questions are the seat's: vocabulary, the stated
+     invariants and conventions, and one source. It leaves format, lint,
+     types and structure to the gates. It names no probe.
+
+   Core knows nothing of one repository (§2.1). So neither file names
+   this repository's `CONTEXT.md` or `DESIGN.md`, nor the spec loop's
+   `driver.py`. The standing instructions reach the prompt as the
+   in-cell lenses' do. Each file carries these slots: `{vocabulary}`,
+   `{spec_id}`, `{branch}`, `{pr}`, `{base}`, `{head}`, `{known}`,
+   `{standing_instructions}`, `{diff}` and `{spec}`.
+2. **The layer's fields.** Add `saffron/end_review.py`. It holds a frozen
+   dataclass `LayerFields` with `spec_id`, `branch`, `pr_url`, `base`,
+   `head` and `known`. `layer_fields(ledger, task_key)` reads the layer's
+   `stack_layers` row, its task and its run, and the task's findings.
+   `base` is the head its predecessor had when the layer was recorded.
+   A layer with no predecessor was cut from its run's `base_sha`. `known`
+   is the layer's in-cell findings, those whose lens is in `review.LENSES`,
+   one line each. A claim or a rebuttal can hold a newline, so each is
+   folded onto its line.
+3. **The prompt.** `END_LENSES` maps `spec` and then `standards` to their
+   two files. `end_review_prompt(lens, fields, *, spec_body, diff,
+   context_md, claude_md, prompts_dir)` fills `END_LENSES[lens]` through
+   `context.build_system_prompt` at phase `REVIEW`. The standing
+   instructions come from `context.standing_instructions(claude_md)`.
+4. **The lenses on one layer.** Add `review_layer(container, fields,
+   ...)`. Its keywords are `end_review_prompt`'s five, then `max_turns`,
+   `budget_usd`, `agent` and `emit`. It runs `review.run_lens` once per entry of
+   `END_LENSES`, in order, and returns the `LensReview`s. The Spec lens's
+   id maps to a report model in `review._REPORTED` whose `probe` is
+   optional. The Standards lens keeps the default model.
+
+No production code calls `layer_fields` or `review_layer` until `SA-0153`.
+So both are `pending_symbols`, and the `dead` gate defers them while this
+spec is open (`.saffron/gates/dead.py:4-6`).
+
+## Out of scope
+
+- **Running the lenses over a stack.** `SA-0153` owns the order down from
+  the top and the reserve. It owns a layer the end review did not reach,
+  and the record of each layer's end review. `SA-0153` also records the
+  findings. It passes the spec body with its criteria appended, as REVIEW
+  does (`saffron/cell/session.py:2526`).
+- **The join lens.** Its prompt, its fields and its run are `SA-0154`'s.
+- **The critic cell a layer is read in.** It is seeded at the layer's
+  pushed head. `review_layer` takes a container name, and `SA-0154` builds
+  the cell and wires the end review into `saffron batch --stack`.
+- **Qualification.** Anchoring, running a probe, severity and grouping are
+  `SA-0147`'s. So `review_layer` anchors nothing, and its findings keep
+  `Finding`'s default `anchored` of false.
+- **Four seat fields.** `{REPO}` is `/work` in a critic cell, which the
+  prompt names in prose. For a layer with a predecessor, `{CELL_BASE}` is
+  the fetched head of its branch. It differs from `{BASE}` only after a
+  hand push, which `SA-0145` leaves to the finishing layer.
+  `{SPEC}` is replaced by the spec body itself. `{WHAT}` is the delegate's
+  own summary, and the host writes none, so the prompt carries the diff.
+- **The gate table.** An in-cell lens sees one (`review.gate_summary`).
+  An end-review lens reads a layer whose gates already passed, and no
+  Gate-only cell runs for it.
+- **The vocabulary.** `CONTEXT.md` has no entry for an end review or an
+  end-review lens. Backlog item b-466005 files both by hand.
+
+## Notes for the agent
+
+**Every criterion but the last two is new code.** No text at the tree base
+fills an end-review prompt or reads a layer's fields. So criteria 1 to 3
+declare a witness and no mutant, and `witness` reports `skip` for them.
+Criteria 4 and 5 are `preserves` and name tests that pass now.
+
+**Import `end_review` inside each test body.** It does not exist at the
+tree base. A module-scope import fails collection when the source is
+reverted, and `revert` reads that as `skip`. Every test in
+`tests/test_end_review.py` is judged by `revert`, so none passes without
+the source.
+
+**Criterion 1's witness** builds a `Ledger` with no record in `tmp_path`.
+It closes the ledger only after its last call. It creates one repo, and a
+run and a task for each row below, in this order. Each run's `base_sha` is
+the one shown.
+
+| task | spec | run base | what it holds |
+|---|---|---|---|
+| `T9a` | `TE-9` | `b` | a push of `a`, `EXHAUSTED`, one correctness finding "c6" |
+| `T7` | `TE-7` | `d` | packaged `READY_FOR_REVIEW` at `7`, one correctness finding "c5" |
+| `T9` | `TE-9` | `b` | packaged `READY_FOR_REVIEW` at `9`, the six findings below |
+| `T9c` | `TE-9` | `b` | a push of `f`, `EXHAUSTED` |
+| `T11` | `TE-11` | `b` | no push |
+| `T12` | `TE-12` | `b` | a push of `c` |
+
+Each letter or digit stands for a sha of forty of it. `T9`'s findings, in
+order: a contract `concern` on `x.py:3` whose claim is "c1 {braces}",
+anchored, with verdict `withdrawn` and a rebuttal of "r1", a newline, two
+spaces and "argued". An adequacy `note` on `y.py:5`, "c2", unanchored. A
+correctness `blocker` on `z.py:8`, "c3 first half", a newline and "second
+half". Three findings on `x.py:4` of the lenses `spec`, `standards` and
+`join`, "c4", "c7" and "c8". It records layers with
+`record_stack_layer`: `T7` at 1 with no predecessor, `T9` at 2 on `T7`.
+Then it pushes `e` to `T7`. It then records `T11` at 3 on `T9`, and `T12` at
+4 on `T11`. `T11` has no push, so `T12`'s `predecessor_head` is `NULL`.
+
+It asserts:
+
+- `T9`'s fields: spec `TE-9`, its branch and URL, `base` `7`, `head` `9`.
+- `T7`'s fields: `base` `d`, `head` `e`.
+- `T9`'s `known` has one line holding "c1 {braces}", `concern`, `x.py:3`,
+  `withdrawn` and "r1 argued". One line holds "c2", `note` and `y.py:5`.
+  One holds "c3 first half second half", `blocker` and `z.py:8`. The three
+  appear in that order.
+- `known` holds none of "c4", "c7", "c8", "c5" and "c6".
+- `ValueError` for `T9c`'s key, for `T11`'s and for `T12`'s.
+
+These fail it, each measured:
+
+- `base` read from the predecessor's current `pushed_sha`, which gives `e`
+- `base` from the layer's own run in every case, which gives `b`
+- `base` as `COALESCE(predecessor_head, base_sha)`, which runs `T12`
+- the bottom layer's `base` left `None`
+- the task found by spec id, newest or oldest, which reads `T9c` or `T9a`
+- `head` taken from `predecessor_head`
+- a layer with no head returned, not refused
+- a key that names no layer returned as empty fields
+- `known` with every lens, with anchored findings only, or with no notes
+- `known` that drops the lens `spec` by name, or `spec` and `standards`
+- `known` gathered from every task of the spec, which holds "c6"
+- `known` sorted by severity
+- `known` with no severity on a line, or no verdict and rebuttal
+- rebuttals listed apart from the findings they answer
+- a claim or a rebuttal whose newline is kept
+
+**Criterion 2's witness** builds `LayerFields` directly: `TE-9`, its
+branch, a URL, `base` `7`, `head` `9`, and a `known` holding
+"c1 {braces}". The spec body is "Fix the {gap}, and keep {{this}} as
+written." The diff holds `{}`. `claude_md` is one line. It reads
+`CONTEXT.md` from the repository root, as `tests/test_review.py:18` does.
+For each lens it asserts each value appears verbatim, with
+`context.sections_for("REVIEW", CONTEXT_MD)` as the vocabulary. It checks
+the range as the two shas joined by `..`. It checks the other text in a
+whitespace-flattened copy. It reads each prompt file for the three names
+it must not hold. These fail it, each measured:
+
+- both lenses on one file
+- `base` and `head` swapped
+- `known` or the spec body pasted into the template before `format`,
+  which raises `KeyError`
+- the standing instructions left out
+- a Standards prompt that asks for a `probe`
+- a prompt with no "do not manufacture one", or no vocabulary slot
+
+**Criterion 3's witness** calls `review_layer` twice, with a container
+name, `max_turns` 17 and `budget_usd` 1.25. Its diff carries the `---` and
+`+++` headers. Every scripted finding sits on a line one of its hunks
+changed, so `findings.anchor` would mark it. Its agent double records each
+call's container, options and keywords, and returns the next scripted
+reply. It raises `AssertionError` on a call with no reply left. A default
+reply would hide a lens that never ran, or one that ran twice.
+
+- First call: the Spec reply holds a finding with a probe and one without.
+  The Standards reply holds one finding. It asserts exactly two calls. Each
+  has the container, `REVIEW_TOOLS`, `max_turns` 17, `max_budget_usd`
+  1.25, and no `resume`. Call *i*'s system prompt equals `end_review_prompt`
+  for the *i*th lens, `spec` then `standards`. The result's lenses are
+  `spec` then `standards`, and neither has an error. The first finding's
+  probe equals the `Mutant` it carried, and the second's is `None`. No
+  returned finding is anchored.
+- Second call: the Spec lens raises `implement.AgentFailed` with an
+  attempt costing 0.4. It asserts two calls, the Spec review's error set
+  and cost 0.4, and the Standards finding returned.
+
+These fail it, each measured:
+
+- the Spec lens alone
+- a loop that stops at the first lens with an error
+- one prompt for both lenses
+- the two lenses in the other order
+- a fixed budget, or a fixed `max_turns`
+- the second lens resuming the first lens's session
+- each lens's findings run through `findings.anchor`
+- the Spec lens on the default model, which refuses the probe
+- the Spec lens on `adequacy`'s model, which requires one
+
+The two model cases fail on the re-prompt `run_lens` makes after a finding
+that is not the schema (`saffron/phases/review.py:242-260`). It takes the
+Standards reply and leaves the Standards lens a call with no reply.
+
+**How the lists were measured.** Two throwaway simulations ran on
+2026-09-23 at `0b1b4b96`. Criterion 1's built `stack_layers` with
+`SA-0145`'s columns and wrote each row as `record_stack_layer` does.
+Criterion 2's used two stand-in prompt files that held the slots above.
+Criterion 3's ran the real `review.run_lens`, with `review._REPORTED`
+patched for each model. The right build passed each witness, and every
+wrong version listed failed. The double's strictness decided no case in
+that run. A lax double failed each wrong version too, on the call count or
+the Standards finding. It stays strict, because a later edit to the
+witness would lose that.
+
+**What the witnesses leave undriven.** A Standards lens that fails is not
+driven, and neither is output that is not the schema after the re-prompt.
+`run_lens` handles both the same way for every lens
+(`saffron/phases/review.py:235-293`). A layer whose `pr_url` or `branch` is
+`NULL` is not driven. PACKAGE writes both for `READY_FOR_REVIEW`
+(`saffron/ledger.py:1109-1119`).
+
+**The prompts are prose the `prose` gate reads**
+(`.saffron/gates/prose.py:43-44`). A new file starts at zero, so write no
+em dash, semicolon, contraction, perfect tense, hedge or sentence over 25
+words. The same holds for every new comment and docstring, and a docstring
+stays within ten lines. Check each file with
+`python3 hooks/prose_limit.py --file <path>` before you commit it.
+
+**A brace in a prompt file is a slot.** `build_system_prompt` runs
+`format` over the file (`saffron/agents/context.py:194-197`). So a
+literal brace, as in a JSON example, is written doubled or not at all.
+Criterion 2's witness raises on a single one.
+
+**Commit as each witness passes**, before the full suite runs.
+
+**Size.** No path here is in `elevate_on`, so `size` is advisory. Two
+prompt files of about 35 lines each run near 10 tokens a line, about 700.
+About 100 lines in `saffron/end_review.py` at 5.5 is about 550, and 8 in
+`review.py` about 40. About 210 test lines at 4.8 is about 1010. That is
+about 2300 tokens of the `feature` ceiling of 3000
+(`saffron/gates/core/size.py:26`). Keep the prompts near the length of
+`criterion-probe.md` (56 lines), not of the in-cell lenses'.

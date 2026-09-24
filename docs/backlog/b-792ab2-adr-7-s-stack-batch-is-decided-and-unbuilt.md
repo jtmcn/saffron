@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -59,3 +59,12 @@ escalations.
 - 2026-09-23: step 2 folds into step 7. A stack batch plans once, before
   any of its own pull requests exist, so only follow-ups meet the check.
   Steps 3 to 9 take `SA-0146` to `SA-0152`.
+- 2026-09-23: step 3 came to about 5000 changed tokens against the
+  `feature` ceiling of 3000, so it splits in three. `SA-0146` builds the
+  Spec and Standards end-review lenses and fills their fields from the
+  ledger. `SA-0153` runs them over a stack and records each layer's end
+  review. `SA-0154` adds the join lens and the critic cell, and wires the
+  end review into `saffron batch --stack`. Step 6's session and facts take
+  `SA-0155`. The chain runs `SA-0145`, `SA-0146`, `SA-0153`, `SA-0154`,
+  `SA-0147`, `SA-0148`, `SA-0149`, `SA-0155`, `SA-0150`, `SA-0151`,
+  `SA-0152`.

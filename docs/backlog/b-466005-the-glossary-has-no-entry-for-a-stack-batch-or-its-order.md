@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -29,7 +29,7 @@ forbidden to the cell, so neither can add the entries.
 
 ## Done looks like
 
-Four entries in `ontology/factory.ttl`, rendered into `CONTEXT.md` by
+Six entries in `ontology/factory.ttl`, rendered into `CONTEXT.md` by
 `uv run python -m ontology.render`.
 
 - **Stack batch**: a batch run with `--stack`. It fixes its order once, and
@@ -40,6 +40,11 @@ Four entries in `ontology/factory.ttl`, rendered into `CONTEXT.md` by
   `READY_FOR_REVIEW`. **Parent** keeps its one referent, `depends_on[0]`.
 - **Layer**: a task in a stack batch that reached `READY_FOR_REVIEW`. The
   next task is cut from its head. A task that misses adds no layer.
+- **End review**: the one read of a stack batch's stack once its last
+  queued task settles. End-review lenses read each layer, and the join
+  lens reads the joins between layers.
+- **End-review lens**: the Spec or the Standards session that reads one
+  layer in the end review. Neither is one of ADR 4's declared lenses.
 
 The **Refusal** entry names the stack order's refusal. This lands after
 `SA-0142` merges.
@@ -52,3 +57,5 @@ The **Refusal** entry names the stack order's refusal. This lands after
   with no glossary entry. `SA-0144` adds the `--stack` flag.
 - 2026-09-23: `SA-0145` names each layer's row in a `stack_layers` table.
   "Layer" joins the entries above.
+- 2026-09-23: `SA-0146` builds the Spec and Standards end-review lenses.
+  "End review" and "end-review lens" join the entries above.
