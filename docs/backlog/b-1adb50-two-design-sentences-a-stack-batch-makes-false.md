@@ -35,7 +35,7 @@ forbid `DESIGN.md`, which is protected.
 ## Done looks like
 
 Once `SA-0149` and `SA-0152` merge, §4.2.1 names the errored spec review
-among the aborts, and §6 names the stack view's source. Once `SA-0154`
+among the aborts, and §6 names the stack view's source. Once `SA-0157`
 wires the end review, `CLAUDE.md` and §4.2.1 say a stack night ends at the
 deadline plus one task plus its end review. Each cites ADR 7.
 

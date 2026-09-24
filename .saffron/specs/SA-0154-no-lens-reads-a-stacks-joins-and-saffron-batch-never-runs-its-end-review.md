@@ -60,6 +60,7 @@ pending_symbols:
   - saffron/end_review.py::RESERVE_SHARE
   - saffron/end_review.py::LENS_BUDGET_USD
   - saffron/end_review.py::LENS_MAX_TURNS
+  - saffron/end_review.py::layers
 acceptance:
   - claim: >-
       `end_review.review_joins(ledger, batch_key, reserve_usd, specs, ...)`
@@ -173,9 +174,10 @@ line number below was read at `f0c8f82d`.
 
 **How a lens runs.** `review.run_lens` runs one fresh session in the
 container it is given, with `REVIEW_TOOLS` (`saffron/phases/review.py:35`,
-`:208-293`). It calls the agent with no `spec_id`
-(`saffron/phases/review.py:236`), so the caller binds one, as `_drive_cell`
-does (`saffron/cell/session.py:1829-1839`). A lens id with no entry in
+`:208-293`). `run_lens` takes a required `spec_id` for its events
+(`saffron/phases/review.py:216`), and this spec passes the top layer's. The
+agent arrives already bound by `SA-0157`, so nothing here binds it again.
+A lens id with no entry in
 `_REPORTED` is parsed against the default model, which has no `probe`
 (`saffron/phases/review.py:85-91`). `build_system_prompt` substitutes
 `{spec}` verbatim and formats every other slot (`saffron/agents/context.py:174-198`).
@@ -213,7 +215,8 @@ Build three things.
    `review_joins` to `saffron/end_review.py`, with `review_stack`'s
    signature, as criterion 1 states. It finds the top layer's task id by
    its record key, as `Ledger._apply` does (`saffron/ledger.py:532-534`).
-   The lens runs under the top layer's spec id.
+   `run_lens` gets the top layer's spec id, and the prompt is built with
+   phase `REVIEW`, as `SA-0146` builds its own.
 2. **The end review over a stack.** Add a frozen dataclass `StackReview`,
    with `join` and `layers`, and `run_end_review` to
    `saffron/end_review.py`. The join lens runs first. Each layer already
@@ -222,7 +225,7 @@ Build three things.
    `LENS_BUDGET_USD` of 2.5, `LENS_MAX_TURNS` of 50 and `RESERVE_SHARE` of
    0.25 to `saffron/end_review.py`. `SA-0157` passes the first two as each
    lens's ceilings, and holds `RESERVE_SHARE` of `--budget` as the reserve.
-   It states why a share.
+   `SA-0157` gives the reason for a share.
 3. **The critic cell.** Add `layer_cell` to `saffron/end_review.py`, as
    criterion 4 states. Its network is `saffron-cells`, the name
    `_drive_cell` uses (`saffron/cell/session.py:1632`). Its container,
@@ -301,7 +304,8 @@ below it:
 | 5 | 0.5 | `TE-10` at 1 |
 
 Record one correctness concern "in-cell c7" on `TE-7`. `specs` holds a
-`Spec` for each, with the body "body `<spec>`". `TE-3`'s body is "body
+`Spec` for each, with the body "body `<spec>`", built in sorted id order so
+its iteration order is not bottom-up by chance. `TE-3`'s body is "body
 TE-3 {gap}". `open_cell` records the fields it is given. It raises
 `RuntimeError("no cell for TE-8")` for `TE-8`, and yields `critic-<spec>`
 for the rest. The agent double records each call's container, options and
