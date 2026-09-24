@@ -259,6 +259,36 @@ def file_at(mirror: Path, sha: str, path: str) -> str | None:
     )
 
 
+def _word_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
+
+
+def unresolved_consumes(mirror: Path, sha: str, entries: list[str]) -> list[str]:
+    """Which of `entries` do not resolve at `sha`'s tree.
+
+    Each entry is a repo-relative `path`, split at the first colon. A bare
+    `path` resolves when the tree holds a regular file, a directory or a
+    symlink there. A `path:name` resolves when `path` names a regular file,
+    or a symlink one hop from one, whose text holds `name` as a whole word.
+    Returns the unresolved entries, in the order given, once per occurrence.
+    A `sha` the mirror lacks raises `GitError`, never reported as unresolved.
+    """
+    unresolved = []
+    for entry in entries:
+        path, sep, name = entry.partition(":")
+        mode = _ls_tree_mode(mirror, sha, path)
+        if not sep:
+            resolved = mode is not None
+        elif mode is None or mode == "040000":
+            resolved = False
+        else:
+            text = file_at(mirror, sha, path)
+            resolved = text is not None and _word_pattern(name).search(text) is not None
+        if not resolved:
+            unresolved.append(entry)
+    return unresolved
+
+
 def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:
     """Every `saffron:retired-by <SPEC-ID>` marker at `sha`, read straight
     from the bare mirror — no export, no checkout, no working tree.
