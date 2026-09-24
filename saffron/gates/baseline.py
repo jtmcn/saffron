@@ -1,8 +1,9 @@
 """Baseline subtraction: only new failures are a task's problem.
 
-A failure on `base_sha` is usually pre-existing and not this task's fault. A
-`witness` failure coded `survived-mutant` is the exception: the spec asked
-this task to kill that mutant, so a survivor at base is not inherited.
+A failure on `base_sha` is pre-existing and not this task's fault, so the
+subtraction cancels it. A `witness` failure coded `survived-mutant` is the
+exception. It is not subtracted, because the spec asked this task to kill
+that mutant.
 Without the subtraction every task inherits the repo's flaky tests and burns
 its budget on them (DESIGN.md §5.4).
 """
@@ -24,14 +25,14 @@ class NewFailure(NamedTuple):
 def _cancels(gate: str, failure: Failure) -> bool:
     """Whether a baseline failure cancels its match at head.
 
-    A `witness` failure coded `survived-mutant` never does: the spec asked
-    this task to kill that mutant, so the base commit having it already is
-    not the same as inheriting it (DESIGN.md §5.4).
+    A `witness` failure coded `survived-mutant` never does. It is not
+    subtracted, because the spec asked this task to kill that mutant
+    (DESIGN.md §5.4).
     """
     return not (gate == "witness" and failure.code == "survived-mutant")
 
 
-def _counts(results: list[GateResult]) -> Counter[tuple[str, str, str, str]]:
+def _cancelling(results: list[GateResult]) -> Counter[tuple[str, str, str, str]]:
     return Counter(
         identity(result.gate, failure)
         for result in results
@@ -45,15 +46,13 @@ def subtract_baseline(
 ) -> list[NewFailure]:
     """Failures at head with no cancelling baseline failure.
 
-    Compared on `(gate, file, code, normalized message)` — never on line
-    number, which the diff moves. Count-aware: one pre-existing failure
-    cancels one failure at head, not every failure sharing its identity.
-
-    One exception: a `witness` failure coded `survived-mutant` at base
-    never cancels its match at head, because the spec asked this task to
-    kill that mutant (DESIGN.md §5.4).
+    Compared on `(gate, file, code, normalized message)`, never on the line
+    number the diff moves. Count-aware, because `normalize_message` erases the
+    digits that tell sibling failures apart: one baseline failure cancels one
+    at head. A `witness` failure coded `survived-mutant` at base never
+    cancels, because the spec asked this task to kill that mutant (§5.4).
     """
-    remaining = _counts(base)
+    remaining = _cancelling(base)
     new = []
     for result in head:
         for failure in result.failures:
@@ -115,7 +114,7 @@ def is_no_progress(
 ) -> bool:
     """An identical new-failure set across two attempts: stop paying.
 
-    No caller in v0 — there is no repair loop yet. It lives beside the
+    It lives beside the
     subtraction because both key on the same identity, and §5.4's argument is
     that they must not drift apart. Counted, for the same reason the
     subtraction is: fixing three of four identical-identity failures is
