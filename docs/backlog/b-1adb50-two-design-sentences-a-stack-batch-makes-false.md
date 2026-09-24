@@ -1,6 +1,6 @@
 ---
 id: b-1adb50
-title: Two DESIGN.md sentences go false once a stack batch lands, and no cell may edit DESIGN.md
+title: Sentences in DESIGN.md and CLAUDE.md go false once a stack batch lands, and no cell may edit either
 status: open
 tier: 2
 by_hand: true
@@ -23,11 +23,17 @@ forbid `DESIGN.md`, which is protected.
   does, and the list will not say so.
 - §6 says the morning queue reads `queue.json`. `SA-0152`'s stack view reads
   the ledger's `stack_layers` table.
+- `CLAUDE.md` says `--until` ends a night at the deadline plus at most one
+  task. A stack batch's end review runs after an `UNTIL` stop, paid from its
+  reserve (`SA-0153`, the operator's decision of 2026-09-23). §4.2.1's
+  wording of the bound needs the same change.
 
 ## Done looks like
 
 Once `SA-0149` and `SA-0152` merge, §4.2.1 names the errored spec review
-among the aborts, and §6 names the stack view's source. Both cite ADR 7.
+among the aborts, and §6 names the stack view's source. Once `SA-0154`
+wires the end review, `CLAUDE.md` and §4.2.1 say a stack night ends at the
+deadline plus one task plus its end review. Each cites ADR 7.
 
 ## Record
 
