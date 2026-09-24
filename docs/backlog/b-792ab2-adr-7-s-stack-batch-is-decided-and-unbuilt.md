@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154, SA-0155]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -88,3 +88,12 @@ escalations.
   injected review, one at a time before its own cell. `SA-0155` runs the
   review session in a critic cell, records it as facts and passes it from
   `saffron batch --stack`.
+- 2026-09-23: step 6's session and facts split in two. `SA-0155` mints
+  each reviewed spec's task before its review. It records the review as an
+  attempt and a `spec_review` fact, and ends a withheld spec's task
+  `SPEC_WITHHELD`. `SA-0156` builds the review session, the mint, and the
+  cell on the minted task. The chain runs `SA-0149`, `SA-0155`, `SA-0156`,
+  `SA-0150`.
+- 2026-09-23: `SA-0147` needs `SA-0138`'s kill rule, the operator's
+  decision. `SA-0133` and `SA-0138` merge before the stack chain runs, so
+  the previous queue lands first.

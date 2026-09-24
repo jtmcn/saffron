@@ -106,13 +106,13 @@ first cell. Section 3 of
 seeds each review at the tree the spec would be cut from. It runs one
 review per queued spec at batch start, up to K at once (`:153-155`).
 
-**This spec is the first of two for step 6.** It builds the read of a
+**This spec is the first of three for step 6.** It builds the read of a
 findings block. It builds the routing inside `run_stack_batch`, through an
-injected `review` callable. `SA-0155` builds the production `review`. That is
+injected `review` callable. `SA-0156` builds the production `review`. That is
 one host-invoked session in a critic cell, seeded at the tree this spec
 hands it, with its prompt taken from `.claude/agents/spec-reviewer.md`'s
-body. `SA-0155` also records each review as facts and passes the callable
-from `saffron batch --stack`.
+body. `SA-0155` records each review as facts, and `SA-0156` passes the
+callable from `saffron batch --stack`.
 
 **Each review runs right before its own spec's cell.** Reviews run one at
 a time. The design's reviews at batch start, K at once, cannot run on the
@@ -211,10 +211,11 @@ Build three things.
 - **An `unmeasured` concern.** The design routes it as `witness`
   (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:168`). With no
   revision here, it routes `run`, as any concern does.
-- **The session, its facts and its caller.** They are `SA-0155`'s. Nothing
+- **The session, its facts and its caller.** The facts are `SA-0155`'s, and
+  the session and its caller are `SA-0156`'s. Nothing
   in `saffron/` passes `review` until then, so a production stack batch
   reviews nothing yet.
-- **Filling `resets_at`.** `SA-0155`'s `review` callable sets it from a
+- **Filling `resets_at`.** `SA-0156`'s `review` callable sets it from a
   session that met the account's rate limit, and returns at once. It
   never waits inside the callable. The loop's wait here is the only one.
 - **Money.** A review's cost reaches no ledger row, so the batch's budget

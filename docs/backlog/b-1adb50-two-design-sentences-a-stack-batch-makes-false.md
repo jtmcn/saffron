@@ -26,7 +26,11 @@ forbid `DESIGN.md`, which is protected.
 - `CLAUDE.md` says `--until` ends a night at the deadline plus at most one
   task. A stack batch's end review runs after an `UNTIL` stop, paid from its
   reserve (`SA-0153`, the operator's decision of 2026-09-23). §4.2.1's
-  wording of the bound needs the same change.
+  wording of the bound needs the same change, and so does `README.md`'s
+  at lines 123-124.
+- §3.3's terminal list and §4.2.1's done list lack `SPEC_WITHHELD`, which
+  `ccfa1553` added to the ontology for `SA-0155`. §3.3's `GATE_ERROR` line
+  does not say that an errored spec review in a stack batch ends there.
 
 ## Done looks like
 

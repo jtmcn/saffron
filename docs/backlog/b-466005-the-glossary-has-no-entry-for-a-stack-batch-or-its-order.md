@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0153, SA-0154]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0153, SA-0154, SA-0155]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -73,3 +73,6 @@ The **Refusal** entry names the stack order's refusal. This lands after
   is a session the host starts before a spec's first cell, and a `blocker`
   withholds the spec and its descendants. **Escalation** is new: a spec a
   stack batch withholds for the operator, which reaches them as one line.
+- 2026-09-23: `SA-0155` labels a spec review's attempt with the phase
+  `SPEC_REVIEW`. `SPEC_WITHHELD` and the `spec_review` fact kind landed by
+  hand with it, in `ccfa1553`.
