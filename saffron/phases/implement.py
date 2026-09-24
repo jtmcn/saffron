@@ -155,9 +155,9 @@ def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
         for n in new_failures
     ]
     return (
-        "These failures are new since the base commit. Failures already "
-        "present on the base commit are excluded and are not yours to fix. "
-        "Fix these and commit.\n\n" + "\n".join(lines)
+        "These failures are yours to fix. A failure the base commit already "
+        "had is left out, unless it is a witness that survived its mutant "
+        "and blocks this task. Fix these and commit.\n\n" + "\n".join(lines)
     )
 
 

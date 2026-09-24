@@ -2486,7 +2486,7 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     assert outcome.state == "READY_FOR_REVIEW"
     # No repair turn was bought — REVIEW's own lens turns are the only ones
     # past IMPLEMENT, and none of them carry a repair prompt.
-    assert not any("These failures are new" in turn for turn in cell.turns)
+    assert not any(turn.startswith(implement.repair_prompt([])) for turn in cell.turns)
     assert not any(nf.gate == "size" for nf in outcome.new_failures)
     # Still reported, host-side, beside `scope` and `integrity`: a gate
     # nothing reads is not a gate, and neither is one whose result vanishes
@@ -2668,7 +2668,7 @@ def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_pa
         gates=("lint",),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    assert not any("These failures are new" in turn for turn in cell.turns)
+    assert not any(turn.startswith(implement.repair_prompt([])) for turn in cell.turns)
     assert not any(nf.gate == "lint" for nf in outcome.new_failures)
     (lint_result,) = [g for g in outcome.gates if g.gate == "lint"]
     assert lint_result.status == "fail"

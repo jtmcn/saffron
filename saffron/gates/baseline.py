@@ -1,8 +1,10 @@
 """Baseline subtraction: only new failures are a task's problem.
 
-Failures on `base_sha` are pre-existing and not this task's fault. Without the
-subtraction every task inherits the repo's flaky tests and burns its budget on
-them (DESIGN.md §5.4).
+A failure on `base_sha` is usually pre-existing and not this task's fault. A
+`witness` failure coded `survived-mutant` is the exception: the spec asked
+this task to kill that mutant, so a survivor at base is not inherited.
+Without the subtraction every task inherits the repo's flaky tests and burns
+its budget on them (DESIGN.md §5.4).
 """
 
 from __future__ import annotations
@@ -19,29 +21,37 @@ class NewFailure(NamedTuple):
     failure: Failure
 
 
+def _cancels(gate: str, failure: Failure) -> bool:
+    """Whether a baseline failure cancels its match at head.
+
+    A `witness` failure coded `survived-mutant` never does: the spec asked
+    this task to kill that mutant, so the base commit having it already is
+    not the same as inheriting it (DESIGN.md §5.4).
+    """
+    return not (gate == "witness" and failure.code == "survived-mutant")
+
+
 def _counts(results: list[GateResult]) -> Counter[tuple[str, str, str, str]]:
     return Counter(
         identity(result.gate, failure)
         for result in results
         for failure in result.failures
+        if _cancels(result.gate, failure)
     )
 
 
 def subtract_baseline(
     head: list[GateResult], base: list[GateResult]
 ) -> list[NewFailure]:
-    """Failures present at head and absent from the baseline.
+    """Failures at head with no cancelling baseline failure.
 
     Compared on `(gate, file, code, normalized message)` — never on line
-    number, which the diff moves.
+    number, which the diff moves. Count-aware: one pre-existing failure
+    cancels one failure at head, not every failure sharing its identity.
 
-    Count-aware: one pre-existing failure cancels one failure at head, not
-    every head failure sharing its identity. `normalize_message` turns digit
-    runs into `N`, and the digits are exactly what tells sibling failures of
-    one rule in one file apart, so a set-based subtraction hid genuinely new
-    ones. Known consequence: when N of M identical-identity failures are new,
-    the ones *reported* may name a pre-existing line — acceptable, `line` is
-    display-only by design.
+    One exception: a `witness` failure coded `survived-mutant` at base
+    never cancels its match at head, because the spec asked this task to
+    kill that mutant (DESIGN.md §5.4).
     """
     remaining = _counts(base)
     new = []

@@ -549,10 +549,30 @@ def test_repair_text_carries_failures_and_never_a_gate_status():
     # The whole preamble, not substrings: hunting for "pass" or "status" runs
     # over gate-supplied failure text, where "passed" fails for the wrong reason.
     assert preamble == (
-        "These failures are new since the base commit. Failures already "
-        "present on the base commit are excluded and are not yours to fix. "
-        "Fix these and commit."
+        "These failures are yours to fix. A failure the base commit already "
+        "had is left out, unless it is a witness that survived its mutant "
+        "and blocks this task. Fix these and commit."
     )
+
+
+def test_the_repair_preamble_stays_true_when_a_base_survivor_is_listed():
+    """The fixed preamble no longer claims every listed failure is new since
+    the base commit. It stays true once a base survivor joins the list."""
+    plain = [NewFailure("types", Failure(file="a.py", code="arg-type", message="x"))]
+    with_survivor = plain + [
+        NewFailure(
+            "witness",
+            Failure(file="t.py::test_w", code="survived-mutant", message="s"),
+        )
+    ]
+    preamble = (
+        "These failures are yours to fix. A failure the base commit already "
+        "had is left out, unless it is a witness that survived its mutant "
+        "and blocks this task. Fix these and commit."
+    )
+    for new in (plain, with_survivor):
+        actual, _, _ = implement.repair_prompt(new).partition("\n\n")
+        assert actual == preamble
 
 
 def test_a_failure_with_no_path_does_not_render_an_empty_one():
