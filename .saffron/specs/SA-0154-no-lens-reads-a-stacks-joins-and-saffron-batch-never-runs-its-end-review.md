@@ -1,15 +1,13 @@
 ---
 id: SA-0154
-title: No lens reads the joins between a stack's layers, and saffron batch --stack never runs its end review
+title: No lens reads the joins between a stack's layers, and no cell exists to read a layer in
 type: feature
 priority: 1
 depends_on: [SA-0153]
 touches:
   - saffron/end_review.py
-  - saffron/cli.py
   - saffron/agents/prompts/end-review-join.md
   - tests/test_end_review.py
-  - tests/test_cli.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -26,6 +24,7 @@ forbidden:
   - harness/**
   - records/**
   - saffron/task.py
+  - saffron/cli.py
   - saffron/batch.py
   - saffron/scheduler.py
   - saffron/intake.py
@@ -51,15 +50,22 @@ forbidden:
   - tests/test_scheduler.py
   - tests/test_ledger.py
   - tests/test_session.py
+  - tests/test_cli.py
 budget_usd: 28
 max_attempts: 3
 max_turns: 160
+pending_symbols:
+  - saffron/end_review.py::run_end_review
+  - saffron/end_review.py::layer_cell
+  - saffron/end_review.py::RESERVE_SHARE
+  - saffron/end_review.py::LENS_BUDGET_USD
+  - saffron/end_review.py::LENS_MAX_TURNS
 acceptance:
   - claim: >-
       `end_review.review_joins(ledger, batch_key, reserve_usd, specs, ...)`
       takes `review_stack`'s keywords and reads that batch's layers alone,
       in position order. With fewer than two layers it returns `None` and
-      records nothing. Otherwise it records one `end_review` fact with the
+      records nothing, whatever the reserve. Otherwise it records one `end_review` fact with the
       lens `join` under the top layer's task. While `reserve_usd` is below
       `budget_usd`, that fact is `not_reached` at 0, no cell is opened, and
       it returns `None`. Otherwise it opens
@@ -103,30 +109,14 @@ acceptance:
       the thread env it was given. It yields the container `cell_up` was
       given. It calls `session.cell_down` once, with the same network,
       volume, state, container and `created` set. It does so when
-      `cell_up` raises, when the body raises, and when neither does.
+      `cell_up` raises, when the body raises, and when neither does. Each
+      call's `note` takes that function's own arguments: `(step, detail)`
+      for `cell_up`, and `(step, ok, detail)` for `cell_down`.
     witness: tests/test_end_review.py::test_a_layers_critic_cell_is_seeded_at_its_head_and_always_torn_down
   - claim: >-
-      `saffron batch --stack --budget N` passes `run_stack_batch` the
-      budget `N` whole, a `reserve_usd` of `N` times
-      `end_review.RESERVE_SHARE`, and an `end_review` callable.
-      `RESERVE_SHARE` is 0.25. The callable calls `end_review.run_end_review`
-      with the ledger and the batch key, reserve and specs it was given. It
-      returns the `StackReview` that call returns. `mirror` is the pinned
-      mirror. `claude_md` is `CLAUDE.md` at the pinned `base_sha`, never the
-      checkout's. `open_cell` is `layer_cell` over the repo and the pinned
-      mirror. Its gates directory is `.saffron/` exported at that
-      `base_sha`, and its `thread_env` is that export's policy's.
-      `context_md` is Saffron's own `CONTEXT.md`,
-      and `prompts_dir` is `context.PROMPTS_DIR`. `max_turns` and
-      `budget_usd` are `end_review.LENS_MAX_TURNS` and
-      `end_review.LENS_BUDGET_USD`. `agent` calls `implement.run_agent` with
-      `timeout_s` of `session.TURN_TIMEOUT_S`, and raises `RateLimited` on a
-      rejected window.
-    witness: tests/test_cli.py::test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_pinned_base
-  - claim: >-
-      `saffron batch` without `--stack` still hands `run_batch` its budget
-      and its defaults.
-    witness: tests/test_cli.py::test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes
+      `review.LENSES` still names the three in-cell lenses, so no cell's
+      REVIEW runs the join lens.
+    witness: tests/test_review.py::test_the_declared_lenses_are_the_three_that_run
     preserves: true
 ---
 
@@ -149,21 +139,18 @@ layer below it, its **predecessor**. Once the last queued task settles, one
 **end review** reads the stack. Two end-review lenses read each layer. One
 join lens reads the joins between layers.
 
-**This spec is the third of three for step 3.** `SA-0146` builds the Spec
+**This spec is the third of four for step 3.** `SA-0146` builds the Spec
 and Standards lenses. `SA-0153` runs them over a stack, top down within a
-reserve, and records each lens of each layer. This spec adds the join lens
-and the critic cell a layer is read in. It wires the end review into
-`saffron batch --stack`. `SA-0147` then qualifies the findings.
+reserve, and records each lens of each layer. This spec adds the join lens,
+the critic cell a layer is read in, and the one call that runs the whole
+end review. `SA-0157` wires that call into `saffron batch --stack`.
+`SA-0147` then qualifies the findings.
 
 **What the tree base holds.** This spec's tree base is `SA-0153`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain
 `SA-0142` to `SA-0153` puts these there, so they are cited by symbol. Every
 line number below was read at `f0c8f82d`.
 
-- `SA-0144` adds `--stack` to `saffron batch`. Given it, `_batch` builds
-  its runner with `_stack_runner` and calls `run_stack_batch` in place of
-  `run_batch`. It does so inside the branch where readiness passed, where
-  `pinned` is bound (`saffron/cli.py:811-822`).
 - `SA-0145` writes one `stack_layers` row per layer, keyed on record keys:
   `task_key`, `batch_key`, `position`, `spec_id`, `predecessor_key`,
   `predecessor_head` and `generation`. `batch_key` is the batch's id as
@@ -205,20 +192,13 @@ makes one with no proxy. Either way it applies a patch to the tree base
 is up and there is no patch. So each layer's critic cell comes up through
 `cell_up` at the layer's head, and nothing is applied to it.
 
-**Where each input lives.** `_drive_cell` exports `.saffron/` at the run's
-`base_sha` and loads the policy from that export (`:1650`, `:1662`). It
-reads `CLAUDE.md` at the same sha (`:1655`) and Saffron's own `CONTEXT.md`
-from Saffron's root (`:1798`). It wraps the agent in `stop_on_rejected`
-and binds `timeout_s=TURN_TIMEOUT_S` (`:1829-1839`). `stop_on_rejected`
-raises `RateLimited` on a rejected window (`:159-181`, `:230-232`).
-
 **What a lens costs.** On 2026-09-23 the ledger held 392 `REVIEWING`
 attempts, one per in-cell lens session. Their cost averaged $0.68 and
 peaked at $1.80. Their turns averaged 11.8 and peaked at 41.
 
 ## Problem
 
-Build four things.
+Build three things.
 
 1. **The join lens.** Add `saffron/agents/prompts/end-review-join.md`. It is
    a system prompt for a read-only session in the top layer's critic cell.
@@ -238,40 +218,23 @@ Build four things.
    with `join` and `layers`, and `run_end_review` to
    `saffron/end_review.py`. The join lens runs first. Each layer already
    had three in-cell lenses, and the joins had none (ADR 6, principle 50).
-   So a short reserve spends on the joins before the layers.
+   So a short reserve spends on the joins before the layers. Add
+   `LENS_BUDGET_USD` of 2.5, `LENS_MAX_TURNS` of 50 and `RESERVE_SHARE` of
+   0.25 to `saffron/end_review.py`. `SA-0157` passes the first two as each
+   lens's ceilings, and holds `RESERVE_SHARE` of `--budget` as the reserve.
+   It states why a share.
 3. **The critic cell.** Add `layer_cell` to `saffron/end_review.py`, as
    criterion 4 states. Its network is `saffron-cells`, the name
    `_drive_cell` uses (`saffron/cell/session.py:1632`). Its container,
-   volume and state names carry the layer's spec id. Reach `cell_up`,
+   volume and state names carry the layer's spec id. Its `branch` is
+   `fields.branch`. Reach `cell_up`,
    `cell_down` and `runtime.remove_container` through their modules at
    call time, since the witness replaces them there. Its two notes print
    their detail line.
-4. **The wiring.** Add `_stack_end_review(*, pinned, repo, ledger,
-   out_dir)` to `saffron/cli.py`, beside `_stack_runner`. It returns the
-   callable criterion 5 states. The callable exports `.saffron/` at the
-   pinned `base_sha` under `out_dir`, in a directory named for the batch
-   key. Its `emit` prints each event's `describe` line, as
-   `_default_emit` does (`saffron/cell/session.py:85-87`). The agent binds
-   the spec id `end-review-<batch key>`. `_batch`'s `--stack` path builds
-   it where it builds `_stack_runner`, and passes it with the reserve. A
-   night whose readiness fails passes `end_review=None`, and
-   `run_stack_batch` then runs none. Add `LENS_BUDGET_USD` of 2.5,
-   `LENS_MAX_TURNS` of 50 and `RESERVE_SHARE` of 0.25 to
-   `saffron/end_review.py`.
 
-**The reserve is a share of `--budget`, not a flag.** The design's command
-line names `--budget` and `--ready` alone. It is in design section 4, under
-"What the delegate still does". A flag would be one more number the
-operator sizes each night, and a default in dollars fits one budget only. A
-share keeps the night bounded by the one number the operator gives. At the
-lens ceiling, the join and `n` layers cost at most `(2n + 1) × 2.5`. A $100
-night reserves $25, which covers the join and four layers at the ceiling.
-`review_stack` starts a layer only while $5 remains. So at the measured
-mean of $0.68 a lens, $25 covers the join and about fifteen layers.
-
-**`SA-0147` reads the `StackReview`.** `run_end_review` returns it, and
-the callable returns it to `run_stack_batch`, which discards it. So
-`SA-0147` qualifies inside the callable or inside `run_end_review`. It
+**`SA-0147` reads the `StackReview`.** `run_end_review` returns it.
+`SA-0157`'s callable returns it to `run_stack_batch`, which discards it.
+So `SA-0147` qualifies inside that callable or inside `run_end_review`. It
 reads `StackReview.layers`, the `LayerReview` list top down, and
 `StackReview.join`, a `LensReview` or `None`. The join's findings sit
 under the top layer's task, the first entry of `layers`.
@@ -288,7 +251,13 @@ under the top layer's task, the first entry of `layers`.
   join or the layer reads as `error`. The rate-limit wait is `SA-0148`'s.
 - **An event log for the end review.** Its events print to the batch's
   output alone. No `events.jsonl` in the batch tree gains them.
-- **The spec-review session.** It is `SA-0155`'s, and `layer_cell` and
+- **The wiring.** `saffron batch --stack` passing a reserve and a callable
+  that calls `run_end_review` is `SA-0157`'s. So are the agent, the inputs
+  read at the pinned base, and the plan header. Until it lands nothing calls
+  `run_end_review`, `layer_cell` or the three constants. They are
+  `pending_symbols`, and the `dead` gate defers them while this spec is
+  open (`.saffron/gates/dead.py:4-6`).
+- **The spec-review session.** It is `SA-0156`'s, and `layer_cell` and
   the reserve are open to it.
 - **The vocabulary.** `CONTEXT.md` has no entry for the join lens. Its
   **Critic cell** entry names a cell whose tree is a task's base with the
@@ -298,9 +267,9 @@ under the top layer's task, the first entry of `layers`.
 ## Notes for the agent
 
 **Every criterion but the last is new code.** No text at the tree base runs
-a join lens. None seeds a cell at a layer's head, or passes an end review
-from the command line. So criteria 1 to 5 declare a witness and no mutant, and
-`witness` reports `skip` for them. Criterion 6 is `preserves` and names a
+a join lens. None seeds a cell at a layer's head or runs one end review. So
+criteria 1 to 4 declare a witness and no mutant, and `witness` reports
+`skip` for them. Criterion 5 is `preserves` and names a
 test that passes now.
 
 **Import every new name inside the test body.** `review_joins`,
@@ -314,7 +283,8 @@ git repo in `tmp_path` as the mirror, and give every commit the message
 `msg <file>`. On `main`, commit `a.txt` as commit `A`, then `m.txt` "moved
 main". Then commit one file per spec, `<spec>.txt` holding "`<spec>`
 layer", in this order: `TE-9`, `TE-3`, `TE-7`, `TE-4`, `TE-2`, `TE-6`,
-`TE-8`, `TE-5`, `TE-1` and `TE-10`.
+`TE-8`, `TE-5`, `TE-1` and `TE-10`. `TE-7`'s commit also rewrites
+`TE-9.txt` to "TE-9 layer v2", so one layer edits an earlier layer's file.
 
 Build a `Ledger` with a `MemoryRecord`. Open five batches. For each spec,
 create a run with `base_sha` `A` and its batch's id, then a task. Package
@@ -328,7 +298,7 @@ below it:
 | 2 | 0.75 | `TE-4` at 1, `TE-2` at 2 |
 | 3 | 4.0 | `TE-6` at 1, `TE-8` at 2 |
 | 4 | 4.0 | `TE-5` at 1, `TE-1` at 2 |
-| 5 | 4.0 | `TE-10` at 1 |
+| 5 | 0.5 | `TE-10` at 1 |
 
 Record one correctness concern "in-cell c7" on `TE-7`. `specs` holds a
 `Spec` for each, with the body "body `<spec>`". `TE-3`'s body is "body
@@ -349,7 +319,8 @@ It asserts:
 - `open_cell` given `TE-7`, `TE-8` and `TE-1`, in that order, each with
   its own head.
 - call 1's system prompt holds "+TE-9 layer", "+TE-3 layer" and "+TE-7
-  layer", and "diff --git a/TE-9.txt b/TE-9.txt". It holds `TE-9`'s head,
+  layer", and "diff --git a/TE-9.txt b/TE-9.txt". It holds "+TE-9 layer
+  v2" and no "-TE-9 layer". It holds `TE-9`'s head,
   `^..` and `TE-7`'s head, joined. It holds "body TE-9", "body TE-3 {gap}"
   and "body TE-7" in that order, and the `claude_md` line. It holds none of
   "moved main", "msg TE-" and "+TE-4 layer".
@@ -371,6 +342,9 @@ These fail it, each measured:
   `fields.base`, which holds "moved main"
 - the range from the bottom layer's head with no `^`, or the top layer's
   own commit alone
+- each layer's own diff, concatenated, which holds "-TE-9 layer"
+- the reserve checked before the layer count, which writes a
+  `not_reached` row for batch 5
 - the layers ordered by spec id, or in the order they were recorded
 - every batch's layers, which raises on the primary key
 - the lens run once per layer above the bottom
@@ -409,8 +383,10 @@ recorder's. These fail it, each measured:
 - `open_cell` withheld from `review_stack`
 
 **Criterion 4's witness** replaces `session.cell_up`, `session.cell_down`
-and `runtime.remove_container` with recorders that append to one log. The
-fields have distinct `base` and `head`. It runs three cases. In the first
+and `runtime.remove_container` with recorders that append to one log.
+The `cell_up` recorder calls its `note` once with a step and a detail. The
+`cell_down` recorder calls its own once with a step, `True` and a detail.
+The fields have distinct `base` and `head`. It runs three cases. In the first
 the body appends the yielded name. It asserts the log reads remove, up,
 body, down, and checks the claim's arguments. In the second, `cell_up`
 adds its container to `created` and raises. It asserts the raise
@@ -423,55 +399,18 @@ These fail it, each measured:
 - a fresh `created` set handed to `cell_down`
 - a yielded name other than the container `cell_up` was given
 - no leftover container removed first
-
-**Criterion 5's witness** builds a git repo as the mirror, with two
-commits. The first holds `.saffron/policy.yaml` with `thread_env` `X:
-base` and `CLAUDE.md` "claude at base". The second changes both to `head`.
-The pinned base is the first commit. The working directory is a checkout
-holding its own `CLAUDE.md` and `CONTEXT.md`, with other text. Readiness
-passes with that mirror and sha, as `_readiness_passes` does
-(`tests/test_cli.py:2603-2621`). `_resolve_queue` returns
-`_fake_batch_resolution` (`:2624-2640`), and takes any keyword. A fake
-`run_stack_batch` records its budget and keywords. It calls `end_review`
-with `"7"`, 10.0 and a mapping of one `Spec`, and keeps what it returns.
-`end_review.run_end_review` is replaced with a recorder that returns a
-sentinel. `implement.run_agent` is replaced with one that records its
-keywords and returns an attempt whose `rate_limit_status` is `rejected`.
-`session.cell_up`, `session.cell_down` and `runtime.remove_container` are
-recorders. It runs `main`
-with `batch --stack --budget 40` and asserts exit 0. It asserts the budget
-40.0, the reserve 10.0, the sentinel returned, and the claim's arguments
-and keywords. It enters `open_cell` on fields whose head is `h` forty
-times. It asserts `cell_up` got `thread_env` `{"X": "base"}`, the checkout
-as `repo`, the pinned mirror and that head. The `policy.yaml` under the
-`gates_dir` it got reads `X: base`. It calls `agent` and asserts `RateLimited`, and
-the `timeout_s` it passed. These fail it, each measured on
-`_stack_end_review` alone:
-
-- `CLAUDE.md` read from the mirror's `HEAD`, or from the checkout
-- `.saffron/` exported at the mirror's `HEAD`, for the policy or for the
-  cell's gates directory alone
-- `CONTEXT.md` read from the checkout
-- an agent with no `stop_on_rejected`, or no `timeout_s`
-- a callable that drops what `run_end_review` returns
-- `specs` not passed through
-- `max_turns` and `budget_usd` swapped
-
-These are unmeasured, because `SA-0144`'s `--stack` path is not at
-`f0c8f82d`:
-
-- the budget less the reserve passed as the budget, which holds the reserve
-  twice
-- a reserve in dollars that ignores `--budget`
+- one two-argument note shared by both calls, which raises from the
+  `finally`
 
 **How the lists were measured.** Throwaway simulations ran on 2026-09-23 at
 `f0c8f82d`. They subclassed `Ledger` with `SA-0145`'s and `SA-0153`'s
 tables and both write methods. They stood in for `layer_fields`,
 `LayerFields`, `LayerReview` and `review_stack`. They ran the real
 `review.run_lens`, `context.build_system_prompt` and
-`session.stop_on_rejected` on the host's git. Criterion 5's ran
-`_stack_end_review` directly, without `main`. The right build passed each
-witness, and every wrong version listed failed its own. The code of
+`session.stop_on_rejected` on the host's git. The right build passed each
+witness, and every wrong version listed failed its own. After the first
+spec review they ran again, with the rewritten `TE-9.txt`, batch 5's short
+reserve and the notes. The code of
 `SA-0143` to `SA-0153` is not at `f0c8f82d`, so no witness ran against it.
 
 **What the witnesses leave undriven.**
@@ -481,8 +420,17 @@ witness, and every wrong version listed failed its own. The code of
   same place, with the same record.
 - The `context_md`, `prompts_dir` and `emit` pass-through in
   `review_joins`. Pass each as given.
-- `end_review=None` on a night whose readiness fails.
-- The two notes `layer_cell` hands `cell_up` and `cell_down`.
+- The `{spec}` slot's per-layer headings and `layer_cell`'s `branch`.
+  Build each as the Problem states.
+
+**Why the join goes first, and where that costs a layer.** Each layer
+already had three in-cell lenses. At the joins the critic is the only full
+reader (ADR 6, principles 40 and 50). So a short reserve buys the joins
+before any layer. The cost is a floor. `review_stack` starts a layer only
+while $5 remains after the join. With a join near $1.50, a `--budget` below
+about $26 reserves too little, and a two-layer stack gets the join and no
+layer. At the lens ceiling of $2.50 that floor is $30. Each layer not
+reached still gets its `not_reached` rows from `review_stack`.
 
 **The double's `AssertionError` is caught.** `review_joins` catches a raise
 from the lens step, the double's included. So an extra lens call reads as
@@ -502,9 +450,8 @@ docstring within ten lines. Check the prompt file with
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
-prototype of this change, with its five witnesses formatted by
-`ruff format`, measured 2365 changed tokens with `size_gate` itself.
-`saffron/end_review.py` took 471, `saffron/cli.py` 129, the prompt 192, and
-the two test files 1573. Criterion 5's last three asserts add about 15.
-That is 79% of the ceiling, so there is little room. Reuse `tests/test_cli.py`'s own git helpers where it has them. Keep
-the witnesses' helpers shared and their docstrings short.
+prototype of this change, with its four witnesses formatted by
+`ruff format`, measured 1946 changed tokens with `size_gate` itself.
+`saffron/end_review.py` took 471, the prompt 192 and
+`tests/test_end_review.py` 1283. That is 65% of the ceiling. Keep the
+witnesses' helpers shared and their docstrings short.

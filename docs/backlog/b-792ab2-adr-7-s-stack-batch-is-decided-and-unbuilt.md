@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154, SA-0155]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154, SA-0155, SA-0157]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -97,3 +97,8 @@ escalations.
 - 2026-09-23: `SA-0147` needs `SA-0138`'s kill rule, the operator's
   decision. `SA-0133` and `SA-0138` merge before the stack chain runs, so
   the previous queue lands first.
+- 2026-09-23: `SA-0154` came to about 2500 changed tokens against the
+  `feature` ceiling of 3000, so its command-line wiring splits out.
+  `SA-0154` keeps the join lens, the critic cell and `run_end_review`.
+  `SA-0157` wires them into `saffron batch --stack`, with a reserve of a
+  quarter of `--budget` printed in the plan header.
