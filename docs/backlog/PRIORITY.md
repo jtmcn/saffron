@@ -246,6 +246,10 @@ consumed name, which a cell cannot write.
 glossary entry for a stack batch, its order and a predecessor, which a cell
 cannot write.
 
+**Placed 2026-09-23**, from the stack batch's spec reviews: **b-1adb50**. Two
+`DESIGN.md` sentences go false once `SA-0149` and `SA-0152` merge, and only a
+person edits that file.
+
 
 **Placed 2026-09-23**, from the spec loop's run 15: ~~**b-6377cf**~~, then
 **b-cde96b**. Baseline subtraction hid a `preserves` mutant that survived at

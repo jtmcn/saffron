@@ -111,7 +111,14 @@ They run once per reviewable layer, in a critic cell seeded at that layer's
 head. The host fills the template fields from the ledger. A layer's `{BASE}` is
 its predecessor's head. `{KNOWN}` is that layer's in-cell findings and its
 `rebuttal.json`. Each field is filled once, and a filled value is never
-expanded again (principle 22).
+expanded again (principle 22). The diff each layer's lenses read is
+`head^..head`, because PACKAGE squashes a layer to one commit. The bottom
+layer's run `base_sha` is not its head's parent once main moves, so
+`base..head` would carry foreign commits. The Spec lens also gets each
+criterion's witness and `preserves` flag, and the `touches` and `forbidden`
+rules the implementer was held to. The Standards lens judges vocabulary
+against the standards documents the target repo declares, not Saffron's
+glossary (`SA-0146`).
 
 **One lens reads the joins.** It reads the top layer's tree with the whole
 stack's range, under ADR 6's rubric:
@@ -160,9 +167,14 @@ repo supplies none of them (ADR 2). This repo's `.claude/agents/spec-writer.md`,
 `spec-reviewer.md` and the skill's `REVIEW-PROMPT.md` stay the hand path's
 own. They name this repo's tools, so they differ from core's by design.
 
-**Queued specs are reviewed before their cells.** At batch start one spec
-review runs per queued spec, up to K at once. A spec's first cell waits only
-for its own review. Blockers route by their tag.
+**Queued specs are reviewed before their cells, one at a time.** Each spec's
+review runs just before its own cell, on the current last layer, which is the
+tree that cell is cut from. The cell runtime cannot run a critic cell beside a
+task cell: one network and one proxy serve every cell, and `cell_up` and
+`cell_down` remove both. Concurrent reviews wait for per-cell names
+(b-6a692d). A review that errors counts toward the breaker, as `GATE_ERROR`
+does. A rate-limited review goes through the same wait as a rate-limited
+task (`SA-0149`). Blockers route by their tag.
 
 - `build` or `witness`: the writer revises, and a fresh spec review reads the
   whole spec again, beside the original. Up to three rounds. Each round walks
@@ -296,10 +308,13 @@ One spec per step. Each step ships usable on its own.
    the handoff (`SA-0143`), the `--stack` flags (`SA-0144`) and the layers'
    record (`SA-0145`).
 2. Folded into step 7. A plan made once has no open PR of its own to exempt.
-3. The seat lenses and the join lens (`SA-0146`).
+3. The end review, as three specs: the Spec and Standards lenses
+   (`SA-0146`), their run over the stack (`SA-0153`), and the join lens with
+   the CLI wiring (`SA-0154`).
 4. Qualification (`SA-0147`).
 5. The rate-limit wait (`SA-0148`).
-6. Spec review in the batch (`SA-0149`).
+6. Spec review in the batch, as two specs: the routing (`SA-0149`) and the
+   review session with its facts (`SA-0155`).
 7. Spec writing and follow-ups, with the overlap exemption (`SA-0150`).
 8. The finishing layer (`SA-0151`).
 9. The stack view on the queue page (`SA-0152`).
