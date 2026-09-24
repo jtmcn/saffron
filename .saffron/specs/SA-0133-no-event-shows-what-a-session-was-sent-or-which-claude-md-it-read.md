@@ -51,6 +51,7 @@ forbidden:
 budget_usd: 25
 max_attempts: 3
 max_turns: 160
+estimated_lines: 330
 risk: elevated
 acceptance:
   - claim: >-
@@ -58,7 +59,8 @@ acceptance:
       the SHA-256 hex of the request it writes to the runner's stdin. It is
       the turn's first event, emitted before the runner starts. The witness
       drives three turns through `run_agent` with an `exec_stream` double
-      that keeps the exact string it was handed. One is a fresh session, one
+      that keeps the exact string it was handed. Its options carry no string
+      system prompt. One is a fresh session, one
       resumes a session with the same prompt and options, and one has a
       runner that exits 1 with no result event, so `run_agent` raises. On
       each, exactly one event carries a 64-character hex digest, it is the
@@ -106,7 +108,9 @@ acceptance:
       the task's `events.jsonl`. The witness drives three cells with the
       default emit, so each writes its own event log, and reads each log
       back. The cells differ only in the base `CLAUDE.md`. The first two
-      carry the same text and the third a different one. The first two logs
+      carry the same text and the third a different one. The witness pins
+      the system prompt file's path to one fixed value across all three
+      cells. The first two logs
       hold the same `CLAUDE.md` digest and the same list of request digests.
       The third holds a different `CLAUDE.md` digest, and its request digests
       differ from the first log's at every position. Each list has one entry
@@ -117,8 +121,9 @@ acceptance:
       find: standing_instructions=context.standing_instructions(claude_md),
       replace: standing_instructions="",
   - claim: >-
-      The request `run_agent` sends still carries the prompt, the options and
-      the resume id, and nothing else.
+      For options that carry no string system prompt, the request
+      `run_agent` sends still carries the prompt, the options and the resume
+      id, and nothing else.
     witness: tests/test_implement.py::test_the_request_carries_the_prompt_the_options_and_the_resume
     preserves: true
   - claim: >-
@@ -140,17 +145,23 @@ branch. `SA-0139` edits `saffron/phases/implement.py`,
 `tests/test_implement.py` and `tests/test_session.py`. It rewrites
 `repair_prompt`'s preamble, and it replaces two `test_session.py` checks
 that matched on the old preamble text. The line numbers below were read at
-`c915d801`, after `SA-0125`, `SA-0126` and `SA-0128` merged. `SA-0139`
-moves some of them in those three files, so find each by its name.
+`bd888bed`, the head of `SA-0139`'s branch. That head also carries `SA-0140`
+and `SA-0129`. Both `SA-0139` and `SA-0140` moved lines in
+`saffron/phases/implement.py`, and `SA-0140` moved them in
+`saffron/phases/rebut.py`. Find each by its name if your base differs.
 
 What the code does now:
 
-- `run_agent` (`saffron/phases/implement.py:190`) is the one function that
+- `run_agent` (`saffron/phases/implement.py:191`) is the one function that
   starts the in-cell runner. It builds the request as a JSON string of the
-  prompt, the options and the resume id at `:219`. It hands that string to
-  `exec_stream` as the runner's stdin at `:262-269`. Every `AgentEvent` it
+  prompt, the options and the resume id at `:229-232`. When the options
+  carry a string `system_prompt`, it also adds `system_prompt_path`, a
+  fresh `/tmp/saffron-system-prompt-<uuid4 hex>` path the runner writes that
+  prompt to (`:223-231`). So two requests with a string system prompt never
+  match byte for byte. It hands that string to `exec_stream` as the runner's
+  stdin at `:275-282`. Every `AgentEvent` it
   emits comes from the runner's stream or from what happens after it ends
-  (`:240`, `:245`, `:260`, `:277-288`, `:327-334`). None comes before it.
+  (`:253`, `:258`, `:273`, `:290-301`, `:344-351`). None comes before it.
 - Every session reaches `run_agent` through one callable. `_drive_cell`
   binds `implement.run_agent` inside `record_attempts` and
   `stop_on_rejected` at `saffron/cell/session.py:1829-1839`. The plan,
@@ -177,7 +188,7 @@ What the code does now:
   other it embeds the text with trailing whitespace stripped. IMPLEMENT
   passes it at `saffron/cell/session.py:1811`, the lenses at
   `saffron/phases/review.py:187`, the criterion probe at `:382`, and the
-  verdict at `saffron/phases/rebut.py:258`.
+  verdict at `saffron/phases/rebut.py:262`.
 
 ## Problem
 
@@ -248,8 +259,11 @@ Keep the raw string as well, or write a double of your own in the test.
 Find the digest with a 64-character lowercase hex pattern over each
 `Agent` event's `detail`. Assert it is `watched[0]`. The failing turn is a
 double returning exit code 1 with no lines, which makes `run_agent` raise
-`AgentFailed` (`saffron/phases/implement.py:303-321`). Wrap that call in
-`pytest.raises`, and check the events after it.
+`AgentFailed` (`saffron/phases/implement.py:319-337`). Wrap that call in
+`pytest.raises`, and check the events after it. Pass options with no
+string `system_prompt`, as `{"max_turns": 3}` is. With one, each request
+carries its own random `system_prompt_path`, and the fresh and resumed
+digests differ through that path alone, whatever `resume` does.
 
 **A harness option for criteria 2 and 4.** `_drive`
 (`tests/test_session.py:1214-1335`) replaces `implement.run_agent` with a
@@ -331,9 +345,33 @@ first, through its trailing newline.
 with `events.read_log`. Script the plan block and one clean turn, so each
 cell has five sessions: plan, IMPLEMENT and the three lenses. Use two texts
 that differ in more than trailing whitespace, because
-`standing_instructions` strips it. The prototype measured the first two logs
-equal and every position of the third different. That was at `f307e83b`, and
-it was not re-run at this base.
+`standing_instructions` strips it.
+
+Pin the system prompt file's path before the first cell, and keep it for
+all three. Every session in a cell sends a string system prompt, so every
+request carries a fresh `uuid4` in `system_prompt_path`. Monkeypatch
+`implement.uuid` with a stand-in whose `uuid4` returns one fixed `UUID`.
+Nothing else under `saffron/` uses `uuid`. Leave the hashed bytes as they
+are. The rule stays to hash the exact string the runner reads.
+
+The pin is what lets the mutant die. Unpinned, the first two logs differ at
+every position, and the witness cannot pass at head. Worse, the third log
+differs from the first at every position under the mutant too, so the
+`standing_instructions=""` mutant survives that half. Pinned, the plan and
+IMPLEMENT requests share one options dict (`saffron/cell/session.py:499`
+and `:1813`). They carry `CLAUDE.md` in all three cells. The mutant drops it
+from both, so their positions match between the first and third logs, and
+the witness fails on them.
+
+The prototype measured the first two logs equal and every position of the
+third different. That was at `f307e83b`, before `SA-0140` added the random
+path, and it was not re-run at this base.
+
+**Criterion 5 and `system_prompt_path`.** Its witness
+(`tests/test_implement.py:523`) sends `{"max_turns": 3}`, so the key is
+never added. Keep `system_prompt_path` for a string system prompt, since
+the runner reads its prompt from that file. Criterion 2 needs no pin,
+because each cell compares a digest with the bytes its own double received.
 
 **Existing tests this changes.**
 
