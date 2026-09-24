@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154, SA-0155, SA-0157, SA-0159]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -107,3 +107,7 @@ escalations.
   each run-level baseline result's `collected` in a `baseline_collected`
   table. `SA-0147` depends on it and on `SA-0138`. The chain runs
   `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`.
+- 2026-09-23: `SA-0156` builds the spec review session in a critic cell at
+  the predecessor's head, with `spec-reviewer.md` read at the pinned base.
+  It builds the mint `saffron batch --stack` passes, and runs each cell on
+  the task its review is recorded on, minted or resumed.

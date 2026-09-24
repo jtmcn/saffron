@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0153, SA-0154, SA-0155]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0153, SA-0154, SA-0155, SA-0156]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -76,3 +76,6 @@ The **Refusal** entry names the stack order's refusal. This lands after
 - 2026-09-23: `SA-0155` labels a spec review's attempt with the phase
   `SPEC_REVIEW`. `SPEC_WITHHELD` and the `spec_review` fact kind landed by
   hand with it, in `ccfa1553`.
+- 2026-09-23: `SA-0156` mints a spec's task before its spec review and runs
+  the cell on it. "Mint" joins the entries above, and a spec review runs in
+  a critic cell at the predecessor's head.
