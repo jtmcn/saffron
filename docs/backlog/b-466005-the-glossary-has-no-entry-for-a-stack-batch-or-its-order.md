@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -59,3 +59,6 @@ The **Refusal** entry names the stack order's refusal. This lands after
   "Layer" joins the entries above.
 - 2026-09-23: `SA-0146` builds the Spec and Standards end-review lenses.
   "End review" and "end-review lens" join the entries above.
+- 2026-09-23: `SA-0153` holds a reserve for the end review and records a
+  lens not reached. "End-review reserve" and a lens's end-review status
+  join the entries above.

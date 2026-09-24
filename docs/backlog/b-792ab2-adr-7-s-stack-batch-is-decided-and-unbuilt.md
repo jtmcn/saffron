@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -68,3 +68,7 @@ escalations.
   `SA-0155`. The chain runs `SA-0145`, `SA-0146`, `SA-0153`, `SA-0154`,
   `SA-0147`, `SA-0148`, `SA-0149`, `SA-0155`, `SA-0150`, `SA-0151`,
   `SA-0152`.
+- 2026-09-23: `SA-0153` runs the Spec and Standards lenses over a stack,
+  top down within a reserve held from the batch budget. It records each
+  lens of each layer as reviewed, error or not reached, in an `end_reviews`
+  table the fold rebuilds.
