@@ -64,9 +64,12 @@ acceptance:
       order recorded. An in-cell concern is a finding of a lens in
       `review.LENSES`, of severity `concern`, with no verdict and no
       rebuttal. Each input is anchored by `findings.anchor` against the
-      diff `<head>^..<head>` of its own layer. A join finding is anchored
-      against `<bottom head>^..<top head>` and belongs to the top layer. An
-      anchored finding with a probe then takes the probe's verdict.
+      diff `<head>^..<head>` of its own layer, reading cited lines at that
+      head. A join finding is anchored against `<bottom head>^..<top head>`,
+      reading at the top head, and belongs to the top layer. An anchored
+      in-cell `adequacy` concern goes to the pool as `unverified`, since its
+      REVIEW probe did not survive. Any other anchored finding with a probe
+      then takes the probe's verdict.
       `killed` drops it. `unproven`, or a `RuntimeError` from the probe
       call, sends it to the pool as `unverified`, with the reason, and the
       walk goes on. An entry's reason is matched to a finding by
@@ -76,9 +79,11 @@ acceptance:
       `FollowUpGroup` per layer and file, in the order its first finding
       was met. `pool` holds the rest in that order. The witness drives
       both halves of the anchoring rule, a bottom layer whose run's base is
-      not its head's parent, all four probe outcomes, a refused probe, two
-      findings sharing one probe, a `note` whose probe survives, an
-      unanchored `note`, and one layer and one file each shared by two
+      not its head's parent, a cited line that moved between a layer's
+      parent and its head, all four probe outcomes, a refused probe, two
+      findings sharing one probe, two probes differing only in `replace`, a
+      `note` whose probe survives, an unanchored `note`, an in-cell
+      `adequacy` concern, and one layer and one file each shared by two
       groups.
     witness: tests/test_qualify.py::test_each_end_review_finding_is_anchored_probed_and_grouped_by_layer_and_file
   - claim: >-
@@ -92,7 +97,7 @@ acceptance:
       task's run, and of the bottom layer's for the join. `repo`, `mirror`,
       `gates_dir`, `thread_env`, `test_paths`, `gates`, `created` and
       `note` pass through as given. The witness drives a stacked layer, the
-      join, and a layer with no probe.
+      join, a layer with no probe, and run ids that differ from task ids.
     witness: tests/test_qualify.py::test_a_findings_probe_runs_in_a_gate_only_cell_on_its_own_layers_tree
   - claim: >-
       Each finding `qualify` meets becomes one `qualification` fact under
@@ -220,6 +225,16 @@ patch that does not apply raises `CriticPatchRejected`, a `RuntimeError` it
 does not catch (`:1028`). `CriticPatchUnrepresentable` is one too
 (`:1036`), and so are `runtime.CellRuntimeError` and `mirror.GitError`.
 
+**An in-cell adequacy concern's probe did not survive.** REVIEW decides
+each anchored adequacy finding from its probe. `survived` makes it a
+`blocker`, `killed` a `note`, and `unproven` leaves it as filed
+(`saffron/phases/review.py:574-584`). So an adequacy `concern` left at
+`READY_FOR_REVIEW` carried no probe that survived. The `findings` table
+keeps no probe (`saffron/ledger.py:153-165`), so the host cannot run one
+again. ADR 7 qualifies a finding only once any probe it carries survived,
+and principle 28 asks one rule of every producer. So such a concern goes
+to the pool as `unverified`.
+
 **Recording today.** `record_findings` numbers a task's findings
 (`saffron/ledger.py:1143-1169`). `record_rebuttal` sets a finding's
 `verdict` and `rebuttal` (`:1171-1188`). `Ledger.findings(task_id)` returns
@@ -248,12 +263,15 @@ cannot add it, because `CONTEXT.md` is protected. The operator adds
 
 Build three things.
 
-1. **The probe call, for any findings.** Add `probe_findings(targets, *,
-   spec, repo, mirror, gates_dir, thread_env, test_paths, gates, patch,
-   base_results, created, note)` to `saffron/cell/session.py`. It takes
-   the body of `SA-0138`'s `_probe_adequacy`. `targets` replaces the line
-   that selects adequacy findings. `_probe_adequacy` keeps its signature
-   and calls `probe_findings` with `review.adequacy_probes(reviews)`. Two tests find
+1. **The probe call, for any findings.** The new name is
+   `probe_findings(targets, *, spec, repo, mirror, gates_dir, thread_env,
+   test_paths, gates, patch, base_results, created, note)`. Rename
+   `SA-0138`'s `def _probe_adequacy` to it in place, in
+   `saffron/cell/session.py`. Replace its line that selects
+   adequacy findings with the `targets` parameter. Beside it, add a thin
+   `_probe_adequacy` with the old signature that calls `probe_findings`
+   with `review.adequacy_probes(reviews)`. Do not copy the body, since
+   `size` blocks at 3000 tokens here. Two tests find
    `_probe_adequacy` on the stack by name (`tests/test_session.py:3475`,
    `:3691`), so it stays a function of its own.
 2. **The record of each outcome.** Add `qualifications` to `SCHEMA` in
@@ -306,6 +324,9 @@ Build three things.
      `unverified`, and the reason carries its message. Any other raise
      propagates. Otherwise an `unproven` finding's reason is the entry
      whose `probe` has its `review.probe_key`.
+   - An anchored in-cell `adequacy` concern is `unverified`, with the
+     reason "its REVIEW probe did not survive". An unanchored one is
+     `unanchored`, as any unanchored finding is.
    - Decide each finding in the order of the inputs, and record it with
      `record_qualification` under the layer's task. The join's go under
      the first layer's task. Capture each severity before the probe call,
@@ -366,45 +387,51 @@ the mirror. Each file below holds twelve lines, `<name>_l1` to
 
 | commit | change |
 |---|---|
-| `A` | `src/a.py` of `alpha`, `src/b.py` of `beta`, `src/c.py` of `gamma` with line 10 `gamma_calls beta_rate` |
+| `A` | `src/a.py` of `alpha`, `src/b.py` of `beta`, `src/c.py` of `gamma` with line 10 `gamma_calls beta_rate alpha_l2_new` |
 | `M` | adds `src/m.py`, one line `moved_main_only` |
 | `H1` | `src/a.py` line 2 becomes `alpha_l2_new` |
-| `H2` | `src/b.py` line 2 becomes `beta_rate`, `src/c.py` line 2 becomes `gamma_l2_new` |
+| `H2` | `src/b.py` line 2 becomes `beta_rate`. `src/c.py` line 2 becomes `gamma_l2_new`, and a line `gamma_inserted` goes in after line 5, so line 10 of `H1` is line 11 of `H2` |
 
-Build a `Ledger` with a `MemoryRecord`. Create a run with `base_sha` `A`
-and a task for `TE-1`, then the same for `TE-2`. Record two baseline results
+Build a `Ledger` with a `MemoryRecord`. Create one spare run with no task,
+so run ids and task ids differ. Then create a run with `base_sha` `A` and a
+task for `TE-1`, then the same for `TE-2`. Record two baseline results
 under each run. The `tests` result collects `[]` for `TE-1` and
 `["tests/t.py::test_old"]` for `TE-2`. The `lint` result collects `None`. Package `TE-1`
 `READY_FOR_REVIEW` at `H1` and `TE-2` at `H2`. Record `TE-1` as the layer at
 position 1 and `TE-2` at position 2 on it. Record these in-cell findings
 first:
 
-- `TE-1`: correctness concerns "c-a" on `src/a.py:2` and "c-m" on
-  `src/m.py:1`.
+- `TE-1`: correctness concerns "c-a" on `src/a.py:2`, "c-m" on
+  `src/m.py:1` and "c-c" on `src/c.py:10`. At `H1` that line names
+  `alpha_l2_new`, which `TE-1`'s diff changed.
 - `TE-2`: a correctness concern "i1" on `src/b.py:1`. Then four on
   `src/b.py:2`. A contract concern "i2" has the rebuttal "argued" and no
   verdict. An adequacy note "i3" and a correctness blocker "i4" have
   neither. A contract concern "i5" has the verdict `withdrawn` and no
-  rebuttal.
+  rebuttal. Last, an adequacy concern "i6" on `src/b.py:1`.
 
 The Spec lens's findings for `TE-2`, each on the line shown:
 
-| claim | severity | at | probe `find` | verdict |
+| claim | severity | at | probe `find`, `replace` | verdict |
 |---|---|---|---|---|
-| f1 | concern | `src/b.py:2` | `beta_rate` | `survived` |
-| f2 | blocker | `src/b.py:3` | `beta_l3` | `killed` |
-| f3 | concern | `src/c.py:2` | `nothing_here` | `unproven` |
-| f4 | note | `src/c.py:3` | `gamma_l2_new` | `survived` |
-| f5 | blocker | `src/c.py:12` | `gamma_l12` | never asked |
-| f6 | concern | `src/c.py:10` | none | |
-| f7 | concern | `src/c.py:4` | `nothing_here`, f3's probe | `unproven` |
+| f1 | concern | `src/b.py:2` | `beta_rate`, `beta_gone` | `survived` |
+| f2 | blocker | `src/b.py:3` | `beta_l3`, `beta_k` | `killed` |
+| f3 | concern | `src/c.py:2` | `nothing_here`, `x` | `unproven` |
+| f4 | note | `src/c.py:3` | `gamma_l2_new`, `gamma_s` | `survived` |
+| f5 | blocker | `src/c.py:13` | `gamma_l12`, `gamma_x` | never asked |
+| f6 | concern | `src/c.py:11` | none | |
+| f7 | concern | `src/c.py:4` | f3's probe | `unproven` |
 | f8 | concern | `src/c.py:5` | on `tests/test_c.py` | refused |
+| f10 | concern | `src/c.py:6` | `nothing_here`, `y` | `unproven` |
+
+Every probe but f8's is on `src/c.py` or `src/b.py`. f3's and f10's share
+the file and `find`, and differ only in `replace`.
 
 The Standards lens's are a note "s1" on `src/b.py:4`, a blocker "s2" on
 `src/b.py:5` and a note "s3" on `src/c.py:12`. The join lens's are a
 concern "j1" on `src/a.py:2`, a concern "j2" on `src/m.py:1`, and a blocker
 "j3" on `src/b.py:2` with a probe. Record copies of the three join findings
-under `TE-2` with `record_findings`, then copies of the eleven Spec and
+under `TE-2` with `record_findings`, then copies of the twelve Spec and
 Standards findings, as `SA-0154` and `SA-0153` do. `layers` is `TE-2`'s `LayerReview`, its Spec then
 Standards reviews, then `TE-1`'s with no reviews.
 
@@ -413,9 +440,12 @@ Replace `session.probe_findings` with a double. It records each call,
 when `spec.base_sha` is `M`. Otherwise it builds one entry per distinct
 `review.probe_key`, in first-seen order, with the refused probes first, as
 the real call does. A probe `probe.probe_refusal` refuses reads `unproven`
-with the refusal as its reason. Every other probe's verdict is looked up by
-`spec.base_sha` and its `find`, and a pair the table lacks raises
-`KeyError`. The `unproven` one's reason is "src/c.py: find text not found".
+with the refusal as its reason. The cell keyword `test_paths` is
+`["tests/**"]`, which matches `tests/test_c.py` and no path under `src/`.
+Every other probe's verdict is looked up by `spec.base_sha`, its `find`
+and its `replace`, and a key the table lacks raises `KeyError`. An
+`unproven` probe's reason is "src/c.py: find text not found for" and its
+`replace`.
 It calls `review.apply_probe_verdict` on every target of each probe. Each
 entry holds the probe dumped and its reason. Pass each of the eight cell
 keywords as a distinct object.
@@ -427,12 +457,15 @@ severities:
 2. `TE-2`, `src/b.py`: f1, s2, i1, as blocker, blocker, concern.
 3. `TE-2`, `src/c.py`: f4, f6, as blocker, concern.
 4. `TE-1`, `src/a.py`: c-a.
+5. `TE-1`, `src/c.py`: c-c.
 
 It asserts `pool` as layer, claim, outcome and reason: j2 `unanchored`, j3
 `unverified`, f3 `unverified`, f5 `unanchored`, f7 `unverified`, f8
-`unverified`, s1 `note`, s3 `unanchored`, and c-m `unanchored`. j3's
-reason holds "no cell for the join". f3's and f7's are the double's
-"not found" reason, and f8's is the refusal. Every other reason is empty.
+`unverified`, f10 `unverified`, s1 `note`, s3 `unanchored`, i6
+`unverified`, and c-m `unanchored`. j3's reason holds "no cell for the
+join". f3's and f7's name `x`, and f10's names `y`. f8's is the refusal,
+and i6's is "its REVIEW probe did not survive". Every other reason is
+empty.
 These fail it, each measured:
 
 - a layer anchored over its `LayerFields.base`, which anchors c-m
@@ -459,9 +492,12 @@ These fail it, each measured:
   the join copies
 - in-cell concerns walked before the end-review findings
 - the `note` outcome dropped from the pool
+- an in-cell adequacy concern qualified as probe-less
+- `read_head` at `<head>^`, or at the top head for every layer
+- entries matched to findings by `find`, or by file and `find`
 
 **Criterion 2's witness** asserts two calls. The first holds j3, and the
-second f1, f2, f3, f4, f7 and f8. The first's `spec.base_sha` is `M` and
+second f1, f2, f3, f4, f7, f8 and f10. The first's `spec.base_sha` is `M` and
 the second's `H1`, and neither has a `stacked_on`. Each `spec_id` is
 `TE-2`, and each `branch` is `TE-2`'s. The first patch holds
 "+alpha_l2_new" and not "moved_main_only". The second holds "+beta_rate"
@@ -479,11 +515,12 @@ and not "alpha_l2_new". The first call's `base_results` collect `[]` and
 - the base in `stacked_on`, with the head as `base_sha`
 - the join's `base_results` from the top layer's run, or a layer's from
   the bottom layer's
+- the baseline read by task id, not by the task's run id
 - a copied `test_paths`
 
 **Criterion 3's witness** reads the rows by `task_key` and claim. `TE-2`
-holds j1, j2, j3, f1 to f8, s1, s2, s3 and i1 at positions 1 to 15. `TE-1`
-holds c-a and c-m at 1 and 2. Seventeen rows in all. f1's row is `spec`,
+holds j1, j2, j3, f1 to f8, f10, s1, s2, s3, i1 and i6 at positions 1 to
+17. `TE-1` holds c-a, c-m and c-c at 1 to 3. Twenty rows in all. f1's row is `spec`,
 `concern`, `src/b.py`, 2, "f1", `survived`, `qualified` and an empty
 reason. f2's verdict and outcome are both `killed`. f3 is `unproven` and
 `unverified`, with the double's reason. s1 has no verdict and is `note`.
@@ -492,7 +529,7 @@ f4 is `note`, `survived`, `qualified`. f5 has no verdict and is
 unrelated repo, run and task there first. It folds the record into it and
 asserts the same rows. It folds the record into the source ledger and
 asserts the rows unchanged. Last, `fold_task` on the fresh ledger with
-`TE-2`'s key and no facts leaves `TE-1`'s two rows alone. These fail it,
+`TE-2`'s key and no facts leaves `TE-1`'s three rows alone. These fail it,
 each measured:
 
 - `_apply` with no branch for `qualification`
@@ -548,5 +585,7 @@ sentence over 25 words. Keep each docstring within ten lines.
 by `size_gate` itself, came to 1962. That is 214 in `ledger.py`, 56 in
 `session.py`, 608 in `qualify.py` and 1084 in the tests. The assertions
 the prototype left short, and the docstrings and comments, bring it to
-about 2330. That is near the ceiling, so keep the helper shared, the test
-docstrings short and the double compact.
+about 2330. The adequacy rule and the round-2 arrangement add about 80
+more, near 2410. That is near the ceiling, so keep the helper shared, the
+test docstrings short and the double compact. Rename the probe function in
+place rather than copy its body.
