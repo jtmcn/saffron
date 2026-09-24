@@ -82,14 +82,20 @@ acceptance:
       own file from `END_LENSES`, whose keys are `spec` then `standards`,
       each on its own file. Each of the two prompts carries REVIEW's
       vocabulary, the spec body, the diff, the spec id, the branch, the
-      pull request URL, `known` and the standing instructions, each
-      verbatim, and the range as `<base>..<head>`. Braces in the spec body
-      and in `known` pass through. Each carries the sentence "do not
+      pull request URL, `known` and the whole block
+      `context.standing_instructions(claude_md)` returns, each verbatim,
+      and the range as `<base>..<head>`. Braces in the spec body and in
+      `known` pass through. The Spec prompt carries one line per acceptance
+      criterion, holding its claim and its witness node id, and `preserves`
+      only on a criterion that preserves. It carries
+      `context.constraints_block(touches, forbidden, [])` whole. Each carries the sentence "do not
       manufacture one" in any case, the three severities and the fields
       `file`, `line`, `severity` and `claim`, each in backticks. The Spec
       prompt names `probe`, `find` and `replace` in backticks, and the
-      Standards prompt names no `probe`. Neither prompt file names
-      `CONTEXT.md`, `DESIGN.md` or `driver.py`.
+      Standards prompt names no `probe`. The Standards prompt file holds
+      the value of `worktree.WORKTREE_MOUNT`, where it reads the files the
+      standing instructions name. Neither prompt file names `CONTEXT.md`, `DESIGN.md` or
+      `driver.py`.
     witness: tests/test_end_review.py::test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields
   - claim: >-
       `end_review.review_layer(container, fields, ...)` runs the Spec lens
@@ -98,7 +104,7 @@ acceptance:
       `end_review_prompt`, the read-only review tools, and the `max_turns`
       and `budget_usd` it was given. It returns their two `LensReview`s in
       that order. A Spec finding keeps the probe it carried, and a Spec
-      finding with none keeps none. It anchors nothing, so a finding on a
+      finding whose output omits the `probe` key keeps none. It anchors nothing, so a finding on a
       changed line keeps `anchored` false. A Spec lens whose session fails
       comes back with its error and its cost, and the Standards lens still
       runs.
@@ -188,20 +194,25 @@ Build four things.
    It emits the `<output>` block the in-cell lenses emit, and each finding
    has `file`, `line`, `severity` and `claim`.
    - The **Spec** lens asks whether the diff does what the spec asks, no
-     more and no less. It walks each acceptance criterion to the
+     more and no less. It reads each criterion's claim, witness and
+     `preserves` flag, and the spec's `touches` and `forbidden`, from its
+     own slots. It walks each acceptance criterion to the
      `file:line` that satisfies it, as the seat does
      (`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md:51-57`). A criterion
      nothing satisfies is a finding, and so is one a comment alone
      satisfies. A criterion whose witness would pass a wrong version gets a
-     finding with a `probe` of `file`, `find` and `replace`. `find` matches exactly once in that file at the layer's
-     head. The host runs the probe later, because the lens holds no tool
+     finding with a `probe` of `file`, `find` and `replace`. `find`
+     matches exactly once in that file at the layer's head. The host runs the probe later, because the lens holds no tool
      that runs anything. The lens then looks past the criteria, as the
      seat does
      (`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md:60-63`).
    - The **Standards** lens asks whether the diff follows what the
      repository wrote down: its standing instructions and the files they
-     name. Its three questions are the seat's: vocabulary, the stated
-     invariants and conventions, and one source. It leaves format, lint,
+     name. It reads those files from `/work`. Its three questions are the
+     seat's: vocabulary, the stated invariants and conventions, and one
+     source. It judges vocabulary against the repository's own standing
+     instructions and any glossary they name. `{vocabulary}` is Saffron's
+     process glossary, not the repository's, and the prompt says so. It leaves format, lint,
      types and structure to the gates. It names no probe.
 
    Core knows nothing of one repository (§2.1). So neither file names
@@ -209,7 +220,8 @@ Build four things.
    `driver.py`. The standing instructions reach the prompt as the
    in-cell lenses' do. Each file carries these slots: `{vocabulary}`,
    `{spec_id}`, `{branch}`, `{pr}`, `{base}`, `{head}`, `{known}`,
-   `{standing_instructions}`, `{diff}` and `{spec}`.
+   `{standing_instructions}`, `{diff}` and `{spec}`. The Spec file also
+   carries `{criteria}` and `{constraints}`.
 2. **The layer's fields.** Add `saffron/end_review.py`. It holds a frozen
    dataclass `LayerFields` with `spec_id`, `branch`, `pr_url`, `base`,
    `head` and `known`. `layer_fields(ledger, task_key)` reads the layer's
@@ -218,18 +230,29 @@ Build four things.
    A layer with no predecessor was cut from its run's `base_sha`. `known`
    is the layer's in-cell findings, those whose lens is in `review.LENSES`,
    one line each. A claim or a rebuttal can hold a newline, so each is
-   folded onto its line.
+   folded onto its line. Read the findings through
+   `Ledger.findings(task_id)`, which orders them by `finding_id`
+   (`saffron/ledger.py:1190-1196`), not through SQL of your own.
 3. **The prompt.** `END_LENSES` maps `spec` and then `standards` to their
    two files. `end_review_prompt(lens, fields, *, spec_body, diff,
-   context_md, claude_md, prompts_dir)` fills `END_LENSES[lens]` through
-   `context.build_system_prompt` at phase `REVIEW`. The standing
-   instructions come from `context.standing_instructions(claude_md)`.
+   acceptance, touches, forbidden, context_md, claude_md, prompts_dir)`
+   fills `END_LENSES[lens]` through `context.build_system_prompt` at phase
+   `REVIEW`. The standing instructions come from
+   `context.standing_instructions(claude_md)`. `{criteria}` is one line per
+   `Criterion` in `acceptance`. `context.criteria_section` will not do,
+   since it drops the witness and the flag (`saffron/agents/context.py:120-131`).
+   `{constraints}` is `context.constraints_block(touches, forbidden, [])`
+   (`:62-86`). The lens has no policy, so the protected list is empty.
 4. **The lenses on one layer.** Add `review_layer(container, fields,
-   ...)`. Its keywords are `end_review_prompt`'s five, then `max_turns`,
+   ...)`. Its keywords are `end_review_prompt`'s eight, then `max_turns`,
    `budget_usd`, `agent` and `emit`. It runs `review.run_lens` once per entry of
    `END_LENSES`, in order, and returns the `LensReview`s. The Spec lens's
    id maps to a report model in `review._REPORTED` whose `probe` is
-   optional. The Standards lens keeps the default model.
+   optional. The Standards lens keeps the default model. Two docstrings
+   then need a sentence each: `_ReportedWithProbe`'s
+   (`saffron/phases/review.py:74-77`) and `reported_model`'s
+   (`saffron/phases/review.py:88-89`). Each says only adequacy
+   asks for an edit, and the Spec lens now does too.
 
 No production code calls `layer_fields` or `review_layer` until `SA-0153`.
 So both are `pending_symbols`, and the `dead` gate defers them while this
@@ -289,11 +312,17 @@ the one shown.
 | `T12` | `TE-12` | `b` | a push of `c` |
 
 Each letter or digit stands for a sha of forty of it. `T9`'s findings, in
-order: a contract `concern` on `x.py:3` whose claim is "c1 {braces}",
-anchored, with verdict `withdrawn` and a rebuttal of "r1", a newline, two
-spaces and "argued". An adequacy `note` on `y.py:5`, "c2", unanchored. A
-correctness `blocker` on `z.py:8`, "c3 first half", a newline and "second
-half". Three findings on `x.py:4` of the lenses `spec`, `standards` and
+the order they are recorded:
+
+1. A correctness `blocker` on `z.py:8`, anchored, whose claim is "q first
+   half", a newline and "second half".
+2. An adequacy `note` on `y.py:5`, "k middle", unanchored.
+3. A contract `concern` on `x.py:3`, "b last {braces}", anchored, with
+   verdict `withdrawn` and a rebuttal of "r1", a newline, two spaces and
+   "argued".
+
+No field sorts to that order. By file and line it runs 3, 2, 1, by claim
+3, 2, 1, and by severity 1, 3, 2. Then come three findings on `x.py:4` of the lenses `spec`, `standards` and
 `join`, "c4", "c7" and "c8". It records layers with
 `record_stack_layer`: `T7` at 1 with no predecessor, `T9` at 2 on `T7`.
 Then it pushes `e` to `T7`. It then records `T11` at 3 on `T9`, and `T12` at
@@ -303,10 +332,10 @@ It asserts:
 
 - `T9`'s fields: spec `TE-9`, its branch and URL, `base` `7`, `head` `9`.
 - `T7`'s fields: `base` `d`, `head` `e`.
-- `T9`'s `known` has one line holding "c1 {braces}", `concern`, `x.py:3`,
-  `withdrawn` and "r1 argued". One line holds "c2", `note` and `y.py:5`.
-  One holds "c3 first half second half", `blocker` and `z.py:8`. The three
-  appear in that order.
+- `T9`'s `known` has one line holding "q first half second half",
+  `blocker` and `z.py:8`. One line holds "k middle", `note` and `y.py:5`.
+  One holds "b last {braces}", `concern`, `x.py:3`, `withdrawn` and "r1
+  argued". The three appear in that order.
 - `known` holds none of "c4", "c7", "c8", "c5" and "c6".
 - `ValueError` for `T9c`'s key, for `T11`'s and for `T12`'s.
 
@@ -323,27 +352,43 @@ These fail it, each measured:
 - `known` with every lens, with anchored findings only, or with no notes
 - `known` that drops the lens `spec` by name, or `spec` and `standards`
 - `known` gathered from every task of the spec, which holds "c6"
-- `known` sorted by severity
+- `known` sorted by severity, by file and line, or by claim
 - `known` with no severity on a line, or no verdict and rebuttal
 - rebuttals listed apart from the findings they answer
 - a claim or a rebuttal whose newline is kept
 
 **Criterion 2's witness** builds `LayerFields` directly: `TE-9`, its
 branch, a URL, `base` `7`, `head` `9`, and a `known` holding
-"c1 {braces}". The spec body is "Fix the {gap}, and keep {{this}} as
-written." The diff holds `{}`. `claude_md` is one line. It reads
+"b last {braces}". The spec body is "Fix the {gap}, and keep {{this}} as
+written." The diff holds `{}`. `claude_md` is two lines, and the witness
+looks for `context.standing_instructions(claude_md)` whole. It passes two
+criteria, one plain and one `preserves`, with distinct witness ids. It
+passes one `touches` path and one `forbidden` path. It reads
 `CONTEXT.md` from the repository root, as `tests/test_review.py:18` does.
 For each lens it asserts each value appears verbatim, with
 `context.sections_for("REVIEW", CONTEXT_MD)` as the vocabulary. It checks
 the range as the two shas joined by `..`. It checks the other text in a
 whitespace-flattened copy. It reads each prompt file for the three names
-it must not hold. These fail it, each measured:
+it must not hold, and the Standards file for `worktree.WORKTREE_MOUNT`.
+
+**The Standards lens's vocabulary is the repository's.** `{vocabulary}`
+is Saffron's own `CONTEXT.md`, read from Saffron's root
+(`saffron/cell/session.py:1798`). It holds the REVIEW sections with the
+_Avoid_ lines stripped (`saffron/agents/context.py:28-31`, `:41`, `:58`). It names the factory's
+terms. The Standards lens judges the diff's words against the target
+repository's standing instructions and any glossary they name, read from
+the worktree. Its prompt says which is which. These fail it, each measured:
 
 - both lenses on one file
 - `base` and `head` swapped
 - `known` or the spec body pasted into the template before `format`,
   which raises `KeyError`
 - the standing instructions left out
+- raw `CLAUDE.md` in place of the block
+- the criteria from `context.criteria_section`, with no witness ids
+- no `preserves` flag, or the flag on every criterion
+- no `touches` and `forbidden` block, or the two lists swapped
+- a Standards prompt file that never names the worktree mount
 - a Standards prompt that asks for a `probe`
 - a prompt with no "do not manufacture one", or no vocabulary slot
 
@@ -355,7 +400,8 @@ call's container, options and keywords, and returns the next scripted
 reply. It raises `AssertionError` on a call with no reply left. A default
 reply would hide a lens that never ran, or one that ran twice.
 
-- First call: the Spec reply holds a finding with a probe and one without.
+- First call: the Spec reply holds a finding with a probe and one whose
+  JSON omits the `probe` key. It must not write `"probe": null`.
   The Standards reply holds one finding. It asserts exactly two calls. Each
   has the container, `REVIEW_TOOLS`, `max_turns` 17, `max_budget_usd`
   1.25, and no `resume`. Call *i*'s system prompt equals `end_review_prompt`
@@ -378,8 +424,9 @@ These fail it, each measured:
 - each lens's findings run through `findings.anchor`
 - the Spec lens on the default model, which refuses the probe
 - the Spec lens on `adequacy`'s model, which requires one
+- a nullable `probe` with no default, which pydantic reads as required
 
-The two model cases fail on the re-prompt `run_lens` makes after a finding
+The three model cases fail on the re-prompt `run_lens` makes after a finding
 that is not the schema (`saffron/phases/review.py:242-260`). It takes the
 Standards reply and leaves the Standards lens a call with no reply.
 
@@ -389,12 +436,28 @@ Standards reply and leaves the Standards lens a call with no reply.
 Criterion 2's used two stand-in prompt files that held the slots above.
 Criterion 3's ran the real `review.run_lens`, with `review._REPORTED`
 patched for each model. The right build passed each witness, and every
-wrong version listed failed. The double's strictness decided no case in
+wrong version listed failed. After the first spec review all three ran
+again, with `T9`'s findings reordered, the criteria and constraints slots,
+and the nullable model. The round-1 order let a sort by file or by claim
+pass, since it matched the recorded order. The double's strictness decided no case in
 that run. A lax double failed each wrong version too, on the call count or
 the Standards finding. It stays strict, because a later edit to the
-witness would lose that.
+witness would lose that. The nullable model accepts `"probe": null` and
+refuses an omitted key, measured, so only an omitted key kills it.
 
-**What the witnesses leave undriven.** A Standards lens that fails is not
+**The bottom layer's `base`.** It is not the pushed head's parent once
+`main` moves. PACKAGE squashes the cell's work into one commit onto the fetched default
+head (`saffron/phases/package.py:666`, `:776-786`). So for a layer with
+no predecessor, `base..head` can hold commits that are not the layer's.
+`layer_fields` still returns the run's `base_sha`, and this spec changes no
+behaviour for it. `SA-0153` builds the diff, and diffs `head^..head`,
+which is exact because PACKAGE pushes one commit.
+
+**What the witnesses leave undriven.** A finding whose `line` is `NULL` is
+not driven. `Finding.line` is a required `int`
+(`saffron/agents/findings.py:39`), so no write path the witness can use
+makes one. A layer with no in-cell findings is not driven, and its `known`
+is empty. A Standards lens that fails is not
 driven, and neither is output that is not the schema after the re-prompt.
 `run_lens` handles both the same way for every lens
 (`saffron/phases/review.py:235-293`). A layer whose `pr_url` or `branch` is
@@ -420,5 +483,7 @@ prompt files of about 35 lines each run near 10 tokens a line, about 700.
 About 100 lines in `saffron/end_review.py` at 5.5 is about 550, and 8 in
 `review.py` about 40. About 210 test lines at 4.8 is about 1010. That is
 about 2300 tokens of the `feature` ceiling of 3000
-(`saffron/gates/core/size.py:26`). Keep the prompts near the length of
+(`saffron/gates/core/size.py:26`). The criteria and constraints slots, the
+Standards lens's `/work` reading and their asserts add about 190 more, for
+about 2490 in all. Keep the prompts near the length of
 `criterion-probe.md` (56 lines), not of the in-cell lenses'.
