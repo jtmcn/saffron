@@ -55,10 +55,15 @@ acceptance:
       `run_batch`, given the same results, writes no row.
     witness: tests/test_batch.py::test_a_stack_batch_records_one_layer_for_each_task_that_reached_review
   - claim: >-
-      Folding the record rebuilds the `stack_layers` rows the batch wrote. A
-      fold into a fresh ledger whose task ids differ from the writer's gives
-      the same rows. A fold into the ledger that wrote them leaves them as
-      they were, three and no more.
+      Folding the record rebuilds the `stack_layers` rows as written. A fold
+      into a fresh ledger whose task ids differ from the writer's gives the
+      same rows. A fold into the ledger that wrote them leaves them as they
+      were, four and no more. A row keeps the record key and the head it
+      was written with, after a later push to the layer below. A row
+      written at generation 1 folds back at 1. `fold_task` with a layer's
+      key and no facts removes that layer's row and no other. The witness
+      drives the three layers of criterion 1 and one row written directly
+      at generation 1.
     witness: tests/test_batch.py::test_the_stack_layers_fold_back_from_the_record_alone
 ---
 
@@ -135,24 +140,30 @@ Build three things.
 
    `SCHEMA` runs on every open (`saffron/ledger.py:216`), so a ledger file
    from before gains the table.
-2. **The fact and its placement.** Add `Ledger.record_stack_layer`. It takes
-   the layer's `task_id`, its position, the predecessor's `task_id` or
-   `None`, and the generation. It looks up the predecessor's record key
+2. **The fact and its placement.** Add
+   `Ledger.record_stack_layer(task_id, *, position, predecessor_task_id,
+   generation)`. It takes the layer's `task_id`, its position, the
+   predecessor's `task_id` or `None`, and the generation. It looks up the predecessor's record key
    and `pushed_sha`, and builds one `stack_layer` fact under the layer's
    own key. The payload carries the position, the spec id, the
    predecessor's key and head, and the generation, never a `task_id`. It
    writes through `_commit_and_append`. `_apply` places the fact as one
-   `stack_layers` row, with `batch_key` from the fact. `_drop_task_rows`
-   deletes the task's `stack_layers` row, so a fold into a ledger that
-   already holds it replaces it.
+   `stack_layers` row, with `batch_key` from the fact and every other
+   value from the payload. It reads no other row. `_drop_task_rows`
+   deletes the task's `stack_layers` row. So a fold into a ledger that
+   already holds it replaces it, and the fold's skip path,
+   `fold_task(key, [])` (`saffron/record/fold.py:48`, `:56`, `:62`),
+   leaves no row behind.
 3. **The writer.** `run_stack_batch` calls `record_stack_layer` once for
    each task that returns `READY_FOR_REVIEW`. The row names the batch
    `run_stack_batch` opened. Generation is 0, because every task here is
    a queued spec.
 
-Two docstring sentences in `saffron/ledger.py` become false. "Only the
+One docstring sentence in `saffron/ledger.py` becomes false. "Only the
 eleven kinds" (`:6`) becomes twelve. "Eight of the nine tables" (`:11`)
-becomes nine of ten. Update both.
+counts the tables `DESIGN.md` §4.1 lists, and §4.1 does not gain this
+one. Keep that count, and add a sentence naming `stack_layers` as a table
+§4.1 does not list.
 
 ## Out of scope
 
@@ -230,39 +241,81 @@ rules. Then it runs the script through `run_batch` on a third ledger,
 with a rescan that returns the same candidates, and asserts no row.
 These fail it:
 
-- a position counted over every task run, which gives 1, 3 and 8
+- a row for every task run, which gives more than three rows
+- a position counted over every task started, which gives 1, 3 and 8
+- a position counted over every returned outcome, which gives 1, 3 and 7
+- a position counted over `READY_FOR_REVIEW` and `MERGE_FAILED`, which
+  gives 1, 2 and 4
+- a module-level position counter, which gives the second ledger 4, 5
+  and 6
 - a row for `MERGE_FAILED`, which packaged and pushed
-- a predecessor taken as the last task run, or the last with a push
+- a predecessor from `depends_on[0]`, which `_candidate` leaves empty, so
+  every `predecessor_key` is `NULL`
+- a predecessor from the `Candidate` handed in, whose `task_id` is `None`
+- a predecessor taken as the last task run, `TE-3`, or the last with a
+  push, `TE-5` or `TE-8`
+- a hook that reads the predecessor after it moves to this task, which
+  makes each layer its own predecessor
 - the layer's own `pushed_sha` as `predecessor_head`
 - a `task_id` stored where a record key goes
 - a fact built before the attach, whose `batch_key` is `None`
 - a hook in `_drive` that `run_batch` fires too
 - a row written and no fact appended, or a fact appended and no row
 
+This half is unmeasured. `run_stack_batch` does not exist at
+`874632f2`, so nothing ran it. The list above is the spec review's hand
+trace. It found one wrong version this witness does not kill: a
+position read per ledger by counting the table, which gives the right
+answer.
+
 **Criterion 2's witness** runs the script through `run_stack_batch` on a
-`Ledger` built with a `MemoryRecord`. It reads the three rows as dicts.
+`Ledger` built with a `MemoryRecord`. It then writes one more layer by
+hand. It creates a run and a task for `TE-4` and packages it
+`READY_FOR_REVIEW`. It calls `record_stack_layer` for it with position 4,
+`TE-6`'s task as predecessor and generation 1. It reads the four rows as
+dicts, and takes each layer's record key now, before any fold. Then it
+calls `record_push` on `TE-7`'s task with a new sha.
+
 It opens a fresh `Ledger` with no record and creates one unrelated repo,
 run and task there first. So every folded task gets a different
 `task_id` from its source row. It calls `saffron.record.fold.fold` with
-the record and the fresh ledger, and asserts its rows equal the
-source's. It then calls `fold` with the record and the source ledger
-itself, and asserts the source's rows are unchanged, three and no more.
-These fail it:
+the record and the fresh ledger. It asserts the rows equal the source's
+four. It asserts `TE-9`'s row names `TE-7`'s record key and the sha first
+pushed for `TE-7`, and `TE-4`'s row has generation 1. It then calls
+`fold` with the record and the source ledger itself, and asserts the
+source's rows are unchanged, four and no more. Last, it calls
+`fold_task` on the fresh ledger with `TE-9`'s key and an empty list. It
+asserts the rows left are `TE-7`'s, `TE-6`'s and `TE-4`'s.
+
+Take the keys before the second fold. It drops and inserts every task
+again, so a key looked up afterwards by the old `task_id` names another
+task, or none. These fail it:
 
 - `_apply` with no branch for `stack_layer`, which aborts the fold
-- a predecessor stored as a `task_id`, or looked up by one at fold time
+- a predecessor stored as a `task_id`
+- a predecessor carried as a `task_id` and resolved to a key at fold time
 - `_drop_task_rows` that leaves the row, which raises on the primary key
+- `INSERT OR REPLACE` with `_drop_task_rows` untouched, which leaves
+  `TE-9`'s row after `fold_task(key, [])`
 - a reference from `batch_key` to `batches`, which a fresh ledger lacks
+- a head looked up by `predecessor_key` at apply time, which reads the
+  new sha
+- a generation left out of the payload, or written as a literal 0
 
-Measured on 2026-09-23 at `71ef7909`, with the script's seven tasks
-written by hand and no layer. After one unrelated task, `fold` gave every
-task a `task_id` one above its source row. A second `fold` into the
-source ledger folded all seven with none skipped.
+Measured on 2026-09-23 at `874632f2`, by a throwaway script. It
+subclassed `Ledger` with the table and each build, wrote the layers with
+`record_stack_layer` in place of `run_stack_batch`, and ran the steps
+above. The right build passed. All nine wrong builds failed, since the
+last bullet is two builds. The missing branch failed on `fold cannot
+place fact kind`, the kept row on `UNIQUE constraint failed`, and the
+reference on `FOREIGN KEY constraint failed`. The other six failed an
+assertion.
 
 **What the witnesses leave undriven.** A layer whose predecessor has no
 `pushed_sha` is not driven. PACKAGE writes `READY_FOR_REVIEW` through
 `set_task_package`, whose `pushed_sha` is a required `str`
-(`saffron/ledger.py:1109-1119`). Record `NULL` there all the same. The in-flight states,
+(`saffron/ledger.py:1109-1119`). Record `NULL` there all the same. The
+in-flight states,
 `RATE_LIMITED` and `PREFLIGHT_FAILED` are not driven. Test for
 `READY_FOR_REVIEW` alone, so each of them adds no layer.
 
@@ -275,5 +328,5 @@ sentence over 25 words. Keep each docstring within ten lines.
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). About
 75 changed lines in `ledger.py` at 4.8 tokens a line, and 35 in
-`batch.py` at 6.3, are about 580 tokens. About 150 lines of test at 3.4
-are about 510. That is about 1100 tokens.
+`batch.py` at 6.3, are about 580 tokens. About 185 lines of test at 3.4
+are about 630. That is about 1210 tokens.
