@@ -53,7 +53,8 @@ acceptance:
   - claim: >-
       Given `review` and `mint`, `run_stack_batch` calls `mint` for a spec
       whose candidate has no `task_id`, once, before its first review. It
-      never calls it for a spec it refuses, nor for a candidate that carries
+      never calls it for a spec refused before its review, nor for a
+      candidate that carries
       a `task_id`. That spec is reviewed and run on the task it names. A spec
       reviewed again after a `wait` keeps its task. A `mint` that raises
       counts as an abort, as a runner's raise does, and its spec is never
@@ -86,7 +87,8 @@ acceptance:
       runs, one withheld, one whose review errored, one reviewed again after
       a `wait`, one run again after `RATE_LIMITED`, and one on a resumed
       task. A run minted outside the batch during a withheld spec's review
-      is not counted.
+      is not counted. A resumed task's run that an earlier batch holds stays
+      with that batch.
     witness: tests/test_batch.py::test_a_stack_batch_counts_each_spec_review_once_in_its_spend
   - claim: >-
       Folding the record rebuilds the `spec_reviews` rows as written. A fold
@@ -241,9 +243,13 @@ Build five things.
    `run_stack_batch` raises `ValueError` before it opens a batch row.
 4. **The facts.** Around each review in the runner wrapper, as criteria
    1 and 2 say.
-5. **The spend.** The stack path attaches the run of each task it
-   reviews, minted or resumed, to the batch. It does so whatever the call
-   returns, so criterion 3 holds. `_drive`'s shared sweep stays as it is,
+5. **The spend.** The stack path attaches each reviewed task's run to
+   the batch. A run that already has a batch keeps it. This holds for a
+   minted or a resumed task, whatever the call returns, so criterion 3
+   holds. Guard
+   the write in `saffron/ledger.py`. `attach_run_to_batch` is an
+   unconditional update (`saffron/ledger.py:861-863`), so leave it as it
+   is and add the guarded write beside it. `_drive`'s shared sweep stays as it is,
    after a raise alone, and `run_batch` does not change.
 
 Also add `SPEC_WITHHELD` to `DONE_STATES`.
@@ -306,9 +312,9 @@ began only after a raise (`saffron/batch.py:227`). A sweep after every
 call would also run in `run_batch`, and would attach a run another
 process minted meanwhile, such as an attended `saffron cell`. So the
 stack path attaches only the task it reviewed. A resumed task's run can
-belong to an earlier night, and attaching it moves that run's spend into
-this one. That overcounts, never undercounts. `_drive` already attaches a
-resumed task's outcome the same way (`saffron/batch.py:233`).
+belong to an earlier night. The guard leaves that run with its batch, so
+tonight's `batch_spend` omits the resumed task's review. The gap is at
+most one review per resumed spec.
 
 **Update `SA-0149`'s four loop witnesses.** Each calls `run_stack_batch`
 with `review`, so each now raises `ValueError`. Pass each the shared mint
@@ -320,8 +326,10 @@ its own, so their review lists do not change. They are
 `test_a_rate_limited_spec_review_waits_and_reviews_again`.
 
 **Criteria 1 to 4 share one arrangement.** Write it once in
-`tests/test_batch.py`. It uses a `Ledger` built with a `MemoryRecord`, and
-the `repo_id` fixture. It also takes `_ready`, a budget of 100 and
+`tests/test_batch.py`. It uses a `Ledger` built with a `MemoryRecord`. The
+`repo_id` fixture belongs to the `ledger` fixture, which has no record. So
+open the `MemoryRecord` ledger on that fixture's file, or add a repo of its
+own. It also takes `_ready`, a budget of 100 and
 `until=None`. Use `SA-0148`'s clock and a fake `sleep`.
 
 - **The mint double** is a class shared with `SA-0149`'s witnesses. It
@@ -330,7 +338,8 @@ the `repo_id` fixture. It also takes `_ready`, a budget of 100 and
   `RuntimeError`. Otherwise it creates a run on the repo at `"a" * 40`
   and a task for the spec id, and returns the task id.
 - **The review double** records `(spec id, length of the mint log)` and
-  returns or raises what the table says, in turn. Each clean or blocker
+  returns or raises what the table says, in turn. For a spec the table
+  gives no review, it raises `AssertionError`. Each clean or blocker
   text is a `json.dumps` inside a fenced `json` block. For `TE-2` it also
   creates an unrelated run and task with one closed attempt at $8, as an
   attended `saffron cell` would meanwhile.
@@ -338,7 +347,8 @@ the `repo_id` fixture. It also takes `_ready`, a budget of 100 and
   its own run and task with one closed attempt at $1, as `SA-0149`'s
   does, and returns `_outcome(...)` with that call's run and task.
 
-Before the batch, create an older task for `TE-7` and end it `GATE_ERROR`.
+Before the batch, create an earlier batch, and an older task for `TE-7`
+on a run in that batch. End the task `GATE_ERROR`.
 Build `TE-7`'s candidate with `dataclasses.replace(_candidate("TE-7"),
 task_id=<that task>)`, as a scan that re-queued it would. The mint double
 raises on `TE-80` alone.
@@ -350,7 +360,7 @@ raises on `TE-80` alone.
 | 3 | `TE-3` | `TE-2` | never called | never called |
 | 4 | `TE-4` | none | `error` `cell died`, text a clean block, cost 0.125 | never called |
 | 5 | `TE-5` | none | no fence and `resets_at` 60 seconds on, cost 0.0625, then clean, cost 0.03125 | `RATE_LIMITED` resetting 60 seconds on, then `READY_FOR_REVIEW` |
-| 6 | `TE-6` | none | raises `RuntimeError("review cell would not start")` | never called |
+| 6 | `TE-6` | none | raises `RuntimeError("critic cell would not start")` | never called |
 | 7 | `TE-7` | none, `task_id` the older task | clean, cost 0.75 | `RATE_LIMITED` resetting 60 seconds on, then `READY_FOR_REVIEW` |
 | 8 | `TE-9` | none | `text` with no fence and no error, cost 0.015625 | never called |
 | 9 | `TE-80` | none | never called | never called |
@@ -380,7 +390,7 @@ with `review` and no `mint` raises `ValueError`, and the count of
 - a mint for a candidate that carries a `task_id`, which mints `TE-7`
 - a task minted for every spec at batch start, which mints `TE-3`
 - a review called after its mint raised
-- a mint's raise turned into a `Refused`, which ends the batch `DRAINED`
+- a mint's raise turned into a `Refused`, which mints and reviews `TE-81`
 - the task handed to the first runner call only, which hands `TE-5`'s
   second call `None`
 - a store of minted tasks at module scope, which mints nothing in the
@@ -405,7 +415,7 @@ state from the ledger. Each attempt is in phase `SPEC_REVIEW`, with
 `block_sha256` is `hash_artifact` of that text. `TE-4`'s `block` is its
 clean text, and its error holds `cell died`. `TE-6`'s `block` and
 `block_sha256` are `None`, and its error is exactly
-`RuntimeError: review cell would not start`. Each `run` fact's error is
+`RuntimeError: critic cell would not start`. Each `run` fact's error is
 `None`. These fail it:
 
 - no state for a withheld task, which leaves `TE-2` `QUEUED`
@@ -421,12 +431,14 @@ clean text, and its error holds `cell died`. `TE-6`'s `block` and
 - an attempt with a fixed `session_id` or turn count
 
 **Criterion 3's witness** asserts `ledger.batch_spend` of the first batch
-is exactly 6.734375. That is the seven review costs, 1.734375, and five
-runner calls at $1. The $8 run is not in it. These fail it:
+is exactly 5.984375. That is six review costs, 0.984375, and five runner
+calls at $1. The $8 run is not in it, and neither is `TE-7`'s review. The
+earlier batch's spend is exactly 0.75, `TE-7`'s review. These fail it:
 
 - no attach on the stack path, which gives 5.140625
-- a sweep after every call in the shared `_drive`, which gives 14.734375,
-  or 13.984375 with no attach on the stack path
+- an unconditional attach that moves an earlier night's run, which gives
+  6.734375 and leaves the earlier batch 0.0
+- a sweep after every call in the shared `_drive`, which gives 13.984375
 - the review's attempt added again on a rerun
 - no attempt for a review
 
