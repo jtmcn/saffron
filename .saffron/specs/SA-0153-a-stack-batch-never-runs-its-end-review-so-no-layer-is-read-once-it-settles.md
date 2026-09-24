@@ -64,8 +64,10 @@ acceptance:
       unanchored, after its in-cell findings. It returns one `LayerReview`
       per layer, top down. Its `reviews` are the `LensReview`s with their
       probes, and empty for a layer not reached. The witness runs two
-      batches on one ledger. It drives a layer that meets the check
-      exactly, a Spec lens that fails with a cost, and a raise from each.
+      batches on one ledger. It drives two layers not reached, a layer
+      that meets the check exactly, and a Spec lens that fails with a cost.
+      It drives a raise from each of `review_layer` and `open_cell`, each
+      above a layer that still runs, and a finding on a line the diff adds.
     witness: tests/test_end_review.py::test_the_end_review_reads_each_layer_top_down_until_its_reserve_runs_short
   - claim: >-
       For each layer it reaches, `review_stack` hands `review_layer` the
@@ -82,7 +84,7 @@ acceptance:
       Folding the record rebuilds the `end_reviews` rows as written, and each
       layer's end-review findings with them. A fold into a fresh ledger
       whose task ids differ gives the same rows. A fold into the ledger that
-      wrote them leaves them as they were, twelve and no more. `fold_task`
+      wrote them leaves them as they were, sixteen and no more. `fold_task`
       with a layer's key and no facts removes that layer's rows and no
       other. The witness folds criterion 1's two batches.
     witness: tests/test_end_review.py::test_each_layers_end_review_folds_back_from_the_record
@@ -92,9 +94,17 @@ acceptance:
       budget less the reserve and the batch's own spend. The batch row keeps
       the whole budget. Once the loop returns, it calls `end_review` once,
       with the batch's id as text, the reserve, and each spec of the order
-      by its id. It then returns the loop's stop reason. The witness drives
-      `BUDGET`, `DRAINED` and `INFRASTRUCTURE`, three batches on one ledger.
+      by its id. It then returns the loop's stop reason. A raise out of the
+      loop propagates, and `end_review` is not called. The witness drives
+      `BUDGET`, `DRAINED`, `INFRASTRUCTURE` and a readiness check that
+      raises, four batches on one ledger.
     witness: tests/test_batch.py::test_a_stack_batch_holds_its_end_review_reserve_and_calls_it_once_the_loop_returns
+  - claim: >-
+      `Ledger.batch_spend(batch_id)` adds the cost on the `end_reviews` rows
+      of that batch's layers to the cost of its attempts. The witness drives
+      a batch with an attempt and an end review, and a second batch whose
+      end review runs on the same ledger.
+    witness: tests/test_end_review.py::test_a_batchs_spend_counts_its_own_end_review
   - claim: >-
       `run_batch`, given no reserve, still refuses a task whose budget
       exceeds what the batch has left.
@@ -135,7 +145,7 @@ cell a layer is read in, and wires the end review into
 Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain
 `SA-0142` to `SA-0146` puts `run_stack_batch`, the `stack_layers` table,
 `Ledger.record_stack_layer` and `saffron/end_review.py` there. So those are
-cited by symbol, and every line number below was read at `f0f3dab2`.
+cited by symbol, and every line number below was read at `4f57467c`.
 
 - `SA-0143` builds `run_stack_batch` in `saffron/batch.py`. It takes the
   order, the ledger, the budget, `until` and a runner, and the keywords
@@ -156,11 +166,10 @@ cited by symbol, and every line number below was read at `f0f3dab2`.
   returns their two `LensReview`s. It anchors nothing, and a Spec finding
   keeps its probe.
 
-**The fact kind is added by hand before this spec is committed.** A cell
-cannot add it, because `CONTEXT.md` is protected. The operator adds
-`end_review` to `KINDS` in `saffron/record/contract.py` and to
-`ontology/factory.ttl`, and renders `CONTEXT.md`, as `75edb212` did for
-`stack_layer`. Nothing places it at the tree base. `Ledger._apply` raises on
+**The fact kind exists, and nothing places it.** A cell cannot add a
+kind, because `CONTEXT.md` is protected. So `8a41411c` added `end_review`
+to `KINDS` by hand (`saffron/record/contract.py:39`), as `75edb212` did
+for `stack_layer`. `Ledger._apply` raises on
 a kind it has no branch for (`saffron/ledger.py:649`), so an `end_review`
 fact aborts a fold there (`saffron/record/fold.py:59-63`).
 
@@ -219,7 +228,12 @@ Build three things.
    `_commit_and_append`. `_apply` places it as one row, `task_key` from the
    fact and every other value from the payload. `_drop_task_rows` deletes
    the task's `end_reviews` rows. `status` is one of `reviewed`, `error`
-   and `not_reached`.
+   and `not_reached`. `batch_spend` adds the `cost_usd` of each
+   `end_reviews` row whose `task_key` has a `stack_layers` row with this
+   batch's `batch_key`. An end-review lens opens no attempt, so the join
+   through attempts that `batch_spend` sums today
+   (`saffron/ledger.py:897-912`) never sees it. A later budget
+   comparison in the same batch then counts it.
 2. **The end review over a stack.** Add a frozen dataclass `LayerReview`,
    with `task_key` and `reviews`, and `review_stack` to
    `saffron/end_review.py`. Its signature is `review_stack(ledger,
@@ -238,7 +252,8 @@ Build three things.
      slots carry them, so an appended copy would send them twice.
    - A raise anywhere in that step gives each lens a `LensReview` with the
      exception's type and message as its error, and a cost of 0.
-   - It records the findings, then one `end_review` fact per lens.
+   - It records the findings as returned, anchoring none, then one
+     `end_review` fact per lens.
    It returns the `LayerReview`s in the order it met the layers.
 3. **The reserve in the batch.** Add `reserve_usd: float = 0.0` and
    `end_review=None` to `run_stack_batch`. `end_review` takes the batch
@@ -265,64 +280,87 @@ defers it while this spec is open (`.saffron/gates/dead.py:4-6`).
   The callable `SA-0154` builds calls `review_stack` and hands its list to
   `SA-0147`, which anchors, probes and groups the findings.
 - **The join lens.** Its run and its record are `SA-0154`'s.
-- **The batch row while the end review runs.** The loop closes the batch
-  row before `end_review` runs, so the row reads closed. Follow-ups run
-  after the end review in the same batch, and `SA-0150` owns that order.
-- **End-review spend in `batch_spend`.** `batch_spend` sums attempts
-  (`saffron/ledger.py:897-912`), and an end-review lens opens none. Its
-  cost is on its `end_reviews` row. The queue page is `SA-0152`'s.
+- **Closing the batch row after the end review.** The loop closes the row
+  before `end_review` runs. `close_batch` stores `spent_usd_est` through
+  `batch_spend` then (`saffron/ledger.py:820-846`), so the stored figure
+  lacks the end review. Follow-ups run after the end review in the same
+  batch. `SA-0150` owns closing the row after both.
+- **Other money in a stack batch.** `reserve_usd` is the end review's
+  alone. A spec review (`SA-0149`, `SA-0155`) runs under a task of its own
+  and is charged through `batch_spend` like any task. Follow-up writing
+  (`SA-0150`) takes a reserve of its own.
+- **A raise once a lens spends.** Take a raise out of `review_layer` that
+  is not `AgentFailed`, or one out of `open_cell`'s exit. Either records
+  both lenses `error` at a cost of 0. `review_layer` returns both lenses at once, so a
+  partial result cannot be recovered here. The reserve can then undercount
+  by at most one layer's lenses per such raise.
 - **The vocabulary.** `CONTEXT.md` has no entry for an end review, its
   reserve or a lens not reached. Backlog item b-466005 files them by hand.
 
 ## Notes for the agent
 
 **Every criterion but the last two is new code.** No text at the tree base
-runs lenses over a stack or places an `end_review` fact. So criteria 1 to 4
+runs lenses over a stack or places an `end_review` fact. So criteria 1 to 5
 declare a witness and no mutant, and `witness` reports `skip` for them.
-Criteria 5 and 6 are `preserves` and name tests that pass now.
+Criteria 6 and 7 are `preserves` and name tests that pass now.
 
 **Import every new name inside the test body.** `review_stack`,
 `LayerReview` and `record_end_review` do not exist at the tree base. A
 module-scope import fails collection when the source is reverted, and
 `revert` reads that as `skip`.
 
-**Criteria 1 to 3 share one arrangement.** A helper builds it and runs two
-end reviews. Point `GIT_CONFIG_GLOBAL` at a file in `tmp_path` that sets
-`diff.noprefix = true`, with `monkeypatch`. Build a git repo in `tmp_path`
-as the mirror. Give every commit the message `msg <file>`.
+**The end review runs past `--until`.** It runs after the loop whatever
+the stop reason, `UNTIL` included, and the operator decided so. The review
+is the point of a stack batch, its money was held back at the start, and
+the reserve bounds its length. `CLAUDE.md` still says a night ends at the
+deadline plus at most one task. `CLAUDE.md` is forbidden here, and the
+operator corrects that sentence by hand.
+
+**Criteria 1, 2, 3 and 5 share one arrangement.** A helper builds it and
+runs two end reviews. Write a git config file in `tmp_path` that sets
+`diff.noprefix = true`, `user.name` and `user.email`. Point
+`GIT_CONFIG_GLOBAL` at it with `monkeypatch`, so no commit reads the
+host's identity. Build a git repo in `tmp_path` as the mirror. Give every
+commit the message `msg <file>`. The `noprefix` and `DIFF_FLAGS` behaviour
+below was measured on the host's git, not the cell image's.
 
 - On `main`: `a.txt` as commit `A`, then `m.txt` "moved main", then one
-  commit per layer adding `TE-7.txt`, `TE-3.txt`, `TE-9.txt` and
-  `TE-5.txt`, each holding "`<spec>` layer".
-- On a branch from `A`: `m2.txt` "moved main", then `TE-8.txt` and
-  `TE-6.txt` the same way.
+  commit per layer adding `TE-4.txt`, `TE-7.txt`, `TE-3.txt`, `TE-9.txt`
+  and `TE-5.txt`, each holding "`<spec>` layer".
+- On a branch from `A`: `m2.txt` "moved main", then `TE-1.txt`,
+  `TE-8.txt` and `TE-6.txt` the same way.
 
-Build a `Ledger` with a `MemoryRecord` and two batches. For each spec, in
-the order `TE-9`, `TE-7`, `TE-5`, `TE-3`, `TE-6`, `TE-8`, create a run with
-`base_sha` `A` and its batch's id, then a task. Package it
-`READY_FOR_REVIEW` at its commit. Record one correctness concern "in-cell
-c5" on `TE-5`. Record layers with `record_stack_layer`, each on the one
-before it:
+Build a `Ledger` with a `MemoryRecord` and two batches. Take the specs in
+the order `TE-9`, `TE-4`, `TE-7`, `TE-5`, `TE-3`, `TE-6`, `TE-1`, `TE-8`.
+For each, create a run with `base_sha` `A` and its batch's id, then a
+task. Package
+it `READY_FOR_REVIEW` at its commit. Record one correctness concern
+"in-cell c5" on `TE-5`, and one closed attempt on `TE-5` costing 1.0.
+Record layers with `record_stack_layer`, each on the one before it:
 
 | batch | position | spec |
 |---|---|---|
-| 1 | 1 | `TE-7` |
-| 1 | 2 | `TE-3` |
-| 1 | 3 | `TE-9` |
-| 1 | 4 | `TE-5` |
-| 2 | 1 | `TE-8` |
-| 2 | 2 | `TE-6` |
+| 1 | 1 | `TE-4` |
+| 1 | 2 | `TE-7` |
+| 1 | 3 | `TE-3` |
+| 1 | 4 | `TE-9` |
+| 1 | 5 | `TE-5` |
+| 2 | 1 | `TE-1` |
+| 2 | 2 | `TE-8` |
+| 2 | 3 | `TE-6` |
 
 `specs` holds a `Spec` for each, with the body "body `<spec>`" and one
-criterion "claim `<spec>`" whose witness is `tests/test_<spec>.py::t`. Its
-`touches` is `<spec>.py` and its `forbidden` is `no-<spec>.py`. `open_cell` records each spec id it is given.
-It raises `RuntimeError("no cell for TE-6")` for `TE-6`, and yields
-`critic-<spec>` for the rest. The agent double records each call's
-container, options and keywords. It returns the next scripted reply, and
-raises `AssertionError` with none left. `budget_usd` is 1.0 and `max_turns`
-17. `claude_md` is one line.
+criterion "claim `<spec>`" whose witness is `tests/test_<spec>.py::t`.
+Its `touches` is `<spec>.py` and its `forbidden` is `no-<spec>.py`.
+`open_cell` records each spec id it is given. It raises
+`RuntimeError("no cell for TE-8")` for `TE-8`, and yields `critic-<spec>`
+for the rest. The agent double records each call's container, options and
+keywords. It returns the next scripted reply, and raises `AssertionError`
+with none left. `budget_usd` is 1.0 and `max_turns` 17. `claude_md` is
+one line.
 
-Batch 1's end review has a reserve of 4.0 and six replies, in order:
+Batch 1's end review has a reserve of 4.0 and six replies, in order. Both
+`TE-5` findings sit on `TE-5.txt` line 1, a line its diff adds.
 
 | call | layer, lens | reply | cost |
 |---|---|---|---|
@@ -334,29 +372,29 @@ Batch 1's end review has a reserve of 4.0 and six replies, in order:
 | 6 | `TE-3`, Standards | no findings | 0.25 |
 
 After `TE-9` the reserve left is exactly 2.0, so `TE-3` runs. After `TE-3`
-it is 1.5, so `TE-7` is not reached. Batch 2's end review has a reserve of
-4.0 and one scripted item, `RuntimeError("runner crashed")`, which the
-double raises on `TE-8`'s Spec call.
+it is 1.5, so neither `TE-7` nor `TE-4` is reached. Batch 2's end review
+has a reserve of 4.0 and three scripted items. The double raises
+`RuntimeError("runner crashed")` on `TE-6`'s Spec call. `open_cell` raises
+for `TE-8`. `TE-1` then gets two replies with no findings, at 0.25 each.
 
 **Criterion 1's witness** asserts:
 
-- six agent calls after batch 1 and seven after batch 2, and `open_cell`
-  given `TE-5`, `TE-9`, `TE-3`, `TE-6` and `TE-8`, in that order.
-- batch 1 returns `TE-5`, `TE-9`, `TE-3` and `TE-7`'s keys in that
-  order. `TE-5`'s reviews are `spec` then `standards`, and its first
+- nine agent calls, and `open_cell` given `TE-5`, `TE-9`, `TE-3`, `TE-6`,
+  `TE-8` and `TE-1`, in that order.
+- batch 1 returns `TE-5`, `TE-9`, `TE-3`, `TE-7` and `TE-4`'s keys in
+  that order. `TE-5`'s reviews are `spec` then `standards`, and its first
   finding's probe equals the `Mutant` scripted. `TE-9`'s Spec review
-  carries its error and cost 0.75. `TE-7`'s reviews are empty.
-- batch 2 returns `TE-6` and `TE-8`'s keys, each with two reviews that
-  carry an error.
-- twelve `end_reviews` rows. `TE-5`'s two, `TE-9`'s Standards and `TE-3`'s
-  two are `reviewed` at their costs, with no error. `TE-9`'s Spec is
-  `error` at 0.75 with an error. `TE-7`'s two are `not_reached` at 0.0.
-  `TE-6`'s two are `error` at 0.0 naming "no cell for TE-6", and `TE-8`'s
-  two name "runner crashed".
+  carries its error and cost 0.75. `TE-7`'s and `TE-4`'s reviews are
+  empty.
+- batch 2 returns `TE-6`, `TE-8` and `TE-1`'s keys.
+- sixteen `end_reviews` rows. `TE-5`'s two, `TE-9`'s Standards, `TE-3`'s
+  two and `TE-1`'s two are `reviewed` at their costs, with no error.
+  `TE-9`'s Spec is `error` at 0.75 with an error. `TE-7`'s two and
+  `TE-4`'s two are `not_reached` at 0.0. `TE-6`'s two are `error` at 0.0
+  naming "runner crashed", and `TE-8`'s two name "no cell for TE-8".
 - `TE-5`'s findings are "in-cell c5", "f5 spec" and "f5 standards" in that
   order, of lenses `correctness`, `spec` and `standards`, none anchored.
-  `TE-9`'s are "f9 standards" alone. `TE-3`, `TE-7`, `TE-6` and `TE-8` have
-  none.
+  `TE-9`'s are "f9 standards" alone. The other six layers have none.
 
 These fail it, each measured:
 
@@ -365,8 +403,11 @@ These fail it, each measured:
 - the cost of a lens with an error left out of the count
 - the reserve checked against one lens's budget
 - a layer not reached given no row, or an `error` row
+- `not_reached` recorded for the first layer that fails the check, then
+  a `break`, which leaves `TE-4` with no row
 - a lens's error ignored, so it reads `reviewed`
 - findings recorded under the predecessor's task
+- findings run through `findings.anchor` before `record_findings`
 - every batch's layers read, which raises on the primary key
 - the spend kept across calls, so batch 2 is not reached
 - a raise that propagates, one that ends the end review, or one recorded
@@ -376,17 +417,18 @@ These fail it, each measured:
 
 **Criterion 2's witness** asserts each call's container in order:
 `critic-TE-5` twice, `critic-TE-9` twice, `critic-TE-3` twice, then
-`critic-TE-8`. Every call has `max_turns` 17, `max_budget_usd` 1.0 and no
-`resume`. For calls 1, 3 and 5, the Spec lens's system prompt holds
-"+`<spec>` layer", "body `<spec>`", the `claude_md` line and that spec's
-witness id. It holds `context.constraints_block` of that `touches` and
-`forbidden` whole. The Standards call after each holds "body `<spec>`" and
-no "claim `<spec>`", since only the Spec prompt has a criteria slot.
-Call 1's prompt holds no "+TE-9 layer". Call 7's holds
-"+TE-8 layer" and "diff --git a/TE-8.txt b/TE-8.txt", and neither
-"moved main" nor "msg TE-8". These fail it, each measured:
+`critic-TE-6` once and `critic-TE-1` twice. Every call has `max_turns` 17,
+`max_budget_usd` 1.0 and no `resume`. For calls 1, 3 and 5, the Spec
+lens's system prompt holds "+`<spec>` layer", "body `<spec>`", the
+`claude_md` line and that spec's witness id. It holds
+`context.constraints_block` of that `touches` and `forbidden` whole. The
+Standards call after each holds "body `<spec>`" and no "claim `<spec>`",
+since only the Spec prompt has a criteria slot. Call 1's prompt holds no
+"+TE-9 layer". Call 8, the bottom layer `TE-1`'s Spec call, holds
+"+TE-1 layer" and "diff --git a/TE-1.txt b/TE-1.txt", and neither
+"moved main" nor "msg TE-1". These fail it, each measured:
 
-- the diff over `fields.base..head`, which holds "moved main" for `TE-8`
+- the diff over `fields.base..head`, which holds "moved main" for `TE-1`
 - the diff from the run's `base_sha`, which holds "+TE-9 layer" for `TE-5`
 - `git show`, which holds the commit message
 - a diff with no `DIFF_FLAGS`, which loses the `a/` prefix
@@ -402,10 +444,10 @@ Call 1's prompt holds no "+TE-9 layer". Call 7's holds
 there first. It calls `saffron.record.fold.fold` with the record and the
 fresh ledger. It asserts the rows equal the source's, and `TE-5`'s
 findings there equal the source's. It then folds the record into the
-source ledger, and asserts its rows are unchanged, twelve and no more.
+source ledger, and asserts its rows are unchanged, sixteen and no more.
 Last, it calls `fold_task` on the fresh ledger with `TE-9`'s key and an
-empty list. Ten rows remain, and none is `TE-9`'s. These fail it, each
-measured:
+empty list. Fourteen rows remain, and none is `TE-9`'s. These fail it,
+each measured:
 
 - `_apply` with no branch for `end_review`, which aborts the fold
 - `_drop_task_rows` that leaves the rows, which raises on the primary key
@@ -413,8 +455,9 @@ measured:
   `TE-9`'s rows after `fold_task(key, [])`
 - a row written and no fact appended
 - findings inserted by SQL of your own, with no fact
+- `not_reached` for the first failing layer, then a `break`
 
-**Criterion 4's witness** runs three stack batches on one `Ledger`, with a
+**Criterion 4's witness** runs four stack batches on one `Ledger`, with a
 reserve of 6.0. The order is `TE-1`, `TE-2` and `TE-3`, each with a budget
 of 5.0 from `_candidate`. The runner appends each spec id to a shared log.
 It creates a run and a task for the spec, opens and closes one attempt
@@ -422,34 +465,51 @@ costing 5.0, and packages the task `READY_FOR_REVIEW`. It returns
 `_outcome` with that task's own `task_id` and run. `end_review` appends
 its three arguments to the same log.
 
-| batch | budget | runner | runs | stop |
-|---|---|---|---|---|
-| 1 | 20.0 | as above | `TE-1`, `TE-2` | `BUDGET` |
-| 2 | 30.0 | as above | all three | `DRAINED` |
-| 3 | 30.0 | raises `RuntimeError` | `TE-1`, `TE-2` | `INFRASTRUCTURE` |
+| batch | budget | runner | readiness | runs | ends |
+|---|---|---|---|---|---|
+| 1 | 20.0 | as above | `_ready` | `TE-1`, `TE-2` | `BUDGET` |
+| 2 | 30.0 | as above | `_ready` | all three | `DRAINED` |
+| 3 | 30.0 | raises `RuntimeError` | `_ready` | `TE-1`, `TE-2` | `INFRASTRUCTURE` |
+| 4 | 30.0 | as above | raises `RuntimeError` | none | the raise |
 
-For each batch it asserts the runs and the stop reason. The log ends with
-one `end_review` entry, of `str` of that batch's id, 6.0 and the order's
-three specs by id. The batch row's `budget_usd` is the budget given. These
-fail it, each measured on a stand-in built over `run_batch`:
+For batches 1 to 3 it asserts the runs and the stop reason. The log ends
+with one `end_review` entry, of `str` of that batch's id, 6.0 and the
+order's three specs by id. The batch row's `budget_usd` is the budget
+given. For batch 4 it asserts the raise leaves `run_stack_batch`, and the
+log stays empty. These fail it, each measured on a stand-in built over
+`run_batch`:
 
 - no reserve held, which runs `TE-3` in batch 1
 - `run_batch` given the budget less the reserve, which records 14.0
 - the spend counted over the whole ledger, which stops batch 2 at `BUDGET`
 - `end_review` called before the loop, or only after `DRAINED`
+- `end_review` called in a `finally`, which logs it for batch 4
 - the batch id passed as an `int`
 - a mapping of the layers' specs alone
 
+**Criterion 5's witness** asserts `batch_spend` of batch 1 is 3.5, the
+attempt's 1.0 and the end review's 2.5, and of batch 2 is 0.5. These fail
+it, each measured:
+
+- `batch_spend` left as it is, which gives 1.0 and 0.0
+- every batch's `end_reviews` rows summed, which gives 4.0 and 3.0
+- the end review's cost in place of the attempts', which gives 2.5
+
+Nothing at the tree base writes an `end_reviews` row, so every existing
+caller and test of `batch_spend` reads the same figure. The join names
+`stack_layers`, so it runs only on a ledger that has that table, which
+`SA-0145` adds to `SCHEMA`.
+
 **How the lists were measured.** Two throwaway simulations ran on
-2026-09-23 at `f0f3dab2`. The first subclassed `Ledger` with `SA-0145`'s
-table, this spec's table and both write methods. It added `end_review` to
-`KINDS` in memory. It stood in for `layer_fields`, and for `review_layer`
-with `SA-0146`'s keywords. It ran the real `review.run_lens`, with a Spec
-model whose probe is optional. It ran the arrangement above on the host's
-git. The second built `run_stack_batch` over `run_batch`. The right build
-passed each witness, and every wrong version listed failed its own. The
-code of `SA-0143` to `SA-0146` is not at `f0f3dab2`, so no witness ran
-against it.
+2026-09-23 at `4f57467c`. The first subclassed `Ledger` with `SA-0145`'s
+table, this spec's table, both write methods and the wider `batch_spend`.
+It stood in for `layer_fields`, and for `review_layer` with `SA-0146`'s
+keywords. It ran the real `review.run_lens`, with a Spec model whose probe
+is optional, and the real `findings.anchor` for that wrong version. It ran
+the arrangement above on the host's git. The second built
+`run_stack_batch` over `run_batch`. The right build passed each witness,
+and every wrong version listed failed its own. The code of `SA-0143` to
+`SA-0146` is not at `4f57467c`, so no witness ran against it.
 
 **What the witnesses leave undriven.**
 
@@ -473,8 +533,9 @@ sentence over 25 words. Keep each docstring within ten lines.
 **Commit as each witness passes**, before the full suite runs.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). About
-40 changed lines in `ledger.py` at 4.8 tokens a line are about 190. About
-70 in `end_review.py` at 5.5 are about 390, and 20 in `batch.py` at 6.3
-about 130. About 220 test lines at 4.8 are about 1060. That is about 1770
-tokens. Keep the helper shared and the test docstrings short.
+`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
+prototype of this change, measured with `size_gate`, came to 1841 changed
+tokens. That was 343 in `end_review.py`, 213 in `ledger.py` and 83 in
+`batch.py`, then 1004 in `tests/test_end_review.py` and 198 in
+`tests/test_batch.py`. It had few docstrings. Keep the helper shared and
+the test docstrings short.
