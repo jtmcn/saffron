@@ -189,6 +189,7 @@ factory:run_created a factory:FactKind . factory:run_finished a factory:FactKind
 factory:run_preflight a factory:FactKind . factory:batch_created a factory:FactKind .
 factory:batch_closed a factory:FactKind . factory:repo_upserted a factory:FactKind .
 factory:stack_layer a factory:FactKind .
+factory:end_review a factory:FactKind .
 
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .
