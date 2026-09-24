@@ -47,11 +47,12 @@ acceptance:
       returned `READY_FOR_REVIEW`, and for no other. On a ledger with a
       record it appends one `stack_layer` fact for each, under that task's
       record key. The row holds the batch's id as text, the layer's
-      position from 1 among layers only, the spec id, the task's record key,
-      the record key of the layer below or `NULL`, the layer below's
-      `pushed_sha` or `NULL`, and generation 0. The witness drives
-      `EXHAUSTED`, `MERGE_FAILED`, `GATE_ERROR`, a `Refused` and a raise
-      between layers. It drives a ledger with a record and one without. And
+      position from 1 among this batch's layers only, the spec id, the
+      task's record key, the record key of the layer below in this batch or
+      `NULL`, that layer's `pushed_sha` or `NULL`, and generation 0. The
+      witness drives `EXHAUSTED`, `MERGE_FAILED`, `GATE_ERROR`, a `Refused`
+      and a raise between layers. It drives a ledger with a record and one
+      without, and a second batch on a ledger that already holds one. And
       `run_batch`, given the same results, writes no row.
     witness: tests/test_batch.py::test_a_stack_batch_records_one_layer_for_each_task_that_reached_review
   - claim: >-
@@ -149,7 +150,7 @@ Build three things.
    predecessor's key and head, and the generation, never a `task_id`. It
    writes through `_commit_and_append`. `_apply` places the fact as one
    `stack_layers` row, with `batch_key` from the fact and every other
-   value from the payload. It reads no other row. `_drop_task_rows`
+   value from the payload. It takes no value from another row. `_drop_task_rows`
    deletes the task's `stack_layers` row. So a fold into a ledger that
    already holds it replaces it, and the fold's skip path,
    `fold_task(key, [])` (`saffron/record/fold.py:48`, `:56`, `:62`),
@@ -176,7 +177,7 @@ one. Keep that count, and add a sentence naming `stack_layers` as a table
   `saffron/cli.py` is forbidden here, so the fetched head is left to the
   finishing layer, step 8.
 - **Generation 1.** Follow-up specs are step 7 of b-792ab2.
-- **Gate 0's overlap exemption.** That is step 2.
+- **Gate 0's overlap exemption.** That folded into step 7.
 - **The `batches` row in a fold.** The fold rebuilds no batch
   (`saffron/record/fold.py:8-13`). The row keeps the batch's id as text,
   as the fact carries it.
@@ -199,6 +200,9 @@ not.
 before `_drive`'s attach has no `batch_key`, and criterion 1 fails. One
 way is a keyword on `_drive` that receives each outcome after the attach,
 with the batch id. `run_batch` must pass none, and write no row.
+`run_stack_batch`'s own signature stays as `SA-0143` left it, because
+its caller in `saffron/cli.py` is forbidden here. Any new keyword goes on
+`_drive` or `run_batch`, with a default of `None`.
 
 **Both witnesses share one arrangement.** Write a runner class in
 `tests/test_batch.py` that takes the ledger, a repo id and a script of
@@ -237,7 +241,11 @@ does. `task_key` is `ledger.record_key` of that spec's task.
 exactly three `stack_layer` facts in the record, one under each layer's
 key, and none under another task's key. It runs the script again on a
 `Ledger` with no record, and asserts the same three rows by the same
-rules. Then it runs the script through `run_batch` on a third ledger,
+rules. It then runs the script a second time through `run_stack_batch` on
+that same no-record ledger. The second batch's three rows have positions
+1, 2 and 3, the second batch's `batch_key`, and a `NULL` predecessor
+below its `TE-7`. The first batch's rows are unchanged. Then it runs the
+script through `run_batch` on a third ledger,
 with a rescan that returns the same candidates, and asserts no row.
 These fail it:
 
@@ -261,12 +269,14 @@ These fail it:
 - a fact built before the attach, whose `batch_key` is `None`
 - a hook in `_drive` that `run_batch` fires too
 - a row written and no fact appended, or a fact appended and no row
+- a position counted over the whole table, or kept on the `Ledger`
+  instance, which gives the second batch 4, 5 and 6
+- a predecessor read from the table's last row, which puts the first
+  batch's `TE-6` below the second batch's `TE-7`
 
 This half is unmeasured. `run_stack_batch` does not exist at
-`874632f2`, so nothing ran it. The list above is the spec review's hand
-trace. It found one wrong version this witness does not kill: a
-position read per ledger by counting the table, which gives the right
-answer.
+`874632f2`, so nothing ran it. The list above is two spec reviews' hand
+trace. Run it against the witness once `SA-0143` lands.
 
 **Criterion 2's witness** runs the script through `run_stack_batch` on a
 `Ledger` built with a `MemoryRecord`. It then writes one more layer by
