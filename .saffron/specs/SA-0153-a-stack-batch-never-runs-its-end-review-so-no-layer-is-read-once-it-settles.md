@@ -52,8 +52,8 @@ acceptance:
       `end_review.review_stack(ledger, batch_key, reserve_usd, specs, ...)`
       reads the layers of that batch alone, from the highest position down.
       A layer starts only while `reserve_usd`, less the cost of every lens
-      the call has run, is at least `budget_usd` for each entry of
-      `END_LENSES`. A lens that returns an error counts its cost. The first
+      the call has run, is at least `budget_usd` times the number of
+      entries in `END_LENSES`. A lens that returns an error counts its cost. The first
       layer that fails the check is not reached, nor is any layer below it,
       and no cell is opened for one. Each lens of each layer becomes one
       `end_review` fact under that layer's task: `reviewed` with its cost,
@@ -263,9 +263,11 @@ Build three things.
    runs once, when one was given. A raise out of the loop propagates, and
    `end_review` does not run.
 
-One docstring sentence in `saffron/ledger.py` becomes false. Its count of
+Two docstrings in `saffron/ledger.py` become false. The module's count of
 the kinds that fold back gains one. `SA-0145` leaves a sentence naming
 `stack_layers` as a table §4.1 does not list, and `end_reviews` joins it.
+`batch_spend`'s docstring names the join through attempts as the whole
+figure (`saffron/ledger.py:898-903`), and it gains the end review's part.
 
 `review_stack` has no production caller until `SA-0154` passes it to
 `run_stack_batch`. So it is a `pending_symbols` entry, and the `dead` gate
@@ -275,7 +277,7 @@ defers it while this spec is open (`.saffron/gates/dead.py:4-6`).
 
 - **The critic cell.** `SA-0154` builds `open_cell`. It seeds a critic cell
   at the layer's head, and wires `review_stack` into
-  `saffron batch --stack` with a reserve flag.
+  `saffron batch --stack`. It sets the reserve as a share of `--budget`.
 - **Qualification.** `run_stack_batch` discards what `end_review` returns.
   The callable `SA-0154` builds calls `review_stack` and hands its list to
   `SA-0147`, which anchors, probes and groups the findings.
@@ -286,14 +288,18 @@ defers it while this spec is open (`.saffron/gates/dead.py:4-6`).
   lacks the end review. Follow-ups run after the end review in the same
   batch. `SA-0150` owns closing the row after both.
 - **Other money in a stack batch.** `reserve_usd` is the end review's
-  alone. A spec review (`SA-0149`, `SA-0155`) runs under a task of its own
+  alone. A spec review (`SA-0149`, `SA-0156`) runs under a task of its own
   and is charged through `batch_spend` like any task. Follow-up writing
   (`SA-0150`) takes a reserve of its own.
 - **A raise once a lens spends.** Take a raise out of `review_layer` that
   is not `AgentFailed`, or one out of `open_cell`'s exit. Either records
-  both lenses `error` at a cost of 0. `review_layer` returns both lenses at once, so a
-  partial result cannot be recovered here. The reserve can then undercount
-  by at most one layer's lenses per such raise.
+  both lenses `error` at a cost of 0. `review_layer` returns both lenses
+  at once, so a partial result cannot be recovered here. The reserve can
+  then undercount by at most one layer's lenses per such raise.
+- **The fold's docstring.** `saffron/record/fold.py:11-12` says
+  `batch_spend` joins `runs.batch_id`, so every batch reads as $0 spent
+  after a fold. The `stack_layers` join makes that false for end-review
+  spend. `saffron/record/**` is forbidden here, and the operator files it.
 - **The vocabulary.** `CONTEXT.md` has no entry for an end review, its
   reserve or a lens not reached. Backlog item b-466005 files them by hand.
 
@@ -386,7 +392,9 @@ for `TE-8`. `TE-1` then gets two replies with no findings, at 0.25 each.
   finding's probe equals the `Mutant` scripted. `TE-9`'s Spec review
   carries its error and cost 0.75. `TE-7`'s and `TE-4`'s reviews are
   empty.
-- batch 2 returns `TE-6`, `TE-8` and `TE-1`'s keys.
+- batch 2 returns `TE-6`, `TE-8` and `TE-1`'s keys. `TE-6`'s reviews and
+  `TE-8`'s are each `spec` then `standards`, at cost 0, with an error
+  naming "runner crashed" and "no cell for TE-8" in turn.
 - sixteen `end_reviews` rows. `TE-5`'s two, `TE-9`'s Standards, `TE-3`'s
   two and `TE-1`'s two are `reviewed` at their costs, with no error.
   `TE-9`'s Spec is `error` at 0.75 with an error. `TE-7`'s two and
@@ -412,6 +420,7 @@ These fail it, each measured:
 - the spend kept across calls, so batch 2 is not reached
 - a raise that propagates, one that ends the end review, or one recorded
   as `not_reached`
+- empty `reviews` for a layer whose read raised
 - a fixed lens budget
 - the two lenses' reviews reversed
 
@@ -443,13 +452,17 @@ since only the Spec prompt has a criteria slot. Call 1's prompt holds no
 `Ledger` with no record, and creates one unrelated repo, run and task
 there first. It calls `saffron.record.fold.fold` with the record and the
 fresh ledger. It asserts the rows equal the source's, and `TE-5`'s
-findings there equal the source's. It then folds the record into the
+findings there equal the source's. It asserts the fresh ledger's
+`batch_spend` of batch 1's id is 2.5. Only the `stack_layers` join gives
+that, since the fold leaves each run's `batch_id` unset. It then folds the record into the
 source ledger, and asserts its rows are unchanged, sixteen and no more.
 Last, it calls `fold_task` on the fresh ledger with `TE-9`'s key and an
 empty list. Fourteen rows remain, and none is `TE-9`'s. These fail it,
 each measured:
 
 - `_apply` with no branch for `end_review`, which aborts the fold
+- the end review's cost joined through `tasks` and `runs.batch_id`, which
+  gives 0.0 on the fresh ledger
 - `_drop_task_rows` that leaves the rows, which raises on the primary key
 - `INSERT OR REPLACE` with `_drop_task_rows` untouched, which leaves
   `TE-9`'s rows after `fold_task(key, [])`
@@ -469,14 +482,14 @@ its three arguments to the same log.
 |---|---|---|---|---|---|
 | 1 | 20.0 | as above | `_ready` | `TE-1`, `TE-2` | `BUDGET` |
 | 2 | 30.0 | as above | `_ready` | all three | `DRAINED` |
-| 3 | 30.0 | raises `RuntimeError` | `_ready` | `TE-1`, `TE-2` | `INFRASTRUCTURE` |
+| 3 | 30.0 | appends, then raises `RuntimeError` | `_ready` | `TE-1`, `TE-2` | `INFRASTRUCTURE` |
 | 4 | 30.0 | as above | raises `RuntimeError` | none | the raise |
 
 For batches 1 to 3 it asserts the runs and the stop reason. The log ends
 with one `end_review` entry, of `str` of that batch's id, 6.0 and the
 order's three specs by id. The batch row's `budget_usd` is the budget
 given. For batch 4 it asserts the raise leaves `run_stack_batch`, and the
-log stays empty. These fail it, each measured on a stand-in built over
+log gains no entry. These fail it, each measured on a stand-in built over
 `run_batch`:
 
 - no reserve held, which runs `TE-3` in batch 1
