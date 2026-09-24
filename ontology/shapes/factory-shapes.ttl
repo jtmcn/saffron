@@ -16,12 +16,13 @@ factory:TaskShape a sh:NodeShape ;
         sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
                 factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
                 factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
+                factory:SPEC_WITHHELD
                 factory:APPROVED factory:CHANGES_REQUESTED factory:REJECTED
                 factory:MERGED factory:ORPHANED ) ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] .
 
-# Nine states reach the operator and no others — set containment inside the end
+# Ten states reach the operator and no others — set containment inside the end
 # states, which is the distinction §4.6 names as justifying the namespace. What
 # the operator's own decision produces is an end state and is not terminal: the
 # conflation is how MERGED read as reaching the operator and ORPHANED, which
@@ -31,7 +32,8 @@ factory:TerminalStateShape a sh:NodeShape ;
     sh:class factory:EndState ;
     sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
-            factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED ) .
+            factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
+            factory:SPEC_WITHHELD ) .
 
 factory:SpecShape a sh:NodeShape ;
     sh:targetClass factory:Spec ;
@@ -119,7 +121,8 @@ factory:FactKindShape a sh:NodeShape ;
             factory:finding factory:rebuttal factory:decision
             factory:run_created factory:run_finished factory:run_preflight
             factory:batch_created factory:batch_closed factory:repo_upserted
-            factory:stack_layer factory:end_review factory:qualification ) .
+            factory:stack_layer factory:end_review factory:qualification
+            factory:spec_review ) .
 
 # A contract gate is a repo's executable for one core-supplied role. This states
 # the contract half only; nothing here forbids a role on a core gate, because

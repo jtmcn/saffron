@@ -38,6 +38,7 @@ KINDS = (
     "stack_layer",
     "end_review",
     "qualification",
+    "spec_review",
 )
 
 

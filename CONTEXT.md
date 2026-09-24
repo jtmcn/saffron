@@ -488,7 +488,8 @@ _Avoid_: "response", "appeal", "pushback".
 
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
-`PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`.
+`PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
+`SPEC_WITHHELD`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you* —
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -508,6 +509,11 @@ window reopens.
 _Avoid_: "exhausted", "out of budget".
 _Avoid_: "failed", "gave up", "errored". Reserve "failed" for gates and
 infrastructure, and "errored" for gate status `error`.
+
+**`SPEC_WITHHELD`**: A task whose spec review in a stack batch found a `blocker`, so no
+cell ran its spec. The review is a fact on the task. The spec is not queued again until it
+is edited.
+_Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.
@@ -599,7 +605,7 @@ Each name is the `kind` written to `events.jsonl` with `Event` appended, because
 `task_package`, `task_push`, `task_merged_head`, `task_policy`, `attempt_opened`,
 `attempt_closed`, `gate_result`, `finding`, `rebuttal`, `decision`, `run_created`,
 `run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`,
-`stack_layer`, `end_review`, `qualification`.
+`stack_layer`, `end_review`, `qualification`, `spec_review`.
 The set is the record's whole alphabet, so it holds kinds nothing appends yet.
 > A fact is an entry in the record on `refs/saffron/*`. An event is a line of
 > `events.jsonl`. The two words do not merge.
