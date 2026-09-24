@@ -65,8 +65,8 @@ acceptance:
       It hands each task the last task before it that returned
       `READY_FOR_REVIEW`, and `None` before any has. A task adds no layer
       when it returns any other state, a `Refused`, or raises. The witness
-      drives `EXHAUSTED`, `MERGE_FAILED`, `GATE_ERROR`, a `Refused` and a
-      raise.
+      drives `EXHAUSTED`, `MERGE_FAILED`, `GATE_ERROR`, `PLAN_REJECTED`, a
+      `Refused` and a raise.
     witness: tests/test_batch.py::test_a_stack_batch_hands_each_task_the_last_task_that_reached_review
   - claim: >-
       `run_stack_batch` never runs a spec that reaches, through a
@@ -193,6 +193,11 @@ while this spec is open.
 
 ## Out of scope
 
+- **Two comments that go stale.** `saffron/cell/session.py:277-278` and
+  `saffron/phases/package.py:615-617` name `_resolve_stacked_on` as what
+  supplies `stacked_on` and `parent_branch`. A handoff supplies them too
+  once this lands. Both files are forbidden here, so a later spec updates
+  them.
 - **The `--stack` flags.** `saffron batch --stack`, `saffron queue
   --stack` and `_resolve_queue`'s `stack` keyword are `SA-0144`'s.
 - **The record of the layers.** That is `SA-0145`'s. Its fact kind,
@@ -272,32 +277,43 @@ check fails it.
 **Criteria 3 to 5 drive `run_stack_batch`** with a fake runner that
 records `(candidate.spec.id, predecessor.spec.id or None)` and returns a
 canned result or raises. Build candidates with `tests/test_batch.py`'s
-`_candidate`, and each outcome that ran with `_outcome` and a run from
-`_spend` at $1. Use its `ledger` and `repo_id` fixtures and `_ready`. The
+`_candidate` (`tests/test_batch.py:34`). It takes neither a priority nor a
+`depends_on` today, so every spec it builds has priority 3
+(`saffron/intake.py:142`). Give it `priority` and `depends_on` keywords
+that default to what it builds now. Build each outcome that ran with
+`_outcome` and a run from `_spend` at $1. Use its `ledger` and `repo_id` fixtures and `_ready`. The
 budget is 100.
 
-**Criterion 3's witness** passes this order, whose ids are not sorted.
+**Criterion 3's witness** passes this order. Its ids are not sorted, and
+its priorities never rise along it, so a sort by either key reorders it.
 
-| order | spec | result | predecessor |
-|---|---|---|---|
-| 1 | `TE-7` | `READY_FOR_REVIEW` | `None` |
-| 2 | `TE-3` | `EXHAUSTED` | `TE-7` |
-| 3 | `TE-9` | `MERGE_FAILED` | `TE-7` |
-| 4 | `TE-1` | `GATE_ERROR` | `TE-7` |
-| 5 | `TE-5` | a `Refused` | `TE-7` |
-| 6 | `TE-8` | `READY_FOR_REVIEW` | `TE-7` |
-| 7 | `TE-2` | raises `RuntimeError` | `TE-8` |
-| 8 | `TE-6` | `READY_FOR_REVIEW` | `TE-8` |
-| 9 | `TE-4` | `READY_FOR_REVIEW` | `TE-6` |
+| order | spec | priority | result | predecessor |
+|---|---|---|---|---|
+| 1 | `TE-7` | 3 | `READY_FOR_REVIEW` | `None` |
+| 2 | `TE-3` | 3 | `EXHAUSTED` | `TE-7` |
+| 3 | `TE-9` | 2 | `MERGE_FAILED` | `TE-7` |
+| 4 | `TE-1` | 2 | `GATE_ERROR` | `TE-7` |
+| 5 | `TE-5` | 2 | a `Refused` | `TE-7` |
+| 6 | `TE-8` | 2 | `READY_FOR_REVIEW` | `TE-7` |
+| 7 | `TE-2` | 1 | raises `RuntimeError` | `TE-8` |
+| 8 | `TE-6` | 1 | `READY_FOR_REVIEW` | `TE-8` |
+| 9 | `TE-10` | 1 | `PLAN_REJECTED` | `TE-6` |
+| 10 | `TE-4` | 1 | `READY_FOR_REVIEW` | `TE-6` |
 
 It asserts the calls are exactly the table's spec and predecessor pairs,
-row by row, and the stop reason is `DRAINED`. These fail it:
+row by row, and the stop reason is `DRAINED`. `PLAN_REJECTED` is in
+neither `ABORT_STATES` nor the in-flight states, so the night still
+drains. The breaker's count runs 1 at row 4, stays 1 at row 5, and is 0
+again at row 6. These fail it, each measured:
 
 - the previous task as predecessor, whatever it returned
 - every state outside `ABORT_STATES` counted as a layer
 - `MERGE_FAILED` counted as a layer, since it packaged
 - a raise or a `Refused` that leaves the task as predecessor
-- the order sorted by id or priority
+- the order sorted by id
+- the order sorted by priority
+- a hand-listed miss set, `ABORT_STATES` with `EXHAUSTED` and
+  `MERGE_FAILED`, which counts `TE-10` as a layer and hands `TE-4` `TE-10`
 
 **One predicate.** "Is a layer" and "missed" are one test and its
 negation: the result is a `CellOutcome` whose state is
@@ -305,29 +321,33 @@ negation: the result is a `CellOutcome` whose state is
 and criterion 4 the miss half for `MERGE_FAILED`, a raise and a
 `Refused`.
 
-**Criterion 4's witness** passes this order.
+**Criterion 4's witness** passes this order. Its priorities never rise
+along it either.
 
-- `TE-11` returns `MERGE_FAILED`.
-- `TE-12` depends on `TE-11`. `TE-13` depends on `TE-12`.
-- `TE-14` returns `READY_FOR_REVIEW`.
-- `TE-15` depends on `TE-14` and `TE-11`, in that order.
-- `TE-16` raises. `TE-17` returns a `Refused`.
-- `TE-18` depends on `TE-16` and `TE-17`.
-- `TE-19` depends on `TE-14` and returns `READY_FOR_REVIEW`.
-- `TE-20` depends on `TE-14` and `TE-99`, in that order, and returns
-  `READY_FOR_REVIEW`. No spec in the order is `TE-99`.
+| order | spec | priority | `depends_on` | result |
+|---|---|---|---|---|
+| 1 | `TE-11` | 3 | none | `MERGE_FAILED` |
+| 2 | `TE-12` | 3 | `TE-11` | refused, names `TE-11` |
+| 3 | `TE-14` | 2 | none | `READY_FOR_REVIEW` |
+| 4 | `TE-13` | 2 | `TE-14`, `TE-12` | refused, names `TE-11`, not `TE-14` |
+| 5 | `TE-15` | 2 | `TE-14`, `TE-11` | refused, names `TE-11`, not `TE-14` |
+| 6 | `TE-16` | 2 | none | raises `RuntimeError` |
+| 7 | `TE-17` | 1 | none | a `Refused` |
+| 8 | `TE-18` | 1 | `TE-16`, `TE-17` | refused, names `TE-16` and `TE-17` |
+| 9 | `TE-19` | 1 | `TE-14` | `READY_FOR_REVIEW` |
+| 10 | `TE-20` | 1 | `TE-14`, `TE-99` | `READY_FOR_REVIEW` |
 
-It collects `emit`'s lines. It asserts the runner saw `TE-11`, `TE-14`,
-`TE-16`, `TE-17`, `TE-19` and `TE-20` only. `TE-19`'s predecessor is
-`TE-14`, and `TE-20`'s is `TE-19`. It asserts exactly one refused line
-each for `TE-12`, `TE-13`, `TE-15` and `TE-18`. It asserts none for
-`TE-11`, `TE-14`, `TE-16`, `TE-19` and `TE-20`, and none names
-`TE-20`.
-It asserts nothing about a line for `TE-17`'s own `Refused`. `TE-12`'s
-and `TE-13`'s name `TE-11`. `TE-15`'s names `TE-11` and not `TE-14`.
-`TE-18`'s names `TE-16` and `TE-17`. These fail it:
+No spec in the order is `TE-99`. It collects `emit`'s lines. It asserts
+the runner's calls, in order. `TE-11` and `TE-14` get `None`. `TE-16`,
+`TE-17` and `TE-19` each get `TE-14`, and `TE-20` gets `TE-19`. It asserts exactly one refused line each for `TE-12`,
+`TE-13`, `TE-15` and `TE-18`, naming what the table says. It asserts none
+for `TE-11`, `TE-14`, `TE-16`, `TE-19` and `TE-20`, and none names
+`TE-20`. It asserts nothing about a line for `TE-17`'s own `Refused`. The
+stop reason is `DRAINED`. These fail it, each measured:
 
 - a check of `depends_on[0]` alone, which runs `TE-15`
+- a transitive walk through `depends_on[0]` only, beside a direct check
+  of every entry, which runs `TE-13`
 - a predecessor taken from `depends_on[0]`, which hands `TE-20` `TE-14`
 - a refusal unless every entry became a layer, which refuses `TE-20`
 - a miss test that leaves out `MERGE_FAILED`, which runs `TE-12`
@@ -335,11 +355,18 @@ and `TE-13`'s name `TE-11`. `TE-15`'s names `TE-11` and not `TE-14`.
 - a grandchild's reason that names only `TE-12`
 - a raise, or a `Refused`, not counted as a miss
 - a refused line printed and not emitted
+- the order sorted by priority
+
+**How the lists were measured.** A throwaway simulation of the loop's
+rule ran both tables on 2026-09-23. The right rule passed each, and every
+wrong version listed under them failed. On round 2's tables, where every
+priority was 3, a priority sort and the hand-listed miss set passed
+criterion 3. A walk through `depends_on[0]` only passed criterion 4.
 
 **What criteria 3 and 4 leave undriven.** They drive `EXHAUSTED`,
-`MERGE_FAILED`, `GATE_ERROR`, a `Refused` and a raise. The in-flight
-states, `RATE_LIMITED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
-`PLAN_REJECTED` and `SCOPE_REVIEW` are not driven. Test for
+`MERGE_FAILED`, `GATE_ERROR`, `PLAN_REJECTED`, a `Refused` and a raise.
+The in-flight states, `RATE_LIMITED`, `PREFLIGHT_FAILED`,
+`NOT_IMPLEMENTED` and `SCOPE_REVIEW` are not driven. Test for
 `READY_FOR_REVIEW` alone, so each of them misses too.
 
 **Criterion 5's witness** passes `TE-1` and `TE-2`, which both raise, and
@@ -378,8 +405,9 @@ These fail it:
 - a `ParentGone` caught and run unstacked
 - the branch taken from the candidate's `depends_on[0]`
 
-Measured on 2026-09-23 at `be9a9f90`, with these helpers and
-`fetch_parent_branch` called directly. Before the fetch the mirror had no
+Measured on 2026-09-23 at `be9a9f90`, on the host's git and not the
+cell image's git 2.39.5, with these helpers and `fetch_parent_branch`
+called directly. Before the fetch the mirror had no
 such ref. After it, the ref and the returned head both equalled the pushed
 head. `saffron/SY-7777` raised `ParentGone`. The mirror's refs then
 included `refs/remotes/origin/saffron/SY-9000`.
@@ -390,8 +418,8 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** About 120 changed lines of source and 290 of test. `SA-0131`'s
+**Size.** About 120 changed lines of source and 300 of test. `SA-0131`'s
 cell measured 4.3 tokens a line in `saffron/cli.py` and 4.0 in
-`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 1640
+`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 1680
 tokens of the 3000 ceiling (`saffron/gates/core/size.py:26`). Keep test
 docstrings short.

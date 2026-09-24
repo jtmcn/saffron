@@ -46,7 +46,9 @@ acceptance:
       `saffron batch --stack` calls `_resolve_queue` once, with `stack=True`,
       `stamp_orphaned=True` and the pinned base. It hands that call's
       candidates, in order, to `run_stack_batch` with the runner
-      `_stack_runner` returns. It never calls `run_batch`. When readiness
+      `_stack_runner` returns. That runner's `repo_id` is asked of the
+      ledger for each task, so a repo first recorded after the opening
+      scan reaches `run_task`. It never calls `run_batch`. When readiness
       fails, it exits 2 and prints the failed step. When `_resolve_queue`
       raises, it exits 2 and prints that the queue could not be resolved.
       Each leaves a batch row closed `INFRASTRUCTURE`.
@@ -114,7 +116,7 @@ Add `--stack` to `saffron batch` and to `saffron queue`.
    runner with `_stack_runner` and calls `run_stack_batch` in place of
    `run_batch`, with no rescan. The `repo_id` it passes `_stack_runner`
    is a callable that asks `ledger.resolve_repo_id(pinned.url)` for each
-   task, the lookup `_resolve_queue` makes (`saffron/cli.py:576`). It is
+   task, the lookup `_resolve_queue` makes (`saffron/cli.py:577`). It is
    not the opening scan's value, which is `None` on a repo's first night. It keeps the readiness check, the printed
    plan and the exit codes it has today. Its runner before readiness
    passes takes a candidate and a predecessor, as `run_stack_batch`'s
@@ -149,8 +151,14 @@ So they declare a witness and no mutant, and `witness` reports `skip` for
 them. Criterion 3 is `preserves` and names a test that passes now.
 
 **Three test fakes declare `_resolve_queue`'s signature**
-(`tests/test_cli.py:2657`, `:2719` and `:3448`). Add `stack=False` to each
+(`tests/test_cli.py:2657`, `:2719` and `:3442`). Add `stack=False` to each
 and change nothing else in them.
+
+**Four tests build `_batch`'s arguments by hand** and call `cli._batch`
+directly (`tests/test_cli.py:3088`, `:3760`, `:3787` and `:3836`). Each
+`argparse.Namespace` lacks `stack`, so a `_batch` that reads `args.stack`
+raises `AttributeError` in all four. Add `stack=False` to each and change
+nothing else in them.
 
 **Criterion 1's witness** follows
 `test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans`
@@ -158,23 +166,36 @@ and change nothing else in them.
 test in all three of its cases.
 
 - **Readiness passes**, with `_readiness_passes`. It fakes
-  `_resolve_queue` to record its keywords and return `SY-2` then `SY-1`.
-  It fakes `cli._stack_runner` to record its keywords and return a
-  sentinel object. It fakes `cli.run_stack_batch` to record its
-  candidates and runner and return `DRAINED`.
+  `_resolve_queue` to record its keywords and return `SY-2` at priority
+  3, then `SY-1` at priority 1. The resolution's `repo_id` is `None`.
+  - It keeps a reference to the real `cli._stack_runner`, then fakes it
+    to record its keywords and return a sentinel object.
+  - It replaces `cli.run_task` with a double that records `repo_id` and
+    `handoff`.
+  - It fakes `cli.run_stack_batch` to record its candidates and runner.
+    Inside that fake, while `main`'s ledger is still open, it upserts a
+    repo at `https://github.com/o/r.git`, the url `_readiness_passes`
+    pins (`tests/test_cli.py:2618`). It then calls the real
+    `_stack_runner` with the recorded keywords, and calls that runner
+    with `SY-2` and `None`. It returns `DRAINED`. The rescan test calls
+    its runner inside its fake loop the same way
+    (`tests/test_cli.py:2726-2732`). `main` closes the ledger when it
+    returns (`saffron/cli.py:224-225`), so a call after `main` raises
+    `sqlite3.ProgrammingError`.
+
   `main([..., "batch", "--stack"])` returns 0. It asserts one
   `_resolve_queue` call, with `stack=True`, `stamp_orphaned=True` and a
-  pinned base. It asserts the candidates, in order, and that the runner
-  is the sentinel. It then calls the real `_stack_runner` with the
-  recorded keywords, with `cli.run_task` replaced. It calls that runner
-  with `SY-2` and `None`. It asserts the `handoff` equals
+  pinned base. It asserts the candidates are `SY-2` then `SY-1`, and the
+  runner is the sentinel. It asserts the double recorded the upserted
+  repo's id and a `handoff` equal to
   `Handoff(stacked_on=None, target_branch=None)`, a real instance, which
   `None` is not.
 - **Readiness fails**, as
   `test_a_readiness_failure_names_the_step_that_failed` sets it up
   (`tests/test_cli.py:2972-2993`), with the real `run_stack_batch`. It
   expects exit 2, the step and detail printed, and the newest `batches`
-  row closed `INFRASTRUCTURE`.
+  row closed `INFRASTRUCTURE`. It reads that row with the query at
+  `tests/test_cli.py:3649-3657`.
 - **`_resolve_queue` raises**, as
   `test_any_raise_resolving_the_queue_still_closes_the_batch_row` sets it
   up (`tests/test_cli.py:3632-3657`), with the real `run_stack_batch`. It
@@ -190,10 +211,25 @@ These fail it:
 - `run_batch` called with the stack order
 - `_batch_runner`'s runner handed to the stack loop
 - a two-argument wrapper over `_batch_runner` that drops the predecessor
+- a `repo_id` fixed at the opening scan's value, which records `None`
+- `None` passed as `repo_id`
+- the candidates re-sorted by priority, which puts `SY-1` first
 - `stack` left at its default in the one call
 - a stack branch placed inside `if readiness.ok`
 - a stack path that hands the loop a readiness check blind to the scan's
   raise, which prints `DRAINED` and exits 0
+
+**How the order and `repo_id` were measured.** A throwaway simulation
+ran on 2026-09-23 against a real `Ledger`. The right `repo_id` callable
+returned the upserted id. An opening-scan value and `None` both failed,
+and so did a priority re-sort of `SY-2` then `SY-1`. A lookup on a closed
+ledger raised `ProgrammingError`.
+
+**The raise case leans on `SA-0143`.** `_batch` names the scan's raise
+only when the same exception object leaves the loop
+(`saffron/cli.py:883-889`). `run_batch` lets it out through its
+`finally` (`saffron/batch.py:116-139`). If `run_stack_batch` wraps the
+exception, this case fails, and the fix is in `SA-0143`'s loop.
 
 **Criterion 2's witness** uses `_repo_with_spec`
 (`tests/test_cli.py:1268`). `SY-1` has priority 1 and
@@ -230,7 +266,7 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** About 50 changed lines of source and 170 of test. `SA-0131`'s
+**Size.** About 50 changed lines of source and 200 of test. `SA-0131`'s
 cell measured 4.3 tokens a line in `saffron/cli.py` and 4.0 in
-`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 870 tokens
+`tests/test_cli.py` (`50ef269d`). At 4.5 and 3.8 that is about 990 tokens
 of the 3000 ceiling (`saffron/gates/core/size.py:26`).
