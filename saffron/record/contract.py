@@ -37,6 +37,7 @@ KINDS = (
     "repo_upserted",
     "stack_layer",
     "end_review",
+    "qualification",
 )
 
 
