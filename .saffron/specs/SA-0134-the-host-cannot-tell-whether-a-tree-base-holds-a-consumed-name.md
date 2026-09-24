@@ -38,6 +38,7 @@ pending_symbols:
 budget_usd: 20
 max_attempts: 3
 max_turns: 120
+estimated_lines: 205
 acceptance:
   - claim: >-
       `unresolved_consumes(mirror, sha, entries)` reads an entry with no
@@ -48,7 +49,7 @@ acceptance:
       at no path in the tree, or outside the tree. A path the tree does not
       hold is unresolved, and so is a prefix
       of a directory's name. This claims nothing for any other spelling of
-      a path, which `SA-0135` refuses at intake.
+      a path, which `SA-0136` refuses at intake.
     witness: tests/test_mirror.py::test_a_consumed_path_resolves_when_the_tree_holds_a_file_a_directory_or_a_symlink_there
   - claim: >-
       An entry `path:name` resolves when `path` at `sha` is a regular file,
@@ -97,7 +98,7 @@ parent built them under other names, the child's cell finds out after its
 first turn is paid for. The item asks for a `consumes:` field and a refusal
 before the cell starts, as gate 0 refuses in §4.2.
 
-**This spec is the first of two.** Estimated whole, the change ran to about
+**This spec is the first of three.** Estimated whole, the change ran to about
 500 changed lines. At 4 tokens a line (`saffron/gates/core/size.py:39`) that
 is about 2000 tokens, against the `feature` ceiling of 3000 tokens
 (`saffron/gates/core/size.py:26`, read at `c915d801`). Past `feature` cells
@@ -149,7 +150,7 @@ for the `dead` gate until then.
   (`saffron/task.py:319`).
 - **Refusing a malformed entry.** A canonical path is repo-relative. Its
   segments are non-empty, joined by single slashes, and none is `.` or
-  `..`. `SA-0135` refuses every other entry at intake, and this reader
+  `..`. `SA-0136` refuses every other entry at intake, and this reader
   is not asked about them. The shapes it refuses are these.
   - an empty entry
   - an empty path, as in `:name`
@@ -260,8 +261,8 @@ result or a set fails it.
 `exact.py` and once with `exact.py:run_task`. Each raises `GitError`. A
 reader that reads a failed git call as an absent path fails it.
 
-**What it raises, and on which inputs.** `SA-0135` maps each of these onto
-a refusal or an error, so the list is whole. Only the first has a witness.
+**What it raises, and on which inputs.** `SA-0135` and `SA-0136` map each
+of these onto a refusal or an error, so the list is whole. Only the first has a witness.
 
 - `GitError`, for any entry at a `sha` the mirror does not hold
   (criterion 6).
