@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -199,6 +200,7 @@ def run_agent(
     timeout_s: float = 3600,
     exec_stream: Callable[..., runtime.Completed] = runtime.exec_stream,
     reap_cell: Callable[..., runtime.Completed] = runtime.reap_cell,
+    exec_: Callable[..., runtime.Completed] = runtime.exec_,
 ) -> AttemptResult:
     """Drive one turn of the in-cell agent and return what it did.
 
@@ -216,7 +218,18 @@ def run_agent(
     reduced to a string first: the dict is only ever available here, not
     downstream of it (SA-0041).
     """
-    request = json.dumps({"prompt": prompt, "options": options, "resume": resume})
+    # A string system prompt travels as a file, never an argument list
+    # (backlog item b-8487de). `options` itself is never written into.
+    system_prompt = options.get("system_prompt")
+    prompt_path = (
+        f"/tmp/saffron-system-prompt-{uuid.uuid4().hex}"
+        if isinstance(system_prompt, str)
+        else None
+    )
+    payload = {"prompt": prompt, "options": options, "resume": resume}
+    if prompt_path is not None:
+        payload["system_prompt_path"] = prompt_path
+    request = json.dumps(payload)
     text: list[str] = []
     errors: list[str] = []
     result: dict = {}
@@ -286,6 +299,10 @@ def run_agent(
                 ),
             )
         )
+        if prompt_path is not None:
+            # A reaped runner never reaches its own `finally`, so the file it
+            # wrote survives it, readable by a later lens sharing this cell.
+            exec_(container, ["rm", "-f", prompt_path], timeout_s=60)
 
     detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
     # One phrasing for both failure paths, so "why did this turn end" reads the
