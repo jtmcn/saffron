@@ -1,11 +1,12 @@
 ---
 id: b-8487de
 title: A lens's verdict session gets its prompt through argv, so a large diff halts the task at `REBUTTING` instead of reporting `error`
-status: open
+status: done
 tier: 1
 filed: 2026-09-23
+closed: 2026-09-23
 specs: [SA-0140]
-prs: []
+prs: [498, 501]
 commits: []
 cites: [§5.5, §5.6]
 related: [b-19b255]
@@ -38,3 +39,7 @@ in-flight state the driver must call a halt.
 ## Record
 
 - 2026-09-23: filed from the spec loop's run 15 (#483).
+- 2026-09-23: `SA-0140` reached `READY_FOR_REVIEW` as #501 at $12.08 of $20,
+  in the spec loop's run 16, and merged ahead of the loop's other cells. A
+  system prompt now reaches the agent CLI as a file. `SA-0140` retires to
+  `done/`.

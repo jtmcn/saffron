@@ -1,11 +1,12 @@
 ---
 id: b-db95e1
 title: A spec estimated near its `size` ceiling runs unsplit, and two cells in a row landed within 25 lines of 1000
-status: open
+status: done
 tier: 2
 filed: 2026-09-22
+closed: 2026-09-23
 specs: [SA-0129]
-prs: []
+prs: [497, 502]
 commits: []
 cites: [§5.4]
 related: [b-89ec93, b-fd1468]
@@ -35,3 +36,6 @@ is not refused for it.
 
 - 2026-09-22: filed from the spec loop's run 14. The operator asked for the
   rule as a `driver.py check` command, not as writer guidance.
+- 2026-09-23: `SA-0129`'s cell ended `NOT_IMPLEMENTED` in the spec loop's run
+  16, because the cell's agent CLI refuses edits under `.claude/`. The
+  operator had it taken by hand as #502. `SA-0129` retires to `done/`.
