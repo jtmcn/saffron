@@ -1978,8 +1978,8 @@ def _size_blocker(target: Spec) -> str | None:
 def cmd_check(args) -> int:
     """Judge a spec's ceilings against cells of its own shape, before a cell
     runs — the arithmetic `_ceilings_line` renders, turned into an exit
-    status. A declared `estimated_lines` priced at 80% of its type's `size`
-    ceiling blocks too, with or without past cells."""
+    status. A declared `estimated_lines` priced at or above 80% of its type's
+    `size` ceiling blocks too, with or without past cells."""
     specs = _known_specs()
     target = specs.get(args.spec_id)
     if target is None:

@@ -47,6 +47,11 @@ def _has_numbers(line: str, lines: int, price: int, ceiling: int) -> bool:
     return {str(lines), str(price), str(ceiling)} <= words
 
 
+def _boundary(ceiling: int, rate) -> int:
+    """The fewest lines whose price reaches 80% of `ceiling`, rounded up."""
+    return int(-(-4 * ceiling // (5 * rate)))
+
+
 def _drive(monkeypatch, capsys, spec_type: str, *, row: bool) -> None:
     """The boundary in lines blocks and one line under it passes, each read
     from the size module as it stands when `check` runs."""
@@ -54,7 +59,7 @@ def _drive(monkeypatch, capsys, spec_type: str, *, row: bool) -> None:
 
     ceiling = size._CEILINGS.get(spec_type, size._DEFAULT_CEILING)
     rate = size._TOKENS_PER_LINE
-    boundary = int(-(-4 * ceiling // (5 * rate)))
+    boundary = _boundary(ceiling, rate)
     rows = [_cell("SA-2000", spec_type, 2, 3)] if row else []
     for estimate, blocks in ((boundary, True), (boundary - 1, False)):
         target = _spec("SA-0009", spec_type=spec_type)
@@ -68,6 +73,7 @@ def _drive(monkeypatch, capsys, spec_type: str, *, row: bool) -> None:
             assert rc == 1, (spec_type, estimate, out)
             assert len(blockers) == 1, out
             assert _has_numbers(blockers[0], estimate, price, ceiling), out
+            assert f"({price} tokens at {rate} a line)" in blockers[0], out
             assert "parent and children" in blockers[0]
             assert CLEAR not in out
         else:
@@ -76,6 +82,7 @@ def _drive(monkeypatch, capsys, spec_type: str, *, row: bool) -> None:
             sized = [x for x in out if x.startswith("size: ")]
             assert len(sized) == 1, out
             assert _has_numbers(sized[0], estimate, price, ceiling), out
+            assert f"({price} tokens at {rate} a line)" in sized[0], out
             assert (CLEAR in out) is row, out
 
 
@@ -107,7 +114,7 @@ def test_check_blocks_an_estimate_at_80_percent_of_its_types_size_ceiling(
         _drive(monkeypatch, capsys, "feature", row=False)
 
     ceiling = size._CEILINGS["feature"]
-    boundary = -(-4 * ceiling // (5 * size._TOKENS_PER_LINE))
+    boundary = _boundary(ceiling, size._TOKENS_PER_LINE)
     specs_dir = tmp_path / ".saffron" / "specs"
     specs_dir.mkdir(parents=True)
     (specs_dir / "SA-0009-x.md").write_text(
@@ -137,7 +144,7 @@ def test_check_prints_a_size_blocker_beside_a_ceilings_blocker(monkeypatch, caps
 
     assert "estimated_lines" in Spec.model_fields
     ceiling = size._CEILINGS.get("bug", size._DEFAULT_CEILING)
-    boundary = -(-4 * ceiling // (5 * size._TOKENS_PER_LINE))
+    boundary = _boundary(ceiling, size._TOKENS_PER_LINE)
     rows = [_cell("SA-2000", "bug", 2, 3)]  # peak 41
     for estimate, sized in ((boundary, True), (boundary - 1, False)):
         target = _spec("SA-0009")
