@@ -178,8 +178,8 @@ def git_argv(*args: str) -> list[str]:
     # (backlog item 102).
     # bigFileThreshold, attributesFile: either can print an edit as `Binary files
     # differ`, so no lens reads its hunks (backlog item 103).
-    # attr.tree: a global attr.tree names a tree whose .gitattributes stands
-    # in for the worktree's own. Empty disarms it the same way (item b-a9ee32).
+    # attr.tree: names a tree whose .gitattributes stands in for the worktree's
+    # own, so it can hide hunks too. Empty disarms it (backlog item b-a9ee32).
     # GIT_GRAFT_FILE, GIT_SHALLOW_FILE: a planted grafts or shallow file re-parents
     # the history `commits_ahead` counts (backlog item 110). No flag pins
     # either, and `exec_` takes no env; measured on git 2.39.5, 2.47 and 2.54.

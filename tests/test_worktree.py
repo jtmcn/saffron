@@ -1881,11 +1881,14 @@ def test_export_patch_shows_hunks_under_a_configured_attributes_file(
 
 def test_git_argv_shows_hunks_under_a_global_attr_tree(tmp_path, monkeypatch):
     """A global `attr.tree` naming a tree whose `.gitattributes` marks every
-    path `-diff` hides an edit's hunks the same way (item b-a9ee32)."""
+    path `-diff` hides an edit's hunks the same way (backlog item b-a9ee32)."""
     base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
     config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
 
     (tmp_path / "bin.dat").write_bytes(b"real\x00binary")
+    # A committed attribute must still hold. An empty-tree pin would drop it.
+    (tmp_path / ".gitattributes").write_text("kept.txt -diff\n")
+    (tmp_path / "kept.txt").write_text("kept\n")
     _edit_and_commit_f(tmp_path)
 
     blob = subprocess.run(
@@ -1920,6 +1923,7 @@ def test_git_argv_shows_hunks_under_a_global_attr_tree(tmp_path, monkeypatch):
     assert "+one = 2" in _diff_block(own, "f.py")
     assert "Binary files" not in _diff_block(own, "f.py")
     assert "Binary files" in _diff_block(own, "bin.dat")
+    assert "Binary files" in _diff_block(own, "kept.txt")
 
     patch = worktree.export_patch("c", base)
     assert "+one = 2" in _diff_block(patch, "f.py")
