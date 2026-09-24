@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153, SA-0154]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -76,3 +76,15 @@ escalations.
   layer's head. It wires the end review into `saffron batch --stack`, with
   a reserve of a quarter of `--budget`. Its `StackReview` hands `SA-0147`
   the join's review and each layer's.
+- 2026-09-23: `SA-0147` qualifies the end review's findings in host code.
+  It anchors each over its own layer's commit. It runs any probe in a
+  Gate-only cell on that layer's tree, and groups the qualified ones by
+  layer and file. Each outcome is a `qualification` fact.
+- 2026-09-23: step 5 is `SA-0148`. A rate limit in a stack batch waits for
+  the reset time or `--until`, then runs the same spec on the same
+  predecessor. A reset time more than six hours on counts as unreadable.
+- 2026-09-23: step 6 splits in two. `SA-0149` reads a spec review's
+  findings block and routes each spec in `run_stack_batch` through an
+  injected review, one at a time before its own cell. `SA-0155` runs the
+  review session in a critic cell, records it as facts and passes it from
+  `saffron batch --stack`.

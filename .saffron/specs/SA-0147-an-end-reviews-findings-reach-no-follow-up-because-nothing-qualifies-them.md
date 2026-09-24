@@ -1,0 +1,473 @@
+---
+id: SA-0147
+title: An end review's findings reach no follow-up, because nothing anchors, probes or groups them
+type: feature
+priority: 1
+depends_on: [SA-0154]
+touches:
+  - saffron/qualify.py
+  - saffron/ledger.py
+  - saffron/cell/session.py
+  - tests/test_qualify.py
+forbidden:
+  - DESIGN.md
+  - CONTEXT.md
+  - CLAUDE.md
+  - README.md
+  - pyproject.toml
+  - uv.lock
+  - .saffron/**
+  - .claude/**
+  - ontology/**
+  - tests/ontology/**
+  - docs/**
+  - images/**
+  - harness/**
+  - records/**
+  - saffron/task.py
+  - saffron/cli.py
+  - saffron/batch.py
+  - saffron/scheduler.py
+  - saffron/intake.py
+  - saffron/events.py
+  - saffron/probe.py
+  - saffron/end_review.py
+  - saffron/record/**
+  - saffron/repos/**
+  - saffron/gates/**
+  - saffron/phases/**
+  - saffron/agents/**
+  - saffron/cell/worktree.py
+  - saffron/cell/runtime.py
+  - saffron/cell/runtimes/**
+  - tests/test_session.py
+  - tests/test_probe_cell.py
+  - tests/test_probe_check.py
+  - tests/test_review.py
+  - tests/test_findings.py
+  - tests/test_end_review.py
+  - tests/test_batch.py
+  - tests/test_ledger.py
+  - tests/test_ledger_fold_task.py
+budget_usd: 28
+max_attempts: 3
+max_turns: 160
+pending_symbols:
+  - saffron/qualify.py::qualify
+  - saffron/qualify.py::pool
+acceptance:
+  - claim: >-
+      `qualify.qualify(ledger, layers, join, ...)` walks each layer in the
+      order given, then the join lens. A layer's inputs are its end-review
+      findings in review order, then its in-cell concerns in the order
+      recorded. An in-cell concern is a finding of a lens in
+      `review.LENSES`, of severity `concern`, with no verdict and no
+      rebuttal. Each input is anchored by `findings.anchor` against the
+      diff `<head>^..<head>` of its own layer. A join finding is anchored
+      against `<bottom head>^..<top head>` and belongs to the top layer. An
+      anchored finding with a probe then takes the probe's verdict.
+      `killed` drops it. `unproven`, or a raise from the probe call, sends
+      it to the pool as `unverified`, with the reason. `survived` makes it a
+      `blocker`. An unanchored finding goes to the pool, and so does a
+      `note`. Every other finding qualifies. `groups` holds one
+      `FollowUpGroup` per layer and file, in the order its first finding
+      was met. `pool` holds the rest in that order. The witness drives
+      both halves of the anchoring rule, a bottom layer whose run's base is
+      not its head's parent, all four probe outcomes, a `note` whose probe
+      survives, and one layer and one file each shared by two groups.
+    witness: tests/test_qualify.py::test_each_end_review_finding_is_anchored_probed_and_grouped_by_layer_and_file
+  - claim: >-
+      `qualify` hands the anchored findings with a probe to
+      `session.probe_findings`, one call per layer and one for the join,
+      and no call where there are none. The `CellSpec` of each call is the
+      tree the probes run on. Its `base_sha` is the full sha of the diff's
+      base, the `spec_id` and `branch` are the layer's, and the patch is
+      the diff the findings were anchored against. `repo`, `mirror`,
+      `gates_dir`, `thread_env`, `test_paths`, `gates`, `created` and
+      `note` pass through as given. The witness drives a stacked layer, the
+      join, and a layer with no probe.
+    witness: tests/test_qualify.py::test_a_findings_probe_runs_in_a_gate_only_cell_on_its_own_layers_tree
+  - claim: >-
+      Each finding `qualify` meets becomes one `qualification` fact under
+      its layer's task, numbered from 1 per task in the order met. It
+      carries the finding's lens, the severity its lens filed, its file,
+      line and claim, the probe's verdict or none, the outcome and the
+      reason. A killed finding is recorded too. Folding the record into a
+      fresh ledger whose task ids differ rebuilds the same rows. Folding it
+      into the ledger that wrote them leaves them as they were.
+      `fold_task` with a layer's key and no facts removes that layer's rows
+      and no other.
+    witness: tests/test_qualify.py::test_each_findings_qualification_is_a_fact_the_fold_rebuilds
+  - claim: >-
+      REVIEW still probes each anchored adequacy finding once per distinct
+      edit, in one suite run.
+    witness: tests/test_session.py::test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run
+    preserves: true
+  - claim: >-
+      REVIEW still enters no probe cell when no probe can be answered.
+    witness: tests/test_session.py::test_a_probed_review_no_probe_cell_could_answer_enters_none
+    preserves: true
+  - claim: >-
+      A fact kind the ledger does not place still aborts the fold.
+    witness: tests/test_ledger_fold_task.py::test_a_kind_the_ledger_cannot_place_aborts_the_fold_in_either_mode
+    preserves: true
+---
+
+## Context
+
+Backlog item **b-792ab2**, step 4 of its Done. It cites `DESIGN.md` §4.1
+and §5.5. ADR 7
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
+decides a stack batch. Section 2 of
+`docs/superpowers/specs/2026-09-23-stack-batch-design.md`, "Qualification is
+host code", is the design. ADR 3
+(`docs/adr/0003-a-test-is-judged-by-an-edit-chosen-to-break-it.md`) decides
+what a probe's verdict means.
+
+A stack batch runs the queued specs into one pull request stack. Each task
+that reaches `READY_FOR_REVIEW` is a **layer**. Once the last queued task
+settles, one **end review** reads the stack. The Spec and Standards
+end-review lenses read each layer, and the join lens reads the stack. ADR 7
+says the host decides which findings qualify, and a qualified finding feeds
+a follow-up spec. Its entry for principle 15 says a finding feeds one only
+once the host anchors it and runs any probe it carries. Its entry for
+principle 28 says one rule serves every producer, and a finding with no
+probe still reaches a follow-up.
+
+**This spec builds step 4 alone.** `SA-0146` builds the two lenses.
+`SA-0153` runs them over a stack and returns one `LayerReview` per layer.
+`SA-0154` adds the join lens and wires the end review into
+`saffron batch --stack`. This spec qualifies what they return. `SA-0150`
+writes a follow-up spec from each group this spec returns.
+
+**What the tree base holds.** This spec's tree base is `SA-0154`'s head.
+Only `depends_on[0]` stacks (`saffron/task.py:133-136`), and the chain
+`SA-0142` to `SA-0154` puts these names there. So they are cited by
+symbol, and every line number below was read at `f0c8f82d`.
+
+- `SA-0145` writes one `stack_layers` row per layer with
+  `record_stack_layer`, each row naming its predecessor.
+- `SA-0146` adds `end_review.layer_fields(ledger, task_key)`. It returns
+  `LayerFields`, whose `spec_id`, `branch` and `head` are the layer's
+  task's own. `head` is its `pushed_sha`.
+- `SA-0153` adds the frozen dataclass `end_review.LayerReview`, with
+  `task_key` and `reviews`. `review_stack` returns one per layer, top
+  down. A layer the end review did not reach has empty `reviews`. Each of
+  the others holds the Spec review, then the Standards review. A Spec
+  finding keeps the probe it carried. `review_stack` also records each
+  layer's end-review findings with `record_findings` under the layer's own
+  task, unanchored, after its in-cell findings.
+- `SA-0154` adds the join lens and `end_review.run_end_review`. It
+  returns a frozen `StackReview`. Its `layers` is the `LayerReview` list,
+  top down, and its `join` is the join lens's `LensReview` or `None`.
+  `qualify` takes both from it. The join lens keeps the default report
+  model, so no join finding carries a probe yet. The rule below still
+  covers one, so a later model needs no change here.
+
+**Anchoring today.** `CONTEXT.md:439-445` defines **Anchored**: inside a
+diff hunk, or citing a line that names an identifier the diff changed.
+`findings.anchor(findings, diff, *, read_head)` applies both halves and
+returns copies (`saffron/agents/findings.py:128-146`). The second half reads
+the cited line through `read_head` and compares its words with every
+changed line's (`:149-166`). `mirror.file_at(mirror, sha, path)` reads a
+file at a sha, and returns `None` for a path the tree lacks
+(`saffron/repos/mirror.py:231-259`). It raises `GitError` for a path it
+cannot read as a file (`:255-259`).
+
+**Probing today.** `session._probe_adequacy` probes REVIEW's anchored
+adequacy findings (`saffron/cell/session.py:1291-1442`). It takes them from
+`review.adequacy_probes(reviews)` (`:1317`) and asks each distinct edit once.
+It enters a Gate-only cell through `critic_cell` with `network=None` and the
+repo's gate env (`:1388-1399`). The cell is seeded at `spec.tree_base` with
+`patch` applied and committed (`:1207`, `:1217`). It runs the baseline
+`tests` gate, then `probe.check_probe` per probe (`:1400-1441`). `decide` calls
+`review.apply_probe_verdict` on every finding of that probe (`:1329-1332`).
+So `survived` makes it a `blocker`, `killed` a `note`, and `unproven` leaves
+it as filed (`saffron/phases/review.py:574-584`). A probe whose `find`
+matches no line, or more than one, is `unproven` with its reason
+(`saffron/cell/worktree.py:637-642`, `saffron/probe.py:189-193`). It returns
+`probes.json`'s entries, each with the `probe` dumped and its `reason`
+(`saffron/cell/session.py:1333-1347`, `saffron/probe.py:247-265`). A patch that does not apply raises
+`CriticPatchRejected`, a `RuntimeError` it does not catch (`:1028`).
+
+**Recording today.** `record_findings` numbers a task's findings
+(`saffron/ledger.py:1143-1169`). `record_rebuttal` sets a finding's
+`verdict` and `rebuttal` (`:1171-1188`). `Ledger.findings(task_id)` returns
+a task's rows in the order recorded (`:1190-1196`). Each write builds one
+fact with `_build_fact` and hands it to `_commit_and_append` (`:372-404`).
+`_apply` raises on a kind it has no branch for (`:649`). `fold_task` drops a
+task's rows through `_drop_task_rows` and applies its facts again
+(`:406-433`).
+
+**The fact kind is added by hand before this spec is committed.** A cell
+cannot add it, because `CONTEXT.md` is protected. The operator adds
+`qualification` to `KINDS` in `saffron/record/contract.py` and to
+`ontology/factory.ttl`, and renders `CONTEXT.md`, as `8a41411c` did for
+`end_review`. Nothing places it at the tree base.
+
+## Problem
+
+Build three things.
+
+1. **The probe call, for any findings.** Add `probe_findings(targets, *,
+   spec, repo, mirror, gates_dir, thread_env, test_paths, gates, patch,
+   created, note)` to `saffron/cell/session.py`. It takes
+   `_probe_adequacy`'s body. `targets` replaces the line that selects adequacy
+   findings. `_probe_adequacy` keeps its signature and calls
+   `probe_findings` with `review.adequacy_probes(reviews)`. Two tests find
+   `_probe_adequacy` on the stack by name (`tests/test_session.py:3475`,
+   `:3691`), so it stays a function of its own.
+2. **The record of each outcome.** Add `qualifications` to `SCHEMA` in
+   `saffron/ledger.py`, with no reference to another table:
+
+   | column | type |
+   |---|---|
+   | `task_key` | `TEXT NOT NULL` |
+   | `position` | `INTEGER NOT NULL` |
+   | `lens` | `TEXT NOT NULL` |
+   | `severity` | `TEXT NOT NULL` |
+   | `file` | `TEXT NOT NULL` |
+   | `line` | `INTEGER` |
+   | `claim` | `TEXT NOT NULL` |
+   | `probe_verdict` | `TEXT` |
+   | `outcome` | `TEXT NOT NULL` |
+   | `reason` | `TEXT NOT NULL` |
+
+   Its primary key is `(task_key, position)`. The row carries the finding
+   itself, since a join finding has no row in `findings`. Add
+   `Ledger.record_qualification(task_id, *, finding, filed, outcome,
+   reason)`. It builds one `qualification` fact under the task's key and
+   writes it through `_commit_and_append`. `position` is one more than the
+   task's rows so far. `severity` is `filed`, and `probe_verdict` is the
+   finding's own. `_apply` places the fact as one row, `task_key` from the
+   fact. `_drop_task_rows` deletes the key's rows. `outcome` is one of
+   `qualified`, `killed`, `unverified`, `unanchored` and `note`. `reason`
+   is empty except for `unverified`.
+3. **Qualification.** Add `saffron/qualify.py` with three frozen
+   dataclasses. `Qualified` has `task_key`, `finding`, `outcome` and
+   `reason`. `FollowUpGroup` has `task_key`, `file` and `findings`, a
+   tuple. `Qualification` has `groups` and `pool`, two lists. Add
+   `qualify(ledger, layers, join, *, mirror, repo, gates_dir, thread_env,
+   test_paths, gates, created, note)`. `layers` is the `LayerReview` list,
+   top down, and `join` is a `LensReview` or `None`. For each layer in
+   order, then the join when there is one and at least one layer:
+   - Build the diff, `git diff` with `DIFF_FLAGS` over the range in
+     `mirror`. A layer's range is `<head>^..<head>`. The join's is the
+     last layer's `<head>^` to the first layer's head.
+   - Anchor the inputs with `findings.anchor`. `read_head` reads the
+     range's head through `mirror.file_at`, and `GitError` reads as
+     `None`.
+   - When any anchored finding carries a probe, hand all such findings to
+     one call of `session.probe_findings`. Its `spec` is a
+     `CellSpec` whose `base_sha` is the range's base resolved to a full
+     sha. `spec_id` and `branch` come from the layer's `LayerFields`, the
+     first layer's for the join. `patch` is the diff. A raise marks each of
+     those findings `unverified`, and the reason carries its message.
+     Otherwise an `unproven` finding's reason is its entry's `reason`.
+   - Decide each finding in the order of the inputs, and record it with
+     `record_qualification` under the layer's task. The join's go under
+     the first layer's task. Capture each severity before the probe call,
+     since the call promotes in place.
+
+   `qualify` returns the `Qualification`.
+
+`ledger.py`'s module docstring counts the kinds that fold back, and that
+count gains one. It also names the tables it holds, and `qualifications`
+joins them.
+
+`qualify` has no production caller until `SA-0150` passes its groups to the
+spec writer. So `qualify`, and the `pool` field only `SA-0150` reads, are
+`pending_symbols`. The `dead` gate defers them while this spec is open
+(`.saffron/gates/dead.py:4-6`).
+
+## Out of scope
+
+- **Writing follow-up specs.** `SA-0150` writes one from each group. It
+  keys each one's anchors and named probe to the tree it runs on
+  (principle 27).
+- **The finishing layer.** `SA-0151` links the stack and marks it ready.
+- **The delegate's `findings.json`.** The skill reads the pool, or the
+  `qualifications` rows, until a declared program files the backlog.
+- **ADR 3's kill rule.** The kill rule is the one `probe_findings` applies,
+  through `check_probe`. At this tree base any new failure kills a probe.
+  `SA-0138` narrows it to a test the diff adds, and it is not on this
+  chain. The patch `qualify` passes is the layer's own diff, so that rule
+  reads the layer's added tests once `SA-0138` lands.
+- **The vocabulary.** `CONTEXT.md` has no entry for qualification, a
+  follow-up group or the backlog pool. Backlog item b-466005 files them by
+  hand.
+
+## Notes for the agent
+
+**Criteria 1 to 3 are new code.** No text at the tree base qualifies a
+finding or places a `qualification` fact. So they declare a witness and no
+mutant, and `witness` reports `skip` for them. Criteria 4 to 6 are
+`preserves` and name tests that pass now. They hold the extraction to
+REVIEW's behaviour.
+
+**Import every new name inside the test body.** `qualify`,
+`record_qualification` and `probe_findings` do not exist at the tree base.
+A module-scope import fails collection when the source is reverted, and
+`revert` reads that as `skip`.
+
+**Criteria 1 to 3 share one arrangement.** A helper builds it and runs
+`qualify` once. Point `GIT_CONFIG_GLOBAL` at a file in `tmp_path` that sets
+`diff.context = 0`, with `monkeypatch`. Build a git repo in `tmp_path` as
+the mirror. Each file below holds twelve lines, `<name>_l1` to
+`<name>_l12`, except where the table says.
+
+| commit | change |
+|---|---|
+| `A` | `src/a.py` of `alpha`, `src/b.py` of `beta`, `src/c.py` of `gamma` with line 10 `gamma_calls beta_rate` |
+| `M` | adds `src/m.py`, one line `moved_main_only` |
+| `H1` | `src/a.py` line 2 becomes `alpha_l2_new` |
+| `H2` | `src/b.py` line 2 becomes `beta_rate`, `src/c.py` line 2 becomes `gamma_l2_new` |
+
+Build a `Ledger` with a `MemoryRecord`. Create a run with `base_sha` `A`
+and a task for `TE-1`, then the same for `TE-2`. Package `TE-1`
+`READY_FOR_REVIEW` at `H1` and `TE-2` at `H2`. Record `TE-1` as the layer at
+position 1 and `TE-2` at position 2 on it. Record these in-cell findings
+first:
+
+- `TE-1`: correctness concerns "c-a" on `src/a.py:2` and "c-m" on
+  `src/m.py:1`.
+- `TE-2`: a correctness concern "i1" on `src/b.py:1`. Then four on
+  `src/b.py:2`. A contract concern "i2" has the rebuttal "argued" and no
+  verdict. An adequacy note "i3" and a correctness blocker "i4" have
+  neither. A contract concern "i5" has the verdict `withdrawn` and no
+  rebuttal.
+
+The Spec lens's findings for `TE-2`, each on the line shown:
+
+| claim | severity | at | probe `find` | verdict |
+|---|---|---|---|---|
+| f1 | concern | `src/b.py:2` | `beta_rate` | `survived` |
+| f2 | blocker | `src/b.py:3` | `beta_l3` | `killed` |
+| f3 | concern | `src/c.py:2` | `nothing_here` | `unproven` |
+| f4 | note | `src/c.py:3` | `gamma_l2_new` | `survived` |
+| f5 | blocker | `src/c.py:12` | `gamma_l12` | never asked |
+| f6 | concern | `src/c.py:10` | none | |
+
+The Standards lens's are a note "s1" on `src/b.py:4` and a blocker "s2" on
+`src/b.py:5`. Record copies of all eight with `record_findings` under
+`TE-2`, as `review_stack` does. The join lens's are a concern "j1" on
+`src/a.py:2`, a concern "j2" on `src/m.py:1`, and a blocker "j3" on
+`src/b.py:2` with a probe. `layers` is `TE-2`'s `LayerReview`, its Spec then
+Standards reviews, then `TE-1`'s with no reviews.
+
+Replace `session.probe_findings` with a double. It records each call. It
+raises `RuntimeError("no cell for the join")` when `spec.base_sha` is `M`.
+Otherwise it looks up each target's verdict by `spec.base_sha` and the
+probe's `find`, and raises `KeyError` for a pair the table does not hold.
+It calls `review.apply_probe_verdict` for each, as the real one does. It
+returns one entry per target, with the probe dumped and a reason of
+"src/c.py: find text not found" for the `unproven` one. Pass each of the
+eight cell keywords as a distinct object.
+
+**Criterion 1's witness** asserts `groups`, as layer, file, claims and
+severities:
+
+1. `TE-2`, `src/b.py`: f1, s2, i1, as blocker, blocker, concern.
+2. `TE-2`, `src/c.py`: f4, f6, as blocker, concern.
+3. `TE-1`, `src/a.py`: c-a.
+4. `TE-2`, `src/a.py`: j1.
+
+It asserts `pool` as f3 `unverified`, f5 `unanchored`, s1 `note`, c-m
+`unanchored`, j2 `unanchored` and j3 `unverified`, each with its layer's
+key. f3's reason is the double's, and j3's holds "no cell for the join".
+These fail it, each measured:
+
+- a layer anchored over its `LayerFields.base`, which anchors c-m
+- the identifier half dropped, which leaves f6 unanchored
+- a diff without `DIFF_FLAGS`, which reads `diff.context = 0`
+- the join anchored over the top layer's own diff, or from the bottom
+  layer's run base, or left out
+- the join's findings put under the bottom layer
+- a probe asked for an unanchored finding
+- a killed finding kept, or an `unproven` one read as survived
+- a `note` judged by the severity its lens filed
+- a raise from `probe_findings` that propagates
+- the probe's tree at the head itself, with no patch
+- groups by layer alone, by file alone, or sorted
+- in-cell concerns left out, or rebutted ones kept
+- a concern with a verdict and no rebuttal kept
+- every unrebutted in-cell finding kept, not concerns alone
+- every finding of the task kept, the end-review copies included
+- in-cell concerns walked before the end-review findings
+- the `note` outcome dropped from the pool
+
+**Criterion 2's witness** asserts two calls. The first holds f1 to f4, and
+the second j3. The first's `spec.tree_base` is `H1` and the second's `M`.
+Each `spec_id` is `TE-2`, and each `branch` is `TE-2`'s. The first patch holds "+beta_rate" and not
+"alpha_l2_new". The second holds "+alpha_l2_new" and not
+"moved_main_only". Each call's eight keywords are the objects passed, by
+`is`. These fail it, each measured:
+
+- the probe's tree at the head itself, with no patch
+- the join's tree at the top layer's parent, or at the bottom layer's run
+  base
+- a probe asked for an unanchored finding
+- a call for `TE-1`, whose inputs carry no probe
+- the join's cell built from the bottom layer's fields
+- a copied `test_paths`
+
+**Criterion 3's witness** reads the rows by `task_key` and claim. `TE-2`
+holds f1 to f6, s1, s2, i1, j1, j2 and j3 at positions 1 to 12. `TE-1`
+holds c-a and c-m at 1 and 2. Fourteen rows in all. f1's row is `spec`,
+`concern`, `src/b.py`, 2, "f1", `survived`, `qualified` and an empty
+reason. f2's verdict and outcome are both `killed`. f3 is `unproven` and
+`unverified`, with the double's reason. s1 has no verdict and is `note`.
+f4 is `note`, `survived`, `qualified`. f5 has no verdict and is
+`unanchored`. It opens a fresh `Ledger` with no record, and creates one
+unrelated repo, run and task there first. It folds the record into it and
+asserts the same rows. It folds the record into the source ledger and
+asserts the rows unchanged. Last, `fold_task` on the fresh ledger with
+`TE-2`'s key and no facts leaves `TE-1`'s two rows alone. These fail it,
+each measured:
+
+- `_apply` with no branch for `qualification`
+- `_drop_task_rows` that leaves the rows, which raises on the primary key
+- `INSERT OR REPLACE` with `_drop_task_rows` untouched, which leaves
+  `TE-2`'s rows after `fold_task(key, [])`
+- the severity recorded after the probe promoted it
+- a pooled finding left unrecorded
+- `position` counted over the whole table, not per task
+
+**How the lists were measured.** A throwaway simulation ran on 2026-09-23
+at `f0c8f82d`, on the host's git 2.54. It subclassed `Ledger` with this
+spec's table and method, and added `qualification` to `KINDS` in memory. It
+stood in for `layer_fields` and `LayerReview` with `SA-0146`'s and
+`SA-0153`'s fields. It ran the real `findings.anchor`, `mirror.file_at` and
+`review.apply_probe_verdict`. It could not set `GIT_CONFIG_GLOBAL`, so the
+config case ran as a diff with `--unified=0`. The right build passed every
+assertion above. Each wrong version listed failed its own witness. The code
+of `SA-0145` to `SA-0154` is not at `f0c8f82d`, so no witness ran against
+it.
+
+**What the witnesses leave undriven.**
+
+- The real `probe_findings` in a Gate-only cell. Criteria 4 and 5 hold its
+  body as REVIEW runs it, and `tests/test_probe_cell.py` runs it in a cell.
+- A `GitError` from `file_at`, and a join with no layers. Handle both as
+  the Problem says.
+- A probed finding the call leaves with no verdict. Read it as
+  `unverified`. The real call leaves none, since it decides every target
+  or raises.
+- A layer whose lens errored. Its `LensReview` holds no findings, so its
+  in-cell concerns are its only inputs.
+- A finding on a binary file. The patch cannot carry one, so the cell
+  raises and the finding is `unverified`.
+
+**The `prose` gate** counts every new comment and docstring. Write none
+with an em dash, a semicolon, a contraction, the perfect tense or a
+sentence over 25 words. Keep each docstring within ten lines.
+
+**Commit as each witness passes**, before the full suite runs.
+
+**Size.** `saffron/ledger.py` and `saffron/cell/session.py` are in
+`elevate_on`, so `size` blocks at the `feature` ceiling of 3000 tokens
+(`saffron/gates/core/size.py:26`). A prototype of all four files, counted
+by `size_gate` itself, came to 1807. That is 214 in `ledger.py`, 56 in
+`session.py`, 578 in `qualify.py` and 959 in the tests. Docstrings and
+comments bring it to about 2150. Keep the helper shared and the test
+docstrings short.

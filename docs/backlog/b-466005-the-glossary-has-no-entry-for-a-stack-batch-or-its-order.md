@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0153, SA-0154]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0153, SA-0154]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -66,3 +66,10 @@ The **Refusal** entry names the stack order's refusal. This lands after
   layer's pushed head with no patch applied. "Join lens" joins the entries
   above. The **Critic cell** entry widens to a cell with no implementer of
   its own, as ADR 6's Consequences ask.
+- 2026-09-23: `SA-0147` qualifies end-review findings. "Qualification",
+  "follow-up group" and "backlog pool" join the entries above.
+- 2026-09-23: `SA-0149` runs a spec review inside a stack batch and
+  withholds a spec on a blocker. **Spec review** widens: in a stack batch it
+  is a session the host starts before a spec's first cell, and a `blocker`
+  withholds the spec and its descendants. **Escalation** is new: a spec a
+  stack batch withholds for the operator, which reaches them as one line.
