@@ -45,8 +45,8 @@ still carries every layer below the composite, not only its members. So the
 composite review's range starts at the first member's predecessor head. The
 layers below that head are its base, as the default branch is outside a stack
 batch. A name a member takes from a layer below is not a join. This narrows ADR
-6's composite review inside a stack batch. Outside a stack batch, §4.2 and ADR 6 stack as before,
-on `depends_on[0]`.
+6's composite review inside a stack batch. Outside a stack batch, §4.2 and ADR
+6 stack as before, on `depends_on[0]`.
 
 **A task that misses `READY_FOR_REVIEW` adds no layer.** Its `depends_on`
 descendants are refused with a reason. The batch goes on.
@@ -73,12 +73,14 @@ holds unchanged.
 
 A revised spec's cell holds the base text at the spec's path. The implement
 prompt carries the revision, and core's gates read the host's parsed copy. A
-repo gate that reads `.saffron/specs/` sees the base text. This repo's `dead`
-gate reads `pending_symbols` that way, so a revision's deferred names go
-unseen. A follow-up has no file there at all. The implementer and the
-criterion session can also read a contract the host no longer judges. That
-departs from principle 20, as ADR 3 records and backlog item 85 measured.
-`spec_drift` reports it on every revised spec.
+repo gate reads `.saffron/` from the read-only `base_sha` export, never from
+`/work`, so it sees the base text too. This repo's `dead` gate reads
+`pending_symbols` there. A name a revision adds goes unseen, and a name it
+drops stays deferred. A follow-up has no file there at all. Every session in
+the spec's cells can also read a contract the host no longer judges. That
+covers the implementer, the criterion session, each lens and verdict session,
+and the end-review Spec lens. That departs from principle 20, as ADR 3 records
+and backlog item 85 measured. `spec_drift` reports it on every revised spec.
 
 **One end review reads the whole stack once.** Two end-review lenses, Spec and
 Standards, read each layer. One join lens reads the stack under ADR 6's rubric.
@@ -93,16 +95,17 @@ principle 18.
 
 **The end review takes four exceptions to ADR 4, and this ADR carries them.**
 Its lenses are not ADR 4's declared lenses. They run once per batch, not on
-every reviewed diff. Its severities route differently. A qualified `blocker`
-or `concern` feeds a follow-up spec, in place of REBUT and the operator. A
-`note` goes to the backlog pool, not the pull request. A lens that errors has no task to stop, so its layer shows as
-unreviewed. Every in-cell critic keeps ADR 4 whole, a follow-up's included.
+every reviewed diff. Its severities route differently. A qualified `blocker` or
+`concern` feeds a follow-up spec, in place of REBUT and the operator. A `note`
+goes to the backlog pool, not the pull request. A lens that errors has no task
+to stop, so its layer shows as unreviewed. Every in-cell critic keeps ADR 4
+whole, a follow-up's included.
 
 **Qualified findings become follow-up specs, one generation deep.** An agent
 writes each follow-up in a critic cell. It passes the same spec review and runs
-on top of the stack. The findings a follow-up's own critic leaves go to the backlog,
-not to a second generation. A second generation needs an ADR that amends this
-one.
+on top of the stack. The findings a follow-up's own critic leaves go to the
+backlog, not to a second generation. A second generation needs an ADR that
+amends this one.
 
 **The host commits the batch's revised and follow-up specs in its own
 finishing layer.** It adds that layer above every task, with no model involved.
@@ -191,8 +194,8 @@ this decision rests on.
   is the seams around the follow-ups and the top layer, which it never sees.
 - **41** upholds. Core's prompts learn no repo's language or tools, and core
   demands nothing of a repo. The Standards lens reads the standards documents
-  a repo declares at `base_sha`, and none when it declares none. A probe runs through the
-  repo's declared gates, never a named test runner.
+  a repo declares at `base_sha`, and none when it declares none. A probe runs
+  through the repo's declared gates, never a named test runner.
 - **44** departs. The follow-up path has never run. The criterion probe that
   answers principles 6 and 49 has not run live either (ADR 3). Its cost and
   its catch rate are both forecasts.
@@ -214,16 +217,17 @@ this decision rests on.
   `base_sha`.
 - **62** departs. §1.4 refuses specs written "from a roadmap". A follow-up is
   written from a qualified finding instead, but §1.4's reason, money, still
-  reaches follow-ups and revisions. One generation and the round bound answer it, and the
-  measurement below tests the answer. §4.2.1's reason reaches them too. It
-  refuses a draft run while nobody is awake, and a task that rewrites its own
-  queue. Every queued spec is read at `base_sha`, and other text comes only
-  from spec review or a qualified finding. A task's diff reaches the queue
+  reaches follow-ups and revisions. One generation and the round bound answer
+  it, and the measurement below tests the answer. §4.2.1's reason reaches them
+  too. It refuses a draft run while nobody is awake, and a task that rewrites
+  its own queue. Every queued spec is read at `base_sha`, and other text comes
+  only from spec review or a qualified finding. A task's diff reaches the queue
   only as the follow-up writer's input. The host enforces the follow-up's
-  fields, and it runs one generation deep. Revisions and follow-ups return from host-invoked sessions, and the host
-  commits them. A follow-up only appends above the stack. It edits, reorders
-  and removes no queued spec. Nothing merges, so the operator can reject each
-  one as a layer, at the rebuild cost the 50 bullet names.
+  fields, and it runs one generation deep. Revisions and follow-ups return from
+  host-invoked sessions, and the host commits them. A follow-up only appends
+  above the stack. It edits, reorders and removes no queued spec. Nothing
+  merges, so the operator can reject each one as a layer, at the rebuild cost
+  the 50 bullet names.
 
 ## Consequences
 
@@ -236,18 +240,13 @@ These are left to the specs that build it. The design record proposes an
 answer to each.
 
 - how blockers route by the spec review's tags, and the round bound.
-- how a revised or follow-up spec's fields reach a repo gate that reads
-  `.saffron/specs/`.
-- how a repo declares its standards documents in `.saffron/`.
 - how every gate 0 and `parse_spec` refusal re-runs on a revised or
-  follow-up spec, and gate 0's "`spec_sha` moved" rule for a revised one.
+  follow-up spec.
 - what qualifies a finding with no probe, which kill rule a probe meets, and
   whether a surviving probe promotes a `note`, as ADR 3 does.
 - how an end-review lens takes finding text. It is a filled value and never
   template input, so a `{…}` inside it stays text (principle 22).
-- which tree a follow-up's anchors and named probe are keyed to.
 - which follow-up spec fields the host enforces: `touches`, budget, risk.
-- how the `scope` gate treats the host's commit to `.saffron/specs/`.
 - where the ledger and the record keep the stack's layers.
 - how gate 0's open pull request check treats the batch's own tasks. Backlog
   item 59 exempted a declared chain, and no item covers a stack's layers.
@@ -258,9 +257,21 @@ answer to each.
 - how the delegate files the backlog from the batch's findings, until a
   declared program does it.
 
+These are left open, and the design record does not answer them yet.
+
+- how a revised or follow-up spec's fields reach a repo gate. It reads the
+  `base_sha` export, so they arrive through that export or a host-supplied
+  input, never through `/work`.
+- how a repo declares its standards documents in `.saffron/`.
+- gate 0's "`spec_sha` moved" rule for a revised spec, whose pinned
+  `spec_sha` the revision changes.
+- which tree a follow-up's anchors and named probe are keyed to.
+- how the `scope` gate treats the host's commit to `.saffron/specs/`.
+
 Whether follow-ups earn their cost is to be measured. The first measure is the
 share of follow-ups that reach `READY_FOR_REVIEW` with a clean critic. The
-second is the spend per follow-up, across its writing, spec review and cell. They
-decide whether an amendment for a second generation is worth proposing. They
-also decide whether the narrowing of §1.4 stands. If follow-ups do not earn
-their cost, an amendment withdraws it and §1.4's entry returns to its old text.
+second is the spend per follow-up, across its writing, spec review and cell.
+They decide whether an amendment for a second generation is worth proposing.
+They also decide whether the narrowing of §1.4 stands. If follow-ups do not
+earn their cost, an amendment withdraws it and §1.4's entry returns to its old
+text.

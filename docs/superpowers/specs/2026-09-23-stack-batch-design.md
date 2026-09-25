@@ -168,10 +168,12 @@ for its own review. Blockers route by their tag.
   its cell (principle 54).
 - A revised spec's cell holds the base text at the spec's path. The implement
   prompt carries the revision, and core's gates read the host's parsed copy.
-  Writing the revision into `/work` would put a protected path in the task's
-  diff, so the stale file stays. A repo gate that reads `.saffron/specs/`, as
-  `dead` reads `pending_symbols`, still sees the base text. So can the
-  implementer and the criterion session (principle 20, item 85).
+  Writing the revision into `/work` would put the spec file in the task's
+  diff, outside its `touches` (and, in this repo, on a protected path). So the
+  stale file stays. A repo gate reads `.saffron/` from the `base_sha` export,
+  never from `/work`, so `dead` sees the base `pending_symbols` either way.
+  Every session in the spec's cells can read the stale text (principle 20,
+  item 85).
 - `scope`, or no tag: the spec and its `depends_on` descendants are skipped
   and escalated.
 - Still blocked after round three: the spec and its descendants are skipped
