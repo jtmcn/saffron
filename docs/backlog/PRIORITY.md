@@ -214,6 +214,10 @@ these buy is that it stops having to. Both are done (2026-09-16, by hand).
 decision because it was the one item whose defect was a guard that could not
 fire. Its number stays listed because item numbers are cited from `saffron/`.
 
+**From the stack batch's last spec reviews** (2026-09-25): **b-b0cd68**.
+Retiring a spec turns this repo's gate suite red, so a stack batch's finish
+cannot push here until the two tests it names are reworked.
+
 **From the spec chain of 2026-09-20** (`SA-0113`): **b-b69bb6**, then
 **b-7d3810**. One spec measured the chain at 35.7 minutes to
 draft and 6.2 to review, so a revision costs about six reviews. b-b69bb6 is
