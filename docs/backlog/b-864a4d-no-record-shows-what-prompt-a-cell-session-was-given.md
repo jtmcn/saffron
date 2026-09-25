@@ -1,10 +1,11 @@
 ---
 id: b-864a4d
 title: No record shows what prompt a cell session was given, so CLAUDE.md reaching a live cell is unverifiable
-status: open
+status: done
 filed: 2026-09-22
+closed: 2026-09-25
 specs: [SA-0133]
-prs: []
+prs: [512]
 commits: []
 cites: [§5.3, §8]
 related: []
@@ -38,3 +39,6 @@ Every recent task carries the same value, `1747509ede66`, whatever its
 ## Record
 
 - 2026-09-22: filed.
+- 2026-09-25: `SA-0133` reached `READY_FOR_REVIEW` as #512 at $16.22 of $25,
+  in the spec loop's run 16. A first run ended `RATE_LIMITED` at $4.91.
+  `SA-0133` retires to `done/`.

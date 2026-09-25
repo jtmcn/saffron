@@ -1,11 +1,12 @@
 ---
 id: b-a9ee32
 title: A global `attr.tree` hides an edit through `export_patch`'s fresh git dir on git 2.46 and later
-status: open
+status: done
 tier: 2
 filed: 2026-09-22
+closed: 2026-09-25
 specs: [SA-0118, SA-0137]
-prs: [433]
+prs: [433, 505]
 commits: []
 cites: [§2]
 related: [103, b-b5f379]
@@ -32,3 +33,6 @@ with a witness that sets it globally.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
+- 2026-09-25: `SA-0137` reached `READY_FOR_REVIEW` as #505 at $2.51 of $16,
+  in the spec loop's run 16. `git_argv` pins `attr.tree` empty. `SA-0137`
+  retires to `done/`.

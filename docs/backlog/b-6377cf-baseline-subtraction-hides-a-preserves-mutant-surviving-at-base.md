@@ -1,11 +1,12 @@
 ---
 id: b-6377cf
 title: Baseline subtraction hides a `preserves` witness whose mutant survives at base, so a cell that never strengthens it passes `witness`
-status: open
+status: done
 tier: 2
 filed: 2026-09-23
+closed: 2026-09-25
 specs: [SA-0139]
-prs: []
+prs: [504]
 commits: []
 cites: [§5.4, §5.5.1]
 related: [b-19b255]
@@ -32,3 +33,5 @@ criterion whose witness is left unstrengthened.
 ## Record
 
 - 2026-09-23: filed from the spec loop's run 15 (#476).
+- 2026-09-25: `SA-0139` reached `READY_FOR_REVIEW` as #504 at $8.42 of $20,
+  in the spec loop's run 16. `SA-0139` retires to `done/`.

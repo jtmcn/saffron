@@ -1,11 +1,12 @@
 ---
 id: b-19b255
 title: A probe is counted killed when any test fails, so a probe that only lengthened a line reads as caught
-status: open
+status: done
 tier: 1
 filed: 2026-09-23
+closed: 2026-09-25
 specs: [SA-0138]
-prs: []
+prs: [515]
 commits: []
 cites: [§5.5.1]
 related: [117, b-2750d5]
@@ -42,3 +43,5 @@ shape: a probe whose only failure is the format test reads as survived.
   same session module. The new rule made two protected sentences stale, in
   `DESIGN.md` §5.5.1 and `CONTEXT.md`'s **Vacuity probe** entry. The spec's
   own pull request rewrote both by hand before any cell ran.
+- 2026-09-25: `SA-0138` reached `READY_FOR_REVIEW` as #515 at $13.19 of $30,
+  in the spec loop's run 16. `SA-0138` retires to `done/`.
