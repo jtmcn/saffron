@@ -79,7 +79,10 @@ longer runs.
 Standards, read each layer. One join lens reads the stack under ADR 6's rubric.
 Each layer's in-cell concerns join their findings as inputs. The
 host decides which findings qualify. A qualified finding is anchored, and any
-probe it carries survived.
+probe it carries survived. An end-review lens emits its block in the same turn
+as the work, with read-only tools, as ADR 4's lenses do. It inherits ADR 4's
+departure from principle 18. A spec writer returns its spec through a separate
+extraction turn, so it keeps principle 18.
 
 **The end review takes four exceptions to ADR 4, and this ADR carries them.**
 Its lenses are not ADR 4's declared lenses. They run once per batch, not on
