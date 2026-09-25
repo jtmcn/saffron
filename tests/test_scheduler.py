@@ -1923,7 +1923,14 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-25, a ninety-seventh time: the spec loop's run 16
+    """Re-measured 2026-09-25, a ninety-eighth time: `SA-0175` queued for
+    backlog item b-792ab2, split from `SA-0156` when ADR 7 made the spec
+    review's prompt core's. It builds the session, its extraction turn and
+    core's prompt. It declares `depends_on: [SA-0169]`, so it is refused.
+    `SA-0156` now declares `depends_on: [SA-0175]`. The candidates are
+    unmoved.
+
+    Re-measured 2026-09-25, a ninety-seventh time: the spec loop's run 16
     retired `SA-0133` to `SA-0139` to `done/`. `SA-0142`'s parent `SA-0136`
     is among them, so `SA-0142` is a candidate beside `SA-0141`. Every other
     spec of b-792ab2's chain is still refused on a parent that has not run.
@@ -2526,6 +2533,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0170",
         "SA-0173",
         "SA-0174",
+        "SA-0175",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.

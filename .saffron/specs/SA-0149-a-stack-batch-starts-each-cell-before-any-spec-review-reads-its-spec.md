@@ -49,17 +49,21 @@ pending_symbols:
 acceptance:
   - claim: >-
       `read_spec_review` reads the last fenced `json` block of a
-      `SpecReviewSession`'s text and carries its cost and `resets_at`.
+      `SpecReviewSession`'s text and carries its cost and `resets_at`. It
+      keeps each finding's `fixes`.
       `spec_review_route` routes a read with `resets_at` set `wait`, before
       any other check. It routes the read `error` when the session carries
       an error, when the
       text holds no `json` block, or when that block is not an object whose
       `findings` is a list of objects. It routes `error` too when a finding
       has no string `claim`, a `severity` other than `blocker`, `concern`
-      or `note`, or a `fixes` other than `scope`, `build`, `witness`, null
-      or absent. Otherwise one `blocker` or more routes `escalate`, whatever
-      its `fixes`, and none routes `run`. Other keys are ignored. The
-      witness drives each member.
+      or `note`, or a `fixes` other than an entry of `SPEC_REVIEW_TAGS`,
+      null or absent. `SPEC_REVIEW_TAGS` is the tuple `scope`, `build`,
+      `witness`, and the read looks it up when called. Otherwise one `blocker` or more routes `escalate`, whatever
+      its `fixes`, and none routes `run`. A `concern` whose `fixes` is
+      `witness` routes `run` and keeps that `fixes`. Other keys are
+      ignored. The witness drives each member, and a tag added to
+      `SPEC_REVIEW_TAGS`.
     witness: tests/test_spec_review.py::test_a_spec_review_routes_on_the_severities_in_its_last_json_block
   - claim: >-
       Given `review`, `run_stack_batch` calls it for a spec after the checks
@@ -99,31 +103,32 @@ acceptance:
 
 Backlog item **b-792ab2**, step 6 of its Done. It cites `DESIGN.md` §4.2,
 §4.2.1 and §5.5. ADR 7
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:50-57`)
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:54-61`)
 decides that spec review runs inside a stack batch, before each spec's
 first cell. Section 3 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md` is the design. It
-seeds each review at the tree the spec would be cut from. It runs one
-review per queued spec at batch start, up to K at once (`:153-155`).
+seeds each review at the tree the spec would be cut from (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:160-162`).
+It reviews queued specs one at a time, each right before its own cell
+(`docs/superpowers/specs/2026-09-23-stack-batch-design.md:170-177`).
 
-**This spec is the first of three for step 6.** It builds the read of a
-findings block. It builds the routing inside `run_stack_batch`, through an
-injected `review` callable. `SA-0156` builds the production `review`. That is
-one host-invoked session in a critic cell, seeded at the tree this spec
-hands it, with its prompt taken from `.claude/agents/spec-reviewer.md`'s
-body. `SA-0155` records each review as facts, and `SA-0156` passes the
-callable from `saffron batch --stack`.
+**This spec is the first of six for step 6.** It builds the read of a
+findings block and the tags blockers route by. It also builds the routing
+inside `run_stack_batch`, through an injected `review` callable. `SA-0155`
+records each review as facts. `SA-0168` and `SA-0169` prepare the task
+and the cell. `SA-0175` builds the session and core's prompt for it.
+`SA-0156` builds the production `review`, one host-invoked session in a
+critic cell seeded at the tree this spec hands it, and passes it from
+`saffron batch --stack`.
 
 **Each review runs right before its own spec's cell.** Reviews run one at
-a time. The design's reviews at batch start, K at once, cannot run on the
-cell runtime at the tree base. Every cell shares the network `saffron-cells` and one
-proxy. `start_proxy` removes the proxy before it starts one
+a time, as the design says. Reviews at batch start, K at once, cannot
+run on the cell runtime at the tree base. Every cell shares the network
+`saffron-cells` and one proxy. `start_proxy` removes the proxy before it starts one
 (`saffron/cell/proxy.py:53`), and `cell_up` removes the network before it
 creates it (`saffron/cell/session.py:909`). `cell_down` stops the proxy
 and removes the network (`:1012-1013`). So a review cell beside a task cell
 loses its network. Run at the spec's turn, the review reads the tree the
-spec's cell is cut from, the current last layer. So this keeps design
-section 3's tree and departs from its timing.
+spec's cell is cut from, the current last layer.
 
 **What the tree base holds.** This spec's tree base is `SA-0148`'s head.
 The chain runs through `SA-0142` to `SA-0145`, and `SA-0135` and
@@ -144,23 +149,31 @@ Criteria 3 and 5 consume what `SA-0148` builds: `run_stack_batch`'s
 `sleep` keyword, `CellOutcome.resets_at` and its wait. After a
 `RATE_LIMITED` task, `SA-0148` sleeps once and offers the same spec again,
 on the same predecessor, and leaves the breaker's count as it was. This spec consumes nothing else of `SA-0146`, `SA-0147` or
-`SA-0148`. Every line number below was read at `0b1b4b96`. The chain edits
+`SA-0148`. Every line number below was read at `2bb34a8d`. The chain edits
 `batch.py` and `tests/test_batch.py`, so read their lines there by symbol.
 
-**How a spec review runs today.** A delegate dispatches the `spec-reviewer`
-agent by hand. `CONTEXT.md` calls it advisory, with nothing in code to
-enforce it (`CONTEXT.md:457-465`). Its report ends with a fenced `json`
-block, `{"findings": [...]}`. Each finding holds `severity`, `criterion`,
-`file`, `line` and `claim`, and a blocker adds `fixes`
-(`.claude/agents/spec-reviewer.md:149-153`). `fixes` is one of `scope`,
-`build` or `witness` (`:140-143`).
+**How a spec review runs today.** A delegate dispatches this repo's
+spec reviewer by hand. `CONTEXT.md` calls it advisory, with nothing in
+code to enforce it (`CONTEXT.md:462-466`). That agent file is the hand
+path's own, and core never reads it (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:164-168`).
+
+**Whose block and tags these are.** ADR 7 makes the tags blockers route
+by core's (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-64`). So this spec defines them as
+`SPEC_REVIEW_TAGS` in `saffron/spec_review.py`, and nothing here derives
+them from a repo file. A spec review returns its tags through a separate
+extraction turn, which keeps principle 18 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:91-94`). That turn is
+`SA-0175`'s. It fills `SpecReviewSession.text` with exactly one fenced
+`json` block, `{"findings": [...]}`, or leaves `text` empty. Each
+finding holds `severity`, `claim`, `criterion`, `file`, `line` and
+`fixes`. So the read here parses only that block, never the review
+turn's prose. Its witnesses build `text` as fixtures.
 
 **How a batch runs a spec today.** `_drive` checks readiness before any
-task (`saffron/batch.py:161-166`). Before each task it checks `--until`,
-the budget and the breaker (`:191-199`). It then emits the spec's
-`starting` line (`:203`) and calls the runner (`:208`). A raise counts as
-an abort (`:209-227`), and so does a `GATE_ERROR` (`:49`, `:235-236`). Two
-in a row fire the breaker (`:53`).
+task (`saffron/batch.py:165-166`). Before each task it checks `--until`,
+the budget and the breaker (`:192-202`). It then emits the spec's
+`starting` line (`:207`) and calls the runner (`:212`). A raise counts as
+an abort (`:213-230`), and so does a `GATE_ERROR` (`:53`, `:244-245`). Two
+in a row fire the breaker (`:57`).
 
 **An unrun review never reads as clean.** REVIEW keeps the same rule. A
 lens that fails returns an `error` and no findings (`saffron/phases/review.py:237-241`).
@@ -179,6 +192,9 @@ Build three things.
    - `SpecReview`, a frozen dataclass of `findings`, `cost_usd`, `error:
      str | None` and `resets_at`. Each finding carries `severity`, `claim`,
      `fixes`, `criterion`, `file` and `line`.
+   - `SPEC_REVIEW_TAGS`, the tuple `("scope", "build", "witness")`. The
+     read checks each `fixes` against it at call time. `SA-0175` fills
+     core's prompt from it, and `SA-0164` routes on it.
    - `read_spec_review(session) -> SpecReview`, as criterion 1 says. It
      checks each finding's `fixes` by name on the finding it builds, so
      `saffron/` reads the field. `SA-0164` routes on it.
@@ -208,14 +224,18 @@ Build three things.
   already keeps and checks each `fixes`. So `SA-0164` adds a `"revise"`
   route in `spec_review_route` and leaves `SpecReview` and the read as
   they are.
-- **An `unmeasured` concern.** The design routes it as `witness`
-  (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:179`). With no
-  revision here, it routes `run`, as any concern does.
-- **The session, its facts and its caller.** The facts are `SA-0155`'s, and
-  the session and its caller are `SA-0156`'s. Nothing
+- **A concern that a witness cannot be measured.** The design routes
+  it as `witness` (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:198-199`). The review marks one itself: a
+  `concern` whose `fixes` is `witness`, as core's prompt asks
+  (`SA-0175`). No word in its claim decides it. The read keeps that
+  `fixes`. With no revision here, it routes `run`, as any concern does.
+  `SA-0164` routes it to the writer.
+- **The session, its facts and its caller.** The session and its
+  extraction turn are `SA-0175`'s, the facts `SA-0155`'s, and the caller
+  `SA-0156`'s. Nothing
   in `saffron/` passes `review` until then, so a production stack batch
   reviews nothing yet.
-- **Filling `resets_at`.** `SA-0156`'s `review` callable sets it from a
+- **Filling `resets_at`.** `SA-0175`'s session sets it from a
   session that met the account's rate limit, and returns at once. It
   never waits inside the callable. The loop's wait here is the only one.
 - **Money.** A review's cost reaches no ledger row, so the batch's budget
@@ -251,7 +271,7 @@ finding's `severity` with it. A second spelling of that `Literal` fails
 `tests/test_closed_sets_are_spelled_once.py`.
 
 **Keep the error route's line single.** `_drive` emits
-`raised <type>: <message>` for any raise (`saffron/batch.py:226`). So the
+`raised <type>: <message>` for any raise (`saffron/batch.py:230`). So the
 exception the error route raises carries a message that does not repeat
 the ` unreviewed  ` line.
 
@@ -270,7 +290,7 @@ otherwise.
 |---|---|
 | `{"findings": []}` | `run` |
 | one `note` | `run` |
-| one `concern` with `fixes: "scope"` | `run` |
+| one `concern` with `fixes: "witness"`, whose read keeps `witness` | `run` |
 | one `blocker` for each of `scope`, `build`, `witness` | `escalate` |
 | one `blocker` with `fixes: null`, and one with no `fixes` | `escalate` |
 | one `note` with an extra `evidence` key | `run` |
@@ -289,6 +309,11 @@ otherwise.
 | a block with a `blocker`, then a clean block | `run` |
 | a clean block, then a block with a `blocker` | `escalate` |
 | `resets_at` set, text a block with a `blocker` | `wait` |
+| `SPEC_REVIEW_TAGS` patched to add `rewrite`, a `blocker` with `fixes: "rewrite"` | `escalate` |
+
+The witness also asserts `SPEC_REVIEW_TAGS == ("scope", "build",
+"witness")` and that it is a tuple. It patches the tags with
+`monkeypatch.setattr` on the module.
 
 These fail it, each measured:
 
@@ -307,6 +332,9 @@ These fail it, each measured:
 - `escalate` only for a `scope` blocker
 - `escalate` for any finding with a `fixes`, whatever its severity
 - a `resets_at` passed over, reasoned and not measured
+- the tags spelled inside the read in place of `SPEC_REVIEW_TAGS`, which
+  refuses `rewrite` once it is patched in, reasoned and not measured
+- `fixes` dropped from a concern's finding, reasoned and not measured
 
 **Criteria 2 to 4 drive `run_stack_batch`** with a budget of 100,
 `until=None`, `_ready` and the `ledger` and `repo_id` fixtures. Build
@@ -441,4 +469,7 @@ a line, the rate `saffron/agents/findings.py` measures. About 50 in
 `saffron/batch.py` at 6.6. About 117 lines of test in
 `tests/test_spec_review.py` at 4.7, the rate of `tests/test_review.py`.
 About 327 in `tests/test_batch.py` at 3.3. That is about 2340 tokens of
-the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`).
+the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`). The
+tags constant, its two table rows and its asserts add about 55, so about
+2395, 79.8% of it. No path here is in `elevate_on`, so `size` stays
+advisory. Keep the new rows inside the existing loop of cases.
