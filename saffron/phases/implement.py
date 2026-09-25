@@ -6,6 +6,7 @@ and splitting them pays full context cost twice for the same file reads.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
@@ -155,9 +156,9 @@ def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
         for n in new_failures
     ]
     return (
-        "These failures are new since the base commit. Failures already "
-        "present on the base commit are excluded and are not yours to fix. "
-        "Fix these and commit.\n\n" + "\n".join(lines)
+        "These failures are yours to fix. A failure the base commit already "
+        "had is left out, unless it is a witness that survived its mutant "
+        "and blocks this task. Fix these and commit.\n\n" + "\n".join(lines)
     )
 
 
@@ -230,6 +231,16 @@ def run_agent(
     if prompt_path is not None:
         payload["system_prompt_path"] = prompt_path
     request = json.dumps(payload)
+    # The turn's first event: the SHA-256 of these exact request bytes, never
+    # a re-serialization (backlog item b-864a4d).
+    emit(
+        Agent(
+            timestamp=time.time(),
+            spec_id=spec_id,
+            raw=False,
+            detail=hashlib.sha256(request.encode()).hexdigest(),
+        )
+    )
     text: list[str] = []
     errors: list[str] = []
     result: dict = {}

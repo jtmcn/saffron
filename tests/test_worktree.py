@@ -1879,6 +1879,61 @@ def test_export_patch_shows_hunks_under_a_configured_attributes_file(
     assert "Binary files" not in patch
 
 
+def test_git_argv_shows_hunks_under_a_global_attr_tree(tmp_path, monkeypatch):
+    """A global `attr.tree` naming a tree whose `.gitattributes` marks every
+    path `-diff` hides an edit's hunks the same way (backlog item b-a9ee32)."""
+    base = _isolated_repo_with_a_text_file(tmp_path, monkeypatch)
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+
+    (tmp_path / "bin.dat").write_bytes(b"real\x00binary")
+    # A committed attribute must still hold. An empty-tree pin would drop it.
+    (tmp_path / ".gitattributes").write_text("kept.txt -diff\n")
+    (tmp_path / "kept.txt").write_text("kept\n")
+    _edit_and_commit_f(tmp_path)
+
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=tmp_path,
+        input="* -diff\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=tmp_path,
+        input=f"100644 blob {blob}\t.gitattributes\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    _set_global(config, "attr.tree", tree)
+    _set_global(config, "user.email", "someone@example.com")
+
+    bare = subprocess.run(
+        ["git", "diff", f"{base}..HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "Binary files" in _diff_block(bare, "f.py")
+
+    own = worktree._git("c", "diff", f"{base}..HEAD").stdout
+    assert "+one = 2" in _diff_block(own, "f.py")
+    assert "Binary files" not in _diff_block(own, "f.py")
+    assert "Binary files" in _diff_block(own, "bin.dat")
+    assert "Binary files" in _diff_block(own, "kept.txt")
+
+    patch = worktree.export_patch("c", base)
+    assert "+one = 2" in _diff_block(patch, "f.py")
+    assert "Binary files" not in _diff_block(patch, "f.py")
+    assert "Binary files" in _diff_block(patch, "bin.dat")
+
+    got = worktree._git("c", "config", "--get", "user.email").stdout
+    assert got.strip() == "someone@example.com"
+
+
 def test_dirty_paths_reads_through_a_planted_replacement(tmp_path, monkeypatch):
     # The pin sits in `_git` so it covers reads no criterion names; `status`
     # diffs the index against the replaced tree and calls a clean tree dirty.

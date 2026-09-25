@@ -16,6 +16,9 @@ from saffron.repos.mirror import (
     retirement_markers,
 )
 
+# unresolved_consumes is imported inside each test body below, never here:
+# a module-scope import would make `revert` read every test as `skip`.
+
 
 def git(repo, *args):
     return subprocess.run(
@@ -700,3 +703,172 @@ def test_file_at_raises_on_a_directory_at_the_path(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "mirror")
     with pytest.raises(GitError):
         file_at(mirror, sha, "CLAUDE.md")
+
+
+# --------------------------------------------------------- unresolved_consumes
+
+
+def _consumes_tree(tmp_path):
+    """A file, an executable file, a directory, and three symlinks, one
+    exact, one dangling, one escaping the tree. `exact.py` and `run.sh` each
+    hold `run_task`, and `pkg/mod.py` holds `helper`."""
+    repo = _plain_repo(tmp_path, "consumes")
+    (repo / "exact.py").write_text("run_task\n")
+    (repo / "run.sh").write_text("run_task\n")
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "mod.py").write_text("helper\n")
+    os.chmod(repo / "run.sh", 0o755)
+    os.symlink("exact.py", repo / "link.py")
+    os.symlink("gone.py", repo / "dangling.py")
+    os.symlink("../outside.py", repo / "escape.py")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "consumes tree")
+    sha = git(repo, "rev-parse", "HEAD")
+    mirror = ensure_mirror(repo, tmp_path / "consumes.git")
+    return mirror, sha
+
+
+def test_a_consumed_path_resolves_when_the_tree_holds_a_file_a_directory_or_a_symlink_there(
+    tmp_path,
+):
+    from saffron.repos.mirror import unresolved_consumes
+
+    mirror, sha = _consumes_tree(tmp_path)
+
+    for entry in ("exact.py", "run.sh", "pkg", "link.py", "dangling.py", "escape.py"):
+        assert unresolved_consumes(mirror, sha, [entry]) == []
+
+    assert unresolved_consumes(mirror, sha, ["missing.py"]) == ["missing.py"]
+    assert unresolved_consumes(mirror, sha, ["pkg/missing.py"]) == ["pkg/missing.py"]
+    assert unresolved_consumes(mirror, sha, ["pk"]) == ["pk"]
+
+
+def test_a_consumed_name_is_read_from_the_file_its_path_names(tmp_path):
+    from saffron.repos.mirror import unresolved_consumes
+
+    mirror, sha = _consumes_tree(tmp_path)
+
+    resolving = ["exact.py:run_task", "run.sh:run_task", "link.py:run_task"]
+    assert unresolved_consumes(mirror, sha, resolving) == []
+
+    not_resolving = ["missing.py:run_task", "pkg:helper", "link.py:exact"]
+    assert unresolved_consumes(mirror, sha, not_resolving) == not_resolving
+
+    # A symlink `file_at` cannot follow raises, never reads as unresolved.
+    for entry in ("dangling.py:run_task", "escape.py:run_task"):
+        with pytest.raises(GitError):
+            unresolved_consumes(mirror, sha, [entry])
+
+
+def test_a_consumed_name_matches_only_as_a_whole_word(tmp_path):
+    from saffron.repos.mirror import unresolved_consumes
+
+    repo = _plain_repo(tmp_path, "words")
+    (repo / "f1.py").write_text("run_task")
+    (repo / "f2.py").write_text("task.run_task(\n")
+    (repo / "f3.py").write_text("run_tasks = run_task\n")
+    (repo / "f4.py").write_text("x = a.c\n")
+    (repo / "lib.rs").write_text("Foo::bar()\n")
+    (repo / "n1.py").write_text("xrun_task\n")
+    (repo / "n2.py").write_text("Xrun_task\n")
+    (repo / "n3.py").write_text("0run_task\n")
+    (repo / "n4.py").write_text("_run_task\n")
+    (repo / "n5.py").write_text("run_tasks\n")
+    (repo / "n6.py").write_text("run_taskS\n")
+    (repo / "n7.py").write_text("run_task9\n")
+    (repo / "n8.py").write_text("run_task_\n")
+    (repo / "n9.py").write_text("Run_Task RUN_TASK\n")
+    (repo / "abc.py").write_text("abc\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "words")
+    sha = git(repo, "rev-parse", "HEAD")
+    mirror = ensure_mirror(repo, tmp_path / "words.git")
+
+    resolving = [
+        "f1.py:run_task",
+        "f2.py:run_task",
+        "f3.py:run_task",
+        "f4.py:a.c",
+        "lib.rs:Foo::bar",
+    ]
+    for entry in resolving:
+        assert unresolved_consumes(mirror, sha, [entry]) == []
+
+    not_resolving = [
+        "n1.py:run_task",
+        "n2.py:run_task",
+        "n3.py:run_task",
+        "n4.py:run_task",
+        "n5.py:run_task",
+        "n6.py:run_task",
+        "n7.py:run_task",
+        "n8.py:run_task",
+        "n9.py:run_task",
+        "abc.py:a.c",
+    ]
+    for entry in not_resolving:
+        assert unresolved_consumes(mirror, sha, [entry]) == [entry]
+
+
+def test_consumed_entries_resolve_at_the_sha_given_and_not_at_head(tmp_path):
+    from saffron.repos.mirror import unresolved_consumes
+
+    repo = _plain_repo(tmp_path, "history")
+    (repo / "a.py").write_text("first_name\n")
+    (repo / "old.py").write_text("x\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "first")
+    first = git(repo, "rev-parse", "HEAD")
+
+    (repo / "a.py").write_text("second_name\n")
+    (repo / "old.py").unlink()
+    (repo / "new.py").write_text("y\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "second")
+    second = git(repo, "rev-parse", "HEAD")
+
+    mirror = ensure_mirror(repo, tmp_path / "history.git")
+
+    assert unresolved_consumes(mirror, first, ["a.py:first_name", "old.py"]) == []
+    assert unresolved_consumes(mirror, first, ["a.py:second_name", "new.py"]) == [
+        "a.py:second_name",
+        "new.py",
+    ]
+    assert unresolved_consumes(mirror, second, ["a.py:second_name", "new.py"]) == []
+    assert unresolved_consumes(mirror, second, ["a.py:first_name", "old.py"]) == [
+        "a.py:first_name",
+        "old.py",
+    ]
+
+
+def test_unresolved_consumes_returns_each_unresolved_entry_in_order(tmp_path):
+    from saffron.repos.mirror import unresolved_consumes
+
+    mirror, sha = _consumes_tree(tmp_path)
+
+    result = unresolved_consumes(
+        mirror,
+        sha,
+        [
+            "missing.py",
+            "exact.py",
+            "missing.py:run_task",
+            "exact.py:run_task",
+            "missing.py",
+        ],
+    )
+    assert result == ["missing.py", "missing.py:run_task", "missing.py"]
+
+    assert unresolved_consumes(mirror, sha, ["exact.py", "exact.py:run_task"]) == []
+
+
+def test_unresolved_consumes_raises_on_a_sha_the_mirror_does_not_hold(tmp_path):
+    from saffron.repos.mirror import unresolved_consumes
+
+    mirror, sha = _consumes_tree(tmp_path)
+    bad_sha = "0" * 40
+
+    with pytest.raises(GitError):
+        unresolved_consumes(mirror, bad_sha, ["exact.py"])
+    with pytest.raises(GitError):
+        unresolved_consumes(mirror, bad_sha, ["exact.py:run_task"])

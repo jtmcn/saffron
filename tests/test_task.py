@@ -56,7 +56,7 @@ def _drive(
         return outcome
 
     monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
-    return task_module.run_task(
+    result = task_module.run_task(
         Spec(
             id=spec_id,
             title="A spec",
@@ -84,6 +84,10 @@ def _drive(
         out_dir=out_dir,
         token=None,
     )
+    # None of this module's specs declare `consumes`, so `run_task` never
+    # refuses here.
+    assert isinstance(result, CellOutcome)
+    return result
 
 
 def _push(monkeypatch, result: package_phase.PushResult) -> None:

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from saffron.cell.runtime import Completed
 from saffron.gates.suite import GateSuite
+from saffron.intake import Criterion, Mutant
 from saffron.repos.policy import GateDeclaration, Policy
 
 FAIL = {"file": "a.py", "code": "E501", "message": "too long"}
@@ -58,6 +59,41 @@ class _Tree:
     @contextlib.contextmanager
     def mutated(self, mutant):
         yield "no tree here"
+
+
+class _WitnessTree(_Tree):
+    """A tree whose mutant applies, so `witness_gate` runs for real.
+
+    `killed` decides whether the witness notices the mutant once it is live.
+    """
+
+    def __init__(self, *args, killed, witness, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.killed = killed
+        self.witness = witness
+        self.live = False
+
+    @contextlib.contextmanager
+    def mutated(self, mutant):
+        self.live = True
+        try:
+            yield None
+        finally:
+            self.live = False
+
+    def run(self, argv, cwd, timeout_s):
+        if Path(argv[0]).name != "tests":
+            return super().run(argv, cwd, timeout_s)
+        self.calls.append("run tests")
+        subset = argv[1:]
+        status = "fail" if subset and self.live and self.killed else "pass"
+        payload = {
+            "gate": "tests",
+            "status": status,
+            "tool": "tests 1.0",
+            "collected": subset or [self.witness],
+        }
+        return Completed(0, json.dumps(payload), "")
 
 
 @dataclass(frozen=True)
@@ -224,3 +260,63 @@ def test_a_tree_left_dirty_at_head_is_a_blocking_new_failure():
     assert [(n.gate, n.failure.file) for n in comparison.new_failures] == [
         ("committed", "a.py")
     ]
+
+
+_WITNESS = "tests/test_a.py::test_stays_true"
+
+
+def test_a_witness_left_unstrengthened_blocks_when_elevated_and_a_killed_mutant_reports_nothing():
+    """§5.4.1: an unstrengthened `preserves` witness blocks once its tier
+    makes `witness` blocking, and killing the mutant reports nothing new.
+
+    Run through `GateSuite.against`, not the gate alone, because the
+    baseline carve-out and the tier's advisory filter both sit between them.
+    One `def` holds all four legs. The last two pass unmodified, and a
+    second `def` would read as theater to `revert` (item 78).
+    """
+    criterion = Criterion(
+        claim="a keeps returning true",
+        witness=_WITNESS,
+        preserves=True,
+        mutant=Mutant(file="src/a.py", find="return True", replace="return False"),
+    )
+    elevated_spec = _Spec(risk="elevated", acceptance=[criterion])
+    standard_spec = _Spec(risk="standard", acceptance=[criterion])
+    elevated_policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()}
+    )
+    elevate_on_policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
+        elevate_on=["src/**"],
+    )
+
+    def _tree(*, killed):
+        return _WitnessTree(
+            _lint(FAIL), changed=["src/a.py"], killed=killed, witness=_WITNESS
+        )
+
+    def _comparison(spec, policy, *, killed):
+        suite = _suite(("lint", "tests"), policy=policy, spec=spec)
+        baseline = suite.baseline(_tree(killed=False))
+        return suite.against(_tree(killed=killed), baseline)
+
+    # Declared `elevated`, unstrengthened: one blocking new `witness` failure.
+    comparison = _comparison(elevated_spec, elevated_policy, killed=False)
+    assert [
+        (n.gate, n.failure.file, n.failure.code) for n in comparison.new_failures
+    ] == [("witness", _WITNESS, "survived-mutant")]
+
+    # `standard` elevated by a touched `elevate_on` path: the same new failure.
+    comparison = _comparison(standard_spec, elevate_on_policy, killed=False)
+    assert [
+        (n.gate, n.failure.file, n.failure.code) for n in comparison.new_failures
+    ] == [("witness", _WITNESS, "survived-mutant")]
+
+    # Declared `standard`: `witness` stays advisory, though it still fails.
+    comparison = _comparison(standard_spec, elevated_policy, killed=False)
+    assert comparison.new_failures == ()
+    assert [r.status for r in comparison.run.results if r.gate == "witness"] == ["fail"]
+
+    # Declared `elevated`, killed: nothing new to report.
+    comparison = _comparison(elevated_spec, elevated_policy, killed=True)
+    assert comparison.new_failures == ()

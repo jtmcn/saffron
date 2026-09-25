@@ -1210,10 +1210,10 @@ def test_the_table_did_not_quietly_lose_a_row():
     kinds cover every call site, and losing a row silently is the failure
     that matters.
 
-    `SA-0085` and `SA-0125` each moved this count. `SA-0126` moves it again
-    for the cut-again `IMPLEMENT:` line."""
-    assert len(FAMILIES) == 65
-    assert len({f.prefix for f in FAMILIES}) == 65
+    `SA-0085`, `SA-0125` and `SA-0126` each moved this count. `SA-0133`
+    moves it again, by two."""
+    assert len(FAMILIES) == 67
+    assert len({f.prefix for f in FAMILIES}) == 67
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
@@ -1744,7 +1744,7 @@ def test_normalise_replaces_exactly_the_three_volatile_substrings():
 # does *not* prove is stated at the granularity that matters — the render
 # branch, not the kind. A kind appearing here does not mean its branches do.
 #
-# Captured: `preflight:` (4 of 5 steps), `cell:`, `baseline:` (the joined
+# Captured: `preflight:` (5 of 6 steps), `cell:`, `baseline:` (the joined
 # line only), `gates: {gate}={status}` (one per gate, at baseline and each
 # attempt), `PLAN: accepted`, `IMPLEMENT: system prompt`, `IMPLEMENT: N
 # commit(s)`, `gates: attempt N …` (green, repair, no-progress), `REVIEW:`
@@ -2041,10 +2041,23 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
             ("lint", "fail"),
         )
     }
+    # Both cells declare no CLAUDE.md. The catch-all `Preflight` branch
+    # already exists at base, so this is inline, not a new `_JOINED` row.
+    no_claude_md = describe(
+        Preflight(
+            timestamp=1.0,
+            spec_id="x",
+            step="claude_md",
+            detail="CLAUDE.md: none found at base_sha",
+        )
+    )
     unchecked = [
         line
         for line in captured
-        if line not in joined and line not in per_gate and "<" not in line
+        if line not in joined
+        and line not in per_gate
+        and line != no_claude_md
+        and "<" not in line
     ]
     assert unchecked == [], f"captured but joined to no kind: {unchecked}"
 

@@ -18,17 +18,18 @@ import pytest
 from saffron.agents import artifacts, context
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
-from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
+from saffron.events import Agent, Attempt, Baseline, PhaseStart, Preflight, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.size import _CEILINGS
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
-from saffron.phases import implement, review
+from saffron.phases import implement, rebut, review
 from saffron.phases import package as package_mod
 from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
+from tests.test_implement import _HEX_64, _no_reap
 
 
 def _git(repo, *args):
@@ -1211,6 +1212,11 @@ def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=N
     monkeypatch.setattr("saffron.repos.mirror.file_at", _file_at)
 
 
+# Bound at collection, module scope. `_drive` below patches
+# `implement.run_agent`, so a local read later would find its own stub.
+_REAL_RUN_AGENT = implement.run_agent
+
+
 def _drive(
     monkeypatch,
     tmp_path,
@@ -1227,6 +1233,8 @@ def _drive(
     agent_says=None,
     claude_md=None,
     base_claude_md=None,
+    # A list: each turn goes through the real `run_agent`, its request kept.
+    real_run_agent=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1242,6 +1250,7 @@ def _drive(
     strings, also collects the raw `Event` each one was built from — for a
     test that needs a field `describe()` does not render (`Attempt.aborted`
     vs `Attempt.decision`, say).
+
     """
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
@@ -1297,9 +1306,44 @@ def _drive(
         # after a green loop, and every test predating it scripts the
         # implementer's turns only. An empty findings block is a clean review.
         turn = next(scripted, _turn(_block({"findings": []})))
-        if isinstance(turn, BaseException):
+        if real_run_agent is None:
+            if isinstance(turn, BaseException):
+                raise turn
+            return turn
+        # A cut-off turn still goes through the real `run_agent`: its own
+        # `subtype` is what makes that function raise, not this stub.
+        cut_off = isinstance(turn, implement.AgentFailed) and turn.attempt is not None
+        if isinstance(turn, BaseException) and not cut_off:
             raise turn
-        return turn
+        attempt = turn.attempt if cut_off else turn
+
+        def _exec_stream(_container, _command, *, stdin_data, on_line, **_kwargs):
+            real_run_agent.append(stdin_data)
+            on_line(json.dumps({"type": "text", "text": attempt.text}))
+            on_line(
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": attempt.subtype,
+                        "terminal_reason": attempt.terminal_reason,
+                        "num_turns": attempt.num_turns,
+                        "is_error": attempt.is_error,
+                        "total_cost_usd": attempt.cost_usd_est,
+                        "session_id": attempt.session_id,
+                    }
+                )
+            )
+            return runtime.Completed(0, "", "")
+
+        return _REAL_RUN_AGENT(
+            container,
+            prompt=prompt,
+            options=options,
+            resume=resume,
+            exec_stream=_exec_stream,
+            reap_cell=_no_reap,
+            **kwargs,
+        )
 
     monkeypatch.setattr("saffron.phases.implement.run_agent", _run_agent)
 
@@ -2486,7 +2530,7 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     assert outcome.state == "READY_FOR_REVIEW"
     # No repair turn was bought — REVIEW's own lens turns are the only ones
     # past IMPLEMENT, and none of them carry a repair prompt.
-    assert not any("These failures are new" in turn for turn in cell.turns)
+    assert not any(turn.startswith(implement.repair_prompt([])) for turn in cell.turns)
     assert not any(nf.gate == "size" for nf in outcome.new_failures)
     # Still reported, host-side, beside `scope` and `integrity`: a gate
     # nothing reads is not a gate, and neither is one whose result vanishes
@@ -2668,7 +2712,7 @@ def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_pa
         gates=("lint",),
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    assert not any("These failures are new" in turn for turn in cell.turns)
+    assert not any(turn.startswith(implement.repair_prompt([])) for turn in cell.turns)
     assert not any(nf.gate == "lint" for nf in outcome.new_failures)
     (lint_result,) = [g for g in outcome.gates if g.gate == "lint"]
     assert lint_result.status == "fail"
@@ -3305,6 +3349,22 @@ _GREEN_TESTS = GateResult(
     gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::test_a"]
 )
 
+# The task's pre-turn baseline and its one attempt. `t.py::test_a` is
+# absent from base and present at head, so `added_tests` (b-19b255) counts it.
+_TASK_BASE = [
+    GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::test_old"]
+    )
+]
+_TASK_HEAD = [
+    GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.0",
+        collected=["t.py::test_old", "t.py::test_a"],
+    )
+]
+
 _EMPTY = _block({"findings": []})
 
 
@@ -3360,7 +3420,13 @@ def test_a_blocker_whose_probe_is_killed_is_demoted_to_a_note(monkeypatch, tmp_p
     """Criterion 2: a probe the real `tests` gate does notice demotes an
     adequacy `blocker` to a `note` — never dropped, never left a blocker —
     so a review with no other finding ends `READY_FOR_REVIEW` with no REBUT
-    turn scripted, and the REVIEW line after probing counts it killed."""
+    turn scripted, and the REVIEW line after probing counts it killed.
+
+    The killing test, `t.py::test_a`, is absent from the task's own base
+    `tests` result and present only in the probe cell's own baseline run
+    (b-19b255): a kill is counted against the tests the diff added, not
+    against any failure the whole suite happens to turn up.
+    """
     killed = Failure(file="t.py", code="t.py::test_a", message="boom")
     mutated = GateResult(
         gate="tests",
@@ -3369,7 +3435,9 @@ def test_a_blocker_whose_probe_is_killed_is_demoted_to_a_note(monkeypatch, tmp_p
         collected=["t.py::test_a"],
         failures=[killed],
     )
-    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
     _stub_probe_gates(monkeypatch, cell, gate_results=[_GREEN_TESTS, mutated])
 
     blocker_with_probe = {
@@ -3619,6 +3687,176 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
     assert [m.file for m in cell.mutated] == ["src/a.py", "src/b.py"]
 
 
+def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_failure_recorded(
+    monkeypatch, tmp_path
+):
+    """Criterion 4: each adequacy probe counts only the tests the diff adds.
+    These are the names the probe cell's own baseline run collected that the
+    task's pre-turn baseline did not (b-19b255). An attempt's suite stands
+    in for neither side.
+
+    Of three findings with distinct probes, one fails only `t.py::test_old`.
+    Unmatched to a counted test, it reads `survived` and reaches REBUT as a
+    blocker, its line naming the probe without saying the tests stayed
+    green. The other two also fail `t.py::test_old` beside an added test.
+    """
+    probe_baseline = GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.0",
+        collected=["t.py::test_old", "t.py::test_added", "t.py::test_new"],
+    )
+
+    def _probed(*failing):
+        return GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            collected=["t.py::test_old", "t.py::test_added", "t.py::test_new"],
+            failures=[
+                Failure(file="t.py", code=code, message="boom") for code in failing
+            ],
+        )
+
+    # Every attempt collects `test_added`, so an attempt's suite read as either
+    # side of the comparison moves which finding is killed.
+    head = [
+        _TASK_HEAD[0].model_copy(
+            update={"collected": ["t.py::test_old", "t.py::test_added"]}
+        )
+    ]
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, head)
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            probe_baseline,
+            _probed("t.py::test_old"),
+            _probed("t.py::test_old", "t.py::test_new"),
+            _probed("t.py::test_old", "t.py::test_added"),
+        ],
+    )
+
+    three_probes = {
+        "findings": [
+            _adequacy_finding("c1", "src/a.py", "a", "A"),
+            _adequacy_finding("c2", "src/b.py", "b", "B"),
+            _adequacy_finding("c3", "src/c.py", "c", "C"),
+        ]
+    }
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(
+            three_probes,
+            rebut=[
+                _turn("I have addressed the findings."),
+                _turn(_block(_CLAIMED_FIX)),
+            ],
+        ),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTING"
+
+    entries = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    by_file = {e["probe"]["file"]: e for e in entries}
+
+    survivor = by_file["src/a.py"]
+    assert survivor["probe_verdict"] == "survived"
+    assert survivor["failures"] == []
+    assert survivor["uncounted"] == ["t.py::test_old"]
+
+    killed_by_new = by_file["src/b.py"]
+    assert killed_by_new["probe_verdict"] == "killed"
+    assert killed_by_new["failures"] == ["t.py::test_new"]
+    assert killed_by_new["uncounted"] == ["t.py::test_old"]
+
+    killed_by_added = by_file["src/c.py"]
+    assert killed_by_added["probe_verdict"] == "killed"
+    assert killed_by_added["failures"] == ["t.py::test_added"]
+    assert killed_by_added["uncounted"] == ["t.py::test_old"]
+
+    # Every entry carries every key an entry had at base, plus `uncounted`.
+    for entry in entries:
+        assert set(entry) == {
+            "probe",
+            "reason",
+            "failures",
+            "uncounted",
+            "tool",
+            "collected",
+            "summary",
+            "baseline_failures",
+            "baseline_tool",
+            "baseline_collected",
+            "baseline_summary",
+            "probe_verdict",
+            "findings",
+        }
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (blocker,) = record["blockers"]
+    assert blocker["claim"] == "c1"
+
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    severity = {
+        f["claim"]: f["severity"] for lens in findings for f in lens["findings"]
+    }
+    assert severity["c2"] == severity["c3"] == "note"
+
+    # The REBUT prompt's line for the survivor shows its probe and does not
+    # say the tests stayed green.
+    rebut_prompt = cell.turns[5]
+    assert "src/a.py" in rebut_prompt
+    assert "`a` -> `A`" in rebut_prompt
+    assert "tests stayed green" not in rebut_prompt
+
+
+def test_a_probe_with_no_readable_base_enumeration_is_unproven_and_left_as_filed(
+    monkeypatch, tmp_path
+):
+    """Criterion 5: with no `tests` result in the task's pre-turn baseline
+    (`_drive`'s default suites), `added_tests` cannot say which tests the
+    diff added. A probe under which a test fails reads `unproven`, never
+    `survived` and never `killed`, and its finding stays at the severity
+    the lens filed."""
+    probe_baseline = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::test_x"]
+    )
+    mutated = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8.0",
+        collected=["t.py::test_x"],
+        failures=[Failure(file="t.py", code="t.py::test_x", message="boom")],
+    )
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _stub_probe_gates(monkeypatch, cell, gate_results=[probe_baseline, mutated])
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(_CONCERN_WITH_PROBE),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (entry,) = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    assert entry["probe_verdict"] == "unproven"
+    assert entry["uncounted"] == ["t.py::test_x"]
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    (finding,) = adequacy["findings"]
+    assert finding["severity"] == "concern"
+    assert finding["probe_verdict"] == "unproven"
+
+
 def test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run(
     monkeypatch, tmp_path
 ):
@@ -3634,7 +3872,11 @@ def test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run(
         collected=["t.py::test_a"],
         failures=[killed],
     )
-    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    # `t.py::test_a` absent from the task's base, present only at the probe
+    # cell's own baseline (b-19b255), the same shape scripted above.
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
     _stub_probe_gates(monkeypatch, cell, gate_results=[_GREEN_TESTS, mutated])
 
     shared = ("src/a.py", "if x < 0:", "if False:")
@@ -3722,11 +3964,13 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
     import saffron.probe as probe_check
     from saffron.intake import Mutant
 
+    # `t.py::test_b` must read as an added test for the probe under it to
+    # count as a kill (b-19b255), so only `_TASK_BASE` below lacks it.
     baseline = GateResult(
         gate="tests",
         status="pass",
         tool="pytest 8.0",
-        collected=["t.py::test_a"],
+        collected=["t.py::test_a", "t.py::test_b"],
         summary="1 passed in 1s",
     )
     killed = Failure(file="t.py", code="t.py::test_b", message="boom")
@@ -3738,7 +3982,9 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
         failures=[killed],
         summary="1 failed in 2s",
     )
-    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
     _stub_probe_gates(monkeypatch, cell, gate_results=[baseline, mutated])
 
     real = probe_check.record_fields
@@ -3778,6 +4024,7 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
         "probe",
         "reason",
         "failures",
+        "uncounted",
         "tool",
         "collected",
         "summary",
@@ -3805,7 +4052,7 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
     assert probed["tool"] == "pytest 8.1 probed"
     assert probed["baseline_tool"] == baseline.tool
     assert probed["collected"] == 2
-    assert probed["baseline_collected"] == 1  # len(baseline.collected)
+    assert probed["baseline_collected"] == 2  # len(baseline.collected)
     assert probed["summary"] == "1 failed in 2s"
     assert probed["baseline_summary"] == baseline.summary
     assert probed["failures"] == ["t.py::test_b"]
@@ -7285,3 +7532,277 @@ def test_a_spec_absent_at_base_is_silent(tmp_path):
     matters."""
     gates_dir = _spec_export(tmp_path, "SA-0099-other.md", "unrelated\n")
     assert session.spec_drift(gates_dir, "SA-0062", "deadbeef") is None
+
+
+# --- backlog item b-864a4d: a digest of the request, a digest of CLAUDE.md ---
+
+
+def _digest_events(capture: list) -> list[str]:
+    return [
+        e.detail
+        for e in capture
+        if isinstance(e, Agent) and not e.raw and _HEX_64.match(e.detail)
+    ]
+
+
+def _assert_digests_match_requests(raw: list[str], capture: list) -> None:
+    digests = _digest_events(capture)
+    assert len(digests) == len(raw)
+    for digest, request in zip(digests, raw, strict=True):
+        assert digest == hashlib.sha256(request.encode()).hexdigest()
+
+
+def _request_kind(raw: str) -> str:
+    """Which session kind sent this request, read from its own parsed
+    `prompt`. Not a preamble wording, which `SA-0139` rewrites."""
+    prompt = json.loads(raw)["prompt"]
+    if prompt == implement.PLAN_PROMPT:
+        return "plan"
+    if prompt == implement.IMPLEMENT_PROMPT:
+        return "implement"
+    if prompt == implement.SALVAGE_PROMPT:
+        return "salvage"
+    if prompt.startswith(implement.repair_prompt([])):
+        return "repair"
+    if prompt == review.REVIEW_PROMPT:
+        return "lens"
+    if prompt == review.CRITERION_PROBE_PROMPT:
+        return "probe"
+    if prompt == rebut.EXTRACT_PROMPT:
+        return "extract"
+    if prompt == rebut.VERDICT_TURN_PROMPT:
+        return "verdict"
+    if prompt.startswith(rebut.REBUT_PROMPT.partition("{blockers}")[0]):
+        return "rebut"
+    raise ValueError(f"unrecognised prompt: {prompt[:80]!r}")
+
+
+def test_every_session_a_task_starts_records_the_sha256_of_its_request(
+    monkeypatch, tmp_path
+):
+    """AC2: every session kind leaves the SHA-256 of its own request among
+    the task's events, in order. Four cells between them reach the plan,
+    IMPLEMENT, a repair, a salvage, the three lenses, a criterion probe,
+    the rebuttal, its extraction and a verdict.
+
+    Not driven: a plan re-prompt, a lens re-prompt, the notes turn. Each
+    reaches `run_agent` through the same `agent` callable, so AC1 covers
+    them by construction."""
+    from saffron.intake import Criterion
+
+    probe_raw: list[str] = []
+    probe_capture: list = []
+    probe_cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path / "probe",
+        cell=probe_cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "nothing touches it"))),
+        spec=_spec(acceptance=[Criterion(claim="it holds", witness="t.py::test_w")]),
+        real_run_agent=probe_raw,
+        capture=probe_capture,
+    )
+    assert [_request_kind(r) for r in probe_raw] == [
+        "plan",
+        "implement",
+        "lens",
+        "lens",
+        "lens",
+        "probe",
+    ]
+    _assert_digests_match_requests(probe_raw, probe_capture)
+
+    repair_raw: list[str] = []
+    repair_capture: list = []
+    failing = Failure(file="a.py", code="E501", message="too long")
+    repair_cell = _stub_the_runtime(monkeypatch, suites=([], _results(failing), []))
+    _drive(
+        monkeypatch,
+        tmp_path / "repair",
+        cell=repair_cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(cost=0.1)],
+        real_run_agent=repair_raw,
+        capture=repair_capture,
+    )
+    assert [_request_kind(r) for r in repair_raw] == [
+        "plan",
+        "implement",
+        "repair",
+        "lens",
+        "lens",
+        "lens",
+    ]
+    _assert_digests_match_requests(repair_raw, repair_capture)
+
+    salvage_raw: list[str] = []
+    salvage_capture: list = []
+    salvage_cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    _drive(
+        monkeypatch,
+        tmp_path / "salvage",
+        cell=salvage_cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.1),
+        ],
+        real_run_agent=salvage_raw,
+        capture=salvage_capture,
+    )
+    assert [_request_kind(r) for r in salvage_raw] == [
+        "plan",
+        "implement",
+        "salvage",
+        "lens",
+        "lens",
+        "lens",
+    ]
+    _assert_digests_match_requests(salvage_raw, salvage_capture)
+
+    rebut_raw: list[str] = []
+    rebut_capture: list = []
+    rebut_cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, rebut_cell, rebut_commits=1)
+    _drive(
+        monkeypatch,
+        tmp_path / "rebut",
+        cell=rebut_cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+        real_run_agent=rebut_raw,
+        capture=rebut_capture,
+    )
+    assert [_request_kind(r) for r in rebut_raw] == [
+        "plan",
+        "implement",
+        "lens",
+        "lens",
+        "lens",
+        "rebut",
+        "extract",
+        "verdict",
+    ]
+    _assert_digests_match_requests(rebut_raw, rebut_capture)
+
+
+def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
+    monkeypatch, tmp_path
+):
+    """AC3: one `Preflight` event per task, step `claude_md`, holding the
+    SHA-256 of the text `file_at` returned at `base_sha`.
+
+    When there was none, the detail names `CLAUDE.md` and carries no
+    digest."""
+    differing = tmp_path / "differing"
+    cell_a = _stub_the_runtime(monkeypatch)
+    capture_a: list = []
+    _drive(
+        monkeypatch,
+        differing,
+        cell=cell_a,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        claude_md="working-copy rule\n",
+        base_claude_md="base-commit rule\n",
+        capture=capture_a,
+    )
+    (event_a,) = [
+        e for e in capture_a if isinstance(e, Preflight) and e.step == "claude_md"
+    ]
+    assert event_a.detail == hashlib.sha256(b"base-commit rule\n").hexdigest()
+    assert event_a.detail != hashlib.sha256(b"base-commit rule").hexdigest()
+
+    absent = tmp_path / "absent"
+    cell_b = _stub_the_runtime(monkeypatch)
+    capture_b: list = []
+    _drive(
+        monkeypatch,
+        absent,
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture_b,
+    )
+    (event_b,) = [
+        e for e in capture_b if isinstance(e, Preflight) and e.step == "claude_md"
+    ]
+    assert "CLAUDE.md" in event_b.detail
+    assert not _HEX_64.match(event_b.detail)
+
+    empty = tmp_path / "empty"
+    cell_c = _stub_the_runtime(monkeypatch)
+    capture_c: list = []
+    _drive(
+        monkeypatch,
+        empty,
+        cell=cell_c,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        base_claude_md="",
+        capture=capture_c,
+    )
+    (event_c,) = [
+        e for e in capture_c if isinstance(e, Preflight) and e.step == "claude_md"
+    ]
+    assert event_c.detail == hashlib.sha256(b"").hexdigest()
+
+
+def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_path):
+    """AC4. The `system_prompt_path` uuid is pinned across three cells. Two
+    given the same base text log the same `CLAUDE.md` and request digests,
+    each matching its own requests. A third differs at every position."""
+    import uuid as uuid_mod
+
+    class _FixedUUID:
+        def uuid4(self):
+            return uuid_mod.UUID(int=7)
+
+    monkeypatch.setattr(implement, "uuid", _FixedUUID())
+
+    def _run(name: str, base_text: str) -> tuple[str, list[str]]:
+        from saffron import events as events_mod
+
+        raw: list[str] = []
+        cell = _stub_the_runtime(monkeypatch)
+        _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            use_default_emit=True,
+            claude_md="irrelevant working-copy text\n",
+            base_claude_md=base_text,
+            real_run_agent=raw,
+        )
+        log = events_mod.read_log(tmp_path / name / "out" / "SY-1")
+        _assert_digests_match_requests(raw, log)
+        (claude_md,) = [
+            e.detail for e in log if isinstance(e, Preflight) and e.step == "claude_md"
+        ]
+        return claude_md, _digest_events(log)
+
+    same_text = "standing instructions apply here\n"
+    claude_a, digests_a = _run("a", same_text)
+    claude_b, digests_b = _run("b", same_text)
+    claude_c, digests_c = _run("c", "an unrelated set of rules entirely\n")
+
+    assert claude_a == claude_b != claude_c
+    assert len(digests_a) == 5
+    assert digests_a == digests_b
+    assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))

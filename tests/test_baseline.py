@@ -20,6 +20,47 @@ def test_a_failure_absent_from_the_baseline_is_new():
     assert new[0].gate == "types"
 
 
+def test_a_witness_mutant_that_survived_at_base_is_still_new_at_head():
+    """A `witness` survivor at base does not cancel its match at head.
+
+    The spec asked this task to kill that mutant, not inherit it."""
+    survivor_a = Failure(
+        file="tests/test_a.py::test_x",
+        code="survived-mutant",
+        message="ran and passed with its mutant applied to a.py — claim a",
+    )
+    survivor_b = Failure(
+        file="tests/test_b.py::test_y",
+        code="survived-mutant",
+        message="ran and passed with its mutant applied to b.py — claim b",
+    )
+    unproven = Failure(
+        file="tests/test_c.py::test_z",
+        code="unproven",
+        message="no such witness in this tree",
+    )
+    tests_survivor = Failure(
+        file="a.py", code="survived-mutant", message="not a witness"
+    )
+    lint_failure = Failure(file="a.py", line=1, code="E501", message="line too long")
+
+    base = [
+        gate("witness", survivor_a, unproven, status="fail"),
+        gate("tests", tests_survivor, status="fail"),
+        gate("lint", lint_failure, status="fail"),
+    ]
+    head = [
+        gate("witness", survivor_a, unproven, survivor_b, status="fail"),
+        gate("tests", tests_survivor, status="fail"),
+        gate("lint", lint_failure, status="fail"),
+    ]
+    new = subtract_baseline(head, base)
+    assert [(n.gate, n.failure.file, n.failure.code) for n in new] == [
+        ("witness", survivor_a.file, "survived-mutant"),
+        ("witness", survivor_b.file, "survived-mutant"),
+    ]
+
+
 def test_a_pre_existing_failure_that_moved_thirty_lines_is_not_new():
     """The load-bearing test. A line-keyed implementation fails here.
 

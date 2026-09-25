@@ -3049,6 +3049,8 @@ def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it
     returned = runner(candidate)
 
     assert packaged.get("called") is True
+    # This candidate declares no `consumes`, so the runner never refuses it.
+    assert isinstance(returned, CellOutcome)
     assert returned.state == "MERGE_FAILED"
     # The line the operator reads. Replacing it with `pass` left the suite
     # green, and this is the only place a task's fate is rendered at all.

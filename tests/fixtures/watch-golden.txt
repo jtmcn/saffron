@@ -1,4 +1,5 @@
 # green: PLAN -> IMPLEMENT -> gates green -> REVIEW
+preflight: CLAUDE.md: none found at base_sha
 preflight: starting the proxy
 preflight: proxy at <LAN-ADDR>
 preflight: proxy reaches api.anthropic.com (401)
@@ -31,6 +32,7 @@ teardown
 teardown: exported 62 bytes to <TASK_DIR>/patch.diff
 
 # failing gate, repaired once, then no-progress -> EXHAUSTED
+preflight: CLAUDE.md: none found at base_sha
 preflight: starting the proxy
 preflight: proxy at <LAN-ADDR>
 preflight: proxy reaches api.anthropic.com (401)

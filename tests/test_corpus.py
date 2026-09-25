@@ -778,7 +778,12 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
         status="fail",
         tool="stub tests gate (probed)",
         collected=["t.py::test_a", "t.py::test_b"],
-        failures=[pre_existing, Failure(file="t.py", code="new", message="boom")],
+        # `counted=baseline.collected` asks whether any collected test
+        # notices, so this code must be a name the baseline collected.
+        failures=[
+            pre_existing,
+            Failure(file="t.py", code="t.py::test_a", message="boom"),
+        ],
         summary="probed: 2 failed",
     )
 
@@ -819,6 +824,7 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
         "probe",
         "reason",
         "failures",
+        "uncounted",
         "tool",
         "collected",
         "summary",
@@ -842,7 +848,7 @@ def test_the_driver_writes_each_probes_json_entry_from_the_shared_helper(
     assert distinct_fields["baseline_collected"] == 1
     assert distinct_fields["summary"] == "probed: 2 failed"
     assert distinct_fields["baseline_summary"] == "baseline: 1 failed"
-    assert distinct_fields["failures"] == ["new"]
+    assert distinct_fields["failures"] == ["t.py::test_a"]
     assert distinct_fields["baseline_failures"] == ["pre-existing"]
     assert distinct_fields["reason"] != distinct_fields["summary"]
 
