@@ -154,7 +154,7 @@ this decision rests on.
   6 and the protected path, each with its bound. §1.4 names its own.
 - **30** departs. Stack mode widens definitions in `CONTEXT.md`, §4.2 and
   §4.2.1. The specs that build each piece edit them. Until then the old
-  sentences stand.
+  sentences stand. ADR 4 and ADR 6 each point to this ADR's exceptions.
 - **34** upholds. It holds once the spec shows a layer the end review did not
   reach, or reached with an error, apart from a clean one.
 - **36** departs. When the reserve runs short, the end review covers layers

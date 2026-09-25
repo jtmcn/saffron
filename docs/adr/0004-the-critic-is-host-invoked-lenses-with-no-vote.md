@@ -80,6 +80,9 @@ Any confirmed blocker reaches `READY_FOR_REVIEW`, whether the implementer
 argued against it or fixed it and stayed green. So do a withdrawn set and a
 green fix. The operator adjudicates a confirmed blocker in the pull request.
 
+Inside a stack batch, ADR 7 takes four exceptions to this decision for its end
+review. Every in-cell critic keeps it whole.
+
 ## Principles
 
 - **4** upholds. No lens runs in the container the implementer had root in.
