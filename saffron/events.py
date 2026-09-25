@@ -898,7 +898,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("preflight: proxy reaches", _S, Preflight),
     _Family("preflight: building", _S, Preflight),
     _Family("preflight: probing", _S, Preflight),
-    _Family("preflight: claude_md digest or none found", _S, Preflight),
+    _Family("preflight: (claude_md digest, or CLAUDE.md: none found)", _S, Preflight),
     _Family("cell:", _S, Preflight),
     _Family("unstacked:", _TASK, Preflight),
     _Family("ceilings:", _RT, Ceilings),

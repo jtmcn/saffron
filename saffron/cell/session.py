@@ -1655,7 +1655,7 @@ def _drive_cell(
     claude_md = mirror_ops.file_at(mirror, spec.base_sha, "CLAUDE.md")
     _preflight(
         "claude_md",
-        hashlib.sha256(claude_md.encode()).hexdigest()
+        artifacts.hash_artifact(claude_md)
         if claude_md is not None
         else "CLAUDE.md: none found at base_sha",
     )

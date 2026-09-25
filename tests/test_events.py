@@ -1210,8 +1210,8 @@ def test_the_table_did_not_quietly_lose_a_row():
     kinds cover every call site, and losing a row silently is the failure
     that matters.
 
-    `SA-0085`, `SA-0125` and `SA-0126` each moved this count. The digest
-    item (`b-864a4d`) moves it again, by two."""
+    `SA-0085`, `SA-0125` and `SA-0126` each moved this count. `SA-0133`
+    moves it again, by two."""
     assert len(FAMILIES) == 67
     assert len({f.prefix for f in FAMILIES}) == 67
 

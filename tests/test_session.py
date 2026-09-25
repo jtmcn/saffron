@@ -5,7 +5,6 @@ import hashlib
 import ipaddress
 import itertools
 import json
-import re
 import shutil
 import subprocess
 import time
@@ -30,6 +29,7 @@ from saffron.phases import implement, rebut, review
 from saffron.phases import package as package_mod
 from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
+from tests.test_implement import _HEX_64, _no_reap
 
 
 def _git(repo, *args):
@@ -1233,6 +1233,7 @@ def _drive(
     agent_says=None,
     claude_md=None,
     base_claude_md=None,
+    # A list: each turn goes through the real `run_agent`, its request kept.
     real_run_agent=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
@@ -1250,9 +1251,6 @@ def _drive(
     test that needs a field `describe()` does not render (`Attempt.aborted`
     vs `Attempt.decision`, say).
 
-    `real_run_agent`: an optional list. Given one, each scripted turn is
-    fed to the real `implement.run_agent` instead of returned directly.
-    The raw request string it built lands in this list, in order.
     """
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
@@ -1337,16 +1335,13 @@ def _drive(
             )
             return runtime.Completed(0, "", "")
 
-        def _reap(_container, **_kwargs):
-            return runtime.Completed(0, "", "")
-
         return _REAL_RUN_AGENT(
             container,
             prompt=prompt,
             options=options,
             resume=resume,
             exec_stream=_exec_stream,
-            reap_cell=_reap,
+            reap_cell=_no_reap,
             **kwargs,
         )
 
@@ -7338,8 +7333,6 @@ def test_a_spec_absent_at_base_is_silent(tmp_path):
 
 # --- backlog item b-864a4d: a digest of the request, a digest of CLAUDE.md ---
 
-_HEX_64 = re.compile(r"^[0-9a-f]{64}$")
-
 
 def _digest_events(capture: list) -> list[str]:
     return [
@@ -7511,7 +7504,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
 def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
     monkeypatch, tmp_path
 ):
-    """AC3: one `Preflight` fact per task, step `claude_md`, holding the
+    """AC3: one `Preflight` event per task, step `claude_md`, holding the
     SHA-256 of the text `file_at` returned at `base_sha`.
 
     When there was none, the detail names `CLAUDE.md` and carries no
@@ -7528,11 +7521,11 @@ def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
         base_claude_md="base-commit rule\n",
         capture=capture_a,
     )
-    (fact_a,) = [
+    (event_a,) = [
         e for e in capture_a if isinstance(e, Preflight) and e.step == "claude_md"
     ]
-    assert fact_a.detail == hashlib.sha256(b"base-commit rule\n").hexdigest()
-    assert fact_a.detail != hashlib.sha256(b"base-commit rule").hexdigest()
+    assert event_a.detail == hashlib.sha256(b"base-commit rule\n").hexdigest()
+    assert event_a.detail != hashlib.sha256(b"base-commit rule").hexdigest()
 
     absent = tmp_path / "absent"
     cell_b = _stub_the_runtime(monkeypatch)
@@ -7544,11 +7537,11 @@ def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
         turns=[_turn(_block(_PLAN)), _turn()],
         capture=capture_b,
     )
-    (fact_b,) = [
+    (event_b,) = [
         e for e in capture_b if isinstance(e, Preflight) and e.step == "claude_md"
     ]
-    assert "CLAUDE.md" in fact_b.detail
-    assert not _HEX_64.match(fact_b.detail)
+    assert "CLAUDE.md" in event_b.detail
+    assert not _HEX_64.match(event_b.detail)
 
     empty = tmp_path / "empty"
     cell_c = _stub_the_runtime(monkeypatch)
@@ -7561,16 +7554,16 @@ def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
         base_claude_md="",
         capture=capture_c,
     )
-    (fact_c,) = [
+    (event_c,) = [
         e for e in capture_c if isinstance(e, Preflight) and e.step == "claude_md"
     ]
-    assert fact_c.detail == hashlib.sha256(b"").hexdigest()
+    assert event_c.detail == hashlib.sha256(b"").hexdigest()
 
 
 def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_path):
-    """AC2 + AC3, joined. `CLAUDE.md`'s system-prompt path is pinned to one
-    value. Two cells given the same base text log the same digests, and a
-    third given a different one logs different digests at every position."""
+    """AC4. The `system_prompt_path` uuid is pinned across three cells. Two
+    given the same base text log the same `CLAUDE.md` and request digests,
+    each matching its own requests. A third differs at every position."""
     import uuid as uuid_mod
 
     class _FixedUUID:
@@ -7579,9 +7572,10 @@ def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_p
 
     monkeypatch.setattr(implement, "uuid", _FixedUUID())
 
-    def _run(name: str, base_text: str) -> list[str]:
+    def _run(name: str, base_text: str) -> tuple[str, list[str]]:
         from saffron import events as events_mod
 
+        raw: list[str] = []
         cell = _stub_the_runtime(monkeypatch)
         _drive(
             monkeypatch,
@@ -7591,20 +7585,21 @@ def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_p
             use_default_emit=True,
             claude_md="irrelevant working-copy text\n",
             base_claude_md=base_text,
-            real_run_agent=[],
+            real_run_agent=raw,
         )
         log = events_mod.read_log(tmp_path / name / "out" / "SY-1")
-        return [
-            e.detail
-            for e in log
-            if isinstance(e, Agent) and not e.raw and _HEX_64.match(e.detail)
+        _assert_digests_match_requests(raw, log)
+        (claude_md,) = [
+            e.detail for e in log if isinstance(e, Preflight) and e.step == "claude_md"
         ]
+        return claude_md, _digest_events(log)
 
     same_text = "standing instructions apply here\n"
-    digests_a = _run("a", same_text)
-    digests_b = _run("b", same_text)
-    digests_c = _run("c", "an unrelated set of rules entirely\n")
+    claude_a, digests_a = _run("a", same_text)
+    claude_b, digests_b = _run("b", same_text)
+    claude_c, digests_c = _run("c", "an unrelated set of rules entirely\n")
 
+    assert claude_a == claude_b != claude_c
     assert len(digests_a) == 5
     assert digests_a == digests_b
     assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))
