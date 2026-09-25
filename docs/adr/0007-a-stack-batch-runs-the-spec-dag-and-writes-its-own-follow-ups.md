@@ -60,6 +60,10 @@ descendants, and reaches the operator. Each round's fresh review reads the
 revision beside the original, and a changed purpose it finds routes the same
 way. The batch never pauses for the operator.
 
+The spec prompts, the end-review lens prompts and the tags blockers route by
+are core's, in `saffron/agents/prompts/`. A target repo supplies none of them,
+so ADR 2 holds.
+
 **A stack batch runs spec text that is not at `base_sha`.** The text is a spec
 review's revision or a follow-up, and nothing else. Every spec the operator
 queued is first read at `base_sha`. Outside a stack batch, §4.2.1's input rule

@@ -96,7 +96,8 @@ and rebuilds no layer.
 
 **The seats become lenses.** `review.py` runs host-invoked lenses from prompt
 files (`LENSES`, `run_lens`), each a fresh session in a critic cell. The Spec
-and Standards seats become two lens prompts, taken from `REVIEW-PROMPT.md`.
+and Standards seats become two lens prompts in `saffron/agents/prompts/`.
+Core owns them, and the skill's `REVIEW-PROMPT.md` is the hand path's copy.
 They run once per reviewable layer, in a critic cell seeded at that layer's
 head. The host fills the template fields from the ledger. A layer's `{BASE}` is
 its predecessor's head. `{KNOWN}` is that layer's in-cell findings and its
@@ -143,9 +144,11 @@ summary, never as clean (principle 34).
 **Where they run.** Spec writing and spec review become host-invoked
 sessions in a critic cell. The cell is seeded at the tree the spec would be cut
 from. The writer never writes into `/work`. Its spec returns through the
-extraction turn and is hashed on arrival, as a plan is. Both prompts come from
-`.claude/agents/spec-writer.md` and `spec-reviewer.md`, so the hand path and
-the batch path share one text.
+extraction turn and is hashed on arrival, as a plan is. Both prompts are core's,
+in `saffron/agents/prompts/`, and so are the tags blockers route by. A target
+repo supplies none of them (ADR 2). This repo's `.claude/agents/spec-writer.md`
+and `spec-reviewer.md` become the hand path's copies. A test holds each pair
+to the same text, or the hand path reads core's copy.
 
 **Queued specs are reviewed before their cells.** At batch start one spec
 review runs per queued spec, up to K at once. A spec's first cell waits only
