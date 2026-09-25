@@ -174,9 +174,10 @@ this decision rests on.
   that exact edit and no other. Principle 6's answer covers it.
 - **49** departs. The implementer sees a named probe and can run it before it
   reports. The criterion probe its critic names stays hidden until REBUT.
-- **50** departs. The end-review lenses replace a delegate's hand review. A
-  qualified finding becomes code before any person reads it. The operator
-  reads it only as a layer of the stack.
+- **50** departs. Under ADR 4 the operator rules on a confirmed blocker before
+  anything acts on it. Here a qualified finding becomes code first. Each
+  follow-up is its own layer, and nothing merges. So the operator still rules
+  on every finding, by keeping or dropping its layer.
 - **54** upholds. It holds once the spec re-runs gate 0 and `parse_spec`'s
   refusals on every revised and follow-up spec, not only on files at
   `base_sha`.
