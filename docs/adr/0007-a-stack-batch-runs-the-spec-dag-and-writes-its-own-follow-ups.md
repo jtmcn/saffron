@@ -63,7 +63,8 @@ way. The batch never pauses for the operator.
 The spec prompts, the end-review lens prompts and the tags blockers route by
 are core's, in `saffron/agents/prompts/`. A target repo supplies none of them,
 so ADR 2 holds. They name no repo file, tool or URL. A repo's facts reach them
-as input the host fills from what the repo declares in `.saffron/`.
+as input the host fills from what the repo declares in `.saffron/`. The host
+reads those at the `base_sha` export, never at a layer's head (principle 43).
 
 **A stack batch runs spec text that is not at `base_sha`.** The text is a spec
 review's revision or a follow-up, and nothing else. Every spec the operator
@@ -71,9 +72,13 @@ queued is first read at `base_sha`. Outside a stack batch, §4.2.1's input rule
 holds unchanged.
 
 A revised spec's cell holds the base text at the spec's path. The implement
-prompt carries the revision, and the gates read the host's parsed copy, so the
-stale file decides nothing. An agent that reads the file sees text the host no
-longer runs.
+prompt carries the revision, and core's gates read the host's parsed copy. A
+repo gate that reads `.saffron/specs/` sees the base text. This repo's `dead`
+gate reads `pending_symbols` that way, so a revision's deferred names go
+unseen. A follow-up has no file there at all. The implementer and the
+criterion session can also read a contract the host no longer judges. That
+departs from principle 20, as ADR 3 records and backlog item 85 measured.
+`spec_drift` reports it on every revised spec.
 
 **One end review reads the whole stack once.** Two end-review lenses, Spec and
 Standards, read each layer. One join lens reads the stack under ADR 6's rubric.
@@ -81,8 +86,10 @@ Each layer's in-cell concerns join their findings as inputs. The
 host decides which findings qualify. A qualified finding is anchored, and any
 probe it carries survived. An end-review lens emits its block in the same turn
 as the work, with read-only tools, as ADR 4's lenses do. It inherits ADR 4's
-departure from principle 18. A spec writer returns its spec through a separate
-extraction turn, so it keeps principle 18.
+departure from principle 18, and so does the join lens. A spec writer returns
+its spec through a separate extraction turn. A spec review returns its tags
+the same way, since a tag decides whether a spec is revised. Both keep
+principle 18.
 
 **The end review takes four exceptions to ADR 4, and this ADR carries them.**
 Its lenses are not ADR 4's declared lenses. They run once per batch, not on
@@ -184,7 +191,7 @@ this decision rests on.
   is the seams around the follow-ups and the top layer, which it never sees.
 - **41** upholds. Core's prompts learn no repo's language or tools, and core
   demands nothing of a repo. The Standards lens reads the standards documents
-  a repo declares, and none when it declares none. A probe runs through the
+  a repo declares at `base_sha`, and none when it declares none. A probe runs through the
   repo's declared gates, never a named test runner.
 - **44** departs. The follow-up path has never run. The criterion probe that
   answers principles 6 and 49 has not run live either (ADR 3). Its cost and
@@ -200,8 +207,8 @@ this decision rests on.
   follow-up is its own layer, and nothing merges. So the operator still rules
   on every finding, by keeping or dropping its layer. Rejecting a follow-up is
   cheap only at the top. Dropping a lower one rebuilds every layer above it,
-  the finishing layer included, and §6.1's merge train re-runs the gates on
-  the result.
+  the finishing layer included. Today nothing re-gates that rebuild, which
+  is backlog item 97. §6.1's merge train would, once it is built.
 - **54** upholds. It holds once the spec re-runs gate 0 and `parse_spec`'s
   refusals on every revised and follow-up spec, not only on files at
   `base_sha`.
@@ -229,6 +236,9 @@ These are left to the specs that build it. The design record proposes an
 answer to each.
 
 - how blockers route by the spec review's tags, and the round bound.
+- how a revised or follow-up spec's fields reach a repo gate that reads
+  `.saffron/specs/`.
+- how a repo declares its standards documents in `.saffron/`.
 - how every gate 0 and `parse_spec` refusal re-runs on a revised or
   follow-up spec, and gate 0's "`spec_sha` moved" rule for a revised one.
 - what qualifies a finding with no probe, which kill rule a probe meets, and

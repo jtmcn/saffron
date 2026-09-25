@@ -99,7 +99,9 @@ files (`LENSES`, `run_lens`), each a fresh session in a critic cell. The Spec
 and Standards seats become two lens prompts in `saffron/agents/prompts/`.
 Core owns them, and they name no repo file or tool. The Standards lens reads
 the standards documents a repo declares in `.saffron/`, and none when it
-declares none (principle 41).
+declares none (principle 41). It reads them from the `base_sha` export, never
+from the layer's head, which that layer's agent could have written
+(principle 43).
 They run once per reviewable layer, in a critic cell seeded at that layer's
 head. The host fills the template fields from the ledger. A layer's `{BASE}` is
 its predecessor's head. `{KNOWN}` is that layer's in-cell findings and its
@@ -146,7 +148,8 @@ summary, never as clean (principle 34).
 **Where they run.** Spec writing and spec review become host-invoked
 sessions in a critic cell. The cell is seeded at the tree the spec would be cut
 from. The writer never writes into `/work`. Its spec returns through the
-extraction turn and is hashed on arrival, as a plan is. Both prompts are core's,
+extraction turn and is hashed on arrival, as a plan is. The spec review's
+tags return through their own extraction turn too (principle 18). Both prompts are core's,
 in `saffron/agents/prompts/`, and so are the tags blockers route by. A target
 repo supplies none of them (ADR 2). This repo's `.claude/agents/spec-writer.md`,
 `spec-reviewer.md` and the skill's `REVIEW-PROMPT.md` stay the hand path's
@@ -164,14 +167,17 @@ for its own review. Blockers route by their tag.
 - Every revised spec passes gate 0 and `parse_spec`'s refusals again before
   its cell (principle 54).
 - A revised spec's cell holds the base text at the spec's path. The implement
-  prompt carries the revision, and the gates read the host's parsed copy.
+  prompt carries the revision, and core's gates read the host's parsed copy.
   Writing the revision into `/work` would put a protected path in the task's
-  diff, so the stale file stays and decides nothing (principle 20).
+  diff, so the stale file stays. A repo gate that reads `.saffron/specs/`, as
+  `dead` reads `pending_symbols`, still sees the base text. So can the
+  implementer and the criterion session (principle 20, item 85).
 - `scope`, or no tag: the spec and its `depends_on` descendants are skipped
   and escalated.
 - Still blocked after round three: the spec and its descendants are skipped
   and escalated.
-- An `unmeasured` concern from check 3 routes as `witness`.
+- A concern that a criterion's witness cannot be measured routes as
+  `witness`.
 - Other concerns and notes go to the backlog pool.
 
 **Follow-ups take the same chain.** For each qualified group, the writer
