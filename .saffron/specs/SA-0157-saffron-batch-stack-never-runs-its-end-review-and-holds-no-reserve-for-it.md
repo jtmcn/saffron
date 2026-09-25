@@ -67,11 +67,16 @@ acceptance:
       read or `run_end_review` is caught. The callable then prints one line
       naming it. For every layer of that batch, it records each lens of
       `end_review.END_LENSES` with no `end_reviews` row yet as `error` at 0,
-      naming the raise, through `record_end_review`. It returns a `StackReview` with no join and one
-      `LayerReview` per layer, top down, holding those error reviews. The
-      witness drives a `GitError` from the export and from the `CLAUDE.md`
-      read, a `PolicyError` from the policy load, and a raise from
-      `run_end_review`.
+      naming the raise, through `record_end_review`. A raise from those
+      writes is caught too, and one more line names both raises. Either
+      way it returns a `StackReview` with no join and one `LayerReview`
+      per layer, top down. Each holds an error review for every lens,
+      naming the raise. A layer that held rows when the raise came says
+      so in each of its errors. The witness drives a `GitError` from the
+      export and from the `CLAUDE.md` read, and a `PolicyError` from the
+      policy load. It drives a raise from `run_end_review` after it
+      recorded one row, and a raise from `record_end_review` after one
+      from `run_end_review`.
     witness: tests/test_cli.py::test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_pinned_base
   - claim: >-
       `saffron batch` without `--stack` still hands `run_batch` its budget
@@ -174,9 +179,22 @@ peaked at $1.80.
    then records every layer's lenses as `error`, as criterion 1 states.
    That is the shape `SA-0153` gives a layer whose cell raised, so the
    layers read as unreviewed, never as clean. It finds the batch's layers
-   in `stack_layers` by `batch_key`, highest position first, and each
-   layer's task id by its record key. Its `emit` prints
-   each event's `describe` line, as `_default_emit` does.
+   in `stack_layers` by `batch_key`, ordered by `position` descending, and
+   each layer's task id by its record key. Neither `task_id` nor row
+   order is bound to position. Its `emit` prints each event's `describe` line,
+   as `_default_emit` does.
+   - **Its own writes can fail.** `review_joins` and `review_stack` catch
+     a raise from each lens step. So a raise out of `run_end_review` is in
+     practice a failed ledger or record write, and the fallback's writes
+     go to the same ledger. Wrap them in their own guard. On a second
+     raise, print a line naming both, stop writing, and still return the
+     error `StackReview`.
+   - **A layer written in part.** A raise can come after `run_end_review`
+     recorded some of a layer's rows. Write `error` only for a lens with
+     no row yet, since a second row for the same lens raises on the
+     primary key. Still return an error review for each of that layer's
+     lenses. Its error names the raise and says the layer's rows were
+     written first, so the layer never reads as not reached.
 2. **The wiring.** `_batch`'s `--stack` path builds the callable where it
    builds `_stack_runner`. It passes `run_stack_batch` the callable and a
    reserve of `--budget` times `end_review.RESERVE_SHARE`. A night whose
@@ -225,6 +243,10 @@ production caller, and `SA-0150` calls it. The chain runs `SA-0157`,
   gains an end-review lens too. Both files are forbidden here, and backlog
   item b-1adb50 files them by hand.
 - **The reserve on the queue page.** The stack view is `SA-0152`'s.
+- **Findings recorded before a raise.** A layer written in part keeps its
+  rows and findings in the ledger. The `StackReview` returns error reviews
+  for it, so `SA-0147` qualifies none of those findings this batch. They
+  are a residual, and this spec gives them no other reader.
 
 ## Notes for the agent
 
@@ -281,30 +303,40 @@ under the `gates_dir` it got reads `X: base`. It calls `agent` and asserts
 `RateLimited`. The `timeout_s` passed is `session.TURN_TIMEOUT_S`, and the
 `spec_id` is `end-review-7`.
 
-Last, it opens a second `Ledger` with a `MemoryRecord`. It records four
-batches of two layers each there, with `record_stack_layer`, the second
-layer on the first. It builds the callable with `cli._stack_end_review`
-over that ledger. It then runs four cases, each through
-`monkeypatch.context()` and on its own batch:
+Last, it opens a second `Ledger` over a `MemoryRecord` it keeps. It
+records five batches of two layers each there, with `record_stack_layer`,
+the second layer on the first. Each layer is a task in its own run of the
+batch. Batches 1 and 3 create and record the top layer first. Batches 2,
+4 and 5 create and record the bottom layer first. So neither `task_id`
+order nor row order matches position in every batch. Batch 2's bottom run
+also holds one task that is not a layer. It builds the callable with
+`cli._stack_end_review` over that ledger. It then runs five cases, each
+through `monkeypatch.context()` and on its own batch:
 
 | batch | replaced | raises |
 |---|---|---|
 | 1 | `git_mirror.export_saffron_dir` | `git_mirror.GitError("unreadable")` |
 | 2 | `cli.load_policy` | `PolicyError("unreadable")` |
 | 3 | `git_mirror.file_at` | `git_mirror.GitError("unreadable")` |
-| 4 | `end_review.run_end_review` | `RuntimeError("review broke")` |
+| 4 | `end_review.run_end_review` | records the top layer's `spec` lens as `reviewed` at 0.5 through `record_end_review`, then `RuntimeError("review broke")` |
+| 5 | `end_review.run_end_review`, and the ledger's `record_end_review` | `RuntimeError("review broke")`, and `OSError("record broke")` |
 
-For each it calls the callable with the batch's key and 10.5. The result
-has no join. Its layers are that batch's two keys, top then bottom. Each
-holds `spec` then `standards`, at 0.0, each with an error naming the
-raise. That batch's four `end_reviews` rows are `error` at 0.0, naming it.
-The output holds four lines that start `end review:`. These fail it, each
-measured on `_stack_end_review` alone:
+For each it calls the callable with the batch's key, 10.5 and `{}`. The
+result has no join. Its layers are that batch's two keys, top then bottom.
+Each holds `spec` then `standards`, at 0.0, each with an error naming the
+raise. In batch 4 the top layer's errors say its rows were written, and
+no other layer's do. Batches 1 to 4 each hold four `end_reviews` rows and
+four `end_review` facts in the `MemoryRecord`. Every row but batch 4's
+`reviewed` one is `error` at 0.0, naming the raise. Batch 5 holds no row
+and no fact. The output holds six lines that start `end review:`. Each
+holds `unreadable` or `review broke`, and one of them holds `record broke`.
+
+These fail it, each measured on `_stack_end_review` alone:
 
 - `CLAUDE.md` read from the mirror's `HEAD`, or from the operator's
   repository
-- `.saffron/` exported at the mirror's `HEAD`, for the policy or for the
-  cell's gates directory alone
+- `.saffron/` exported at the mirror's `HEAD`, for both, for the policy
+  alone or for the cell's gates directory alone
 - `CONTEXT.md` read from the operator's repository
 - an agent with no `stop_on_rejected`, or no `timeout_s`
 - an agent with no `spec_id`, or one bound to another id
@@ -313,11 +345,26 @@ measured on `_stack_end_review` alone:
 - `run_end_review`'s raise unguarded
 - the error rows written and the error reviews not returned, or the reverse
 - every batch's layers, or the layers bottom up
+- the layers found through `runs.batch_id`, which adds the task that is
+  not a layer
+- the layers ordered by `task_id` or by row order, either way
+- the error rows inserted by SQL, which writes no fact
 - the Spec lens alone
 - the error with its type and not its message
+- a line that does not name the raise
+- the fallback's writes unguarded, so batch 5's second raise escapes
+- a second raise that goes unprinted, or that returns `None`
+- a layer written in part whose errors do not say so
+- a layer written in part left out of the result
+- a second row written for a lens that has one
 - a callable that drops what `run_end_review` returns
 - `specs` not passed through
 - `max_turns` and `budget_usd` swapped
+
+Two builds the first review listed are subsumed by the guard, and both
+still fail the witness. A read outside the guard lets batch 1's
+`GitError` escape. A caught raise returned as `None` has no `join` to
+read.
 
 These are unmeasured, because `SA-0144`'s `--stack` path is not at
 `f0c8f82d`:
@@ -339,14 +386,16 @@ The right build passed, and every wrong version listed failed. After the
 first spec review of `SA-0154` it ran again, with the `spec_id`, the
 guarded reads and the notes. After this spec's first review it ran again.
 That run added a `GitError` from two reads and the raise from
-`run_end_review`. It also added the error rows on a second ledger.
+`run_end_review`. It also added the error rows on a second ledger. After
+the second review it ran again on 2026-09-24, with batches 4 and 5 and the
+arrangement above. With every batch's top layer created first, the
+`task_id` and row-order builds that read ascending passed. The mixed
+arrangement fails both directions of each.
 
 **What the witness leaves undriven.** The callable's `emit`, and
-`end_review=None` on a night whose readiness fails. A raise from
-`run_end_review` after it recorded some rows is undriven too. Record
-`error` only for a lens with no `end_reviews` row yet, since a second row
-for the same lens raises on the primary key. Build each as the Problem
-states.
+`end_review=None` on a night whose readiness fails. A raise from reading
+`stack_layers` in the fallback is undriven too, and escapes. Build each as
+the Problem states.
 
 **The `prose` gate** reads every new comment and docstring
 (`.saffron/gates/prose.py`). Write no em dash, semicolon, contraction,
@@ -358,6 +407,7 @@ ten lines.
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
 prototype of this change, with its witness formatted by `ruff format`,
-measured 858 changed tokens with `size_gate` itself. `saffron/cli.py` took
-271 and `tests/test_cli.py` 587. That is 29% of the ceiling.
+measured 1112 changed tokens with `size_gate` itself on 2026-09-24.
+`saffron/cli.py` took 334 and `tests/test_cli.py` 778. That is 37% of the
+ceiling.
 Reuse `tests/test_cli.py`'s own git helpers where it has them.
