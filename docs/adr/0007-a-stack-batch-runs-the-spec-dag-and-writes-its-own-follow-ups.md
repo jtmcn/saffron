@@ -106,8 +106,10 @@ This ADR narrows §1.4's refusal, and §1.4's entry says so. An agent writes a
 follow-up only from a qualified finding, inside a batch the operator started.
 An agent revises a queued spec only for a witness or buildability blocker,
 within the round bound. ADR 6's rule that the operator writes each new member
-spec stands. A follow-up has no `depends_on`, so it is never a member spec. A
-revised member spec is not a new one.
+spec stands. A follow-up has no `depends_on`, so it is never a member spec.
+An agent revising a member spec is an exception to ADR 6, because §1.4's
+reason reaches it. It takes the same bounds as any queued spec. ADR 6's
+composite review still reads the joins a revision moves.
 
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md` holds the design
 this decision rests on.
