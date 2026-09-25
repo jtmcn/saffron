@@ -228,11 +228,12 @@ def _resolve_stacked_on(
 
 @dataclass(frozen=True, kw_only=True)
 class Refused:
-    """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**),
-    for an unresolved `consumes` entry the reader could check before any
-    turn was spent. Carries only `reason`, the same text `run_task` prints
-    on the refused line. No run and no task row exist for a caller to read
-    anything else back from."""
+    """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**).
+
+    A `consumes` entry did not resolve at the tree base, or the reader could
+    not read it there. Carries only `reason`, the same text `run_task`
+    prints on the refused line. No run and no task row exist for a caller
+    to read anything else back from."""
 
     reason: str
 
@@ -269,7 +270,8 @@ def run_task(
     `READY_FOR_REVIEW` every packaged task would otherwise report.
 
     Returns `Refused` instead, before any cell exists, when `spec.consumes`
-    names something the tree base does not resolve.
+    names something the tree base does not resolve. A tree base the mirror
+    does not hold as a commit raises `GitError`.
     """
     if emit is None:
         # Print plus the task's own log, the shape `session._default_emit` and

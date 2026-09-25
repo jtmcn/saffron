@@ -1,9 +1,11 @@
-"""Witnesses for `consumes:` (SA-0135).
+"""Witnesses for `consumes:` (SA-0135, SA-0136).
 
 Covers the field on `Spec` and the fixture spec that declares it. Covers
 `run_task`'s pre-cell refusal for an entry that does not resolve at the
 task's tree base. Also covers `saffron cell` and a batch, the two callers
-that must survive `run_task`'s widened return type.
+that must survive `run_task`'s widened return type. `SA-0136` adds the
+malformed shapes refused at load, the refusal for an unreadable entry, and
+`has_commit`.
 
 `Refused` and `unresolved_consumes` are imported inside each test body that
 needs them, never here: a module-scope import of a name this spec adds would
@@ -658,6 +660,31 @@ def test_an_unreadable_consumed_entry_refuses_the_task_and_names_it(
     assert calls == []
     expected = ", ".join(entries[:-1])
     assert result.reason == f"{sha[:12]} does not resolve {expected}"
+
+    # A tree base that names a tree, not a commit, is an error before any read.
+    tree = git(repo, "rev-parse", f"{sha}^{{tree}}")
+
+    def _no_cell(*_a, **_k):
+        raise AssertionError("the cell ran on a tree base that is not a commit")
+
+    monkeypatch.setattr(task_module, "run_one_cell", _no_cell)
+    with pytest.raises(GitError):
+        task_module.run_task(
+            _consumes_spec("SY-3", ["real.py:run_task"]),
+            "s" * 40,
+            ceilings=_CEILINGS,
+            base=PinnedBase(
+                mirror=mirror, url="https://github.com/o/r.git", base_sha=tree
+            ),
+            repo_id=None,
+            repo=repo,
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+            token=None,
+        )
+    monkeypatch.setattr(
+        task_module, "run_one_cell", lambda spec, **k: calls.append(spec)
+    )
 
     blob = git(repo, "rev-parse", f"{sha}:real.py")
     loose = mirror / "objects" / blob[:2] / blob[2:]
