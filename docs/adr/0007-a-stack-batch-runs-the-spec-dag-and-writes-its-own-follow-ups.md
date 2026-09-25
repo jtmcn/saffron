@@ -70,6 +70,11 @@ review's revision or a follow-up, and nothing else. Every spec the operator
 queued is first read at `base_sha`. Outside a stack batch, §4.2.1's input rule
 holds unchanged.
 
+A revised spec's cell holds the base text at the spec's path. The implement
+prompt carries the revision, and the gates read the host's parsed copy, so the
+stale file decides nothing. An agent that reads the file sees text the host no
+longer runs.
+
 **One end review reads the whole stack once.** Two end-review lenses, Spec and
 Standards, read each layer. One join lens reads the stack under ADR 6's rubric.
 Each layer's in-cell concerns join their findings as inputs. The

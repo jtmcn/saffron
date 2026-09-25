@@ -163,6 +163,10 @@ for its own review. Blockers route by their tag.
   that allowed the revision is a claim (principle 15).
 - Every revised spec passes gate 0 and `parse_spec`'s refusals again before
   its cell (principle 54).
+- A revised spec's cell holds the base text at the spec's path. The implement
+  prompt carries the revision, and the gates read the host's parsed copy.
+  Writing the revision into `/work` would put a protected path in the task's
+  diff, so the stale file stays and decides nothing (principle 20).
 - `scope`, or no tag: the spec and its `depends_on` descendants are skipped
   and escalated.
 - Still blocked after round three: the spec and its descendants are skipped
