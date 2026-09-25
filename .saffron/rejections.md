@@ -948,3 +948,85 @@ delegate verified each one before it was fixed or kept.
 - `SA-0128` (#483): repair pinned three test ids to the old ceilings to keep
   `census` green.
   **Bucket 2.** **Open:** item b-f30189.
+
+## 2026-09-25, `SA-0133` to `SA-0140` (the spec loop's run 16, stack #507 to #505)
+
+Run 16 of the spec loop. These are what the two independent seats found after
+each cell and the in-cell critic did not raise, or raised below blocker. The
+delegate verified each one before it was fixed or kept. `SA-0129` (#502) was
+taken by hand, so no critic ran on it and it has no lines here.
+
+- `SA-0140` (#501): witness 1 let a prompt file sized under the threshold
+  pass, so a wrong bound survived.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #501.
+- `SA-0140` (#501): no witness drove the runner's unlink when the session
+  raised.
+  **Bucket 1.** **Landed:** a review commit on #501.
+- `SA-0140` (#501): a test module docstring described the old behaviour.
+  **Bucket 3**, a claim no gate reads. **Landed:** a review commit on #501.
+- `SA-0140` (#501): the new tests restated helpers the suite already holds.
+  **Bucket 2**, one source. **Landed:** a review commit on #501.
+- `SA-0139` (#504): a module docstring called a base survivor "not
+  inherited", against `CONTEXT.md`.
+  **Bucket 2**, vocabulary no gate reads in Python. **Landed:** a review
+  commit on #504.
+- `SA-0139` (#504): the subtraction lost its counting rationale, which the
+  cell cut to fit the docstring limit.
+  **Bucket 2**, a `CLAUDE.md` invariant. **Landed:** a review commit on #504.
+- `SA-0139` (#504): `_counts` named something other than what it returns.
+  **Bucket 2.** **Landed:** a review commit on #504.
+- `SA-0139` (#504): `is_no_progress`'s docstring was false.
+  **Bucket 3**, a claim no gate reads. **Landed:** a review commit on #504.
+- `SA-0137` (#505): an empty-tree `attr.tree` pin passed the witness and
+  dropped the repo's committed attributes.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #505.
+- `SA-0137` (#505): the pin's comment limited the hazard to global config.
+  **Bucket 3**, a claim no gate reads. **Landed:** a review commit on #505.
+- `SA-0137` (#505): `harness/recovery.py`'s `pinned_diff` lacks the same pin.
+  **Bucket 2**, one source. **Open:** item b-9ead75.
+- `SA-0134` (#507): a `file_at` `GitError` caught as unresolved passed every
+  witness.
+  **Bucket 1.** **Landed:** a review commit on #507.
+- `SA-0134` (#507): a bare `"040000"` literal named no mode.
+  **Bucket 2.** **Landed:** a review commit on #507.
+- `SA-0135` (#510): no witness pinned that an empty `consumes` calls nothing.
+  **Bucket 1.** **Landed:** a review commit on #510.
+- `SA-0135` (#510): a docstring bullet was false.
+  **Bucket 3**, a claim no gate reads. **Landed:** a review commit on #510.
+- `SA-0133` (#512): a `Preflight` event was called a fact.
+  **Bucket 2**, vocabulary no gate reads in Python. **Landed:** a review
+  commit on #512.
+- `SA-0133` (#512): a `hashlib` call restated `artifacts.hash_artifact`.
+  **Bucket 2**, one source. **Landed:** a review commit on #512.
+- `SA-0133` (#512): the new tests restated helpers the suite already holds.
+  **Bucket 2**, one source. **Landed:** a review commit on #512.
+- `SA-0133` (#512): a `FAMILIES` row named no shape the log renders.
+  **Bucket 1.** **Landed:** a review commit on #512.
+- `SA-0133` (#512): `_drive`'s docstring grew from 15 to 19 lines and the
+  `prose` gate counted no new hit.
+  **Bucket 1**, the `prose` gate. **Landed:** a review commit on #512.
+  **Open:** item b-e88930.
+- `SA-0133` (#512): criterion 4's witness never read the `CLAUDE.md` digest.
+  The critic raised it, and a probe killed through another test demoted it.
+  **Bucket 1**, the probe runner. **Landed:** a review commit on #512, and
+  item b-19b255 by #515.
+- `SA-0136` (#514): no witness pinned `run_task`'s `has_commit` guard.
+  **Bucket 1.** **Landed:** a review commit on #514.
+- `SA-0136` (#514): the `Refused` and `run_task` docstrings misdescribed
+  them.
+  **Bucket 3**, a claim no gate reads. **Landed:** a review commit on #514.
+- `SA-0136` (#514): `saffron/cli.py` checks inline whether a commit exists,
+  which `has_commit` now does.
+  **Bucket 2**, one source. **Open:** item b-79d951.
+- `SA-0138` (#515): criterion 2 could not see `uncounted` truncated on the
+  unproven path.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #515.
+- `SA-0138` (#515): the unproven reason merged ADR 0003's two cases.
+  **Bucket 3.** **Landed:** a review commit on #515.
+- `SA-0138` (#515): the module and `added_tests` docstrings were false.
+  **Bucket 3**, a claim no gate reads. **Landed:** a review commit on #515.
+- `SA-0138` (#515): criterion 4's witness passed with `base_results` set to
+  `latest.results`. The critic raised it, and a probe killed through another
+  test demoted it.
+  **Bucket 1**, the probe runner. **Landed:** a review commit on #515, and
+  item b-19b255 by #515.
