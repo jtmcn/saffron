@@ -40,6 +40,15 @@ class GitError(RuntimeError):
     """A git invocation that did not do what was asked."""
 
 
+class UnreadablePath(GitError):
+    """`file_at` found something at the path it cannot read as text. That
+    covers a submodule, a symlink leaving the tree, or one whose target
+    does not resolve to a regular file. It is a `GitError` for every
+    existing catcher. It is named so a caller that wants only this
+    exception can catch it without also catching a broken git
+    invocation."""
+
+
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a git command, wrapping a missing `git` binary as GitError too."""
     try:
@@ -246,18 +255,30 @@ def file_at(mirror: Path, sha: str, path: str) -> str | None:
         target = _git(mirror, "show", f"{sha}:{path}")
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
         if posixpath.isabs(resolved) or resolved.startswith(".."):
-            raise GitError(
+            raise UnreadablePath(
                 f"{path} at {sha[:12]}: symlink target {target!r} leaves the tree"
             )
         if _ls_tree_mode(mirror, sha, resolved) not in _REGULAR_MODES:
-            raise GitError(
+            raise UnreadablePath(
                 f"{path} at {sha[:12]}: symlink target {resolved!r} is not a "
                 "regular file"
             )
         return _git(mirror, "show", f"{sha}:{resolved}", strip=False)
-    raise GitError(
+    raise UnreadablePath(
         f"{path} at {sha[:12]}: mode {mode} is not a regular file or symlink"
     )
+
+
+def has_commit(mirror: Path, sha: str) -> bool:
+    """Whether `mirror` holds `sha` as a commit.
+
+    `_run`, not `_git`. A `sha` the mirror lacks, or one naming a tree or
+    a blob, is `False` here, not a `GitError`. The caller that wants an
+    error for a missing tree base raises it itself, once. This function
+    does not guess that every caller wants the same thing.
+    """
+    completed = _run(["git", "-C", str(mirror), "cat-file", "-e", f"{sha}^{{commit}}"])
+    return completed.returncode == 0
 
 
 def _word_pattern(name: str) -> re.Pattern[str]:

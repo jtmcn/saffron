@@ -12,9 +12,13 @@ fail collection with the source reverted, and `revert` reads that as `skip`.
 
 from __future__ import annotations
 
+import json
+import locale
+import os
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from saffron import cli
 from saffron import task as task_module
@@ -60,6 +64,32 @@ def _frontmatter(*, depends_yaml: str = "", consumes_yaml: str = "") -> str:
         "---\n\n"
         "## Acceptance criteria\n- [ ] it works\n"
     )
+
+
+def _entry_yaml(*entries: str) -> str:
+    """A `consumes:` block, each entry quoted so it reads as a scalar rather
+    than a YAML mapping or a parse error (measured 2026-09-23)."""
+    lines = "".join(f"  - {json.dumps(entry)}\n" for entry in entries)
+    return f"consumes:\n{lines}"
+
+
+def _load_ok(entry: str) -> None:
+    text = _frontmatter(
+        depends_yaml="depends_on: [SA-0001]\n", consumes_yaml=_entry_yaml(entry)
+    )
+    assert parse_spec(text).consumes == [entry]
+
+
+def _load_refused(entry: str) -> None:
+    text = _frontmatter(
+        depends_yaml="depends_on: [SA-0001]\n", consumes_yaml=_entry_yaml(entry)
+    )
+    with pytest.raises(SpecError) as excinfo:
+        parse_spec(text)
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, ValidationError)
+    msg = cause.errors()[0]["msg"]
+    assert repr(entry) in msg
 
 
 def test_a_spec_declares_what_it_consumes_and_needs_a_parent_to_consume_from(
@@ -460,3 +490,218 @@ def test_a_batch_steps_over_a_refused_task(ledger, repo_id):
 
     assert reason2 == "INFRASTRUCTURE"
     assert infra_runner.calls == infra[:3]
+
+
+# --------------------------------------------------------- shapes, at load
+
+
+def test_an_empty_consumed_entry_is_refused_at_load():
+    _load_refused("")
+    _load_ok("a")
+
+
+def test_a_consumed_entry_with_an_empty_path_is_refused_at_load():
+    _load_refused(":run_task")
+    _load_ok("a.py:run_task")
+
+
+def test_a_consumed_entry_with_an_empty_name_is_refused_at_load():
+    _load_refused("a.py:")
+    _load_ok("a.py:x")
+
+
+def test_an_absolute_consumed_path_is_refused_at_load():
+    for entry in ("/a.py", "/a.py:run_task"):
+        _load_refused(entry)
+    for entry in ("a.py", "a.py:run_task"):
+        _load_ok(entry)
+
+
+def test_a_bare_dot_consumed_path_is_refused_at_load():
+    for entry in (".", ".:run_task"):
+        _load_refused(entry)
+    for entry in (".github", ".github:run_task"):
+        _load_ok(entry)
+
+
+def test_a_consumed_path_with_a_dot_segment_is_refused_at_load():
+    for entry in (
+        "pkg/./mod.py",
+        "pkg/./mod.py:run_task",
+        "pkg/.",
+        "pkg/.:run_task",
+        "./mod.py",
+        "./mod.py:run_task",
+    ):
+        _load_refused(entry)
+    for entry in (
+        "pkg/.hidden/mod.py",
+        "pkg/.hidden/mod.py:run_task",
+        "pkg/v1./mod.py",
+        "pkg/v1./mod.py:run_task",
+    ):
+        _load_ok(entry)
+
+
+def test_a_consumed_path_with_a_dot_dot_segment_is_refused_at_load():
+    for entry in (
+        "pkg/../mod.py",
+        "pkg/../mod.py:run_task",
+        "pkg/..",
+        "pkg/..:run_task",
+        "../mod.py",
+        "../mod.py:run_task",
+        "..",
+        "..:run_task",
+    ):
+        _load_refused(entry)
+    for entry in (
+        "pkg/..hidden/mod.py",
+        "pkg/..hidden/mod.py:run_task",
+        "pkg/v1../mod.py",
+        "pkg/v1../mod.py:run_task",
+    ):
+        _load_ok(entry)
+
+
+def test_a_consumed_path_with_an_empty_segment_is_refused_at_load():
+    for entry in ("pkg//mod.py", "pkg//mod.py:run_task"):
+        _load_refused(entry)
+    for entry in ("pkg/mod.py", "pkg/mod.py:run_task"):
+        _load_ok(entry)
+
+
+def test_a_consumed_path_ending_in_a_slash_is_refused_at_load():
+    for entry in ("pkg/", "pkg/:run_task", "pkg/:Foo::bar"):
+        _load_refused(entry)
+    for entry in ("pkg", "pkg:run_task", "a.py:Foo::bar"):
+        _load_ok(entry)
+
+
+# --------------------------------------------------------- unreadable entries
+
+
+def test_an_unreadable_consumed_entry_refuses_the_task_and_names_it(
+    tmp_path, monkeypatch
+):
+    from saffron.repos.mirror import UnreadablePath, unresolved_consumes
+    from saffron.task import Refused
+
+    repo = _plain_repo(tmp_path, "unreadable")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "a.md").write_text("doc\n")
+    (repo / "real.py").write_text("run_task\n")
+    os.symlink("real.py", repo / "link.md")
+    os.symlink("link.md", repo / "hop.md")
+    os.symlink("docs", repo / "dir.md")
+    os.symlink("missing.md", repo / "gone.md")
+    os.symlink("../outside", repo / "out.md")
+    (repo / "bytes.py").write_bytes(b"\xff\xfe")
+    os.symlink("bytes.py", repo / "bytes_link.py")
+
+    git(repo, "add", "-A")
+    # Staged right before the commit: a later `add -A` would remove it again,
+    # since nothing exists at `sub` in the worktree (git 2.54.0, 2026-09-24).
+    git(repo, "update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},sub")
+    git(repo, "commit", "-qm", "unreadable entries")
+    sha = git(repo, "rev-parse", "HEAD")
+    mirror = ensure_mirror(repo, tmp_path / "unreadable.git")
+
+    entries = [
+        "sub:x",
+        "out.md:x",
+        "gone.md:x",
+        "absent.py:x",
+        "dir.md:x",
+        "hop.md:x",
+        "bytes.py:x",
+        "bytes_link.py:x",
+        "real.py:run_task",
+    ]
+
+    for entry in ("sub:x", "out.md:x", "gone.md:x", "dir.md:x", "hop.md:x"):
+        with pytest.raises(UnreadablePath):
+            unresolved_consumes(mirror, sha, [entry])
+
+    try:
+        b"\xff\xfe".decode(locale.getpreferredencoding(False))
+        decodes_the_bytes = True
+    except (UnicodeDecodeError, LookupError):
+        decodes_the_bytes = False
+    if not decodes_the_bytes:
+        for entry in ("bytes.py:x", "bytes_link.py:x"):
+            with pytest.raises(UnicodeDecodeError):
+                unresolved_consumes(mirror, sha, [entry])
+
+    assert unresolved_consumes(mirror, sha, ["absent.py:x"]) == ["absent.py:x"]
+
+    calls: list[object] = []
+    monkeypatch.setattr(
+        task_module, "run_one_cell", lambda spec, **k: calls.append(spec)
+    )
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", lambda *a, **k: _NO_PUSH)
+
+    ledger = Ledger(tmp_path / "l.db")
+    spec = _consumes_spec("SY-1", entries)
+    result = task_module.run_task(
+        spec,
+        "s" * 40,
+        ceilings=_CEILINGS,
+        base=PinnedBase(mirror=mirror, url="https://github.com/o/r.git", base_sha=sha),
+        repo_id=None,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+        token=None,
+    )
+    assert isinstance(result, Refused)
+    assert calls == []
+    expected = ", ".join(entries[:-1])
+    assert result.reason == f"{sha[:12]} does not resolve {expected}"
+
+    blob = git(repo, "rev-parse", f"{sha}:real.py")
+    loose = mirror / "objects" / blob[:2] / blob[2:]
+    assert loose.exists()
+    loose.unlink()
+
+    only_real = _consumes_spec("SY-2", ["real.py:run_task"])
+    with pytest.raises(GitError):
+        task_module.run_task(
+            only_real,
+            "s" * 40,
+            ceilings=_CEILINGS,
+            base=PinnedBase(
+                mirror=mirror, url="https://github.com/o/r.git", base_sha=sha
+            ),
+            repo_id=None,
+            repo=repo,
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+            token=None,
+        )
+    assert calls == []
+
+
+def test_has_commit_answers_whether_the_mirror_holds_a_commit(tmp_path):
+    from saffron.repos.mirror import has_commit
+
+    repo = _plain_repo(tmp_path, "has-commit")
+    (repo / "a.py").write_text("x\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "first")
+    first = git(repo, "rev-parse", "HEAD")
+    tree = git(repo, "rev-parse", f"{first}^{{tree}}")
+
+    git(repo, "checkout", "-qb", "other", first)
+    (repo / "b.py").write_text("y\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "second")
+    second = git(repo, "rev-parse", "HEAD")
+    git(repo, "checkout", "-q", "main")
+
+    mirror = ensure_mirror(repo, tmp_path / "has-commit.git")
+
+    assert has_commit(mirror, first) is True
+    assert has_commit(mirror, second) is True
+    assert has_commit(mirror, "0" * 40) is False
+    assert has_commit(mirror, tree) is False

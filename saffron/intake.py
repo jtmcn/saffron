@@ -181,6 +181,34 @@ class Spec(BaseModel):
         """`type` under the name `CellSpec` and the gate suite read it by."""
         return self.type
 
+    @field_validator("consumes")
+    @classmethod
+    def _consumes_entries_are_well_formed(cls, value: list[str]) -> list[str]:
+        """Refuse a shape the reader would either choke on or false-pass.
+
+        Split at the first colon. An empty entry, an empty path or an empty
+        name is refused. So is a path that is not canonical: repo-relative,
+        its `/`-split segments all non-empty and none `.` or `..`. That
+        covers an absolute path, a bare `.` or `..`, and a `.` or `..`
+        segment anywhere. It also covers a path ending in `/` or holding
+        `//`. A segment that only starts or ends with a dot, like `.github`
+        or `pkg/v1./mod.py`, stays untouched.
+        """
+        for entry in value:
+            if not entry:
+                raise ValueError(f"consumes entry {entry!r} is empty")
+            path, sep, name = entry.partition(":")
+            if not path:
+                raise ValueError(f"consumes entry {entry!r} has an empty path")
+            if sep and not name:
+                raise ValueError(f"consumes entry {entry!r} has an empty name")
+            segments = path.split("/")
+            if any(segment == "" or segment in (".", "..") for segment in segments):
+                raise ValueError(
+                    f"consumes entry {entry!r} has a path that is not canonical"
+                )
+        return value
+
     @model_validator(mode="after")
     def _consumes_needs_a_parent(self) -> Spec:
         """A `consumes` entry names something a parent built. A spec with no

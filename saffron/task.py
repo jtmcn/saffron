@@ -48,7 +48,12 @@ from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
-from saffron.repos.mirror import unresolved_consumes
+from saffron.repos.mirror import (
+    GitError,
+    UnreadablePath,
+    has_commit,
+    unresolved_consumes,
+)
 from saffron.scheduler import DEPENDENCY_WAITING_STATES
 
 
@@ -336,10 +341,18 @@ def run_task(
         max_attempts=ceilings.max_attempts,
         max_turns=ceilings.max_turns,
     )
-    # A `consumes` entry resolves against the one tree base `CellSpec` names.
+    # A `consumes` entry resolves against the tree base `CellSpec` names.
+    # An entry the reader cannot read joins the unresolved ones by name.
     if spec.consumes:
         tree_base = cell_spec.tree_base
-        unresolved = unresolved_consumes(base.mirror, tree_base, spec.consumes)
+        if not has_commit(base.mirror, tree_base):
+            raise GitError(f"{tree_base} is not a commit {base.mirror} holds")
+        unresolved: list[str] = []
+        for entry in spec.consumes:
+            try:
+                unresolved += unresolved_consumes(base.mirror, tree_base, [entry])
+            except (UnreadablePath, UnicodeDecodeError):
+                unresolved.append(entry)
         if unresolved:
             reason = f"{tree_base[:12]} does not resolve {', '.join(unresolved)}"
             print(f"{spec.id:<10} refused  {reason}")
