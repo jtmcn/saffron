@@ -181,7 +181,7 @@ Build three things.
      `fixes`, `criterion`, `file` and `line`.
    - `read_spec_review(session) -> SpecReview`, as criterion 1 says. It
      checks each finding's `fixes` by name on the finding it builds, so
-     `saffron/` reads the field. `SA-0150` routes on it.
+     `saffron/` reads the field. `SA-0164` routes on it.
    - `spec_review_route(review)`, which returns `"wait"`, `"run"`,
      `"escalate"` or `"error"`, as criterion 1 says.
 2. **One keyword on `run_stack_batch`.** `review`, a callable taking a
@@ -203,13 +203,13 @@ Build three things.
   proxy names per cell, in `saffron/cell/**`, and a later spec. The
   operator files that backlog item.
 - **Revision rounds.** A `build` or `witness` blocker gets up to three
-  rounds by an agent that revises the spec. That is `SA-0150`'s, because
+  rounds by an agent that revises the spec. That is `SA-0164`'s, because
   it needs the spec writer. Here every blocker routes `escalate`. The read
-  already keeps and checks each `fixes`. So `SA-0150` adds a `"revise"`
+  already keeps and checks each `fixes`. So `SA-0164` adds a `"revise"`
   route in `spec_review_route` and leaves `SpecReview` and the read as
   they are.
 - **An `unmeasured` concern.** The design routes it as `witness`
-  (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:168`). With no
+  (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:179`). With no
   revision here, it routes `run`, as any concern does.
 - **The session, its facts and its caller.** The facts are `SA-0155`'s, and
   the session and its caller are `SA-0156`'s. Nothing
@@ -258,7 +258,7 @@ the ` unreviewed  ` line.
 **`tests/` is not scanned by `dead`** (`.saffron/gates/dead.py:4-5`). So
 every new name in `saffron/spec_review.py` needs a reader in `saffron/`.
 `batch.py` reading each one is enough. `fixes` is read only by the check
-in the read until `SA-0150` routes on it, so it is a `pending_symbols`
+in the read until `SA-0164` routes on it, so it is a `pending_symbols`
 entry too.
 
 **Criterion 1's witness** builds each session with `json.dumps` inside a

@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0150, SA-0151, SA-0152, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159, SA-0160, SA-0161, SA-0162, SA-0164, SA-0165, SA-0167, SA-0168, SA-0169, SA-0170, SA-0173, SA-0174]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -111,3 +111,13 @@ escalations.
   the predecessor's head, with `spec-reviewer.md` read at the pinned base.
   It builds the mint `saffron batch --stack` passes, and runs each cell on
   the task its review is recorded on, minted or resumed.
+- 2026-09-25: build steps 6 to 9 are written, and `SA-0150` split into
+  eleven specs past the size margin. The chain runs `SA-0155`, `SA-0168`,
+  `SA-0169`, `SA-0156`, `SA-0150`, `SA-0160`, `SA-0164`, `SA-0161`,
+  `SA-0173`, `SA-0165`, `SA-0162`, `SA-0151`, `SA-0174`, `SA-0167`,
+  `SA-0170`, `SA-0152`.
+- 2026-09-25: operator decisions. A stack batch mints a fresh task for
+  each spec every night (`SA-0155`, `SA-0168`). The spec review and writer
+  hold `Bash` in their critic cell, run as an unprivileged account whose
+  cell alone gets `CAP_SETUID` and `CAP_SETGID` (`SA-0169`). Prompt paths
+  are declared in `policy.yaml` (`SA-0156`, `SA-0160`).

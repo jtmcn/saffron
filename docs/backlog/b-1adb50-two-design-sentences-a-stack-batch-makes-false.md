@@ -6,7 +6,7 @@ tier: 2
 by_hand: true
 filed: 2026-09-23
 closed:
-specs: []
+specs: [SA-0151, SA-0156, SA-0160, SA-0165, SA-0169]
 prs: []
 commits: []
 cites: [§4.2.1, §6]
@@ -42,3 +42,10 @@ deadline plus one task plus its end review. Each cites ADR 7.
 ## Record
 
 - 2026-09-23: filed from the spec reviews of `SA-0149` and `SA-0152`.
+- 2026-09-25: more hand edits the last build specs need. The finish and
+  the follow-up writer run past `--until` (`SA-0151`, `SA-0165`).
+  `DESIGN.md` §2.1 and its policy key list gain `spec_review_prompt` and
+  `spec_writer_prompt` (`SA-0156`, `SA-0160`). §5.1 and §5.5 record the
+  narrowed departures for a spec session's cell (`SA-0169`).
+  `.claude/agents/spec-reviewer.md` drops "runs no test" before the key is
+  set. `.saffron/policy.yaml` gains both keys after the cells merge.

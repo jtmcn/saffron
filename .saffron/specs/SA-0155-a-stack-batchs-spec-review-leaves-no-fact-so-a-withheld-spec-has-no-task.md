@@ -48,15 +48,14 @@ forbidden:
   - tests/test_spec_loop_driver.py
 budget_usd: 27
 max_attempts: 3
-max_turns: 160
+max_turns: 180
 acceptance:
   - claim: >-
-      Given `review` and `mint`, `run_stack_batch` calls `mint` for a spec
-      whose candidate has no `task_id`, once, before its first review. It
-      never calls it for a spec refused before its review, nor for a
-      candidate that carries
-      a `task_id`. That spec is reviewed and run on the task it names. A spec
-      reviewed again after a `wait` keeps its task. A `mint` that raises
+      Given `review` and `mint`, `run_stack_batch` calls `mint` for each
+      spec once, before its first review, whatever `task_id` its candidate
+      carries. It never calls it for a spec refused before its review. A
+      task the candidate names gets no review, no attempt and no state. A
+      spec reviewed again after a `wait` keeps its task. A `mint` that raises
       counts as an abort, as a runner's raise does, and its spec is never
       reviewed. Each runner call for a reviewed spec gets the candidate with
       `task_id` set to that spec's task, both calls of a rerun after
@@ -65,8 +64,8 @@ acceptance:
       and opens no batch row.
     witness: tests/test_batch.py::test_a_stack_batch_mints_each_reviewed_specs_task_before_its_first_review
   - claim: >-
-      Each review that returns adds one attempt to the spec's task, minted
-      or resumed, in phase `SPEC_REVIEW`, with the session's cost,
+      Each review that returns adds one attempt to the spec's minted task,
+      in phase `SPEC_REVIEW`, with the session's cost,
       `session_id` and turns. Its subtype is `error` when the session
       carries an error, and `success` otherwise, whatever the route or the
       read's error. It adds
@@ -79,16 +78,21 @@ acceptance:
       `error`, with no block and an error of the exception's type and
       message, and ends the task `GATE_ERROR`. The witness drives each
       route, a raise, a text with no `json` block and no session error, and
-      a resumed task.
+      a candidate that carries an older task.
     witness: tests/test_batch.py::test_each_spec_review_is_a_fact_on_its_specs_minted_task
   - claim: >-
       `ledger.batch_spend` counts each review's cost once, and no run the
       stack batch did not review or start. The witness drives a spec that
       runs, one withheld, one whose review errored, one reviewed again after
-      a `wait`, one run again after `RATE_LIMITED`, and one on a resumed
-      task. A run minted outside the batch during a withheld spec's review
-      is not counted. A resumed task's run that an earlier batch holds stays
-      with that batch.
+      a `wait`, one run again after `RATE_LIMITED`, and one whose candidate
+      carries an older task. A run minted outside the batch during a
+      withheld spec's review is not counted. The older task's run stays
+      with the earlier batch that holds it. The stack path attaches each
+      minted task's run to tonight's batch right after the mint, before
+      the first review. So a review's cost counts in `batch_spend` once its
+      attempt closes, before the spec's next review runs.
+      `Ledger.task_run` returns a task's `run_id`, and raises `ValueError`
+      for a task that does not exist.
     witness: tests/test_batch.py::test_a_stack_batch_counts_each_spec_review_once_in_its_spend
   - claim: >-
       Folding the record rebuilds the `spec_reviews` rows as written. A fold
@@ -136,8 +140,8 @@ through an injected `review` callable. This spec gives each review a task
 and a record. The batch mints the spec's task before its review. So the
 review and any escalation are facts on it. The review's cost then counts
 against the batch. `SA-0156` builds the production `review`, a session
-in a critic cell, and the `mint` that `saffron batch --stack` passes. It
-also has the cell run on the minted task.
+in a critic cell, and the `mint` that `saffron batch --stack` passes.
+`SA-0168` has the cell run on the minted task.
 
 **What the tree base holds.** This spec's tree base is `SA-0149`'s head.
 The chain below it runs `SA-0135` and `SA-0136`, then `SA-0142` to
@@ -176,11 +180,17 @@ over the tasks of the runs attached to the batch
 the call began (`:227`, `saffron/ledger.py:880-895`). A `Refused` gets
 neither, from `SA-0135`.
 
-**A re-queued spec resumes its task.** §4.2.1 says such a spec "resumes
-that task row" (`DESIGN.md:387`). A new row would trip gate 0 on the pull
-request it was sent back to fix. `build_queue` sets `Candidate.task_id` to that row
-(`saffron/scheduler.py:792-794`). So the batch mints only for a candidate
-whose `task_id` is `None`.
+**A stack batch mints a fresh task for every spec.** The operator decided
+this on 2026-09-24, and it replaces the resume this spec first built.
+§4.2.1 says a re-queued spec "resumes that task row" (`DESIGN.md:387`).
+`build_queue` sets `Candidate.task_id` to that row
+(`saffron/scheduler.py:792-794`). A plain `saffron batch` already mints a
+new task for it, since `_batch_runner` passes the cell no task
+(`saffron/cli.py:475-490`). Gate 0 exempts such a candidate
+(`saffron/scheduler.py:650-656`). In stack mode the batch mints too,
+whatever `task_id` the candidate carries, and leaves the older task's
+state as it is. So every run, attempt and layer belongs to tonight's
+batch, and `batch_spend` and every budget check stay exact.
 
 **How a fact reaches the record.** Each write method builds one fact with
 `_build_fact` and applies it through `_commit_and_append`
@@ -238,19 +248,20 @@ Build five things.
    `_drop_task_rows` deletes the task's rows by its key.
 3. **The mint.** Add a keyword `mint: Callable[[Candidate], int] | None =
    None` to `run_stack_batch`. It takes a candidate and returns the
-   `task_id` of a task it created. The batch calls it only for a candidate
-   whose `task_id` is `None`, and uses the candidate's own otherwise. Given `review` and no `mint`,
+   `task_id` of a task it created. The batch calls it for every candidate,
+   whatever its `task_id`. Given `review` and no `mint`,
    `run_stack_batch` raises `ValueError` before it opens a batch row.
 4. **The facts.** Around each review in the runner wrapper, as criteria
    1 and 2 say.
-5. **The spend.** The stack path attaches each reviewed task's run to
-   the batch. A run that already has a batch keeps it. This holds for a
-   minted or a resumed task, whatever the call returns, so criterion 3
-   holds. Guard
-   the write in `saffron/ledger.py`. `attach_run_to_batch` is an
-   unconditional update (`saffron/ledger.py:861-863`), so leave it as it
-   is and add the guarded write beside it. `_drive`'s shared sweep stays as it is,
-   after a raise alone, and `run_batch` does not change.
+5. **The spend.** Add `Ledger.task_run(task_id)`, which returns the
+   task's `run_id` and raises `ValueError` for a task that does not
+   exist. The stack path reads the minted task's run with it, and
+   attaches that run with `attach_run_to_batch`. It does so right after
+   the mint, before the first review, so criterion 3 holds. `SA-0164`'s revision rounds
+   read `batch_spend` inside one call, between reviews. The run is one `mint` created tonight with no batch,
+   so the plain update is enough (`saffron/ledger.py:848-866`). `_drive`'s
+   shared sweep stays as it is, after a raise alone, and `run_batch` does
+   not change.
 
 Also add `SPEC_WITHHELD` to `DONE_STATES`.
 
@@ -264,8 +275,8 @@ it.
 
 ## Out of scope
 
-- **The production `review` and `mint`, and the cell on the minted
-  task.** They are `SA-0156`'s. No caller in `saffron/` passes `review`
+- **The production callables and the cell.** `SA-0156` builds the
+  `review` and the `mint`. `SA-0168` runs the cell on the minted task. No caller in `saffron/` passes `review`
   or `mint` until then. `run_one_cell` still mints its own task
   (`saffron/cell/session.py:1689`), and `run_task` reads no
   `candidate.task_id` (`saffron/task.py:218-383`).
@@ -277,9 +288,12 @@ it.
 - **`resets_at` on the fact.** A cell supplies it, and SQLite's `INTEGER`
   holds 64 bits. `10**20` raised `OverflowError` on insert, measured on
   the host on 2026-09-23. The route `wait` says the rest.
-- **`batch_key` on the table.** A fact built before the stack path's
-  attach carries none, the trap `SA-0145` names. So the table keeps none.
-- **Revision rounds.** They are `SA-0150`'s.
+- **`batch_key` on the table.** The attach precedes the first review, so
+  each `spec_review` fact's envelope now carries the batch's key. The
+  table still keeps none. A task hangs from one run, and the run names
+  its batch. A column would restate that join, and could disagree with
+  it after a fold.
+- **Revision rounds.** They are `SA-0164`'s.
 - **The vocabulary.** `SPEC_WITHHELD` and `spec_review` are at the tree
   base. The phase label `SPEC_REVIEW` joins backlog item b-466005.
 
@@ -298,7 +312,7 @@ queued there, measured below. Import `spec_review`'s names inside each
 test body, as `SA-0149`'s witnesses do.
 
 **One way to build it.** In the wrapper, before a spec's first review,
-take the candidate's `task_id`, or call `mint` when it is `None`. Keep the
+call `mint`, whatever the candidate's `task_id`. Keep the
 task id by spec id, beside `SA-0149`'s route. Keep both per call of
 `run_stack_batch`, never at module scope. Then attach that task's run to
 the batch. How the stack path learns the batch id is your choice, as it
@@ -311,10 +325,7 @@ abort and `SA-0143` counts the miss. Hand the runner
 began only after a raise (`saffron/batch.py:227`). A sweep after every
 call would also run in `run_batch`, and would attach a run another
 process minted meanwhile, such as an attended `saffron cell`. So the
-stack path attaches only the task it reviewed. A resumed task's run can
-belong to an earlier night. The guard leaves that run with its batch, so
-tonight's `batch_spend` omits the resumed task's review. The gap is at
-most one review per resumed spec.
+stack path attaches only the task it reviewed.
 
 **Update `SA-0149`'s four loop witnesses.** Each calls `run_stack_batch`
 with `review`, so each now raises `ValueError`. Pass each the shared mint
@@ -340,15 +351,18 @@ own. It also takes `_ready`, a budget of 100 and
 - **The review double** records `(spec id, length of the mint log)` and
   returns or raises what the table says, in turn. For a spec the table
   gives no review, it raises `AssertionError`. Each clean or blocker
-  text is a `json.dumps` inside a fenced `json` block. For `TE-2` it also
-  creates an unrelated run and task with one closed attempt at $8, as an
-  attended `saffron cell` would meanwhile.
+  text is a `json.dumps` inside a fenced `json` block. On each call it
+  also records the batch that holds the run of the spec's newest task.
+  For `TE-5` it also records `batch_spend` of the newest batch. For
+  `TE-2` it also creates an unrelated run and task with one closed
+  attempt at $8, as an attended `saffron cell` would meanwhile.
 - **The runner double** records `(spec id, candidate.task_id)`. It mints
   its own run and task with one closed attempt at $1, as `SA-0149`'s
   does, and returns `_outcome(...)` with that call's run and task.
 
 Before the batch, create an earlier batch, and an older task for `TE-7`
-on a run in that batch. End the task `GATE_ERROR`.
+on a run in that batch. Give it one closed attempt at $2, and end it
+`GATE_ERROR`.
 Build `TE-7`'s candidate with `dataclasses.replace(_candidate("TE-7"),
 task_id=<that task>)`, as a scan that re-queued it would. The mint double
 raises on `TE-80` alone.
@@ -372,13 +386,13 @@ counts 1 at `TE-9` and 2 at `TE-80`, so the batch stops `INFRASTRUCTURE`
 before `TE-81`.
 
 **Criterion 1's witness** asserts the stop reason `INFRASTRUCTURE`. The
-mint log is exactly `TE-1`, `TE-2`, `TE-4`, `TE-5`, `TE-6`, `TE-9` and
-`TE-80`. The review pairs are exactly `(TE-1, 1)`, `(TE-2, 2)`,
-`(TE-4, 3)`, `(TE-5, 4)`, `(TE-5, 4)`, `(TE-6, 5)`, `(TE-7, 5)` and
-`(TE-9, 6)`. Exactly one emitted line starts with `TE-80` padded to ten
+mint log is exactly `TE-1`, `TE-2`, `TE-4`, `TE-5`, `TE-6`, `TE-7`,
+`TE-9` and `TE-80`. The review pairs are exactly `(TE-1, 1)`,
+`(TE-2, 2)`, `(TE-4, 3)`, `(TE-5, 4)`, `(TE-5, 4)`, `(TE-6, 5)`,
+`(TE-7, 6)` and `(TE-9, 7)`. Exactly one emitted line starts with `TE-80` padded to ten
 and holds `raised RuntimeError`. The runner's pairs are `TE-1`, `TE-5`,
-`TE-5`, `TE-7` and `TE-7`. Each of the first three gets the task its
-mint returned, and `TE-7` gets the older task both times. It then runs
+`TE-5`, `TE-7` and `TE-7`. Each gets the task its mint returned, one
+task for both of `TE-7`'s calls, and never the older task. It then runs
 a second batch on the same ledger with `TE-1` alone. Its mint log is
 `TE-1`, and that task's one `spec_review` fact has `n` 1. Last, a call
 with `review` and no `mint` raises `ValueError`, and the count of
@@ -387,7 +401,8 @@ with `review` and no `mint` raises `ValueError`, and the count of
 - a mint after the review, which leaves `TE-6` with no task
 - a mint on every review, which mints `TE-5` twice
 - a mint on every runner call, which mints `TE-5` and `TE-7` again
-- a mint for a candidate that carries a `task_id`, which mints `TE-7`
+- no mint for a candidate that carries a `task_id`, which reviews and
+  runs `TE-7` on the older task
 - a task minted for every spec at batch start, which mints `TE-3`
 - a review called after its mint raised
 - a mint's raise turned into a `Refused`, which mints and reviews `TE-81`
@@ -408,8 +423,11 @@ state from the ledger. Each attempt is in phase `SPEC_REVIEW`, with
 | `TE-4` | 1 `error` | `GATE_ERROR` | 0.125 `error` |
 | `TE-5` | 1 `wait`, 2 `run` | `RATE_LIMITED` | 0.0625 `success`, then 0.03125 `success` |
 | `TE-6` | 1 `error` | `GATE_ERROR` | none |
-| `TE-7`, the older task | 1 `run` | `GATE_ERROR` | 0.75 `success` |
+| `TE-7`, its minted task | 1 `run` | `QUEUED` | 0.75 `success` |
 | `TE-9` | 1 `error` | `GATE_ERROR` | 0.015625 `success` |
+
+The older task keeps `GATE_ERROR`, its one attempt and no `spec_review`
+fact.
 
 `TE-2`'s `block` is the `json.dumps` text the double fenced, and its
 `block_sha256` is `hash_artifact` of that text. `TE-4`'s `block` is its
@@ -431,14 +449,24 @@ clean text, and its error holds `cell died`. `TE-6`'s `block` and
 - an attempt with a fixed `session_id` or turn count
 
 **Criterion 3's witness** asserts `ledger.batch_spend` of the first batch
-is exactly 5.984375. That is six review costs, 0.984375, and five runner
-calls at $1. The $8 run is not in it, and neither is `TE-7`'s review. The
-earlier batch's spend is exactly 0.75, `TE-7`'s review. These fail it:
+is exactly 6.734375. That is seven review costs, 1.734375, and five
+runner calls at $1. The $8 run is not in it. The earlier batch's spend is
+exactly 2.0, the older task's attempt. Every batch the review double
+recorded is tonight's. At `TE-5`'s second review, `batch_spend` is
+exactly 1.9375, which holds `TE-5`'s first review's 0.0625. Last,
+`ledger.task_run` of a task id no row holds raises `ValueError`. These
+fail it, each measured:
 
+- a missing task read as run 0, measured in `SA-0168`'s prototype
+
+- the build `attached when the wrapper returns`. A first review then runs
+  on a run tonight's batch does not yet hold.
 - no attach on the stack path, which gives 5.140625
-- an unconditional attach that moves an earlier night's run, which gives
-  6.734375 and leaves the earlier batch 0.0
-- a sweep after every call in the shared `_drive`, which gives 13.984375
+- no mint for a candidate that carries a `task_id`, with the plain attach,
+  which gives 8.734375 and leaves the earlier batch 0.0
+- the same with an attach that keeps a run's batch, which gives 5.984375
+  and leaves the earlier batch 2.75
+- a sweep after every call in the shared `_drive`, which gives 14.734375
 - the review's attempt added again on a rerun
 - no attempt for a review
 
@@ -505,9 +533,16 @@ tree base and both wrong builds queued `TE-1` on the first scan. The tree
 base is what the mutant leaves. Criterion
 5 is unmeasured, since the read does not exist at `c9d46ca8`.
 
+**Measured again under the operator's decision.** A second throwaway
+model ran criteria 1 to 3 on 2026-09-24 at `f2a08a9f`, with the mint for
+every candidate. It used a real `Ledger` with a `MemoryRecord`, and stood
+in for `record_spec_review`, and modelled when the run is attached. The
+right build passed. Each wrong build under criteria 1 and 3 failed, with
+the figures above. The older task
+kept its state and its one attempt.
+
 **What the witnesses leave undriven.** A `RATE_LIMITED` rerun whose spec
-was reviewed again is not driven, since `SA-0149` reviews it once. A
-resumed task whose run another batch holds is not driven. A cost
+was reviewed again is not driven, since `SA-0149` reviews it once. A cost
 of `NaN`, or one too large for a float, is not driven. `record_attempts`
 takes a turn's cost as it comes (`saffron/cell/session.py:184-208`), and
 `SA-0156` fills this one.

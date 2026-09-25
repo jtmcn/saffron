@@ -5,7 +5,7 @@ status: open
 tier: 2
 by_hand: true
 filed: 2026-09-23
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0153, SA-0154, SA-0155, SA-0156]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0150, SA-0151, SA-0153, SA-0154, SA-0155, SA-0156, SA-0160, SA-0161, SA-0162, SA-0164, SA-0167, SA-0170, SA-0174]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -79,3 +79,9 @@ The **Refusal** entry names the stack order's refusal. This lands after
 - 2026-09-23: `SA-0156` mints a spec's task before its spec review and runs
   the cell on it. "Mint" joins the entries above, and a spec review runs in
   a critic cell at the predecessor's head.
+- 2026-09-25: the last build specs add terms. `SA-0150` adds a recorded
+  spec text, and `SA-0160` a spec writer session. `SA-0164` adds a revision
+  round and the `SPEC_WRITING` phase. `SA-0161` adds a follow-up spec, its
+  writer sub-cap and the backlog pool. `SA-0162` adds a layer's generation,
+  and `SA-0151` the finishing layer. `SA-0174` adds `findings.json`,
+  `SA-0167` an escalation line, and `SA-0170` linking a stack.
