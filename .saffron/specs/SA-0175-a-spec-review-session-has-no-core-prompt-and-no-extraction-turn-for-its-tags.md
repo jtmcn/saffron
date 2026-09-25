@@ -86,14 +86,13 @@ acceptance:
       passes the container, `SPEC_REVIEW_EXTRACT_PROMPT`, the same options,
       `resume` of the first turn's `session_id` and `last_cost_usd` of its
       cost, and nothing else. The session's `text` is a `json` fence around
-      what `artifacts.parse_output_block` returns for the second turn's text,
-      once `json.loads` accepts that body. A body it refuses gives `not
-      JSON: ` and the parser's message as `error`, and an empty `text`.
-      It holds nothing of the first turn's text. Its cost and `num_turns` are
+      what `artifacts.parse_output_block` returns for the second turn's text
+      alone, once `json.loads` accepts that body. It holds nothing of the
+      first turn's text. A second turn with no `<output>` block, or a body
+      `json.loads` refuses, goes to criterion 5's one re-ask. Its cost and `num_turns` are
       the two turns' sums, and a failed turn with no attempt counts 0. Its
       `session_id` is the second turn's, or the first's where the second
-      carries none. A second turn with no `<output>` block gives that
-      function's message as `error` and an empty `text`. A first turn with no
+      carries none. A first turn with no
       `session_id` gives `no session to extract from` as `error`, and no
       second call. A second turn whose status is `rejected`, returned or
       raised, gives no error and an empty `text`. Its `resets_at` follows
@@ -111,7 +110,8 @@ acceptance:
       ` (advisory)`. `{protected}` and `{elevate_on}` hold one such line per
       entry, in order. An empty list fills `none`. `{ceilings}` holds one
       line per entry of `size._CEILINGS`, in its order, as the type in
-      backticks, a colon, the number and `changed tokens`. `{tags}` holds
+      backticks, a colon, the number and `changed tokens`. A last line
+      gives `size._DEFAULT_CEILING` as `any other type`. `{tags}` holds
       one line per entry of `SPEC_REVIEW_TAGS`, the tuple `SA-0149`
       defines in the same module, read when called. Every line starts with a dash and a space, and
       lines join on a newline. Braces inside a value reach the prompt
@@ -125,14 +125,34 @@ acceptance:
       five filled blocks for a policy that declares every list.
       `SPEC_REVIEW_EXTRACT_PROMPT` is `context.turn_prompt("spec-review-extract")`,
       holds the shared extraction rules, and names `findings`, `severity`,
-      `claim`, `fixes`, `blocker`, `concern`, `note` and `witness`. It
-      keeps `fixes` on a concern the review tagged. The raw
-      `spec-review.md` names `concern` and `witness`. Neither
-      `spec-review.md` nor the extraction prompt holds `.claude`,
-      `CLAUDE.md`, `DESIGN.md`, `CONTEXT.md`, `driver.py`, `pytest`,
-      `uv run`, `make check`, `ruff`, `prek`, `saffron/`, `docs/`, `/opt/`
-      or `://`. The witness checks each of those fourteen strings in each file.
+      `claim`, `fixes`, `blocker`, `concern`, `note` and `witness`. With
+      whitespace runs collapsed to one space, the raw `spec-review.md`
+      holds the sentence "A concern that a criterion's witness cannot be
+      measured carries `witness`." The extraction prompt holds "Copy each
+      finding's `fixes` exactly as your review gave it, and decide no tag
+      from the prose." Neither file holds `.claude`, `CLAUDE.md`,
+      `DESIGN.md`, `CONTEXT.md`, `driver.py`, `pytest`, `uv run`, `make
+      check`, `ruff`, `prek`, `saffron/`, `docs/`, `/opt/`, `://` or `the
+      reviewer`. The witness checks each of those fifteen strings in each
+      file, case-insensitively.
     witness: tests/test_spec_review.py::test_cores_spec_review_prompts_fill_every_slot_and_name_no_repo_tool
+  - claim: >-
+      When the second turn's text has no `<output>` block, or `json.loads`
+      refuses its last block's body, `run_spec_review` re-asks once. Its
+      third call passes the container, the failure's message, a blank line
+      and `SPEC_REVIEW_EXTRACT_PROMPT` as the prompt, the same options,
+      `resume` of the last `session_id` a turn carried, and `last_cost_usd`
+      of the second turn's cost. It passes nothing else. The message is
+      `parse_output_block`'s, or `not JSON: ` and the parser's. A third
+      turn that passes both checks gives its fenced body as `text`. One
+      that fails either gives that message as `error` and an empty `text`,
+      and there is no fourth call. A rejected third turn, returned or
+      raised, gives no error, an empty `text`, and criterion 1's reset
+      rule. A third turn that raises `AgentFailed` otherwise gives its text
+      as `error`, and any other raise propagates. Cost and `num_turns` sum
+      over every turn, and `session_id` is the last one a turn carried. The
+      witness drives each case.
+    witness: tests/test_spec_review.py::test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema
 ---
 
 ## Context
@@ -228,11 +248,17 @@ Build four things.
    tools, a list of names. Load the extraction prompt with
    `context.turn_prompt` at import, as `rebut.EXTRACT_PROMPT` is loaded.
    Name the 681-second measurement below in the timeout's comment.
-2. **The session.** Add `run_spec_review`, as criteria 1 and 2 state.
+2. **The session.** Add `run_spec_review`, as criteria 1, 2 and 5 state.
    Read the rate-limit status with `session.terminal_for_rate_limit`, on
    the returned attempt or the failed one. Call the agent directly, not
    through `stop_on_rejected`, so a rejected turn's cost reaches the
    session. Build the second call as `run_rebuttal` builds its own.
+   Build the re-ask as `run_lens` builds its own, from the error and the
+   extraction rules (`saffron/phases/review.py:222-227`, `:268-275`). §5.3
+   feeds a schema failure back "twice, then reject" (`DESIGN.md:727`).
+   This spec re-asks once, as `run_lens` does, and not twice. A session
+   whose second answer is still not the schema has spent two turns on
+   shape, and `SA-0149` counts its error as an abort.
 3. **The system prompt.** Add `spec_review_system_prompt`, as criterion
    3 states. Fill the slots as `format` arguments, never by substituting
    text and formatting the result.
@@ -292,37 +318,48 @@ review's own prose, and any `json` block in it would then be recorded as
 the tags. So only a completed extraction turn puts anything in `text`.
 
 **What `spec-review.md` says.** It is core's, so it names no repo file,
-tool or URL, and none of criterion 4's fourteen strings. Keep it within
+tool or URL, and none of criterion 4's fifteen strings. Keep it within
 60 lines. It holds each of the five slots once, and no other brace. It
 covers these, in words of its own.
 
-- The reviewer reads one spec before a cell spends money on it. The user
-  prompt names the spec's path and base. The working tree is a snapshot of
-  that base.
+- It addresses the session as "you", and never writes "the reviewer".
+  `CONTEXT.md` keeps that word for the operator (`CONTEXT.md:469`).
+- You read one spec before a cell spends money on it. The user prompt
+  names the spec's path and base. The working tree is a snapshot of that
+  base.
 - Severities. A blocker gets a cell wrong if built as written. A concern
   needs the operator's judgement. A note is true and minor.
 - Each blocker carries one tag from `{tags}`. `scope` changes the spec's
   goal. `build` changes what the cell builds within that goal. `witness`
-  changes only a test or probe. A concern that a witness cannot be
-  measured also carries `witness`.
+  changes only a test or probe. Then this sentence, word for word, the
+  one place the rule is written: "A concern that a criterion's witness
+  cannot be measured carries `witness`." It is the design's own rule
+  (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:198-199`).
 - Five checks. A criterion built as written breaks the repository's
   standing instructions or design. Every file the change edits sits in
   `touches` and outside `forbidden` and `{protected}`. Each witness fails
   a plausible wrong build, and a claim over a set drives every member.
-  The size estimate stays under the ceiling in `{ceilings}`, and a path in
-  `{elevate_on}` makes it block. Every sentence about current code is true
-  at the snapshot.
-- The gates in `{gates}` run on every attempt.
-- The reviewer writes a report in prose, and the host asks for the
-  findings in a later turn. It writes no file in the tree.
+  The size estimate stays under its type's ceiling in `{ceilings}`. The
+  gate blocks when the spec says `risk: elevated` or a changed path
+  matches `{elevate_on}`. Every sentence about current code is true at
+  the snapshot.
+- A line that ends in a colon, then `{gates}` on the lines below it,
+  says which gates the repo declares. So an empty list reads `none`.
+- You write a report in prose, and the host asks for the findings in a
+  later turn. You write no file in the tree.
 
 **What `spec-review-extract.md` says.** It asks for one JSON object with
 the key `findings`, one entry per finding in the review. Each entry holds
 `severity` (`blocker`, `concern` or `note`), `claim`, `criterion` (a
-number or null), `file`, `line` and `fixes`. `fixes` is the tag the review
-gave a blocker or a concern. A concern whose witness or arrangement
-cannot be run carries `witness`, and `SA-0164` routes on that tag.
-`fixes` is null on a note and on an untagged concern. It ends with the
+number or null), `file`, `line` and `fixes`. It holds this sentence word
+for word.
+
+> Copy each finding's `fixes` exactly as your review gave it, and decide
+> no tag from the prose.
+
+`fixes` is null where the review gave no
+tag. The extraction turn copies tags and judges none. `SA-0164`
+routes on the tag the review gave. It ends with the
 `{extraction}` slot. Write no `{word}` brace pair elsewhere in it, since
 `test_a_loaded_turn_prompt_keeps_no_unfilled_slot` reads one as a slot.
 
@@ -330,14 +367,16 @@ cannot be run carries `witness`, and `SA-0164` routes on that tag.
 `c-1`, the system prompt `sys` and the prompt `p`. Its agent double
 records each call's arguments and returns or raises the case's turn. Each
 case asserts exactly one call, with those three and the options the claim
-names, and no other keyword. `J` is a first-turn text holding a fenced
-`json` block with one `scope` blocker.
+names, and no other keyword. `J` is a first-turn text of prose, then a
+fenced `json` block with one `scope` blocker, then an `<output>` block
+holding that same object. A build that parses the turns' texts joined
+then finds `J`'s block.
 
 | first turn | `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` |
 |---|---|
 | returned, text `J`, `rejected`, reset 1755800000, cost 0.25, `s-1`, 7 turns | empty, 0.25, `None`, 1755800000, `s-1`, 7 |
-| raised `AgentFailed("api_error")`, `rejected`, reset `10**20`, cost 0.125 | empty, 0.125, `None`, `10**20` |
-| the same with reset `None`, `"soon"`, `True`, 1755800000.0, 0 and -5 | empty, 0.125, `None`, 1 |
+| raised `AgentFailed("api_error")`, `rejected`, reset `10**20`, cost 0.125, `s-1`, 3 turns | empty, 0.125, `None`, `10**20`, `s-1`, 3 |
+| the same with reset `None`, `"soon"`, `True`, 1755800000.0, 0 and -5 | empty, 0.125, `None`, 1, `s-1`, 3 |
 | raised `AgentFailed("idle bound")`, text `J`, cost 0.0625, `s-1`, 7 turns | empty, 0.0625, `idle bound`, `None`, `s-1`, 7 |
 | raised `AgentFailed("no result")` with no attempt | empty, 0.0, `no result`, `None`, `None`, 0 |
 | raised `RuntimeError("runner died")` | raises |
@@ -360,18 +399,19 @@ asserts `SPEC_SESSION_TOOLS`, sorted, is `Bash`, `Glob`, `Grep` and
 - every exception caught
 
 **Criterion 2's witness** uses the same double, with a first turn that
-returns text `J`, cost 0.5, `s-1` and 7 turns. `X` is a second-turn text
+returns text `J`, cost 0.5, `s-1` and 7 turns. `B` is
+`json.dumps(obj, indent=2, ensure_ascii=False)` of one `findings` object
+holding one `build` blocker whose claim is `naïve read`, with
+`criterion` 1, `file` `a.py` and `line` 3. `X` is a second-turn text
 holding two `<output>` blocks. The draft's body is `{"findings": []}`.
-The last one's body is a `findings` object with one `build` blocker. `B` is that last body,
-stripped, and `F` is ```` "```json\n" + B + "\n```\n" ````.
+The last one is `<output>\n` + `B` + `\n</output>`. `F` is
+```` "```json\n" + B + "\n```\n" ````.
 
 | case | calls | `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` |
 |---|---|---|
 | first status none, second returns `X`, cost 0.25, `s-2`, 2 turns | 2 | `F`, 0.75, `None`, `None`, `s-2`, 9 |
 | first status `allowed`, reset 9, the same second turn | 2 | the same |
 | second returns `X` with no `session_id` | 2 | `F`, 0.75, `None`, `None`, `s-1`, 9 |
-| second returns text with no `<output>` block | 2 | empty, 0.75, `no <output> block in the response`, `None`, `s-2`, 9 |
-| second returns one `<output>` block whose body is `{"findings": [}` | 2 | empty, 0.75, starts `not JSON: `, `None`, `s-2`, 9 |
 | first returns no `session_id` | 1 | empty, 0.5, `no session to extract from`, `None`, `None`, 7 |
 | second returns `rejected`, reset 9 | 2 | empty, 0.75, `None`, 9, `s-2`, 9 |
 | second returns `rejected`, reset -5 | 2 | empty, 0.75, `None`, 1, `s-2`, 9 |
@@ -389,7 +429,9 @@ carries an attempt carries cost 0.25, `s-2` and 2 turns. The witness also assert
 - the tags read from the first turn's text, or `text` set to it
 - the first `<output>` block taken, which fences `{"findings": []}`, or
   the body left unstripped
-- a body fenced without `json.loads`, which fences text that is not JSON
+- the body parsed and written back with `json.dumps`, which loses the
+  indent or the `ï` that `SA-0155` hashes as sent
+- the turns' texts joined before the parse, which finds `J`'s block
 - `text` set to the second turn's raw text, with no fence
 - no `resume`, or `resume` of `None`, which opens a fresh session
 - no `last_cost_usd`, or the extraction turn's cost alone
@@ -421,6 +463,7 @@ C
 - `bug`: 1300 changed tokens
 - `feature`: 2999 changed tokens
 - `refactor`: 4200 changed tokens
+- any other type: 4200 changed tokens
 T
 - `scope`
 - `build`
@@ -438,6 +481,7 @@ again, and the output follows the new text. These fail it:
 - the advisory mark dropped, or put on a blocking gate
 - an empty list filled with an empty string
 - the ceilings written out by hand, which misses 2999
+- the default ceiling left out
 - the tags written into the template in place of the slot, or spelled
   in the fill, which misses `x` and `y`
 - the tags copied into a second constant, or bound to a default argument
@@ -449,22 +493,69 @@ again, and the output follows the new text. These fail it:
 **Criterion 4's witness** fills the real template with the first
 policy from criterion 3's witness, without the `setitem`. It asserts each of the five rendered blocks
 appears in the result, and no `{gates}`, `{protected}`, `{elevate_on}`,
-`{ceilings}` or `{tags}` is left. It reads both files' raw text and
-checks each of the fourteen strings against each. A prompt that names
-this repo's tools, as the hand path's agent file does, fails it.
+`{ceilings}` or `{tags}` is left. It reads both files' raw text,
+collapses each run of whitespace to one space, and asserts each file's
+sentence verbatim. It lowers both sides and checks each of the fifteen
+strings against each file. These fail it:
+
+- a review prompt with no sentence tagging an unmeasurable witness, or
+  one worded otherwise
+- an extraction prompt that nulls `fixes` on a concern, or tells the
+  turn to judge a tag from the prose
+- a prompt that names this repo's tools, as the hand path's agent file
+  does
+- a prompt that calls the session "the reviewer"
+
+**Criterion 5's witness** uses criterion 2's double, first turn and `X`.
+`N` is a text with no `<output>` block. `Q` is `<output>{"findings":
+[}</output>`. Every second turn carries cost 0.25, `s-2` and 2 turns, and
+every third turn that carries an attempt carries cost 0.25, `s-3` and 2
+turns, unless its row says otherwise.
+
+| second | third | calls | `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` |
+|---|---|---|---|
+| `N` | returns `X` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
+| `Q` | returns `X` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
+| `N` with no `session_id` | returns `X` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
+| `N` | returns `N` | 3 | empty, 1.0, `no <output> block in the response`, `None`, `s-3`, 11 |
+| `Q` | returns `Q` | 3 | empty, 1.0, starts `not JSON: `, `None`, `s-3`, 11 |
+| `N` | returns `X` with no `session_id` | 3 | `F`, 1.0, `None`, `None`, `s-2`, 11 |
+| `N` | returns `rejected`, reset 9 | 3 | empty, 1.0, `None`, 9, `s-3`, 11 |
+| `N` | raises `AgentFailed("api_error")`, `rejected`, reset `"soon"` | 3 | empty, 1.0, `None`, 1, `s-3`, 11 |
+| `N` | raises `AgentFailed("cut")` with an attempt | 3 | empty, 1.0, `cut`, `None`, `s-3`, 11 |
+| `N` | raises `AgentFailed("gone")` with no attempt | 3 | empty, 0.75, `gone`, `None`, `s-2`, 9 |
+| `N` | raises `RuntimeError` | 3 | raises |
+
+Each third call is asserted exactly. After `N` its prompt is
+`"no <output> block in the response\n\n" + SPEC_REVIEW_EXTRACT_PROMPT`.
+After `Q` it starts `not JSON: ` and ends `"\n\n" +
+SPEC_REVIEW_EXTRACT_PROMPT`. It carries the first call's options,
+`resume="s-2"`, or `"s-1"` where the second carries no `session_id`, and
+`last_cost_usd=0.25`, and no other keyword. No row makes a fourth call.
+These fail it:
+
+- no re-ask, which routes `N` to `error` after two calls
+- a second re-ask, which makes a fourth call on `N` then `N`
+- the error or the extraction rules left out of the re-ask's prompt
+- `EXTRACTION_PROMPT` alone in place of `SPEC_REVIEW_EXTRACT_PROMPT`
+- a re-ask with no `resume`, or `resume` of the first turn's id
+- the re-ask's cost or turns left out of the sums
+- a third turn's rejection read as an error
 
 **The wrong-version lists are unmeasured.** Nothing below this spec's
 head is built. So no stand-in for the session or the fill can run at the
 tree base. Each list is reasoned from the code it names.
 
 **What the witnesses leave undriven.** A repo file named by a string
-outside criterion 4's fourteen passes. So does a prompt that fills every
+outside criterion 4's fifteen passes. So does a prompt that fills every
 slot and reviews badly. The prompt's quality is measured on the first
 stack night, as its budget is.
 
 **The `prose` gate** counts both new prompt files, and every new comment
 and docstring. Write none with an em dash, a semicolon, a contraction,
-the perfect tense, a hedge or a sentence over 25 words. Run
+the perfect tense, a hedge or a sentence over 25 words. Use no word from
+`FILLER` (`.saffron/gates/prose.py:67-83`), such as `just` or `simply`.
+Run
 `python3 hooks/prose_limit.py --file <path>` on each prompt file. Keep
 each docstring within ten lines.
 
@@ -472,13 +563,14 @@ each docstring within ten lines.
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate, in changed tokens, is about 2500, 83% of the ceiling. The
+estimate, in changed tokens, is about 2850, 95% of the ceiling. The
 session's single-turn prototype for `SA-0156` measured 218 tokens in
 `spec_review.py` and 264 in its witness. The second turn, the JSON check,
-the fill and the constants add about 310 to the source, so about 530.
+the re-ask, the fill and the constants add about 380 to the source, so
+about 600.
 `spec-review.md` at 60 lines runs about 370 to 550, at the 6.2 to 9.1
 words a line of the system prompts in `saffron/agents/prompts/` (`wc
--lw`). The extraction prompt runs about 100. The four witnesses run about
-1100 to 1300, with about 20 table cases and an exact 20-line block, and
-`tests/test_context.py` about 20. The estimate crosses 80%, so the
-operator decides whether to split it.
+-lw`). The extraction prompt runs about 100. The five witnesses run about
+1450 to 1650, with about 30 table cases and an exact 21-line block, and
+`tests/test_context.py` about 20. The operator chose not to split it,
+and `size` stays advisory.

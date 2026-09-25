@@ -49,8 +49,10 @@ pending_symbols:
 acceptance:
   - claim: >-
       `read_spec_review` reads the last fenced `json` block of a
-      `SpecReviewSession`'s text and carries its cost and `resets_at`. It
-      keeps each finding's `fixes`.
+      `SpecReviewSession`'s text and carries its cost and `resets_at`. A
+      block opens with a line that is ```` ```json ```` and closes at the
+      next line that holds only ```` ``` ````. It keeps each finding's
+      `fixes`.
       `spec_review_route` routes a read with `resets_at` set `wait`, before
       any other check. It routes the read `error` when the session carries
       an error, when the
@@ -98,10 +100,12 @@ acceptance:
       `SA-0148`'s rate-limit wait. It counts no abort and attaches no run.
       The batch sleeps once and offers the spec again, next, on the same
       predecessor, after `--until`, the budget and the breaker. It reviews
-      the spec again, and runs it once its review routes `run`. A wait that
-      ends at or past `until` stops `UNTIL` at once, with no sleep. The
-      witness drives a wait that ends before `until` and one that does
-      not.
+      the spec again, and runs it once its review routes `run`. A review
+      wait records no miss and adds no layer, so a spec that depends on it
+      is not refused and runs on it after its rerun. `wait` is never kept
+      as the spec's route. A wait that ends at or past `until` stops
+      `UNTIL` at once, with no sleep. The witness drives a wait that ends
+      before `until`, with a dependent spec, and one that does not.
     witness: tests/test_batch.py::test_a_rate_limited_spec_review_waits_and_reviews_again
 ---
 
@@ -130,7 +134,7 @@ critic cell seeded at the tree this spec hands it, and passes it from
 a time, as the design says. Reviews at batch start, K at once, cannot
 run on the cell runtime at the tree base. Every cell shares the network
 `saffron-cells` and one proxy. `start_proxy` removes the proxy before it starts one
-(`saffron/cell/proxy.py:53`), and `cell_up` removes the network before it
+(`saffron/cell/proxy.py:54`), and `cell_up` removes the network before it
 creates it (`saffron/cell/session.py:909`). `cell_down` stops the proxy
 and removes the network (`:1012-1013`). So a review cell beside a task cell
 loses its network. Run at the spec's turn, the review reads the tree the
@@ -278,7 +282,8 @@ collection with the source reverted, and `revert` reads that as `skip`.
 
 **One way to route.** Review inside the runner wrapper `SA-0143` builds,
 on the predecessor it is about to hand the runner. Keep each spec's route
-by spec id, and read it again on a second call for that spec. For
+by spec id, and read it again on a second call for that spec. Never
+keep `wait`: a spec that waits is reviewed again on its next call. For
 `escalate`, emit the line and return a `Refused` (`saffron/task.py`, from
 `SA-0135`). `SA-0143` counts a `Refused` as a miss, and `_drive` counts it
 as no abort. For `error`, emit the line and then raise, so `_drive` counts
@@ -330,6 +335,7 @@ otherwise.
 | a clean block, then a block with a `blocker` | `escalate` |
 | `resets_at` set, text a block with a `blocker` | `wait` |
 | `SPEC_REVIEW_TAGS` patched to add `rewrite`, a `blocker` with `fixes: "rewrite"` | `escalate` |
+| one `note` whose `claim` holds ```` ``` ```` mid-line | `run` |
 
 The witness also asserts `SPEC_REVIEW_TAGS == ("scope", "build",
 "witness")` and that it is a tuple. It patches the tags with
@@ -348,6 +354,8 @@ These fail it, each measured:
 - a finding with no `claim` accepted
 - a `fixes` outside the three accepted
 - a `fixes` checked on a blocker alone
+- a closing fence matched mid-line, which cuts the block inside the
+  `note`'s claim, reasoned and not measured
 - a finding that is not an object passed over
 - `escalate` only for a `scope` blocker
 - `escalate` for any finding with a `fixes`, whatever its severity
@@ -450,16 +458,34 @@ no runner call. These fail it, each measured on the loop's rule:
 - a review called before `_drive`'s `--until`, budget and breaker checks,
   which reviews `TE-33`
 
-**Criterion 5's witness** has two parts. The first passes `TE-50` then
-`TE-51`, with no `depends_on`, `until=None`, a fake `sleep` and
-`SA-0148`'s clock. `TE-50`'s review
-returns a session with `error` set. `TE-51`'s first review returns a
-session whose text holds no fence and whose `resets_at` is 60 seconds
-ahead of the clock. Its second returns clean. It asserts the review's pairs are `(TE-50, None)`,
-`(TE-51, None)` and `(TE-51, None)`. It asserts one runner call, `TE-51`
-on `None`, the sleeps `[60.0]`, and the stop reason `DRAINED`. It asserts
-two `starting` lines for `TE-51`, since the wait offers it again through
-`_drive`.
+**Criterion 5's witness** has two parts. Each passes `SA-0148`'s clock
+and a fake `sleep` that records each call and raises `AssertionError` on
+its second. So a build that waits again fails at once and never hangs.
+
+The first part passes `until=None` and four specs, each runner call
+returning `READY_FOR_REVIEW`.
+
+| order | spec | `depends_on` | reviews |
+|---|---|---|---|
+| 1 | `TE-49` | none | clean |
+| 2 | `TE-50` | none | a session with `error` set |
+| 3 | `TE-51` | none | first text with no fence and `resets_at` 60 seconds ahead of the clock, then clean |
+| 4 | `TE-52` | `TE-51` | clean |
+
+It asserts:
+
+- the review's pairs are `(TE-49, None)`, `(TE-50, TE-49)`, `(TE-51,
+  TE-49)`, `(TE-51, TE-49)` and `(TE-52, TE-51)`.
+- the runner's calls are `TE-49` on `None`, `TE-51` on `TE-49`, then
+  `TE-52` on `TE-51`.
+- no line contains ` refused `.
+- two `starting` lines for `TE-51`, since the wait offers it again
+  through `_drive`.
+- the sleeps are `[60.0]`, and the stop reason is `DRAINED`.
+
+The breaker still tells a wait from an abort. `TE-49` leaves the count at
+0, `TE-50` makes it 1, and the wait leaves it at 1. A wait counted as an
+abort makes it 2, which stops the batch before `TE-51` runs.
 
 The second part passes `TE-51` alone, with `until` 30 seconds after the
 clock's start. Its review returns a session whose `resets_at` is 60
@@ -468,11 +494,18 @@ sleep, one review, no runner call and one `starting` line for `TE-51`.
 `SA-0148` stops `UNTIL` at once there and runs nothing more, so the spec
 is never offered again.
 
-These fail it, the first three measured on the loop's rule:
+These fail it. The first three are measured on the loop's rule, and the
+rest are reasoned:
 
 - a `resets_at` passed over, which reads no block and fires the breaker
-- a `wait` kept as the spec's route, which waits again and never runs it
+- a `wait` kept as the spec's route, which waits again, and the second
+  sleep raises
 - a `wait` counted as an abort, which fires the breaker after `TE-50`
+- a wait recorded as a miss, which refuses `TE-52`
+- the spec offered again after the rest of the order, which reviews
+  `TE-52` before `TE-51`'s rerun
+- a wait that moves the predecessor, which reviews `TE-51`'s rerun on
+  another layer
 - a wrapper that sleeps and reviews again inside itself, which logs one
   `starting` line and sleeps in the second part
 - a synthetic `RATE_LIMITED` outcome, whose attach raises and ends the
@@ -490,7 +523,9 @@ built, so they stay unmeasured.
 `run_stack_batch` does not exist at `0b1b4b96`, so nothing ran the real
 loop.
 
-**What the witnesses leave undriven.** Only `READY_FOR_REVIEW`,
+**What the witnesses leave undriven.** A miss recorded at the wait and
+cleared on the rerun reads the same as no miss here. The rerun comes
+next, so no spec is weighed between the two. Only `READY_FOR_REVIEW`,
 `EXHAUSTED` and one `RATE_LIMITED` return from the runner in criteria 2
 to 5. A `wait` that meets `--until` is `SA-0148`'s rule, driven there for
 a task only. `SA-0143`'s own
@@ -508,10 +543,12 @@ a line, the rate `saffron/agents/findings.py` measures. About 50 in
 `saffron/batch.py` at 6.6. About 117 lines of test in
 `tests/test_spec_review.py` at 4.7, the rate of `tests/test_review.py`.
 About 327 in `tests/test_batch.py` at 3.3. That is about 2340 tokens of
-the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`). Three
-things move it. The tags constant, its two table rows and its asserts add
-about 55. The wait signal adds about 12 lines to `batch.py`, about 80.
-Priced at 4 tokens a line, the repo's aggregate, `tests/test_batch.py`
-runs about 347 lines with criterion 5's second part, about 1390. That is
-about 2780, 93% of the ceiling. No path here is in `elevate_on`, so
-`size` stays advisory. Keep the new rows inside the existing loops.
+the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`). Four
+things move it. The tags constant, its table rows and its asserts add
+about 55. The fence row adds about 30. The wait signal adds about 12
+lines to `batch.py`, about 80. `tests/test_batch.py` runs about 367
+lines with criterion 5's two parts and its bounded sleep. At 4 tokens a
+line, the repo's aggregate, that is about 1470. That is
+about 2890, 96% of the ceiling. No path here is in `elevate_on`, so
+`size` stays advisory, and the operator chose not to split. Keep the new
+rows inside the existing loops.

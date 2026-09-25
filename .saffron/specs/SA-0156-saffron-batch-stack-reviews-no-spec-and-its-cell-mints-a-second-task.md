@@ -73,9 +73,10 @@ acceptance:
       `spec_session=True`, on `LayerFields` whose `branch` is the
       candidate's own. The prompt holds `.saffron/specs/` and the
       candidate's file name, `base: ` and the seeded tree, and `is a
-      snapshot of the base`. It names no tool path: the witness checks
-      `/opt/`, `pytest`, `uv run`, `make check`, `.claude` and `://`. The
-      callable calls
+      snapshot of the base`. It then holds the three account lines the
+      notes quote, each verbatim on its own line. It names no tool path:
+      the witness checks `/opt/`, `pytest`, `uv run`, `make check`,
+      `.claude` and `://`. The callable calls
       `spec_review.run_spec_review` once, with the cell's container, that
       system prompt and that prompt. Its agent is `implement.run_agent`
       bound to `spec_review.SPEC_REVIEW_TIMEOUT_S` and the candidate's spec
@@ -206,7 +207,11 @@ the critic cell (`DESIGN.md:1065`). There it would run as root beside the
 runner a lens re-executes. A spec session's `Bash` runs commands the
 model writes in that cell. `SA-0169` narrows the departure: those
 commands run as a user that cannot write the runner or its files. The
-operator records the narrowed departure in `DESIGN.md` by hand.
+operator records the narrowed departure in `DESIGN.md` by hand. This
+spec also makes `SA-0169`'s capability grant live. §5.1 says "No
+capability is granted to anything" (`DESIGN.md:587`), and the spec
+session's `Bash` wrapper gets two. The operator records that departure
+too, by hand.
 
 ## Problem
 
@@ -221,11 +226,17 @@ Build three things.
    `policy.yaml`. Build `LayerFields` with the spec's id, `_branch` of it,
    `base` and `head` both the seeded tree, and `pr_url` and `known` empty.
    The prompt is a `spec:` line and a `base:` line, then the snapshot
-   sentence. Three lines follow, as `SA-0160`'s writer prompt holds them.
-   The account reads the checkout and cannot write it. Anything that
-   writes runs in a clone in the cell's temporary directory. A tool whose
-   name does not resolve is called by its full path. `SA-0169` measured
-   all three. Reach `package_phase.fetch_parent_branch`,
+   sentence. These three lines follow, verbatim, one per line.
+
+   ```
+   Your Bash runs as an account that can read /work but cannot write it.
+   To run anything that writes, clone the tree first: git clone -q /work /tmp/w && cd /tmp/w
+   Call a tool by its full path when its name does not resolve.
+   ```
+
+   `SA-0169` measured all three in a cell. They name no tool path, since
+   ADR 7 bars a repo's tools from core's spec prompts. `SA-0160` points
+   at these lines for its writer. Reach `package_phase.fetch_parent_branch`,
    `git_mirror.export_saffron_dir`, `end_review.layer_cell`,
    `spec_review.run_spec_review` and `implement.run_agent` through their
    modules at call time, since the witness replaces them there.
@@ -298,8 +309,11 @@ checkout` and `checkout/**`. The witness replaces these through
   with no default, so a binding left out raises `TypeError`. It records
   each call and returns a turn.
 - `spec_review.run_spec_review` records its container, `system_prompt`
-  and `prompt`. It calls its `agent` once, with that container, a prompt
-  `x` and empty options. It returns a distinct sentinel per call.
+  and `prompt`. It calls its `agent` once, as
+  `agent(container, prompt="x", options={})`, with both as keywords,
+  since `run_agent` takes them keyword-only
+  (`saffron/phases/implement.py:192-197`). It returns a distinct sentinel
+  per call.
 
 Each candidate's path is `tmp_path / "export" / ".saffron" / "specs" /
 "<id>-x.md"`. The witness pins `base` and builds the callable. It asserts
@@ -325,9 +339,10 @@ It asserts:
   over that `gates_dir`, with `prompts_dir=context.PROMPTS_DIR`. It holds
   `` `base/**` ``, and neither `head/**` nor `checkout/**`. The prompt
   holds `.saffron/specs/<id>-x.md`, `base: ` with the seeded tree, and
-  `is a snapshot of the base`. It does not contain `str(tmp_path)`. It
-  contains none of `/opt/`, `pytest`, `uv run`, `make check`, `.claude`
-  and `://`.
+  `is a snapshot of the base`. It holds each of the three account lines
+  as a whole line, `git clone -q /work /tmp/w && cd /tmp/w` included. It
+  does not contain `str(tmp_path)`. It contains none of `/opt/`,
+  `pytest`, `uv run`, `make check`, `.claude` and `://`.
 - two agent calls. `timeout_s` is `SPEC_REVIEW_TIMEOUT_S` and equals
   1800. The spec ids are `SY-1` then `SY-2`.
 
@@ -347,6 +362,7 @@ These fail it:
 - `layer_cell` called without `spec_session=True`
 - the layer's branch in the fields, in place of the candidate's
 - a tool path such as `/opt/venv/bin/pytest` in the prompt
+- an account line dropped or reworded
 - `session.TURN_TIMEOUT_S`, no `timeout_s`, no `spec_id`, or an empty
   `thread_env`
 - the export run at build time, before any call
@@ -391,6 +407,10 @@ pinned url with no `policy_sha`. These fail it, each measured:
 
 - `cli._stack_review` and `cli._stack_mint`, with recorders that record
   their keywords and return two distinct sentinels.
+- `cli._resolve_queue`, with a fake that takes any keyword and returns
+  `_fake_batch_resolution(tmp_path)`, as `tests/test_cli.py:2978-2980`
+  does. The real one exports through the double below
+  (`saffron/cli.py:606-608`).
 - `cli.git_mirror.export_saffron_dir`, with a double that records each
   call.
 - `cli.run_stack_batch`, with a fake that records its ledger and keywords
@@ -452,8 +472,11 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 1460 changed tokens, 49% of the ceiling. The earlier
-prototype measured 466 tokens in `saffron/cli.py` and 14 in `ledger.py`.
-Its start refusal and prompt-file read go, about 150, so `cli.py` runs
-about 320. The witnesses run about 1110: criterion 1's about 490, the
-mint's about 350, the wiring's about 250, and the fakes about 20.
+estimate is about 1900 to 2300 changed tokens, 64% to 77% of the
+ceiling. The earlier prototype measured 466 tokens in `saffron/cli.py`
+and 14 in `ledger.py`. Its start refusal and prompt-file read go, about
+150, and the quoted lines and the empty-policy branch add about 70. So
+`cli.py` runs about 390, and the reworded docstring about 25. The
+witnesses run about 1500 to 1900. Criterion 1's runs about 800 to 1100,
+with its three commits, six replacements and the `bare` call. The mint's
+runs about 350, the wiring's about 320, and the fakes about 40.
