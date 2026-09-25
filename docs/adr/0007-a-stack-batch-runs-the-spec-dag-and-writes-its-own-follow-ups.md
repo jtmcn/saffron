@@ -89,7 +89,11 @@ one.
 
 **The host commits the batch's revised and follow-up specs.** They land in the
 top layer. It is the one agent-written text a protected path takes, and the
-host writes it, never a cell.
+host writes it, never a cell. The host also moves each spec with a reviewable
+layer to `.saffron/specs/done/`, in the same top layer. That move asserts a
+retired spec's work is in the default branch. It reaches the default branch
+only when the operator merges the stack, so the operator's merge makes the
+assertion.
 
 **Nothing merges.** The batch links the stack, and `--ready` marks it ready.
 Merging stays the operator's, as §1.4 says of every version.

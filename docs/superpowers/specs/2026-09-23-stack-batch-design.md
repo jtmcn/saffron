@@ -200,7 +200,8 @@ on top with no model involved.
 
 - It commits the revised and new spec files.
 - It moves each spec with a reviewable layer to `specs/done/`
-  (`RETIRED_DIRNAME`).
+  (`RETIRED_DIRNAME`). The move sits in the top layer, so the scan sees it
+  only once the operator merges the stack.
 - It writes the backlog pool to `findings.json` in the batch tree.
 
 `.saffron/specs/` is protected. The host writes these files, never a cell, and
