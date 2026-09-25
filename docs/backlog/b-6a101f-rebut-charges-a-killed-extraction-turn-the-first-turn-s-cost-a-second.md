@@ -15,9 +15,9 @@ related: [b-792ab2]
 ## Problem
 
 `run_agent` reports `last_cost_usd` as the cost of a turn killed before
-any result event (`saffron/phases/implement.py:303-318`). REBUT's extraction
+any result event (`saffron/phases/implement.py:319-334`). REBUT's extraction
 turn is passed the first turn's cost there, then adds the failed attempt's
-cost to the first turn's (`saffron/phases/rebut.py:190-193`). So a killed
+cost to the first turn's (`saffron/phases/rebut.py:192-197`). So a killed
 extraction turn charges the first turn twice. `SA-0160` avoids it for the
 spec writer.
 
