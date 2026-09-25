@@ -188,6 +188,13 @@ record's own fact kinds, and it is 168 and 169 a third time.
 neighbour. A run's status reaches no fact, so a folded ledger loses the cap
 on a cut spec's retries.
 
+**Placed 2026-09-24**: **b-dce9a4**, filed checking item 29's closure against
+the tree. Item 29 left one window open for `SA-0020` to close, and `SA-0020`
+shipped without it. A reconcile that runs mid-PACKAGE can move a resumed
+task's live row into `CHANGES_REQUESTED`, and the scan then offers the task as
+resumable. It sits in tier 2 because `saffron queue` starts no cell, and the
+second cell needs another command to consume the candidate.
+
 **152 and 153 are the spec loop's authoring half**, filed 2026-09-16 from
 writing #290's three specs and reading their reviews. 152 is the mechanical
 part — nothing resolves a queued spec's `witness` node ids until a cell has been
