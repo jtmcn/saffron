@@ -114,11 +114,10 @@ def is_no_progress(
 ) -> bool:
     """An identical new-failure set across two attempts: stop paying.
 
-    It lives beside the
-    subtraction because both key on the same identity, and §5.4's argument is
-    that they must not drift apart. Counted, for the same reason the
-    subtraction is: fixing three of four identical-identity failures is
-    progress, and a set could not see it.
+    It lives beside the subtraction because both key on the same identity, and
+    §5.4's argument is that they must not drift apart. Counted, for the same
+    reason the subtraction is: fixing three of four identical-identity
+    failures is progress, and a set could not see it.
     """
     return Counter(identity(n.gate, n.failure) for n in current) == Counter(
         identity(n.gate, n.failure) for n in previous
