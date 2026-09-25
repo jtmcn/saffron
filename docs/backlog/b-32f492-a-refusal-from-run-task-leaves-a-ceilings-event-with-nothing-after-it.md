@@ -43,3 +43,7 @@ task writes no event at all. A test drives a refused task through
 ## Record
 
 - 2026-09-23: filed with `SA-0135`'s first revision.
+- 2026-09-25: `DESIGN.md` §4.2 gate 0, §4.2.1 and `CONTEXT.md`'s **Refusal**
+  now say this refusal prints one line and writes no queue row. The lone
+  `Ceilings` event and the missing morning line remain, so the item stays
+  open.
