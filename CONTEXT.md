@@ -202,7 +202,10 @@ _Avoid_: "the JSON step", "parsing the output".
 
 **Refusal**: A task rejected before any cell starts — a duplicate open PR, an
 overlapping in-flight change, a malformed or moved spec, a repo that failed
-preflight. Costs nothing and reaches the queue as one line.
+preflight. Costs nothing. A refusal the queue scan makes reaches the queue as
+one line. `run_task` also refuses a task whose `consumes` entry does not
+resolve, or cannot be read, at the tree base. That refusal prints one line
+and writes no queue row.
 _Avoid_: "skip" (that is a gate status), "blocked", "reject" (that is what the
 operator does to a PR).
 

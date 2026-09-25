@@ -14,6 +14,14 @@ GitHub issues remain in use only for research/evidence records under
   `forbidden` and `pending_symbols` empty; the ceilings `budget_usd` 12,
   `max_attempts` 4, `max_turns` 60 and `risk` `standard`. An unknown key is
   refused, not ignored.
+- **`estimated_lines`** is optional and absent by default. When declared it is
+  a strict positive integer, the author's size estimate. `driver.py check`
+  prices it against the type's `size` ceiling and blocks at 80% of it. No
+  cell gate reads it.
+- **`consumes`** is optional and empty by default. Each entry is a
+  repo-relative `path` or `path:name` that `depends_on[0]` produces. A spec
+  that declares it needs a `depends_on`. `run_task` resolves each entry at
+  the tree base before the cell starts and refuses the task on a miss.
 - **`pending_symbols`** lists dead code this spec will bring into use, one
   `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
   defers each one while the spec is open, so a parent spec can add what only its

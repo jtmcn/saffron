@@ -148,10 +148,15 @@ witness REBUT added to kill a surviving probe, since the property it pins was
 already true at base. A correct diff ended `EXHAUSTED`, and the operator
 opened #433 by hand.
 
-**Placed 2026-09-23**, from the spec loop's run 15: **b-19b255**, then
+**Placed 2026-09-23**, from the spec loop's run 15: ~~**b-19b255**~~, then
 **b-8487de**. Both are REVIEW telling the operator something false. A probe
 that only broke the format test read as killed on `SA-0127`. A verdict
 session too big for argv left `SA-0128` halted at `REBUTTING`.
+
+**Placed 2026-09-25**, from the spec loop's run 16: **b-e471bd**, then
+**b-a7e5f3**. The cell's agent refused every write under `.claude/`, and
+`SA-0129` ended `NOT_IMPLEMENTED`. Its by-hand pull request then merged, and
+the ledger still refused its child.
 
 ### Tier 2 — the morning after
 
@@ -215,19 +220,19 @@ the loop's report in core, and it needs design before a spec.
 released a hold whose spec edit was still open, and `next` named the old text.
 
 **From the spec loop's run 13** (2026-09-22): **b-66e82d**, **b-055fa3** and
-**b-a9ee32**. The first is why finding the gate behind #433's `EXHAUSTED` took
+~~**b-a9ee32**~~. The first is why finding the gate behind #433's `EXHAUSTED` took
 reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's
 git.
 
 **From comparing Saffron with the superpowers skills** (2026-09-21):
-**b-602d00**. A stacked child whose parent built its names differently pays for
+~~**b-602d00**~~. A stacked child whose parent built its names differently pays for
 a cell overnight and packages nothing mergeable. A host check refuses it first.
 Then **b-343c21**, filed writing `SA-0134`. It is the glossary entry for a
 consumed name, which a cell cannot write.
 
 
-**Placed 2026-09-23**, from the spec loop's run 15: **b-6377cf**, then
+**Placed 2026-09-23**, from the spec loop's run 15: ~~**b-6377cf**~~, then
 **b-cde96b**. Baseline subtraction hid a `preserves` mutant that survived at
 base on `SA-0127`. The second is the by-hand half of run 15's merges.
 
@@ -238,12 +243,17 @@ behaviour, and `SA-0141` is its first slice. Then ~~**b-e51967**~~, filed
 writing `SA-0141`. It is the by-hand edit to §5.3 and the glossary, done in
 that spec's pull request.
 
+**Placed 2026-09-25**, from the spec loop's run 16: **b-04a5d9**, **b-e0cd57**,
+**b-bff670**, then **b-c375d6**. The first is a PR body that calls a new
+advisory failure present at base. The second is a refusal that names ports
+and not processes. The last two are the loop's tools reading stale state.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**,
 ~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, ~~**87**~~, ~~**89**~~, **90**, **92**, **96**, **99**, **100**, **101**, **105**, **106**, ~~**107**~~, **108**, ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, **124**, **125**, **127**, **130**, **131**, **132**, **133**, **134**, ~~**139**~~, **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, ~~**b-e0bbbf**~~, and from run 9: **b-0e20e9**, ~~**b-e403c1**~~, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: **b-5fa523**, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**, and from run 13: **b-542beb**, **b-37924b**,
-**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, ~~**b-111c56**~~, ~~**b-2dea1c**~~, and from ADR 4's review: **b-26315b**, **b-e40d09**, **b-ac97c0**, **b-07f694**, **b-032c3e**, **b-7c88f8**, and from ADR 5: ~~**b-0adc85**~~, and from comparing Saffron with the superpowers skills: **b-e1afbb**, **b-3732ef**, and from run 15: **b-f4eb52**, **b-f30189**, **b-a90136**, **b-e06dbc**, and from `SA-0135`'s review: **b-32f492**, **b-50b566**.
+**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, ~~**b-111c56**~~, ~~**b-2dea1c**~~, and from ADR 4's review: **b-26315b**, **b-e40d09**, **b-ac97c0**, **b-07f694**, **b-032c3e**, **b-7c88f8**, and from ADR 5: ~~**b-0adc85**~~, and from comparing Saffron with the superpowers skills: **b-e1afbb**, **b-3732ef**, and from run 15: **b-f4eb52**, **b-f30189**, **b-a90136**, **b-e06dbc**, and from `SA-0135`'s review: **b-32f492**, **b-50b566**, and from run 16: **b-8fb227**, **b-79d951**, **b-9ead75**, **b-e88930**, **b-1e5572**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
 is the same defect as filing one nowhere at all. **94** was filed here and moved

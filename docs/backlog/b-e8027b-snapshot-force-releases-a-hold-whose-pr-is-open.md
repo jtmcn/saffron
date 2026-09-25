@@ -31,3 +31,6 @@ while that pull request is open. `status` names every hold it kept and why.
 ## Record
 
 - 2026-09-21: filed from the spec loop's run 12.
+- 2026-09-25: recurred in the spec loop's run 16. `snapshot --force` after
+  #497 released `SA-0140`'s hold while its edit (#498) was open. The
+  delegate held it again by hand.

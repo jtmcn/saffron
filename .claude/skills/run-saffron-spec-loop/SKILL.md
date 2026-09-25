@@ -64,16 +64,21 @@ Run the ceilings check over every spec in the order first:
 uv run .claude/skills/run-saffron-spec-loop/driver.py check SA-NNNN
 ```
 
-It applies check 4's two blocker rules to the rows `history` prints, and exits
-1 on either. A blocker here is arithmetic rather than judgement, so it goes to
-the operator before the review rather than after it: raise the ceiling, run
-the spec as written, or drop it. A concern it prints is advisory and exits 0,
+It applies three blocker rules and exits 1 on any of them. Two are check 4's
+turns and budget rules, applied to the rows `history` prints. The third
+prices a declared `estimated_lines` against the `size` ceiling of the spec's
+type. At or above 80% of that ceiling it blocks, and the remedy is a split
+into a parent and children, not a raised ceiling. A blocker here is
+arithmetic rather than judgement, so it goes to the operator before the
+review rather than after it. For turns or budget, raise the ceiling, run the
+spec as written, or drop it. A concern it prints is advisory and exits 0,
 and a usage error, such as a spec id no file declares, also exits 1.
 
 A spec of a shape no past cell matches prints `ceilings: no past cells of this
-shape to compare against` and exits 0, with no verdict line under it. That is
-check 4's third outcome, a note rather than a pass, and the review still owes
-you the reading. The floor caveat and the different-`type` caveat stay with
+shape to compare against`, with no verdict line under it. That is check 4's
+third outcome, a note rather than a pass, and the review still owes you the
+reading. The size rule reads no past cell, so such a spec still exits 1 when
+its `estimated_lines` blocks. The floor caveat and the different-`type` caveat stay with
 the review too.
 
 The review runs either way and still gets `history: run it yourself`, because
