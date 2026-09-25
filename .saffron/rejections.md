@@ -1004,8 +1004,8 @@ taken by hand, so no critic ran on it and it has no lines here.
   **Bucket 1.** **Landed:** a review commit on #512.
 - `SA-0133` (#512): `_drive`'s docstring grew from 15 to 19 lines and the
   `prose` gate counted no new hit.
-  **Bucket 1**, the `prose` gate. **Landed:** a review commit on #512.
-  **Open:** item b-e88930.
+  **Bucket 1**, the `prose` gate. **Open:** item b-e88930. A review commit
+  on #512 cut the docstring back.
 - `SA-0133` (#512): criterion 4's witness never read the `CLAUDE.md` digest.
   The critic raised it, and a probe killed through another test demoted it.
   **Bucket 1**, the probe runner. **Landed:** a review commit on #512, and

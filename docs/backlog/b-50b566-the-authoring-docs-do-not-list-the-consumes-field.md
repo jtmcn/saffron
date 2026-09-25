@@ -40,3 +40,6 @@ writer to put what a child keys by into `consumes:`. This lands after
 ## Record
 
 - 2026-09-23: filed after `SA-0135` and `SA-0136` were queued.
+- 2026-09-25: #517 lists `consumes` in `docs/agents/issue-tracker.md`, with
+  its entry forms and its need for a `depends_on`. The malformed shapes and
+  the pre-flight's check 4 are still open.

@@ -37,3 +37,6 @@ unresolved one refuses the task before its cell starts, and the
 ## Record
 
 - 2026-09-22: filed with `SA-0134`.
+- 2026-09-25: #517's **Refusal** entry in `CONTEXT.md` names the refusal for
+  an unresolved `consumes` entry. The glossary still has no entry for a
+  consumed name.
