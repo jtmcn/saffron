@@ -77,8 +77,9 @@ probe it carries survived.
 
 **The end review takes four exceptions to ADR 4, and this ADR carries them.**
 Its lenses are not ADR 4's declared lenses. They run once per batch, not on
-every reviewed diff. A qualified `blocker` or `concern` feeds a follow-up spec,
-not REBUT. A lens that errors has no task to stop, so its layer shows as
+every reviewed diff. Its severities route differently. A qualified `blocker`
+or `concern` feeds a follow-up spec, in place of REBUT and the operator. A
+`note` goes to the backlog pool, not the pull request. A lens that errors has no task to stop, so its layer shows as
 unreviewed. Every in-cell critic keeps ADR 4 whole, a follow-up's included.
 
 **Qualified findings become follow-up specs, one generation deep.** An agent
@@ -87,10 +88,12 @@ on top of the stack. The findings a follow-up's own critic leaves go to the back
 not to a second generation. A second generation needs an ADR that amends this
 one.
 
-**The host commits the batch's revised and follow-up specs.** They land in the
-top layer. It is the one agent-written text a protected path takes, and the
-host writes it, never a cell. The host also moves each spec with a reviewable
-layer to `.saffron/specs/done/`, in the same top layer. That move asserts a
+**The host commits the batch's revised and follow-up specs in its own
+finishing layer.** It adds that layer above every task, with no model involved.
+The repo's gate suite runs on it in a cell before any push. It is the one
+agent-written text a protected path takes, and the host writes it, never a
+cell. The host also moves each spec with a reviewable layer to
+`.saffron/specs/done/`, in the same finishing layer. That move asserts a
 retired spec's work is in the default branch. It reaches the default branch
 only when the operator merges the stack, so the operator's merge makes the
 assertion.
@@ -192,8 +195,9 @@ this decision rests on.
   measurement below tests the answer. §4.2.1's reason reaches them too. It
   refuses a draft run while nobody is awake, and a task that rewrites its own
   queue. Every queued spec is read at `base_sha`, and other text comes only
-  from spec review or a qualified finding. No task's diff reaches the queue.
-  Revisions and follow-ups return from host-invoked sessions, and the host
+  from spec review or a qualified finding. A task's diff reaches the queue
+  only as the follow-up writer's input. The host enforces the follow-up's
+  fields, and it runs one generation deep. Revisions and follow-ups return from host-invoked sessions, and the host
   commits them. A follow-up only appends above the stack. It edits, reorders
   and removes no queued spec. Nothing merges, so the operator can reject each
   one as a layer.
@@ -209,8 +213,8 @@ These are left to the specs that build it. The design record proposes an
 answer to each.
 
 - how blockers route by the spec review's tags, and the round bound.
-- which refusals re-run on a revised or follow-up spec, and gate 0's
-  "`spec_sha` moved" rule for a revised one.
+- how every gate 0 and `parse_spec` refusal re-runs on a revised or
+  follow-up spec, and gate 0's "`spec_sha` moved" rule for a revised one.
 - what qualifies a finding with no probe, which kill rule a probe meets, and
   whether a surviving probe promotes a `note`, as ADR 3 does.
 - how an end-review lens takes finding text. It is a filled value and never

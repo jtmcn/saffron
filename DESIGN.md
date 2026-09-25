@@ -67,6 +67,7 @@ The important inversion: **the product of this factory is not code, it is a revi
 - Cloud runners. Local only until throughput actually binds.
 - Agents writing their own specs from a roadmap. That's v3 and it's the part most likely to waste money.
   ADR 7 narrows this, at the operator's request of 2026-09-23. A stack batch writes a follow-up spec only from a finding the host qualified, one generation deep.
+  It also revises a queued spec, but only for a witness or buildability blocker.
   The money reason still holds, so one generation and a bound on revision rounds limit it. Qualification is the seam.
 - A bespoke diff viewer. GitHub already built the best one you'll ever have (§6).
 - An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record; it never controls execution. SHACL shapes validate the projection; they do not gate state transitions, and no scheduling decision reads a triple. (Stands for v1, and the spike that would have reopened it has now run and did not: Appendix O's rule closed the question on 2026-09-04, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`.)

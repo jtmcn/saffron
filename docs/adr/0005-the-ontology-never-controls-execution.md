@@ -67,7 +67,9 @@ vocabulary's readers. A term neither reads is deleted. Coverage follows
 readers, never the reverse.
 
 The operator's intent to revisit §1.4 is recorded in Appendix T, and it decides
-nothing. §1.4 moves only on a measured result. Whoever reopens it starts with
+nothing. §1.4 moves only on a measured result. That rule is the ontology
+entry's. ADR 7 narrows the spec-writing entry on the operator's request, and
+its own measurement decides whether that stays. Whoever reopens it starts with
 §4.2.1, which now states the `forbidden` carve-out behind O's no on question 1.
 
 This ADR replaces Appendix P's paragraph on the emitter's status and rev 20's
