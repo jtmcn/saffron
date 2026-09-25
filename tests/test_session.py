@@ -3718,8 +3718,15 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
             ],
         )
 
+    # Every attempt collects `test_added`, so an attempt's suite read as either
+    # side of the comparison moves which finding is killed.
+    head = [
+        _TASK_HEAD[0].model_copy(
+            update={"collected": ["t.py::test_old", "t.py::test_added"]}
+        )
+    ]
     cell = _stub_the_runtime(
-        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, head)
     )
     _rebuttable(monkeypatch, cell, rebut_commits=0)
     _stub_probe_gates(
@@ -3795,6 +3802,12 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
     (blocker,) = record["blockers"]
     assert blocker["claim"] == "c1"
+
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    severity = {
+        f["claim"]: f["severity"] for lens in findings for f in lens["findings"]
+    }
+    assert severity["c2"] == severity["c3"] == "note"
 
     # The REBUT prompt's line for the survivor shows its probe and does not
     # say the tests stayed green.

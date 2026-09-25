@@ -655,12 +655,15 @@ def test_a_new_failure_no_counted_test_can_be_matched_to_is_unproven():
             status="fail",
             tool="pytest 8.0",
             collected=["something_else"],
-            failures=[Failure(file="t.py", code="t.py::test_y", message="boom")],
+            failures=[
+                Failure(file="t.py", code="t.py::test_y", message="boom"),
+                Failure(file="t.py", code="t.py::test_z", message="boom"),
+            ],
         ),
         counted={"other"},
     )
     assert run2.verdict == "unproven"
-    assert run2.uncounted == ("t.py::test_y",)
+    assert run2.uncounted == ("t.py::test_y", "t.py::test_z")
 
     run3 = _check(
         PROBE,

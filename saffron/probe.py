@@ -2,9 +2,9 @@
 
 **A green suite is the positive result** — the inversion of `witness_gate`,
 which applies a mutant a criterion declared and reads a `fail` as the answer it
-wanted. Here the edit comes from a lens's finding, and a suite that stays green
-under it is the finding confirmed: the tests do not notice the behaviour
-breaking, which is what the finding said.
+wanted. Here the edit comes from a lens's finding, and a suite whose counted
+tests stay green under it is the finding confirmed: the tests the diff added
+do not notice the behaviour breaking, which is what the finding said.
 
 This module holds the verdict and no I/O. `mutate` and `run_tests` are injected
 exactly as `witness_gate` takes them, so every branch below is reachable without
@@ -108,7 +108,7 @@ class ProbeResult:
     `unproven`, where the reason is the whole content of the result."""
     failures: tuple[str, ...] = ()
     """The new failure identities behind a `killed`. Itemised rather than
-    counted: telling a real kill from program breakage is a person's call and
+    a number: telling a real kill from program breakage is a person's call and
     they cannot make it from a number."""
     tool: str | None = None
     """What the gate ran, as it reported it. `None` when no gate answered."""
@@ -264,8 +264,9 @@ def check_probe(
     if not readable:
         return ProbeResult(
             "unproven",
-            "a new failure exists but the run cannot say which tests the "
-            "diff added, so nothing could be matched to a counted test",
+            "a new failure exists but the run cannot say which tests the diff added"
+            if counted is None
+            else "no new failure names a test the run collected",
             tool=tool,
             collected=collected,
             summary=summary,
@@ -303,8 +304,8 @@ def added_tests(base: Sequence[GateResult], head: GateResult) -> frozenset[str] 
     (b-19b255). This is the set a probe's kill is counted against.
 
     `base` is a whole suite's results. Only the one among them with
-    `gate == "tests"` is read, by role, the way `census` and `criteria` read
-    theirs. `None` covers three cases, and none of them means the diff added
+    `gate == "tests"` is read, by role, as `runner.py` reads it, and unlike
+    `census`'s union. `None` covers three cases, and none of them means the diff added
     nothing: no `tests` result in `base`, that result's `collected` is
     `None`, or `head.collected` is `None`. A `base` result that collected
     `[]` makes every name `head` collected an addition.
