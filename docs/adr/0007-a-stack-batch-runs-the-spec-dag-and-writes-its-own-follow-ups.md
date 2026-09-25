@@ -142,7 +142,10 @@ this decision rests on.
   above on a stale head. The residual holds until the spec records each
   handoff's head and checks it at the finish.
 - **23** upholds. §1.4's entry is narrowed in the same pull request, with the
-  operator's request, its reason and the seam that covers the rest.
+  operator's request, its reason and the seam that covers the rest. ADR 5
+  moves §1.4 only on a measured result. Its own 23 bullet scopes that rule to
+  the ontology entry, so it does not reach this one. The measurement
+  below still decides whether this narrowing stays.
 - **26** upholds. "Predecessor" names the task below in the stack. "Parent"
   keeps its one referent, `depends_on[0]`. The refusal names every
   `depends_on` entry, not the parent alone.
@@ -228,4 +231,6 @@ answer to each.
 Whether follow-ups earn their cost is to be measured. The first measure is the
 share of follow-ups that reach `READY_FOR_REVIEW` with a clean critic. The
 second is the spend per follow-up, across its writing, spec review and cell. They
-decide whether an amendment for a second generation is worth proposing.
+decide whether an amendment for a second generation is worth proposing. They
+also decide whether the narrowing of §1.4 stands. If follow-ups do not earn
+their cost, an amendment withdraws it and §1.4's entry returns to its old text.
