@@ -1,4 +1,5 @@
-"""Driving one task: a resolved spec and a pinned base in, a `CellOutcome` out.
+"""Driving one task: a resolved spec and a pinned base in, a `CellOutcome` or
+a `Refused` out.
 
 The span is one task from `CellSpec` to packaged pull request — a cell *and*
 PACKAGE, which is why this is neither `cell/` nor `phases/`. `CONTEXT.md` §2
@@ -12,13 +13,17 @@ record of what bounded it. `batch.py` names the cause in its own `runner`
 docstring — the resolvers this needs were `cli`-private, and `cli.py` was
 `forbidden` to the spec that built the loop.
 
-What stays outside, deliberately:
+What stays outside, deliberately, except one refusal named below:
 
 - **The refusals and the mirror fetch.** They run at different times on the
   two paths for good reasons — a batch refuses at scan time so a night never
   pays for the cell, and pays for the mirror once per run (§4.2.1); an
   attended run has no scan and pays per task. Folding either in would force
   one of those to move.
+- **The one exception.** An unresolved `consumes` entry needs the tree base
+  it must resolve against. Neither scan-time path knows that base until
+  `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
+  instead.
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -43,6 +48,7 @@ from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
+from saffron.repos.mirror import unresolved_consumes
 from saffron.scheduler import DEPENDENCY_WAITING_STATES
 
 
@@ -215,6 +221,17 @@ def _resolve_stacked_on(
     return head, branch
 
 
+@dataclass(frozen=True, kw_only=True)
+class Refused:
+    """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**),
+    for an unresolved `consumes` entry the reader could check before any
+    turn was spent. Carries only `reason`, the same text `run_task` prints
+    on the refused line. No run and no task row exist for a caller to read
+    anything else back from."""
+
+    reason: str
+
+
 def run_task(
     spec: Spec,
     spec_sha: str,
@@ -227,7 +244,7 @@ def run_task(
     out_dir: Path,
     token: str | None,
     emit: Callable[[Event], None] | None = None,
-) -> CellOutcome:
+) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package the result if the cell came back reviewable.
 
@@ -245,6 +262,9 @@ def run_task(
     packaging ran, so a caller reads what actually happened to the task —
     `MERGE_FAILED` included — rather than the pre-packaging
     `READY_FOR_REVIEW` every packaged task would otherwise report.
+
+    Returns `Refused` instead, before any cell exists, when `spec.consumes`
+    names something the tree base does not resolve.
     """
     if emit is None:
         # Print plus the task's own log, the shape `session._default_emit` and
@@ -299,6 +319,16 @@ def run_task(
     # kind carries `CellSpec.stacked_on` at all. Backlog item 43.
     if stacked_on is not None:
         print(f"stacked on {target_branch} @ {stacked_on[:12]}")
+
+    # The tree base a `consumes` entry must resolve against: `stacked_on`
+    # once known, else the run's own pin.
+    tree_base = stacked_on if stacked_on is not None else base.base_sha
+    if spec.consumes:
+        unresolved = unresolved_consumes(base.mirror, tree_base, spec.consumes)
+        if unresolved:
+            reason = f"{tree_base[:12]} does not resolve {', '.join(unresolved)}"
+            print(f"{spec.id:<10} refused  {reason}")
+            return Refused(reason=reason)
 
     cell_spec = CellSpec(
         spec_id=spec.id,

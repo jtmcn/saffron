@@ -35,7 +35,13 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
-from saffron.task import PinnedBase, ResolvedCeilings, run_task, spec_ceilings
+from saffron.task import (
+    PinnedBase,
+    Refused,
+    ResolvedCeilings,
+    run_task,
+    spec_ceilings,
+)
 from saffron.watch import UnknownTask, follow, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
@@ -446,6 +452,10 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         out_dir=out_dir,
         token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
     )
+    if isinstance(outcome, Refused):
+        # `run_task` already printed the refused line, and no task exists
+        # for this to add anything more about.
+        return 1
     return CELL_EXIT.get(outcome.state, 1)
 
 
@@ -456,7 +466,7 @@ def _batch_runner(
     repo: Path,
     ledger: Ledger,
     out_dir: Path,
-) -> Callable[[Candidate], CellOutcome]:
+) -> Callable[[Candidate], CellOutcome | Refused]:
     """What turns a candidate into a cell (`run_batch`'s own phrase for the
     callable it takes with no default) — the adapter, and only the adapter:
     `task.run_task` is the driver both this and `_run_cell` go through, so
@@ -472,7 +482,7 @@ def _batch_runner(
     against the row its parent's task minted.
     """
 
-    def run(candidate: Candidate) -> CellOutcome:
+    def run(candidate: Candidate) -> CellOutcome | Refused:
         spec = candidate.spec
         # No flag can reach a batch's task, so the spec's own fields are the
         # whole arbitration — `_ceilings`' other half.
@@ -689,7 +699,7 @@ def _mirror_path(repo: Path, home: Path) -> Path:
     return home / "mirrors" / f"{repo.name}-{digest}.git"
 
 
-def _no_candidate_should_run(candidate: Candidate) -> CellOutcome:
+def _no_candidate_should_run(candidate: Candidate) -> CellOutcome | Refused:
     """The runner a night gets when the loop was never meant to start —
     readiness failed, or readiness passed but the queue itself could not be
     resolved.
@@ -802,7 +812,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         )
 
     candidates: list[Candidate] = []
-    runner: Callable[[Candidate], CellOutcome] = _no_candidate_should_run
+    runner: Callable[[Candidate], CellOutcome | Refused] = _no_candidate_should_run
     # Matches `candidates`' own empty default — nothing reaches it.
     rescan: Callable[[], Sequence[Candidate]] = _no_candidates_to_rescan
     # Set when the scan raises after readiness passed (item 95), so the raise

@@ -21,6 +21,9 @@ multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is the batch
 *scan*'s job, not this loop's — every rescan this loop triggers passes
 `stamp_orphaned=False`, since a task this same night left in flight is not a
 corpse a dead scan left behind).
+
+`Refused` is imported from `saffron.task` for its type alone. Importing a
+type is not importing the driver that builds it.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate
+from saffron.task import Refused
 
 # The loop returns `INCOMPLETE` for a night that left a task in flight — a
 # task that came back mid-phase, having reached no end state, which is not
@@ -58,7 +62,7 @@ def run_batch(
     ledger: Ledger,
     budget_usd: float,
     until: datetime | None,
-    runner: Callable[[Candidate], CellOutcome],
+    runner: Callable[[Candidate], CellOutcome | Refused],
     *,
     rescan: Callable[[], Sequence[Candidate]],
     clock: Callable[[], datetime] = datetime.now,
@@ -144,7 +148,7 @@ def _drive(
     ledger: Ledger,
     budget_usd: float,
     until: datetime | None,
-    runner: Callable[[Candidate], CellOutcome],
+    runner: Callable[[Candidate], CellOutcome | Refused],
     rescan: Callable[[], Sequence[Candidate]],
     *,
     batch_id: int,
@@ -226,29 +230,34 @@ def _drive(
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
         else:
-            # `create_run` mints the row with no `batch_id` (`run_one_cell`,
-            # forbidden here, passes none) — this stamps it on after the fact,
-            # the shape `record_push` and `set_task_package` already use on
-            # `tasks`: the row exists, then the fact about it arrives.
-            ledger.attach_run_to_batch(outcome.run_id, batch_id)
-
-            if outcome.state in ABORT_STATES:
-                consecutive_aborts += 1
+            if isinstance(outcome, Refused):
+                # No run to attach, and the breaker's count stands exactly
+                # where it was: a refusal is not a task outcome.
+                pass
             else:
-                # Any state a task earned resets the counter, `EXHAUSTED`
-                # included — "any terminal state" would also reset on
-                # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
-                # would never reach two. An in-flight state resets it the same
-                # way: two provider blips in a row must not end a night that
-                # would have recovered on its third task (backlog item 70).
-                consecutive_aborts = 0
+                # `create_run` mints the row with no `batch_id` (`run_one_cell`,
+                # forbidden here, passes none) — this stamps it on after the fact,
+                # the shape `record_push` and `set_task_package` already use on
+                # `tasks`: the row exists, then the fact about it arrives.
+                ledger.attach_run_to_batch(outcome.run_id, batch_id)
 
-            if outcome.state in IN_FLIGHT_STATES:
-                # Read from `reconcile`, never copied: the next batch scan's own
-                # definition of "in flight" is what decides a corpse there, and a
-                # second list here is how the two would come to disagree about
-                # what a finished task is.
-                in_flight.append((candidate.spec.id, outcome.state))
+                if outcome.state in ABORT_STATES:
+                    consecutive_aborts += 1
+                else:
+                    # Any state a task earned resets the counter, `EXHAUSTED`
+                    # included — "any terminal state" would also reset on
+                    # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
+                    # would never reach two. An in-flight state resets it the same
+                    # way: two provider blips in a row must not end a night that
+                    # would have recovered on its third task (backlog item 70).
+                    consecutive_aborts = 0
+
+                if outcome.state in IN_FLIGHT_STATES:
+                    # Read from `reconcile`, never copied: the next batch scan's own
+                    # definition of "in flight" is what decides a corpse there, and a
+                    # second list here is how the two would come to disagree about
+                    # what a finished task is.
+                    in_flight.append((candidate.spec.id, outcome.state))
 
         # Rescanned after every task, success or not, so a child whose parent
         # just packaged is reachable tonight rather than tomorrow.

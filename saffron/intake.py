@@ -20,6 +20,7 @@ from pydantic import (
     StringConstraints,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
@@ -141,6 +142,9 @@ class Spec(BaseModel):
     type: SpecType
     priority: int = 3
     depends_on: list[str] = Field(default_factory=list)
+    # A path or `path:name` a parent already built. `run_task` checks this
+    # against the tree base before any cell starts.
+    consumes: list[str] = Field(default_factory=list)
     envelope: list[str] = Field(default_factory=list)
     touches: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)
@@ -176,6 +180,16 @@ class Spec(BaseModel):
     def spec_type(self) -> SpecType:
         """`type` under the name `CellSpec` and the gate suite read it by."""
         return self.type
+
+    @model_validator(mode="after")
+    def _consumes_needs_a_parent(self) -> Spec:
+        """A `consumes` entry names something a parent built. A spec with no
+        `depends_on` has no parent to consume from."""
+        if self.consumes and not self.depends_on:
+            raise ValueError(
+                "spec declares `consumes` but no `depends_on` to consume from"
+            )
+        return self
 
 
 def parse_spec(text: str) -> Spec:
