@@ -40,7 +40,8 @@ forbidden:
   - tests/test_review.py
 budget_usd: 30
 max_attempts: 3
-max_turns: 190
+max_turns: 230
+estimated_lines: 465
 risk: elevated
 acceptance:
   - claim: >-
@@ -57,8 +58,9 @@ acceptance:
       `uncounted`.
     witness: tests/test_probe_check.py::test_a_probe_only_an_unadded_test_notices_survives_with_that_failure_beside_it
   - claim: >-
-      A probe with a new failure reads `unproven`, never `survived` or
-      `killed`, when no failure can be matched to a counted test. That is
+      A probe reads `unproven`, never `survived` or `killed`, when a new
+      failure exists and none can be matched to a
+      counted test. That is
       `counted=None`, or no new failure's `code` is in `counted` or among the
       names the probed run collected. Each such result holds every new
       failure's `code` in `uncounted`. The witness drives four runs of this kind,
@@ -127,9 +129,12 @@ tier 1. It was found in the spec loop's run 15 on `SA-0127` (#476). Item 117
 built the probe path, and `SA-0109` shipped it.
 
 Every sentence below about current code was read at `55c6d41b` on
-2026-09-23, and rechecked at `4d141879`. `SA-0133` lands first and moves line numbers in
-`saffron/cell/session.py` and `tests/test_session.py`. Find each cited name
-by its name at the base you are cut from.
+2026-09-23, and rechecked at `4d141879`. `SA-0140` has since moved
+`saffron/phases/rebut.py`, and `SA-0133` moves line numbers in
+`saffron/cell/session.py` and `tests/test_session.py`. The anchors below for
+`baseline`, `latest`, the `_probe_adequacy` call and `_blocker_line` were
+re-read at `5bfb6921`, the head of `SA-0133`. Find each cited name by its
+name at the base you are cut from.
 
 **Any new failure kills a probe today.** `check_probe`
 (`saffron/probe.py:157-244`) applies one probe and runs the whole suite,
@@ -159,12 +164,12 @@ Its docstring records why. This repo's gate reads node ids from the
   (`:1407`), then calls `check_probe` per distinct probe (`:1416-1422`).
   Its `decide` builds each entry from `probe_check.record_fields` plus
   `probe_verdict` and `findings` (`saffron/cell/session.py:1329-1345`). Its
-  one caller is `probed = _probe_adequacy(` (`saffron/cell/session.py:2577-2589`).
+  one caller is `probed = _probe_adequacy(` (`saffron/cell/session.py:2583-2595`).
   The task's pre-turn suite is `baseline = suite.baseline(tree)`
-  (`saffron/cell/session.py:1745`), taken at base before any turn. A second
+  (`saffron/cell/session.py:1751`), taken at base before any turn. A second
   suite is in scope there too. It starts as `latest = baseline`
-  (`saffron/cell/session.py:1748`) and becomes each attempt's head suite,
-  `latest = comparison.run` (`saffron/cell/session.py:2233`). Nothing passes it to
+  (`saffron/cell/session.py:1754`) and becomes each attempt's head suite,
+  `latest = comparison.run` (`saffron/cell/session.py:2239`). Nothing passes it to
   `_probe_adequacy` today.
 - The lens-corpus driver's `probe_check.check_probe(` call
   (`docs/evidence/scripts/2026-09-08-lens-corpus.py:245-251`).
@@ -188,7 +193,8 @@ diff adds. The rest adds declared witnesses and removes `preserves` ones.
 
 **What the record says.** `record_fields` writes ten fields
 (`saffron/probe.py:247-265`). REBUT shows a survived probe to the implementer
-with the words "and the tests stayed green" (`saffron/phases/rebut.py:133-137`).
+with the words "and the tests stayed green" (`_blocker_line`,
+`saffron/phases/rebut.py:130-142`, the words at `:140`).
 
 ## Problem
 
@@ -233,6 +239,13 @@ unmeasured. The probe cell runs with `network=None`.
 (`docs/adr/0003-a-test-is-judged-by-an-edit-chosen-to-break-it.md`) already
 state the new rule. This spec's own pull request rewrote them by hand, so
 none of the three needs an edit.
+
+**ADR 0003's "cannot say" case.** ADR 0003's lines 64-66 make a probe
+`unproven` when "the run cannot say which tests the diff added". That case
+applies only to a probe with a new failure. Criterion 2's fourth run passes
+`counted=None` with no new failure and reads `survived`. No test failed, so
+no test the diff adds noticed, as `DESIGN.md:1077` says. The ADR stays as it
+is, since `docs/adr/**` is forbidden.
 
 **The corpus's own numbers.** The driver passes every name its baseline
 collected, so any collected test still counts there. A published pass is
@@ -327,7 +340,16 @@ notices.
   `t.py::test_old` and `t.py::test_added`. Script the probe cell's runs
   with `_stub_probe_gates(gate_results=...)`. The first entry is its own
   baseline run, collecting all three names. Each later entry is one
-  probe's run. Read the REBUT prompt from `cell.turns`.
+  probe's run, and it collects all three names too. A probed run that
+  lacks one makes `_no_longer_collected` (`saffron/probe.py:213-224`)
+  read the probe `unproven`. Read the REBUT prompt from `cell.turns`.
+- For criterion 4, leave `_drive`'s `gate_cell_suite` at its default
+  (`tests/test_session.py:1132` at base). The Gate-only cell and the probe
+  cell are both `saffron-gate-` containers. `_stub_probe_gates` answers
+  every `run_gate` on such a container from `gate_results`
+  (`tests/test_session.py:3311-3314`). A Gate-only suite that collects
+  `t.py::test_added` gives its `revert_gate` a candidate. That run would
+  consume the probe cell's baseline entry before the probe cell starts.
 - The three collections differ so that two wrong versions each turn one
   `killed` into `survived`. This is worked by arithmetic, not run. The
   design counts `{t.py::test_added, t.py::test_new}`.
@@ -393,6 +415,9 @@ notices.
 - `base_results` is `latest.results`, the last attempt's suite.
 - The head collection taken from `latest.results` in place of the probe
   cell's baseline run. Only criterion 4's third collection kills it.
+- The head collection taken from `gate_comparison.run.results`, the
+  Gate-only cell's suite. Criterion 4 excludes it only while
+  `gate_cell_suite` stays at its default.
 - A `None` from `added_tests` turned into `frozenset()` in the session.
 - Any run with an unmatched failure read as `unproven`, or `uncounted`
   keeping only the first code.
