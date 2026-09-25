@@ -109,18 +109,19 @@ acceptance:
 ## Context
 
 Backlog item **b-792ab2**, step 6 of its Done. It cites `DESIGN.md` §5.5.
-`SA-0156` gives the stack batch's spec review session `Bash` in its critic
-cell, through `spec_review.SPEC_SESSION_TOOLS`, which is `Read`, `Glob`,
-`Grep` and `Bash`. `SA-0160`'s spec writer takes the same list. The
+`SA-0175` gives the stack batch's spec review session `Bash`, through
+`spec_review.SPEC_SESSION_TOOLS`, which is `Read`, `Glob`, `Grep` and
+`Bash`. `SA-0156` runs that session in a critic cell, and `SA-0160`'s
+spec writer takes the same list. The
 operator decided that this Bash runs as an unprivileged account. That
 account cannot write the runner, its files, or anything the host reads the
 session's findings from. The operator also decided that only a cell that
 runs a spec session gets the capabilities this needs, and that the account
-never sees `CLAUDE_CODE_OAUTH_TOKEN`. This spec builds that, and `SA-0156`
-depends on it.
+never sees `CLAUDE_CODE_OAUTH_TOKEN`. This spec builds that, and
+`SA-0175` and `SA-0156` build on it.
 
 **What the tree base holds.** This spec's tree base is `SA-0168`'s head.
-Every line number below was read at `f2a08a9f`, where no chain code
+Every line number below was read at `18c72f36`, where no chain code
 exists. This spec consumes one chain name. `SA-0154` adds
 `end_review.layer_cell(fields, *, repo, mirror, gates_dir, thread_env)`, a
 context manager. It removes a leftover container, calls `session.cell_up`
@@ -130,20 +131,20 @@ one. Only a spec session holds `Bash`. `SA-0154`'s witness file is
 `tests/test_end_review.py`.
 
 **What §5.5 forbids, and why.** A gate-only cell exists so that no gate
-executes in the critic cell (`DESIGN.md:1062`). There, "a gate would run
+executes in the critic cell (`DESIGN.md:1065`). There, "a gate would run
 model-authored code as root in the container the lenses then re-exec
 their runner from". A spec session's cell is seeded at the predecessor
 layer's head, which the previous layer's implementer wrote. A spec review
 that runs a test there runs that code.
 
 **Who runs as what today.** No image sets a `USER`, so every cell process
-runs as root (`DESIGN.md:603`). `implement.run_agent` execs
+runs as root (`DESIGN.md:604`). `implement.run_agent` execs
 `/opt/saffron/python /opt/saffron/agent_runner.py` with no user
-(`saffron/phases/implement.py:262-269`). The runner starts the bundled
+(`saffron/phases/implement.py:286-293`). The runner starts the bundled
 Claude Code CLI through the SDK, and the CLI runs the Bash tool's commands.
 So the model's Bash, the CLI and the runner are all root. The runner writes
 Saffron's events on stdout, and the host reads the session's text from that
-stream (`saffron/phases/implement.py:225-260`). Every cell starts with
+stream (`saffron/phases/implement.py:257-284`). Every cell starts with
 `--cap-drop ALL` (`saffron/cell/runtime.py:227`), so root there cannot
 change its uid.
 
@@ -235,7 +236,7 @@ Build six things.
 
 1. **The account and the wrapper.** Edit
    `images/cell-base.python.Dockerfile` after the step that runs the runner,
-   before `WORKDIR /work` (`:68-72`). Add a system account named
+   before `WORKDIR /work` (`images/cell-base.python.Dockerfile:68-72`). Add a system account named
    `unprivileged`, with its own group and home. Write its global git
    config there with two `safe.directory` entries, `/work` and
    `/work/.git`. Copy a new `images/unprivileged.sh`, a bash script, to
@@ -303,10 +304,11 @@ toolchain or the state volume. The session's transcript lives in the state
 volume, and a resumed extraction turn reads it. So neither the turn under
 way nor any later turn in the cell runs anything the account wrote.
 
-**What `SA-0156` and `SA-0160` pass.** `SA-0156`'s `run_spec_review`
-passes `agent_options` of `SPEC_SESSION_TOOLS`, which hold `Bash` and
-neither `Write` nor `Edit`. So the prefix reaches that session with no
-argument. Each of their callables opens its cell with
+**What `SA-0175`, `SA-0156` and `SA-0160` pass.** `SA-0175`'s
+`run_spec_review` passes `agent_options` of `SPEC_SESSION_TOOLS`, which
+hold `Bash` and neither `Write` nor `Edit`. So the prefix reaches that
+session with no argument. Each of `SA-0156`'s and `SA-0160`'s callables
+opens its cell with
 `layer_cell(..., spec_session=True)`, and that grants the capabilities and
 runs the self-check. A cell whose wrapper stays root raises
 `CellRuntimeError` before any session starts.
@@ -316,22 +318,20 @@ account reads `/work` and cannot write it, and it writes `/tmp`. Through
 the CLI's composite command, with no snapshot, its `PATH` is
 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`. Root's
 login shell resets it there, so `pytest` does not resolve. `git clone -q
-/work /tmp/w` worked, and `/opt/venv/bin/pytest` ran a test in the clone.
-`SA-0156`'s and `SA-0160`'s prompts come from this repository's agent
-files, so the operator adds this sentence to them:
-
-> Your Bash runs as an unprivileged account that can read /work but not
-> write it. To run anything that writes, clone the tree first: `git clone
-> -q /work /tmp/w && cd /tmp/w`. Call a tool by its full path, such as
-> `/opt/venv/bin/pytest`, when its name does not resolve.
+/work /tmp/w` worked, and this repo's test runner, called by its full
+path, ran a test in the clone. The session's prompt tells it so. Those
+prompts are core's, and name no repo file, tool or URL (ADR 7,
+principle 41). `SA-0156`'s review prompt carries three lines for this,
+quoted verbatim there, and they name no tool path. `SA-0160` points at
+the same lines for its writer. This spec writes no prompt text.
 
 ## Out of scope
 
 - **`DESIGN.md`.** It is protected. The operator records two departures by
   hand, in the pull request, each narrowed to a spec session's cell.
-  - §5.5 (`:1062`) keeps model-authored code out of the critic cell. A
+  - §5.5 (`DESIGN.md:1065`) keeps model-authored code out of the critic cell. A
     spec session's cell now runs it, as `unprivileged` only.
-  - §5.1 says "No capability is granted to anything" (`:586`). A spec
+  - §5.1 says "No capability is granted to anything" (`DESIGN.md:587`). A spec
     session's cell now grants its root `CAP_SETUID` and `CAP_SETGID`.
     The Bash that runs model-authored code holds neither.
 - **The implementer's cell.** Its Bash stays root.

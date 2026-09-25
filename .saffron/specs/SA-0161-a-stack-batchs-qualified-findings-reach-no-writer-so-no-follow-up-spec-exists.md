@@ -150,7 +150,7 @@ cell and the mint, and passes it from `saffron batch --stack`. `SA-0162`
 then runs the follow-ups as generation 1.
 
 **What the tree base holds.** This spec's tree base is `SA-0164`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain
 `SA-0142` to `SA-0164` puts these names there, so they are cited by symbol.
 Every line number below was read at `f2a08a9f`, where none of them exist.
 
@@ -168,7 +168,7 @@ Every line number below was read at `f2a08a9f`, where none of them exist.
 - `SA-0150`: `Ledger.record_spec_text(task_id, *, origin, spec_id, path,
   text)`, and `Ledger.spec_text(task_id)`, the latest row or `None`. A row's
   `spec_sha` is the SHA-256 of its text, as `load_spec` hashes a file
-  (`saffron/intake.py:263-274`). Its fact's `batch_key` is the task's run's
+  (`saffron/intake.py:308-319`). Its fact's `batch_key` is the task's run's
   batch when it is written (`saffron/ledger.py:372-391`).
 - `SA-0156` and `SA-0168`: `cli._stack_mint`, whose mint creates a run and
   a task with no batch and returns the task's id, and
@@ -187,11 +187,12 @@ the batch's runs (`saffron/ledger.py:897-912`). `attach_run_to_batch` sets
 a run's batch (`:848-863`). `open_attempt` takes a phase (`:1000-1023`).
 `tasks_by_repo` lists a repo's tasks with their spec ids (`:712-727`), and
 `record_key` gives a task's key (`:366-370`). `parse_spec` refuses a mutant
-whose `find` the body or a claim spells (`saffron/intake.py:236-259`). It
-does not refuse one a finding named. `scope.matches` is the glob `touches`
-is judged by (`saffron/gates/core/scope.py:31-36`). `mirror.changed_files`
+whose `find` the body or a claim spells (`saffron/intake.py:260-303`). It
+does not refuse one a finding named. The `scope` gate's glob match is
+`matches` (`saffron/gates/core/scope.py:31-36`), and `touches` is judged
+by it. `mirror.changed_files`
 and `mirror.file_at` read a range's paths and a file at a sha
-(`saffron/repos/mirror.py:127-149`, `:231-259`). `worktree.git_argv` and
+(`saffron/repos/mirror.py:136-158`, `saffron/repos/mirror.py:241-270`). `worktree.git_argv` and
 `DIFF_FLAGS` pin a diff's shape (`saffron/cell/worktree.py:132-205`). A
 spec file's name starts with its id and a hyphen
 (`saffron/cell/session.py:459-466`), and ids are numbered from the highest
@@ -260,8 +261,8 @@ Build two things in `saffron/follow_up.py`.
 
 **Why a probe is checked at the top.** A follow-up runs on top of the
 stack. A later layer can move a probe's `find` text, and a `find` that
-matches other than once is `unproven` (`saffron/cell/worktree.py:635-643`,
-`saffron/probe.py:189-193`). So a finding whose probe no longer matches
+matches other than once is `unproven` (`saffron/cell/worktree.py:640-648`,
+`saffron/probe.py:206-210`). So a finding whose probe no longer matches
 once at the top is pooled. Principle 28 asks that the group's other
 findings still reach a follow-up.
 
@@ -286,8 +287,10 @@ within half of `--budget`.
   cell's keywords, and `write` with `run_spec_writer` in a critic cell. It
   seeds that cell at the top layer's head, the tree the prompt names. It
   calls `run_spec_writer(container, *, system_prompt, prompt, agent)` as
-  `SA-0160` defines it. The system prompt is the file the policy's
-  `spec_writer_prompt` names. It binds the mint, owns `pooled`, passes
+  `SA-0160` defines it. The system prompt is core's
+  `saffron/agents/prompts/spec-writer.md`, which `SA-0160`'s
+  `spec_writer_system_prompt` fills from the policy at the pinned
+  `base_sha`. It binds the mint, owns `pooled`, passes
   `follow_ups` from `saffron batch --stack`, and catches every raise.
 - **Running the follow-ups.** `SA-0162` appends them on top, records each
   layer at generation 1, and moves the batch row's close after them.

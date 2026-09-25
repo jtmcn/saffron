@@ -58,9 +58,10 @@ acceptance:
       `StackReview`. Given a stack with no layers, it returns `[]`, and
       reads, prints and calls nothing. Otherwise it exports `.saffron/` at
       the pinned `base_sha` into `out_dir / "follow-ups" / <batch key>`, and
-      loads that export's policy. The system prompt is the file the policy's
-      `spec_writer_prompt` names, read at the pinned `base_sha`, after its
-      frontmatter. It then calls `follow_up.write_follow_ups` once, with the
+      loads that export's policy. The system prompt is
+      `spec_review.spec_writer_system_prompt` of that policy over
+      `context.PROMPTS_DIR`, core's writer prompt (`SA-0160`). It is never
+      filled from `repo`'s policy or the one at the mirror's `HEAD`. It then calls `follow_up.write_follow_ups` once, with the
       ledger, the stack and the batch key. Its `mirror` is the pinned mirror,
       `specs_dir` the export's `.saffron/specs`, and `repo_id` the pinned
       url's. Its `test_paths` is the policy's, `cap_usd` is as given,
@@ -73,13 +74,13 @@ acceptance:
       pinned base, `repo` and the ledger, and keeps each task id it returns
       beside the group last written. Its `write` brings up
       `end_review.layer_cell` at `layer_fields` of the stack's first layer,
-      over `repo`, the pinned mirror, the export and its `thread_env`. In
-      that cell it returns `spec_review.run_spec_writer` of the system
+      over `repo`, the pinned mirror, the export and its `thread_env`,
+      called with `spec_session=True` (`SA-0169`). In that cell it returns `spec_review.run_spec_writer` of the system
       prompt and the prompt it got. The agent is `implement.run_agent`
       bound to `spec_review.SPEC_WRITER_TIMEOUT_S` and to `follow-up-` plus
       the spec id of the group's own layer. Each `write` call gets its own
       cell. The callable returns the list of candidates `write_follow_ups`
-      returns, and adds nothing to `pooled`. A raise from the export, the policy load, the prompt read, the repo lookup,
+      returns, and adds nothing to `pooled`. A raise from the export, the policy load, the repo lookup,
       `layer_fields` or `write_follow_ups` is caught. The callable then
       prints one line, `follow-ups: stopped, <type>: <message>`, and returns
       `[]`. Given a kept `Qualification`, it takes each of its groups in
@@ -90,8 +91,7 @@ acceptance:
       remain, it appends a `Pooled` of the group narrowed to them, with the
       reason `"<type>: <message>"`. Given no `Qualification`, it leaves
       `pooled` as it was. A raise before `qualify` runs brings up no cell.
-      The witness drives each raise, an unset key, a prompt with no
-      frontmatter, and groups on two layers. It drives a success that leaves
+      The witness drives each raise, and groups on two layers. It drives a success that leaves
       a minted group without a text. It drives a raise after a mint with no
       text, and one before a group's session. Each holds a whole pooled
       group, a narrowed pooled group, and an accepted group written
@@ -143,7 +143,7 @@ builds the command-line callable that binds its cells, and passes it from
 1.
 
 **What the tree base holds.** This spec's tree base is `SA-0173`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain from
+Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain from
 `SA-0142` puts these names there, so they are cited by symbol. Every line
 number below was read at `68892367`, where none of them exist.
 
@@ -168,12 +168,14 @@ number below was read at `68892367`, where none of them exist.
   `reserve_usd` of `--budget` times `end_review.RESERVE_SHARE`.
   `_print_batch_plan` takes `reserve_usd`, and prints `budget $<budget>,
   reserve $<reserve>, until <deadline>` when it is given.
-- From `SA-0160`: `Policy.spec_writer_prompt`, and the start refusal when
-  the policy at the pinned base leaves it unset. `spec_review` holds
-  `SpecWriterSession`, `run_spec_writer(container, *, system_prompt,
-  prompt, agent)` and `SPEC_WRITER_TIMEOUT_S`, the writer turn's wall
-  clock of 3600 s. `cli._stack_revise` reads the writer prompt the way
-  this spec does.
+- From `SA-0160`: `spec_review` holds `SpecWriterSession`,
+  `run_spec_writer(container, *, system_prompt, prompt, agent)` and
+  `SPEC_WRITER_TIMEOUT_S`, the writer turn's wall clock of 3600 s.
+  `spec_writer_system_prompt(policy, *, prompts_dir)` fills core's
+  `saffron/agents/prompts/spec-writer.md` from a `Policy`, and names no
+  repo file. `cli._stack_revise` fills the writer prompt the way this
+  spec does. No policy key names a prompt, and no start refusal reads
+  one.
 - From `SA-0164`: the `revise` route, and `_stack_revise` wired into the
   `--stack` path.
 - From `SA-0161`: `follow_up.write_follow_ups(ledger, stack, *,
@@ -196,29 +198,28 @@ number below was read at `68892367`, where none of them exist.
 
 **What the base holds.** `_drive_cell` hands REVIEW's probe call the
 policy's `thread_env` and `test_paths`, its gates, its `created` set and a
-teardown `note` (`saffron/cell/session.py:2577-2589`). Its gates are the
+teardown `note` (`saffron/cell/session.py:2590-2604`). Its gates are the
 cell-side paths under `worktree.GATES_MOUNT`
-(`saffron/cell/session.py:1668-1670`, `saffron/cell/worktree.py:22`).
+(`saffron/cell/session.py:1681-1683`, `saffron/cell/worktree.py:22`).
 `gate_executables` joins `.saffron/gates/<name>` to the directory it gets
 (`saffron/repos/policy.py:87-90`). `critic_cell` removes each name it
 added to `created` in its own `finally`, and reports a survivor through
 `note` (`saffron/cell/session.py:1219-1234`). `export_saffron_dir` removes
-its destination first (`saffron/repos/mirror.py:173-218`). It raises
-`GitError` for a sha the mirror lacks (`:207-209`). `load_policy` raises
-`PolicyError` (`saffron/repos/policy.py:114-138`). A pydantic refusal
-carries its message over several lines, measured. `file_at` returns
-`None` for a missing path, and raises `GitError` for a directory
-(`saffron/repos/mirror.py:231-259`). `_FRONTMATTER`'s second group is the
-text after the first closing fence (`saffron/intake.py:28`).
+its destination first (`saffron/repos/mirror.py:182-227`). It raises
+`GitError` for a sha the mirror lacks (`saffron/repos/mirror.py:217-219`).
+`load_policy` raises `PolicyError` (`saffron/repos/policy.py:114-138`). A
+pydantic refusal carries its message over several lines, measured.
+`context.PROMPTS_DIR` is the one locator for core's prompt tree
+(`saffron/agents/context.py:21`).
 `resolve_repo_id` returns `None` for a url with no row
 (`saffron/ledger.py:673-681`). `run_agent` takes `spec_id` and
 `timeout_s` as keywords, and `timeout_s` defaults to 3600
-(`saffron/phases/implement.py:190-199`). `critic_cell` and the probe call
+(`saffron/phases/implement.py:192-201`). `critic_cell` and the probe call
 take `note` as `(step, ok, detail)` (`saffron/cell/session.py:1130`,
-`:1230-1234`, `:1460`).
+`saffron/cell/session.py:1229-1234`, `saffron/cell/session.py:1304`).
 `TURN_TIMEOUT_S` is 900 s, per turn (`saffron/cell/session.py:58-63`).
 `_print_batch_plan` prints the night's header
-(`saffron/cli.py:715-735`).
+(`saffron/cli.py:725-747`).
 
 ## Problem
 
@@ -229,10 +230,9 @@ Build two things in `saffron/cli.py`.
    states. Its callable does its work in this order.
    - Return `[]` at once for a stack with no layers.
    - Inside one `try`, read every input at the pinned base. Export
-     `.saffron/`, load the policy, and read the prompt file with
-     `git_mirror.file_at`. An unset key raises `ValueError` naming
-     `spec_writer_prompt`. A missing file, or one `_FRONTMATTER` does not
-     match, raises `ValueError` naming the path. Then look up the repo id,
+     `.saffron/`, load the policy, and fill the system prompt with
+     `spec_review.spec_writer_system_prompt` over `context.PROMPTS_DIR`.
+     Then look up the repo id,
      and raise `ValueError` naming the url when it is `None`. Then read
      the top layer's `layer_fields`.
    - Still inside the `try`, build `qualify`, `mint` and `write` over
@@ -246,8 +246,7 @@ Build two things in `saffron/cli.py`.
      Build the narrowed group with `dataclasses.replace`. Return `[]`.
    - Otherwise return the list `write_follow_ups` returned.
 
-   Reach `git_mirror.export_saffron_dir`, `git_mirror.file_at`,
-   `cli.load_policy`, `end_review.layer_fields`, `end_review.layer_cell`,
+   Reach `git_mirror.export_saffron_dir`, `cli.load_policy`, `end_review.layer_fields`, `end_review.layer_cell`,
    `qualify.qualify`, `spec_review.run_spec_writer`, `implement.run_agent`,
    `follow_up.write_follow_ups` and `_stack_mint` through their modules at
    call time, since the witness replaces them there.
@@ -261,16 +260,16 @@ Build two things in `saffron/cli.py`.
    The `--stack` path passes it.
 
 **Why every input is read first.** `write_follow_ups` catches a raise from
-`write` and pools that group (`SA-0161`). A prompt read inside `write`
+`write` and pools that group (`SA-0161`). A policy read inside `write`
 would pool every group, one line each, after `qualify` had spent its
-probe cells. Read first, a missing prompt is one line and no cell.
+probe cells. Read first, a broken policy is one line and no cell.
 
 **Why each `write` gets its own cell.** A writer session runs with Bash in
 its critic cell (`SA-0160`). One cell for every group would hand the next
 writer a tree the last one changed.
 
 **Why the top layer's head.** A follow-up is cut from the top of the stack
-(`SA-0162`). `SA-0161`'s prompt names that head as the writer's tree, and
+(`SA-0162`). `SA-0161`'s user prompt names that head as the writer's tree, and
 its probe check reads there.
 
 **Why the agent's id names the origin layer.** `run_agent` files each
@@ -316,8 +315,11 @@ spec creates the list, and `SA-0174` must pass that same object to
 
 ## Out of scope
 
-- **The host logic.** Qualification's call, the prompt, the refusals, the
-  next id and the sub-cap are `SA-0161`'s.
+- **The host logic.** Qualification's call, the user prompt, the
+  refusals, the next id and the sub-cap are `SA-0161`'s.
+- **Core's writer prompt.** `SA-0160` writes `spec-writer.md` and its
+  fill. This repo's `.claude/agents/spec-writer.md` stays the hand path's
+  own, and nothing here reads it.
 - **Running the follow-ups.** `SA-0162` appends them on top as generation
   1 layers.
 - **The findings file.** `SA-0174` writes `findings.json` from `pooled`.
@@ -331,16 +333,14 @@ spec creates the list, and `SA-0174` must pass that same object to
   and no `Qualification`, so no group reaches `pooled`. This is a
   residual.
 - **A raise before `qualify` runs.** The export, the policy load, the
-  prompt read, the repo lookup and `layer_fields` come first. A raise
+  prompt's fill, the repo lookup and `layer_fields` come first. A raise
   there leaves no `Qualification` and no `qualification` rows, so no
   finding reaches `pooled`. This is a residual.
 - **The wall clock past `--until`.** Each writer session runs up to two
   turns at `SPEC_WRITER_TIMEOUT_S`, after the loop stops. The sub-cap
   bounds how many sessions start. `README.md:123-124` and the overshoot
-  bound at `DESIGN.md:202` gain this too. Both files are forbidden here,
+  bound at `DESIGN.md:203` gain this too. Both files are forbidden here,
   and backlog item b-1adb50 files them by hand.
-- **This repository's policy key.** `.saffron/policy.yaml` gains
-  `spec_writer_prompt` by hand, as `SA-0160` says.
 - **Concurrent writers.** They wait for per-cell network names
   (b-6a692d).
 
@@ -374,20 +374,15 @@ same for any other witness in `tests/test_cli.py` that asserts the
 mirror, with `_git` and `_rev_parse` (`tests/test_cli.py:36-52`). Each
 commit makes `.saffron/gates/tests` an executable file. `P(x)` is a policy
 with the gate `tests`, `test_paths` `tests/**`, `thread_env` `X: x` and
-`spec_writer_prompt: prompts/writer.md`.
+`protected` `x/**`.
 
 | commit | holds |
 |---|---|
-| `bare` | `P(bare)`, and `.claude/agents/spec-writer.md` with a frontmatter. No `prompts/writer.md`. |
-| `unset` | `P(unset)` without the key, and `prompts/writer.md` with a frontmatter |
-| `dir` | the key set to `prompts`, a directory |
-| `plain` | the key set to `prompts/plain.md`, which reads `plain` with no frontmatter |
 | `broken` | `P(broken)` plus the line `nope: 1`, which the policy forbids |
-| `base` | `P(base)`. `prompts/writer.md` is `---\nname: w\n---\nat base\n---\nsecond half\n`, and `.saffron/specs/SY-1-x.md` reads `at base`. |
-| head | the gate `lint`, `X: head`, `spec/**` and the key `prompts/head.md`. `prompts/writer.md` reads `head`, and the spec file `at head`. |
+| `base` | `P(base)`, and `.saffron/specs/SY-1-x.md` reading `at base` |
+| head | the gate `lint`, `X: head`, `spec/**` and `protected` `head/**`. The spec file reads `at head`. |
 
-The `repo` passed holds its own `prompts/writer.md`, reading `in the
-operator's repository`. Open a `Ledger` in `tmp_path`. Upsert
+The `repo` passed holds its own `.saffron/policy.yaml`, `P(checkout)`. Open a `Ledger` in `tmp_path`. Upsert
 `https://github.com/o/other.git` first, then the pinned url, so its repo
 id is 2. Replace these through `monkeypatch`.
 
@@ -397,6 +392,10 @@ id is 2. Replace these through `monkeypatch`.
 - `session.cell_up` records its keywords and adds its container to
   `created`. `session.cell_down` records its keywords.
   `runtime.remove_container` returns `None`.
+- `end_review.layer_cell` is wrapped by a spy that records its keywords
+  and calls the original. `session.assert_bash_is_unprivileged` is
+  replaced with a recorder of its container, as `SA-0156`'s witness
+  replaces it. The fake container would make a correct build raise.
 - `implement.run_agent` declares `spec_id` and `timeout_s` as keywords
   with no default, and records each call. `SPEC_WRITER_TIMEOUT_S` equals
   `run_agent`'s own default of 3600. The double has none, so it still
@@ -439,11 +438,16 @@ callable with `cap_usd` 6.5 and `pooled` holding `P0`, and calls it with
   Its `gates_dir` is `out_dir / "follow-ups" / "7"`, whose policy reads
   `X: base`. Its `created` is a set. Its `note`, called as
   `note("survived", False, "volume v survived")`, prints that detail.
-- the calls ran up, writer, agent, down, twice over. Each `cell_up` got
+- the calls ran up, writer, agent, down, twice over. Each `layer_cell`
+  call carried `spec_session=True`, and each check ran on its own
+  `cell_up`'s container. Each `cell_up` got
   `"2" * 40`, `saffron/SY-2`, `repo`, the pinned mirror, `{"X": "base"}`
   and a `gates_dir` whose policy reads `X: base`.
-- each writer call ran in its own `cell_up`'s container, with the system
-  prompt exactly `at base\n---\nsecond half\n`, and the prompts in order.
+- each writer call ran in its own `cell_up`'s container, with the prompts
+  in order. Its system prompt equals `spec_writer_system_prompt` of
+  `load_policy` over the `gates_dir` `qualify` got, with
+  `prompts_dir=context.PROMPTS_DIR`. It holds `` `base/**` ``, and
+  neither `head/**` nor `checkout/**`.
   The agent's ids are `follow-up-SY-1` then `follow-up-SY-2`, each with
   `timeout_s` of `spec_review.SPEC_WRITER_TIMEOUT_S`. `write` returned
   each session the writer double made.
@@ -453,10 +457,6 @@ alone, and calls it:
 
 | pinned sha, url or stack | the line holds |
 |---|---|
-| `bare` | `prompts/writer.md` |
-| `unset` | `spec_writer_prompt` |
-| `dir` | `not a regular file` |
-| `plain` | `prompts/plain.md` |
 | `broken` | `nope` |
 | `"f" * 40` | `ffffffffffff` |
 | `base`, url `https://github.com/o/none.git` | `o/none` |
@@ -489,16 +489,19 @@ Last, it removes `out_dir` and calls a fresh callable with an empty
 stack. That returns `[]`, calls and prints nothing, and leaves `out_dir`
 absent.
 
-These fail it, each measured:
+These fail it. Each was measured, except the first and the third, which
+changed when the prompt became core's:
 
-- the prompt read from `repo`, or at the mirror's `HEAD`
+- the prompt filled from `repo`'s policy, or from the one at the mirror's
+  `HEAD`
 - `.saffron/` exported at the mirror's `HEAD`
-- the frontmatter kept, or the body split on every `---`
-- a hard-coded `.claude/agents/spec-writer.md` in place of the key, or for
-  an unset key
+- `spec_review_system_prompt` in place of the writer's, or a prompts
+  directory other than `context.PROMPTS_DIR`
 - the gates as host paths under the export
 - `qualify` given no `test_paths`, no join, or a return it drops
 - the writer's cell with an empty `thread_env`
+- `layer_cell` called without `spec_session=True`, which leaves the
+  writer no `Bash`
 - the cell seeded at the group's own layer's head, the last layer's, or
   the pinned `base_sha`
 - one cell for every `write`
@@ -515,7 +518,6 @@ These fail it, each measured:
 - the writer's session dropped
 - no early return on an empty stack
 - the mint built over another `repo`
-- the prompt read inside `write`
 - the export done at build time
 - the export under `out_dir / "end-review"`
 - a one-argument `note`
@@ -536,12 +538,7 @@ These fail it, each measured:
 **Criterion 2's witness** follows `SA-0157`'s wiring witness, with
 `_readiness_passes` and `_fake_batch_resolution`
 (`tests/test_cli.py:2603-2640`). It sets `follow_up.WRITER_SHARE` to 0.125
-through `monkeypatch`. `SA-0156` and `SA-0160` refuse the night at start when the policy at
-the pinned base leaves `spec_review_prompt` or `spec_writer_prompt` unset.
-So replace `git_mirror.export_saffron_dir` with a double that writes
-`.saffron/policy.yaml` under its destination with both keys set, and
-returns the destination, as their refusal witnesses do. It replaces
-`cli._stack_follow_ups` with a recorder
+through `monkeypatch`. It replaces `cli._stack_follow_ups` with a recorder
 that returns a sentinel. It replaces `cli.run_stack_batch` with a fake
 that records its ledger, budget and keywords and returns `DRAINED`. It
 runs `main` with `batch --stack --budget 42`, and asserts exit 0. The
@@ -581,18 +578,20 @@ this spec states them. Those were `StackReview`, `LayerReview`,
 `FollowUpGroup`, `Qualification` and `qualify`. They were
 `SpecWriterSession`, `run_spec_writer` and `SPEC_WRITER_TIMEOUT_S` at
 3600. They were `Pooled`, `write_follow_ups` and
-`WRITER_SHARE`. Last were `_stack_mint` and `Policy.spec_writer_prompt`. Its `layer_cell`
+`WRITER_SHARE`. Last were `_stack_mint` and a policy key that named a
+prompt file, the shape ADR 7's revision removed. Its `layer_cell`
 called the real `cell_up` and `cell_down` names. It ran the real
 `export_saffron_dir`, `load_policy`, `file_at`, `_FRONTMATTER` and
-`resolve_repo_id`. It built `_stack_follow_ups`, the header and criterion
+`resolve_repo_id`. The last three read that prompt file. It built `_stack_follow_ups`, the header and criterion
 1's witness. It ran again after the first spec review, with the
 `note` shape, the pooling on a raise and the timeout of 3600. It ran a
 third time after the second, with `pooled` passed through and accepted
 read from the spec text. It ran a fourth time with pooling judged by
 findings. That run stood in for `record_spec_text` and
 `spec_text` too. The right build passed. Each wrong version listed as measured
-was applied as a text edit, and each failed the witness. The first right
-build printed a `PolicyError` over four lines, so the line joins the
+was applied as a text edit, and each failed the witness. The fill of
+core's prompt was not prototyped, and the witness's reverted run in the
+new shape is unmeasured. The first right build printed a `PolicyError` over four lines, so the line joins the
 message's whitespace.
 
 **What the witnesses leave undriven.**
@@ -602,6 +601,8 @@ message's whitespace.
 - A `created` name that survives its probe cell. `qualify`'s cells report
   it through `note`, which prints it.
 - `emit` beyond one line.
+- Where the prompt's fill runs. It reads core's own file and cannot miss
+  per repo, so a fill inside `write` gives the same prompt.
 
 **The `prose` gate** reads every new comment and docstring
 (`.saffron/gates/prose.py`). Write no em dash, semicolon, contraction,
@@ -615,7 +616,9 @@ ten lines.
 prototype, formatted by `ruff format`, measured 1602 changed tokens with
 `size_gate` itself after the second review's alignment. `saffron/cli.py`
 took 422, and criterion 1's witness 1180, of which about 45 are imports
-`tests/test_cli.py` already has or a stand-in needs. A sketch of
-criterion 2's witness measured 157. Its export double adds about 40, and
-the `_batch` wiring and the edits to other fakes about 70, estimated.
-That is about 1825 tokens, 61% of the ceiling. Keep the raise cases in one table.
+`tests/test_cli.py` already has or a stand-in needs. The prompt-file read
+and its four raise cases go, about 40 in `cli.py` and 150 in the witness.
+The `protected` lines and the fill's assertion add about 40. A sketch of
+criterion 2's witness measured 157. The `_batch` wiring and the edits to
+other fakes add about 70, estimated. The `layer_cell` spy and the check's recorder add about 40. That is about 1740 tokens, 58% of
+the ceiling. Keep the raise cases in one table.

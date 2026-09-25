@@ -55,14 +55,17 @@ acceptance:
   - claim: >-
       `spec_review_route` routes a read `revise` when it holds a `blocker`
       and every blocker's `fixes` is `build` or `witness`. It also routes
-      `revise` a read with no blocker whose `concern` has a `claim` holding
-      `unmeasured`, matched without regard to case. A blocker whose `fixes` is `scope`, null or
-      absent routes the read `escalate`, whatever else the read holds and
-      in either order. `wait` and `error` keep their precedence. Every other
-      read routes `run`. The witness drives each `fixes` value, a mix in
-      both orders, the word in two cases, a concern without it, a note with
-      it, the word in `file` alone, and a concern tagged `witness`.
-    witness: tests/test_spec_review.py::test_a_build_or_witness_blocker_and_an_unmeasured_concern_route_to_a_revision
+      `revise` a read with no blocker that holds a `concern` whose `fixes`
+      is `witness`, the tag from `SPEC_REVIEW_TAGS`. A blocker whose `fixes`
+      is anything but `build` or `witness` routes the read `escalate`,
+      whatever else the read holds and in either order. `wait` and `error`
+      keep their precedence. Every other read routes `run`, whatever a
+      claim says. The witness drives `scope`, `build`, `witness`, null and
+      absent on a blocker and on a concern, a tag patched into
+      `SPEC_REVIEW_TAGS` on a blocker, a mix in both orders, a note tagged
+      `witness`, and a concern with no `fixes` whose claim holds
+      `unmeasured`.
+    witness: tests/test_spec_review.py::test_a_build_or_witness_blocker_and_a_witness_concern_route_to_a_revision
   - claim: >-
       Given `revise`, `run_stack_batch` revises a spec whose review routes
       `revise`. It calls `revise` with the candidate, the layer the review
@@ -135,28 +138,28 @@ acceptance:
 
 Backlog item **b-792ab2**, step 7 of its Done. It cites `DESIGN.md` §4.2,
 §4.2.1 and §5.5. ADR 7
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:52-57`)
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:54-61`)
 decides that an agent revises a spec for a witness or buildability blocker,
 for a bounded number of rounds. Each round's fresh
 review reads the revision beside the original. Section 3 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md` is the design
-(`:168-180`). A `build` or `witness` blocker is revised, up to three rounds.
+(`:179-200`). A `build` or `witness` blocker is revised, up to three rounds.
 A `scope` blocker, no tag, or a spec still blocked after round three is
-skipped and escalated. An `unmeasured` concern from check 3 routes as
-`witness`.
+skipped and escalated. "A concern that a criterion's witness cannot be
+measured routes as `witness`" (`:198-199`).
 
 A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
 from the last layer, its **predecessor**.
 
 **Revision rounds take two specs, and this is the second.** `SA-0160`
-builds the writer session, its callable and its policy key. This spec
+builds the writer session and its callable. This spec
 routes a spec to it, runs the rounds, records each one, and wires the
 callable into `saffron batch --stack`. `SA-0161` then writes follow-up
 specs with the same session.
 
 **What the tree base holds.** This spec's tree base is `SA-0160`'s head.
-Every line number below was read at `68892367`, where no chain code from
+Every line number below was read at `18c72f36`, where no chain code from
 `SA-0142` on exists. So `batch.py`, `cli.py` and `spec_review.py` are cited
 by symbol where the chain edits them. This spec consumes these names.
 
@@ -169,7 +172,10 @@ by symbol where the chain edits them. This spec consumes these names.
 - From `SA-0149`: `SpecReviewSession`, `read_spec_review`, and
   `spec_review_route`, which returns `wait`, `run`, `escalate` or `error`.
   Each finding on the read carries `severity`, `claim`, `fixes`,
-  `criterion`, `file` and `line`. `run_stack_batch`'s `review` keyword. The
+  `criterion`, `file` and `line`. `SPEC_REVIEW_TAGS`, the tuple
+  `("scope", "build", "witness")`. The read keeps `fixes` on every
+  severity, and routes a `concern` whose `fixes` is `witness` `run`.
+  `run_stack_batch`'s `review` keyword. The
   wrapper reviews a spec, keeps its route by spec id, and reviews it once. An
   `escalate` emits `escalated  ` and its count of blockers, and returns a
   `Refused`. An `error` emits ` unreviewed  ` and raises. A `wait` goes
@@ -186,12 +192,16 @@ by symbol where the chain edits them. This spec consumes these names.
   which passes it the candidate's `task_id`. The re-queue cap's phase
   clause admits `SPEC_REVIEW` and `SPEC_WRITING` beside `IMPLEMENTING`. So
   a writer attempt on a task disqualifies it from no cap.
-- From `SA-0156`: `SPEC_REVIEW_BUDGET_USD`, 6.0, and `cli._stack_review`,
-  whose callable takes a candidate and its layer. `_batch`'s `--stack`
-  path builds `_stack_review` and `_stack_mint` where readiness passed and
-  `pinned` is bound, and passes `None` for both when readiness fails. Its
-  prompt file is the one `Policy.spec_review_prompt` names, read at the
-  pinned base.
+- From `SA-0175`: `SPEC_REVIEW_BUDGET_USD`, 6.0, and `run_spec_review`.
+  Its session's `text` is one fenced `json` block, the findings its
+  extraction turn returned, or empty. It holds none of the review turn's
+  prose. The extraction turn copies each `fixes` as the review gave it.
+- From `SA-0156`: `cli._stack_review`, whose callable takes a candidate
+  and its layer. It fills core's spec review prompt from the policy at
+  the pinned base, and builds its user prompt as one string in one place.
+  `_batch`'s `--stack` path builds `_stack_review` and `_stack_mint` where
+  readiness passed and `pinned` is bound, and passes `None` for both when
+  readiness fails.
 - From `SA-0150`: `Ledger.record_spec_text(task_id, *, origin, spec_id,
   path, text)` and `Ledger.spec_text(task_id)`, the task's latest row or
   `None`. `record_spec_text` takes a `spec_id` equal to the task's. A
@@ -217,23 +227,28 @@ refusals at the pinned base. `_stack_runner` hands `run_task` the task
 (`SA-0168`), so each revision this spec records meets those checks. This
 spec adds no check of its own.
 
-**What the findings block says of `unmeasured`.** Check 3 names an
-arrangement it could not run `unmeasured`. It reports it "as a concern
-whose fix is that run" (`.claude/agents/spec-reviewer.md:72-80`). Its
-findings block holds `severity`, `criterion`, `file`, `line` and `claim`,
-and only a blocker adds `fixes` (`:149-153`). No field says "unmeasured".
-So the word in a concern's `claim` is the one signal the block carries.
+**Why the route reads the tag and never the claim.** The review's prompt
+and its tags are core's (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-67`).
+This repository's `.claude/agents/spec-reviewer.md` stays the hand
+path's own, and core never reads it
+(`docs/superpowers/specs/2026-09-23-stack-batch-design.md:164-168`).
+Core's prompt writes the design's rule once: "A concern that a
+criterion's witness cannot be measured carries `witness`" (`SA-0175`).
+Its extraction turn copies each finding's `fixes` exactly as the review
+gave it, and decides no tag from the prose. `SA-0149`'s read keeps
+`fixes` on a concern. So the tag is the one signal the block carries,
+and no word in a claim decides a route.
 
 **Why the batch cannot read the queued file itself.** `_resolve_queue`
 builds the queue from a temporary export of `.saffron/`. That directory is
-gone once it returns (`saffron/cli.py:596-621`). So a
+gone once it returns (`saffron/cli.py:606-642`). So a
 `Candidate.path` names a file that no longer exists by the time a batch
 runs. Its name is still the spec file's name. The mirror holds the file at
-the pinned base (`saffron/repos/mirror.py:231-259`).
+the pinned base (`saffron/repos/mirror.py:241-269`).
 
 **How a batch meets money today.** Before each task, `_drive` compares the
 spec's `budget_usd` with the budget less `batch_spend`
-(`saffron/batch.py:194-196`). Nothing checks money inside a runner call.
+(`saffron/batch.py:198-200`). Nothing checks money inside a runner call.
 `batch_spend` sums the attempts of the tasks on the batch's runs
 (`saffron/ledger.py:897-912`). `open_attempt` takes a phase
 (`:1000-1023`).
@@ -244,7 +259,8 @@ Build four things.
 
 1. **The route.** In `saffron/spec_review.py`, `spec_review_route` gains
    `"revise"`, as criterion 1 states. Name the two revisable tags once, in
-   a module constant the route reads. Add `WRITING_PHASE = "SPEC_WRITING"`,
+   a module constant the route reads. The route reads each finding's
+   `fixes`, so `SA-0149`'s `pending_symbols` entry for it is spent. Add `WRITING_PHASE = "SPEC_WRITING"`,
    the phase of every writer session's attempt. `SA-0161` charges its
    follow-up writer in the same phase.
 2. **The rounds.** In `saffron/batch.py`, add `MAX_REVISE_ROUNDS = 3` and a
@@ -296,7 +312,7 @@ A round, in order:
   A row another process records for the task between those two calls is
   not caught. `run_task` reads the latest row when it runs (`SA-0150`).
   Nothing outside a stack batch records a spec text, and a batch runs one
-  task at a time (`DESIGN.md:407`).
+  task at a time (`DESIGN.md:408`).
 - **Rounds and revisions across nights.** Each night mints a fresh task
   (D1), so its rounds and its texts start empty. A revision recorded on
   last night's task does not carry over, and tonight's review revises
@@ -316,7 +332,7 @@ A round, in order:
 - **The earlier review, handed to the fresh one.** The fresh review reads
   the whole revised spec beside the original, as design section 3 says.
   The writer walks the earlier findings, since its prompt holds the
-  review.
+  review's findings block.
 - **The words.** `CONTEXT.md` has no entry for a revision round, the
   `revise` route or the `SPEC_WRITING` phase. Backlog item b-466005 files
   them by hand.
@@ -336,17 +352,20 @@ keyword. Import each new name inside the test body.
 **Keep the older witnesses as they are.** The loop witnesses of `SA-0149`
 and `SA-0155` pass no `revise`. So a `build` or `witness` blocker there
 still escalates with the same line. No spec there holds a spec text, so
-the batch hands their review doubles no `spec_text`. If a row of
-`SA-0149`'s route witness holds only `build` or `witness` blockers, change
-that row's route to `revise` and nothing else. Type the `review` keyword so
+the batch hands their review doubles no `spec_text`. `SA-0149`'s route
+witness has a row holding one `concern` tagged `witness` and no blocker,
+which it routes `run`. Change that row's route to `revise`, and do the
+same for any row holding only `build` or `witness` blockers. Change
+nothing else. Type the `review` keyword so
 it accepts the new keyword. A `run_stack_batch` fake in `tests/test_cli.py`
 that names its keywords with no `**kwargs` gets `revise=None` added, and
 nothing else.
 
 **Criterion 1's witness** builds each session as `SA-0149`'s route witness
 does, and asserts the route. `b(x)` is a blocker with `fixes` `x`, and
-each finding holds `criterion`, `file` `a.py`, `line` and `claim` `x`
-unless its row says otherwise.
+`c(x)` a concern with `fixes` `x`. `b(-)` and `c(-)` carry no `fixes`
+key. Each finding holds `criterion`, `file` `a.py`, `line` and `claim`
+`x` unless its row says otherwise.
 
 | findings | route |
 |---|---|
@@ -356,33 +375,42 @@ unless its row says otherwise.
 | `b(build)`, `b(scope)` | `escalate` |
 | `b(scope)`, `b(witness)` | `escalate` |
 | `b(witness)`, `b(null)` | `escalate` |
-| `b(build)`, a blocker with no `fixes` | `escalate` |
-| a concern claiming `Unmeasured: criterion 2's arrangement` | `revise` |
-| a concern claiming ``the arrangement is `unmeasured` `` | `revise` |
-| a concern claiming `the witness is not measured` | `run` |
-| a concern with `file` `unmeasured.py` | `run` |
-| a note claiming `unmeasured` | `run` |
-| a concern with `fixes` `witness` | `run` |
-| a concern claiming `unmeasured`, then `b(scope)` | `escalate` |
-| a concern claiming `unmeasured`, then `b(null)` | `escalate` |
+| `b(build)`, `b(-)` | `escalate` |
+| `SPEC_REVIEW_TAGS` patched to add `rewrite`, `b(rewrite)` | `escalate` |
+| `c(witness)` | `revise` |
+| `c(build)` | `run` |
+| `c(scope)` | `run` |
+| `c(null)` | `run` |
+| `c(-)` claiming `Unmeasured: criterion 2's arrangement` | `run` |
+| a note with `fixes` `witness` | `run` |
+| `c(witness)`, then `b(build)` | `revise` |
+| `c(witness)`, then `b(scope)` | `escalate` |
+| `b(null)`, then `c(witness)` | `escalate` |
 | `b(build)` with `resets_at` 9 | `wait` |
+| `c(witness)` with `resets_at` 9 | `wait` |
 | `b(build)` with `error` set | `error` |
+| `c(witness)` with `error` set | `error` |
 
-These fail it, each measured:
+It patches the tags with `monkeypatch.setattr` on the module, as
+`SA-0149`'s route witness does. These fail it. The four marked reasoned
+came with this revision, and the prototype measured the rest.
 
-- the word matched with its case, or any concern routed `revise`
-- a note with the word routed `revise`
-- the substring `measured`, or the word read from any field
 - the first blocker's tag deciding the route
 - an untagged blocker, or a null one, routed `revise`
 - `escalate` for a `scope` blocker alone
-- a concern tagged `witness` routed `revise`
-- an unmeasured concern outranking a `scope` blocker
+- a blocker with a tag outside `build` and `witness` routed `run`,
+  reasoned
+- any concern routed `revise`, or one routed on a word in its claim, as
+  this spec's earlier text asked, reasoned
+- a note tagged `witness` routed `revise`, reasoned
+- a concern tagged `witness` outranking a `scope` or null blocker, or
+  `wait` and `error`, reasoned
 
-The choice of the word admits two wrong routes the witness cannot kill,
-since the reviewer writes both. A concern that says "no longer unmeasured"
-routes `revise`, and costs one round. A concern that says "not run" without
-the word routes `run`, as every concern did before.
+The route trusts the review's tag. A concern tagged `witness` that is not
+about a witness costs one round. An unmeasured witness the review leaves
+untagged routes `run`, as every concern did before. The tag is the
+review's claim, and the next round's fresh review is its check (principle
+15, ADR 7).
 
 **Criteria 2 to 4 share one arrangement** in `tests/test_batch.py`, built
 once. Its `ledger` has a `MemoryRecord` and its own repo, as `SA-0155`'s
@@ -399,10 +427,13 @@ otherwise.
   starts `TE-5` at 3.
 - **The review double** takes `(candidate, layer, **kw)`. It records the
   spec id, the layer's spec id or `None`, and `kw`. It returns the spec's
-  next scripted session. Each session's text is `report`, a newline, then
-  the fenced `json` block, so a writer handed only the block fails. Each
-  review costs 0.5. `u` below is a read holding one concern that claims
-  `Unmeasured: the arrangement`, and no blocker.
+  next scripted session. Each session's text is a fenced `json` block
+  alone, as `SA-0175`'s session returns. Its body is `json.dumps` of the
+  findings with `indent=2`, and each finding's claim names its spec and
+  the review's number, such as `TE-2 review 3`. So a writer handed
+  another review's text, or the read's findings dumped again, fails. Each
+  review costs 0.5. `u` below is a read holding one concern tagged
+  `witness`, and no blocker.
 - **The revise double** records `(spec id, layer id, spec text, review
   text)`, and the state of the spec's task at the call. It returns or
   raises the spec's next scripted turn. A written turn has `session_id`
@@ -430,7 +461,7 @@ otherwise.
 of 67. Its second sees 25.875 spent, so 66.125 is left, and it is refused.
 Leaving out any one of the five terms lets the second round run. So does
 `SPEC_WRITER_BUDGET_USD` in place of `SPEC_WRITER_SESSION_USD`, and a
-check before the first round alone. The reviewer's figure of 56 assumed
+check before the first round alone. The spec review's figure of 56 assumed
 the earlier order, and `TE-10` and the rounds moved the spend. The aborts
 are `TE-6` and `TE-8`, with `TE-9` between them counting none. So the batch
 stops `INFRASTRUCTURE` before `TE-11`. Each cost is a sum of powers of two,
@@ -505,14 +536,17 @@ These fail criteria 2 to 4, each measured:
 
 - no fresh review after a revision
 - the fresh review handed no text, or a text only after tonight's revision
-- each revision handed the queued file, or the review's block, or no layer
+- each revision handed the queued file, or no layer
+- each revision handed the read's findings dumped again, or the first
+  review's text on every round, reasoned since the prototype's text held
+  prose
 - rounds counted across the batch, from the task's spec texts, or at
   module scope
 - a bound of 2 or of 4
 - a read with no blocker escalated after the rounds, or with no writer
 - a read with no blocker given three rounds
-- D4 read as one unmeasured-triggered round, which revises `TE-5` a second
-  time
+- D4 read as one round for a witness concern whatever ran before, which
+  revises `TE-5` a second time
 - a rate-limited session counted as a round, or followed by a fresh review
 - a rate-limited session read as an error, or leaving the state
 - an errored revision returned as a refusal, or ending `SPEC_WITHHELD`
@@ -531,9 +565,9 @@ These fail criteria 2 to 4, each measured:
   review read
 
 **Criterion 5's witness** follows `SA-0160`'s witness for `_stack_revise`,
-with its git helpers and doubles. The mirror's `base` commit holds a
-policy naming the writer's and the reviewer's prompt files, both files,
-and `.saffron/specs/SY-1-x.md` reading `queued at base\n`. A later commit
+with its git helpers and doubles. The mirror's `base` commit holds what
+that witness seeds there, and `.saffron/specs/SY-1-x.md` reading `queued
+at base\n`. Both prompts are core's, so the base holds no prompt file. A later commit
 `head` sets that file to `at head\n`. The `repo` checkout holds it as `in
 the checkout\n`. The fetch returns `head`. It pins `base`.
 
@@ -560,9 +594,7 @@ These fail it, each measured:
 - no sentence naming a scope blocker
 
 **Criterion 6's witness** follows `SA-0156`'s wiring witness, with
-`_readiness_passes` and `_fake_batch_resolution`. The policy at the pinned
-base names both `spec_review_prompt` and `spec_writer_prompt`, since
-`SA-0156` and `SA-0160` refuse a batch that leaves either unset. It replaces
+`_readiness_passes` and `_fake_batch_resolution`. It replaces
 `cli._stack_revise` with a recorder that returns a sentinel, and
 `cli.run_stack_batch` with a fake that records its keywords and returns
 `DRAINED`. It runs `main` with `batch --stack` with readiness passing, then
@@ -570,7 +602,7 @@ failing. With it passing, the recorder got the pinned base, the resolved
 `--repo` and `main`'s `out_dir`, once, and the fake got the sentinel as
 `revise`. With it failing, the recorder was not called and `revise` is
 `None`. These fail it, unmeasured, since the `--stack` path is not at
-`68892367`:
+`18c72f36`:
 
 - no `revise` passed, which escalates every `revise` route
 - the callable built before readiness, on a base not yet pinned
@@ -586,7 +618,10 @@ for every spec, as D1 decides. It built
 criteria 1 to 5 and their witnesses. The right build passed all of them.
 Each wrong build listed as measured was applied as a text edit, and each
 failed its witness. Criterion 6 needs `SA-0144`'s `--stack` path, so
-nothing ran it.
+nothing ran it. A later revision moved criterion 1's route from a word in
+a claim to the `witness` tag, and a review's text to `SA-0175`'s block
+alone. No prototype ran after it, so each wrong version marked reasoned
+is unmeasured.
 
 **What the witnesses leave undriven.**
 
@@ -611,6 +646,8 @@ prototype, formatted by `ruff format`, measured 2138 changed tokens with
 `size_gate`'s own count. The route took 73, the rounds 265 and the two
 callables 96. The witnesses for criteria 1 to 5 took 1704, about 80 of it
 a helper and imports `tests/test_batch.py` already carries. Criterion 6's
-witness, the wiring and the docstrings add about 320. That is about 2380
-tokens, 79% of the ceiling. Keep the arrangement's helpers shared across
-the three batch witnesses.
+witness, the wiring and the docstrings add about 320. The tag route's
+new rows add about 100 to criterion 1's witness. The route reads a tag
+in place of a word. That is about
+2480 tokens, 83% of the ceiling. Keep the arrangement's helpers shared
+across the three batch witnesses.

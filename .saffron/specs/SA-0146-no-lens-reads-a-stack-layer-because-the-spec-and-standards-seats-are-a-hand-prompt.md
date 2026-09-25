@@ -52,7 +52,7 @@ forbidden:
   - tests/test_ledger.py
 budget_usd: 27
 max_attempts: 3
-max_turns: 150
+max_turns: 170
 pending_symbols:
   - saffron/end_review.py::layer_fields
   - saffron/end_review.py::review_layer
@@ -93,10 +93,14 @@ acceptance:
       `file`, `line`, `severity` and `claim`, each in backticks. The Spec
       prompt names `probe`, `find` and `replace` in backticks, and the
       Standards prompt names no `probe`. The Standards prompt file holds
-      the value of `worktree.WORKTREE_MOUNT`, where it reads the files the
-      standing instructions name. It holds the phrase "is Saffron's process
-      glossary, not this repository's", said of its vocabulary. Neither
-      prompt file names `CONTEXT.md`, `DESIGN.md` or `driver.py`.
+      the phrase "never against a file in the worktree", and not the value
+      of `worktree.WORKTREE_MOUNT`. It holds the phrase "is Saffron's
+      process glossary, not this repository's", said of its vocabulary.
+      Neither prompt file holds `.claude`, `CLAUDE.md`, `CONTEXT.md`,
+      `DESIGN.md`, `driver.py`, `pytest`, `uv run`, `make check`, `ruff`,
+      `prek`, `saffron/`, `docs/`, `/opt/` or `://`, matched without regard
+      to case. The witness checks each of those fourteen strings in each
+      file.
     witness: tests/test_end_review.py::test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields
   - claim: >-
       `end_review.review_layer(container, fields, ...)` runs the Spec lens
@@ -148,20 +152,33 @@ and the critic cell a layer is read in, and wires the end review into
 `saffron batch --stack`. `SA-0147` then qualifies the findings.
 
 **What the tree base holds.** This spec's tree base is `SA-0145`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`), and the chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`), and the chain
 `SA-0142` to `SA-0145` puts `stack_layers` and `Ledger.record_stack_layer`
 there. `SA-0145` keys each row on record keys. Its columns are `task_key`,
 `batch_key`, `position`, `spec_id`, `predecessor_key`, `predecessor_head`
 and `generation`. `predecessor_head` is the predecessor's `pushed_sha` when
 the layer was recorded. Every other line number below was read at
-`0b1b4b96`.
+`18c72f36`.
 
 **The two seats today.** `.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md`
 holds them as a delegate's hand prompt: an Opening (`:29-44`), the Spec seat
 (`:46-72`), the Standards seat (`:74-92`) and the Report rules (`:94-115`).
 The delegate fills nine fields by hand (`:15-27`). For a stacked spec, `{BASE}`
 is a merge base with the parent's branch (`:17-18`). `{KNOWN}` is the in-cell findings the delegate
-checked, and any blocker a lens withdrew at REBUT (`:25-27`).
+checked, and any blocker a lens withdrew at REBUT (`:25-27`). The seats name
+this repository's files and tools, such as the loop's driver (`:72`) and
+`CONTEXT.md` (`:77`). So they stay the hand path's own, and differ from
+core's prompts by design
+(`docs/superpowers/specs/2026-09-23-stack-batch-design.md:164-168`).
+
+**Whose prompts these are.** ADR 7 makes the end-review lens prompts
+core's, in `saffron/agents/prompts/`, and they name no repo file, tool or
+URL. A repo's facts reach them as input the host fills. The host reads
+those "at the `base_sha` export, never at a layer's head"
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-67`).
+A layer's head is what that layer's agent wrote, so a standard read there
+is one the agent could have rewritten (principle 43,
+`docs/superpowers/specs/2026-09-23-stack-batch-design.md:105-109`).
 
 **How a lens runs today.** `review.LENSES` maps each in-cell lens to its
 prompt file (`saffron/phases/review.py:39-43`). `lens_prompt` fills that
@@ -179,7 +196,7 @@ and its cost (`:237-241`).
 findings in the order they were recorded (`saffron/ledger.py:1190-1196`).
 Each row carries `lens`, `severity`, `file`, `line`, `claim`, `anchored`,
 REBUT's `verdict` and the `rebuttal` (`:153-165`). A task's run carries the
-`base_sha` it was pinned at (`saffron/cell/session.py:1689`). An unstacked
+`base_sha` it was pinned at (`saffron/cell/session.py:1702`). An unstacked
 cell's tree base is that `base_sha` (`saffron/cell/session.py:293-301`).
 Reading `ledger._db` from another module has precedent in
 `chain_walk._task_rows` (`saffron/chain_walk.py:54`) and
@@ -190,8 +207,11 @@ Reading `ledger._db` from another module has precedent in
 Build four things.
 
 1. **Two prompt files.** Add `saffron/agents/prompts/end-review-spec.md`
-   and `end-review-standards.md`, taken from the two seats in
-   `REVIEW-PROMPT.md`. Each is a system prompt for a read-only session in
+   and `end-review-standards.md`. Core owns both, and they name no repo
+   file, tool or URL (ADR 7, principle 41). Write them in core's own
+   words, covering the two remits below. Copy nothing from the hand
+   seats, which name this repository's tools. Each is a system prompt for
+   a read-only session in
    a critic cell, over one layer that already reached `READY_FOR_REVIEW`.
    It emits the `<output>` block the in-cell lenses emit, and each finding
    has `file`, `line`, `severity` and `claim`.
@@ -199,29 +219,31 @@ Build four things.
      more and no less. It reads each criterion's claim, witness and
      `preserves` flag, and the spec's `touches` and `forbidden`, from its
      own slots. It walks each acceptance criterion to the
-     `file:line` that satisfies it, as the seat does
-     (`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md:51-57`). A criterion
+     `file:line` that satisfies it. A criterion
      nothing satisfies is a finding, and so is one a comment alone
      satisfies. A criterion whose witness would pass a wrong version gets a
      finding with a `probe` of `file`, `find` and `replace`. `find`
      matches exactly once in that file at the layer's head. The host runs the probe later, because the lens holds no tool
-     that runs anything. The lens then looks past the criteria, as the
-     seat does
-     (`.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md:60-63`).
-   - The **Standards** lens asks whether the diff follows what the
-     repository wrote down: its standing instructions and the files they
-     name. It reads those files from `/work`. Its three questions are the
-     seat's: vocabulary, the stated invariants and conventions, and one
-     source. It judges vocabulary against the repository's own standing
-     instructions and any glossary they name. `{vocabulary}` is Saffron's
+     that runs anything. The lens then looks past the criteria: behaviour
+     the spec did not ask for, call sites the change leaves uncovered,
+     and anything the diff does to get past a gate.
+   - The **Standards** lens asks whether the diff follows the standards
+     the repository wrote down. They reach it as the standing
+     instructions block the host fills, read at the run's `base_sha`
+     (`SA-0157` passes `CLAUDE.md` at the pinned `base_sha`). The lens
+     never reads a standard from the worktree, which holds the layer's
+     head (principle 43). The prompt tells it to judge against the
+     standards the prompt carries, "never against a file in the
+     worktree". Its three questions are vocabulary, the stated invariants
+     and conventions, and one source. It judges vocabulary against the
+     standing instructions it carries. `{vocabulary}` is Saffron's
      process glossary, not the repository's. The prompt says so in the
-     phrase criterion 2 names. It leaves format, lint,
+     glossary phrase criterion 2 names. It leaves format, lint,
      types and structure to the gates. It names no probe.
 
-   Core knows nothing of one repository (§2.1). So neither file names
-   this repository's `CONTEXT.md` or `DESIGN.md`, nor the spec loop's
-   `driver.py`. The standing instructions reach the prompt as the
-   in-cell lenses' do. Each file carries these slots: `{vocabulary}`,
+   Core knows nothing of one repository (§2.1). So neither file holds any
+   of criterion 2's fourteen strings. The standing instructions reach the
+   prompt as a filled value, as the in-cell lenses' do. Each file carries these slots: `{vocabulary}`,
    `{spec_id}`, `{branch}`, `{pr}`, `{base}`, `{head}`, `{known}`,
    `{standing_instructions}`, `{diff}` and `{spec}`. The Spec file also
    carries `{criteria}` and `{constraints}`.
@@ -267,9 +289,16 @@ spec is open (`.saffron/gates/dead.py:4-6`).
   the top and the reserve. It owns a layer the end review did not reach,
   and the record of each layer's end review. `SA-0153` also records the
   findings. It passes `spec.body` alone. REVIEW appends
-  `context.criteria_section` to it (`saffron/cell/session.py:2526`), but
+  `context.criteria_section` to it (`saffron/cell/session.py:2539`), but
   here the Spec lens's `{criteria}` slot carries the criteria, so the
   append would send them twice.
+- **How a repo declares its standards documents.** ADR 7 leaves it open
+  (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:265`).
+  This spec builds no declaration surface, reads no `.saffron/` key for
+  one, and adds no slot for one. Until a spec answers it, the Standards
+  lens carries the standing instructions alone, and a glossary or
+  document they name is not read. Reading it from the worktree would
+  read the layer's head, which principle 43 bars.
 - **The join lens.** Its prompt, its fields and its run are `SA-0154`'s.
 - **The critic cell a layer is read in.** It is seeded at the layer's
   pushed head. `review_layer` takes a container name, and `SA-0154` builds
@@ -277,8 +306,8 @@ spec is open (`.saffron/gates/dead.py:4-6`).
 - **Qualification.** Anchoring, running a probe, severity and grouping are
   `SA-0147`'s. So `review_layer` anchors nothing, and its findings keep
   `Finding`'s default `anchored` of false.
-- **Four seat fields.** `{REPO}` is `/work` in a critic cell, which the
-  prompt names in prose. For a layer with a predecessor, `{CELL_BASE}` is
+- **Four seat fields.** `{REPO}` is the critic cell's worktree, which a
+  prompt calls the worktree in prose. For a layer with a predecessor, `{CELL_BASE}` is
   the fetched head of its branch. It differs from `{BASE}` only after a
   hand push, which `SA-0145` leaves to the finishing layer.
   `{SPEC}` is replaced by the spec body itself. `{WHAT}` is the delegate's
@@ -376,10 +405,11 @@ It reads `CONTEXT.md` from the repository root, as `tests/test_review.py:18` doe
 For each lens it asserts each value appears verbatim, with
 `context.sections_for("REVIEW", CONTEXT_MD)` as the vocabulary. It checks
 the range as the two shas joined by `..`. It checks the other text in a
-whitespace-flattened copy. It reads each prompt file for the three names
-it must not hold. It reads the Standards file for
-`worktree.WORKTREE_MOUNT` and for the glossary phrase, in a
-whitespace-flattened copy. These fail it, each measured:
+whitespace-flattened copy. It lowers each prompt file's raw text and
+checks each of the fourteen strings, lowered, against it. It reads the
+Standards file, whitespace-flattened, for the worktree phrase and the
+glossary phrase, and asserts `worktree.WORKTREE_MOUNT` is not in it.
+These fail it, each measured:
 
 - both lenses on one file
 - `base` and `head` swapped
@@ -390,20 +420,29 @@ whitespace-flattened copy. These fail it, each measured:
 - the criteria from `context.criteria_section`, with no witness ids
 - no `preserves` flag, or the flag on every criterion
 - no `touches` and `forbidden` block, or the two lists swapped
-- a Standards prompt file that never names the worktree mount
 - a Standards prompt that asks for a `probe`
 - a prompt with no "do not manufacture one", or no vocabulary slot
 - a Standards prompt judging vocabulary against `{vocabulary}`
 - a Spec prompt with no `{spec_id}` slot
 
+Three more are reasoned, not measured, since this revision came after the
+simulations:
+
+- a Standards prompt that reads the files its instructions name from
+  the worktree mount, as this spec's earlier text asked
+- a Standards prompt with no sentence keeping its standards off the
+  worktree
+- a prompt that names this repository's tools or files, as the hand
+  seats do
+
 **The Standards lens's vocabulary is the repository's.** `{vocabulary}`
 is Saffron's own `CONTEXT.md`, read from Saffron's root
-(`saffron/cell/session.py:1798`). It holds the REVIEW sections with the
+(`saffron/cell/session.py:1811`). It holds the REVIEW sections with the
 _Avoid_ lines stripped (`saffron/agents/context.py:28-31`, `:41`,
-`:58`). It names the factory's terms. The Standards lens judges the diff's words against the target
-repository's standing instructions and any glossary they name, read from
-the worktree. Its prompt says which is which, in the phrase criterion 2
-names.
+`:58`). It names the factory's terms. The Standards lens judges the
+diff's words against the target repository's standing instructions,
+which the host read at `base_sha`. Its prompt says which is which, in
+the glossary phrase criterion 2 names.
 
 **The constraints block is the implementer's rules, and the lens only
 reads them.** `constraints_block` speaks to an implementer ("the only paths
@@ -485,7 +524,11 @@ driven, and neither is output that is not the schema after the re-prompt.
 `run_lens` handles both the same way for every lens
 (`saffron/phases/review.py:235-293`). A layer whose `pr_url` or `branch` is
 `NULL` is not driven. PACKAGE writes both for `READY_FOR_REVIEW`
-(`saffron/ledger.py:1109-1119`).
+(`saffron/ledger.py:1109-1119`). A prompt can name a repo file, tool or
+URL by a string outside criterion 2's fourteen, and it passes. So does a
+Standards prompt that keeps the worktree phrase and still reads a
+standard there. The first layer an end review reads measures each
+prompt's quality.
 
 **The prompts are prose the `prose` gate reads**
 (`.saffron/gates/prose.py:43-44`). A new file starts at zero, so write no
@@ -507,7 +550,8 @@ About 100 lines in `saffron/end_review.py` at 5.5 is about 550, and 8 in
 `review.py` about 40. About 210 test lines at 4.8 is about 1010. That is
 about 2300 tokens of the `feature` ceiling of 3000
 (`saffron/gates/core/size.py:26`). The criteria and constraints slots, the
-Standards lens's `/work` reading and their asserts add about 190 more.
-The second review's asserts and the glossary phrase add about 40. That is
-about 2530 in all. Keep the prompts near the length of
+Standards lens's worktree phrase and their asserts add about 190 more.
+The second review's asserts and the glossary phrase add about 40. The
+fourteen-string check adds about 50 over the three names it replaces.
+That is about 2580 in all, 86% of the ceiling. Keep the prompts near the length of
 `criterion-probe.md` (56 lines), not of the in-cell lenses'.
