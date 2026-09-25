@@ -6,7 +6,7 @@ date: 2026-09-23
 supersedes: []
 superseded_by: []
 appendices: [A, D, E, F, H, I, J, K, L, N, P, U]
-principles: [2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 44, 45, 47, 49, 50, 54, 57, 62]
+principles: [2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62]
 ---
 
 ## Context
@@ -62,7 +62,8 @@ way. The batch never pauses for the operator.
 
 The spec prompts, the end-review lens prompts and the tags blockers route by
 are core's, in `saffron/agents/prompts/`. A target repo supplies none of them,
-so ADR 2 holds.
+so ADR 2 holds. They name no repo file, tool or URL. A repo's facts reach them
+as input the host fills from what the repo declares in `.saffron/`.
 
 **A stack batch runs spec text that is not at `base_sha`.** The text is a spec
 review's revision or a follow-up, and nothing else. Every spec the operator
@@ -171,6 +172,10 @@ this decision rests on.
   assembled for the review.
 - **40** upholds. The join lens reads the seams between layers. The residual
   is the seams around the follow-ups and the top layer, which it never sees.
+- **41** upholds. Core's prompts learn no repo's language or tools, and core
+  demands nothing of a repo. The Standards lens reads the standards documents
+  a repo declares, and none when it declares none. A probe runs through the
+  repo's declared gates, never a named test runner.
 - **44** departs. The follow-up path has never run. The criterion probe that
   answers principles 6 and 49 has not run live either (ADR 3). Its cost and
   its catch rate are both forecasts.
@@ -187,8 +192,6 @@ this decision rests on.
 - **54** upholds. It holds once the spec re-runs gate 0 and `parse_spec`'s
   refusals on every revised and follow-up spec, not only on files at
   `base_sha`.
-- **57** upholds. The Decision summarises the design record, and the record
-  keeps the routes this ADR leaves out.
 - **62** departs. §1.4 refuses specs written "from a roadmap". A follow-up is
   written from a qualified finding instead, but §1.4's reason, money, still
   reaches follow-ups and revisions. One generation and the round bound answer it, and the
