@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 
 import pytest
 
@@ -154,10 +156,12 @@ class _stream:
         self._timed_out = timed_out
         self._bound = bound
         self.request: dict = {}
+        self.raw_request: str = ""
         self.command: list[str] = []
 
     def __call__(self, container, command, *, stdin_data, on_line, **kwargs):
         self.request = json.loads(stdin_data)
+        self.raw_request = stdin_data
         self.command = list(command)
         for line in self._lines:
             on_line(line)
@@ -214,8 +218,8 @@ def test_the_stream_becomes_an_attempt_result():
     assert result.num_turns == 5
     assert result.cost_usd_est == 0.75
     assert result.text == "<output>{}</output>"
-    # Per event, so the operator sees the session as it happens, not at its end.
-    assert len(watched) == 4
+    # One digest event ahead of the stream, then one per event in it.
+    assert len(watched) == 5
 
 
 def test_an_absent_result_event_is_an_error_not_a_success():
@@ -536,6 +540,79 @@ def test_the_request_carries_the_prompt_the_options_and_the_resume():
         "resume": "sess-1",
     }
     assert stream.command == [implement.PYTHON, implement.RUNNER]
+
+
+_HEX_64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _digest_event(watched: list[Event]) -> Agent:
+    (found,) = [
+        e
+        for e in watched
+        if isinstance(e, Agent) and not e.raw and _HEX_64.match(e.detail)
+    ]
+    return found
+
+
+def test_each_request_is_recorded_by_the_sha256_of_the_bytes_the_runner_reads():
+    """AC1: the turn's first event names the SHA-256 hex of the request
+    string the runner reads. Hashed from those bytes, never a
+    re-serialization (backlog item b-864a4d)."""
+    options = {"max_turns": 3}
+
+    watched_fresh: list[Event] = []
+    stream_fresh = _stream(_result_line())
+    implement.run_agent(
+        "cell",
+        prompt="fix these",
+        options=options,
+        spec_id="SY-1",
+        emit=watched_fresh.append,
+        exec_stream=stream_fresh,
+    )
+    digest_fresh = _digest_event(watched_fresh)
+    assert watched_fresh[0] is digest_fresh
+    assert (
+        digest_fresh.detail
+        == hashlib.sha256(stream_fresh.raw_request.encode()).hexdigest()
+    )
+
+    watched_resumed: list[Event] = []
+    stream_resumed = _stream(_result_line())
+    implement.run_agent(
+        "cell",
+        prompt="fix these",
+        options=options,
+        resume="sess-1",
+        spec_id="SY-1",
+        emit=watched_resumed.append,
+        exec_stream=stream_resumed,
+    )
+    digest_resumed = _digest_event(watched_resumed)
+    assert watched_resumed[0] is digest_resumed
+    assert (
+        digest_resumed.detail
+        == hashlib.sha256(stream_resumed.raw_request.encode()).hexdigest()
+    )
+    assert digest_fresh.detail != digest_resumed.detail
+
+    watched_failed: list[Event] = []
+    stream_failed = _stream(returncode=1)
+    with pytest.raises(implement.AgentFailed):
+        implement.run_agent(
+            "cell",
+            prompt="fix these",
+            options=options,
+            spec_id="SY-1",
+            emit=watched_failed.append,
+            exec_stream=stream_failed,
+        )
+    digest_failed = _digest_event(watched_failed)
+    assert watched_failed[0] is digest_failed
+    assert (
+        digest_failed.detail
+        == hashlib.sha256(stream_failed.raw_request.encode()).hexdigest()
+    )
 
 
 def test_repair_text_carries_failures_and_never_a_gate_status():

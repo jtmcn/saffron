@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import itertools
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -18,14 +19,14 @@ import pytest
 from saffron.agents import artifacts, context
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
-from saffron.events import Agent, Attempt, Baseline, PhaseStart, describe
+from saffron.events import Agent, Attempt, Baseline, PhaseStart, Preflight, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.size import _CEILINGS
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison, SuiteRun
 from saffron.intake import parse_spec
 from saffron.ledger import Ledger
-from saffron.phases import implement, review
+from saffron.phases import implement, rebut, review
 from saffron.phases import package as package_mod
 from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
@@ -1211,6 +1212,11 @@ def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=N
     monkeypatch.setattr("saffron.repos.mirror.file_at", _file_at)
 
 
+# Bound at collection, module scope. `_drive` below patches
+# `implement.run_agent`, so a local read later would find its own stub.
+_REAL_RUN_AGENT = implement.run_agent
+
+
 def _drive(
     monkeypatch,
     tmp_path,
@@ -1227,6 +1233,7 @@ def _drive(
     agent_says=None,
     claude_md=None,
     base_claude_md=None,
+    real_run_agent=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1242,6 +1249,10 @@ def _drive(
     strings, also collects the raw `Event` each one was built from — for a
     test that needs a field `describe()` does not render (`Attempt.aborted`
     vs `Attempt.decision`, say).
+
+    `real_run_agent`: an optional list. Given one, each scripted turn is
+    fed to the real `implement.run_agent` instead of returned directly.
+    The raw request string it built lands in this list, in order.
     """
     repo = tmp_path / "repo"
     (repo / ".saffron" / "gates").mkdir(parents=True, exist_ok=True)
@@ -1297,9 +1308,47 @@ def _drive(
         # after a green loop, and every test predating it scripts the
         # implementer's turns only. An empty findings block is a clean review.
         turn = next(scripted, _turn(_block({"findings": []})))
-        if isinstance(turn, BaseException):
+        if real_run_agent is None:
+            if isinstance(turn, BaseException):
+                raise turn
+            return turn
+        # A cut-off turn still goes through the real `run_agent`: its own
+        # `subtype` is what makes that function raise, not this stub.
+        cut_off = isinstance(turn, implement.AgentFailed) and turn.attempt is not None
+        if isinstance(turn, BaseException) and not cut_off:
             raise turn
-        return turn
+        attempt = turn.attempt if cut_off else turn
+
+        def _exec_stream(_container, _command, *, stdin_data, on_line, **_kwargs):
+            real_run_agent.append(stdin_data)
+            on_line(json.dumps({"type": "text", "text": attempt.text}))
+            on_line(
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": attempt.subtype,
+                        "terminal_reason": attempt.terminal_reason,
+                        "num_turns": attempt.num_turns,
+                        "is_error": attempt.is_error,
+                        "total_cost_usd": attempt.cost_usd_est,
+                        "session_id": attempt.session_id,
+                    }
+                )
+            )
+            return runtime.Completed(0, "", "")
+
+        def _reap(_container, **_kwargs):
+            return runtime.Completed(0, "", "")
+
+        return _REAL_RUN_AGENT(
+            container,
+            prompt=prompt,
+            options=options,
+            resume=resume,
+            exec_stream=_exec_stream,
+            reap_cell=_reap,
+            **kwargs,
+        )
 
     monkeypatch.setattr("saffron.phases.implement.run_agent", _run_agent)
 
@@ -7285,3 +7334,277 @@ def test_a_spec_absent_at_base_is_silent(tmp_path):
     matters."""
     gates_dir = _spec_export(tmp_path, "SA-0099-other.md", "unrelated\n")
     assert session.spec_drift(gates_dir, "SA-0062", "deadbeef") is None
+
+
+# --- backlog item b-864a4d: a digest of the request, a digest of CLAUDE.md ---
+
+_HEX_64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _digest_events(capture: list) -> list[str]:
+    return [
+        e.detail
+        for e in capture
+        if isinstance(e, Agent) and not e.raw and _HEX_64.match(e.detail)
+    ]
+
+
+def _assert_digests_match_requests(raw: list[str], capture: list) -> None:
+    digests = _digest_events(capture)
+    assert len(digests) == len(raw)
+    for digest, request in zip(digests, raw, strict=True):
+        assert digest == hashlib.sha256(request.encode()).hexdigest()
+
+
+def _request_kind(raw: str) -> str:
+    """Which session kind sent this request, read from its own parsed
+    `prompt`. Not a preamble wording, which `SA-0139` rewrites."""
+    prompt = json.loads(raw)["prompt"]
+    if prompt == implement.PLAN_PROMPT:
+        return "plan"
+    if prompt == implement.IMPLEMENT_PROMPT:
+        return "implement"
+    if prompt == implement.SALVAGE_PROMPT:
+        return "salvage"
+    if prompt.startswith(implement.repair_prompt([])):
+        return "repair"
+    if prompt == review.REVIEW_PROMPT:
+        return "lens"
+    if prompt == review.CRITERION_PROBE_PROMPT:
+        return "probe"
+    if prompt == rebut.EXTRACT_PROMPT:
+        return "extract"
+    if prompt == rebut.VERDICT_TURN_PROMPT:
+        return "verdict"
+    if prompt.startswith(rebut.REBUT_PROMPT.partition("{blockers}")[0]):
+        return "rebut"
+    raise ValueError(f"unrecognised prompt: {prompt[:80]!r}")
+
+
+def test_every_session_a_task_starts_records_the_sha256_of_its_request(
+    monkeypatch, tmp_path
+):
+    """AC2: every session kind leaves the SHA-256 of its own request among
+    the task's events, in order. Four cells between them reach the plan,
+    IMPLEMENT, a repair, a salvage, the three lenses, a criterion probe,
+    the rebuttal, its extraction and a verdict.
+
+    Not driven: a plan re-prompt, a lens re-prompt, the notes turn. Each
+    reaches `run_agent` through the same `agent` callable, so AC1 covers
+    them by construction."""
+    from saffron.intake import Criterion
+
+    probe_raw: list[str] = []
+    probe_capture: list = []
+    probe_cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path / "probe",
+        cell=probe_cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "nothing touches it"))),
+        spec=_spec(acceptance=[Criterion(claim="it holds", witness="t.py::test_w")]),
+        real_run_agent=probe_raw,
+        capture=probe_capture,
+    )
+    assert [_request_kind(r) for r in probe_raw] == [
+        "plan",
+        "implement",
+        "lens",
+        "lens",
+        "lens",
+        "probe",
+    ]
+    _assert_digests_match_requests(probe_raw, probe_capture)
+
+    repair_raw: list[str] = []
+    repair_capture: list = []
+    failing = Failure(file="a.py", code="E501", message="too long")
+    repair_cell = _stub_the_runtime(monkeypatch, suites=([], _results(failing), []))
+    _drive(
+        monkeypatch,
+        tmp_path / "repair",
+        cell=repair_cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(cost=0.1)],
+        real_run_agent=repair_raw,
+        capture=repair_capture,
+    )
+    assert [_request_kind(r) for r in repair_raw] == [
+        "plan",
+        "implement",
+        "repair",
+        "lens",
+        "lens",
+        "lens",
+    ]
+    _assert_digests_match_requests(repair_raw, repair_capture)
+
+    salvage_raw: list[str] = []
+    salvage_capture: list = []
+    salvage_cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    _drive(
+        monkeypatch,
+        tmp_path / "salvage",
+        cell=salvage_cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.1),
+        ],
+        real_run_agent=salvage_raw,
+        capture=salvage_capture,
+    )
+    assert [_request_kind(r) for r in salvage_raw] == [
+        "plan",
+        "implement",
+        "salvage",
+        "lens",
+        "lens",
+        "lens",
+    ]
+    _assert_digests_match_requests(salvage_raw, salvage_capture)
+
+    rebut_raw: list[str] = []
+    rebut_capture: list = []
+    rebut_cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, rebut_cell, rebut_commits=1)
+    _drive(
+        monkeypatch,
+        tmp_path / "rebut",
+        cell=rebut_cell,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                _block(
+                    {
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                )
+            ),
+            _turn(
+                _block(
+                    {
+                        "verdicts": [
+                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                        ]
+                    }
+                )
+            ),
+        ),
+        real_run_agent=rebut_raw,
+        capture=rebut_capture,
+    )
+    assert [_request_kind(r) for r in rebut_raw] == [
+        "plan",
+        "implement",
+        "lens",
+        "lens",
+        "lens",
+        "rebut",
+        "extract",
+        "verdict",
+    ]
+    _assert_digests_match_requests(rebut_raw, rebut_capture)
+
+
+def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
+    monkeypatch, tmp_path
+):
+    """AC3: one `Preflight` fact per task, step `claude_md`, holding the
+    SHA-256 of the text `file_at` returned at `base_sha`.
+
+    When there was none, the detail names `CLAUDE.md` and carries no
+    digest."""
+    differing = tmp_path / "differing"
+    cell_a = _stub_the_runtime(monkeypatch)
+    capture_a: list = []
+    _drive(
+        monkeypatch,
+        differing,
+        cell=cell_a,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        claude_md="working-copy rule\n",
+        base_claude_md="base-commit rule\n",
+        capture=capture_a,
+    )
+    (fact_a,) = [
+        e for e in capture_a if isinstance(e, Preflight) and e.step == "claude_md"
+    ]
+    assert fact_a.detail == hashlib.sha256(b"base-commit rule\n").hexdigest()
+    assert fact_a.detail != hashlib.sha256(b"base-commit rule").hexdigest()
+
+    absent = tmp_path / "absent"
+    cell_b = _stub_the_runtime(monkeypatch)
+    capture_b: list = []
+    _drive(
+        monkeypatch,
+        absent,
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture_b,
+    )
+    (fact_b,) = [
+        e for e in capture_b if isinstance(e, Preflight) and e.step == "claude_md"
+    ]
+    assert "CLAUDE.md" in fact_b.detail
+    assert not _HEX_64.match(fact_b.detail)
+
+    empty = tmp_path / "empty"
+    cell_c = _stub_the_runtime(monkeypatch)
+    capture_c: list = []
+    _drive(
+        monkeypatch,
+        empty,
+        cell=cell_c,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        base_claude_md="",
+        capture=capture_c,
+    )
+    (fact_c,) = [
+        e for e in capture_c if isinstance(e, Preflight) and e.step == "claude_md"
+    ]
+    assert fact_c.detail == hashlib.sha256(b"").hexdigest()
+
+
+def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_path):
+    """AC2 + AC3, joined. `CLAUDE.md`'s system-prompt path is pinned to one
+    value. Two cells given the same base text log the same digests, and a
+    third given a different one logs different digests at every position."""
+    import uuid as uuid_mod
+
+    class _FixedUUID:
+        def uuid4(self):
+            return uuid_mod.UUID(int=7)
+
+    monkeypatch.setattr(implement, "uuid", _FixedUUID())
+
+    def _run(name: str, base_text: str) -> list[str]:
+        from saffron import events as events_mod
+
+        cell = _stub_the_runtime(monkeypatch)
+        _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            use_default_emit=True,
+            claude_md="irrelevant working-copy text\n",
+            base_claude_md=base_text,
+            real_run_agent=[],
+        )
+        log = events_mod.read_log(tmp_path / name / "out" / "SY-1")
+        return [
+            e.detail
+            for e in log
+            if isinstance(e, Agent) and not e.raw and _HEX_64.match(e.detail)
+        ]
+
+    same_text = "standing instructions apply here\n"
+    digests_a = _run("a", same_text)
+    digests_b = _run("b", same_text)
+    digests_c = _run("c", "an unrelated set of rules entirely\n")
+
+    assert len(digests_a) == 5
+    assert digests_a == digests_b
+    assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))

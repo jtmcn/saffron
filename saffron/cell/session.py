@@ -1653,6 +1653,12 @@ def _drive_cell(
     # ponytail: Claude Code's own `@path` imports inside CLAUDE.md still reach
     # the model as literal text, and file_at follows only one symlink hop.
     claude_md = mirror_ops.file_at(mirror, spec.base_sha, "CLAUDE.md")
+    _preflight(
+        "claude_md",
+        hashlib.sha256(claude_md.encode()).hexdigest()
+        if claude_md is not None
+        else "CLAUDE.md: none found at base_sha",
+    )
 
     # R2: the on-host validation stays — a declared gate exists and is
     # executable — but it now runs against the exported tree the cell mounts.

@@ -6,6 +6,7 @@ and splitting them pays full context cost twice for the same file reads.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import uuid
@@ -230,6 +231,16 @@ def run_agent(
     if prompt_path is not None:
         payload["system_prompt_path"] = prompt_path
     request = json.dumps(payload)
+    # The turn's first event: the SHA-256 of these exact request bytes, never
+    # a re-serialization (backlog item b-864a4d).
+    emit(
+        Agent(
+            timestamp=time.time(),
+            spec_id=spec_id,
+            raw=False,
+            detail=hashlib.sha256(request.encode()).hexdigest(),
+        )
+    )
     text: list[str] = []
     errors: list[str] = []
     result: dict = {}
