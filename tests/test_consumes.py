@@ -322,6 +322,39 @@ def test_a_tree_base_the_mirror_lacks_is_an_error_and_not_a_refusal(
     assert "refused" not in capsys.readouterr().out
 
 
+def test_a_spec_that_consumes_nothing_never_calls_the_reader(tmp_path, monkeypatch):
+    """No `consumes` means no reader call, not a call with an empty list."""
+
+    class _Stop(Exception):
+        pass
+
+    def _stop(*_a, **_k):
+        raise _Stop
+
+    seen: list[object] = []
+    monkeypatch.setattr(task_module, "run_one_cell", _stop)
+    monkeypatch.setattr(
+        task_module, "unresolved_consumes", lambda *a, **k: seen.append(a) or []
+    )
+    with pytest.raises(_Stop):
+        task_module.run_task(
+            _consumes_spec("SY-2", []),
+            "s" * 40,
+            ceilings=_CEILINGS,
+            base=PinnedBase(
+                mirror=tmp_path / "none.git",
+                url="https://github.com/o/r.git",
+                base_sha="0" * 40,
+            ),
+            repo_id=None,
+            repo=tmp_path,
+            ledger=Ledger(tmp_path / "l.db"),
+            out_dir=tmp_path / "out",
+            token=None,
+        )
+    assert seen == []
+
+
 def test_saffron_cell_exits_1_on_a_consumes_refusal(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")
     repo = _local_origin(tmp_path)

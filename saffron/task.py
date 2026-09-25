@@ -21,7 +21,7 @@ What stays outside, deliberately, except one refusal named below:
   attended run has no scan and pays per task. Folding either in would force
   one of those to move.
 - **The one exception.** An unresolved `consumes` entry needs the tree base
-  it must resolve against. Neither scan-time path knows that base until
+  it must resolve against. Neither caller knows that base until
   `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
   instead.
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
@@ -320,16 +320,6 @@ def run_task(
     if stacked_on is not None:
         print(f"stacked on {target_branch} @ {stacked_on[:12]}")
 
-    # The tree base a `consumes` entry must resolve against: `stacked_on`
-    # once known, else the run's own pin.
-    tree_base = stacked_on if stacked_on is not None else base.base_sha
-    if spec.consumes:
-        unresolved = unresolved_consumes(base.mirror, tree_base, spec.consumes)
-        if unresolved:
-            reason = f"{tree_base[:12]} does not resolve {', '.join(unresolved)}"
-            print(f"{spec.id:<10} refused  {reason}")
-            return Refused(reason=reason)
-
     cell_spec = CellSpec(
         spec_id=spec.id,
         spec_sha=spec_sha,
@@ -346,6 +336,15 @@ def run_task(
         max_attempts=ceilings.max_attempts,
         max_turns=ceilings.max_turns,
     )
+    # A `consumes` entry resolves against the one tree base `CellSpec` names.
+    if spec.consumes:
+        tree_base = cell_spec.tree_base
+        unresolved = unresolved_consumes(base.mirror, tree_base, spec.consumes)
+        if unresolved:
+            reason = f"{tree_base[:12]} does not resolve {', '.join(unresolved)}"
+            print(f"{spec.id:<10} refused  {reason}")
+            return Refused(reason=reason)
+
     outcome = run_one_cell(
         cell_spec,
         repo=repo,
