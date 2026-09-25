@@ -92,10 +92,16 @@ acceptance:
       budget stops the first spec, no review is called.
     witness: tests/test_batch.py::test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker
   - claim: >-
-      A review routed `wait` is handled as `SA-0148` handles a
-      `RATE_LIMITED` task. The batch sleeps once, counts no abort, and offers
-      the spec again on the same predecessor. It reviews the spec again, and
-      runs it once its review routes `run`.
+      A review routed `wait` leaves the runner wrapper as a
+      `batch.SpecReviewWait` raised with the review's `resets_at`. `_drive`
+      catches it before its general handler and gives that reset time to
+      `SA-0148`'s rate-limit wait. It counts no abort and attaches no run.
+      The batch sleeps once and offers the spec again, next, on the same
+      predecessor, after `--until`, the budget and the breaker. It reviews
+      the spec again, and runs it once its review routes `run`. A wait that
+      ends at or past `until` stops `UNTIL` at once, with no sleep. The
+      witness drives a wait that ends before `until` and one that does
+      not.
     witness: tests/test_batch.py::test_a_rate_limited_spec_review_waits_and_reviews_again
 ---
 
@@ -162,8 +168,10 @@ by core's (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-fol
 `SPEC_REVIEW_TAGS` in `saffron/spec_review.py`, and nothing here derives
 them from a repo file. A spec review returns its tags through a separate
 extraction turn, which keeps principle 18 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:91-94`). That turn is
-`SA-0175`'s. It fills `SpecReviewSession.text` with exactly one fenced
-`json` block, `{"findings": [...]}`, or leaves `text` empty. Each
+`SA-0175`'s. It is meant to fill `SpecReviewSession.text` with one
+fenced `json` block, `{"findings": [...]}`, whose body parses as JSON, or
+leave `text` empty. This spec takes no such promise on trust. Any other
+`text` routes `error`, as criterion 1 says. Each
 finding holds `severity`, `claim`, `criterion`, `file`, `line` and
 `fixes`. So the read here parses only that block, never the review
 turn's prose. Its witnesses build `text` as fixtures.
@@ -181,7 +189,7 @@ lens that fails returns an `error` and no findings (`saffron/phases/review.py:23
 
 ## Problem
 
-Build three things.
+Build four things.
 
 1. **The read.** A new module, `saffron/spec_review.py`, holds these.
    - `SpecReviewSession`, a frozen dataclass of `text: str`,
@@ -212,6 +220,16 @@ Build three things.
    review that raises or routes `error` is an abort. A review routed
    `wait` goes through `SA-0148`'s wait with the review's `resets_at`, as
    a `RATE_LIMITED` task's does, and its spec is reviewed again.
+4. **The wait signal.** Add `SpecReviewWait`, an exception in
+   `saffron/batch.py` that carries `resets_at: int | None`. The wrapper
+   raises it for a `wait` route. `_drive` catches it in its own `except`
+   clause, before the general one, and hands `resets_at` to the wait
+   `SA-0148` built for a `RATE_LIMITED` outcome. That wait then takes the
+   spec id back out of the started set, as it does for a task. Build no
+   `CellOutcome` for it. A review wait has no run, and
+   `attach_run_to_batch` raises on a run that does not exist
+   (`saffron/ledger.py:855-859`). That raise ends the night
+   `INFRASTRUCTURE`.
 
 ## Out of scope
 
@@ -229,7 +247,8 @@ Build three things.
   `concern` whose `fixes` is `witness`, as core's prompt asks
   (`SA-0175`). No word in its claim decides it. The read keeps that
   `fixes`. With no revision here, it routes `run`, as any concern does.
-  `SA-0164` routes it to the writer.
+  `SA-0164` at the tree base routes it `run` and keys its revision on a
+  word in the claim. `SA-0164` must be revised to route on this tag.
 - **The session, its facts and its caller.** The session and its
   extraction turn are `SA-0175`'s, the facts `SA-0155`'s, and the caller
   `SA-0156`'s. Nothing
@@ -237,7 +256,8 @@ Build three things.
   reviews nothing yet.
 - **Filling `resets_at`.** `SA-0175`'s session sets it from a
   session that met the account's rate limit, and returns at once. It
-  never waits inside the callable. The loop's wait here is the only one.
+  never waits inside the callable. The loop's wait here is the only one,
+  and the wrapper never sleeps or reviews again inside itself.
 - **Money.** A review's cost reaches no ledger row, so the batch's budget
   check does not count it. The start-of-batch reserve for spec work is a
   later step.
@@ -430,24 +450,43 @@ no runner call. These fail it, each measured on the loop's rule:
 - a review called before `_drive`'s `--until`, budget and breaker checks,
   which reviews `TE-33`
 
-**Criterion 5's witness** passes `TE-50` then `TE-51`, with no
-`depends_on`, a fake `sleep` and `SA-0148`'s clock. `TE-50`'s review
+**Criterion 5's witness** has two parts. The first passes `TE-50` then
+`TE-51`, with no `depends_on`, `until=None`, a fake `sleep` and
+`SA-0148`'s clock. `TE-50`'s review
 returns a session with `error` set. `TE-51`'s first review returns a
 session whose text holds no fence and whose `resets_at` is 60 seconds
 ahead of the clock. Its second returns clean. It asserts the review's pairs are `(TE-50, None)`,
 `(TE-51, None)` and `(TE-51, None)`. It asserts one runner call, `TE-51`
-on `None`, the sleeps `[60.0]`, and the stop reason `DRAINED`. These fail
-it, each measured on the loop's rule:
+on `None`, the sleeps `[60.0]`, and the stop reason `DRAINED`. It asserts
+two `starting` lines for `TE-51`, since the wait offers it again through
+`_drive`.
+
+The second part passes `TE-51` alone, with `until` 30 seconds after the
+clock's start. Its review returns a session whose `resets_at` is 60
+seconds ahead of the clock. It expects the stop reason `UNTIL`, no
+sleep, one review, no runner call and one `starting` line for `TE-51`.
+`SA-0148` stops `UNTIL` at once there and runs nothing more, so the spec
+is never offered again.
+
+These fail it, the first three measured on the loop's rule:
 
 - a `resets_at` passed over, which reads no block and fires the breaker
 - a `wait` kept as the spec's route, which waits again and never runs it
 - a `wait` counted as an abort, which fires the breaker after `TE-50`
+- a wrapper that sleeps and reviews again inside itself, which logs one
+  `starting` line and sleeps in the second part
+- a synthetic `RATE_LIMITED` outcome, whose attach raises and ends the
+  night `INFRASTRUCTURE`
+- a `SpecReviewWait` caught by the general handler, which counts an abort
 
 **How the lists were measured.** A throwaway model of the loop's rule and
 of the read ran every table above on 2026-09-23. It modelled `SA-0143`'s
 miss rule, `_drive`'s checks, `SA-0148`'s wait and the routing here, with each wrong version
 as a flag. The right build passed each table. Every wrong version listed
 failed at least one, and each failure named above is the one it gave.
+The wait signal, criterion 5's second part and the last three wrong
+versions under it are not in that model. Nothing below `SA-0175`'s head is
+built, so they stay unmeasured.
 `run_stack_batch` does not exist at `0b1b4b96`, so nothing ran the real
 loop.
 
@@ -469,7 +508,10 @@ a line, the rate `saffron/agents/findings.py` measures. About 50 in
 `saffron/batch.py` at 6.6. About 117 lines of test in
 `tests/test_spec_review.py` at 4.7, the rate of `tests/test_review.py`.
 About 327 in `tests/test_batch.py` at 3.3. That is about 2340 tokens of
-the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`). The
-tags constant, its two table rows and its asserts add about 55, so about
-2395, 79.8% of it. No path here is in `elevate_on`, so `size` stays
-advisory. Keep the new rows inside the existing loop of cases.
+the `feature` ceiling of 3000 (`saffron/gates/core/size.py:26`). Three
+things move it. The tags constant, its two table rows and its asserts add
+about 55. The wait signal adds about 12 lines to `batch.py`, about 80.
+Priced at 4 tokens a line, the repo's aggregate, `tests/test_batch.py`
+runs about 347 lines with criterion 5's second part, about 1390. That is
+about 2780, 93% of the ceiling. No path here is in `elevate_on`, so
+`size` stays advisory. Keep the new rows inside the existing loops.

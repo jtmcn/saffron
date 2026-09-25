@@ -70,9 +70,12 @@ acceptance:
       the operator's checkout or the mirror's `HEAD`. Building the callable
       reads nothing. The cell is `end_review.layer_cell` over `repo`, the
       pinned mirror, that export and its `thread_env`, called with
-      `spec_session=True`. The prompt holds `.saffron/specs/` and the
+      `spec_session=True`, on `LayerFields` whose `branch` is the
+      candidate's own. The prompt holds `.saffron/specs/` and the
       candidate's file name, `base: ` and the seeded tree, and `is a
-      snapshot of the base`. The callable calls
+      snapshot of the base`. It names no tool path: the witness checks
+      `/opt/`, `pytest`, `uv run`, `make check`, `.claude` and `://`. The
+      callable calls
       `spec_review.run_spec_review` once, with the cell's container, that
       system prompt and that prompt. Its agent is `implement.run_agent`
       bound to `spec_review.SPEC_REVIEW_TIMEOUT_S` and the candidate's spec
@@ -192,9 +195,10 @@ repo that declares nothing for the prompt is reviewed all the same.
 that declares nothing (`saffron/cli.py:290-294`). The review callable
 does the same, so it demands no policy of a repo.
 
-**How a policy is read from an export today.** `_batch` exports
-`.saffron/` at the pinned base and calls `load_policy` on the export
-(`saffron/cli.py:294-296`). The export clears its destination first
+**How a policy is read from an export today.** `_resolve_queue` exports
+`.saffron/` at the pinned base (`saffron/cli.py:606-608`).
+`_protected_paths` calls `load_policy` on an export
+(`saffron/cli.py:295-296`). The export clears its destination first
 (`saffron/repos/mirror.py:196`).
 
 **Where `Bash` departs from §5.5.** §5.5 keeps model-authored code out of
@@ -229,11 +233,15 @@ Build three things.
    states.
 3. **The wiring.** In `_batch`'s `--stack` path, build both callables
    where `_stack_runner` and `_stack_end_review` are built, and pass them
-   to `run_stack_batch`, as criterion 3 states.
+   to `run_stack_batch`, as criterion 3 states. Building reads nothing,
+   so either side of `_resolve_queue` is safe. Build them beside
+   `_stack_runner`.
 
 One docstring in `saffron/ledger.py` becomes false. `attach_run_to_batch`
 says `run_one_cell` is the only call that mints a run
-(`saffron/ledger.py:849-850`), and `_stack_mint` mints one too. Reword it.
+(`saffron/ledger.py:849-850`). It is false already, since `replay` mints
+one (`saffron/replay.py:54`), and `_stack_mint` mints one too. Reword it
+to name all three.
 
 ## Out of scope
 
@@ -280,8 +288,12 @@ checkout` and `checkout/**`. The witness replaces these through
 - `session.cell_up` records its keywords and adds its container to
   `created`. `session.cell_down` records its keywords.
   `runtime.remove_container` returns `None`.
-- `end_review.layer_cell` is wrapped by a spy that records its keywords
-  and calls the original.
+- `end_review.layer_cell` is wrapped by a spy that records its fields
+  and keywords and calls the original.
+- `session.assert_bash_is_unprivileged` is replaced with a recorder of
+  its container. With `spec_session=True`, `SA-0169`'s `layer_cell` runs
+  that check through `runtime.exec_` against the container. The fake
+  container would make a correct build raise.
 - `implement.run_agent` declares `spec_id` and `timeout_s` as keywords
   with no default, so a binding left out raises `TypeError`. It records
   each call and returns a turn.
@@ -304,13 +316,18 @@ It asserts:
   `cell_down` calls. Each has `repo`, the pinned mirror and `thread_env`
   `{"X": "base"}`. Its `gates_dir` is `out_dir / "spec-review" / <spec
   id>`, and its `policy.yaml` holds `X: base`.
-- two `layer_cell` calls, each with `spec_session=True`.
+- two `layer_cell` calls, each with `spec_session=True`, on fields whose
+  `branch` is `saffron/SY-1` then `saffron/SY-2`.
+- two unprivileged checks, one per cell, each on the container its
+  `cell_up` got.
 - two `run_spec_review` calls, each with the container its `cell_up` got.
   Each system prompt equals `spec_review_system_prompt` of `load_policy`
   over that `gates_dir`, with `prompts_dir=context.PROMPTS_DIR`. It holds
   `` `base/**` ``, and neither `head/**` nor `checkout/**`. The prompt
   holds `.saffron/specs/<id>-x.md`, `base: ` with the seeded tree, and
-  `is a snapshot of the base`. It holds no part of `tmp_path`.
+  `is a snapshot of the base`. It does not contain `str(tmp_path)`. It
+  contains none of `/opt/`, `pytest`, `uv run`, `make check`, `.claude`
+  and `://`.
 - two agent calls. `timeout_s` is `SPEC_REVIEW_TIMEOUT_S` and equals
   1800. The spec ids are `SY-1` then `SY-2`.
 
@@ -328,6 +345,8 @@ These fail it:
 - `.saffron/` exported into `out_dir / <spec id>`
 - the export's absolute path in the prompt
 - `layer_cell` called without `spec_session=True`
+- the layer's branch in the fields, in place of the candidate's
+- a tool path such as `/opt/venv/bin/pytest` in the prompt
 - `session.TURN_TIMEOUT_S`, no `timeout_s`, no `spec_id`, or an empty
   `thread_env`
 - the export run at build time, before any call
@@ -396,14 +415,14 @@ These fail it:
 - either callable built before readiness, on a base not yet pinned
 - either callable built once per spec
 - a mint over a ledger other than `main`'s
-- a start check that exports `.saffron/` to read a prompt path
 - either callable built without `--stack`
 
 **Other fakes of `run_stack_batch`.** `SA-0144` and `SA-0157` fake
 `run_stack_batch` in `tests/test_cli.py`. Each fake must accept the new
 `review` and `mint` keywords, through `**kwargs` or by name. The file is
-in `touches`, so edit each fake that refuses them. Change nothing else in
-those tests.
+in `touches`, so edit each fake that refuses them. Where such a test
+asserts the exact keywords the fake got, widen that assertion to allow
+`review` and `mint`. Change nothing else in those tests.
 
 **How the lists were measured.** A throwaway prototype ran on 2026-09-24
 at `f2a08a9f`, on the host's git, over `SA-0168`'s prototype. It built an
@@ -433,8 +452,8 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 1400 changed tokens, 47% of the ceiling. The earlier
+estimate is about 1460 changed tokens, 49% of the ceiling. The earlier
 prototype measured 466 tokens in `saffron/cli.py` and 14 in `ledger.py`.
 Its start refusal and prompt-file read go, about 150, so `cli.py` runs
-about 320. The witnesses run about 1050: criterion 1's about 430, the
+about 320. The witnesses run about 1110: criterion 1's about 490, the
 mint's about 350, the wiring's about 250, and the fakes about 20.
