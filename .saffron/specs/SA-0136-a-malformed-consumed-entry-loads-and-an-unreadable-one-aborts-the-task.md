@@ -145,16 +145,20 @@ each malformed shape, measured on host git 2.54.0.
   own mistake to the host.
 
 This spec stacks on `SA-0135`. The cell is cut from `saffron/SA-0135`,
-and every sentence about current code was read there, at `fe1d43cf`.
-That commit holds `SA-0134`'s reader and `SA-0135`'s check. `Spec` is
+and every sentence about current code was read there, at `f5522112`.
+The reader in `saffron/repos/mirror.py` is the same at `fe1d43cf`, where
+the measurements below were taken. That branch holds `SA-0134`'s reader and `SA-0135`'s check. `Spec` is
 cited by symbol, because `SA-0129` and `SA-0135` move its lines.
 
-**What `SA-0135` built.** `run_task` takes the tree base as `stacked_on`
-or else `base.base_sha`. When `spec.consumes` is not empty, it calls
-`unresolved_consumes` on it there. When any entry comes back, it prints
+**What `SA-0135` built.** `run_task` builds the `CellSpec` first
+(`saffron/task.py:323-338`). When `spec.consumes` is not empty, it reads
+the tree base as `cell_spec.tree_base` and calls `unresolved_consumes` on
+it there (`:339-346`). When any entry comes back, it prints
 `f"{spec.id:<10} refused  {reason}"` and returns a `Refused` holding the
-reason. Any exception from the reader propagates
-(`saffron/task.py:323-332`). The witness
+reason. Any exception from the reader propagates. Use that same
+`tree_base` for `has_commit` and for each per-entry read. Never work the
+tree base out a second time, which is what `CellSpec.tree_base` exists to
+stop. The witness
 `test_a_tree_base_the_mirror_lacks_is_an_error_and_not_a_refusal`
 (`tests/test_consumes.py:291-322`) expects `GitError` for a tree base the
 mirror lacks.
