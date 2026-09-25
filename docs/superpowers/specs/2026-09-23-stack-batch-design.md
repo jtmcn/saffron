@@ -64,9 +64,10 @@ tree holds the parent's code.
 Cutting the spec from a predecessor would drop that code, so stack mode refuses
 it with a reason naming the dependency. It runs once that stack merges.
 
-**A composite's members stay contiguous.** The order keeps them together, so
-the last member's tree carries members only, as ADR 6's composite review
-assumes.
+**A composite's members stay contiguous.** The order keeps them together. The
+last member's tree still carries every layer below the composite. So the
+composite review's range starts at the first member's predecessor head, and
+the layers below it are its base (ADR 7 narrows ADR 6 here).
 
 **The predecessor is the last task at `READY_FOR_REVIEW`.** A task in any
 other state adds no layer. The next task starts from the same head the failed
@@ -75,8 +76,8 @@ reason that names it.
 
 **Gate 0's open-PR overlap check exempts the batch's own tasks.** Every lower
 layer's PR is open and often touches nearby files. Without the exemption,
-stack mode refuses its own second task. This closes the stack case of backlog
-item 59.
+stack mode refuses its own second task. Backlog item 59 exempted a
+declared chain, and no item covers a stack's layers yet.
 
 **Recording.** A ledger table `stack_layers` holds `batch_id`, `position`,
 `spec_id`, `task_id`, `predecessor_task_id` and `generation`. Generation 0 is
@@ -99,7 +100,8 @@ and Standards seats become two lens prompts, taken from `REVIEW-PROMPT.md`.
 They run once per reviewable layer, in a critic cell seeded at that layer's
 head. The host fills the template fields from the ledger. A layer's `{BASE}` is
 its predecessor's head. `{KNOWN}` is that layer's in-cell findings and its
-`rebuttal.json`.
+`rebuttal.json`. Each field is filled once, and a filled value is never
+expanded again (principle 22).
 
 **One lens reads the joins.** It reads the top layer's tree with the whole
 stack's range, under ADR 6's rubric:
@@ -109,7 +111,7 @@ stack's range, under ADR 6's rubric:
 - work a layer redoes that an earlier layer already provides.
 
 **Qualification is host code.** Each finding from the seats, the join lens,
-and each layer's unrebutted in-cell `concern` passes these steps in order.
+and each layer's in-cell `concern` passes these steps in order.
 
 1. **Anchored** (principle 15), as `CONTEXT.md` defines the word: inside a
    hunk, or citing a line that names an identifier the diff changed. For the

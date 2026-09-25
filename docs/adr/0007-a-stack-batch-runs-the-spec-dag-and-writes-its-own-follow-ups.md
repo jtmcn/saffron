@@ -6,7 +6,7 @@ date: 2026-09-23
 supersedes: []
 superseded_by: []
 appendices: [A, D, E, F, H, I, J, K, L, N, P, U]
-principles: [2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 38, 40, 44, 45, 47, 49, 50, 54, 57, 62]
+principles: [2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 44, 45, 47, 49, 50, 54, 57, 62]
 ---
 
 ## Context
@@ -40,8 +40,12 @@ request stack.
 **Every task in a stack batch stacks.** Every `depends_on` entry of a spec
 comes before it in the order, so its tree holds that code. A spec is refused
 when any `depends_on` entry is outside the plan and not on the default branch.
-A composite's members stay contiguous in the order, so the last member's tree
-carries members only. Outside a stack batch, §4.2 and ADR 6 stack as before,
+A composite's members stay contiguous in the order. The last member's tree
+still carries every layer below the composite, not only its members. So the
+composite review's range starts at the first member's predecessor head. The
+layers below that head are its base, as the default branch is outside a stack
+batch. A name a member takes from a layer below is not a join. This narrows ADR
+6's composite review inside a stack batch. Outside a stack batch, §4.2 and ADR 6 stack as before,
 on `depends_on[0]`.
 
 **A task that misses `READY_FOR_REVIEW` adds no layer.** Its `depends_on`
@@ -63,7 +67,7 @@ holds unchanged.
 
 **One end review reads the whole stack once.** Two end-review lenses, Spec and
 Standards, read each layer. One join lens reads the stack under ADR 6's rubric.
-Each layer's unrebutted in-cell concerns join their findings as inputs. The
+Each layer's in-cell concerns join their findings as inputs. The
 host decides which findings qualify. A qualified finding is anchored, and any
 probe it carries survived.
 
@@ -75,7 +79,7 @@ unreviewed. Every in-cell critic keeps ADR 4 whole, a follow-up's included.
 
 **Qualified findings become follow-up specs, one generation deep.** An agent
 writes each follow-up in a critic cell. It passes the same spec review and runs
-on top of the stack. A follow-up's own unrebutted findings go to the backlog,
+on top of the stack. The findings a follow-up's own critic leaves go to the backlog,
 not to a second generation. A second generation needs an ADR that amends this
 one.
 
@@ -129,8 +133,8 @@ this decision rests on.
 - **21** departs. A hand push to a lower layer mid-batch leaves the layers
   above on a stale head. The residual holds until the spec records each
   handoff's head and checks it at the finish.
-- **23** upholds. §1.4's entry is narrowed in the same pull request, with its
-  reason and the seam that covers the rest.
+- **23** upholds. §1.4's entry is narrowed in the same pull request, with the
+  operator's request, its reason and the seam that covers the rest.
 - **26** upholds. "Predecessor" names the task below in the stack. "Parent"
   keeps its one referent, `depends_on[0]`. The refusal names every
   `depends_on` entry, not the parent alone.
@@ -138,13 +142,17 @@ this decision rests on.
   probe to the tree it runs on. A later layer can move both.
 - **28** upholds. It holds once the spec checks qualification against each
   producer. A finding with no probe must still reach a follow-up.
-- **29** upholds. This ADR carries its exceptions to §1.4, §4.2.1, ADR 4 and
-  the protected path, each with its bound. §1.4 names its own.
+- **29** upholds. This ADR carries its exceptions to §1.4, §4.2.1, ADR 4, ADR
+  6 and the protected path, each with its bound. §1.4 names its own.
 - **30** departs. Stack mode widens definitions in `CONTEXT.md`, §4.2 and
   §4.2.1. The specs that build each piece edit them. Until then the old
   sentences stand.
 - **34** upholds. It holds once the spec shows a layer the end review did not
   reach, or reached with an error, apart from a clean one.
+- **36** departs. When the reserve runs short, the end review covers layers
+  from the top down. Follow-ups are then written from part of the findings.
+  The summary names each layer it did not reach, so no follow-up reads as
+  covering it.
 - **38** upholds. The join lens reads the stack's pushed top head, not a tree
   assembled for the review.
 - **40** upholds. The join lens reads the seams between layers. The residual
@@ -166,8 +174,9 @@ this decision rests on.
   `base_sha`.
 - **57** upholds. The Decision summarises the design record, and the record
   keeps the routes this ADR leaves out.
-- **62** departs. §1.4's reason, money, still reaches follow-ups and
-  revisions. One generation and the round bound answer it, and the
+- **62** departs. §1.4 refuses specs written "from a roadmap". A follow-up is
+  written from a qualified finding instead, but §1.4's reason, money, still
+  reaches follow-ups and revisions. One generation and the round bound answer it, and the
   measurement below tests the answer.
 
 ## Consequences
@@ -185,12 +194,14 @@ answer to each.
   "`spec_sha` moved" rule for a revised one.
 - what qualifies a finding with no probe, which kill rule a probe meets, and
   whether a surviving probe promotes a `note`, as ADR 3 does.
+- how an end-review lens takes finding text. It is a filled value and never
+  template input, so a `{…}` inside it stays text (principle 22).
 - which tree a follow-up's anchors and named probe are keyed to.
 - which follow-up spec fields the host enforces: `touches`, budget, risk.
 - how the `scope` gate treats the host's commit to `.saffron/specs/`.
 - where the ledger and the record keep the stack's layers.
-- how gate 0's open pull request check treats the batch's own tasks (backlog
-  item 59).
+- how gate 0's open pull request check treats the batch's own tasks. Backlog
+  item 59 exempted a declared chain, and no item covers a stack's layers.
 - what `RATE_LIMITED` does to the breaker in a stack batch (§4.2.1).
 - what `--until` and the budget leave running, and the reserve for the end
   review, the spec work and the finish.
