@@ -248,6 +248,10 @@ def _apply_probes(
                 mutate=partial(worktree.source_mutated, container),
                 run_tests=run_tests,
                 test_paths=TEST_PATHS,
+                # The corpus has no separate task baseline to diff against, so
+                # it asks a wider question than a task does: whether *any*
+                # test this baseline collected notices (b-19b255).
+                counted=baseline.collected,
             )
         except runtime.CellRuntimeError as exc:
             # After a raise the tree may be mutated: a failed undo and a failed

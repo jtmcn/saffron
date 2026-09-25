@@ -3349,6 +3349,22 @@ _GREEN_TESTS = GateResult(
     gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::test_a"]
 )
 
+# The task's pre-turn baseline and its one attempt. `t.py::test_a` is
+# absent from base and present at head, so `added_tests` (b-19b255) counts it.
+_TASK_BASE = [
+    GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::test_old"]
+    )
+]
+_TASK_HEAD = [
+    GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.0",
+        collected=["t.py::test_old", "t.py::test_a"],
+    )
+]
+
 _EMPTY = _block({"findings": []})
 
 
@@ -3404,7 +3420,13 @@ def test_a_blocker_whose_probe_is_killed_is_demoted_to_a_note(monkeypatch, tmp_p
     """Criterion 2: a probe the real `tests` gate does notice demotes an
     adequacy `blocker` to a `note` — never dropped, never left a blocker —
     so a review with no other finding ends `READY_FOR_REVIEW` with no REBUT
-    turn scripted, and the REVIEW line after probing counts it killed."""
+    turn scripted, and the REVIEW line after probing counts it killed.
+
+    The killing test, `t.py::test_a`, is absent from the task's own base
+    `tests` result and present only in the probe cell's own baseline run
+    (b-19b255): a kill is counted against the tests the diff added, not
+    against any failure the whole suite happens to turn up.
+    """
     killed = Failure(file="t.py", code="t.py::test_a", message="boom")
     mutated = GateResult(
         gate="tests",
@@ -3413,7 +3435,9 @@ def test_a_blocker_whose_probe_is_killed_is_demoted_to_a_note(monkeypatch, tmp_p
         collected=["t.py::test_a"],
         failures=[killed],
     )
-    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
     _stub_probe_gates(monkeypatch, cell, gate_results=[_GREEN_TESTS, mutated])
 
     blocker_with_probe = {
@@ -3663,6 +3687,163 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
     assert [m.file for m in cell.mutated] == ["src/a.py", "src/b.py"]
 
 
+def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_failure_recorded(
+    monkeypatch, tmp_path
+):
+    """Criterion 4: each adequacy probe counts only the tests the diff adds.
+    These are the names the probe cell's own baseline run collected that the
+    task's pre-turn baseline did not (b-19b255). An attempt's suite stands
+    in for neither side.
+
+    Of three findings with distinct probes, one fails only `t.py::test_old`.
+    Unmatched to a counted test, it reads `survived` and reaches REBUT as a
+    blocker, its line naming the probe without saying the tests stayed
+    green. The other two also fail `t.py::test_old` beside an added test.
+    """
+    probe_baseline = GateResult(
+        gate="tests",
+        status="pass",
+        tool="pytest 8.0",
+        collected=["t.py::test_old", "t.py::test_added", "t.py::test_new"],
+    )
+
+    def _probed(*failing):
+        return GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            collected=["t.py::test_old", "t.py::test_added", "t.py::test_new"],
+            failures=[
+                Failure(file="t.py", code=code, message="boom") for code in failing
+            ],
+        )
+
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            probe_baseline,
+            _probed("t.py::test_old"),
+            _probed("t.py::test_old", "t.py::test_new"),
+            _probed("t.py::test_old", "t.py::test_added"),
+        ],
+    )
+
+    three_probes = {
+        "findings": [
+            _adequacy_finding("c1", "src/a.py", "a", "A"),
+            _adequacy_finding("c2", "src/b.py", "b", "B"),
+            _adequacy_finding("c3", "src/c.py", "c", "C"),
+        ]
+    }
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(
+            three_probes,
+            rebut=[
+                _turn("I have addressed the findings."),
+                _turn(_block(_CLAIMED_FIX)),
+            ],
+        ),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTING"
+
+    entries = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    by_file = {e["probe"]["file"]: e for e in entries}
+
+    survivor = by_file["src/a.py"]
+    assert survivor["probe_verdict"] == "survived"
+    assert survivor["failures"] == []
+    assert survivor["uncounted"] == ["t.py::test_old"]
+
+    killed_by_new = by_file["src/b.py"]
+    assert killed_by_new["probe_verdict"] == "killed"
+    assert killed_by_new["failures"] == ["t.py::test_new"]
+    assert killed_by_new["uncounted"] == ["t.py::test_old"]
+
+    killed_by_added = by_file["src/c.py"]
+    assert killed_by_added["probe_verdict"] == "killed"
+    assert killed_by_added["failures"] == ["t.py::test_added"]
+    assert killed_by_added["uncounted"] == ["t.py::test_old"]
+
+    # Every entry carries every key an entry had at base, plus `uncounted`.
+    for entry in entries:
+        assert set(entry) == {
+            "probe",
+            "reason",
+            "failures",
+            "uncounted",
+            "tool",
+            "collected",
+            "summary",
+            "baseline_failures",
+            "baseline_tool",
+            "baseline_collected",
+            "baseline_summary",
+            "probe_verdict",
+            "findings",
+        }
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (blocker,) = record["blockers"]
+    assert blocker["claim"] == "c1"
+
+    # The REBUT prompt's line for the survivor shows its probe and does not
+    # say the tests stayed green.
+    rebut_prompt = cell.turns[5]
+    assert "src/a.py" in rebut_prompt
+    assert "`a` -> `A`" in rebut_prompt
+    assert "tests stayed green" not in rebut_prompt
+
+
+def test_a_probe_with_no_readable_base_enumeration_is_unproven_and_left_as_filed(
+    monkeypatch, tmp_path
+):
+    """Criterion 5: with no `tests` result in the task's pre-turn baseline
+    (`_drive`'s default suites), `added_tests` cannot say which tests the
+    diff added. A probe under which a test fails reads `unproven`, never
+    `survived` and never `killed`, and its finding stays at the severity
+    the lens filed."""
+    probe_baseline = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::test_x"]
+    )
+    mutated = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8.0",
+        collected=["t.py::test_x"],
+        failures=[Failure(file="t.py", code="t.py::test_x", message="boom")],
+    )
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _stub_probe_gates(monkeypatch, cell, gate_results=[probe_baseline, mutated])
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(_CONCERN_WITH_PROBE),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    (entry,) = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
+    assert entry["probe_verdict"] == "unproven"
+    assert entry["uncounted"] == ["t.py::test_x"]
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    (finding,) = adequacy["findings"]
+    assert finding["severity"] == "concern"
+    assert finding["probe_verdict"] == "unproven"
+
+
 def test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run(
     monkeypatch, tmp_path
 ):
@@ -3678,7 +3859,11 @@ def test_two_findings_naming_one_probe_are_decided_by_a_single_suite_run(
         collected=["t.py::test_a"],
         failures=[killed],
     )
-    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    # `t.py::test_a` absent from the task's base, present only at the probe
+    # cell's own baseline (b-19b255), the same shape scripted above.
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
     _stub_probe_gates(monkeypatch, cell, gate_results=[_GREEN_TESTS, mutated])
 
     shared = ("src/a.py", "if x < 0:", "if False:")
@@ -3766,11 +3951,13 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
     import saffron.probe as probe_check
     from saffron.intake import Mutant
 
+    # `t.py::test_b` must read as an added test for the probe under it to
+    # count as a kill (b-19b255), so only `_TASK_BASE` below lacks it.
     baseline = GateResult(
         gate="tests",
         status="pass",
         tool="pytest 8.0",
-        collected=["t.py::test_a"],
+        collected=["t.py::test_a", "t.py::test_b"],
         summary="1 passed in 1s",
     )
     killed = Failure(file="t.py", code="t.py::test_b", message="boom")
@@ -3782,7 +3969,9 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
         failures=[killed],
         summary="1 failed in 2s",
     )
-    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    cell = _stub_the_runtime(
+        monkeypatch, patch=_ANCHORING_DIFF, suites=(_TASK_BASE, _TASK_HEAD)
+    )
     _stub_probe_gates(monkeypatch, cell, gate_results=[baseline, mutated])
 
     real = probe_check.record_fields
@@ -3822,6 +4011,7 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
         "probe",
         "reason",
         "failures",
+        "uncounted",
         "tool",
         "collected",
         "summary",
@@ -3849,7 +4039,7 @@ def test_the_host_writes_each_probes_json_entry_from_the_shared_helper(
     assert probed["tool"] == "pytest 8.1 probed"
     assert probed["baseline_tool"] == baseline.tool
     assert probed["collected"] == 2
-    assert probed["baseline_collected"] == 1  # len(baseline.collected)
+    assert probed["baseline_collected"] == 2  # len(baseline.collected)
     assert probed["summary"] == "1 failed in 2s"
     assert probed["baseline_summary"] == baseline.summary
     assert probed["failures"] == ["t.py::test_b"]

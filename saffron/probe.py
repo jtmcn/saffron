@@ -16,12 +16,20 @@ here can tell that from a real kill, so `killed` carries its failure identities
 and a person annotates the ones that are collateral. A heuristic in this spot
 would be a silently-wrong step inside the one number that exists because
 reading is not running.
+
+**A kill must be counted** (b-19b255). This repo's own suite runs its lint
+and format checks as tests. A probe that lengthens one line can fail those
+checks, and no test the diff added would notice. `check_probe` takes
+`counted`, the tests allowed to kill it. Only a new failure whose `code` is
+among them kills the probe. Every other new failure lands in `uncounted` and
+decides nothing. `added_tests` builds that set from two suites' own `tests`
+results.
 """
 
 from __future__ import annotations
 
 import posixpath
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Literal
@@ -123,6 +131,11 @@ class ProbeResult:
     baseline: BaselineRecord | None = None
     """The baseline in hand when the probe was checked. `None` only when there
     was none, which is not a green one (`failures == ()`)."""
+    uncounted: tuple[str, ...] = ()
+    """Every new failure's `code` whose test was not in `counted`, recognised
+    by the probed run's own `collected` or not. Never what decides the verdict
+    alone. A `killed` result carries none of these codes. A `survived` or
+    `unproven` one can carry every new failure's (b-19b255)."""
 
 
 def _repo_relative(file: str) -> str | None:
@@ -161,13 +174,17 @@ def check_probe(
     mutate: Mutated,
     run_tests: RunTests,
     test_paths: Sequence[str],
+    counted: Collection[str] | None,
 ) -> ProbeResult:
     """Apply one vacuity probe at the head tree and ask the repo's declared
     `tests` gate.
 
-    `test_paths` carries no default: the refusal below is the one guard the
-    design spec calls non-optional, and a default would let a caller that
-    forgot it measure with no refusal at all, silently.
+    `test_paths` carries no default. The refusal below is the one guard the
+    design spec calls required, and a default would leave it unchecked.
+
+    `counted` carries no default either (b-19b255). It names the tests a
+    kill can be read from, typically the tests the diff added. A forgotten
+    argument must raise, not read every new failure as a kill.
     """
     # Before any refusal, so a `None` baseline means the same thing whichever
     # path returns: there was no baseline verdict to record.
@@ -233,19 +250,73 @@ def check_probe(
             summary=summary,
             baseline=record,
         )
+
+    # ponytail: any failure of a counted test counts as a kill. `Failure`
+    # has no field that tells an assertion apart from an error in the test.
+    enumerated = None if mutated.collected is None else set(mutated.collected)
+    # ponytail: one matched code makes a run readable. `criteria._side`'s
+    # own ponytail comment states the same rule, not "every code is known".
+    readable = counted is not None and any(
+        n.failure.code in counted
+        or (enumerated is not None and n.failure.code in enumerated)
+        for n in new
+    )
+    if not readable:
+        return ProbeResult(
+            "unproven",
+            "a new failure exists but the run cannot say which tests the "
+            "diff added, so nothing could be matched to a counted test",
+            tool=tool,
+            collected=collected,
+            summary=summary,
+            baseline=record,
+            uncounted=tuple(n.failure.code for n in new),
+        )
+
+    assert counted is not None  # `readable` is `False` whenever it is
+    killing = tuple(n.failure.code for n in new if n.failure.code in counted)
+    uncounted = tuple(n.failure.code for n in new if n.failure.code not in counted)
+    if killing:
+        return ProbeResult(
+            "killed",
+            f"{len(killing)} new failure(s) matched a counted test",
+            killing,
+            tool=tool,
+            collected=collected,
+            summary=summary,
+            baseline=record,
+            uncounted=uncounted,
+        )
     return ProbeResult(
-        "killed",
-        f"{len(new)} new failure(s) against the baseline",
-        tuple(n.failure.code for n in new),
+        "survived",
+        "a new failure exists but matched no counted test",
         tool=tool,
         collected=collected,
         summary=summary,
         baseline=record,
+        uncounted=uncounted,
     )
 
 
+def added_tests(base: Sequence[GateResult], head: GateResult) -> frozenset[str] | None:
+    """The names `head` collected that the `tests` result in `base` did not
+    (b-19b255). This is the set a probe's kill is counted against.
+
+    `base` is a whole suite's results. Only the one among them with
+    `gate == "tests"` is read, by role, the way `census` and `criteria` read
+    theirs. `None` covers three cases, and none of them means the diff added
+    nothing: no `tests` result in `base`, that result's `collected` is
+    `None`, or `head.collected` is `None`. A `base` result that collected
+    `[]` makes every name `head` collected an addition.
+    """
+    base_tests = next((r for r in base if r.gate == "tests"), None)
+    if base_tests is None or base_tests.collected is None or head.collected is None:
+        return None
+    return frozenset(head.collected) - frozenset(base_tests.collected)
+
+
 def record_fields(probe: Mutant, result: ProbeResult) -> dict[str, object]:
-    """The ten fields a `probes.json` entry owes `probe` and `result`, flat.
+    """The eleven fields a `probes.json` entry owes `probe` and `result`, flat.
 
     It returns no verdict key and no `findings`. Each caller adds its own.
     The baseline fields are `null` when `result.baseline` is `None`, never
@@ -255,6 +326,7 @@ def record_fields(probe: Mutant, result: ProbeResult) -> dict[str, object]:
         "probe": probe.model_dump(),
         "reason": result.reason,
         "failures": list(result.failures),
+        "uncounted": list(result.uncounted),
         "tool": result.tool,
         "collected": result.collected,
         "summary": result.summary,

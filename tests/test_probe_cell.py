@@ -121,6 +121,9 @@ def test_the_probe_cell_holds_the_declared_gate_env_and_no_host_credential(
         gates_dir=gates_dir,
         thread_env=policy.thread_env,
         test_paths=policy.integrity.test_paths,
+        # Not this isolation test's own concern (b-19b255): the probe under
+        # test carries no new failure either way.
+        base_results=[],
         gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
         patch=patch,
         reviews=[LensReview(lens="adequacy", findings=[finding])],

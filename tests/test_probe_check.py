@@ -65,6 +65,7 @@ def test_a_verdict_records_which_suite_answered_it():
         mutate=_applies(),
         run_tests=lambda subset: answered,
         test_paths=("tests/**",),
+        counted=(),
     )
     assert got.verdict == "survived"
     assert got.tool == "pytest 8.4.1"
@@ -82,6 +83,7 @@ def test_a_verdict_reached_without_a_suite_records_no_count():
         mutate=_applies(),
         run_tests=lambda subset: pytest.fail("must not run"),
         test_paths=("tests/**",),
+        counted=(),
     )
     assert got.verdict == "unproven"
     assert (got.tool, got.collected, got.summary) == (None, None, "")
@@ -111,12 +113,16 @@ TEST_PATHS = ("tests/**",)
 
 
 def _check(probe=PROBE, **kwargs):
-    """`check_probe` with the now-required `test_paths` supplied.
+    """`check_probe` with the now-required `test_paths` and `counted`
+    supplied.
 
-    The default lives here and never in the code under test: a caller that
-    forgets the test-file refusal must get a `TypeError`, not a silent pass.
-    """
+    The defaults live here and never in the code under test: a caller that
+    forgets the test-file refusal, or the counted set, must get a
+    `TypeError`, not a silent pass. `counted=()` is harmless for every test
+    below that does not itself pass one: it only matters once a new failure
+    exists, and a test asserting `killed` supplies its own."""
     kwargs.setdefault("test_paths", TEST_PATHS)
+    kwargs.setdefault("counted", ())
     return probe_check.check_probe(probe, **kwargs)
 
 
@@ -141,6 +147,7 @@ def test_a_probe_the_tests_notice_is_killed_and_names_what_failed():
         baseline=_result("pass"),
         mutate=_applies(),
         run_tests=lambda subset: _result("fail", (_fail("test_a"), _fail("test_b"))),
+        counted={"test_a", "test_b"},
     )
     assert got.verdict == "killed"
     assert got.failures == ("test_a", "test_b")
@@ -168,6 +175,7 @@ def test_one_baseline_failure_cancels_one_head_failure_not_all_of_them():
         baseline=_result("fail", (_fail("test_a"),)),
         mutate=_applies(),
         run_tests=lambda subset: _result("fail", (_fail("test_a"), _fail("test_a"))),
+        counted={"test_a"},
     )
     assert got.verdict == "killed"
     assert got.failures == ("test_a",)
@@ -332,6 +340,7 @@ def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
             mutate=_applies_and_records,
             run_tests=lambda subset: pytest.fail("must not run"),
             test_paths=("tests/**",),
+            counted=(),
         )
         assert got.verdict == "unproven"
         assert "test" in got.reason
@@ -345,6 +354,7 @@ def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
         mutate=_applies_and_records,
         run_tests=lambda subset: _result("pass"),
         test_paths=("tests/*.py",),
+        counted=(),
     )
     assert got.verdict == "survived"
     assert applied == ["tests/sub/x.py"]
@@ -357,6 +367,7 @@ def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
         mutate=_applies_and_records,
         run_tests=lambda subset: pytest.fail("must not run"),
         test_paths=(),
+        counted=(),
     )
     assert got.verdict == "unproven"
     assert got.reason == "../outside.py is not a relative path inside the tree"
@@ -370,6 +381,7 @@ def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
         mutate=_applies_and_records,
         run_tests=lambda subset: pytest.fail("must not run"),
         test_paths=(),
+        counted=(),
     )
     assert got.verdict == "unproven"
     assert got.reason == (
@@ -385,6 +397,7 @@ def test_check_probe_refuses_by_reverts_glob_rule_and_on_no_test_paths():
         mutate=_applies_and_records,
         run_tests=lambda subset: _result("pass"),
         test_paths=("tests",),
+        counted=(),
     )
     assert got.verdict == "survived"
     assert applied == ["tests/sub/x.py", "tests/test_report.py"]
@@ -475,6 +488,7 @@ def test_a_kill_names_the_baselines_failures_beside_the_new_ones():
         baseline=_result("fail", (_fail("test_a"),)),
         mutate=_applies(),
         run_tests=lambda subset: _result("fail", (_fail("test_a"), _fail("test_b"))),
+        counted={"test_b"},
     )
     assert got.verdict == "killed"
     assert got.failures == ("test_b",)
@@ -546,3 +560,192 @@ def test_the_baseline_field_is_additive_and_a_result_built_without_it_stands():
         ("test_a",),
     )
     assert built.baseline is None
+    assert built.uncounted == ()
+
+
+# --- b-19b255: a kill is counted, never any new failure ---
+
+_FORMAT = (
+    "tests/test_saffron_gates.py::"
+    "test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree[format]"
+)
+_ADDED = "tests/test_new_thing.py::test_added"
+
+
+def _named(status, *codes, collected=(_FORMAT, _ADDED)):
+    return GateResult(
+        gate="tests",
+        status=status,
+        tool="pytest 8.0",
+        collected=list(collected),
+        failures=[Failure(file="t.py", code=code, message="boom") for code in codes],
+    )
+
+
+def test_a_probe_only_an_unadded_test_notices_survives_with_that_failure_beside_it():
+    """`check_probe` counts a probe `killed` only when a new failure's `code`
+    is one of the names its `counted` argument holds (b-19b255): the format
+    test lengthening a probe's line trips is never one of them."""
+    counted = {_ADDED}
+
+    only_format = _check(
+        PROBE,
+        baseline=_named("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: _named("fail", _FORMAT),
+        counted=counted,
+    )
+    assert only_format.verdict == "survived"
+    assert only_format.failures == ()
+    assert only_format.uncounted == (_FORMAT,)
+
+    both_fail = _check(
+        PROBE,
+        baseline=_named("pass"),
+        mutate=_applies(),
+        run_tests=lambda subset: _named("fail", _FORMAT, _ADDED),
+        counted=counted,
+    )
+    assert both_fail.verdict == "killed"
+    assert both_fail.failures == (_ADDED,)
+    assert both_fail.uncounted == (_FORMAT,)
+
+    # The added test was already red at the baseline. The subtraction
+    # cancels it, so only the format test is new, and it still survives.
+    added_already_red = _check(
+        PROBE,
+        baseline=_named("fail", _ADDED),
+        mutate=_applies(),
+        run_tests=lambda subset: _named("fail", _FORMAT, _ADDED),
+        counted=counted,
+    )
+    assert added_already_red.verdict == "survived"
+    assert _FORMAT in added_already_red.uncounted
+
+
+def test_a_new_failure_no_counted_test_can_be_matched_to_is_unproven():
+    """`unproven`, never `survived` or `killed`, when a new failure exists
+    and none can be matched to a counted test: `counted=None`, or no new
+    failure's `code` is in `counted` or among the names the probed run
+    collected (b-19b255)."""
+    collected_x = _named("pass", collected=("t.py::test_x",))
+    run1 = _check(
+        PROBE,
+        baseline=collected_x,
+        mutate=_applies(),
+        run_tests=lambda subset: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            collected=["t.py::test_x"],
+            failures=[Failure(file="t.py", code="t.py::test_x", message="boom")],
+        ),
+        counted=None,
+    )
+    assert run1.verdict == "unproven"
+    assert run1.uncounted == ("t.py::test_x",)
+
+    unmatched_baseline = _named("pass", collected=("something_else",))
+    run2 = _check(
+        PROBE,
+        baseline=unmatched_baseline,
+        mutate=_applies(),
+        run_tests=lambda subset: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            collected=["something_else"],
+            failures=[Failure(file="t.py", code="t.py::test_y", message="boom")],
+        ),
+        counted={"other"},
+    )
+    assert run2.verdict == "unproven"
+    assert run2.uncounted == ("t.py::test_y",)
+
+    run3 = _check(
+        PROBE,
+        baseline=unmatched_baseline,
+        mutate=_applies(),
+        run_tests=lambda subset: GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            collected=None,
+            failures=[Failure(file="t.py", code="t.py::test_y", message="boom")],
+        ),
+        counted={"other"},
+    )
+    assert run3.verdict == "unproven"
+    assert run3.uncounted == ("t.py::test_y",)
+
+    green = _named("pass", collected=("t.py::test_x",))
+    run4 = _check(
+        PROBE,
+        baseline=green,
+        mutate=_applies(),
+        run_tests=lambda subset: green,
+        counted=None,
+    )
+    assert run4.verdict == "survived"
+
+    # One unmatched failure does not decide a run alone. The other one here
+    # is a name the probed run collected, so the run reads `survived`.
+    two_failures = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 8.0",
+        collected=["t.py::test_x"],
+        failures=[
+            Failure(file="t.py", code="t.py::test_x", message="boom"),
+            Failure(file="t.py", code="t.py::test_unknown", message="boom"),
+        ],
+    )
+    run5 = _check(
+        PROBE,
+        baseline=green,
+        mutate=_applies(),
+        run_tests=lambda subset: two_failures,
+        counted={"other"},
+    )
+    assert run5.verdict == "survived"
+    assert set(run5.uncounted) == {"t.py::test_x", "t.py::test_unknown"}
+
+
+def test_added_tests_are_the_names_collected_at_head_and_not_at_base():
+    """`probe.added_tests(base, head)` returns, as a frozenset, the names
+    `head` collected that the `tests` result in `base` did not (b-19b255)."""
+    base_tests = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["a"]
+    )
+    head = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["a", "b"]
+    )
+    assert probe_check.added_tests([base_tests], head) == frozenset({"b"})
+
+    # A name collected only at base is not in it.
+    only_at_base = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=["a", "c"]
+    )
+    assert probe_check.added_tests([only_at_base], head) == frozenset({"b"})
+
+    # A base `tests` result that collected `[]` makes every head name added.
+    empty_base = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=[]
+    )
+    assert probe_check.added_tests([empty_base], head) == frozenset({"a", "b"})
+
+    # A result in `base` from any other gate is not read.
+    other_gate = GateResult(
+        gate="lint", status="pass", tool="ruff 1.0", collected=["a"]
+    )
+    assert probe_check.added_tests([other_gate], head) is None
+
+    # `None` in three cases: no `tests` result in `base`, that result's
+    # `collected` is `None`, or `head.collected` is `None`.
+    assert probe_check.added_tests([], head) is None
+    no_collected = GateResult(gate="tests", status="skip", tool=None, collected=None)
+    assert probe_check.added_tests([no_collected], head) is None
+    unreadable_head = GateResult(
+        gate="tests", status="pass", tool="pytest 8.0", collected=None
+    )
+    assert probe_check.added_tests([base_tests], unreadable_head) is None

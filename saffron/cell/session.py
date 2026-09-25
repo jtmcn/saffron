@@ -1296,6 +1296,7 @@ def _probe_adequacy(
     gates_dir: Path,
     thread_env: Mapping[str, str],
     test_paths: Sequence[str],
+    base_results: Sequence[GateResult],
     gates: dict[str, Path],
     patch: str,
     reviews: list[review.LensReview],
@@ -1305,6 +1306,8 @@ def _probe_adequacy(
     """Every anchored adequacy finding's vacuity probe, asked once each
     (backlog item 117), in a Gate-only cell entered *after* REVIEW's own
     critic cell is torn down — never inside it, the hole `SA-0087` closed.
+    `base_results` is the task's pre-turn baseline (b-19b255), and a kill
+    counts only against names `added_tests` reads from it and this run.
 
     Decides each finding's `severity`/`probe_verdict` in place before
     returning, so the caller's later `ledger.record_findings` sees the
@@ -1411,6 +1414,9 @@ def _probe_adequacy(
         # `check_probe` builds its own for each result it returns, so this
         # copy is only for the entries the host authors: the raise path's.
         record = probe_check.BaselineRecord.of(baseline)
+        # Once, not per probe: the same two suites decide every probe's
+        # counted set (b-19b255).
+        counted = probe_check.added_tests(base_results, baseline)
         for index, p in enumerate(remaining):
             try:
                 result = probe_check.check_probe(
@@ -1419,6 +1425,7 @@ def _probe_adequacy(
                     mutate=partial(worktree.source_mutated, container),
                     run_tests=run_tests,
                     test_paths=test_paths,  # the same list every probe was asked about
+                    counted=counted,
                 )
             except runtime.CellRuntimeError as exc:
                 # A failed undo leaves the tree untrustworthy (item 117): no
@@ -2587,6 +2594,8 @@ def _drive_cell(
                         gates_dir=gates_dir,
                         thread_env=policy.thread_env,
                         test_paths=policy.integrity.test_paths,
+                        # The pre-turn baseline, not `latest` (b-19b255).
+                        base_results=baseline.results,
                         gates=gates,
                         patch=patch_to_review,
                         reviews=reviews,

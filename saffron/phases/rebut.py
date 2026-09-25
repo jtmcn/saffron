@@ -137,7 +137,7 @@ def _blocker_line(n: int, f: Finding) -> str:
     if f.probe_verdict == "survived" and f.probe is not None:
         line += (
             f" (its probe survived: in {f.probe.file}, `{f.probe.find}` -> "
-            f"`{f.probe.replace}` and the tests stayed green)"
+            f"`{f.probe.replace}`, and no test able to decide it failed)"
         )
     return line
 
