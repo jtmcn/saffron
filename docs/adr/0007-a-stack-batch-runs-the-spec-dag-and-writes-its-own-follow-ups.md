@@ -181,7 +181,14 @@ this decision rests on.
 - **62** departs. §1.4 refuses specs written "from a roadmap". A follow-up is
   written from a qualified finding instead, but §1.4's reason, money, still
   reaches follow-ups and revisions. One generation and the round bound answer it, and the
-  measurement below tests the answer.
+  measurement below tests the answer. §4.2.1's reason reaches them too. It
+  refuses a draft run while nobody is awake, and a task that rewrites its own
+  queue. Every queued spec is read at `base_sha`, and other text comes only
+  from spec review or a qualified finding. No task's diff reaches the queue.
+  Revisions and follow-ups return from host-invoked sessions, and the host
+  commits them. A follow-up only appends above the stack. It edits, reorders
+  and removes no queued spec. Nothing merges, so the operator can reject each
+  one as a layer.
 
 ## Consequences
 
