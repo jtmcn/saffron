@@ -188,7 +188,10 @@ this decision rests on.
 - **50** departs. Under ADR 4 the operator rules on a confirmed blocker before
   anything acts on it. Here a qualified finding becomes code first. Each
   follow-up is its own layer, and nothing merges. So the operator still rules
-  on every finding, by keeping or dropping its layer.
+  on every finding, by keeping or dropping its layer. Rejecting a follow-up is
+  cheap only at the top. Dropping a lower one rebuilds every layer above it,
+  the finishing layer included, and §6.1's merge train re-runs the gates on
+  the result.
 - **54** upholds. It holds once the spec re-runs gate 0 and `parse_spec`'s
   refusals on every revised and follow-up spec, not only on files at
   `base_sha`.
@@ -203,7 +206,7 @@ this decision rests on.
   fields, and it runs one generation deep. Revisions and follow-ups return from host-invoked sessions, and the host
   commits them. A follow-up only appends above the stack. It edits, reorders
   and removes no queued spec. Nothing merges, so the operator can reject each
-  one as a layer.
+  one as a layer, at the rebuild cost the 50 bullet names.
 
 ## Consequences
 
