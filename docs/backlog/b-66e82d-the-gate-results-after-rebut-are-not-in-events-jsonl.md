@@ -31,3 +31,7 @@ Each gate result after REBUT is an event in `events.jsonl`, and the
 - 2026-09-23: recurred in run 15. `SA-0128`'s attempt 1 failed `census` (3)
   and `dead` (1), and `events.jsonl` carried the counts with no identities.
   The ids came from the batch record only after the cell exited.
+- 2026-09-26: recurred in the spec loop's run 18. A `GateResult` in
+  `events.jsonl` carries a status and no summary. `revert` has nine skip paths,
+  and nothing said which one `SA-0144`'s head took (b-76f08d). Repair turns
+  read `prose.py` and `integrity.py` to learn what failed.

@@ -39,3 +39,6 @@ for a task that never started.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-09-26: recurred in the spec loop's run 18, the third run in a row.
+  RAATServer on 9200 and limactl on 53 failed `SA-0142`'s first start. The
+  refusal named ports, and `lsof` found the processes.

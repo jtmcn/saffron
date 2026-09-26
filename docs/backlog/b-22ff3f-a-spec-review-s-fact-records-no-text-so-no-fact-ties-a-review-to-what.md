@@ -28,3 +28,6 @@ The `spec_review` fact records the text's `n` and `spec_sha` it read.
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
+- 2026-09-26: the operator skipped the loop's step 1b in run 18, since the
+  spec chain in #508 reviewed all nine specs. No fact says so, and the loop's
+  driver cannot tell a reviewed spec from an unreviewed one.

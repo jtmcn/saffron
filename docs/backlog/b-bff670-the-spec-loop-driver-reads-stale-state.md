@@ -36,3 +36,6 @@ is item b-e8027b, and it is recorded there.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-09-26: recurred in the spec loop's run 18. After run 17 merged,
+  `status` said to run `snapshot --force`. That exited 1 with no candidates.
+  The right command was `snapshot --new`, and neither output named it.

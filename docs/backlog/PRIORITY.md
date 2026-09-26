@@ -164,6 +164,10 @@ session too big for argv left `SA-0128` halted at `REBUTTING`.
 `SA-0129` ended `NOT_IMPLEMENTED`. Its by-hand pull request then merged, and
 the ledger still refused its child.
 
+**Placed 2026-09-26**, from the spec loop's run 18: **b-76f08d**. The `tests`
+gate reads a flag error in captured output as its own, so `revert` skips every
+witness for a new CLI flag.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -273,6 +277,10 @@ that spec's pull request.
 advisory failure present at base. The second is a refusal that names ports
 and not processes. The last two are the loop's tools reading stale state.
 
+**Placed 2026-09-26**, from the spec loop's run 18: **b-43061c**, then
+**b-fab381**. The first is text in a string literal that no `prose` rule reads.
+The second is `snapshot` stranding a chain behind a merged parent.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -297,6 +305,10 @@ index ranked neither. They now carry the 3 this list already gave them.
 **b-7d2acf**, filed the same day, is the check that was missing. Nothing
 compares the index to the records in that direction. It ranks here, beside
 128 and 129.
+
+**Placed 2026-09-26**, from the spec loop's run 18: **b-615466**, **b-50a704**,
+**b-17d0d5**, then **b-830357**. Each is a stack batch seam that review kept
+as written, or a witness too weak at one boundary.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
