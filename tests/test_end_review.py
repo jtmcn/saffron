@@ -1,4 +1,4 @@
-"""The end review's two seat lenses: `LayerFields`, the prompt filler and
+"""The end review's two lenses: `LayerFields`, the prompt filler and
 `review_layer`. `saffron.end_review` is imported inside every test body
 here, never at module scope. It does not exist at this spec's own tree
 base, and a module-scope import would fail collection under `revert`.
@@ -312,6 +312,7 @@ def test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields():
 
         raw = (PROMPTS / end_review.END_LENSES[lens]).read_text()
         raw_flat = _flatten(raw)
+        assert _flatten(raw.split("{")[0]) in flat, "each lens fills its own file"
         assert "do not manufacture one" in raw_flat.lower()
         for token in (
             "`blocker`",
@@ -340,16 +341,12 @@ def test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields():
         prompts_dir=PROMPTS,
     )
     spec_flat = _flatten(spec_prompt)
-    assert acceptance[0].witness in spec_flat
-    assert acceptance[1].witness in spec_flat
-    assert acceptance[2].witness in spec_flat
-    # The tag tracks each criterion's own flag, not its position: the
-    # preserving criterion here sits in the middle, not last.
-    criteria_lines = end_review._criteria_lines(acceptance).splitlines()
-    assert len(criteria_lines) == 3
-    assert "(preserves)" not in criteria_lines[0]
-    assert "(preserves)" in criteria_lines[1]
-    assert "(preserves)" not in criteria_lines[2]
+    for criterion in acceptance:
+        assert _flatten(criterion.claim) in spec_flat
+        assert criterion.witness in spec_flat
+    # The preserving criterion sits in the middle, so the tag tracks its flag.
+    assert f"{acceptance[1].witness}` (preserves)" in spec_flat
+    assert spec_flat.count("(preserves)") == 1
     assert _flatten(context.constraints_block(touches, forbidden, [])) in spec_flat
 
     spec_raw = _flatten((PROMPTS / "end-review-spec.md").read_text())
@@ -361,7 +358,9 @@ def test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields():
     standards_lower = standards_raw.lower()
     assert "never against a file in the worktree" in standards_lower
     assert "is saffron's process glossary, not this repository's" in standards_lower
-    assert "worktree.worktree_mount" not in standards_lower
+    from saffron.cell.worktree import WORKTREE_MOUNT
+
+    assert WORKTREE_MOUNT not in standards_raw
 
 
 def test_a_layer_is_read_by_the_spec_lens_then_the_standards_lens():

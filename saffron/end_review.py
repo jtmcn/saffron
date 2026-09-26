@@ -1,4 +1,4 @@
-"""The end review's two seat lenses, over one stack-batch layer.
+"""The end review's two lenses, over one stack-batch layer.
 
 `SA-0153` wires the order and the reserve. This module builds what a
 layer needs. A layer is one task's `stack_layers` row. `layer_fields`
@@ -38,7 +38,7 @@ def _flatten(text: str) -> str:
 
 @dataclass(frozen=True)
 class LayerFields:
-    """What one layer's two seat prompts are filled from. `known` is one
+    """What one layer's two end-review prompts are filled from. `known` is one
     line per in-cell finding the layer's own task carries, already
     formatted for the prompt (`layer_fields` builds it)."""
 
