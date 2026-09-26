@@ -164,8 +164,8 @@ callable into `saffron batch --stack`. `SA-0161` then writes follow-up
 specs with the same session.
 
 **What the tree base holds.** This spec's tree base is `SA-0160`'s head.
-Every line number below was read at `18c72f36`, where no chain code from
-`SA-0142` on exists. So `batch.py`, `cli.py` and `spec_review.py` are cited
+Every line number below was read at `18c72f36`, and read again at
+`a5d52c29`. No chain code from `SA-0142` on exists at either. So `batch.py`, `cli.py` and `spec_review.py` are cited
 by symbol where the chain edits them. This spec consumes these names.
 
 - From `SA-0143`, `SA-0148` and `SA-0157`: `run_stack_batch` and its runner
@@ -230,8 +230,10 @@ and one whose id or `depends_on` list differs from the handed spec's. It
 refuses one whose `budget_usd`, `max_turns` or `max_attempts` exceeds the
 handed spec's. It runs the `protected`, criterion path and retirement
 refusals at the pinned base. `_stack_runner` hands `run_task` the task
-(`SA-0168`), so each revision this spec records meets those checks. This
-spec adds no check of its own.
+(`SA-0168`), so each revision this spec records meets those checks.
+`SA-0162`, above this spec in the chain, runs gate 0's two open pull
+request refusals on each revised spec before its runner call. This spec
+adds no check of its own.
 
 **Why the route reads the tag and never the claim.** The review's prompt
 and its tags are core's (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-67`).
@@ -335,8 +337,9 @@ A round, in order:
   `SA-0173` adds `writer_usd` to the held amount, and `SA-0162` releases
   both reserves for a follow-up's rounds.
 - **The open pull request refusals on a revision.** A revision can change a
-  spec's `touches`. `run_task` does not run gate 0's two refusals that need
-  GitHub (`SA-0150`), and neither does this spec.
+  spec's `touches`. `run_task` cannot run gate 0's two refusals that need
+  GitHub (`SA-0150`). `SA-0162` runs them on every revised spec, once the
+  batch holds the open pull requests.
 - **The earlier review, handed to the fresh one.** The fresh review reads
   the whole revised spec beside the original, as design section 3 says.
   The writer walks the earlier findings, since its prompt holds the

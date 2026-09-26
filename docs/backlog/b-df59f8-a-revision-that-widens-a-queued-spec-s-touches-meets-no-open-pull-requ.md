@@ -5,7 +5,7 @@ status: open
 tier: 3
 filed: 2026-09-25
 closed:
-specs: []
+specs: [SA-0162]
 prs: []
 commits: []
 cites: [§4.2, §4.2.1]
@@ -28,3 +28,4 @@ A revised text meets the open pull request refusals before its cell, as a follow
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
+- 2026-09-25: `SA-0162` takes it. It runs the open pull request refusals on every revised spec before its runner call.

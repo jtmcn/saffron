@@ -169,10 +169,12 @@ reader.
 - It records batch 3 with `saffron/batch-3-finish`, `a`×40 and no URL.
   The reader's row is a `sqlite3.Row` holding those, with `pr_url`
   `None`.
-- It records batch 3 again with `b`×40 and `https://github.com/o/r/pull/200`.
-  The reader reads both new values.
-- It records batch 3 once more with `c`×40 and no URL. The reader reads
-  `c`×40 and `pr_url` `None`.
+- It records batch 3 again with `saffron/batch-3-finish-2`, `b`×40 and
+  `https://github.com/o/r/pull/200`. The reader reads all three new values.
+- It records batch 3 once more with `saffron/batch-3-finish`, `c`×40 and no
+  URL. The reader reads that branch, `c`×40 and `pr_url` `None`.
+- It reads `batch_key` from `stack_finishes` with `sqlite3` directly, and
+  asserts the stored values are the strings `"3"` and `"4"`.
 - It records batch 4 with its own values. The reader reads batch 4's
   values, and batch 3's are unchanged.
 - The reader's `stack_finish(5)` is `None`.
@@ -182,17 +184,20 @@ directly, opens a fresh `Ledger`, records batch 6, and reads it back.
 
 These fail it:
 
-- a write that never commits, which the fresh reader cannot see
+- a write that never commits, which the fresh reader cannot see, or which
+  holds a lock the reader's open waits on until it raises
 - a plain `INSERT`, which raises on the second write
 - an `UPDATE` alone, which writes nothing the first time
-- an upsert that keeps a column the call leaves out
+- an upsert that keeps a column the call leaves out, such as one that
+  updates `head_sha` and `pr_url` and keeps the old `branch`
 - `batch_key` as an integer referencing `batches`, which refuses a batch
   with no row
 - a read with no `WHERE`, which returns another batch's row
 - a read that returns a `dict` or a tuple
-- the table created outside `SCHEMA`, which a dropped table never regains
 
-This criterion is unmeasured. A prototype was not run.
+This criterion is unmeasured. A prototype was not run. A table created
+outside `SCHEMA` with `IF NOT EXISTS` also regains a dropped table, so the
+witness does not tell it apart. Put the table in `SCHEMA` all the same.
 
 **The `prose` gate** reads every new comment and docstring
 (`.saffron/gates/prose.py`). Write no em dash, semicolon, contraction,

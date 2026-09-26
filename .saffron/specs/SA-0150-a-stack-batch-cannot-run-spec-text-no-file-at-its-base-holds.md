@@ -130,13 +130,14 @@ text is a spec review's revision or a follow-up spec, and nothing else.
 Section 3 of `docs/superpowers/specs/2026-09-23-stack-batch-design.md`
 holds each one as a record fact with its text and `spec_sha`, and the cell
 runs that text. The finishing layer commits the files. §4.2.1 already
-names this exception (`DESIGN.md:385`).
+names this exception (`DESIGN.md:386`).
 
 Principle 54 says a control applied at one call site is not applied
 (`docs/appendices/N-what-pinning-the-base-and-the-gate-runner-found.md:86-89`).
 ADR 7 holds principle 54 only once gate 0 runs again on every revised and
 follow-up spec. `parse_spec`'s refusals run again too, not only on files
-at `base_sha`.
+at `base_sha`. This spec runs each of them in `run_task` but the two open
+pull request refusals, which `SA-0162` runs in the batch.
 
 A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
@@ -147,13 +148,15 @@ and runs it. `SA-0160` builds the spec writer's session. `SA-0164` runs
 the revision rounds, which record a revision with
 `record_spec_text(origin="revision")`. `SA-0161` writes
 follow-up specs, each recorded with `origin="follow_up"`. `SA-0162` runs
-the follow-ups as layers. Step 8's `SA-0151` is the finish. It commits
+the follow-ups as layers. It also runs gate 0's open pull request
+refusals on each revised and follow-up spec. Step 8's `SA-0151` is the finish. It commits
 the latest text of each task at its `path`.
 
 **What the tree base holds.** This spec's tree base is `SA-0156`'s head.
-Every line number below was read at `68892367`, where none of the chain's
-code exists. So `task.py` and `ledger.py` are cited by symbol where the
-chain edits them. This spec consumes these names.
+Every line number below was read at `a5d52c29`, where no chain code from
+`SA-0142` on exists. `SA-0135`'s `Refused` and `consumes` check are
+there. So `task.py` and `ledger.py` are cited by symbol where the chain
+edits them. This spec consumes these names.
 
 - From `SA-0135`: `Refused` in `saffron/task.py`, a frozen dataclass
   holding only `reason`. `run_task` returns `CellOutcome | Refused`. It
@@ -180,29 +183,29 @@ chain edits them. This spec consumes these names.
   `ccfa1553` did the same for `spec_review`.
 
 **What `spec_sha` means at the base.** `load_spec` hashes a file's raw
-bytes with SHA-256 (`saffron/intake.py:263-274`). A recorded text's
+bytes with SHA-256 (`saffron/intake.py:308-319`). A recorded text's
 `spec_sha` is the same hash over the text's UTF-8 bytes. Those are the
 bytes the finish writes, so the committed file hashes to it.
 
 **Where a spec reaches a cell today.** `run_task` takes the parsed spec
-and its `spec_sha` (`saffron/task.py:218-229`). It emits the `Ceilings`
-event from its `ceilings` argument (`:269-280`). It builds the `CellSpec`
-from the spec's fields (`:303-318`). It hands the spec to PACKAGE
-(`:328-341`), or to the push of unpackaged work (`:351-361`).
+and its `spec_sha` (`saffron/task.py:241-253`). It emits the `Ceilings`
+event from its `ceilings` argument (`:296-307`). It builds the `CellSpec`
+from the spec's fields (`:330-345`). It hands the spec to PACKAGE
+(`:372-386`), or to the push of unpackaged work (`:395-405`).
 `cli._batch_runner` resolves the ceilings with `spec_ceilings` of the
-candidate's spec (`saffron/cli.py:475-490`).
+candidate's spec (`saffron/cli.py:485-500`).
 
 **Gate 0 at the base.** §4.2 refuses a spec that is malformed or whose
-`spec_sha` moved (`DESIGN.md:362`). §4.2.1 counts eight refusals
-(`DESIGN.md:397`). `build_queue` runs them at scan time
+`spec_sha` moved (`DESIGN.md:363`). §4.2.1 counts eight refusals
+(`DESIGN.md:398`). `build_queue` runs them at scan time
 (`saffron/scheduler.py:623-727`). `saffron cell` runs the two that need
 no ledger and no GitHub before its cell. It reads `protected` from
 `.saffron/` at `base_sha` and the retirement markers from the mirror at
-`base_sha` (`saffron/cli.py:397-429`). `_unmatched_criterion_path` needs
+`base_sha` (`saffron/cli.py:403-435`). `_unmatched_criterion_path` needs
 the spec alone (`saffron/scheduler.py:311-342`), and `_refuse` words its
 refusal (`:700-701`). Inside the cell, `spec_drift` compares the spec file
 at `base_sha` with `CellSpec.spec_sha`, and reports a difference without
-refusing (`saffron/cell/session.py:91-133`, `:1672-1673`).
+refusing (`saffron/cell/session.py:91-133`, `:1685-1686`).
 
 **How a fact reaches the record.** Each write method builds one fact with
 `_build_fact` and applies it through `_commit_and_append`
@@ -275,7 +278,7 @@ Build three things.
 
 The ceiling check keeps a revision inside what the batch reserved for
 the queued spec. The batch's budget check reads the file's `budget_usd`
-(`saffron/batch.py:194-196`). It mirrors `SA-0161`'s refusal of a
+(`saffron/batch.py:198-200`). It mirrors `SA-0161`'s refusal of a
 follow-up whose budget exceeds its origin spec's. A follow-up's handed
 spec is its own text, so it passes this check by construction. The
 `touches` check holds a follow-up to what the host allowed it. A queued
@@ -306,17 +309,20 @@ since `SA-0135`. Add the recorded text's.
 - **The open pull request refusals.** Two of gate 0's refusals need
   GitHub: another task's open pull request on this spec, and a `touches`
   overlap with an open pull request's files. `run_task` holds no slug and
-  no `gh`. So a revision that widens `touches` onto another open pull
-  request is not refused here. The delegate files a backlog item for that
-  revision gap. `SA-0162` owns the overlap check for a follow-up, with
-  its exemption for the batch's own pull requests.
-- **Pinning the text a review approved.** The integrity check compares a
-  row with itself. It catches a corrupted or hand-edited row. It is not
-  §4.2's "`spec_sha` moved" rule, which asks whether the text changed
-  after it was approved. Within a batch `SA-0164` meets it by
-  construction, since the cell runs straight after the review that
-  passed the latest text. The `spec_review` fact records no text `n`, so
-  no fact ties a review to the text it read.
+  no `gh`, so neither runs here. `SA-0162` runs both in the batch, on
+  every revised spec and every follow-up, with its exemption for the
+  batch's own layers.
+- **Pinning the text a review approved.** ADR 7 leaves open gate 0's
+  "`spec_sha` moved" rule for a revised spec. A revision changes the
+  pinned `spec_sha`. The integrity check compares a row with
+  itself. It catches a corrupted or hand-edited row. It is not §4.2's
+  "`spec_sha` moved" rule, which asks whether the text changed after it
+  was approved. Until the ADR answers it, this spec runs the latest text
+  with no such check. Within a batch `SA-0164` meets the rule by
+  construction, since the cell runs straight after the review that passed
+  the latest text. That is reasoned, and no check enforces it. The
+  `spec_review` fact records no text `n`, so no fact ties a review to the
+  text it read.
 - **An attended run's flags.** `saffron cell` passes no `task_id`, so its
   flags still set its ceilings.
 - **The refused task's state.** A refusal writes nothing, as `SA-0135`'s
@@ -334,6 +340,11 @@ since `SA-0135`. Add the recorded text's.
 - **The original in the worktree.** The cell's worktree holds the spec
   file at `base_sha`, the original. `spec_drift` compares it with the
   text's `spec_sha`, and prints one preflight line for a revision.
+- **A repo gate's view of the text.** A repo gate reads `.saffron/` from
+  the `base_sha` export, so it reads the original too. This repo's `dead`
+  gate reads `pending_symbols` there, so a name a revision adds goes
+  unseen, and a name it drops stays deferred. That is the principle 20
+  residual ADR 7 records.
 - **A revision does not carry over.** A revision recorded on last night's
   task stays on it. Tonight's fresh task holds no text, so tonight's
   review revises again.
@@ -344,7 +355,7 @@ since `SA-0135`. Add the recorded text's.
   queued one.
 - **The refusal count.** The id, `depends_on`, ceiling, `touches` and
   path checks
-  are refusals §4.2.1 does not count (`DESIGN.md:397`). `DESIGN.md` is forbidden, so the
+  are refusals §4.2.1 does not count (`DESIGN.md:398`). `DESIGN.md` is forbidden, so the
   operator files it.
 - **`saffron/record/fold.py:1-3`**, which lists what the fold rebuilds and
   becomes incomplete. That file is forbidden here, so the operator files
