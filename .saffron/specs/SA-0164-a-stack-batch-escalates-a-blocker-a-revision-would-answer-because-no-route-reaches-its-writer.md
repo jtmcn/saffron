@@ -164,8 +164,8 @@ callable into `saffron batch --stack`. `SA-0161` then writes follow-up
 specs with the same session.
 
 **What the tree base holds.** This spec's tree base is `SA-0160`'s head.
-Every line number below was read at `18c72f36`, and read again at
-`a5d52c29`. No chain code from `SA-0142` on exists at either. So `batch.py`, `cli.py` and `spec_review.py` are cited
+Every line number below was read at `642a26c3`. No chain code from `SA-0142`
+on exists there. So `batch.py`, `cli.py` and `spec_review.py` are cited
 by symbol where the chain edits them. This spec consumes these names.
 
 - From `SA-0143`, `SA-0148` and `SA-0157`: `run_stack_batch` and its runner
@@ -661,7 +661,7 @@ failing. With it passing, the recorder got the pinned base, the resolved
 `--repo` and `main`'s `out_dir`, once, and the fake got the sentinel as
 `revise`. With it failing, the recorder was not called and `revise` is
 `None`. These fail it, unmeasured, since the `--stack` path is not at
-`18c72f36`:
+`642a26c3`:
 
 - no `revise` passed, which escalates every `revise` route
 - the callable built before readiness, on a base not yet pinned

@@ -113,14 +113,14 @@ and Standards lenses. `SA-0153` runs them over a stack within a reserve.
 follow it in the chain.
 
 **What the tree base holds.** This spec's tree base is `SA-0154`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). The chain
 `SA-0142` to `SA-0154` puts these there, so they are cited by symbol. Every
-line number below was read at `f0c8f82d`.
+line number below was read at `642a26c3`.
 
 - `SA-0144` adds `--stack` to `saffron batch`. Given it, `_batch` builds
   its runner with `_stack_runner` and calls `run_stack_batch` in place of
   `run_batch`. It does so inside the branch where readiness passed, where
-  `pinned` is bound (`saffron/cli.py:811-822`).
+  `pinned` is bound (`saffron/cli.py:821-832`).
 - `SA-0153` adds `reserve_usd` and `end_review` to `run_stack_batch`. Its
   task loop holds the reserve back from each budget comparison.
   `end_review` runs once after the loop, with the batch's id as text, the
@@ -142,20 +142,21 @@ line number below was read at `f0c8f82d`.
 
 **Where each input lives.** `_drive_cell` exports `.saffron/` at the run's
 `base_sha` and loads the policy from that export
-(`saffron/cell/session.py:1650`, `:1662`). It reads `CLAUDE.md` at the same
-sha (`:1655`) and Saffron's own `CONTEXT.md` from Saffron's root (`:1798`).
-It wraps the agent in `stop_on_rejected` and binds `timeout_s` and
-`spec_id` (`:1829-1839`). `review.run_lens` calls the agent with no
+(`saffron/cell/session.py:1657`, `:1675`). It reads `CLAUDE.md` at the same
+sha (`saffron/cell/session.py:1662`) and Saffron's own `CONTEXT.md` from
+Saffron's root (`saffron/cell/session.py:1811`). It wraps the agent in
+`stop_on_rejected` and binds `timeout_s` and `spec_id`
+(`saffron/cell/session.py:1842-1852`). `review.run_lens` calls the agent with no
 `spec_id` (`saffron/phases/review.py:236`), and `run_agent` requires one
-(`saffron/phases/implement.py:196`). `stop_on_rejected` raises
+(`saffron/phases/implement.py:198`). `stop_on_rejected` raises
 `RateLimited` on a rejected window (`saffron/cell/session.py:159-181`,
 `:230-232`). `_default_emit` prints each event's `describe` line
 (`:85-87`).
 
 **The plan header.** `_print_batch_plan` prints the candidate count, the
-budget and the deadline on one line (`saffron/cli.py:715-735`). `_batch`
-calls it once the queue resolves (`:839`).
-`tests/test_cli.py:3802-3850` pins that output exactly for a night without
+budget and the deadline on one line (`saffron/cli.py:725-745`). `_batch`
+calls it once the queue resolves (`:849`).
+`tests/test_cli.py:3804-3852` pins that output exactly for a night without
 `--stack`.
 
 **What a lens costs.** On 2026-09-23 the ledger held 392 `REVIEWING`
@@ -169,10 +170,10 @@ peaked at $1.80.
    callable criterion 1 states. The callable exports `.saffron/` at the
    pinned `base_sha` into `out_dir / "end-review" / <batch key>`.
    `export_saffron_dir` removes its destination first
-   (`saffron/repos/mirror.py:173-218`), so the directory is one no task
+   (`saffron/repos/mirror.py:182-227`), so the directory is one no task
    uses, as PACKAGE's `out_dir / "package"` is
    (`saffron/phases/package.py:709-711`). The reads raise `GitError`, `OSError`
-   or `PolicyError` (`saffron/repos/mirror.py:209`, `:217`, `:243-259`,
+   or `PolicyError` (`saffron/repos/mirror.py:218`, `:226`, `:253-269`,
    `saffron/repos/policy.py:114-138`). A raise would leave `run_stack_batch`
    after the loop, and `main` would exit 2 for a night that drained. So the
    callable catches any raise from the reads or from `run_end_review`. It
@@ -224,7 +225,7 @@ stack can get the join and no layer.
 
 **Who reads the `StackReview`.** The callable returns it, and
 `run_stack_batch` discards it. `SA-0147` builds `qualify` with no
-production caller, and `SA-0150` calls it. The chain runs `SA-0157`,
+production caller, and `SA-0165` calls it. The chain runs `SA-0157`,
 `SA-0159`, then `SA-0147`.
 
 ## Out of scope
@@ -239,7 +240,7 @@ production caller, and `SA-0150` calls it. The chain runs `SA-0157`,
   output alone. No `events.jsonl` in the batch tree gains them.
 - **Two sentences this makes false.** `README.md:123-124` says a night ends
   at the deadline plus at most one task. The end review now runs after an
-  `UNTIL` stop. `DESIGN.md`'s one-task overshoot bound (`DESIGN.md:202`)
+  `UNTIL` stop. `DESIGN.md`'s one-task overshoot bound (`DESIGN.md:203`)
   gains an end-review lens too. Both files are forbidden here, and backlog
   item b-1adb50 files them by hand.
 - **The reserve on the queue page.** The stack view is `SA-0152`'s.

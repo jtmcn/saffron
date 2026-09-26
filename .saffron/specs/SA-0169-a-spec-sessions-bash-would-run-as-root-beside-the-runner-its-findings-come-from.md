@@ -132,7 +132,7 @@ never sees `CLAUDE_CODE_OAUTH_TOKEN`. This spec builds that, and
 `SA-0175` and `SA-0156` build on it.
 
 **What the tree base holds.** This spec's tree base is `SA-0168`'s head.
-Every line number below was read at `18c72f36`, where no chain code
+Every line number below was read at `642a26c3`, where no chain code
 exists. This spec consumes one chain name. `SA-0154` adds
 `end_review.layer_cell(fields, *, repo, mirror, gates_dir, thread_env)`, a
 context manager. It removes a leftover container, calls `session.cell_up`

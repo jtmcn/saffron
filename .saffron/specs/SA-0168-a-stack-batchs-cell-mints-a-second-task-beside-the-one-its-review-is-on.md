@@ -137,7 +137,7 @@ the size of `SA-0156`'s first draft.
 The chain below it runs `SA-0135`, `SA-0136`, `SA-0142` to `SA-0146`,
 `SA-0153`, `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`,
 `SA-0149` and `SA-0155`. Every line number below was read at
-`f2a08a9f`, where none of their code exists. The chain edits `cli.py`,
+`642a26c3`, where none of their code exists. The chain edits `cli.py`,
 `ledger.py`, `task.py` and `session.py`, so read those there by symbol.
 This spec consumes these names.
 
@@ -153,11 +153,11 @@ This spec consumes these names.
 
 **How a cell comes by its task today.** `_drive_cell` exports `.saffron/`
 at `base_sha` and loads the policy from it
-(`saffron/cell/session.py:1650`, `:1662`). It upserts the repo, creates
+(`saffron/cell/session.py:1657`, `:1675`). It upserts the repo, creates
 a run at `base_sha`, and creates a task with that `policy_sha` and
-`context.prompt_sha()` (`:1688-1707`). Nothing reads a task id from
+`context.prompt_sha()` (`:1701-1720`). Nothing reads a task id from
 `CellSpec` (`:249-303`). `run_task` builds the `CellSpec` and calls
-`run_one_cell` (`saffron/task.py:303-326`). So a spec `SA-0155` reviewed
+`run_one_cell` (`saffron/task.py:330-370`). So a spec `SA-0155` reviewed
 on a task gets a second task, and the review sits on a task no cell ran.
 `Ledger.record_policy` writes a task's policy after it exists
 (`saffron/ledger.py:1100-1107`). PACKAGE calls it only when the value
@@ -170,16 +170,16 @@ its own task. Each is wrong on a given task.
 
 - **The re-queue cap.** `previous_cut_orphan` looks for another task at
   this repo, spec id and `CellSpec.spec_sha`
-  (`saffron/cell/session.py:388-421`, `:408`, `:420`). That task ended
+  (`saffron/cell/session.py:388-421`, `:408`, `:419`). That task ended
   `ORPHANED` on a `COMPLETE` run, and every attempt it holds is in phase
   `IMPLEMENTING` (`:412-415`). The cut settles `NOT_IMPLEMENTED` when it
-  finds one, and `ORPHANED` otherwise (`:2201-2214`). Every stack task
+  finds one, and `ORPHANED` otherwise (`:2214-2227`). Every stack task
   holds a `SPEC_REVIEW` attempt, and a revised one a spec-writing attempt
   too, so the phase clause refuses each. `SA-0150` makes a revised task's
   `CellSpec.spec_sha` the hash of its revision text, which never equals
   its task row's. So a revised spec cut each night re-queues each night.
 - **The rate limit's read-back.** On `RATE_LIMITED` the cell reports
-  `ledger.task_spend(task_id)` (`saffron/cell/session.py:2813`). That sums
+  `ledger.task_spend(task_id)` (`saffron/cell/session.py:2828`). That sums
   every attempt on the task (`saffron/ledger.py:1053-1063`). On a given
   task it counts the review, and on `SA-0148`'s rerun the first cell too.
 - **The unpackaged push.** `push_unpackaged_work` pushes over a branch
@@ -222,13 +222,13 @@ Build five things.
 
 One docstring in `saffron/ledger.py` becomes false. `tasks_by_spec` says
 `cell/session.py` mints a run and a task on each invocation
-(`:690-691`), which a set `task_id` now stops. Reword it.
+(`:691-692`), which a set `task_id` now stops. Reword it.
 
 ## Out of scope
 
 - **`saffron batch` without `--stack`.** `_batch_runner` passes no
   `task_id`, so a plain batch still mints a task for a re-queued spec.
-  `DESIGN.md:387` says such a spec "resumes that task row". Gate 0 already
+  `DESIGN.md:388` says such a spec "resumes that task row". Gate 0 already
   exempts a candidate that carries its `task_id`
   (`saffron/scheduler.py:650-656`). A stack batch now mints too. The
   departure goes to the backlog as its own item.
@@ -236,7 +236,7 @@ One docstring in `saffron/ledger.py` becomes false. `tasks_by_spec` says
   revision `SA-0164` recorded on last night's task does not carry over.
   Tonight's review revises again.
 - **A baseline per cell on one run.** Each cell records its baseline
-  under its run (`saffron/cell/session.py:1762-1763`), and
+  under its run (`saffron/cell/session.py:1775-1776`), and
   `baseline_results(run_id)` returns every row
   (`saffron/ledger.py:1248-1249`). `SA-0148`'s same-night rerun shares
   one task and run, so that run holds two baselines. `SA-0147` reads a
@@ -245,10 +245,10 @@ One docstring in `saffron/ledger.py` becomes false. `tasks_by_spec` says
   and it goes to the backlog.
 - **The run's columns on a rerun.** `SA-0148`'s rerun writes the shared
   run's `status`, `preflight` and `ended_at` again
-  (`saffron/cell/session.py:1782-1795`, `saffron/ledger.py:781-800`). The
+  (`saffron/cell/session.py:1795-1808`, `saffron/ledger.py:781-800`). The
   first cell's values do not survive. No reader tells the two cells apart.
 - **The repository row.** The cell upserts its repo by
-  `package.real_remote(repo)` (`saffron/cell/session.py:1683-1688`). The
+  `package.real_remote(repo)` (`saffron/cell/session.py:1696-1701`). The
   cap scopes its search to that repo id. `SA-0156`'s mint upserts by the
   pinned url. Where the two spellings differ, the minted task hangs from
   another repo row than the one the cap searches.
@@ -276,9 +276,9 @@ to each such double and change nothing else in it.
 
 **Criterion 1's witness** follows
 `test_a_wall_on_the_plan_turn_is_not_the_task_failing`
-(`tests/test_session.py:4161-4180`), with `_stub_the_runtime`, `_drive`,
+(`tests/test_session.py:4408-4427`), with `_stub_the_runtime`, `_drive`,
 `_spec`, `_turn`, `_block`, `_PLAN` and `_rejected`. `_drive` opens
-`tmp_path / "ledger.db"` itself (`:1307`). So the witness opens that
+`tmp_path / "ledger.db"` itself (`:1351`). So the witness opens that
 file first and closes it before the first drive.
 
 - It upserts a repo at `str(tmp_path / "repo")`, the origin `_drive`'s
@@ -303,7 +303,7 @@ asserts:
 - task 999 raises `ValueError`, and its cell created no network.
 - `record_policy` was called exactly twice, for the minted task and then
   the older task, each with the SHA-256 of `gates: {}\n`. `_drive`
-  writes that policy by default (`:1221`).
+  writes that policy by default (`:1227`).
 - two tasks and two runs. Each task's state is its last outcome's, so the
   older task is no longer `GATE_ERROR`.
 
@@ -329,7 +329,7 @@ then seeds tonight's task at `"a" * 64` on a new run, with closed
 tonight's task, with `CellSpec.spec_sha` `"f" * 64`, the revision's hash.
 Each case drives a plan turn, a wall cut and a salvage turn with no
 commits, as `test_a_second_cut_at_one_spec_sha_settles_the_spec` does
-(`tests/test_session.py:2005-2062`).
+(`tests/test_session.py:2049-2106`).
 
 | case | last night's row `spec_sha` | its attempts | outcome | line names |
 |---|---|---|---|---|
@@ -349,7 +349,7 @@ names one, and none elsewhere. These fail it, each measured:
 - a phase denylist of `REVIEWING` and `REBUTTING`, which fails `repaired`
 - the sub-select bound to `CellSpec.task_id`, which reads `NULL` on the
   plain path. `test_a_second_cut_at_one_spec_sha_settles_the_spec`
-  (`tests/test_session.py:2005`) fails it, since its third task then
+  (`tests/test_session.py:2049`) fails it, since its third task then
   ends `ORPHANED`.
 
 **Criterion 4's witness** follows `_drive` in `tests/test_task.py:24-86`,

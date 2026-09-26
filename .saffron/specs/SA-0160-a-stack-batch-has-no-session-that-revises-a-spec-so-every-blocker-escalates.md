@@ -164,7 +164,7 @@ the prompt, and a batch is never refused for want of one.
 
 **The writer's structured output keeps principle 18.** ADR 7 says "A spec
 writer returns its spec through a separate extraction turn"
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:92-93`).
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:91-92`).
 Criterion 1 already runs that turn. The host reads the spec only from the
 extraction turn's block, never from the first turn's text or from `/work`.
 
@@ -189,7 +189,7 @@ user prompt of their own.
 
 **What the tree base holds.** This spec's tree base is `SA-0176`'s head.
 Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156`,
-`SA-0150` and `SA-0176`. Every line number below was read at `ee4f8c07`, where no chain
+`SA-0150` and `SA-0176`. Every line number below was read at `642a26c3`, where no chain
 code from `SA-0142` on exists. So `cli.py` and `spec_review.py` are cited
 by symbol where the chain edits them. This spec consumes these names.
 

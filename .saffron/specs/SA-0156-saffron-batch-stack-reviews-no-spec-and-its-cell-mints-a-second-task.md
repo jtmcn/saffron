@@ -138,7 +138,7 @@ core's prompt for it. This spec builds the production `review` and
 The chain below it runs `SA-0135`, `SA-0136`, `SA-0142` to `SA-0146`,
 `SA-0153`, `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`,
 `SA-0149`, `SA-0155`, `SA-0168`, `SA-0169` and `SA-0175`. Every line
-number below was read at `2bb34a8d`, where none of their code exists. So
+number below was read at `642a26c3`, where none of their code exists. So
 `cli.py` and `ledger.py` are cited by symbol where the chain edits them.
 This spec consumes these names.
 
@@ -186,7 +186,7 @@ route by are core's, in `saffron/agents/prompts/`"
 repo's facts reach them "as input the host fills from what the repo
 declares in `.saffron/`" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:65-66`). The host reads those "at the
 `base_sha` export, never at a layer's head" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:67`). Core "demands nothing of a
-repo" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:195-196`). The design record adds that this repo's
+repo" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:198-199`). The design record adds that this repo's
 `.claude/agents/spec-reviewer.md` stays the hand path's own, and differs
 from core's by design (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:164-168`).
 So the review callable reads no prompt file from the repo. It fills

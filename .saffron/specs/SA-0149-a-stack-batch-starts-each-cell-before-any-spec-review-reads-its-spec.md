@@ -159,7 +159,7 @@ Criteria 3 and 5 consume what `SA-0148` builds: `run_stack_batch`'s
 `sleep` keyword, `CellOutcome.resets_at` and its wait. After a
 `RATE_LIMITED` task, `SA-0148` sleeps once and offers the same spec again,
 on the same predecessor, and leaves the breaker's count as it was. This spec consumes nothing else of `SA-0146`, `SA-0147` or
-`SA-0148`. Every line number below was read at `2bb34a8d`. The chain edits
+`SA-0148`. Every line number below was read at `642a26c3`. The chain edits
 `batch.py` and `tests/test_batch.py`, so read their lines there by symbol.
 
 **How a spec review runs today.** A delegate dispatches this repo's

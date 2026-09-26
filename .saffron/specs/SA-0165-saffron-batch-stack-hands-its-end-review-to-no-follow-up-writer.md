@@ -146,7 +146,7 @@ builds the command-line callable that binds its cells, and passes it from
 **What the tree base holds.** This spec's tree base is `SA-0173`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain from
 `SA-0142` puts these names there, so they are cited by symbol. Every line
-number below was read at `68892367`, where none of them exist.
+number below was read at `642a26c3`, where none of them exist.
 
 - From `SA-0143` and `SA-0144`: `run_stack_batch` in `saffron/batch.py`,
   and `saffron batch --stack`. Its `_batch` calls `run_stack_batch` where

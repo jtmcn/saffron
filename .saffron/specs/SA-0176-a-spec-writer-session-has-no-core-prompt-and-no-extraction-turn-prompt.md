@@ -115,7 +115,7 @@ A repo's facts reach them "as input the host fills from what the repo
 declares in `.saffron/`", read at the `base_sha` export
 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:65-67`).
 Core "demands nothing of a repo"
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:195-196`).
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:198-199`).
 The design record adds that this repo's `.claude/agents/spec-writer.md`
 stays the hand path's own and differs from core's by design
 (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:164-168`). So
@@ -141,7 +141,7 @@ those same three lines, so a revision and a follow-up both read them.
 
 **What the tree base holds.** This spec's tree base is `SA-0150`'s head.
 Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156` and
-`SA-0150`. Every line number below was read at `ee4f8c07`, where no chain
+`SA-0150`. Every line number below was read at `642a26c3`, where no chain
 code from `SA-0142` on exists. This spec consumes these names.
 
 - From `SA-0175`, in `saffron/spec_review.py`:

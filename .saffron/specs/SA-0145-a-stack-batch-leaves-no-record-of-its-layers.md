@@ -90,9 +90,9 @@ the driver's `stack` and `status` can read the stack from the ledger in a
 later step.
 
 **What the tree base holds.** This spec's tree base is `SA-0144`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`), and the chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`), and the chain
 `SA-0142`, `SA-0143`, `SA-0144` is what puts `run_stack_batch` and
-`Refused` there. Every line number below was read at `71ef7909`. The
+`Refused` there. Every line number below was read at `642a26c3`. The
 chain edits `batch.py`, so read its lines there by symbol.
 
 **The fact kind exists and nothing places it.** `stack_layer` is in `KINDS`
@@ -118,8 +118,8 @@ fresh ledger, with `foreign_keys=ON` (`saffron/ledger.py:215`).
 
 **Where the batch id is known.** `_build_fact` takes the fact's
 `batch_key` from `runs.batch_id` (`saffron/ledger.py:374-391`). In
-`_drive`, `runner(candidate)` (`saffron/batch.py:208`) returns before
-`ledger.attach_run_to_batch` runs (`:233`). So a fact built inside a runner wrapper,
+`_drive`, `runner(candidate)` (`saffron/batch.py:212`) returns before
+`ledger.attach_run_to_batch` runs (`:242`). So a fact built inside a runner wrapper,
 before that attach, carries no batch.
 
 ## Problem

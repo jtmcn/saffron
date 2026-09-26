@@ -167,7 +167,7 @@ core's, in `saffron/agents/prompts/`. A target repo supplies none of
 them" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-67`).
 A repo's facts reach them "as input the host fills from what the repo
 declares in `.saffron/`", read at the `base_sha` export. Core "demands
-nothing of a repo" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:195-196`).
+nothing of a repo" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:198-199`).
 "A spec review returns its tags the same way", through a separate
 extraction turn, so it keeps principle 18
 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:91-94`).
@@ -186,7 +186,7 @@ it in a cell, the mint and the wiring. Nothing in `saffron/` calls
 The chain below it runs `SA-0135`, `SA-0136`, `SA-0142` to `SA-0146`,
 `SA-0153`, `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`,
 `SA-0149`, `SA-0155`, `SA-0168` and `SA-0169`. Every line number below was
-read at `2bb34a8d`, where none of their code exists. This spec consumes
+read at `642a26c3`, where none of their code exists. This spec consumes
 these names.
 
 - From `SA-0149` and `SA-0155`: `saffron/spec_review.py` with

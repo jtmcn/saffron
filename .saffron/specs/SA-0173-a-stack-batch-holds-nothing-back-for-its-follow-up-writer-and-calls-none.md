@@ -107,7 +107,7 @@ first spec above `SA-0164`, which records the revisions, to edit that
 
 **What the tree base holds.** This spec's tree base is `SA-0161`'s head.
 The chain puts these names there, so they are cited by symbol. Every line
-number below was read at `f2a08a9f`, where none of them exist.
+number below was read at `642a26c3`, where none of them exist.
 
 - `SA-0143`: `run_stack_batch` in `saffron/batch.py`. It takes the order,
   the ledger, the budget, `until` and a runner, and the keywords

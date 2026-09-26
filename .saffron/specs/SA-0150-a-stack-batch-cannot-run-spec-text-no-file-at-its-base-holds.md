@@ -245,7 +245,7 @@ Build three things.
    since the host names that file. The slug is required, because
    `projection` and `session._spec_path` find a spec only as
    `<id>-*.md` (`saffron/projection.py:145`,
-   `saffron/cell/session.py:462`, `:467`). A revision's path is the queued spec's
+   `saffron/cell/session.py:461`, `:466`). A revision's path is the queued spec's
    own file, and nothing ties a spec file's name to its id
    (`saffron/cell/session.py:440-442`). So a revision's path takes any
    one file name in the spec directory:

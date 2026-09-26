@@ -87,23 +87,23 @@ flags that call them. `SA-0145` records the stack's layers.
 **What the tree base holds.** This spec's tree base is `SA-0143`'s head.
 That chain runs through `SA-0142` and `SA-0136`, and `SA-0135` edits
 `cli._batch` and `_batch_runner`. So `cli.py` is cited by symbol below,
-and every line number was read at `012f8aab`.
+and every line number was read at `642a26c3`.
 
 **How the two commands run today.**
 
 - The parser declares `queue` with `--repo` alone, and `batch` with
-  `--repo`, `--budget` and `--until` (`saffron/cli.py:99-116`).
+  `--repo`, `--budget` and `--until` (`saffron/cli.py:105-122`).
 - `_resolve_queue` takes `stamp_orphaned` and `pinned` and calls
-  `build_queue` (`saffron/cli.py:527-533`, `:600-619`).
+  `build_queue` (`saffron/cli.py:537-543`, `:610-629`).
 - `_queue` calls it with `stamp_orphaned=False` and prints the candidates
-  in the order returned (`saffron/cli.py:940`, `:1140-1145`).
+  in the order returned (`saffron/cli.py:950`, `:1150-1155`).
 - `_batch` checks readiness, then calls `_resolve_queue` with
-  `stamp_orphaned=True` and the pinned base (`saffron/cli.py:788-826`). It
+  `stamp_orphaned=True` and the pinned base (`saffron/cli.py:798-836`). It
   prints the plan, builds a rescan and `_batch_runner`, and calls
-  `run_batch` (`:838-881`). It maps the stop reason to an exit code
-  (`:883-906`).
+  `run_batch` (`:848-891`). It maps the stop reason to an exit code
+  (`:893-916`).
 - Before readiness passes, `_batch` holds a runner that takes one
-  candidate, `_no_candidate_should_run` (`saffron/cli.py:692-704`, `:805`).
+  candidate, `_no_candidate_should_run` (`saffron/cli.py:702-714`, `:815`).
 
 ## Problem
 
@@ -116,7 +116,7 @@ Add `--stack` to `saffron batch` and to `saffron queue`.
    runner with `_stack_runner` and calls `run_stack_batch` in place of
    `run_batch`, with no rescan. The `repo_id` it passes `_stack_runner`
    is a callable that asks `ledger.resolve_repo_id(pinned.url)` for each
-   task, the lookup `_resolve_queue` makes (`saffron/cli.py:577`). It is
+   task, the lookup `_resolve_queue` makes (`saffron/cli.py:587`). It is
    not the opening scan's value, which is `None` on a repo's first night. It keeps the readiness check, the printed
    plan and the exit codes it has today. Its runner before readiness
    passes takes a candidate and a predecessor, as `run_stack_batch`'s
@@ -126,7 +126,7 @@ Without `--stack`, both commands behave as today.
 
 `_batch`'s docstring says `run_batch` is the only caller of
 `create_batch` and `close_batch` in this module, and that the exit codes
-are `run_batch`'s stop reasons (`saffron/cli.py:757-762`). Reword both
+are `run_batch`'s stop reasons (`saffron/cli.py:767-772`). Reword both
 sentences to name `run_stack_batch` too.
 
 ## Out of scope
@@ -151,11 +151,11 @@ So they declare a witness and no mutant, and `witness` reports `skip` for
 them. Criterion 3 is `preserves` and names a test that passes now.
 
 **Three test fakes declare `_resolve_queue`'s signature**
-(`tests/test_cli.py:2657`, `:2719` and `:3442`). Add `stack=False` to each
+(`tests/test_cli.py:2657`, `:2719` and `:3444`). Add `stack=False` to each
 and change nothing else in them.
 
 **Four tests build `_batch`'s arguments by hand** and call `cli._batch`
-directly (`tests/test_cli.py:3088`, `:3760`, `:3787` and `:3836`). Each
+directly (`tests/test_cli.py:3090`, `:3762`, `:3789` and `:3838`). Each
 `argparse.Namespace` lacks `stack`, so a `_batch` that reads `args.stack`
 raises `AttributeError` in all four. Add `stack=False` to each and change
 nothing else in them.
@@ -180,7 +180,7 @@ test in all three of its cases.
     with `SY-2` and `None`. It returns `DRAINED`. The rescan test calls
     its runner inside its fake loop the same way
     (`tests/test_cli.py:2726-2732`). `main` closes the ledger when it
-    returns (`saffron/cli.py:224-225`), so a call after `main` raises
+    returns (`saffron/cli.py:230-231`), so a call after `main` raises
     `sqlite3.ProgrammingError`.
 
   `main([..., "batch", "--stack"])` returns 0. It asserts one
@@ -195,15 +195,15 @@ test in all three of its cases.
   (`tests/test_cli.py:2972-2993`), with the real `run_stack_batch`. It
   expects exit 2, the step and detail printed, and the newest `batches`
   row closed `INFRASTRUCTURE`. It reads that row with the query at
-  `tests/test_cli.py:3649-3657`.
+  `tests/test_cli.py:3651-3659`.
 - **`_resolve_queue` raises**, as
   `test_any_raise_resolving_the_queue_still_closes_the_batch_row` sets it
-  up (`tests/test_cli.py:3632-3657`), with the real `run_stack_batch`. It
+  up (`tests/test_cli.py:3634-3659`), with the real `run_stack_batch`. It
   expects exit 2, `batch: the queue could not be resolved:` and the
   raise's text, and the row closed `INFRASTRUCTURE`. It expects no
   `readiness failed`, as
   `test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line` does
-  (`tests/test_cli.py:3661-3683`).
+  (`tests/test_cli.py:3663-3685`).
 
 These fail it:
 
@@ -227,8 +227,8 @@ ledger raised `ProgrammingError`.
 
 **The raise case leans on `SA-0143`.** `_batch` names the scan's raise
 only when the same exception object leaves the loop
-(`saffron/cli.py:883-889`). `run_batch` lets it out through its
-`finally` (`saffron/batch.py:116-139`). If `run_stack_batch` wraps the
+(`saffron/cli.py:893-899`). `run_batch` lets it out through its
+`finally` (`saffron/batch.py:120-143`). If `run_stack_batch` wraps the
 exception, this case fails, and the fix is in `SA-0143`'s loop.
 
 **Criterion 2's witness** uses `_repo_with_spec`

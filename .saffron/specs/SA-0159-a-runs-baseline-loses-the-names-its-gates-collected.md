@@ -79,14 +79,14 @@ holds its pre-turn suite in memory, so it has the names. `SA-0147` runs
 after the cell is gone, and reads a layer's base from the ledger.
 
 **This spec's tree base is `SA-0157`'s head.** Only `depends_on[0]` stacks
-(`saffron/task.py:133-136`). The chain `SA-0142` to `SA-0157` edits
+(`saffron/task.py:144-147`). The chain `SA-0142` to `SA-0157` edits
 `saffron/ledger.py`, so find each name below by its name. Every line
-number was read at `3699aeb8`.
+number was read at `642a26c3`.
 
 **A run's baseline loses its names today.** Each cell makes its own run
-(`saffron/cell/session.py:1689`). It takes the pre-turn suite on the
-task's tree base (`:1745`) and records each result under the run
-(`:1762-1763`). A result carries `collected`, the node ids its gate
+(`saffron/cell/session.py:1702`). It takes the pre-turn suite on the
+task's tree base (`:1758`) and records each result under the run
+(`:1775-1776`). A result carries `collected`, the node ids its gate
 enumerated, or `None` for a gate that does not enumerate
 (`saffron/gates/contract.py:71`). `record_gate_result` writes a run's result
 with no `collected` (`saffron/ledger.py:1205-1233`). A baseline result
@@ -98,7 +98,7 @@ returns `collected=None` for every result.
 columns of `gate_results` to §4.1's listing, and `DESIGN.md` is protected.
 So the names cannot be a new column there. The table is `baseline_names`.
 `baseline_collected` already names a `probes.json` entry key
-(`saffron/probe.py:263`).
+(`saffron/probe.py:336`).
 
 **What it gains on its own.** A host reader can tell, from the ledger
 alone, which tests a run's base collected. With a task's head suite, that

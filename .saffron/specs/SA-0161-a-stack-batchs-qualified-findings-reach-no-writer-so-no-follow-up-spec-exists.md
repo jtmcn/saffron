@@ -152,7 +152,7 @@ then runs the follow-ups as generation 1.
 **What the tree base holds.** This spec's tree base is `SA-0164`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain
 `SA-0142` to `SA-0164` puts these names there, so they are cited by symbol.
-Every line number below was read at `f2a08a9f`, where none of them exist.
+Every line number below was read at `642a26c3`, where none of them exist.
 
 - `SA-0145` and `SA-0146`: `record_stack_layer`, and
   `end_review.layer_fields(ledger, task_key)`, whose `head` is the layer's
@@ -171,8 +171,8 @@ Every line number below was read at `f2a08a9f`, where none of them exist.
   (`saffron/intake.py:308-319`). Its fact's `batch_key` is the task's run's
   batch when it is written (`saffron/ledger.py:372-391`).
 - `SA-0156` and `SA-0168`: `cli._stack_mint`, whose mint creates a run and
-  a task with no batch and returns the task's id, and
-  `Ledger.task_run(task_id)`.
+  a task with no batch and returns the task's id.
+- `SA-0155`: `Ledger.task_run(task_id)`.
 - `SA-0160`: `spec_review.SpecWriterSession`, a frozen dataclass of
   `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` and
   `spec_sha`. `SPEC_WRITER_SESSION_USD` is 18.5, the budget of one

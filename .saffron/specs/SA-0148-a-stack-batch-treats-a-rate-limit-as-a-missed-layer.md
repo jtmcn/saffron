@@ -118,9 +118,9 @@ Backlog item **b-792ab2**, step 5 of its Done. It cites `DESIGN.md` §4.2.1.
 ADR 7
 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
 decides a stack batch. It leaves "what `RATE_LIMITED` does to the breaker
-in a stack batch" to the specs that build it (`:194`). Section 4 of
+in a stack batch" to the specs that build it (`:256`). Section 4 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md`, "A rate limit
-waits", is the design (`:236-239`). In a stack batch `RATE_LIMITED` does
+waits", is the design (`:268-271`). In a stack batch `RATE_LIMITED` does
 not count toward the breaker. The batch sleeps until the reset time or
 `--until`, whichever comes first, then runs the same task again on the same
 predecessor. The limit is the account's, so the next spec would meet it too.
@@ -136,14 +136,14 @@ candidate and a predecessor, and `Refused` there. `SA-0143` names
 `run_batch` takes them. `SA-0143` also gives `tests/test_batch.py`'s
 `_candidate` a `depends_on` keyword. That chain edits `saffron/batch.py`, so
 its lines are cited by symbol. Every line number below was read at
-`0b1b4b96`.
+`642a26c3`.
 
 **What a rate limit does in a batch today.** `ABORT_STATES` holds
-`RATE_LIMITED` (`saffron/batch.py:49`). `_drive` adds one to the breaker's
-count for any state in it (`:235-236`), and two in a row stop the batch
-(`:53`, `:198-199`). `_drive` starts a spec at most once, by spec id
-(`:171`, `:177`, `:204`). `DESIGN.md` §4.2.1 gives the reason
-(`DESIGN.md:413`). A provider ceiling "lets every remaining task start a
+`RATE_LIMITED` (`saffron/batch.py:53`). `_drive` adds one to the breaker's
+count for any state in it (`:244-245`), and two in a row stop the batch
+(`:57`, `:202-203`). `_drive` starts a spec at most once, by spec id
+(`:175`, `:181`, `:208`). `DESIGN.md` §4.2.1 gives the reason
+(`DESIGN.md:414`). A provider ceiling "lets every remaining task start a
 cell and run a baseline suite ... before dying of the same global
 condition". The queue re-queues it tomorrow. In a stack batch `SA-0143`
 also reads any state but `READY_FOR_REVIEW` as a miss, and refuses the
@@ -157,16 +157,16 @@ limit: … window reopens HH:MM local` line says when"
 (`.claude/skills/run-saffron-spec-loop/GOTCHAS.md:41-43`).
 
 **Where the reset time is, and where it is not.** The cell's `rate_limit`
-event carries `resets_at` (`images/agent_runner.py:112`), and
+event carries `resets_at` (`images/agent_runner.py:117`), and
 `AttemptResult.rate_limit_resets_at` holds it
-(`saffron/phases/implement.py:92`). A rejected window raises
+(`saffron/phases/implement.py:94`). A rejected window raises
 `RateLimited(resets_at)` (`saffron/cell/session.py:141-147`, `:232`).
-`run_one_cell` catches it (`:2808`). `_resets_at_fields` shapes the value
+`run_one_cell` catches it (`:2823`). `_resets_at_fields` shapes the value
 into a clean `int` or `None` (`:150-156`). The handler emits a
-`TaskOutcome` with that value (`:2814-2823`), then returns a `CellOutcome`
-(`:2827-2835`). `CellOutcome` has no field for it (`:305-344`), so the
+`TaskOutcome` with that value (`:2829-2838`), then returns a `CellOutcome`
+(`:2842-2850`). `CellOutcome` has no field for it (`:305-344`), so the
 value reaches the event log and never the batch. `run_task` returns
-`run_one_cell`'s own object (`saffron/task.py:319`, `:383`).
+`run_one_cell`'s own object (`saffron/task.py:363`, `:427`).
 
 **What the reset time can hold.** It arrives from an untrusted cell.
 Backlog item 104 measured four malformed values reaching the handler: a
@@ -178,9 +178,9 @@ So `10**20` reaches the outcome as an `int`. `events.when` renders it
 on 2026-09-23, `datetime.fromtimestamp(10**20)` raised `OverflowError`.
 
 **The clock is naive local time.** `run_batch`'s `clock` defaults to
-`datetime.now` (`saffron/batch.py:64`). `cli._batch` resolves `--until` from
-`datetime.now()` (`saffron/cli.py:784-786`) and passes no `clock`
-(`:871-880`). `_drive` compares the two (`saffron/batch.py:191`). Nothing
+`datetime.now` (`saffron/batch.py:68`). `cli._batch` resolves `--until` from
+`datetime.now()` (`saffron/cli.py:794-796`) and passes no `clock`
+(`:881-890`). `_drive` compares the two (`saffron/batch.py:195`). Nothing
 stops a caller passing an aware clock and an aware `until`.
 
 ## Problem
@@ -210,7 +210,7 @@ Build two things.
      names `now` plus the wait as `%H:%M`.
    - It offers the same spec as the next task, with the same predecessor.
      That task meets `--until`, the budget and the breaker, in that order,
-     as every task does (`saffron/batch.py:191-199`). The rate-limited run
+     as every task does (`saffron/batch.py:195-203`). The rate-limited run
      stays attached to the batch, so its spend counts.
 
 `run_batch` does none of this. A `RATE_LIMITED` task there still counts
@@ -219,7 +219,7 @@ toward the breaker, and its spec is not started again that night.
 ## Out of scope
 
 - **`run_batch` without `--stack`.** It keeps §4.2.1's breaker. Tomorrow's
-  queue re-queues the spec there (`DESIGN.md:389`).
+  queue re-queues the spec there (`DESIGN.md:390`).
 - **`DESIGN.md` §4.2.1.** It describes `run_batch`'s breaker, and that stays
   true. No section of `DESIGN.md` describes a stack batch yet, and
   `DESIGN.md` is protected.
@@ -234,7 +234,7 @@ toward the breaker, and its spec is not started again that night.
 - **A bound on the number of waits.** With no `--until`, the batch waits as
   long as the provider keeps the window closed. Each new task still meets
   the budget check. An operator's Ctrl-C closes the row `INFRASTRUCTURE`
-  (`saffron/batch.py:131-139`).
+  (`saffron/batch.py:135-143`).
 - **A longer wait for a longer limit.** A reset time more than six hours
   on gets the hour's default. A limit that lasts days costs one new task an
   hour, each rejected at its first turn.
@@ -312,7 +312,7 @@ a sleep.
 Each batch witness also replaces `time.sleep` with one that raises. The fake
 runner takes `(candidate, predecessor)` and records `(spec id, predecessor's
 spec id or None)`. Its predecessor defaults to `None`, because `run_batch`
-calls `runner(candidate)` alone (`saffron/batch.py:208`). Each call mints its own run and a task for its spec id.
+calls `runner(candidate)` alone (`saffron/batch.py:212`). Each call mints its own run and a task for its spec id.
 The task holds one closed attempt at $1 unless a row says otherwise.
 That is `_spend`'s shape with the spec id in place of `TE-0001`. It can
 advance the clock. It returns `_outcome(state=..., run_id=...,
@@ -395,7 +395,7 @@ raising `OverflowError` on `10**20` and `ValueError` on `10**12` on
 
 **Criterion 5's witness** follows
 `test_an_unreadable_reset_time_still_stops_rate_limited`
-(`tests/test_session.py:4183`), with `_stub_the_runtime`, `_drive` and
+(`tests/test_session.py:4430`), with `_stub_the_runtime`, `_drive` and
 `_rejected`. For each of the six values it asserts `outcome.resets_at`.
 `1755800000` and `10**20` stay themselves, asserted by type as `int` and by
 value. The other four give `None`. These fail it:

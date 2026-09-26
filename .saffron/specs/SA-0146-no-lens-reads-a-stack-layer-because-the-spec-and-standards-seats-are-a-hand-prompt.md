@@ -159,7 +159,7 @@ there. `SA-0145` keys each row on record keys. Its columns are `task_key`,
 `batch_key`, `position`, `spec_id`, `predecessor_key`, `predecessor_head`
 and `generation`. `predecessor_head` is the predecessor's `pushed_sha` when
 the layer was recorded. Every other line number below was read at
-`18c72f36`.
+`642a26c3`.
 
 **The two seats today.** `.claude/skills/run-saffron-spec-loop/REVIEW-PROMPT.md`
 holds them as a delegate's hand prompt: an Opening (`:29-44`), the Spec seat
@@ -294,7 +294,7 @@ spec is open (`.saffron/gates/dead.py:4-6`).
   here the Spec lens's `{criteria}` slot carries the criteria, so the
   append would send them twice.
 - **How a repo declares its standards documents.** ADR 7 leaves it open
-  (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:265`).
+  (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:268`).
   This spec builds no declaration surface, reads no `.saffron/` key for
   one, and adds no slot for one. Until a spec answers it, the Standards
   lens carries the standing instructions alone, and a glossary or

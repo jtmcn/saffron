@@ -123,21 +123,21 @@ records the stack's layers.
 
 **What the tree base holds.** This spec's tree base is `SA-0142`'s head,
 and `SA-0142` stacks on `SA-0136`. Only `depends_on[0]` stacks
-(`saffron/task.py:133-136`), so that chain is what puts both in this
+(`saffron/task.py:144-147`), so that chain is what puts both in this
 tree. `SA-0135` adds `Refused` to `saffron/task.py` and widens
 `run_task`'s return to `CellOutcome | Refused`. It adds a check in
 `run_task` that runs after `_resolve_stacked_on`. So `task.py`,
 `batch.py` and `cli.py` are cited by symbol below, and every line number
-was read at `012f8aab`.
+was read at `642a26c3`.
 
 **How a task is stacked today.** `run_task` calls `_resolve_stacked_on`
-(`saffron/task.py:286-294`). That reads `depends_on[0]`'s newest waiting
-task from the ledger (`:179-186`). It fetches that task's branch with
-`package_phase.fetch_parent_branch` (`:202`). It returns the fetched head
-and the branch, or `(None, None)` together (`:127-131`). `run_task` puts
-the head in `CellSpec.stacked_on` (`:314`). It passes the branch to
-`package` as `parent_branch` (`:340`). A spec with no `depends_on` is cut
-from `base_sha` (`:179-180`).
+(`saffron/task.py:313-321`). That reads `depends_on[0]`'s newest waiting
+task from the ledger (`:190-197`). It fetches that task's branch with
+`package_phase.fetch_parent_branch` (`:213`). It returns the fetched head
+and the branch, or `(None, None)` together (`:138-142`). `run_task` puts
+the head in `CellSpec.stacked_on` (`:341`). It passes the branch to
+`package` as `parent_branch` (`:384`). A spec with no `depends_on` is cut
+from `base_sha` (`:190-191`).
 
 **Why the fetch has to happen.** `fetch_parent_branch` fetches
 `refs/heads/<branch>` from the origin into the mirror and returns its head
@@ -145,16 +145,16 @@ from `base_sha` (`:179-180`).
 mirror's own refs and checks out the tree base
 (`saffron/cell/worktree.py:86-95`). So a head no mirror ref reaches is not
 in the cell. PACKAGE checks the predecessor out detached in a mirror
-worktree (`saffron/repos/mirror.py:119`).
+worktree (`saffron/repos/mirror.py:128`).
 
 **How a batch runs today.** `run_batch` drives `_drive`
-(`saffron/batch.py:56-139`). `_drive` takes the first candidate not yet
-started (`:177`). It checks `--until`, then the budget, then the breaker
-(`:191-199`). It calls the runner with the candidate alone (`:208`). A
-raise counts as an abort (`:209-227`). After every task it replaces the
-pending list with a rescan (`:253-255`). `cli._batch` builds the runner
+(`saffron/batch.py:60-143`). `_drive` takes the first candidate not yet
+started (`:181`). It checks `--until`, then the budget, then the breaker
+(`:195-203`). It calls the runner with the candidate alone (`:212`). A
+raise counts as an abort (`:213-231`). After every task it replaces the
+pending list with a rescan (`:262-264`). `cli._batch` builds the runner
 with `_batch_runner` and a rescan through `_resolve_queue`
-(`saffron/cli.py:841-861`).
+(`saffron/cli.py:851-871`).
 
 ## Problem
 
@@ -163,7 +163,7 @@ Build four things.
 1. **The handoff.** Add a frozen, keyword-only dataclass `Handoff` to
    `saffron/task.py`, with `stacked_on: str | None` and
    `target_branch: str | None`. The two are adjacent strings, as
-   `PinnedBase`'s are (`saffron/task.py:57-60`). Its
+   `PinnedBase`'s are (`saffron/task.py:68-71`). Its
    construction raises `ValueError` when exactly one is `None`. Add a
    keyword `handoff: Handoff | None = None` to `run_task`. Given one,
    `run_task` takes the pair from it and never calls
@@ -239,13 +239,13 @@ One way is to let `run_stack_batch` call `run_batch`. It wraps the runner
 in a closure that passes the predecessor and records each result. The
 rescan it passes returns the order minus the refused specs, and emits
 their lines. `_drive` counts a raise as an abort
-(`saffron/batch.py:209-227`). From `SA-0135` it also skips the attach and
+(`saffron/batch.py:213-231`). From `SA-0135` it also skips the attach and
 the breaker's count for a `Refused`.
 
 **Name the branch once.** `scheduler._branch` already names it
 (`saffron/scheduler.py:162-163`), and `task.py` already imports from
-`scheduler` (`saffron/task.py:46`). Import `_branch` and call it where
-`run_task` builds its `CellSpec` (`saffron/task.py:306`) and in
+`scheduler` (`saffron/task.py:57`). Import `_branch` and call it where
+`run_task` builds its `CellSpec` (`saffron/task.py:333`) and in
 `_stack_runner`. Add no new function. Three copies stay as they are,
 because their files are forbidden here: `saffron/phases/package.py:649`,
 `saffron/phases/package.py:1067` and `saffron/replay.py:59`.
@@ -279,7 +279,7 @@ records `(candidate.spec.id, predecessor.spec.id or None)` and returns a
 canned result or raises. Build candidates with `tests/test_batch.py`'s
 `_candidate` (`tests/test_batch.py:34`). It takes neither a priority nor a
 `depends_on` today, so every spec it builds has priority 3
-(`saffron/intake.py:142`). Give it `priority` and `depends_on` keywords
+(`saffron/intake.py:143`). Give it `priority` and `depends_on` keywords
 that default to what it builds now. Build each outcome that ran with
 `_outcome` and a run from `_spend` at $1. Use its `ledger` and `repo_id` fixtures and `_ready`. The
 budget is 100.
@@ -375,7 +375,7 @@ turns a raise into a `Refused` fails it.
 
 **Criterion 6's witness** follows
 `test_the_adapter_stacks_a_child_on_its_parents_branch`
-(`tests/test_cli.py:3169-3215`), with `_local_origin`,
+(`tests/test_cli.py:3171-3217`), with `_local_origin`,
 `_push_parent_branch`, `_mirror_of`, `_seed_repo` and `_seed_task`.
 
 - It pushes `saffron/SY-9000` and `saffron/SY-5555` to the origin. It then

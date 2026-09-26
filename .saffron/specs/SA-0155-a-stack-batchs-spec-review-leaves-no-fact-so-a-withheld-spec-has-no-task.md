@@ -125,11 +125,11 @@ acceptance:
 
 Backlog item **b-792ab2**, step 6 of its Done. It cites `DESIGN.md` §3.3,
 §4.1 and §4.2.1. ADR 7
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:50-57`)
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:54-61`)
 decides that spec review runs inside a stack batch, before each spec's
 first cell. Section 3 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md` is the design.
-Section 4 says each escalation is a record fact (`:238-239`).
+Section 4 says each escalation is a record fact (`:259`).
 
 A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
@@ -146,7 +146,7 @@ in a critic cell, and the `mint` that `saffron batch --stack` passes.
 **What the tree base holds.** This spec's tree base is `SA-0149`'s head.
 The chain below it runs `SA-0135` and `SA-0136`, then `SA-0142` to
 `SA-0145`, `SA-0146`, `SA-0153`, `SA-0154`, `SA-0147` and `SA-0148`.
-Every line number below was read at `ec5e6989`. The chain edits
+Every line number below was read at `642a26c3`. The chain edits
 `batch.py`, `ledger.py`, `scheduler.py` and `tests/test_batch.py`, so read
 those there by symbol. This spec consumes these names.
 
@@ -170,23 +170,23 @@ those there by symbol. This spec consumes these names.
 
 **What a review leaves today, at the tree base.** Nothing. `SA-0149`'s
 Out of scope says its review's cost reaches no ledger row. A task exists
-only once `run_one_cell` mints one (`saffron/cell/session.py:1689-1705`),
+only once `run_one_cell` mints one (`saffron/cell/session.py:1702-1718`),
 so a withheld spec has none, and neither does a spec whose review raised.
 
 **Where spend is read.** `ledger.batch_spend` sums `attempts.cost_usd_est`
 over the tasks of the runs attached to the batch
 (`saffron/ledger.py:897-912`). `_drive` attaches the outcome's run
-(`saffron/batch.py:233`). After a raise it sweeps each run minted since
-the call began (`:227`, `saffron/ledger.py:880-895`). A `Refused` gets
+(`saffron/batch.py:242`). After a raise it sweeps each run minted since
+the call began (`:231`, `saffron/ledger.py:880-895`). A `Refused` gets
 neither, from `SA-0135`.
 
 **A stack batch mints a fresh task for every spec.** The operator decided
 this on 2026-09-24, and it replaces the resume this spec first built.
-§4.2.1 says a re-queued spec "resumes that task row" (`DESIGN.md:387`).
+§4.2.1 says a re-queued spec "resumes that task row" (`DESIGN.md:388`).
 `build_queue` sets `Candidate.task_id` to that row
 (`saffron/scheduler.py:792-794`). A plain `saffron batch` already mints a
 new task for it, since `_batch_runner` passes the cell no task
-(`saffron/cli.py:475-490`). Gate 0 exempts such a candidate
+(`saffron/cli.py:485-500`). Gate 0 exempts such a candidate
 (`saffron/scheduler.py:650-656`). In stack mode the batch mints too,
 whatever `task_id` the candidate carries, and leaves the older task's
 state as it is. So every run, attempt and layer belongs to tonight's
@@ -202,14 +202,14 @@ its facts again (`:406-433`). `record_findings` numbers each fact on its
 own task and carries the number in the payload (`:1143-1169`).
 
 **Why the new state is done with the spec.** §4.2.1 queues a spec unless
-its task at that `spec_sha` is done with it (`DESIGN.md:389`). It
+its task at that `spec_sha` is done with it (`DESIGN.md:390`). It
 re-queues "when nothing was learned about the spec". A blocker is
 something learned. Running the same text again would meet the same
 review. So `SPEC_WITHHELD`
 joins `DONE_STATES` (`saffron/scheduler.py:68-81`), and an edit, a new
 `spec_sha`, queues the spec again. A review that errored learned nothing.
 `GATE_ERROR` already names "a verdict session never started"
-(`DESIGN.md:273-276`), counts toward the breaker (`saffron/batch.py:49`),
+(`DESIGN.md:274-277`), counts toward the breaker (`saffron/batch.py:53`),
 and re-queues (`saffron/scheduler.py:108-116`).
 
 **The vocabulary lands first, by hand.** `SPEC_WITHHELD` and
@@ -278,10 +278,10 @@ it.
 - **The production callables and the cell.** `SA-0156` builds the
   `review` and the `mint`. `SA-0168` runs the cell on the minted task. No caller in `saffron/` passes `review`
   or `mint` until then. `run_one_cell` still mints its own task
-  (`saffron/cell/session.py:1689`), and `run_task` reads no
-  `candidate.task_id` (`saffron/task.py:218-383`).
+  (`saffron/cell/session.py:1702`), and `run_task` reads no
+  `candidate.task_id` (`saffron/task.py:241-427`).
 - **The morning page.** A withheld spec never reaches `run_task`, so it
-  appends no queue line (`saffron/task.py:364`). `_STATE_RANK` and a
+  appends no queue line (`saffron/task.py:408`). `_STATE_RANK` and a
   stack view with escalations are `SA-0152`'s.
 - **The minted run's status.** It stays `RUNNING` (`saffron/ledger.py:775`),
   as every run a fold rebuilds does (`:470`). Nothing reads the column.
@@ -322,7 +322,7 @@ abort and `SA-0143` counts the miss. Hand the runner
 `dataclasses.replace(candidate, task_id=...)`.
 
 **Why not a sweep in `_drive`.** `_drive` sweeps runs minted since a call
-began only after a raise (`saffron/batch.py:227`). A sweep after every
+began only after a raise (`saffron/batch.py:231`). A sweep after every
 call would also run in `run_batch`, and would attach a run another
 process minted meanwhile, such as an attended `saffron cell`. So the
 stack path attaches only the task it reviewed.

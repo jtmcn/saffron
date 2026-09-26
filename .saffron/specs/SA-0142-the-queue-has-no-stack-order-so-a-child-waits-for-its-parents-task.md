@@ -187,7 +187,7 @@ taken, because neither spec is ever ready.
 
 **Why this spec depends on `SA-0136`.** `SA-0143` edits `task.py`,
 `batch.py` and `cli.py` after `SA-0136`'s chain, and only `depends_on[0]`
-stacks (`saffron/task.py:133-136`). So this spec sits between the two, and
+stacks (`saffron/task.py:144-147`). So this spec sits between the two, and
 `SA-0143`'s tree holds its code.
 
 **Every new criterion is new code.** Stack mode has no text at base a
