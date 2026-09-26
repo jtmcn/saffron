@@ -277,7 +277,7 @@ that spec's pull request.
 advisory failure present at base. The second is a refusal that names ports
 and not processes. The last two are the loop's tools reading stale state.
 
-**Placed 2026-09-26**, from the spec loop's run 18: **b-43061c**, then
+**Placed 2026-09-26**, from the spec loop's run 18: ~~**b-43061c**~~, then
 **b-fab381**. The first is text in a string literal that no `prose` rule reads.
 The second is `snapshot` stranding a chain behind a merged parent.
 
