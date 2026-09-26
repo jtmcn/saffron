@@ -53,13 +53,23 @@ def test_an_added_long_sentence_fails(tmp_path):
     _stage(repo, "README.md", "Short.\n\n" + LONG_A + "\n")
     done = _hook(repo)
     assert done.returncode == 1
-    assert "README.md: sentence-length rose from 0 to 1" in done.stdout
+    assert "README.md: 1 new sentence-length hit" in done.stdout
     assert "README.md:3:" in done.stdout
 
 
-def test_a_rewritten_hit_passes(tmp_path):
+def test_a_rewritten_hit_is_new(tmp_path):
+    """A hit is its sentence, so one long sentence rewritten into another is new
+    and cannot cancel against the one it replaced (backlog item b-044ae7)."""
     repo = _repo(tmp_path, {"README.md": LONG_A + "\n"})
     _stage(repo, "README.md", LONG_B + "\n")
+    done = _hook(repo)
+    assert done.returncode == 1
+    assert "README.md: 1 new sentence-length hit" in done.stdout
+
+
+def test_a_reflowed_hit_is_not_new(tmp_path):
+    repo = _repo(tmp_path, {"README.md": LONG_A + "\n"})
+    _stage(repo, "README.md", LONG_A.replace(" ", "\n", 3) + "\n")
     assert _hook(repo).returncode == 0
 
 
@@ -68,7 +78,7 @@ def test_a_new_file_compares_against_nothing(tmp_path):
     _stage(repo, "docs/backlog/1-new.md", LONG_A + "\n")
     done = _hook(repo)
     assert done.returncode == 1
-    assert "docs/backlog/1-new.md: sentence-length rose from 0 to 1" in done.stdout
+    assert "docs/backlog/1-new.md: 1 new sentence-length hit" in done.stdout
 
 
 def test_a_rename_keeps_its_count(tmp_path):
@@ -88,7 +98,7 @@ def test_a_commit_of_python_alone_is_limited(tmp_path):
     _stage(repo, "saffron/m.py", "# one\n# two\n# three\nx = 1\n")
     done = _hook(repo)
     assert done.returncode == 1
-    assert "saffron/m.py: comment-block rose from 0 to 1" in done.stdout
+    assert "saffron/m.py: 1 new comment-block hit" in done.stdout
 
 
 def test_prek_runs_the_hook_on_markdown_and_python():
@@ -140,8 +150,12 @@ def test_a_clean_edit_and_a_file_elsewhere_say_nothing(tmp_path):
 
 
 def test_an_edit_beside_an_untouched_hit_says_nothing(tmp_path):
-    repo = _repo(tmp_path, {"README.md": "The agent works well — it helps a lot.\n"})
-    (repo / "README.md").write_text("The agent works nicely — it helps a lot.\n")
+    repo = _repo(
+        tmp_path, {"README.md": "The agent works well — it helps a lot. It is fast.\n"}
+    )
+    (repo / "README.md").write_text(
+        "The agent works well — it helps a lot. It is quick.\n"
+    )
     done = _edited(repo, repo / "README.md")
     assert done.returncode == 0
     assert done.stderr == ""
@@ -215,9 +229,9 @@ def test_file_mode_reads_a_tracked_file_against_head(tmp_path):
     assert "README.md:3: sentence-length" in done.stdout
 
 
-def test_file_mode_says_nothing_rose_when_the_count_holds(tmp_path):
+def test_file_mode_says_nothing_when_a_hit_only_moves(tmp_path):
     repo = _repo(tmp_path, {"README.md": LONG_A + "\n"})
-    (repo / "README.md").write_text(LONG_B + "\n")
+    (repo / "README.md").write_text("Intro.\n\n" + LONG_A + "\n")
     done = _hook(repo, "--file", "README.md")
     assert done.returncode == 0
     assert "0 new hits against HEAD" in done.stdout

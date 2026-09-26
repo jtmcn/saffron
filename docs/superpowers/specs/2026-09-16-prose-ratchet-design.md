@@ -68,7 +68,7 @@ Three measurements shaped the rules:
 | Question | Decision |
 |---|---|
 | Install or rebuild | Rebuild. Reuse SimpleEnglish's code-stripping and sentence splitting, credited. |
-| Existing prose | Counts cannot rise, per file and per rule. Nothing is rewritten up front. |
+| Existing prose | No file gains a hit its base lacks. Nothing is rewritten up front. |
 | Rules | Sentence length, hedges, em-dashes and semicolons, a Saffron filler list, perfect tense, trailing condition in spec instructions, contractions. |
 | Sentence limit | 25 words everywhere. Separating instructions from description needs a classifier. |
 | Scope | Living documents and queued specs. Records stay as written. |
@@ -103,13 +103,18 @@ two-line `sh` wrapper, like `structure`.
 | `prose` | blocking | the style rules |
 | `terms` | advisory | `avoided-term` |
 
-A `prose` failure carries one fixed `message` per rule code. It says what the
-rule counts and what to change, and it warns that the line shown can be an
-older instance. No excerpt is recorded. The message cannot carry one without
-leaving identity, and `repair_prompt` never shows `summary`. `identity` is then
-`(gate, file, code, message)`. Baseline
-subtraction counts identities (§5.4), so it removes one pre-existing failure
-per file and rule. That is the per-file limit, with no change to `saffron/`.
+A `prose` failure's `message` names the rule, what to change, an excerpt of
+the hit and a hash of its whole text. A word rule's text is the sentence that
+holds it, whitespace folded, so a reflow keeps it. A length rule's text is the
+block's name or first line and its line count, so a block that grows is new.
+`identity` is `(gate, file, code, message)`, and baseline subtraction cancels
+equal identities (§5.4). A hit the base holds cancels wherever it moved. A new
+hit fails whatever the diff removed elsewhere in the file. There is still no
+change to `saffron/`.
+
+Amended 2026-09-26 (item b-044ae7). The first design fixed the message per
+rule, so identity was the file and the rule. A cell then grew a long docstring,
+or traded a new em-dash for an old one, and passed.
 
 `tool` is the output of running `prose.py --version`, which prints a hash of
 the rule set. A changed rule reads as a different tool. The
@@ -228,7 +233,7 @@ A test is trusted after it fails against the unfixed code or a mutant.
   hit rewritten into another hit passes. A new file with one hit fails. A
   rename keeps its count.
 - **The gates:** both emit a valid `GateResult` with an executed `tool`.
-  Baseline subtraction over `prose` failures cancels per file and rule.
+  Baseline subtraction cancels a moved hit and keeps a rewritten one.
 - **`CONTEXT.md` agreement:** removing an entry's quote from a fixture copy of
   `CONTEXT.md` fails the test.
 - **Rendered spans:** a long principle added to an appendix counts once.

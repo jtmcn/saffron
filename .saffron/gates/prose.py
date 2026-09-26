@@ -102,30 +102,25 @@ WORD_RULES = (
     ("contraction", CONTRACTION),
 )
 
-_OLDER = "The line shown can be an older one."
-# Fixed per code, so identity stays per file and rule. A REPAIR turn reads the text.
+# What to change, per code. `message` appends the hit's own text, so a failure's
+# identity is the sentence or block it names (backlog item b-044ae7).
 MESSAGES = {
-    "sentence-length": f"this file gained a sentence over {SENTENCE_LIMIT} words;"
-    f" split one. {_OLDER}",
-    "hedge": "this file gained a should/may/might; say must, or state the fact."
-    f" {_OLDER}",
-    "em-dash": "this file gained an em-dash or spaced hyphen; use two sentences"
-    f" or name the relation. {_OLDER}",
-    "semicolon": f"this file gained a semicolon in prose; use two sentences. {_OLDER}",
-    "filler": f"this file gained a filler word ({', '.join(FILLER[:8])}, ...);"
-    f" delete it. {_OLDER}",
-    "perfect-tense": "this file gained a has/have/had been or has/have + -ed;"
-    f" use the simple past. {_OLDER}",
-    "trailing-condition": "a spec instruction gained a mid-sentence if/when;"
-    f" put the condition first. {_OLDER}",
-    "contraction": f"this file gained a contraction; write the words out. {_OLDER}",
-    "comment-block": f"this file gained a comment over {COMMENT_LIMIT} lines; keep the"
-    f" why, and move the rationale to the commit or the PR body. {_OLDER}",
-    "docstring-length": "this file gained a function, class or test docstring over"
+    "sentence-length": f"a sentence over {SENTENCE_LIMIT} words; split it:",
+    "hedge": "a should/may/might; say must, or state the fact:",
+    "em-dash": "an em-dash or spaced hyphen; use two sentences or name the relation:",
+    "semicolon": "a semicolon in prose; use two sentences:",
+    "filler": f"a filler word ({', '.join(FILLER[:8])}, ...); delete it:",
+    "perfect-tense": "a has/have/had been or has/have + -ed; use the simple past:",
+    "trailing-condition": "a mid-sentence if/when in a spec instruction;"
+    " put the condition first:",
+    "contraction": "a contraction; write the words out:",
+    "comment-block": f"a comment over {COMMENT_LIMIT} lines; keep the why, and move"
+    " the rationale to the commit or the PR body:",
+    "docstring-length": "a function, class or test docstring over"
     f" {DOCSTRING_LIMIT} lines; keep what a caller needs, and move the rest to the"
-    f" commit or the PR body. {_OLDER}",
+    " commit or the PR body:",
     "rendered-span": "a span ontology.render writes could not be located;"
-    " fix the definition or the principle index at its source.",
+    " fix the definition or the principle index at its source:",
 }
 
 _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
@@ -161,6 +156,17 @@ class Hit:
     line: int
     code: str
     excerpt: str
+    # What the hit is, whatever line it sits on: a whole sentence, or a block's
+    # name and length. `excerpt` when empty.
+    key: str = ""
+
+
+def message(hit: Hit) -> str:
+    """A `prose` failure's message, and so its identity: the rule, the excerpt
+    and a hash of `key`. Two sentences sharing their first 80 characters stay
+    two, and a sentence that grows past its excerpt is new."""
+    digest = hashlib.sha256((hit.key or hit.excerpt).encode()).hexdigest()[:8]
+    return f"{MESSAGES[hit.code]} {hit.excerpt} #{digest}"
 
 
 @dataclass(frozen=True)
@@ -239,7 +245,8 @@ def _comment_blocks(text: str) -> list[Hit]:
     for number, comment in [*lines, (-1, "")]:
         if run and number != run[-1][0] + 1:
             if len(run) > COMMENT_LIMIT:
-                found.append(Hit(run[0][0], "comment-block", _excerpt(run[0][1])))
+                excerpt = _excerpt(f"{len(run)} lines: {run[0][1]}")
+                found.append(Hit(run[0][0], "comment-block", excerpt))
             run = []
         run.append((number, comment))
     return found
@@ -254,8 +261,10 @@ def _long_docstrings(text: str) -> list[Hit]:
         doc = ast.get_docstring(node, clean=False)
         if doc is not None and doc.count("\n") + 1 > DOCSTRING_LIMIT:
             first = doc.strip().splitlines()[0] if doc.strip() else ""
-            excerpt = _excerpt(f"{node.name}: {first}")
-            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt))
+            size = doc.count("\n") + 1
+            excerpt = _excerpt(f"{node.name}, {size} lines: {first}")
+            key = f"{node.name}, {size} lines"
+            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt, key))
     return found
 
 
@@ -284,6 +293,10 @@ def _python_prose(text: str) -> str | None:
     for token in comments:
         start = starts[token.start[0] - 1] + token.start[1]
         keep(start, start + len(token.string), " " + token.string[1:])
+        # A comment after code is a sentence of its own, not the next line's
+        # start: a list marker in the blanked code ends the one before it.
+        if token.start[1] >= 2 and token.line[: token.start[1]].strip():
+            kept[start - 2] = "-"
     for node in documented:
         first = node.body[0]
         start = offset(first.lineno, first.col_offset)
@@ -418,16 +431,31 @@ def _filler_pattern(
     return re.compile(rf"\b(?:{alternation})\b", re.I)
 
 
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
 def _style(text: _Text, path: str, root: Path) -> list[Hit]:
     found = []
     spec = path.startswith(".saffron/specs/")
-    for sentence in _sentences(text.body):
+    sentences = list(_sentences(text.body))
+    starts = [sentence.start for sentence in sentences]
+
+    def around(offset: int) -> str:
+        # The sentence holding `offset`, so a reflow keeps a hit's identity.
+        i = bisect.bisect_right(starts, offset) - 1
+        if i >= 0 and offset < sentences[i].start + len(sentences[i].text):
+            return sentences[i].text
+        return text.line_text(offset)
+
+    for sentence in sentences:
         if len(sentence.text.split()) > SENTENCE_LIMIT:
             found.append(
                 Hit(
                     text.line(sentence.start),
                     "sentence-length",
                     _excerpt(sentence.text),
+                    _flat(sentence.text),
                 )
             )
         if (
@@ -441,6 +469,7 @@ def _style(text: _Text, path: str, root: Path) -> list[Hit]:
                     text.line(sentence.start),
                     "trailing-condition",
                     _excerpt(sentence.text),
+                    _flat(sentence.text),
                 )
             )
     # A quoted word is a mention, and CONTEXT.md quotes the words it rules on.
@@ -452,7 +481,8 @@ def _style(text: _Text, path: str, root: Path) -> list[Hit]:
     for code, pattern in rules:
         for match in pattern.finditer(unquoted):
             line = text.line(match.start())
-            found.append(Hit(line, code, _excerpt(text.line_text(match.start()))))
+            held = around(match.start())
+            found.append(Hit(line, code, _excerpt(held), _flat(held)))
     return found
 
 
@@ -567,13 +597,13 @@ def main(argv: list[str]) -> int:
         for path in paths:
             text = (root / path).read_text(encoding="utf-8", errors="replace")
             for hit in check(text, path, gate, root=root):
-                message = MESSAGES[hit.code] if gate == "prose" else hit.excerpt
+                text_of = message(hit) if gate == "prose" else hit.excerpt
                 failures.append(
                     {
                         "file": path,
                         "line": hit.line,
                         "code": hit.code,
-                        "message": message,
+                        "message": text_of,
                     }
                 )
                 counts[hit.code] += 1
