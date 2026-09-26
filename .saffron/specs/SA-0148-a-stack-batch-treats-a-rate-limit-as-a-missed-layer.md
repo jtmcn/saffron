@@ -136,7 +136,7 @@ candidate and a predecessor, and `Refused` there. `SA-0143` names
 `run_batch` takes them. `SA-0143` also gives `tests/test_batch.py`'s
 `_candidate` a `depends_on` keyword. That chain edits `saffron/batch.py`, so
 its lines are cited by symbol. Every line number below was read at
-`642a26c3`.
+`71140772`.
 
 **What a rate limit does in a batch today.** `ABORT_STATES` holds
 `RATE_LIMITED` (`saffron/batch.py:53`). `_drive` adds one to the breaker's
@@ -159,7 +159,7 @@ limit: … window reopens HH:MM local` line says when"
 **Where the reset time is, and where it is not.** The cell's `rate_limit`
 event carries `resets_at` (`images/agent_runner.py:117`), and
 `AttemptResult.rate_limit_resets_at` holds it
-(`saffron/phases/implement.py:94`). A rejected window raises
+(`saffron/phases/implement.py:95`). A rejected window raises
 `RateLimited(resets_at)` (`saffron/cell/session.py:141-147`, `:232`).
 `run_one_cell` catches it (`:2823`). `_resets_at_fields` shapes the value
 into a clean `int` or `None` (`:150-156`). The handler emits a
@@ -395,7 +395,7 @@ raising `OverflowError` on `10**20` and `ValueError` on `10**12` on
 
 **Criterion 5's witness** follows
 `test_an_unreadable_reset_time_still_stops_rate_limited`
-(`tests/test_session.py:4430`), with `_stub_the_runtime`, `_drive` and
+(`tests/test_session.py:4433`), with `_stub_the_runtime`, `_drive` and
 `_rejected`. For each of the six values it asserts `outcome.resets_at`.
 `1755800000` and `10**20` stay themselves, asserted by type as `int` and by
 value. The other four give `None`. These fail it:

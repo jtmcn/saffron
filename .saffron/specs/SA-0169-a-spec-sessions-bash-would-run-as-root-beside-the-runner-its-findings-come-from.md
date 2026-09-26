@@ -132,7 +132,7 @@ never sees `CLAUDE_CODE_OAUTH_TOKEN`. This spec builds that, and
 `SA-0175` and `SA-0156` build on it.
 
 **What the tree base holds.** This spec's tree base is `SA-0168`'s head.
-Every line number below was read at `642a26c3`, where no chain code
+Every line number below was read at `71140772`, where no chain code
 exists. This spec consumes one chain name. `SA-0154` adds
 `end_review.layer_cell(fields, *, repo, mirror, gates_dir, thread_env)`, a
 context manager. It removes a leftover container, calls `session.cell_up`
@@ -151,11 +151,11 @@ that runs a test there runs that code.
 **Who runs as what today.** No image sets a `USER`, so every cell process
 runs as root (`DESIGN.md:604`). `implement.run_agent` execs
 `/opt/saffron/python /opt/saffron/agent_runner.py` with no user
-(`saffron/phases/implement.py:286-293`). The runner starts the bundled
+(`saffron/phases/implement.py:290-297`). The runner starts the bundled
 Claude Code CLI through the SDK, and the CLI runs the Bash tool's commands.
 So the model's Bash, the CLI and the runner are all root. The runner writes
 Saffron's events on stdout, and the host reads the session's text from that
-stream (`saffron/phases/implement.py:257-284`). Every cell starts with
+stream (`saffron/phases/implement.py:261-288`). Every cell starts with
 `--cap-drop ALL` (`saffron/cell/runtime.py:227`), so root there cannot
 change its uid.
 

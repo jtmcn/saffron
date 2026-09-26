@@ -115,7 +115,7 @@ follow it in the chain.
 **What the tree base holds.** This spec's tree base is `SA-0154`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:144-147`). The chain
 `SA-0142` to `SA-0154` puts these there, so they are cited by symbol. Every
-line number below was read at `642a26c3`.
+line number below was read at `71140772`.
 
 - `SA-0144` adds `--stack` to `saffron batch`. Given it, `_batch` builds
   its runner with `_stack_runner` and calls `run_stack_batch` in place of
@@ -148,7 +148,7 @@ Saffron's root (`saffron/cell/session.py:1811`). It wraps the agent in
 `stop_on_rejected` and binds `timeout_s` and `spec_id`
 (`saffron/cell/session.py:1842-1852`). `review.run_lens` calls the agent with no
 `spec_id` (`saffron/phases/review.py:236`), and `run_agent` requires one
-(`saffron/phases/implement.py:198`). `stop_on_rejected` raises
+(`saffron/phases/implement.py:202`). `stop_on_rejected` raises
 `RateLimited` on a rejected window (`saffron/cell/session.py:159-181`,
 `:230-232`). `_default_emit` prints each event's `describe` line
 (`:85-87`).

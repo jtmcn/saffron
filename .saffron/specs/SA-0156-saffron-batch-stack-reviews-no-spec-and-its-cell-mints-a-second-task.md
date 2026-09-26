@@ -138,7 +138,7 @@ core's prompt for it. This spec builds the production `review` and
 The chain below it runs `SA-0135`, `SA-0136`, `SA-0142` to `SA-0146`,
 `SA-0153`, `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`,
 `SA-0149`, `SA-0155`, `SA-0168`, `SA-0169` and `SA-0175`. Every line
-number below was read at `642a26c3`, where none of their code exists. So
+number below was read at `71140772`, where none of their code exists. So
 `cli.py` and `ledger.py` are cited by symbol where the chain edits them.
 This spec consumes these names.
 
@@ -174,7 +174,7 @@ This spec consumes these names.
 
 **How a turn is bound today.** `implement.run_agent` takes `spec_id` with
 no default, and `timeout_s` with a default of 3600
-(`saffron/phases/implement.py:192-205`). `session.TURN_TIMEOUT_S` is 900
+(`saffron/phases/implement.py:196-209`). `session.TURN_TIMEOUT_S` is 900
 seconds (`saffron/cell/session.py:63`). A spec review needs longer, so
 `SA-0175` gives it its own bound.
 
@@ -312,7 +312,7 @@ checkout` and `checkout/**`. The witness replaces these through
   and `prompt`. It calls its `agent` once, as
   `agent(container, prompt="x", options={})`, with both as keywords,
   since `run_agent` takes them keyword-only
-  (`saffron/phases/implement.py:192-197`). It returns a distinct sentinel
+  (`saffron/phases/implement.py:196-201`). It returns a distinct sentinel
   per call.
 
 Each candidate's path is `tmp_path / "export" / ".saffron" / "specs" /

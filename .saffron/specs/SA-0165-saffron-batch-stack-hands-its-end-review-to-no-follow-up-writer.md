@@ -146,7 +146,7 @@ builds the command-line callable that binds its cells, and passes it from
 **What the tree base holds.** This spec's tree base is `SA-0173`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain from
 `SA-0142` puts these names there, so they are cited by symbol. Every line
-number below was read at `642a26c3`, where none of them exist.
+number below was read at `71140772`, where none of them exist.
 
 - From `SA-0143` and `SA-0144`: `run_stack_batch` in `saffron/batch.py`,
   and `saffron batch --stack`. Its `_batch` calls `run_stack_batch` where
@@ -216,7 +216,7 @@ pydantic refusal carries its message over several lines, measured.
 `resolve_repo_id` returns `None` for a url with no row
 (`saffron/ledger.py:673-681`). `run_agent` takes `spec_id` and
 `timeout_s` as keywords, and `timeout_s` defaults to 3600
-(`saffron/phases/implement.py:192-201`). `critic_cell` and the probe call
+(`saffron/phases/implement.py:196-205`). `critic_cell` and the probe call
 take `note` as `(step, ok, detail)` (`saffron/cell/session.py:1130`,
 `saffron/cell/session.py:1229-1234`, `saffron/cell/session.py:1304`).
 `TURN_TIMEOUT_S` is 900 s, per turn (`saffron/cell/session.py:58-63`).

@@ -172,3 +172,23 @@ the word PAPRIKA. That proves the file was read.
 | fresh, `Read`/`Glob`/`Grep` | `_Verdicts` | `success`, valid, `reason` starts PAPRIKA, $0.04 |
 
 The schema and the file prompt both hold on the same turn. Total $0.15.
+
+## Addendum, 2026-09-25: a whole spec as one string
+
+Before `SA-0160` and `SA-0176` moved the spec writer onto `output_format`,
+the delegate measured the one case the runs above left open: a large string
+value. The SDK pin was 0.2.142 on the host, with the option shape above and
+`Bash` among the tools but not allowed. The work turn read a real spec and
+was told to prefix its `title:` value with `SPIKE `. The resumed turn carried
+`output_format` for an object with one string field, `spec`, and was asked
+for the whole revised file, frontmatter first.
+
+| Spec | Chars | Returned | Extract turn | Extract cost | Total cost |
+|---|---|---|---|---|---|
+| `SA-0167` | 40,153 | identical to the expected text | 130 s | $0.40 | $0.57 |
+| `SA-0162` | 45,945 | identical to the expected text | 150 s | $0.41 | $0.55 |
+
+Both values matched the expected text exactly, with no strip needed. The
+extraction turn is slow because it writes the whole file as output tokens.
+One run each, so a rate of failure is not measured. Not measured in a cell,
+and not with a turn ceiling low enough to cut the tool call.

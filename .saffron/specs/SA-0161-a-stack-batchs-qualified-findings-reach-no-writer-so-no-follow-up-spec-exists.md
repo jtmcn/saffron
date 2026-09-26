@@ -177,8 +177,8 @@ Every line number below was read at `642a26c3`, where none of them exist.
   `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` and
   `spec_sha`. `SPEC_WRITER_SESSION_USD` is 18.5, the budget of one
   session's writer and extraction turns. Its one re-ask can add 1.5
-  more. `run_spec_writer` returns the spec text from its
-  extraction turn.
+  more. `run_spec_writer` returns the spec text from its extraction
+  turn's `structured_output`, never from a turn's text.
 - `SA-0164`: `spec_review.WRITING_PHASE`, `SPEC_WRITING`, the phase of
   every writer session's attempt. It charges each revision session as an
   attempt on its spec's task.

@@ -57,6 +57,7 @@ max_turns: 140
 pending_symbols:
   - saffron/spec_review.py::spec_writer_system_prompt
   - saffron/spec_review.py::SPEC_WRITER_EXTRACT_PROMPT
+  - saffron/spec_review.py::SPEC_WRITER_FORMAT
 acceptance:
   - claim: >-
       `spec_review.spec_writer_system_prompt(policy, *, prompts_dir)` reads
@@ -80,18 +81,31 @@ acceptance:
       whole line. It holds the line "Measure any list of wrong builds you
       add with a throwaway script." as a whole line too.
       The raw `spec-writer-extract.md` holds the Problem's two lines, "Put
-      the whole spec file in the block, frontmatter first." and "Do not
-      wrap the file in a code fence.", each as a whole line. Its last
-      non-blank line is `{extraction}`. The raw `spec-writer.md` holds
-      `{gates}`, `{protected}`, `{elevate_on}` and `{ceilings}` once each,
-      and no other brace pair.
+      the whole spec file in the `spec` field, frontmatter first." and "Do
+      not wrap the file in a code fence.", each as a whole line. Its last
+      three non-blank lines are "Answer now in the required structured
+      format.", "Do not change files." and "Do not run commands.", in that
+      order. It holds no brace pair, so no `{extraction}`. The raw
+      `spec-writer.md` holds `{gates}`, `{protected}`, `{elevate_on}` and
+      `{ceilings}` once each, and no other brace pair.
       `SPEC_WRITER_EXTRACT_PROMPT` is
-      `context.turn_prompt("spec-writer-extract")`, and holds
-      `artifacts.EXTRACTION_PROMPT`. Neither
-      raw file holds any of the fifteen strings `SA-0175`'s criterion 4
-      lists. The witness checks each of those fifteen in each file,
-      case-insensitively.
+      `context.turn_prompt("spec-writer-extract")`, and does not hold
+      `artifacts.EXTRACTION_PROMPT`. Neither raw file holds any of the
+      seventeen strings the notes list. The witness checks each of those
+      seventeen in each file, case-insensitively.
     witness: tests/test_spec_review.py::test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool
+  - claim: >-
+      `spec_review._SpecWriterReply` is a Pydantic model with one field,
+      `spec`, a `str` with no default, and it forbids other keys.
+      `SPEC_WRITER_FORMAT` equals `{"type": "json_schema", "schema":
+      _SpecWriterReply.model_json_schema()}`. That schema's top-level
+      `type` is `object`, its `required` is `["spec"]`, its `properties`
+      name `spec` alone with `type` `string`, and its
+      `additionalProperties` is `False`. `model_validate` returns a
+      multi-line `spec` with its whitespace unchanged. It refuses `{}`,
+      `{"spec": 3}`, `{"spec": None}`, `{"spec": "x", "extra": 1}` and a
+      JSON string of a valid value.
+    witness: tests/test_spec_review.py::test_the_spec_writer_format_is_the_schema_of_one_string_field
 ---
 
 ## Context
@@ -130,8 +144,9 @@ ceiling. So this spec builds the prompts and the fill, as `SA-0175` does
 for the review. `SA-0160` builds the session that runs them, and the
 revision callable. `SA-0165` fills the same prompt for a follow-up.
 Nothing in `saffron/` calls `spec_writer_system_prompt` or reads
-`SPEC_WRITER_EXTRACT_PROMPT` until `SA-0160` lands, hence
-`pending_symbols`.
+`SPEC_WRITER_EXTRACT_PROMPT` or `SPEC_WRITER_FORMAT` until `SA-0160`
+lands, hence `pending_symbols`. `SPEC_WRITER_FORMAT` reads
+`_SpecWriterReply` at import, so the model needs no entry.
 
 **The session holds Bash.** A spec writer session runs commands in its
 critic cell, as a hand draft does. `SA-0169` runs that Bash as an
@@ -141,31 +156,51 @@ those same three lines, so a revision and a follow-up both read them.
 
 **What the tree base holds.** This spec's tree base is `SA-0150`'s head.
 Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156` and
-`SA-0150`. Every line number below was read at `642a26c3`, where no chain
+`SA-0150`. Every line number below was read at `71140772`, where no chain
 code from `SA-0142` on exists. This spec consumes these names.
 
 - From `SA-0175`, in `saffron/spec_review.py`:
   `spec_review_system_prompt(policy, *, prompts_dir)` fills `{gates}`,
   `{protected}`, `{elevate_on}`, `{ceilings}` and `{tags}` in core's
   `spec-review.md`, read when called. `SPEC_REVIEW_PROMPT` is that file's
-  name. Its criterion 4 names fifteen strings neither of its prompt files
-  holds.
+  name. Its criterion 4 names strings neither of its prompt files holds.
+  This spec's notes list its own seventeen, so neither spec reads the
+  other's list.
 - From `SA-0156`: the three account lines its Problem quotes, verbatim.
 
 **How a turn prompt is loaded today.** `context.turn_prompt(name)` reads
-`prompts/turns/<name>.md` and fills its `{extraction}` slot with the shared
-rules (`saffron/agents/context.py:156-171`). `rebut.EXTRACT_PROMPT` is
-loaded that way at import (`saffron/phases/rebut.py:38`).
+`prompts/turns/<name>.md` and fills any `{extraction}` slot with the
+shared rules (`saffron/agents/context.py:156-171`). A file with no slot
+loads unchanged. `rebut.EXTRACT_PROMPT` is loaded that way at import
+(`saffron/phases/rebut.py:36`), and its file holds no slot.
 `tests/test_context.py` holds every turn file to a constant that loads it
 (`tests/test_context.py:413-429`), and lists the turns that carry the
-shared rules (`tests/test_context.py:446-450`). `context.PROMPTS_DIR` is
-the one locator for the prompt tree (`saffron/agents/context.py:21`).
-`size._CEILINGS` holds the ceiling per spec type
-(`saffron/gates/core/size.py:26`).
+shared rules (`tests/test_context.py:450-452`). `rebut-extract` is not
+among them. `context.PROMPTS_DIR` is the one locator for the prompt tree
+(`saffron/agents/context.py:21`). `size._CEILINGS` holds the ceiling per
+spec type (`saffron/gates/core/size.py:26`).
+
+**How a structured turn asks today.** `SA-0141` moved REBUT's extraction
+turn onto the SDK's `output_format`. REBUT builds its format from its
+model's `model_json_schema()` (`saffron/phases/rebut.py:66-69`). It merges
+that format into the options of its resumed call
+(`saffron/phases/rebut.py:207-214`). Its `_validate` checks the returned
+value with that model (`saffron/phases/rebut.py:72-86`).
+Its turn prompt ends with three lines, one to a line
+(`saffron/agents/prompts/turns/rebut-extract.md:9-11`). They ask for the
+structured format, and forbid file changes and commands. A schema
+whose top level is not an object is refused by the API, and
+`additionalProperties: false` is accepted
+(`docs/evidence/2026-09-23-structured-output-spike.md:38-49`). The
+spike's last addendum is headed "a whole spec as one string". It
+returned specs of 40,153 and 45,945 characters exactly, each as the one
+string field `spec` of a resumed turn. The operator decided the
+writer moves onto this path and keeps its separate extraction turn
+(principle 18, `docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:91-94`).
 
 ## Problem
 
-Build two things.
+Build three things.
 
 1. **The system prompt.** Add `SPEC_WRITER_PROMPT` and
    `spec_writer_system_prompt`, as criterion 1 states. Fill each slot with
@@ -178,20 +213,33 @@ Build two things.
    two lines, each word for word and on a line of its own.
 
    ```
-   Put the whole spec file in the block, frontmatter first.
+   Put the whole spec file in the `spec` field, frontmatter first.
    Do not wrap the file in a code fence.
    ```
 
-   It asks for nothing else in the block. Its last non-blank line is the
-   `{extraction}` slot. It holds no other `{word}` brace pair, since
-   `test_a_loaded_turn_prompt_keeps_no_unfilled_slot` reads one as a slot
-   (`tests/test_context.py:437-443`). Load it at import into
+   It asks for nothing else in the field. It ends with these three lines,
+   as `rebut-extract.md` ends.
+
+   ```
+   Answer now in the required structured format.
+   Do not change files.
+   Do not run commands.
+   ```
+
+   It holds no `{extraction}` slot and no other brace pair.
+   `test_a_loaded_turn_prompt_keeps_no_unfilled_slot` reads a `{word}` as
+   a slot (`tests/test_context.py:441-447`). Load it at import into
    `SPEC_WRITER_EXTRACT_PROMPT`, as `rebut.EXTRACT_PROMPT` is loaded
-   (`saffron/phases/rebut.py:38`). Add `"spec-writer-extract"` to
-   `tests/test_context.py`'s `TURN_PROMPTS` with that constant, and to the
-   names its extraction-rules test lists.
-   `test_every_turn_prompt_file_is_loaded_by_something` fails without the
-   first.
+   (`saffron/phases/rebut.py:36`). Add `"spec-writer-extract"` to
+   `tests/test_context.py`'s `TURN_PROMPTS` with that constant.
+   `test_every_turn_prompt_file_is_loaded_by_something` fails without it.
+   Leave the extraction-rules test's list as it is, since this turn
+   carries no shared rules.
+3. **The reply's shape.** Beside `SPEC_WRITER_EXTRACT_PROMPT`, add
+   `_SpecWriterReply` and `SPEC_WRITER_FORMAT`, as criterion 3 states.
+   Build the format as `rebut._REBUTTALS_FORMAT` is built
+   (`saffron/phases/rebut.py:68`). `SA-0160` sends it on the extraction
+   turn and validates the reply with the model.
 
 ## Out of scope
 
@@ -221,7 +269,7 @@ module-scope import makes the reverted run a collection error, which
 `spec_review` at module scope, and is not a declared witness.
 
 **What `spec-writer.md` says.** It is core's, so it names no repo file,
-tool or URL, and none of criterion 2's fifteen strings. That bars
+tool or URL, and none of the seventeen strings below. That bars
 `.saffron/` too, since `saffron/` is one of them. The user prompt names the
 spec's path. Keep the file within 50 lines. It holds each of the four
 slots once, and no other brace. It covers these, in words of its own.
@@ -257,6 +305,16 @@ slots once, and no other brace. It covers these, in words of its own.
   throwaway script." on its own line.
 - You write no file that outlives the cell. The host asks for the whole
   spec in a later turn.
+
+**The seventeen strings** neither prompt file holds, compared lowered
+with each file lowered: `.claude`, `CLAUDE.md`, `DESIGN.md`,
+`CONTEXT.md`, `driver.py`, `pytest`, `uv run`, `make check`, `ruff`,
+`prek`, `saffron/`, `docs/`, `/opt/`, `://`, `the reviewer`, `<output>`
+and `output block`. The first fifteen name this repo's tools and paths.
+The last two keep the writer off the `<output>` block, as
+`test_rebuts_prompts_ask_for_no_output_block` keeps REBUT off it
+(`tests/test_context.py:455-466`). Write the list in the witness, not
+imported from `SA-0175`'s.
 
 **Criterion 1's witness** writes one template into a `tmp_path` prompts
 directory, as both `spec-review.md` and `spec-writer.md`:
@@ -311,11 +369,12 @@ throwaway-script line is one of them. It asserts
 `sorted(re.findall(r"\{[^{}]*\}", raw))` for `spec-writer.md` equals
 `["{ceilings}", "{elevate_on}", "{gates}", "{protected}"]`. It reads
 `spec-writer-extract.md` raw, splits it into lines, and asserts each of
-the Problem's two lines is one of them. Its last non-blank line is
-`{extraction}`. It asserts `SPEC_WRITER_EXTRACT_PROMPT` equals
-`context.turn_prompt("spec-writer-extract")`, and holds
+the Problem's two lines is one of them. Its non-blank lines end with the
+Problem's three closing lines, in order. `re.findall(r"\{[^{}]*\}", raw)`
+for it is `[]`. It asserts `SPEC_WRITER_EXTRACT_PROMPT` equals
+`context.turn_prompt("spec-writer-extract")`, and does not hold
 `artifacts.EXTRACTION_PROMPT`. It lowers both raw files and checks each of
-the fifteen strings against each. These fail it, reasoned:
+the seventeen strings against each. These fail it, reasoned:
 
 - a turn file that asks for the file inside a code fence, or words the
   ban otherwise, which a check for the words `code fence` passes
@@ -324,21 +383,45 @@ the fifteen strings against each. These fail it, reasoned:
 - a `{tags}` slot in the writer's template, which the fill passes over
   unseen
 - a slot written twice, which fills both places
-- a turn file with text after `{extraction}`, which asks for more than the
-  block
+- a turn file that keeps the `{extraction}` slot, whose load then holds
+  the shared rules and their `<output>` block
+- a turn file that asks for an `<output>` block, or names the field other
+  than `spec`
+- a turn file with text after "Do not run commands.", or one of the three
+  closing lines left out or reordered
 - an account line reworded, joined to another line, or left out
 - the account lines in the user prompt alone, where a follow-up's
   session never reads them
 - a writer prompt that names this repo's tools or `.saffron/`, as the hand
   path's agent file does
 
-**The lists are unmeasured.** Nothing below this spec's head is built,
-and neither prompt file was prototyped. Each list is reasoned from the
-code it names.
+**Criterion 3's witness** imports `_SpecWriterReply` and
+`SPEC_WRITER_FORMAT` inside its body. It asserts the format equals the
+dict criterion 3 names, and reads the schema's `type`, `required`,
+`properties` and `additionalProperties` from it. It validates
+`{"spec": "---\nid: X\n---\n  body  \n"}` and asserts the `spec` it
+returns equals that string. It asserts `pydantic.ValidationError` for
+each of the five refused values. These fail it, measured on 2026-09-25
+in a throwaway script over Pydantic's own models:
+
+- no `extra="forbid"`, which accepts the extra key and drops
+  `additionalProperties`
+- a default on `spec`, which accepts `{}` and empties `required`
+- the field named `text`
+- `str_strip_whitespace`, which changes the body's padding
+- `coerce_numbers_to_str`, which accepts `{"spec": 3}`
+- a `RootModel[str]`, whose schema's top level is a string, the shape
+  the API refuses
+
+**The other lists are unmeasured.** Nothing below this spec's head is
+built, and neither prompt file was prototyped. Criteria 1 and 2's lists
+are reasoned from the code they name.
 
 **What the witnesses leave undriven.** A prompt that names a repo file by
-a string outside the fifteen passes. So does one that fills every slot
-and writes badly.
+a string outside the seventeen passes. So does one that fills every slot
+and writes badly. An empty `spec` validates, and `SA-0150`'s
+`parse_spec` refuses it at run time. No witness sends the format to the
+API. The spike measured the one-field shape on the host, not in a cell.
 
 **The `prose` gate** counts both new prompt files, and every new comment
 and docstring. Write none with an em dash, a semicolon, a contraction, the
@@ -351,13 +434,16 @@ each docstring within ten lines.
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 900 to 1100 changed tokens, 30% to 37% of the
+estimate is about 1100 to 1350 changed tokens, 37% to 45% of the
 ceiling. The `history` rows beside this spec measured lines against the
 old ceiling of 600 changed lines, so none compares with this figure
 directly.
 The fill and its two constants run about 80 to 130 tokens in
-`saffron/spec_review.py`. `spec-writer.md` at 50 lines runs about 310 to
-460 tokens. That is 6.2 to 9.1 words a line, as the system prompts in
-`saffron/agents/prompts/` run (`wc -lw`). The extraction turn prompt runs
-about 40. Each witness runs about 160, and `tests/test_context.py` takes
-about 10.
+`saffron/spec_review.py`. The model, the format and the import add about
+60, as `saffron/phases/rebut.py:39-69` runs for two models and two formats.
+`spec-writer.md` at 50 lines runs about 310 to 460 tokens. That is 6.2
+to 9.1 words a line, as the system prompts in `saffron/agents/prompts/`
+run (`wc -lw`). The extraction turn prompt runs about 50. Criteria 1 and
+2's witnesses run about 160 and 220, the second with the seventeen
+strings written out. Criterion 3's runs about 140, and
+`tests/test_context.py` takes about 5.

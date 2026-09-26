@@ -137,7 +137,7 @@ the size of `SA-0156`'s first draft.
 The chain below it runs `SA-0135`, `SA-0136`, `SA-0142` to `SA-0146`,
 `SA-0153`, `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`,
 `SA-0149` and `SA-0155`. Every line number below was read at
-`642a26c3`, where none of their code exists. The chain edits `cli.py`,
+`71140772`, where none of their code exists. The chain edits `cli.py`,
 `ledger.py`, `task.py` and `session.py`, so read those there by symbol.
 This spec consumes these names.
 
@@ -276,9 +276,9 @@ to each such double and change nothing else in it.
 
 **Criterion 1's witness** follows
 `test_a_wall_on_the_plan_turn_is_not_the_task_failing`
-(`tests/test_session.py:4408-4427`), with `_stub_the_runtime`, `_drive`,
+(`tests/test_session.py:4411-4430`), with `_stub_the_runtime`, `_drive`,
 `_spec`, `_turn`, `_block`, `_PLAN` and `_rejected`. `_drive` opens
-`tmp_path / "ledger.db"` itself (`:1351`). So the witness opens that
+`tmp_path / "ledger.db"` itself (`tests/test_session.py:1353`). So the witness opens that
 file first and closes it before the first drive.
 
 - It upserts a repo at `str(tmp_path / "repo")`, the origin `_drive`'s
@@ -329,7 +329,7 @@ then seeds tonight's task at `"a" * 64` on a new run, with closed
 tonight's task, with `CellSpec.spec_sha` `"f" * 64`, the revision's hash.
 Each case drives a plan turn, a wall cut and a salvage turn with no
 commits, as `test_a_second_cut_at_one_spec_sha_settles_the_spec` does
-(`tests/test_session.py:2049-2106`).
+(`tests/test_session.py:2051-2108`).
 
 | case | last night's row `spec_sha` | its attempts | outcome | line names |
 |---|---|---|---|---|
@@ -349,7 +349,7 @@ names one, and none elsewhere. These fail it, each measured:
 - a phase denylist of `REVIEWING` and `REBUTTING`, which fails `repaired`
 - the sub-select bound to `CellSpec.task_id`, which reads `NULL` on the
   plain path. `test_a_second_cut_at_one_spec_sha_settles_the_spec`
-  (`tests/test_session.py:2049`) fails it, since its third task then
+  (`tests/test_session.py:2051`) fails it, since its third task then
   ends `ORPHANED`.
 
 **Criterion 4's witness** follows `_drive` in `tests/test_task.py:24-86`,

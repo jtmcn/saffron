@@ -158,7 +158,7 @@ Only `depends_on[0]` stacks (`saffron/task.py:144-147`), and the chain
 `SA-0142` to `SA-0159` puts these names there. `SA-0138`, the second
 entry, does not stack. It and its parent `SA-0133` are merged at
 `e3020b3b`, so their code is under the chain's root. The chain's names are
-cited by symbol, and every line number below was read at `e3020b3b`. No
+cited by symbol, and every line number below was read at `71140772`. No
 spec in the chain below this one touches `saffron/cell/session.py`, so its
 lines stand at the tree base.
 
@@ -276,8 +276,8 @@ Build three things.
    `_probe_adequacy` with the old signature that calls `probe_findings`
    with `review.adequacy_probes(reviews)`. Do not copy the body, since
    `size` blocks at 3000 tokens here. Two tests find
-   `_probe_adequacy` on the stack by name (`tests/test_session.py:3543`,
-   `:3933`), so it stays a function of its own.
+   `_probe_adequacy` on the stack by name (`tests/test_session.py:3546`,
+   `:3936`), so it stays a function of its own.
 2. **The record of each outcome.** Add `qualifications` to `SCHEMA` in
    `saffron/ledger.py`, with no reference to another table:
 
