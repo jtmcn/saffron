@@ -32,3 +32,10 @@ the declared pairs. An undeclared disappearance still fails.
 ## Record
 
 - 2026-09-23: filed from the spec loop's run 15 (#478, #483).
+- 2026-09-25: recurred in run 17 (#519). `test_a_turn_prompt_constant_is_its_file`
+  took its ids from each prompt's text, so `SA-0141`'s prompt edit failed
+  `census` on four ids. Repair pinned the old text into the ids, and kept two
+  cases the spec said to drop by inverting their assertion. A review commit
+  made the ids the prompt names, so a prompt edit no longer renames a case.
+  The spec told the cell to drop two parametrised cases, and neither the spec
+  review nor the spec named `census`.
