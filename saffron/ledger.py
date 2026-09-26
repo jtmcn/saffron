@@ -165,11 +165,8 @@ CREATE TABLE IF NOT EXISTS findings (
     rebuttal     TEXT
 );
 
--- One layer of a stack batch (`run_stack_batch`, `saffron/batch.py`). Keyed
--- on the layer's own record key, never a task_id, so a fold need not resolve
--- one. `batch_key` carries the batch's id as text with no reference to
--- `batches`, since a fold rebuilds no batch row. `predecessor_key` and
--- `predecessor_head` are `NULL` for a stack's first layer.
+-- One layer of a stack batch, keyed on record keys with no reference to
+-- `batches`, so a fold into a fresh ledger places it.
 CREATE TABLE IF NOT EXISTS stack_layers (
     task_key         TEXT PRIMARY KEY,
     batch_key        TEXT,
@@ -1192,6 +1189,8 @@ class Ledger:
         spec_row = self._db.execute(
             "SELECT spec_id FROM tasks WHERE task_id = ?", (task_id,)
         ).fetchone()
+        if spec_row is None:
+            raise ValueError(f"no task {task_id} to record a stack layer for")
         predecessor_key = None
         predecessor_head = None
         if predecessor_task_id is not None:
@@ -1199,9 +1198,10 @@ class Ledger:
                 "SELECT record_key, pushed_sha FROM tasks WHERE task_id = ?",
                 (predecessor_task_id,),
             ).fetchone()
-            if pred_row is not None:
-                predecessor_key = pred_row["record_key"]
-                predecessor_head = pred_row["pushed_sha"]
+            if pred_row is None:
+                raise ValueError(f"no predecessor task {predecessor_task_id}")
+            predecessor_key = pred_row["record_key"]
+            predecessor_head = pred_row["pushed_sha"]
         fact = self._build_fact(
             task_id,
             "stack_layer",

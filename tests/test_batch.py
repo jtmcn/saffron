@@ -1607,7 +1607,7 @@ def test_the_stack_layers_fold_back_from_the_record_alone(tmp_path):
     )
 
     source_rows = _stack_layers(ledger)
-    assert len(source_rows) == 4
+    assert [row["position"] for row in source_rows] == [1, 2, 3, 4]
     assert source_rows[3]["spec_id"] == "TE-4"
     assert source_rows[3]["generation"] == 1
 
@@ -1643,3 +1643,27 @@ def test_the_stack_layers_fold_back_from_the_record_alone(tmp_path):
     fresh.fold_task(te9_key, [])
     remaining = {row["spec_id"] for row in _stack_layers(fresh)}
     assert remaining == {"TE-7", "TE-6", "TE-4"}
+
+
+def test_a_stack_layer_naming_an_unknown_task_raises(tmp_path):
+    """`record_stack_layer` raises `ValueError` for a task or a predecessor
+    that names no row, like every other write method. A silent `NULL`
+    predecessor would read as a stack's first layer."""
+    from saffron.ledger import Ledger
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(
+        run_id, spec_id="TE-1", spec_sha="s" * 64, branch="saffron/TE-1"
+    )
+
+    with pytest.raises(ValueError, match="no task 999"):
+        ledger.record_stack_layer(
+            999, position=1, predecessor_task_id=None, generation=0
+        )
+    with pytest.raises(ValueError, match="no predecessor task 998"):
+        ledger.record_stack_layer(
+            task_id, position=2, predecessor_task_id=998, generation=0
+        )
+    assert ledger._db.execute("SELECT COUNT(*) FROM stack_layers").fetchone()[0] == 0

@@ -68,6 +68,7 @@ def run_batch(
     clock: Callable[[], datetime] = datetime.now,
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None] = print,
+    # Fired right after each task's attach, never for a `Refused` or a raise.
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
 ) -> StopReason:
     """Drive one night against one repo's already-sorted candidates.
@@ -102,11 +103,6 @@ def run_batch(
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
     `SA-0051` owns the mapping to an exit code.
-
-    `after_attach` fires once per task attached to the batch, right after
-    that attach. Never for a `Refused` and never for a raise.
-    `run_stack_batch` is the one caller that supplies it. An ordinary batch
-    passes none.
     """
     # UTC, and space-separated: `batches.started_at` is `datetime('now')`,
     # which is both. A naive local `isoformat()` matched neither, so the two
