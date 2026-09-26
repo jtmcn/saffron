@@ -54,7 +54,28 @@ from saffron.repos.mirror import (
     has_commit,
     unresolved_consumes,
 )
-from saffron.scheduler import DEPENDENCY_WAITING_STATES
+from saffron.scheduler import DEPENDENCY_WAITING_STATES, _branch
+
+
+@dataclass(frozen=True, kw_only=True)
+class Handoff:
+    """What a stack batch hands a task in place of `_resolve_stacked_on`
+    (`SA-0143`): the predecessor's tree and its branch, decided once by the
+    batch's own planned order rather than re-derived from the ledger.
+
+    The two travel together or not at all, `PinnedBase`'s reason for
+    `kw_only`: `stacked_on` and `target_branch` are adjacent strings, and a
+    positional swap would type-check and stack a cell on the wrong tree.
+    """
+
+    stacked_on: str | None
+    target_branch: str | None
+
+    def __post_init__(self) -> None:
+        if (self.stacked_on is None) != (self.target_branch is None):
+            raise ValueError(
+                "a Handoff carries both stacked_on and target_branch, or neither"
+            )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -249,10 +270,13 @@ def run_task(
     ledger: Ledger,
     out_dir: Path,
     token: str | None,
+    handoff: Handoff | None = None,
     emit: Callable[[Event], None] | None = None,
 ) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package the result if the cell came back reviewable.
+
+    A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
 
     `ceilings` arrives resolved, because only the attended path has flags to
     arbitrate against the spec (`cli._ceilings`); a batch has none, so there is
@@ -310,15 +334,18 @@ def run_task(
     # together for an ordinary unstacked cell (`_resolve_stacked_on`,
     # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
     # place either has to be read.
-    stacked_on, target_branch = _resolve_stacked_on(
-        ledger,
-        repo_id,
-        spec.depends_on,
-        mirror=base.mirror,
-        url=base.url,
-        spec_id=spec.id,
-        emit=emit,
-    )
+    if handoff is not None:
+        stacked_on, target_branch = handoff.stacked_on, handoff.target_branch
+    else:
+        stacked_on, target_branch = _resolve_stacked_on(
+            ledger,
+            repo_id,
+            spec.depends_on,
+            mirror=base.mirror,
+            url=base.url,
+            spec_id=spec.id,
+            emit=emit,
+        )
     # Which tree a run was cut from is not recoverable from the exit code, and
     # a stacked run that surprises an operator is one they cannot diagnose.
     # ponytail: a `print`, so `events.jsonl` carries the *negative* stacking
@@ -330,7 +357,7 @@ def run_task(
     cell_spec = CellSpec(
         spec_id=spec.id,
         spec_sha=spec_sha,
-        branch=f"saffron/{spec.id}",
+        branch=_branch(spec.id),
         base_sha=base.base_sha,
         touches=spec.touches,
         spec_type=spec.spec_type,
@@ -387,11 +414,10 @@ def run_task(
         print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
         outcome.state = result.state
     else:
-        # PACKAGE never ran, but teardown may still have exported commits
-        # (backlog item 45, `SA-0069`) — pushed to the cell's own
-        # branch, never packaged, and never allowed to change `outcome.state`:
-        # a caller reading `MERGE_FAILED` or `READY_FOR_REVIEW` here would
-        # believe PACKAGE ran.
+        # PACKAGE never ran, but teardown may still have exported commits to
+        # the cell's own branch (backlog item 45, `SA-0069`). Never packaged,
+        # and never allowed to change `outcome.state`: a caller reading
+        # `MERGE_FAILED` or `READY_FOR_REVIEW` here would believe PACKAGE ran.
         pushed = package_phase.push_unpackaged_work(
             outcome,
             spec=spec,

@@ -8,17 +8,25 @@ import hashlib
 import os
 import subprocess
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 
-from saffron import preflight
-from saffron.batch import run_batch
+from saffron import end_review, preflight
+from saffron.agents import context
+from saffron.batch import run_batch, run_stack_batch
 from saffron.cell import runtime
-from saffron.cell.session import CellOutcome
+from saffron.cell.session import (
+    _SAFFRON_ROOT,
+    TURN_TIMEOUT_S,
+    CellOutcome,
+    stop_on_rejected,
+)
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
+from saffron.phases import implement, review
 from saffron.phases import package as package_phase
 from saffron.reconcile import ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
@@ -30,12 +38,14 @@ from saffron.scheduler import (
     Candidate,
     GhRunner,
     Refusal,
+    _branch,
     build_queue,
     protected_touch_refusal,
     retirement_refusal,
     run_gh,
 )
 from saffron.task import (
+    Handoff,
     PinnedBase,
     Refused,
     ResolvedCeilings,
@@ -106,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         "queue", help="show what a batch would run tonight, agent-free"
     )
     queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    queue_parser.add_argument("--stack", action="store_true")
 
     batch_parser = subcommands.add_parser(
         "batch", help="run one repo's night, unattended (§4.2.1)"
@@ -119,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
     # duration would need no "which day" question at all, and a time of day
     # is the shape an operator actually types before going to bed.
     batch_parser.add_argument("--until", type=_clock_time, default=None)
+    # A stack batch plans its order once, at batch start, and runs it into
+    # one pull request stack (ADR 7, `DESIGN.md` §4.2.1).
+    batch_parser.add_argument("--stack", action="store_true")
 
     reconcile_parser = subcommands.add_parser(
         "reconcile",
@@ -502,6 +516,151 @@ def _batch_runner(
     return run
 
 
+def _stack_runner(
+    *,
+    pinned: PinnedBase,
+    repo_id: Callable[[], int | None],
+    repo: Path,
+    ledger: Ledger,
+    out_dir: Path,
+) -> Callable[[Candidate, Candidate | None], CellOutcome | Refused]:
+    """`run_stack_batch`'s adapter. Given a predecessor, it fetches that
+    task's branch fresh into the mirror and hands `run_task` a `Handoff`
+    built from the fetch, never from `_resolve_stacked_on`. A predecessor
+    branch the origin no longer has raises `package_phase.ParentGone`, and
+    this never catches it: an unstacked cell is not this function's call to
+    make."""
+
+    def run(
+        candidate: Candidate, predecessor: Candidate | None
+    ) -> CellOutcome | Refused:
+        spec = candidate.spec
+        if predecessor is None:
+            handoff = Handoff(stacked_on=None, target_branch=None)
+        else:
+            branch = _branch(predecessor.spec.id)
+            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+            handoff = Handoff(stacked_on=head, target_branch=branch)
+        ceilings = spec_ceilings(spec)
+        return run_task(
+            spec,
+            candidate.spec_sha,
+            ceilings=ceilings,
+            base=pinned,
+            repo_id=repo_id(),
+            repo=repo,
+            ledger=ledger,
+            out_dir=out_dir,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            handoff=handoff,
+        )
+
+    return run
+
+
+_STACK_END_REVIEW_WRITTEN_LENSES = "SELECT lens FROM end_reviews WHERE task_key = ?"
+
+
+def _end_review_error_reviews(
+    ledger: Ledger, batch_key: str, message: str
+) -> end_review.StackReview:
+    """Every lens of every layer in `batch_key`, filed `error` at cost 0.
+
+    A lens with a row already skips the write, since a second row for one
+    lens raises on the primary key. A layer that already held rows says so
+    in every review this returns for it. A write that raises stops every
+    later write, prints a line naming both raises, and still returns an
+    error review for what is left.
+    """
+    rows = ledger._db.execute(end_review._BATCH_LAYERS, (batch_key,)).fetchall()
+    write_failed = False
+    layers: list[end_review.LayerReview] = []
+    for row in rows:
+        task_key, task_id = row["task_key"], row["task_id"]
+        written = {
+            r["lens"]
+            for r in ledger._db.execute(
+                _STACK_END_REVIEW_WRITTEN_LENSES, (task_key,)
+            ).fetchall()
+        }
+        own = written & end_review.END_LENSES.keys()
+        note = ", this layer's rows were written first" if own else ""
+        lens_error = f"{message}{note}"
+        reviews: list[review.LensReview] = []
+        for lens in end_review.END_LENSES:
+            if not write_failed and lens not in written:
+                try:
+                    ledger.record_end_review(
+                        task_id,
+                        lens=lens,
+                        status="error",
+                        cost_usd=0.0,
+                        error=lens_error,
+                    )
+                except Exception as write_exc:
+                    print(f"end review: {message}, then recording failed: {write_exc}")
+                    write_failed = True
+            reviews.append(review.LensReview(lens, cost_usd=0.0, error=lens_error))
+        layers.append(end_review.LayerReview(task_key, reviews))
+    return end_review.StackReview(join=None, layers=layers)
+
+
+def _stack_end_review(
+    *, pinned: PinnedBase, repo: Path, ledger: Ledger, out_dir: Path
+) -> Callable[[str, float, Mapping[str, Spec]], object]:
+    """`run_stack_batch`'s `end_review` callable: one export per batch key,
+    and a fresh critic cell per layer and for the join.
+
+    Every read below, and the review itself, run inside one guard. A raise
+    from any of them is recorded as an `error` for every lens of every
+    layer, through `_end_review_error_reviews`. That keeps the raise from
+    reaching `run_stack_batch`, which already closed its loop.
+    """
+
+    def run(batch_key: str, reserve_usd: float, specs: Mapping[str, Spec]) -> object:
+        try:
+            exported = git_mirror.export_saffron_dir(
+                pinned.mirror, pinned.base_sha, out_dir / "end-review" / batch_key
+            )
+            policy, _ = load_policy(exported)
+            claude_md = git_mirror.file_at(pinned.mirror, pinned.base_sha, "CLAUDE.md")
+            context_md = (_SAFFRON_ROOT / "CONTEXT.md").read_text()
+            agent = stop_on_rejected(
+                partial(
+                    implement.run_agent,
+                    timeout_s=TURN_TIMEOUT_S,
+                    spec_id=f"end-review-{batch_key}",
+                )
+            )
+            open_cell = partial(
+                end_review.layer_cell,
+                repo=repo,
+                mirror=pinned.mirror,
+                gates_dir=exported,
+                thread_env=policy.thread_env,
+            )
+            return end_review.run_end_review(
+                ledger,
+                batch_key,
+                reserve_usd,
+                specs,
+                mirror=pinned.mirror,
+                open_cell=open_cell,
+                context_md=context_md,
+                claude_md=claude_md,
+                prompts_dir=context.PROMPTS_DIR,
+                max_turns=end_review.LENS_MAX_TURNS,
+                budget_usd=end_review.LENS_BUDGET_USD,
+                agent=agent,
+            )
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            print(f"end review: {message}")
+            return _end_review_error_reviews(ledger, batch_key, message)
+
+    return run
+
+
 @dataclass
 class QueueResolution:
     """What resolving one repo's queue over the pinned base produced —
@@ -541,6 +700,7 @@ def _resolve_queue(
     *,
     stamp_orphaned: bool,
     pinned: PinnedBase | None = None,
+    stack: bool = False,
 ) -> QueueResolution:
     """Resolve one repo's queue over its pinned `base_sha` — the mirror, the
     pinned base, the reconcile, the slug, the export, and the scan over that
@@ -626,6 +786,7 @@ def _resolve_queue(
             # (`SA-0131`).
             pushed_landed=lambda sha: _pushed_landed(mirror, base_sha, sha),
             gh=_guarded_gh(gh_failures),
+            stack=stack,
         )
 
     return QueueResolution(
@@ -714,6 +875,20 @@ def _no_candidate_should_run(candidate: Candidate) -> CellOutcome | Refused:
     )
 
 
+def _no_stack_candidate_should_run(
+    candidate: Candidate, predecessor: Candidate | None
+) -> CellOutcome | Refused:
+    """`_no_candidate_should_run`'s own twin for `--stack`: the runner a
+    stack batch gets when the loop was never meant to start.
+    `run_stack_batch` takes its runner before it knows whether it will use
+    it. Reaching this is a bug in the ordering above, not an operator's
+    problem."""
+    raise AssertionError(
+        "readiness failed or the queue could not be resolved, yet "
+        f"{candidate.spec.id} was started anyway"
+    )
+
+
 def _no_candidates_to_rescan() -> list[Candidate]:
     """The rescan `_no_candidate_should_run`'s own night gets: readiness
     failed, or the opening scan itself could not be resolved, so there is no
@@ -723,7 +898,11 @@ def _no_candidates_to_rescan() -> list[Candidate]:
 
 
 def _print_batch_plan(
-    resolved: QueueResolution, *, budget_usd: float, until: datetime | None
+    resolved: QueueResolution,
+    *,
+    budget_usd: float,
+    until: datetime | None,
+    reserve_usd: float | None = None,
 ) -> None:
     """What the night is about to attempt, and what its scan could not check.
 
@@ -739,9 +918,11 @@ def _print_batch_plan(
     do before it says what became of it.
     """
     deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
+    # Only a `--stack` night holds a reserve, printed beside its budget.
+    reserve = f", reserve ${reserve_usd:.2f}" if reserve_usd is not None else ""
     print(
         f"batch: {len(resolved.candidates)} candidate(s), "
-        f"budget ${budget_usd:.2f}, until {deadline}"
+        f"budget ${budget_usd:.2f}{reserve}, until {deadline}"
     )
     for candidate in resolved.candidates:
         print(f"  {candidate.spec.id:<10} priority={candidate.spec.priority}")
@@ -764,12 +945,13 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     in-flight row found here is a corpse, not live work an operator is
     watching); binds a real readiness check to this run's own paths and
     token, never the loop's "proceed" default; builds the adapter that turns
-    a candidate into a cell (`_batch_runner`) and the rescan; and hands them
-    to `saffron.batch.run_batch`, which owns the loop itself and is the only
-    thing in this module that calls `ledger.create_batch`/`close_batch` —
-    true whether the night gets past readiness or not.
+    a candidate into a cell (`_batch_runner` or `_stack_runner`); and hands them
+    to `saffron.batch.run_batch`, or to `run_stack_batch` under `--stack`.
+    Both own the loop and are the only things in this module that call
+    `ledger.create_batch`/`close_batch` — true whether the night gets past
+    readiness or not.
 
-    Exit codes are `run_batch`'s own five stop reasons, mapped per §4.2.1:
+    Exit codes are either loop's own five stop reasons, mapped per §4.2.1:
     `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` and for
     `INCOMPLETE` — never `1`, which is reserved for a task's own failure and
     a batch is not a task. `INCOMPLETE` shares `INFRASTRUCTURE`'s exit code
@@ -794,6 +976,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     until = (
         _resolve_until(args.until, datetime.now()) if args.until is not None else None
     )
+    # Bound to `--budget` and `--stack` alone, so the night stays sized
+    # against the one number the operator gives it (stack-batch design §4).
+    reserve_usd = args.budget * end_review.RESERVE_SHARE if args.stack else None
 
     # Readiness first, and before the scan — §4.4's own order, step 1 ahead of
     # step 4. Run after it, `Readiness`'s `mirror`, `origin` and
@@ -815,8 +1000,14 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     runner: Callable[[Candidate], CellOutcome | Refused] = _no_candidate_should_run
     # Matches `candidates`' own empty default — nothing reaches it.
     rescan: Callable[[], Sequence[Candidate]] = _no_candidates_to_rescan
+    stack_runner: Callable[[Candidate, Candidate | None], CellOutcome | Refused] = (
+        _no_stack_candidate_should_run
+    )
+    # `None` until the scan resolves under `--stack`: a night whose readiness
+    # or scan fails runs no end review at all.
+    stack_end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
-    # still reaches `run_batch` and its row.
+    # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
     if readiness.ok:
         # Readiness already paid for these three reads. `Readiness` declares
@@ -832,7 +1023,12 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         )
         try:
             resolved = _resolve_queue(
-                repo, args.home, ledger, stamp_orphaned=True, pinned=pinned
+                repo,
+                args.home,
+                ledger,
+                stamp_orphaned=True,
+                pinned=pinned,
+                stack=args.stack,
             )
         except Exception as exc:
             # A discovery refusal (`SA-0065`), a mirror fetch, a reconcile:
@@ -846,50 +1042,80 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             # passed — the scan quietly did less than it appears to have done, on
             # the one path where nobody is awake to notice.
             _print_reconcile_summary(resolved.reconciled)
-            _print_batch_plan(resolved, budget_usd=args.budget, until=until)
-
-            # Updated by every rescan, so `_batch_runner`'s `repo_id`
-            # callable reads the latest answer, not the opening one.
-            latest_repo_id: list[int | None] = [resolved.repo_id]
-
-            def _rescan() -> list[Candidate]:
-                # `False`: a task left in flight tonight is live, not a
-                # corpse. `pinned`: the same base the opening scan paid for.
-                rescanned = _resolve_queue(
-                    repo, args.home, ledger, stamp_orphaned=False, pinned=pinned
-                )
-                latest_repo_id[0] = rescanned.repo_id
-                return rescanned.candidates
-
-            rescan = _rescan
-            runner = _batch_runner(
-                pinned=pinned,
-                repo_id=lambda: latest_repo_id[0],
-                repo=repo,
-                ledger=ledger,
-                out_dir=out_dir,
+            _print_batch_plan(
+                resolved, budget_usd=args.budget, until=until, reserve_usd=reserve_usd
             )
             candidates = resolved.candidates
 
+            if args.stack:
+                # A stack batch never rescans: the order is fixed right here.
+                # `repo_id` is still looked up fresh per task, not pinned now.
+                stack_runner = _stack_runner(
+                    pinned=pinned,
+                    repo_id=lambda: ledger.resolve_repo_id(pinned.url),
+                    repo=repo,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                )
+                stack_end_review = _stack_end_review(
+                    pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
+                )
+            else:
+                # Updated by every rescan, so `_batch_runner`'s `repo_id`
+                # callable reads the latest answer, not the opening one.
+                latest_repo_id: list[int | None] = [resolved.repo_id]
+
+                def _rescan() -> list[Candidate]:
+                    # `False`: a task left in flight tonight is live, not a
+                    # corpse. `pinned`: the same base the opening scan paid for.
+                    rescanned = _resolve_queue(
+                        repo, args.home, ledger, stamp_orphaned=False, pinned=pinned
+                    )
+                    latest_repo_id[0] = rescanned.repo_id
+                    return rescanned.candidates
+
+                rescan = _rescan
+                runner = _batch_runner(
+                    pinned=pinned,
+                    repo_id=lambda: latest_repo_id[0],
+                    repo=repo,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                )
+
     def _readiness_or_raise() -> preflight.Readiness:
-        # Raised inside `run_batch`'s `try`, so its `finally` closes the row
+        # Raised inside the batch loop's `try`, so its `finally` closes the row
         # `INFRASTRUCTURE` — the "readiness probe that raised" case it names.
         if resolution_error is not None:
             raise resolution_error
         return readiness
 
     try:
-        stop = run_batch(
-            candidates,
-            ledger,
-            args.budget,
-            until,
-            runner,
-            rescan=rescan,
-            # The readiness already measured above, or the scan's raise — never
-            # a second probe of the same host.
-            readiness_check=_readiness_or_raise,
-        )
+        if args.stack:
+            # `run_stack_batch` in place of `run_batch`, and no rescan: the
+            # order this batch runs was fixed by the single resolve above.
+            stop = run_stack_batch(
+                candidates,
+                ledger,
+                args.budget,
+                until,
+                stack_runner,
+                readiness_check=_readiness_or_raise,
+                reserve_usd=reserve_usd or 0.0,
+                end_review=stack_end_review,
+            )
+        else:
+            stop = run_batch(
+                candidates,
+                ledger,
+                args.budget,
+                until,
+                runner,
+                rescan=rescan,
+                # The readiness already measured above, or the scan's raise —
+                # never a second probe of the same host.
+                readiness_check=_readiness_or_raise,
+            )
     except Exception as exc:
         if exc is not resolution_error:
             # Identity, not presence: `create_batch` can still raise after a
@@ -947,7 +1173,9 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     asserts exactly that: `_resolve_queue`'s own docstring names the premise
     this passes on.
     """
-    resolved = _resolve_queue(args.repo, args.home, ledger, stamp_orphaned=False)
+    resolved = _resolve_queue(
+        args.repo, args.home, ledger, stamp_orphaned=False, stack=args.stack
+    )
 
     _print_reconcile_summary(resolved.reconciled)
     _print_queue(

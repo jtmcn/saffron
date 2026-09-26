@@ -28,11 +28,12 @@ type is not importing the driver that builds it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
 from saffron.cell.session import CellOutcome
+from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
@@ -68,6 +69,9 @@ def run_batch(
     clock: Callable[[], datetime] = datetime.now,
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None] = print,
+    # Fired right after each task's attach, never for a `Refused` or a raise.
+    after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
+    reserve_usd: float = 0.0,
 ) -> StopReason:
     """Drive one night against one repo's already-sorted candidates.
 
@@ -130,6 +134,8 @@ def run_batch(
             readiness_check=readiness_check,
             emit=emit,
             in_flight=in_flight,
+            after_attach=after_attach,
+            reserve_usd=reserve_usd,
         )
         return stopped
     finally:
@@ -156,6 +162,8 @@ def _drive(
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None],
     in_flight: list[tuple[str, str]],
+    after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
+    reserve_usd: float = 0.0,
 ) -> StopReason:
     """`run_batch`'s body, split out so every exit closes the batch row.
 
@@ -195,7 +203,9 @@ def _drive(
         if until is not None and clock() >= until:
             return _stop(ledger, batch_id, "UNTIL", in_flight, emit)
 
-        remaining = budget_usd - ledger.batch_spend(batch_id)
+        # `reserve_usd` is held back here, not subtracted from `budget_usd`
+        # itself. The batch row still records the whole budget it was given.
+        remaining = budget_usd - reserve_usd - ledger.batch_spend(batch_id)
         if candidate.spec.budget_usd > remaining:
             return _stop(ledger, batch_id, "BUDGET", in_flight, emit)
 
@@ -240,6 +250,10 @@ def _drive(
                 # the shape `record_push` and `set_task_package` already use on
                 # `tasks`: the row exists, then the fact about it arrives.
                 ledger.attach_run_to_batch(outcome.run_id, batch_id)
+                # After the attach above, so any fact `after_attach` builds
+                # already carries this run's `batch_id`.
+                if after_attach is not None:
+                    after_attach(candidate, outcome, batch_id)
 
                 if outcome.state in ABORT_STATES:
                     consecutive_aborts += 1
@@ -262,6 +276,112 @@ def _drive(
         # Rescanned after every task, success or not, so a child whose parent
         # just packaged is reachable tonight rather than tomorrow.
         pending = rescan()
+
+
+def _is_layer(result: CellOutcome | Refused) -> bool:
+    """`run_stack_batch`'s one predicate. A result adds a layer only when it
+    is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
+    `EXHAUSTED`, any other state, or a `Refused`."""
+    return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
+
+
+def run_stack_batch(
+    order: Sequence[Candidate],
+    ledger: Ledger,
+    budget_usd: float,
+    until: datetime | None,
+    runner: Callable[[Candidate, Candidate | None], CellOutcome | Refused],
+    *,
+    readiness_check: Callable[[], Readiness],
+    clock: Callable[[], datetime] = datetime.now,
+    emit: Callable[[str], None] = print,
+    reserve_usd: float = 0.0,
+    end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
+) -> StopReason:
+    """Run one stack's planned `order` once, never rescanning the repo
+    (`SA-0142` fixes the order at batch start). `runner` takes each
+    candidate and its predecessor: the last candidate before it,
+    positionally, that reached `READY_FOR_REVIEW`, or `None` before any has.
+
+    A candidate is refused here, before `run_batch` ever sees it, when a
+    `depends_on` entry reaches a spec that ran this batch and missed. It
+    can reach one through a refused spec. `reserve_usd` holds back the loop's budget check, and
+    once the loop returns `end_review` runs once, with the batch id, the
+    reserve and `order`'s own specs."""
+    order = list(order)
+    remaining = list(order)
+    missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
+    predecessor: Candidate | None = None
+    predecessor_task_id: int | None = None
+    position = 0
+
+    # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at
+    # generation 0. The predecessor is the last such task, not `candidate`.
+    def record_layer(candidate: Candidate, outcome: CellOutcome, batch_id: int) -> None:
+        nonlocal position, predecessor_task_id
+        if not _is_layer(outcome):
+            return
+        position += 1
+        ledger.record_stack_layer(
+            outcome.task_id,
+            position=position,
+            predecessor_task_id=predecessor_task_id,
+            generation=0,
+        )
+        predecessor_task_id = outcome.task_id
+
+    def blocking(candidate: Candidate) -> frozenset[str]:
+        found: set[str] = set()
+        for entry in candidate.spec.depends_on:
+            if entry in missed:
+                found |= missed[entry]
+        return frozenset(found)
+
+    def resolve_prefix() -> list[Candidate]:
+        while remaining:
+            candidate = remaining[0]
+            found = blocking(candidate)
+            if not found:
+                break
+            names = ", ".join(sorted(found))
+            emit(f"{candidate.spec.id:<10} refused  reaches {names}")
+            missed[candidate.spec.id] = found
+            remaining.pop(0)
+        return remaining
+
+    def wrapped(candidate: Candidate) -> CellOutcome | Refused:
+        nonlocal predecessor
+        pred = predecessor
+        try:
+            result = runner(candidate, pred)
+        except Exception:
+            missed[candidate.spec.id] = frozenset({candidate.spec.id})
+            remaining.remove(candidate)
+            raise
+        remaining.remove(candidate)
+        if _is_layer(result):
+            predecessor = candidate
+        else:
+            missed[candidate.spec.id] = frozenset({candidate.spec.id})
+        return result
+
+    stopped = run_batch(
+        resolve_prefix(),
+        ledger,
+        budget_usd,
+        until,
+        wrapped,
+        rescan=resolve_prefix,
+        clock=clock,
+        readiness_check=readiness_check,
+        emit=emit,
+        after_attach=record_layer,
+        reserve_usd=reserve_usd,
+    )
+    if end_review is not None:
+        specs = {c.spec.id: c.spec for c in order}
+        end_review(str(ledger.latest_batch_id()), reserve_usd, specs)
+    return stopped
 
 
 def _stop(

@@ -37,6 +37,51 @@ def test_upsert_repo_is_idempotent(ledger):
     assert first == second
 
 
+def test_a_runs_baseline_keeps_the_names_each_gate_collected(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    ledger = Ledger(db_path)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+
+    names = ["t.py::e", "t.py::b", "t.py::d", "t.py::a", "t.py::c"]
+    ledger.record_gate_result(
+        GateResult(gate="tests", status="fail", collected=names), run_id=run_id
+    )
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", collected=None), run_id=run_id
+    )
+    ledger.record_gate_result(
+        GateResult(gate="census", status="pass", collected=[]), run_id=run_id
+    )
+
+    task_id = ledger.create_task(
+        run_id, spec_id="TE-9002", spec_sha="s" * 64, branch="saffron/TE-9002"
+    )
+    attempt_id = ledger.open_attempt(task_id)
+    ledger.record_gate_result(
+        GateResult(gate="tests", status="pass", collected=["t.py::x"]),
+        attempt_id=attempt_id,
+    )
+
+    expected = [names, None, []]
+    assert [r.collected for r in ledger.baseline_results(run_id)] == expected
+
+    reopened = Ledger(db_path)
+    assert [r.collected for r in reopened.baseline_results(run_id)] == expected
+    reopened.close()
+
+    assert [r.collected for r in ledger.attempt_results(attempt_id)] == [None]
+
+    rows = ledger._db.execute(
+        """SELECT g.gate FROM baseline_names b
+             JOIN gate_results g ON g.gate_result_id = b.gate_result_id
+            ORDER BY b.gate_result_id"""
+    ).fetchall()
+    assert [r["gate"] for r in rows] == ["tests", "census"]
+
+    ledger.close()
+
+
 def test_a_baseline_result_belongs_to_a_run(ledger, task):
     run_id, _ = task
     ledger.record_gate_result(
@@ -56,10 +101,12 @@ def test_a_baseline_result_belongs_to_a_run(ledger, task):
 def test_a_task_result_belongs_to_an_attempt(ledger, task):
     _, task_id = task
     ledger.record_gate_result(
-        GateResult(gate="types", status="pass"),
+        GateResult(gate="types", status="pass", collected=["t.py::a"]),
         attempt_id=ledger.open_attempt(task_id),
     )
-    assert [r.gate for r in ledger.task_results(task_id)] == ["types"]
+    results = ledger.task_results(task_id)
+    assert [r.gate for r in results] == ["types"]
+    assert results[0].collected is None
 
 
 def test_a_baseline_result_is_not_a_task_result(ledger, task):

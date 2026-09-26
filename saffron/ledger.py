@@ -3,17 +3,20 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the eleven kinds
+by `saffron/record/fold.py`, deletable at any time. Only the thirteen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
-to put in it.
+to put in it. `stack_layers`, `end_reviews` and `baseline_names` are a tenth,
+an eleventh and a twelfth table, outside that count: `DESIGN.md` §4.1 does
+not list any of them.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -135,6 +138,13 @@ CREATE TABLE IF NOT EXISTS gate_results (
     CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
 );
 
+-- One row per run result whose `GateResult.collected` is not None, as a JSON
+-- list. A result with no row reads None.
+CREATE TABLE IF NOT EXISTS baseline_names (
+    gate_result_id INTEGER PRIMARY KEY,
+    names          TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS failures (
     failure_id     INTEGER PRIMARY KEY,
     gate_result_id INTEGER NOT NULL REFERENCES gate_results(gate_result_id),
@@ -162,6 +172,30 @@ CREATE TABLE IF NOT EXISTS findings (
     verdict      TEXT,
     adjudication TEXT,
     rebuttal     TEXT
+);
+
+-- One layer of a stack batch, keyed on record keys with no reference to
+-- `batches`, so a fold into a fresh ledger places it.
+CREATE TABLE IF NOT EXISTS stack_layers (
+    task_key         TEXT PRIMARY KEY,
+    batch_key        TEXT,
+    position         INTEGER NOT NULL,
+    spec_id          TEXT NOT NULL,
+    predecessor_key  TEXT,
+    predecessor_head TEXT,
+    generation       INTEGER NOT NULL
+);
+
+-- One lens's outcome against one stack-batch layer (`review_stack`,
+-- `saffron/end_review.py`). Keyed on record keys, like `stack_layers`, so a
+-- fold into a fresh ledger places it with no reference to `batches`.
+CREATE TABLE IF NOT EXISTS end_reviews (
+    task_key TEXT NOT NULL,
+    lens     TEXT NOT NULL,
+    status   TEXT NOT NULL,
+    cost_usd REAL NOT NULL,
+    error    TEXT,
+    PRIMARY KEY (task_key, lens)
 );
 
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
@@ -413,7 +447,11 @@ class Ledger:
 
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
-        `fold_task` an upsert, and a no-op on a task with no row yet."""
+        `fold_task` an upsert, and a no-op on a task with no row yet.
+        `stack_layers` and `end_reviews` are keyed on `key` itself, so both
+        deletes run first."""
+        self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -614,6 +652,37 @@ class Ledger:
             return None
         if fact.kind == "task_policy":
             self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
+            return None
+        if fact.kind == "stack_layer":
+            # Every value but `batch_key` comes straight from the payload,
+            # never a fresh lookup, so a later push cannot change this row.
+            self._db.execute(
+                "INSERT INTO stack_layers (task_key, batch_key, position, "
+                "spec_id, predecessor_key, predecessor_head, generation) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    fact.batch_key,
+                    payload["position"],
+                    payload["spec_id"],
+                    payload["predecessor_key"],
+                    payload["predecessor_head"],
+                    payload["generation"],
+                ),
+            )
+            return None
+        if fact.kind == "end_review":
+            self._db.execute(
+                "INSERT INTO end_reviews (task_key, lens, status, cost_usd, error) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["lens"],
+                    payload["status"],
+                    payload["cost_usd"],
+                    payload["error"],
+                ),
+            )
             return None
         if fact.kind == "finding":
             if payload["position"] != self._finding_count(task_id) + 1:
@@ -877,6 +946,16 @@ class Ledger:
         ).fetchone()
         return int(row["high_water"])
 
+    def latest_batch_id(self) -> int:
+        """The high-water mark on `batches.batch_id`, `max_run_id`'s shape
+        one table over. `run_stack_batch` reads it once `run_batch` returns,
+        since a stop reason carries no id and `create_batch` never hands one
+        back through it."""
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(batch_id), 0) AS high_water FROM batches"
+        ).fetchone()
+        return int(row["high_water"])
+
     def attach_orphan_runs_to_batch(self, batch_id: int, since_run_id: int) -> int:
         """Stamp any unattached run minted after `since_run_id`, returning how
         many. Answers "the runner raised — did it leave a billed run behind?"
@@ -895,19 +974,28 @@ class Ledger:
             return cursor.rowcount
 
     def batch_spend(self, batch_id: int) -> float:
-        """The same join `close_batch` derives through:
-        `batches` -> `runs.batch_id` -> `tasks.run_id` -> `attempts.cost_usd_est`,
-        summed and coalesced to 0.0 — never read off `tasks.spent_usd_est`,
-        which is only as fresh as the last `set_task_state` and would silently
-        omit the turn that just closed (`task_spend`'s docstring, one level
-        down)."""
+        """The same join `close_batch` derives through, plus the end
+        review's own. The first term is `batches` -> `runs.batch_id` ->
+        `tasks.run_id` -> `attempts.cost_usd_est`, summed and coalesced to
+        0.0. The second is `end_reviews.cost_usd` for the rows whose
+        `task_key` names a `stack_layers` row filed under this batch's key.
+        An end-review lens opens no attempt, so the first term never sees
+        it. Never `tasks.spent_usd_est`, which is only as fresh as the last
+        `set_task_state` and drops a turn that just closed (`task_spend`'s
+        docstring, one level down)."""
         row = self._db.execute(
-            """SELECT COALESCE(SUM(a.cost_usd_est), 0.0) AS spent
-                 FROM attempts a
-                 JOIN tasks t ON t.task_id = a.task_id
-                 JOIN runs r ON r.run_id = t.run_id
-                WHERE r.batch_id = ?""",
-            (batch_id,),
+            """SELECT
+                 (SELECT COALESCE(SUM(a.cost_usd_est), 0.0)
+                    FROM attempts a
+                    JOIN tasks t ON t.task_id = a.task_id
+                    JOIN runs r ON r.run_id = t.run_id
+                   WHERE r.batch_id = ?)
+                 +
+                 (SELECT COALESCE(SUM(e.cost_usd), 0.0)
+                    FROM end_reviews e
+                    JOIN stack_layers sl ON sl.task_key = e.task_key
+                   WHERE sl.batch_key = ?) AS spent""",
+            (batch_id, str(batch_id)),
         ).fetchone()
         return float(row["spent"])
 
@@ -1140,6 +1228,68 @@ class Ledger:
         )
         self._commit_and_append(fact)
 
+    def record_stack_layer(
+        self,
+        task_id: int,
+        *,
+        position: int,
+        predecessor_task_id: int | None,
+        generation: int,
+    ) -> None:
+        """One layer of a stack batch (`run_stack_batch`, `saffron/batch.py`).
+
+        Looks up the predecessor's record key and pushed sha by its task_id,
+        once, and bakes both into the payload. Filed under the layer's own
+        key, never the predecessor's, and never carrying a task_id."""
+        spec_row = self._db.execute(
+            "SELECT spec_id FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if spec_row is None:
+            raise ValueError(f"no task {task_id} to record a stack layer for")
+        predecessor_key = None
+        predecessor_head = None
+        if predecessor_task_id is not None:
+            pred_row = self._db.execute(
+                "SELECT record_key, pushed_sha FROM tasks WHERE task_id = ?",
+                (predecessor_task_id,),
+            ).fetchone()
+            if pred_row is None:
+                raise ValueError(f"no predecessor task {predecessor_task_id}")
+            predecessor_key = pred_row["record_key"]
+            predecessor_head = pred_row["pushed_sha"]
+        fact = self._build_fact(
+            task_id,
+            "stack_layer",
+            {
+                "position": position,
+                "spec_id": spec_row["spec_id"],
+                "predecessor_key": predecessor_key,
+                "predecessor_head": predecessor_head,
+                "generation": generation,
+            },
+        )
+        self._commit_and_append(fact)
+
+    def record_end_review(
+        self,
+        task_id: int,
+        *,
+        lens: str,
+        status: str,
+        cost_usd: float,
+        error: str | None,
+    ) -> None:
+        """One lens's outcome against one layer (`review_stack`,
+        `saffron/end_review.py`). `status` is `reviewed`, `error` or
+        `not_reached`. Filed under the layer's own task, and the primary key
+        on `(task_key, lens)` refuses a lens recorded twice for one layer."""
+        fact = self._build_fact(
+            task_id,
+            "end_review",
+            {"lens": lens, "status": status, "cost_usd": cost_usd, "error": error},
+        )
+        self._commit_and_append(fact)
+
     def record_findings(self, task_id: int, findings: Sequence[Finding]) -> list[int]:
         """Every finding the review produced, anchored or not, in the order the
         lenses reported them. Returns the ids in that same order — REBUT names
@@ -1230,6 +1380,11 @@ class Ledger:
                         for f in result.failures
                     ],
                 )
+                if result.collected is not None:
+                    self._db.execute(
+                        "INSERT INTO baseline_names (gate_result_id, names) VALUES (?, ?)",
+                        (gate_result_id, json.dumps(result.collected)),
+                    )
             return gate_result_id
         owner = self._attempt_of(attempt_id, "record a gate result against")
         fact = self._build_fact(
@@ -1282,6 +1437,13 @@ class Ledger:
                 "SELECT * FROM failures WHERE gate_result_id = ? ORDER BY failure_id",
                 (row["gate_result_id"],),
             ).fetchall()
+            names_row = self._db.execute(
+                "SELECT names FROM baseline_names WHERE gate_result_id = ?",
+                (row["gate_result_id"],),
+            ).fetchone()
+            collected = (
+                json.loads(names_row["names"]) if names_row is not None else None
+            )
             results.append(
                 GateResult(
                     gate=row["gate"],
@@ -1289,6 +1451,7 @@ class Ledger:
                     tool=row["tool"],
                     summary=row["summary"] or "",
                     duration_ms=row["duration_ms"],
+                    collected=collected,
                     failures=[
                         Failure(
                             file=f["file"],

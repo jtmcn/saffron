@@ -79,14 +79,25 @@ class _ReportedWithProbe(_Reported):
     probe: Mutant
 
 
-_REPORTED: dict[str, type[_Reported]] = {"adequacy": _ReportedWithProbe}
+class _ReportedWithOptionalProbe(_Reported):
+    """The end review's Spec lens keeps the probe optional. A criterion
+    the diff satisfies cleanly names no wrong version at all. This field
+    is not required the way adequacy's is."""
+
+    probe: Mutant | None = None
+
+
+_REPORTED: dict[str, type[_Reported]] = {
+    "adequacy": _ReportedWithProbe,
+    "spec": _ReportedWithOptionalProbe,
+}
 
 
 def reported_model(lens: str) -> type[_Reported]:
     """The schema this lens's findings are validated against.
 
     Per lens rather than one shape with an optional field: only adequacy's
-    prompt asks for an edit and only its defect class is expressible as one.
+    and the end review's Spec lens's prompts ask for an edit.
     """
     return _REPORTED.get(lens, _Reported)
 
