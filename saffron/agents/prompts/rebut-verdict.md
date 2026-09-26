@@ -48,11 +48,11 @@ about.
 
 Read whatever you need first — the diff under "The diff, after the
 rebuttal" below is the change as it now stands, the implementer's fix
-included, and the files under /work are the code. Then reply with a single
-`<output>` block containing only JSON: an object with one key, `verdicts`,
-whose value is an array with **one entry per finding above** — a finding you
-leave out is not a withdrawal, it is a missing answer, and the host treats
-the whole turn as one. Each element has exactly these fields:
+included, and the files under /work are the code. Then answer in the
+required structured format: an object with one key, `verdicts`, whose value
+is an array with **one entry per finding above** — a finding you leave out
+is not a withdrawal, it is a missing answer, and the host treats the whole
+turn as one. Each element has exactly these fields:
 
 - `finding` (integer) — the number of the finding, exactly as listed above.
 - `verdict` (string) — `confirmed` or `withdrawn`.

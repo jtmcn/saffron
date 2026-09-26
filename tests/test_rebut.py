@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from saffron.agents.findings import Finding
-from saffron.phases import implement, rebut
+from saffron.phases import implement, rebut, review
 
 PROMPTS = Path(rebut.__file__).resolve().parents[1] / "agents" / "prompts"
 CONTEXT_MD = (Path(rebut.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
@@ -37,7 +37,7 @@ def _blocker(lens="correctness", **kwargs) -> Finding:
     return Finding.model_validate(base.model_dump() | kwargs)
 
 
-def _turn(text, cost=0.1):
+def _turn(text="", cost=0.1, structured_output=None):
     return implement.AttemptResult(
         session_id="sess-1",
         subtype="success",
@@ -45,19 +45,21 @@ def _turn(text, cost=0.1):
         num_turns=1,
         cost_usd_est=cost,
         text=text,
+        structured_output=structured_output,
     )
 
 
 def _block(payload):
+    """An `<output>` block, for the witnesses that prove it is never read."""
     return f"Done.\n<output>\n{json.dumps(payload)}\n</output>"
 
 
 def _rebuttals(*entries):
-    return _block({"rebuttals": list(entries)})
+    return _turn(structured_output={"rebuttals": list(entries)})
 
 
 def _verdicts(*entries):
-    return _block({"verdicts": list(entries)})
+    return _turn(structured_output={"verdicts": list(entries)})
 
 
 def _fixed(finding=1, argument="committed the fix"):
@@ -791,6 +793,116 @@ def test_unkept_fixes_takes_the_first_answer_to_a_duplicated_finding():
         moved=False,
     )
     assert rebut.unkept_fixes(result) == 1
+
+
+# --- backlog b-4e0868: REBUT's two turns read `structured_output`, not text ---
+
+
+def test_the_rebuttal_extraction_turn_asks_for_the_schema_and_records_its_structured_output():
+    record: list[dict] = []
+    # Text disagrees with structured_output on purpose: it argues finding 1,
+    # while the value marks it fixed. Only the value must be read.
+    extracted = _turn(
+        text=_block({"rebuttals": [_argued()]}),
+        structured_output={"rebuttals": [_fixed()]},
+    )
+    result = _run("Fixed.", extracted, _verdicts(_verdict()), record=record)
+    assert result.state == "READY_FOR_REVIEW"
+    assert [r.action for r in result.rebuttal.rebuttals] == ["fixed"]
+    assert len(record) == 3
+    assert record[0]["options"].get("output_format") is None
+    assert record[1]["options"]["output_format"] == {
+        "type": "json_schema",
+        "schema": rebut._Rebuttals.model_json_schema(),
+    }
+    without_format = {
+        k: v for k, v in record[1]["options"].items() if k != "output_format"
+    }
+    assert without_format == record[0]["options"]
+
+
+def test_each_verdict_session_asks_for_the_schema_and_records_its_structured_output():
+    blockers = [_blocker(lens=lens) for lens in review.LENSES]
+    fixes = [_fixed(n) for n in (1, 2, 3)]
+    # Each verdict session's text confirms its finding, and its
+    # structured_output withdraws it instead. Only the value must be read.
+    verdict_turns = [
+        _turn(
+            text=_block({"verdicts": [_verdict(n, verdict="confirmed")]}),
+            structured_output={"verdicts": [_verdict(n, verdict="withdrawn")]},
+        )
+        for n in (1, 2, 3)
+    ]
+    record: list[dict] = []
+    result = _run(
+        "Fixed all three.",
+        _rebuttals(*fixes),
+        *verdict_turns,
+        blockers=blockers,
+        record=record,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert len(record) == 5  # rebuttal, extraction, three verdict sessions
+    assert len(result.verdicts) == 3
+    for lens_verdicts in result.verdicts:
+        assert [v.verdict for v in lens_verdicts.verdicts] == ["withdrawn"]
+    for call in record[2:]:
+        options = dict(call["options"])
+        output_format = options.pop("output_format")
+        assert output_format == {
+            "type": "json_schema",
+            "schema": rebut._Verdicts.model_json_schema(),
+        }
+        expected = implement.agent_options(
+            system_prompt=options["system_prompt"],
+            max_turns=20,
+            budget_usd=2.0,
+            tools=review.REVIEW_TOOLS,
+        )
+        assert options == expected
+
+
+def test_a_rebuttal_turn_without_a_valid_structured_output_is_not_the_schema():
+    for bad_value in (
+        None,
+        {"rebuttals": [{"finding": 1, "action": "maybe", "argument": "a"}]},
+        json.dumps({"rebuttals": [{"finding": 1, "action": "fixed", "argument": "a"}]}),
+    ):
+        record: list[dict] = []
+        extracted = _turn(
+            text=_block({"rebuttals": [_argued()]}), structured_output=bad_value
+        )
+        result = _run("Fixed.", extracted, moved=False, record=record)
+        assert result.state == "REBUTTING"
+        assert result.rebuttal.error is not None
+        assert result.rebuttal.error.startswith("not the schema")
+        assert result.rebuttal.rebuttals == []
+        assert result.rebuttal.error in result.why
+        assert len(record) == 2
+
+
+def test_a_verdict_session_without_a_valid_structured_output_is_not_the_schema():
+    for bad_value in (
+        None,
+        {"verdicts": [{"finding": 1, "verdict": "maybe", "reason": "r"}]},
+        json.dumps(
+            {"verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "r"}]}
+        ),
+    ):
+        record: list[dict] = []
+        verdict_turn = _turn(
+            text=_block({"verdicts": [_verdict(verdict="confirmed")]}),
+            structured_output=bad_value,
+        )
+        result = _run(
+            "Fixed.", _rebuttals(_fixed()), verdict_turn, moved=True, record=record
+        )
+        assert result.state == "REBUTTING"
+        (lens_verdicts,) = result.verdicts
+        assert lens_verdicts.verdicts == []
+        assert lens_verdicts.error is not None
+        assert lens_verdicts.error.startswith("not the schema")
+        assert len(record) == 3
 
 
 def test_unkept_fixes_does_not_count_an_argued_first_answer_stray_fixed_later():

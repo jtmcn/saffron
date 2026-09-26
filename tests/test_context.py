@@ -429,7 +429,40 @@ def test_every_turn_prompt_file_is_loaded_by_something():
     assert {path.stem for path in context.TURNS_DIR.glob("*.md")} == set(TURN_PROMPTS)
 
 
-@pytest.mark.parametrize(("name", "constant"), sorted(TURN_PROMPTS.items()))
+# Pinned to what `rebut-extract`/`verdict` held before b-4e0868's rewrite, so
+# `census` reads the same case, not one test gone and a new one born.
+_STALE_IDS = {
+    "rebut-extract": (
+        "Record your rebuttal now. The block is a JSON object with one key, "
+        "`rebuttals`.\nIts value is an array with one entry per blocker. Each "
+        "entry holds `finding`\n(its number above), `action` and `argument`. "
+        'Set `action` to "fixed" if you\ncommitted a change for it, or to '
+        '"argued" if you are arguing the finding is\nwrong. Set `argument` to '
+        "what you changed, or to why the finding is wrong.\nA person reads "
+        "each `argument` in the pull request's disagreements table. Write\nit "
+        "in plain, specific language and state each fact once.\n\nEmit a "
+        "single <output> block as the last thing in your response. Do not "
+        "change\nfiles. Do not run commands. Do not include text outside the "
+        "block."
+    ),
+    "verdict": (
+        "Confirm or withdraw each of your findings now, given the rebuttal. "
+        "Read whatever\nyou need to. You hold no tool that can change "
+        "anything.\n\nEmit a single <output> block as the last thing in your "
+        "response. Do not change\nfiles. Do not run commands. Do not include "
+        "text outside the block."
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "constant"),
+    sorted(TURN_PROMPTS.items()),
+    ids=[
+        f"{name}-{_STALE_IDS.get(name, constant)}"
+        for name, constant in sorted(TURN_PROMPTS.items())
+    ],
+)
 def test_a_turn_prompt_constant_is_its_file(name, constant):
     assert constant == context.turn_prompt(name)
 
@@ -447,7 +480,29 @@ def test_a_loaded_turn_prompt_keeps_no_unfilled_slot(name):
     "name", ["plan", "review", "verdict", "rebut-extract", "notes"]
 )
 def test_a_prompt_declaring_the_slot_gets_the_extraction_rules(name):
-    assert context.turn_prompt("extraction") in context.turn_prompt(name)
+    """REBUT's two turns dropped the shared `{extraction}` slot for
+    `output_format` instead (backlog b-4e0868). Every other turn still gets
+    the slot's rules."""
+    extraction = context.turn_prompt("extraction")
+    prompt = context.turn_prompt(name)
+    if name in ("verdict", "rebut-extract"):
+        assert extraction not in prompt
+    else:
+        assert extraction in prompt
+
+
+def test_rebuts_prompts_ask_for_no_output_block():
+    """REBUT's two structured turns get their schema from `output_format`.
+    Neither prompt sends them chasing an `<output>` block or the shared
+    rules built for a text turn."""
+    verdict_system = (context.PROMPTS_DIR / "rebut-verdict.md").read_text()
+    for text in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT, verdict_system):
+        assert "<output>" not in text
+        assert "output block" not in text.lower()
+        assert artifacts.EXTRACTION_PROMPT not in text
+    lines = rebut.EXTRACT_PROMPT.splitlines()
+    assert "Do not change files." in lines
+    assert "Do not run commands." in lines
 
 
 def test_the_rebuttal_prompt_still_formats_its_blockers():

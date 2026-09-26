@@ -106,11 +106,70 @@ def test_the_result_event_carries_what_the_supervisor_bounds_on():
         "session_id": "sess-1",
         "terminal_reason": "completed",
         "is_error": False,
+        "structured_output": None,
         "input_tokens": 200,
         "output_tokens": 80,
         "cache_read_input_tokens": 500,
         "cache_creation_input_tokens": 25,
     }
+
+
+def test_the_result_event_carries_structured_output_whole():
+    """`structured_output` reaches `run_agent` exactly as the SDK reported it,
+    never through `_clip`, which would cut a 200-char string mid-value."""
+    nested = {"argument": "x" * 500}
+    with_value = SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id="s1",
+        total_cost_usd=0.1,
+        terminal_reason="completed",
+        is_error=False,
+        structured_output=nested,
+    )
+    with_none = SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id="s2",
+        total_cost_usd=0.1,
+        terminal_reason="completed",
+        is_error=False,
+        structured_output=None,
+    )
+    without_attr = SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id="s3",
+        total_cost_usd=0.1,
+        terminal_reason="completed",
+        is_error=False,
+    )
+    for message, expected in (
+        (with_value, nested),
+        (with_none, None),
+        (without_attr, None),
+    ):
+        (event,) = runner.events(message)
+        assert "structured_output" in event
+        assert event["structured_output"] == expected
+
+    (event,) = runner.events(with_value)
+    line = json.dumps(event)
+
+    def _exec_stream(container, command, *, stdin_data, on_line, **_kwargs):
+        on_line(line)
+        return runtime.Completed(0, "", "")
+
+    attempt = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={"system_prompt": "s", "max_turns": 1},
+        spec_id="SY-1",
+        exec_stream=_exec_stream,
+        reap_cell=_no_reap,
+        exec_=_no_exec,
+    )
+    assert attempt.structured_output == nested
 
 
 def test_the_result_event_carries_the_sessions_token_counts():
@@ -637,7 +696,7 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     # Every prompt path a raising session received. Each must be gone after.
     raised_paths: list[str] = []
 
-    def _result_message():
+    def _result_message(structured_output=None):
         return SimpleNamespace(
             subtype="success",
             num_turns=1,
@@ -645,19 +704,18 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
             total_cost_usd=0.05,
             terminal_reason="completed",
             is_error=False,
+            structured_output=structured_output,
         )
 
     def _query_valid(finding):
         async def _query(prompt, options):
-            payload = json.dumps(
-                {
-                    "verdicts": [
-                        {"finding": finding, "verdict": "withdrawn", "reason": "ok"}
-                    ]
-                }
-            )
-            yield _assistant(SimpleNamespace(text=f"<output>{payload}</output>"))
-            yield _result_message()
+            payload = {
+                "verdicts": [
+                    {"finding": finding, "verdict": "withdrawn", "reason": "ok"}
+                ]
+            }
+            yield _assistant(SimpleNamespace(text="Withdrawing."))
+            yield _result_message(structured_output=payload)
 
         return _query
 
@@ -682,31 +740,30 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     def _es(query):
         return _exec_stream_via_runner(monkeypatch, _stub_module(query))
 
-    def _rebuttal_block(n):
-        payload = json.dumps(
-            {
-                "rebuttals": [
-                    {"finding": i, "action": "argued", "argument": "a"}
-                    for i in range(1, n + 1)
-                ]
-            }
-        )
-        return f"<output>{payload}</output>"
+    def _rebuttal_payload(n):
+        return {
+            "rebuttals": [
+                {"finding": i, "action": "argued", "argument": "a"}
+                for i in range(1, n + 1)
+            ]
+        }
 
-    def _agent(rebuttal_texts, verdict_scripts):
+    def _agent(rebuttal_payload, verdict_scripts):
         calls = {"n": 0}
         scripts = iter(verdict_scripts)
 
         def agent(container, *, prompt, options, resume=None, emit, **_kwargs):
             calls["n"] += 1
             if resume is not None:
+                # The first resumed call is the rebuttal attempt, sent no
+                # `output_format`. The second is its extraction turn.
                 return implement.AttemptResult(
                     session_id="sess-1",
                     subtype="success",
                     terminal_reason="completed",
                     num_turns=1,
                     cost_usd_est=0.05,
-                    text=rebuttal_texts[calls["n"] - 1],
+                    structured_output=rebuttal_payload if calls["n"] == 2 else None,
                 )
             exec_stream, reap_cell, exec_ = next(scripts)
             return implement.run_agent(
@@ -740,10 +797,7 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
             rerun_gates=lambda: None,
             critic_container=lambda: "critic-cell",
             diff=lambda _critic: "diff",
-            agent=_agent(
-                [_rebuttal_block(len(blockers)), _rebuttal_block(len(blockers))],
-                verdict_scripts,
-            ),
+            agent=_agent(_rebuttal_payload(len(blockers)), verdict_scripts),
             spec_id="SY-1",
             reviewed_diff="diff",
             emit=lambda _e: None,

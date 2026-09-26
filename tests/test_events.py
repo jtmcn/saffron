@@ -2292,13 +2292,18 @@ def _lines_from_cell(*raw_lines: str):
     return _exec
 
 
-def _scripted_agent(*texts: str):
-    """`Callable[..., implement.AttemptResult]`: one canned turn per text, for
-    driving `review.run_review`/`rebut.run_rebut` without a real agent."""
-    scripted = iter(texts)
+def _scripted_agent(*turns):
+    """`Callable[..., implement.AttemptResult]`: one canned turn per entry, for
+    driving `review.run_review`/`rebut.run_rebut` without a real agent. A
+    string becomes a text turn. An `AttemptResult` passes through unchanged,
+    for a caller scripting a structured turn (§5.3, backlog b-4e0868)."""
+    from saffron.phases.implement import AttemptResult
+
+    scripted = iter(turns)
 
     def run(container, *, prompt, options, **kwargs):
-        return _turn(next(scripted))
+        turn = next(scripted)
+        return turn if isinstance(turn, AttemptResult) else _turn(turn)
 
     return run
 
@@ -2408,11 +2413,15 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
         diff=lambda _critic: diff,
         agent=_scripted_agent(
             "ok",
-            _block(
-                {"rebuttals": [{"finding": 1, "action": "fixed", "argument": "done"}]}
+            _turn(
+                structured_output={
+                    "rebuttals": [{"finding": 1, "action": "fixed", "argument": "done"}]
+                }
             ),
-            _block(
-                {"verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "ok"}]}
+            _turn(
+                structured_output={
+                    "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "ok"}]
+                }
             ),
         ),
         spec_id="s",
