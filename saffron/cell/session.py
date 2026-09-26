@@ -1288,7 +1288,8 @@ def _gate_cell_suite(
         return suite.against(CellTree(container, cwd=repo), baseline)
 
 
-def _probe_adequacy(
+def probe_findings(
+    targets: list[Finding],
     *,
     spec: CellSpec,
     repo: Path,
@@ -1299,32 +1300,30 @@ def _probe_adequacy(
     base_results: Sequence[GateResult],
     gates: dict[str, Path],
     patch: str,
-    reviews: list[review.LensReview],
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> list[dict]:
-    """Every anchored adequacy finding's vacuity probe, asked once each
-    (backlog item 117), in a Gate-only cell entered *after* REVIEW's own
-    critic cell is torn down — never inside it, the hole `SA-0087` closed.
-    `base_results` is the task's pre-turn baseline (b-19b255), and a kill
-    counts only against names `added_tests` reads from it and this run.
+    """Each finding in `targets` carries a probe. Each is asked once per
+    distinct edit (backlog item 117), in a Gate-only cell entered after
+    REVIEW's own critic cell is torn down. `base_results` is the task's
+    pre-turn baseline (b-19b255), and a kill counts only against names
+    `added_tests` reads from it and this run.
 
-    Decides each finding's `severity`/`probe_verdict` in place before
+    Decides each finding's `severity` and `probe_verdict` in place before
     returning, so the caller's later `ledger.record_findings` sees the
-    decided findings. Returns `probes.json`'s own list; writes nothing.
+    decided findings. Returns `probes.json`'s own list and writes nothing.
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
 
-    targets = review.adequacy_probes(reviews)
     if not targets:
         return []
     # Captured before anything is decided, or a promotion loses it.
     filed = {id(f): f.severity for f in targets}
     by_probe: dict[tuple[str, str, str], list[Finding]] = {}
     for f in targets:
-        assert f.probe is not None  # adequacy_probes already filtered this
+        assert f.probe is not None  # every caller filters to probed findings first
         by_probe.setdefault(review.probe_key(f.probe), []).append(f)
 
     entries: list[dict] = []
@@ -1447,6 +1446,41 @@ def _probe_adequacy(
                 break
             decide(p, result)
     return entries
+
+
+def _probe_adequacy(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    test_paths: Sequence[str],
+    base_results: Sequence[GateResult],
+    gates: dict[str, Path],
+    patch: str,
+    reviews: list[review.LensReview],
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> list[dict]:
+    """REVIEW's own caller of `probe_findings`, over its anchored adequacy
+    findings alone. Kept so REVIEW's call site and the stack-name checks
+    in `tests/test_session.py` need no change.
+    """
+    return probe_findings(
+        review.adequacy_probes(reviews),
+        spec=spec,
+        repo=repo,
+        mirror=mirror,
+        gates_dir=gates_dir,
+        thread_env=thread_env,
+        test_paths=test_paths,
+        base_results=base_results,
+        gates=gates,
+        patch=patch,
+        created=created,
+        note=note,
+    )
 
 
 def _apply_criterion_probes(
