@@ -74,12 +74,26 @@ class _ReportedWithProbe(_Reported):
     """Adequacy's variant. The probe is required because the number it feeds is
     only computable when every finding carries one — an optional field filled
     sometimes and not others makes the measurement a phrasing lottery, which is
-    the failure the corpus exists to catch."""
+    the failure the corpus exists to catch. Adequacy was once the only lens
+    that asked for an edit here. The end review's Spec lens now asks for
+    one too, through its own optional model below.
+    """
 
     probe: Mutant
 
 
-_REPORTED: dict[str, type[_Reported]] = {"adequacy": _ReportedWithProbe}
+class _ReportedWithOptionalProbe(_Reported):
+    """The end review's Spec lens keeps the probe optional. A criterion
+    the diff satisfies cleanly names no wrong version at all. This field
+    is not required the way adequacy's is."""
+
+    probe: Mutant | None = None
+
+
+_REPORTED: dict[str, type[_Reported]] = {
+    "adequacy": _ReportedWithProbe,
+    "spec": _ReportedWithOptionalProbe,
+}
 
 
 def reported_model(lens: str) -> type[_Reported]:
@@ -87,6 +101,8 @@ def reported_model(lens: str) -> type[_Reported]:
 
     Per lens rather than one shape with an optional field: only adequacy's
     prompt asks for an edit and only its defect class is expressible as one.
+    The end review's Spec lens asks for an edit too now, so it gets its
+    own model here as well.
     """
     return _REPORTED.get(lens, _Reported)
 
