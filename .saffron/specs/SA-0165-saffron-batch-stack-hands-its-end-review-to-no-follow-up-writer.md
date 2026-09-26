@@ -60,7 +60,7 @@ acceptance:
       the pinned `base_sha` into `out_dir / "follow-ups" / <batch key>`, and
       loads that export's policy. The system prompt is
       `spec_review.spec_writer_system_prompt` of that policy over
-      `context.PROMPTS_DIR`, core's writer prompt (`SA-0160`). It is never
+      `context.PROMPTS_DIR`, core's writer prompt (`SA-0176`). It is never
       filled from `repo`'s policy or the one at the mirror's `HEAD`. It then calls `follow_up.write_follow_ups` once, with the
       ledger, the stack and the batch key. Its `mirror` is the pinned mirror,
       `specs_dir` the export's `.saffron/specs`, and `repo_id` the pinned
@@ -169,12 +169,13 @@ number below was read at `68892367`, where none of them exist.
   `reserve_usd` of `--budget` times `end_review.RESERVE_SHARE`.
   `_print_batch_plan` takes `reserve_usd`, and prints `budget $<budget>,
   reserve $<reserve>, until <deadline>` when it is given.
+- From `SA-0176`: `spec_review.spec_writer_system_prompt(policy, *,
+  prompts_dir)` fills core's `saffron/agents/prompts/spec-writer.md` from
+  a `Policy`, and names no repo file.
 - From `SA-0160`: `spec_review` holds `SpecWriterSession`,
   `run_spec_writer(container, *, system_prompt, prompt, agent)` and
   `SPEC_WRITER_TIMEOUT_S`, the writer turn's wall clock of 3600 s.
-  `spec_writer_system_prompt(policy, *, prompts_dir)` fills core's
-  `saffron/agents/prompts/spec-writer.md` from a `Policy`, and names no
-  repo file. `cli._stack_revise` fills the writer prompt the way this
+  `cli._stack_revise` fills the writer prompt the way this
   spec does, except that it reads a missing `policy.yaml` as `Policy()`. No policy key names a prompt, and no start refusal reads
   one.
 - From `SA-0164`: the `revise` route, and `_stack_revise` wired into the
@@ -320,7 +321,7 @@ spec creates the list, and `SA-0174` must pass that same object to
 
 - **The host logic.** Qualification's call, the user prompt, the
   refusals, the next id and the sub-cap are `SA-0161`'s.
-- **Core's writer prompt.** `SA-0160` writes `spec-writer.md` and its
+- **Core's writer prompt.** `SA-0176` writes `spec-writer.md` and its
   fill. This repo's `.claude/agents/spec-writer.md` stays the hand path's
   own, and nothing here reads it.
 - **Running the follow-ups.** `SA-0162` appends them on top as generation

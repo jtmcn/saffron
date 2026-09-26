@@ -343,8 +343,8 @@ login shell resets it there, so `pytest` does not resolve. `git clone -q
 path, ran a test in the clone. The session's prompt tells it so. Those
 prompts are core's, and name no repo file, tool or URL (ADR 7,
 principle 41). `SA-0156`'s review prompt carries three lines for this,
-quoted verbatim there, and they name no tool path. `SA-0160` points at
-the same lines for its writer. This spec writes no prompt text.
+quoted verbatim there, and they name no tool path. `SA-0176` puts
+the same lines in core's writer prompt. This spec writes no prompt text.
 
 ## Out of scope
 

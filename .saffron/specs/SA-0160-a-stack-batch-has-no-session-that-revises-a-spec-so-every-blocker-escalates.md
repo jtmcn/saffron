@@ -3,15 +3,12 @@ id: SA-0160
 title: A stack batch has no session that revises a spec, so a build or witness blocker can only escalate
 type: feature
 priority: 1
-depends_on: [SA-0150]
+depends_on: [SA-0176]
 touches:
   - saffron/spec_review.py
   - saffron/cli.py
-  - saffron/agents/prompts/spec-writer.md
-  - saffron/agents/prompts/turns/spec-writer-extract.md
   - tests/test_spec_review.py
   - tests/test_cli.py
-  - tests/test_context.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -43,6 +40,8 @@ forbidden:
   - saffron/phases/**
   - saffron/agents/*.py
   - saffron/agents/prompts/spec-review.md
+  - saffron/agents/prompts/spec-writer.md
+  - saffron/agents/prompts/turns/spec-writer-extract.md
   - saffron/agents/prompts/turns/spec-review-extract.md
   - saffron/agents/prompts/turns/extraction.md
   - tests/test_batch.py
@@ -50,6 +49,7 @@ forbidden:
   - tests/test_scheduler.py
   - tests/test_ledger.py
   - tests/test_policy.py
+  - tests/test_context.py
   - tests/test_session.py
   - tests/test_task.py
   - tests/test_review.py
@@ -88,42 +88,11 @@ acceptance:
       whatever block it holds. A turn that raises `implement.AgentFailed`
       otherwise gives its message as `error` and no text. A first turn with
       no `session_id` gives an error, no text and no extraction turn. An
-      extraction turn with no such block goes to criterion 5's re-ask. Any
+      extraction turn with no such block goes to criterion 3's re-ask. Any
       other raise propagates. The witness drives each case, from either
       turn, and reset values of 10**20, 0, -5, `True`, a float, `None` and
       a string.
     witness: tests/test_spec_review.py::test_a_spec_writer_session_returns_the_extraction_turns_spec
-  - claim: >-
-      `spec_review.spec_writer_system_prompt(policy, *, prompts_dir)` reads
-      `prompts_dir / SPEC_WRITER_PROMPT` when called, and
-      `SPEC_WRITER_PROMPT` is `spec-writer.md`. It fills four slots with
-      `str.format`: `{gates}`, `{protected}`, `{elevate_on}` and
-      `{ceilings}`. Each slot holds exactly the lines
-      `spec_review_system_prompt` fills that slot with for the same policy
-      and the same `size._CEILINGS`, read when called. Braces inside a value
-      reach the prompt unchanged. The witness drives a policy with two
-      gates, one advisory, and an empty `Policy()`, under a patched
-      ceiling, over one template written as both files. It then rewrites
-      the writer's template alone.
-    witness: tests/test_spec_review.py::test_the_spec_writer_system_prompt_fills_the_same_declarations_as_the_reviews
-  - claim: >-
-      The prompt files exist and serve their loaders.
-      `spec_writer_system_prompt` over `context.PROMPTS_DIR` leaves none of
-      the four slots unfilled, and holds each of the four filled blocks for
-      a policy that declares every list. The raw `spec-writer.md` holds each
-      of the three account lines `SA-0156` quotes, verbatim, each as a
-      whole line. It holds the line "Measure any list of wrong builds you
-      add with a throwaway script." as a whole line too.
-      The raw `spec-writer-extract.md` holds the Problem's two lines, "Put
-      the whole spec file in the block, frontmatter first." and "Do not
-      wrap the file in a code fence.", each as a whole line.
-      `SPEC_WRITER_EXTRACT_PROMPT` is
-      `context.turn_prompt("spec-writer-extract")`, and holds
-      `artifacts.EXTRACTION_PROMPT`. Neither
-      raw file holds any of the fifteen strings `SA-0175`'s criterion 4
-      lists. The witness checks each of those fifteen in each file,
-      case-insensitively.
-    witness: tests/test_spec_review.py::test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool
   - claim: >-
       `cli._stack_revise(*, pinned, repo, out_dir)` returns a callable that
       takes a candidate, its layer, the spec's current text as
@@ -185,23 +154,13 @@ tree the spec would be cut from
 spec returns through the extraction turn and is hashed on arrival
 (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:162-163`).
 
-**Core owns the writer's prompt.** ADR 7 makes the spec prompts core's.
-They live "in `saffron/agents/prompts/`"
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-64`).
-"A target repo supplies none of them, so ADR 2 holds. They name no repo
-file, tool or URL"
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:64-65`).
-A repo's facts reach them "as input the host fills from what the repo
-declares in `.saffron/`", read at the `base_sha` export
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:65-67`).
-Core "demands nothing of a repo"
-(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:195-196`).
-The design record adds that this repo's `.claude/agents/spec-writer.md`
-stays the hand path's own and differs from core's by design
-(`docs/superpowers/specs/2026-09-23-stack-batch-design.md:164-168`). So
-this spec writes `saffron/agents/prompts/spec-writer.md` and fills it from
-the policy at the pinned `base_sha`, as `SA-0175` fills `spec-review.md`.
-No policy key names it, and a batch is never refused for want of one.
+**Core owns the writer's prompt, and `SA-0176` writes it.** ADR 7 makes
+the spec prompts core's, in `saffron/agents/prompts/`
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:63-67`).
+`SA-0176` adds `spec-writer.md`, its extraction turn prompt and the fill.
+This spec runs them. It fills the system prompt from the policy at the
+pinned `base_sha`, as `SA-0156` fills the review's. No policy key names
+the prompt, and a batch is never refused for want of one.
 
 **The writer's structured output keeps principle 18.** ADR 7 says "A spec
 writer returns its spec through a separate extraction turn"
@@ -214,23 +173,23 @@ session runs commands in its critic cell, as a hand draft does. It
 measures any wrong-build list it adds with a throwaway script. The cell is
 torn down after the session. `SA-0169` runs that Bash as an unprivileged
 user. `SA-0156` measured three account lines that tell a session so, and
-quotes them in its Problem. Core's writer prompt carries those same three
-lines. The chain runs `SA-0168`, `SA-0169`, `SA-0175`, then `SA-0156`.
+quotes them in its Problem. `SA-0176`'s writer prompt carries those same
+three lines.
 
 A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
 from the last layer, its **predecessor**.
 
-**Revision rounds take two specs.** This first one builds the session,
-core's writer prompt and the callable. `SA-0164` builds the `revise`
+**Revision rounds take two specs, after the prompt.** `SA-0176` writes
+core's writer prompt. This spec builds the session and the callable. `SA-0164` builds the `revise`
 route, the rounds in `run_stack_batch`, the record of each revision, and
 the wiring into `saffron batch --stack`. `SA-0161` and `SA-0165` then write
-follow-up specs. They run the same session with core's writer prompt and a
+follow-up specs. They run the same session with `SA-0176`'s prompt and a
 user prompt of their own.
 
-**What the tree base holds.** This spec's tree base is `SA-0150`'s head.
-Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156` and
-`SA-0150`. Every line number below was read at `18c72f36`, where no chain
+**What the tree base holds.** This spec's tree base is `SA-0176`'s head.
+Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156`,
+`SA-0150` and `SA-0176`. Every line number below was read at `ee4f8c07`, where no chain
 code from `SA-0142` on exists. So `cli.py` and `spec_review.py` are cited
 by symbol where the chain edits them. This spec consumes these names.
 
@@ -247,10 +206,12 @@ by symbol where the chain edits them. This spec consumes these names.
   `UNREADABLE_RESET` of 1, and `SPEC_SESSION_TOOLS`, which is `Read`,
   `Glob`, `Grep` and `Bash`. A rejected window in `run_spec_review` gives
   no error and a `resets_at` of the clean `int` above 0, or
-  `UNREADABLE_RESET`. `spec_review_system_prompt(policy, *, prompts_dir)`
-  fills `{gates}`, `{protected}`, `{elevate_on}`, `{ceilings}` and
-  `{tags}` in core's `spec-review.md`. `SPEC_REVIEW_PROMPT` is that file's
-  name.
+  `UNREADABLE_RESET`.
+- From `SA-0176`, in `saffron/spec_review.py`:
+  `spec_writer_system_prompt(policy, *, prompts_dir)`, which fills core's
+  `spec-writer.md` from a `Policy`, and `SPEC_WRITER_EXTRACT_PROMPT`, the
+  extraction turn's prompt. The account lines and the rule on a throwaway
+  script are in that system prompt.
 - From `SA-0156`: `cli._stack_review(*, pinned, repo, out_dir)`, whose
   callable exports `.saffron/` at the pinned `base_sha`, reads a missing
   `policy.yaml` as `Policy()`, and runs its review in a `layer_cell` with
@@ -287,13 +248,8 @@ shape, and `SA-0164` counts its error.
 A spec that quotes a closing tag loses its tail there, and a draft block or
 a tag in prose moves its start. So this spec reads its own block.
 `hash_artifact` is the SHA-256 of the text's bytes
-(`saffron/agents/artifacts.py:205-206`). `context.turn_prompt(name)` reads
-`prompts/turns/<name>.md` and fills its `{extraction}` slot with the shared
-rules (`saffron/agents/context.py:156-171`). `tests/test_context.py` holds
-every turn file to a constant that loads it
-(`tests/test_context.py:413-429`), and lists the turns that carry the
-shared rules (`tests/test_context.py:446-450`). `context.PROMPTS_DIR` is
-the one locator for the prompt tree (`saffron/agents/context.py:21`).
+(`saffron/agents/artifacts.py:205-206`). `context.PROMPTS_DIR` is the one
+locator for the prompt tree (`saffron/agents/context.py:21`).
 
 **How a turn is bounded.** `agent_options` sets `max_budget_usd` per turn,
 not per session (`saffron/phases/implement.py:97-140`). `AgentFailed`
@@ -308,7 +264,7 @@ its destination first (`saffron/repos/mirror.py:196`).
 
 ## Problem
 
-Build four things.
+Build two things.
 
 1. **The session.** In `saffron/spec_review.py`, add these.
    - `SpecWriterSession`, a frozen dataclass of `text: str`,
@@ -318,39 +274,14 @@ Build four things.
    - `SPEC_WRITER_MAX_TURNS` of 120, `SPEC_WRITER_BUDGET_USD` of 17.0,
      `SPEC_WRITER_EXTRACT_BUDGET_USD` of 1.5, `SPEC_WRITER_SESSION_USD` as
      their sum, and `SPEC_WRITER_TIMEOUT_S` of 3600.0.
-   - `run_spec_writer`, as criteria 1 and 5 state. Build the re-ask as
+   - `run_spec_writer`, as criteria 1 and 3 state. Build the re-ask as
      `SA-0175`'s `run_spec_review` builds its own. Read the block with a
      regular expression local to this module. It opens on the first
      `<output>` that optional whitespace and `---` follow, and reads
      greedily to the last `</output>`. It takes any prompt, so `SA-0161`
      can run it for a follow-up.
-2. **The system prompt.** Add `SPEC_WRITER_PROMPT` and
-   `spec_writer_system_prompt`, as criterion 2 states. Fill each slot with
-   the lines `SA-0175`'s fill builds. Sharing that code within the module
-   is the cell's choice. Fill the slots as `format` arguments, never by
-   substituting text and formatting the result.
-3. **The prompt files.** Write `saffron/agents/prompts/spec-writer.md`, as
-   the notes below say. Add
-   `saffron/agents/prompts/turns/spec-writer-extract.md`. It holds these
-   two lines, each word for word and on a line of its own.
-
-   ```
-   Put the whole spec file in the block, frontmatter first.
-   Do not wrap the file in a code fence.
-   ```
-
-   It asks for nothing else in the block. It ends with the `{extraction}`
-   slot, and holds no other `{word}` brace pair, since
-   `test_a_loaded_turn_prompt_keeps_no_unfilled_slot` reads one as a slot
-   (`tests/test_context.py:437-443`). Load it at import into
-   `SPEC_WRITER_EXTRACT_PROMPT`, as `rebut.EXTRACT_PROMPT` is loaded
-   (`saffron/phases/rebut.py:38`). Add `"spec-writer-extract"` to
-   `tests/test_context.py`'s `TURN_PROMPTS` with that constant, and to the
-   names its extraction-rules test lists.
-   `test_every_turn_prompt_file_is_loaded_by_something` fails without the
-   first.
-4. **The callable.** In `saffron/cli.py`, add `_stack_revise`, as
-   criterion 4 states. Export `.saffron/` with
+2. **The callable.** In `saffron/cli.py`, add `_stack_revise`, as
+   criterion 2 states. Export `.saffron/` with
    `git_mirror.export_saffron_dir` into `out_dir / "spec-write" / <spec
    id>`, as `_stack_review` does into its own directory. Load its policy
    with `load_policy`, or take `Policy()` where the export holds no
@@ -387,6 +318,9 @@ are `pending_symbols` entries.
 
 - **This repo's hand path.** `.claude/agents/spec-writer.md` stays as it
   is. Core never reads it.
+- **Core's writer prompt.** `SA-0176` writes `spec-writer.md`,
+  `spec-writer-extract.md` and `spec_writer_system_prompt`. This spec
+  edits none of them.
 - **`SA-0175`'s prompt and session.** This spec edits neither
   `spec-review.md` nor `spec-review-extract.md`, and changes nothing
   `run_spec_review` or `spec_review_system_prompt` does.
@@ -413,7 +347,7 @@ are `pending_symbols` entries.
   revision (principle 15).
 - **Follow-up specs.** `SA-0161` builds their user prompt and host logic
   around `run_spec_writer`, and reserves by `SPEC_WRITER_SESSION_USD`.
-  `SA-0165` runs them with `spec_writer_system_prompt`.
+  `SA-0165` runs them with `SA-0176`'s `spec_writer_system_prompt`.
 - **Concurrent sessions.** They wait for per-cell network names
   (b-6a692d).
 - **The vocabulary.** `CONTEXT.md` names the `spec-writer` agent only as a
@@ -423,50 +357,14 @@ are `pending_symbols` entries.
 ## Notes for the agent
 
 **Every criterion is new code.** No text at the tree base runs a spec
-writer session, fills a writer prompt or builds a revision callable. So
+writer session or builds a revision callable. So
 each criterion declares a witness and no mutant, and `witness` reports
 `skip` for each.
 
 **Every witness fails with the source reverted.** Each calls or reads a
 name this spec adds. Import each new name inside the test body. A
 module-scope import makes the reverted run a collection error, which
-`revert` reads as `skip`. The new `TURN_PROMPTS` entry reads
-`spec_review` at module scope, and is not a declared witness.
-
-**What `spec-writer.md` says.** It is core's, so it names no repo file,
-tool or URL, and none of criterion 3's fifteen strings. That bars
-`.saffron/` too, since `saffron/` is one of them. The user prompt names the
-spec's path. Keep the file within 50 lines. It holds each of the four
-slots once, and no other brace. It covers these, in words of its own.
-
-- It addresses the session as "you", and never writes "the reviewer".
-- You write one spec file: YAML frontmatter between `---` fences, then a
-  body. Each acceptance criterion holds a claim and a witness test.
-- The user prompt takes one of two forms. A `review:` line asks you to
-  revise the spec it names against the review it quotes. Apply each
-  blocker and concern that holds at the base, and keep the spec's
-  purpose. A `context:` line asks for a new spec from the findings it
-  gives.
-- Each witness fails a plausible wrong build, and a claim over a set
-  drives every member. New code declares a witness and no mutant.
-- Every sentence about current code names a file and line you read at
-  the base.
-- Every file the change edits sits in `touches`, and none sits in
-  `forbidden` or `{protected}`. A file the change must not edit goes in
-  `forbidden`.
-- `pending_symbols` names each new name that nothing calls until a later
-  spec lands, as `<path>::<name>`. A name left out can fail a declared
-  gate that reads unused code.
-- The size estimate stays under its type's ceiling in
-  `{ceilings}`. The size check blocks when a changed path matches
-  `{elevate_on}`.
-- A line that ends in a colon, then `{gates}` on the lines below it, says
-  which gates the repo declares.
-- The three account lines `SA-0156` quotes, each on its own line and
-  word for word. Then "Measure any list of wrong builds you add with a
-  throwaway script." on its own line.
-- You write no file that outlives the cell. The host asks for the whole
-  spec in a later turn.
+`revert` reads as `skip`.
 
 **Criterion 1's witness** calls `run_spec_writer` with the container `c-1`,
 the system prompt `sys` and the prompt `p`. Its agent double is one small
@@ -571,72 +469,7 @@ new:
   where it cannot be shaped
 - any of the five constants at another value
 
-**Criterion 2's witness** writes one template into a `tmp_path` prompts
-directory, as both `spec-review.md` and `spec-writer.md`:
-``"G\n{gates}\nP\n{protected}\nE\n{elevate_on}\nC\n{ceilings}\n"``. It
-builds `Policy` directly, never through `load_policy`. The first policy is
-`SA-0175`'s criterion 3 witness's: `tests` then `lint`, with `lint` not
-blocking, `protected` `uv.lock` then `docs/{a,b}.md`, and `elevate_on`
-`saffron/ledger.py`. It sets `size._CEILINGS["feature"]` to 2999 with
-`monkeypatch.setitem`. It asserts `SPEC_WRITER_PROMPT` is
-`spec-writer.md`. For the first policy and for `Policy()`, the writer's
-fill equals `spec_review_system_prompt` of the same policy over the same
-directory. The first policy's fill holds ``- `lint` (advisory)``,
-``- `docs/{a,b}.md` `` and ``- `feature`: 2999 changed tokens``. Last, it
-rewrites `spec-writer.md` alone as ``"W\n{gates}\n"``, and the writer's
-fill is exactly ``"W\n- `tests`\n- `lint` (advisory)\n"``. These fail it:
-
-- `SPEC_REVIEW_PROMPT` read in place of `SPEC_WRITER_PROMPT`
-- the template read once at import, or from `context.PROMPTS_DIR`
-- gates or lists sorted
-- an empty list filled with an empty string, not `none`
-- the ceilings written out by hand, which misses 2999
-- the values substituted and the result then formatted, which fails on
-  `{a,b}`
-
-**Criterion 3's witness** fills the real template with criterion 2's
-first policy, without the `setitem`. It asserts no `{gates}`,
-`{protected}`, `{elevate_on}` or `{ceilings}` is left. The result
-holds each of these four blocks.
-
-```
-- `tests`
-- `lint` (advisory)
-```
-
-```
-- `uv.lock`
-- `docs/{a,b}.md`
-```
-
-```
-- `saffron/ledger.py`
-```
-
-```
-- `feature`: 3000 changed tokens
-```
-
-It reads `spec-writer.md` raw, splits
-it into lines, and asserts each of `SA-0156`'s three account lines and the
-throwaway-script line is one of them. It reads `spec-writer-extract.md`
-raw, splits it into lines, and asserts each of the Problem's two lines is
-one of them. It asserts `SPEC_WRITER_EXTRACT_PROMPT` equals
-`context.turn_prompt("spec-writer-extract")`, and holds
-`artifacts.EXTRACTION_PROMPT`. It lowers both raw files and checks each of
-the fifteen strings against each. These fail it, reasoned:
-
-- a turn file that asks for the file inside a code fence, or words the
-  ban otherwise, which a check for the words `code fence` passes
-- a turn file that asks for the body alone, or the frontmatter last
-- a template that leaves a slot out, or spells a stray brace
-- an account line reworded, joined to another line, or left out
-- the account lines in the user prompt alone, where a follow-up's
-  session never reads them
-- a writer prompt that names this repo's tools or `.saffron/`, as the hand
-  path's agent file does
-
-**Criterion 4's witness** follows `SA-0156`'s criterion 1 witness, and
+**Criterion 2's witness** follows `SA-0156`'s criterion 1 witness, and
 reuses the helpers it adds to `tests/test_cli.py`. It builds a git
 repository in `tmp_path` as the mirror, with `_git` and `_rev_parse`. It
 has three commits. `bare` holds `.saffron/README` and no `policy.yaml`.
@@ -724,7 +557,7 @@ with no layer. The system prompt equals `spec_writer_system_prompt` of
 - `run_spec_review` called in place of `run_spec_writer`
 - `stop_on_rejected` around the agent
 
-**Criterion 5's witness** uses criterion 1's double, its draft first turn
+**Criterion 3's witness** uses criterion 1's double, its draft first turn
 at cost 0.5, its final text and its killed turn. `N` is the text
 `no block`. `E` is `<output>` then two spaces and a newline, then
 `</output>`. `U` is `<output>id: SY-1</output>`, a block with no fence.
@@ -779,8 +612,8 @@ measured was applied as a text edit and failed it. `24e8152f` is not in
 this repository's history, so a reader cannot rerun it. On 2026-09-25 a
 throwaway script ran the block read alone over criterion 1's texts. It
 checked the right read and each wrong read the second list names. The
-cost rule, the reset rows and criterion 5 are new since the prototype.
-Criteria 2 to 4 changed when ADR 7 made the prompt core's. Those lists are
+cost rule, the reset rows and criterion 3 are new since the prototype.
+Criterion 2 changed when ADR 7 made the prompt core's. Those lists are
 unmeasured, and so is each witness's reverted run.
 
 **What the witnesses leave undriven.**
@@ -798,9 +631,6 @@ unmeasured, and so is each witness's reverted run.
   one. The read starts at the draft and runs to the last closing tag. The
   extraction prompt asks for one block, and `parse_spec` refuses the
   joined text at run time.
-- A writer prompt that names a repo file by a string outside the fifteen.
-  So does one that fills every slot and writes badly. Its quality is
-  measured on the first stack night.
 
 **The ceilings.** `SA-0161` priced 74 hand `spec-writer` sessions from
 their transcripts. Their mean was $6.24, their p90 $16.92 and their max
@@ -831,29 +661,22 @@ sessions ran past 2700 seconds. Those ran `make check` and prototypes
 too, as this session can. `SPEC_WRITER_TIMEOUT_S` is 3600. The callable
 binds it for both turns, and the extraction turn ends far sooner.
 
-**The `prose` gate** counts both new prompt files, and every new comment
-and docstring. Write none with an em dash, a semicolon, a contraction, the
+**The `prose` gate** counts every new comment and docstring. Write none with an em dash, a semicolon, a contraction, the
 perfect tense, a hedge or a sentence over 25 words. Use no word from
 `FILLER` (`.saffron/gates/prose.py:67-83`), such as `just` or `simply`.
-Run `python3 hooks/prose_limit.py --file <path>` on each prompt file. Keep
-each docstring within ten lines.
+Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 2750 to 3050 changed tokens, 92% to 102% of the
-ceiling. The earlier prototype,
-formatted by `ruff format`, measured `saffron/spec_review.py` at 383
-tokens and its turn file at 33. The fill adds about 60 to 110, and the
-re-ask and the cap about 80, so about 550. `saffron/cli.py` measured 309
-with a start refusal and a prompt-file read. Both go, and so do six
-prompt lines, so about 200. `spec-writer.md` at 50 lines runs about 310
-to 460 tokens. That is 6.2 to 9.1 words a line, as the system prompts in
-`saffron/agents/prompts/` run (`wc -lw`). The earlier witnesses measured
-1331, with a policy witness and a refusal witness that go. Criteria 1 and
-4 keep about 1100, with the reset rows, the literals, the spy and the
-account check's recorder added. Criteria 2 and 3 run about 160 each, and
-criterion 5 about 300, as `SA-0175`'s criterion 5 is estimated.
-`tests/test_context.py` takes about 10. Keep the doubles shared, the
-reset values in one loop, and the docstrings short.
+estimate is about 1950 to 2250 changed tokens, 65% to 75% of the
+ceiling. The earlier prototype, formatted by `ruff format`, measured
+`saffron/spec_review.py` at 383 tokens. The re-ask and the cap add about
+80, so about 460. `saffron/cli.py` measured 309 with a start refusal and
+a prompt-file read. Both go, and so do six prompt lines, so about 200.
+The earlier witnesses measured 1331, with a policy witness and a refusal
+witness that go. Criteria 1 and 2 keep about 1100, with the reset rows,
+the literals, the spy and the account check's recorder added. Criterion 3
+runs about 300, as `SA-0175`'s criterion 5 is estimated. Keep the doubles
+shared, the reset values in one loop, and the docstrings short.

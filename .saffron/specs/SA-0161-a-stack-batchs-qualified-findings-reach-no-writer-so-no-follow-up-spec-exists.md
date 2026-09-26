@@ -290,7 +290,7 @@ within half of `--budget`.
   seeds that cell at the top layer's head, the tree the prompt names. It
   calls `run_spec_writer(container, *, system_prompt, prompt, agent)` as
   `SA-0160` defines it. The system prompt is core's
-  `saffron/agents/prompts/spec-writer.md`, which `SA-0160`'s
+  `saffron/agents/prompts/spec-writer.md`, which `SA-0176`'s
   `spec_writer_system_prompt` fills from the policy at the pinned
   `base_sha`. It binds the mint, owns `pooled`, passes
   `follow_ups` from `saffron batch --stack`, and catches every raise.

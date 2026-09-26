@@ -279,7 +279,7 @@ Build four things.
   extraction turn returns is what `SA-0155` records.
 - **History rows for a ceilings check.** A batch has no ledger in the
   cell, so core's prompt carries no such check.
-- **The writer's prompt.** `SA-0160` adds it beside this one.
+- **The writer's prompt.** `SA-0176` adds it beside this one.
 - **The review's events.** `run_spec_review` passes the agent no `emit`.
   `run_agent`'s default prints each event, cut short
   (`saffron/phases/implement.py:199`, `saffron/events.py:669-675`). No

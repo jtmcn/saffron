@@ -235,8 +235,8 @@ Build three things.
    ```
 
    `SA-0169` measured all three in a cell. They name no tool path, since
-   ADR 7 bars a repo's tools from core's spec prompts. `SA-0160` points
-   at these lines for its writer. Reach `package_phase.fetch_parent_branch`,
+   ADR 7 bars a repo's tools from core's spec prompts. `SA-0176` puts
+   these lines in core's writer prompt. Reach `package_phase.fetch_parent_branch`,
    `git_mirror.export_saffron_dir`, `end_review.layer_cell`,
    `spec_review.run_spec_review` and `implement.run_agent` through their
    modules at call time, since the witness replaces them there.
@@ -260,7 +260,7 @@ to name all three.
   edits neither `saffron/spec_review.py` nor `saffron/agents/prompts/`.
 - **This repo's hand path.** `.claude/agents/spec-reviewer.md` stays as
   it is, and no code here reads it.
-- **The writer's prompt.** `SA-0160` adds core's writer prompt beside
+- **The writer's prompt.** `SA-0176` adds core's writer prompt beside
   the review's.
 - **The review's record and its spend.** `SA-0155` records the attempt,
   the fact and the state, and attaches the run. So `_stack_review` takes

@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0150, SA-0151, SA-0152, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159, SA-0160, SA-0161, SA-0162, SA-0164, SA-0165, SA-0167, SA-0168, SA-0169, SA-0170, SA-0173, SA-0174, SA-0175]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0150, SA-0151, SA-0152, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159, SA-0160, SA-0161, SA-0162, SA-0164, SA-0165, SA-0167, SA-0168, SA-0169, SA-0170, SA-0173, SA-0174, SA-0175, SA-0176]
 prs: []
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -125,3 +125,7 @@ escalations.
   the spec review and spec writer prompts in `saffron/agents/prompts/`
   (`SA-0175`, `SA-0160`), and no policy key names them. `SA-0175` joins the
   chain between `SA-0169` and `SA-0156`.
+- 2026-09-25: `SA-0160` came to about 2900 changed tokens with its re-ask
+  and its cost rule. So core's writer prompt and its fill split out as
+  `SA-0176`. `SA-0176` depends on `SA-0150`, and
+  `SA-0160` on `SA-0176`.
