@@ -252,7 +252,8 @@ caller loses its findings unseen. For each layer in order:
   one call of `session.probe_findings`. Reach it through the `session`
   module, so a test can replace it. Its `spec` is a `CellSpec` whose
   `base_sha` is `<head>^` resolved to a full sha. `spec_id` and `branch`
-  come from the layer's `LayerFields`. `patch` is the diff.
+  come from `layer_fields` of the task recorded under. `patch` is the
+  diff.
   `base_results` is `ledger.baseline_results` of the layer's task's run.
   `CellSpec` also requires `spec_sha`, `touches`, `spec_type` and `body`
   (`saffron/cell/session.py:250-257`). Fill them with placeholders, such
@@ -270,7 +271,11 @@ caller loses its findings unseen. For each layer in order:
 helper. It takes the range's base and head, the inputs, and the task to
 record under. It also takes the run the probes count from. That run's
 `baseline_results` become `base_results`. `qualify` passes the layer's
-own task and run for both. `SA-0147` adds each layer's in-cell concerns
+own task and run for both. The helper records each finding and returns
+the decided findings in the order of its inputs, each with its outcome
+and reason. It builds no group. `qualify` builds `groups` and `pool` once,
+over the whole walk, so a later call can add to an earlier call's group.
+`SA-0147` adds each layer's in-cell concerns
 to its inputs, and calls the helper once more for the join. That call
 records under the top layer's task and counts from the bottom layer's
 run.
@@ -371,7 +376,7 @@ the first group's file sorts after the second's.
 The Standards lens's are a note "s1" on `src/b.py:4`, a blocker "s2" on
 `src/b.py:5` and a note "s3" on `src/c.py:12`. Build the join lens's
 findings too, though this spec passes no join: a concern "j1" on
-`src/a.py:2`, a concern "j2" on `src/m.py:1`, and a blocker "j3" on
+`src/c.py:11`, a concern "j2" on `src/m.py:1`, and a blocker "j3" on
 `src/b.py:2` with a probe of `beta_rate` to `beta_j`. Record copies of the
 three join findings under `TE-2` with `record_findings`, then copies of
 the twelve Spec and Standards findings, as `SA-0154` and `SA-0153` do.

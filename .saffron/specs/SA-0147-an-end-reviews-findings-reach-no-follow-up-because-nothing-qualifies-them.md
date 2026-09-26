@@ -80,7 +80,9 @@ acceptance:
       finding. A `RuntimeError` from a probe call, the join's or a
       layer's, sends each finding of that call to the pool as
       `unverified`, with a reason that carries the message, and the walk
-      goes on. The witness drives a join finding that qualifies, one left
+      goes on. A join finding and a top-layer finding on one file share
+      one group. The witness drives a join finding that qualifies on a
+      file the top layer also qualifies, one left
       unanchored because its file changed only below the bottom layer, one
       whose probe call raises, and a second call of the helper in which the
       top layer's probe call raises as well.
@@ -151,8 +153,10 @@ chain's names are cited by symbol.
   qualifies by layer and file, and records each finding with
   `ledger.record_qualification`. A `join` that is not `None` raises
   `ValueError`. A raise from the probe call propagates. Its per-layer walk
-  is one helper that takes the range, the inputs and the task to record
-  under.
+  is one helper. It takes the range's base and head, the inputs, the task
+  to record under, and the run the probes count from. It returns its
+  decided findings in order, and `qualify` groups them once over the
+  whole walk.
 - `SA-0180`'s `tests/test_qualify.py` builds a two-layer stack in one
   helper, and keeps the layers' expected groups, pool and rows as module
   constants. Its helper already builds the join lens's findings j1, j2
@@ -226,10 +230,12 @@ A `RuntimeError` from any probe call marks each finding of that call
 `unverified`, and the reason carries its message. Any other raise
 propagates.
 
-In `tests/test_qualify.py`, give the helper three keywords: whether to
-record the in-cell findings, whether to pass the join, and which commits'
-calls the double raises on. Leave `SA-0180`'s
-three witnesses and their constants as they are.
+In `tests/test_qualify.py`, give the helper four keywords. They say
+whether to record the in-cell findings, whether to pass the join, whether
+to add `TE-0`, and which commits' calls the double raises on. `TE-0` is
+off unless a witness asks for it. The double records each call, then
+raises. Leave `SA-0180`'s three witnesses and their constants as they
+are.
 
 ## Out of scope
 
@@ -305,12 +311,15 @@ fail it, each measured:
 - a layer with no end-review findings skipped whole
 
 **Criterion 2's witness** runs the helper with the join, raising on `M`.
-`TE-0` is not in this arrangement. `groups` is `(TE-2, src/a.py, [j1],
-[concern])`, then the four in-cell groups. The first two pool entries are
-j2 `unanchored` and j3 `unverified`, whose reason holds "no cell at M".
-The rest is the in-cell pool. It then calls the helper again in a fresh
-directory, raising on `M` and `H1`. The groups are j1's, then `TE-2`'s `src/c.py` with f6 alone,
-then `TE-2`'s `src/b.py` with s2 and i1, then `TE-1`'s two. f1, f2, f3,
+`TE-0` is not in this arrangement. j1, on `src/c.py:11`, names
+`beta_rate`, which the join's diff changed, and qualifies. So `groups`
+opens with one `TE-2`, `src/c.py` group of j1, f6 and f4, as concern,
+concern and blocker. The other three in-cell groups follow. The first two
+pool entries are j2 `unanchored` and j3 `unverified`, whose reason holds
+"no cell at M". The rest is the in-cell pool. It then calls the helper
+again in a fresh directory, raising on `M` and `H1`. The groups are
+`TE-2`'s `src/c.py` with j1 and f6, then `TE-2`'s `src/b.py` with s2 and
+i1, then `TE-1`'s two. f1, f2, f3,
 f4, f7, f8 and f10 are all in the pool as `unverified`, each reason
 holding "no cell at H1". These fail it, each measured:
 
@@ -322,9 +331,12 @@ holding "no cell at H1". These fail it, each measured:
 - a raise that propagates
 - a raise caught on the join's call alone
 - a raise that stops the walk
+- the helper groups per call, so the join and the top layer give two
+  groups for one file
 
 **Criterion 3's witness** runs the helper with the join, raising on `M`,
-and asserts two calls. The first holds j3 alone. Its `spec.base_sha` is
+and asserts two calls. `TE-0` is not in this arrangement. The first
+holds j3 alone. Its `spec.base_sha` is
 `M`, with no `stacked_on`. Its `spec_id` is `TE-2`, and its `branch` is
 `TE-2`'s. Its patch holds "+alpha_l2_new" and not "moved_main_only". Its
 `base_results` collect `[]` and `None`, `TE-1`'s. Its eight keywords are
@@ -338,6 +350,7 @@ These fail it, each measured:
 - the join walked after the layers
 
 **Criterion 4's witness** runs the helper with the join, raising on `M`.
+`TE-0` is not in this arrangement.
 `TE-2`'s rows are j1, j2 and j3 at positions 1 to 3. Their outcomes are
 `qualified`, `unanchored` and `unverified`. Criterion 1's fourteen follow
 at 4 to 17. `TE-1`'s are `SA-0180`'s three. These fail it, each measured:
@@ -360,6 +373,9 @@ one-line change.
 **What the witnesses leave undriven.**
 
 - A join with no layers. Walk nothing for it, as the Problem says.
+- A join over a stack whose bottom layer the end review did not reach.
+  The join's range then starts at that layer's head's parent, as
+  `review_joins` builds it (`saffron/end_review.py:450`).
 - A raise from the probe call that is not a `RuntimeError`. It
   propagates, so a wrong keyword fails loudly rather than reading
   `unverified`.
@@ -375,7 +391,7 @@ or a sentence over 25 words. Keep each docstring within ten lines.
 **Size.** No path this spec touches is in `elevate_on`, so `size` is
 advisory at the `feature` ceiling of 3000 tokens
 (`saffron/gates/core/size.py:26`). The prototype's change over
-`SA-0180`'s, formatted with `ruff format`, measured 781 changed tokens
-with `size_gate`'s own count: 245 in `qualify.py` and 536 in the tests.
+`SA-0180`'s, formatted with `ruff format`, measured 785 changed tokens
+with `size_gate`'s own count: 245 in `qualify.py` and 540 in the tests.
 Sibling cells landed at 1.4 to 1.6 times their authors' estimates, so
-about 1090, 36% of the ceiling.
+about 1100, 37% of the ceiling.
