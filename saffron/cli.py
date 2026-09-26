@@ -620,10 +620,6 @@ def _resolve_queue(
 
     `resolve_repo_id`, never `upsert_repo`: an unseen repo gets `None`, which
     both `build_queue` and `reconcile` treat as nothing to do.
-
-    `stack` is passed straight through to `build_queue`. `False` is every
-    caller's queue order. `True` is the stack order `saffron queue --stack`
-    and `saffron batch --stack` ask for instead.
     """
     repo = repo.resolve()
 
@@ -832,14 +828,13 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     in-flight row found here is a corpse, not live work an operator is
     watching); binds a real readiness check to this run's own paths and
     token, never the loop's "proceed" default; builds the adapter that turns
-    a candidate into a cell (`_batch_runner`) and the rescan; and hands them
+    a candidate into a cell (`_batch_runner` or `_stack_runner`); and hands them
     to `saffron.batch.run_batch`, or to `run_stack_batch` under `--stack`.
     Both own the loop and are the only things in this module that call
     `ledger.create_batch`/`close_batch` — true whether the night gets past
     readiness or not.
 
-    Exit codes are `run_batch`'s and `run_stack_batch`'s own five stop
-    reasons, mapped per §4.2.1:
+    Exit codes are either loop's own five stop reasons, mapped per §4.2.1:
     `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` and for
     `INCOMPLETE` — never `1`, which is reserved for a task's own failure and
     a batch is not a task. `INCOMPLETE` shares `INFRASTRUCTURE`'s exit code
@@ -889,7 +884,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         _no_stack_candidate_should_run
     )
     # Set when the scan raises after readiness passed (item 95), so the raise
-    # still reaches `run_batch` and its row.
+    # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
     if readiness.ok:
         # Readiness already paid for these three reads. `Readiness` declares
@@ -961,7 +956,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 )
 
     def _readiness_or_raise() -> preflight.Readiness:
-        # Raised inside `run_batch`'s `try`, so its `finally` closes the row
+        # Raised inside the batch loop's `try`, so its `finally` closes the row
         # `INFRASTRUCTURE` — the "readiness probe that raised" case it names.
         if resolution_error is not None:
             raise resolution_error

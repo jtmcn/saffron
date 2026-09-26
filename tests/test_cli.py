@@ -2529,24 +2529,17 @@ def test_the_printed_queue_is_unchanged_by_sharing_the_base(tmp_path, capsys):
 
 def test_queue_stack_prints_the_stack_order(tmp_path, capsys):
     """`saffron queue --stack` prints `build_queue`'s stack order
-    (`SA-0142`): SY-1 depends on SY-2 and runs after it in that order, ahead
-    of SY-2's own priority. SY-3 depends on SY-9, which no spec here
+    (`SA-0142`): SY-1 depends on SY-2, so it runs after SY-2 although its
+    own priority is higher. SY-3 depends on SY-9, which no spec here
     declares, and stays refused either way. Without `--stack` the same repo
     admits SY-2 alone and refuses SY-1, since no task recorded it merged."""
-    sy2 = (
-        "---\nid: SY-2\ntitle: t\ntype: chore\n---\n\n"
-        "## Acceptance criteria\n- [ ] it works\n"
-    )
+    sy2 = _dep_spec("SY-2")
     sy1 = (
         "---\nid: SY-1\ntitle: t\ntype: chore\npriority: 1\n"
         "depends_on:\n  - SY-2\n---\n\n"
         "## Acceptance criteria\n- [ ] it works\n"
     )
-    sy3 = (
-        "---\nid: SY-3\ntitle: t\ntype: chore\n"
-        "depends_on:\n  - SY-9\n---\n\n"
-        "## Acceptance criteria\n- [ ] it works\n"
-    )
+    sy3 = _dep_spec("SY-3", "SY-9")
     repo = _repo_with_spec(
         tmp_path,
         spec_text=sy1,
@@ -2805,7 +2798,9 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
     def _fake_resolve_queue(
         repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
     ):
-        resolve_calls.append({"stamp_orphaned": stamp_orphaned, "pinned": pinned})
+        resolve_calls.append(
+            {"stamp_orphaned": stamp_orphaned, "pinned": pinned, "stack": stack}
+        )
         # The opening call: `None`, no candidates. The rescan: an id, its own list.
         if len(resolve_calls) == 1:
             return _fake_batch_resolution(tmp_path, repo_id=None)
@@ -2838,6 +2833,7 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
     assert resolve_calls[1]["stamp_orphaned"] is False
     assert resolve_calls[0]["pinned"] is not None
     assert resolve_calls[1]["pinned"] is resolve_calls[0]["pinned"]
+    assert [call["stack"] for call in resolve_calls] == [False, False]
     assert recorded_repo_ids == [99]
 
 
@@ -2848,8 +2844,8 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
     `stamp_orphaned=True`, against the pinned base. It never calls
     `run_batch`. It hands the resolved order to `run_stack_batch`, with the
     runner `_stack_runner` builds. That runner looks up `repo_id` fresh per
-    task, so a repo this batch itself records still reaches a later
-    candidate. A readiness failure and a queue that raises both still reach
+    task, so a repo recorded after the opening scan still reaches the
+    first candidate. A readiness failure and a queue that raises both still reach
     the real `run_stack_batch`, so both still close the batch row
     `INFRASTRUCTURE`."""
     real_stack_runner = cli._stack_runner
