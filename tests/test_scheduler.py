@@ -2053,6 +2053,13 @@ def test_a_stack_order_refuses_a_spec_with_any_dependency_outside_it_and_names_e
         directory, "te55.md", id="TE-55", touches=["te55.py"], depends_on=["TE-51"]
     )
     _write_spec(
+        directory,
+        "te56.md",
+        id="TE-56",
+        touches=["te56.py"],
+        depends_on=["TE-41", "TE-44"],
+    )
+    _write_spec(
         directory, "te61.md", id="TE-61", touches=["te61.py"], depends_on=["TE-62"]
     )
     _write_spec(
@@ -2091,6 +2098,16 @@ def test_a_stack_order_refuses_a_spec_with_any_dependency_outside_it_and_names_e
     assert [c.spec.id for c in candidates] == ["TE-44"]
 
     reasons = {r.path.name: r.reason for r in refusals}
+    assert set(reasons) >= {
+        "te51.md",
+        "te52.md",
+        "te53.md",
+        "te54.md",
+        "te55.md",
+        "te56.md",
+        "te61.md",
+        "te62.md",
+    }
     assert "TE-41" in reasons["te51.md"]
     assert "outside the stack order" in reasons["te51.md"]
     assert "TE-41" in reasons["te52.md"]
@@ -2099,6 +2116,8 @@ def test_a_stack_order_refuses_a_spec_with_any_dependency_outside_it_and_names_e
     assert "TE-43" in reasons["te54.md"]
     assert "TE-49" in reasons["te54.md"]
     assert "TE-51" in reasons["te55.md"]
+    assert "TE-41" in reasons["te56.md"]
+    assert "TE-44" not in reasons["te56.md"]
     assert "TE-61" in reasons["te62.md"]
     assert "TE-62" in reasons["te61.md"]
 

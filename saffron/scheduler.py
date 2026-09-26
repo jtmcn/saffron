@@ -640,7 +640,7 @@ def _refuse(
 
     `check_dependencies=False` skips the `depends_on` loop below, leaving
     every other check as it runs today. Stack mode (`SA-0142`) passes it.
-    A stack order decides `depends_on` in one pass over every candidate,
+    A stack order decides `depends_on` over every candidate at once,
     not one entry at a time here."""
     if (
         reason := protected_touch_refusal(
@@ -758,7 +758,7 @@ def _stack_dependency_reason(
 def _stack_order(
     candidates: list[Candidate], on_default_branch: frozenset[str]
 ) -> tuple[list[Candidate], list[Refusal]]:
-    """One stack's fixed run order over `candidates` (§4.2, `SA-0142`).
+    """One stack's fixed order over `candidates` (ADR 7, `SA-0142`).
 
     Takes one spec at a time. A spec is ready once every `depends_on` entry
     is already taken or in `on_default_branch`. Each step takes the ready
@@ -849,10 +849,7 @@ def build_queue(
     filename order to break ties — `sorted` is stable and `discover_specs`
     already returns its specs in that order, so no second key is needed.
 
-    `stack=True` (`SA-0142`) replaces that ordering with one fixed stack
-    order. It refuses a candidate whose `depends_on` reaches outside that
-    order, rather than running each entry through `_dependency_refusal`.
-    Every other refusal in this function runs exactly as it does today.
+    `stack=True` orders and refuses on `depends_on` by `_stack_order`.
     """
     specs, failures = discover_specs(directory)
     existing = ledger.tasks_by_spec(repo_id) if repo_id is not None else {}
