@@ -3,15 +3,15 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the thirteen kinds
+by `saffron/record/fold.py`, deletable at any time. Only the fourteen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
-to put in it. `stack_layers`, `end_reviews` and `baseline_names` are a tenth,
-an eleventh and a twelfth table, outside that count: `DESIGN.md` §4.1 does
-not list any of them.
+to put in it. `stack_layers`, `end_reviews`, `baseline_names` and
+`qualifications` are a tenth, an eleventh, a twelfth and a thirteenth table,
+outside that count: `DESIGN.md` §4.1 does not list any of them.
 """
 
 from __future__ import annotations
@@ -196,6 +196,22 @@ CREATE TABLE IF NOT EXISTS end_reviews (
     cost_usd REAL NOT NULL,
     error    TEXT,
     PRIMARY KEY (task_key, lens)
+);
+
+-- What the host decided of one review finding (`SA-0180`). Keyed on record
+-- keys, like `stack_layers`, so the row carries the finding and reads alone.
+CREATE TABLE IF NOT EXISTS qualifications (
+    task_key      TEXT NOT NULL,
+    position      INTEGER NOT NULL,
+    lens          TEXT NOT NULL,
+    severity      TEXT NOT NULL,
+    file          TEXT NOT NULL,
+    line          INTEGER,
+    claim         TEXT NOT NULL,
+    probe_verdict TEXT,
+    outcome       TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    PRIMARY KEY (task_key, position)
 );
 
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
@@ -448,10 +464,11 @@ class Ledger:
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
         `fold_task` an upsert, and a no-op on a task with no row yet.
-        `stack_layers` and `end_reviews` are keyed on `key` itself, so both
-        deletes run first."""
+        `stack_layers`, `end_reviews` and `qualifications` are keyed on `key`
+        itself, so all three deletes run first."""
         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -532,6 +549,12 @@ class Ledger:
     def _finding_count(self, task_id: int) -> int:
         return self._db.execute(
             "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
+        ).fetchone()["n"]
+
+    def _qualification_count(self, task_id: int) -> int:
+        key = self.record_key(task_id)
+        return self._db.execute(
+            "SELECT COUNT(*) AS n FROM qualifications WHERE task_key = ?", (key,)
         ).fetchone()["n"]
 
     def _finding_at(self, task_id: int, position: int) -> int | None:
@@ -703,6 +726,25 @@ class Ledger:
                 ),
             )
             return _inserted_id(cursor)
+        if fact.kind == "qualification":
+            self._db.execute(
+                "INSERT INTO qualifications (task_key, position, lens, severity, "
+                "file, line, claim, probe_verdict, outcome, reason) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["position"],
+                    payload["lens"],
+                    payload["severity"],
+                    payload["file"],
+                    payload["line"],
+                    payload["claim"],
+                    payload["probe_verdict"],
+                    payload["outcome"],
+                    payload["reason"],
+                ),
+            )
+            return None
         if fact.kind == "rebuttal":
             finding_id = self._finding_at(task_id, payload["position"])
             if finding_id is None:
@@ -1287,6 +1329,36 @@ class Ledger:
             task_id,
             "end_review",
             {"lens": lens, "status": status, "cost_usd": cost_usd, "error": error},
+        )
+        self._commit_and_append(fact)
+
+    def record_qualification(
+        self,
+        task_id: int,
+        *,
+        finding: Finding,
+        filed: str,
+        outcome: str,
+        reason: str,
+    ) -> None:
+        """One host decision on one review finding (`SA-0180`,
+        `saffron/qualify.py`). `filed` is the severity recorded here, the
+        finding's own left untouched. Position counts within the task, one
+        more than its qualifications so far."""
+        fact = self._build_fact(
+            task_id,
+            "qualification",
+            {
+                "position": self._qualification_count(task_id) + 1,
+                "lens": finding.lens,
+                "severity": filed,
+                "file": finding.file,
+                "line": finding.line,
+                "claim": finding.claim,
+                "probe_verdict": finding.probe_verdict,
+                "outcome": outcome,
+                "reason": reason,
+            },
         )
         self._commit_and_append(fact)
 
