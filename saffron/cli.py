@@ -18,7 +18,12 @@ from saffron import end_review, preflight
 from saffron.agents import context
 from saffron.batch import run_batch, run_stack_batch
 from saffron.cell import runtime
-from saffron.cell.session import TURN_TIMEOUT_S, CellOutcome, stop_on_rejected
+from saffron.cell.session import (
+    _SAFFRON_ROOT,
+    TURN_TIMEOUT_S,
+    CellOutcome,
+    stop_on_rejected,
+)
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -50,10 +55,6 @@ from saffron.task import (
 from saffron.watch import UnknownTask, follow, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
-
-# Saffron's own checkout root, never the operator's target repo, the way
-# `session.py`'s own `_SAFFRON_ROOT` reads `CONTEXT.md` for an in-cell lens.
-_SAFFRON_ROOT = Path(__file__).resolve().parent.parent
 
 # The exit code is the only thing a script reads: 0 the task is reviewable,
 # 2 the infrastructure failed, 1 the task did not make it (§3.3). The map covers
@@ -557,16 +558,6 @@ def _stack_runner(
     return run
 
 
-# One batch's layers, top down, each task id read by its own record key.
-# `end_review.py` keeps the same query under a private name of its own.
-_STACK_END_REVIEW_LAYERS = """
-    SELECT sl.task_key, t.task_id
-      FROM stack_layers sl
-      JOIN tasks t ON t.record_key = sl.task_key
-     WHERE sl.batch_key = ?
-     ORDER BY sl.position DESC
-"""
-
 _STACK_END_REVIEW_WRITTEN_LENSES = "SELECT lens FROM end_reviews WHERE task_key = ?"
 
 
@@ -581,7 +572,7 @@ def _end_review_error_reviews(
     later write, prints a line naming both raises, and still returns an
     error review for what is left.
     """
-    rows = ledger._db.execute(_STACK_END_REVIEW_LAYERS, (batch_key,)).fetchall()
+    rows = ledger._db.execute(end_review._BATCH_LAYERS, (batch_key,)).fetchall()
     write_failed = False
     layers: list[end_review.LayerReview] = []
     for row in rows:
@@ -592,7 +583,8 @@ def _end_review_error_reviews(
                 _STACK_END_REVIEW_WRITTEN_LENSES, (task_key,)
             ).fetchall()
         }
-        note = ", this layer's rows were written first" if written else ""
+        own = written & end_review.END_LENSES.keys()
+        note = ", this layer's rows were written first" if own else ""
         lens_error = f"{message}{note}"
         reviews: list[review.LensReview] = []
         for lens in end_review.END_LENSES:
@@ -616,8 +608,8 @@ def _end_review_error_reviews(
 def _stack_end_review(
     *, pinned: PinnedBase, repo: Path, ledger: Ledger, out_dir: Path
 ) -> Callable[[str, float, Mapping[str, Spec]], object]:
-    """`run_stack_batch`'s `end_review` callable, one export and one critic
-    cell per batch key rather than per layer.
+    """`run_stack_batch`'s `end_review` callable: one export per batch key,
+    and a fresh critic cell per layer and for the join.
 
     Every read below, and the review itself, run inside one guard. A raise
     from any of them is recorded as an `error` for every lens of every
@@ -923,10 +915,10 @@ def _print_batch_plan(
     The header is the night's own twin of a task's `ceilings:` line — that
     one is `events.Ceilings` now and both paths emit it; this is the batch
     scoped fact beside it: at 7am the log has to say what the night set out to
-    do before it says what became of it. `reserve_usd`, given only by a
-    `--stack` night, prints beside the budget it was held out of.
+    do before it says what became of it.
     """
     deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
+    # Only a `--stack` night holds a reserve, printed beside its budget.
     reserve = f", reserve ${reserve_usd:.2f}" if reserve_usd is not None else ""
     print(
         f"batch: {len(resolved.candidates)} candidate(s), "
@@ -985,7 +977,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         _resolve_until(args.until, datetime.now()) if args.until is not None else None
     )
     # Bound to `--budget` and `--stack` alone, so the night stays sized
-    # against the one number the operator gives it (§4).
+    # against the one number the operator gives it (stack-batch design §4).
     reserve_usd = args.budget * end_review.RESERVE_SHARE if args.stack else None
 
     # Readiness first, and before the scan — §4.4's own order, step 1 ahead of

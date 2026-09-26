@@ -3320,6 +3320,10 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
         ledger_arg.record_end_review(
             top_id_4, lens="spec", status="reviewed", cost_usd=0.5, error=None
         )
+        # A join row is no lens row of the layer's own: its note stays off.
+        ledger_arg.record_end_review(
+            _bottom_id_4, lens="join", status="not_reached", cost_usd=0.0, error=None
+        )
         raise RuntimeError("review broke")
 
     with monkeypatch.context() as m:
@@ -3342,7 +3346,7 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
         assert "review broke" in lr.error
         assert "written first" not in lr.error
     rows4 = _end_review_rows(layer_keys[4])
-    assert len(rows4) == 4
+    assert len(rows4) == 5
     reviewed = [row for row in rows4 if row["status"] == "reviewed"]
     assert len(reviewed) == 1
     assert reviewed[0]["lens"] == "spec"
@@ -3351,7 +3355,7 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
     errored = [row for row in rows4 if row["status"] == "error"]
     assert len(errored) == 3
     assert all("review broke" in row["error"] for row in errored)
-    assert len(_end_review_facts(layer_keys[4])) == 4
+    assert len(_end_review_facts(layer_keys[4])) == 5
 
     def _fake_run_end_review_case5(ledger_arg, batch_key, reserve_usd, specs, **kwargs):
         raise RuntimeError("review broke")
