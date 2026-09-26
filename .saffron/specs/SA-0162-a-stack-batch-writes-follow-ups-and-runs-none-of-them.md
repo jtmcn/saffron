@@ -549,7 +549,7 @@ One ` escalated  ` line starts with `TE-27`. No line starts
 
 **Criterion 2's witness** runs eight batches on one ledger, each with a
 budget of 30.0. The runner double costs $1 a call. `SA-0164`'s check
-reads `SPEC_WRITER_SESSION_USD` and `SPEC_REVIEW_BUDGET_USD` through the
+reads `SPEC_WRITER_SESSION_USD` and `SPEC_REVIEW_SESSION_USD` through the
 `saffron.spec_review` module at call time. So batch 7 sets them to 10.0
 and 8.0 on that module through `monkeypatch`, and calls their sum of 18
 `need`. The check asks for `need` plus the spec's budget.
@@ -722,7 +722,7 @@ not at `68892367`:
 
 **Criterion 6's witness** runs one batch with a budget of 30 and
 `follow_ups` of `None`. It sets `SPEC_WRITER_SESSION_USD` and
-`SPEC_REVIEW_BUDGET_USD` to 1.0 each on the `saffron.spec_review` module
+`SPEC_REVIEW_SESSION_USD` to 1.0 each on the `saffron.spec_review` module
 through `monkeypatch`, as batch 7 does. Its order is `TE-141` to `TE-148`,
 each with a budget of 1 and `touches` of `m.py`, but `TE-146`'s of
 `d.py`. `TE-142` ends `MERGE_FAILED`, and the rest are ready. The mint
@@ -753,8 +753,8 @@ returns three pull requests.
 `writer_usd`, 8 together, and needs 1.0 plus 1.0 plus the spec's budget
 of 1, so 3. Each runner call costs 1, and nothing else costs. The most
 spent before a revision is 4, before `TE-147`, so the least left is 18.
-Every revision in the table runs. With the real constants, 18.5 and 6.0,
-the need is 25.5 against at most 22 left, and every revision would stay
+Every revision in the table runs. With the real constants, 18.5 and 8.0,
+the need is 27.5 against at most 22 left, and every revision would stay
 unrevised.
 
 It asserts the runner's spec ids are `TE-141`, `TE-142`, `TE-143`,
@@ -789,7 +789,8 @@ ran a prototype of the moved refusal function against the real
 `scheduler.py`. The right build passed criteria 1 to 4. Each wrong build
 listed as measured failed its own witness. Batch 7 ran with the
 constants of that day, a writer session of 12.5 and a review of 6.0, so
-a `need` of 18.5. Today's sum is 24.5. The witness patches both, so its
+a `need` of 18.5. Today's sum is 26.5, with the review's reserve at
+`SPEC_REVIEW_SESSION_USD`. The witness patches both, so its
 `need` of 18 and its one-dollar margins hold either way. Criterion 5 needs `SA-0144`'s
 `--stack` path, so nothing ran it. Criterion 6 came after the simulation,
 so nothing ran it either.

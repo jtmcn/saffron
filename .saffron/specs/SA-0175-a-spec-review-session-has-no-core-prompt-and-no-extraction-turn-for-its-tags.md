@@ -51,11 +51,12 @@ forbidden:
   - tests/test_policy.py
 budget_usd: 26
 max_attempts: 3
-max_turns: 170
+max_turns: 220
 pending_symbols:
   - saffron/spec_review.py::run_spec_review
   - saffron/spec_review.py::spec_review_system_prompt
   - saffron/spec_review.py::SPEC_REVIEW_TIMEOUT_S
+  - saffron/spec_review.py::SPEC_REVIEW_SESSION_USD
 acceptance:
   - claim: >-
       `spec_review.run_spec_review(container, *, system_prompt, prompt,
@@ -66,6 +67,7 @@ acceptance:
       no `output_format`. `SPEC_SESSION_TOOLS`
       holds `Read`, `Glob`, `Grep` and `Bash`, and no other tool.
       `SPEC_REVIEW_MAX_TURNS` is 90, `SPEC_REVIEW_BUDGET_USD` 6.0,
+      `SPEC_REVIEW_EXTRACT_BUDGET_USD` 1.0, `SPEC_REVIEW_SESSION_USD` 8.0,
       `SPEC_REVIEW_TIMEOUT_S` 1800.0 and `UNREADABLE_RESET` 1, and the
       witness asserts each literal. A first
       turn that raises `implement.AgentFailed` gives that failure's text as
@@ -84,23 +86,27 @@ acceptance:
   - claim: >-
       After a first turn that returns with a `session_id` and a status other
       than `rejected`, `run_spec_review` calls `agent` a second time. It
-      passes the container, `SPEC_REVIEW_EXTRACT_PROMPT`, the first call's
-      options with `output_format` set to `SPEC_REVIEW_FORMAT`, `resume` of
-      the first turn's `session_id` and `last_cost_usd` of its cost, and
-      nothing else. `SPEC_REVIEW_FORMAT` is `{"type": "json_schema",
+      passes the container, `SPEC_REVIEW_EXTRACT_PROMPT`, and the first
+      call's options with `max_budget_usd` set to
+      `SPEC_REVIEW_EXTRACT_BUDGET_USD` and `output_format` set to
+      `SPEC_REVIEW_FORMAT`. It passes `resume` of the first turn's
+      `session_id`, and `last_cost_usd` of the smaller of that turn's cost
+      and `SPEC_REVIEW_EXTRACT_BUDGET_USD`, and nothing else. `SPEC_REVIEW_FORMAT` is `{"type": "json_schema",
       "schema": _SpecReviewFindings.model_json_schema()}`. That model is an
       object whose one key, `findings`, is a list of `_SpecReviewFinding`.
       Its fields, in order, are `severity` typed `findings.Severity`,
       `claim` a string, `criterion` an integer or null, `file` a string or
-      null, `line` an integer or null, and `fixes` any string or null. No
-      field has a default, and both models forbid other keys. When
+      null, `line` an integer or null, and `fixes` any string or null. The
+      schema of each of the last four holds a null branch. No field has a
+      default, and both models forbid other keys. When
       `_SpecReviewFindings.model_validate` accepts the second turn's
       `structured_output`, the session's `text` is a `json` fence around
       `json.dumps` of the validated model's `model_dump(mode="json")`, with
       `indent=2` and `ensure_ascii=False`. It holds nothing of either
       turn's text. A null `structured_output`, or one `model_validate`
-      refuses, goes to criterion 5's one re-ask. Its cost and `num_turns` are
-      the two turns' sums, and a failed turn with no attempt counts 0. Its
+      refuses, goes to criterion 5's one re-ask. Its cost and `num_turns`
+      sum every attempt a turn returned or failed with, a killed turn's
+      included, and a failed turn with no attempt counts 0. Its
       `session_id` is the second turn's, or the first's where the second
       carries none. A first turn with no
       `session_id` gives `no session to extract from` as `error`, and no
@@ -109,9 +115,10 @@ acceptance:
       the first turn's rule, driven with 9, -5 and `"soon"`. A second turn that
       raises `AgentFailed` otherwise gives its text as `error` and an empty
       `text`. Any other raise propagates. The witness drives each case, with
-      a first status of none and of `allowed`. Every second turn's text
-      holds an `<output>` block and a `json` block that disagree with its
-      value.
+      a first status of none and of `allowed`, a note whose four nullable
+      fields are null, and an extraction turn killed after a first turn of
+      cost 0.5 and of 4.0. Every second turn's text holds an `<output>`
+      block and a `json` block that disagree with its value.
     witness: tests/test_spec_review.py::test_a_spec_review_returns_its_tags_from_a_separate_extraction_turn
   - claim: >-
       `spec_review.spec_review_system_prompt(policy, *, prompts_dir)` reads
@@ -158,8 +165,8 @@ acceptance:
       re-asks once. Its third call passes the container, the failure's
       message, a blank line and `SPEC_REVIEW_EXTRACT_PROMPT` as the prompt,
       the second call's options, `resume` of the last `session_id` a turn
-      carried, and `last_cost_usd` of the second turn's cost. It passes
-      nothing else. The message is `not the schema: the turn returned no
+      carried, and `last_cost_usd` of the smaller of the second turn's
+      cost and `SPEC_REVIEW_EXTRACT_BUDGET_USD`. It passes nothing else. The message is `not the schema: the turn returned no
       structured output` for a null value. For a refused one it is `not
       the schema: ` and the validation error. A third turn whose value
       passes gives `text` as criterion 2 builds it from that value. One
@@ -171,7 +178,8 @@ acceptance:
       over every turn, and `session_id` is the last one a turn carried. The
       witness drives a null value, a value missing `claim`, one with
       severity `critical`, one with an extra key, and a JSON string of a
-      valid value. Each second turn's text beside them holds a valid
+      valid value, and a killed re-ask after a second turn of cost 0.25
+      and of 3.0. Each second turn's text beside them holds a valid
       `<output>` block and `json` block.
     witness: tests/test_spec_review.py::test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema
 ---
@@ -254,9 +262,12 @@ REBUT's extraction prompt has no `{extraction}` slot, so the shared
 `<output>` rules never reach it. It ends with three lines: "Answer now
 in the required structured format.", "Do not change files." and "Do not
 run commands." (`saffron/agents/prompts/turns/rebut-extract.md:9-11`).
-`test_rebuts_prompts_ask_for_no_output_block` checks each line whole, and
-that the prompt holds neither `<output>` nor `artifacts.EXTRACTION_PROMPT`
-(`tests/test_context.py:455-466`). `context.turn_prompt` fills an
+`test_rebuts_prompts_ask_for_no_output_block` checks two of the three
+closing lines whole. They are "Do not change files." and "Do not run
+commands." It
+also checks that the prompt holds neither `<output>` nor
+`artifacts.EXTRACTION_PROMPT` (`tests/test_context.py:455-466`). Criterion
+4 here checks all three lines itself. `context.turn_prompt` fills an
 `{extraction}` slot where one stands (`saffron/agents/context.py:156-171`).
 
 **What the SDK's structured output does, measured.** The schema holds
@@ -266,9 +277,23 @@ The CLI answers `output_format` through a tool named `StructuredOutput`
 whose root is not an object is refused with an API 400
 (`docs/evidence/2026-09-23-structured-output-spike.md:38-49`). A turn no value satisfies still ends `success`, with a null
 `structured_output`, after four tries of that tool inside the one turn
-(`docs/evidence/2026-09-23-structured-output-spike.md:51-59`). So the CLI already retries the shape within a turn. §5.3
-records the move for REBUT, and says the other extraction turns still
-emit the block (`DESIGN.md:731`).
+(`docs/evidence/2026-09-23-structured-output-spike.md:51-59`). So the CLI already retries the shape within a turn.
+§5.3 records the move for REBUT, and says the other extraction turns
+still emit the block (`DESIGN.md:731`).
+
+The spike's last addendum sent this spec's finding shape through a
+resumed turn. The API took four required nullable fields. The turn
+returned two findings with all four null, and both validated. That
+extraction turn cost $0.08
+(`docs/evidence/2026-09-23-structured-output-spike.md:196-207`).
+
+**How a killed turn is charged today.** A turn killed before its result
+event raises `AgentFailed`. Its attempt has no `session_id` and 0 turns.
+Its cost is the `last_cost_usd` its call passed
+(`saffron/phases/implement.py:334-345`). A failed turn that reported 0
+falls back to that same figure (`saffron/phases/implement.py:411-423`).
+§4.1 names the rule (`DESIGN.md:343`). `SA-0160` caps the figure its
+writer passes at the next turn's own budget, and this spec does the same.
 
 **How a lens prompt is loaded today.** `LENSES` maps a lens to a file
 name, and `lens_prompt` reads `prompts_dir / LENSES[lens]` when called
@@ -286,10 +311,12 @@ ceiling per spec type (`saffron/gates/core/size.py:26`).
 Build four things.
 
 1. **The constants and the model.** In `saffron/spec_review.py`, add
-   `SPEC_REVIEW_MAX_TURNS` of 90, `SPEC_REVIEW_BUDGET_USD` of 6.0,
-   `SPEC_REVIEW_TIMEOUT_S` of 1800.0, `UNREADABLE_RESET` of 1,
+   `SPEC_REVIEW_MAX_TURNS` of 90 and `SPEC_REVIEW_BUDGET_USD` of 6.0. Add
+   `SPEC_REVIEW_EXTRACT_BUDGET_USD` of 1.0 and `SPEC_REVIEW_SESSION_USD`
+   of 8.0. Add `SPEC_REVIEW_TIMEOUT_S` of 1800.0, `UNREADABLE_RESET` of 1,
    `SPEC_SESSION_TOOLS`, `SPEC_REVIEW_PROMPT` and
-   `SPEC_REVIEW_EXTRACT_PROMPT`. Define no tags. `SPEC_REVIEW_TAGS`
+   `SPEC_REVIEW_EXTRACT_PROMPT`. Write the session figure as the sum of
+   the review's budget and two extraction budgets. Define no tags. `SPEC_REVIEW_TAGS`
    already stands in the module, from `SA-0149`. Follow `REVIEW_TOOLS`' spelling
    for the tools, a list of names. Load the extraction prompt with
    `context.turn_prompt` at import, as `rebut.EXTRACT_PROMPT` is loaded.
@@ -302,7 +329,10 @@ Build four things.
    the returned attempt or the failed one. Call the agent directly, not
    through `stop_on_rejected`, so a rejected turn's cost reaches the
    session. Build the second call as `run_rebuttal` builds its own, the
-   first call's options with `output_format` added. Read the value as
+   first call's options with `output_format` added. Set its
+   `max_budget_usd` to `SPEC_REVIEW_EXTRACT_BUDGET_USD` too, as `SA-0160`
+   does for its writer. Pass each later turn `min(prior cost,
+   SPEC_REVIEW_EXTRACT_BUDGET_USD)` as `last_cost_usd`. Read the value as
    `rebut._validate` reads it. Calling it is the cell's choice, since it
    gives the messages criterion 5 names. Build the re-ask as `run_lens`
    builds its own, from the error, a blank line and the turn's own prompt
@@ -329,9 +359,11 @@ Build four things.
   spec only fixes what the block holds and where it comes from.
 - **The review turn's prose.** It reaches no record. `SA-0155` records
   the block the host writes from the extraction turn's value.
-- **§5.3's text.** It names REBUT alone as using `output_format`
-  (`DESIGN.md:731`). `DESIGN.md` is forbidden here, and backlog item
-  b-4e0868 owns that record as the other turns move.
+- **§5.3's text.** It names REBUT alone as using `output_format`, and
+  says "the other extraction turns still emit the block" (`DESIGN.md:731`).
+  Principle 18 calls the extraction turn tool-less. Both lag this turn,
+  which keeps the session's tools. `DESIGN.md` is forbidden here, and
+  backlog item b-4e0868 owns that text as the other turns move.
 - **History rows for a ceilings check.** A batch has no ledger in the
   cell, so core's prompt carries no such check.
 - **The writer's prompt.** `SA-0176` adds it beside this one.
@@ -390,7 +422,29 @@ is a backstop. REBUT has none, because its attempt is already made and
 HEAD already says what it did (`saffron/phases/rebut.py:223-225`). A
 spec review's value is its whole product. Without its findings the
 review's spend buys nothing, and `SA-0149` routes the session `error`,
-which counts as an abort. One more turn costs far less than that.
+which counts as an abort. The spike's extraction turn cost $0.08, far
+less than the review it saves.
+
+**The bound on one session.** The review turn runs at
+`SPEC_REVIEW_BUDGET_USD`, 6.0. The extraction turn and the re-ask each
+run at `SPEC_REVIEW_EXTRACT_BUDGET_USD`, 1.0, a dozen times the spike's
+$0.08. That turn resumes a context a real review made far longer, so 1.0
+is reasoned with room, not measured in a cell. Each fallback figure is
+capped at the next turn's own budget. So a session records at most
+6.0 + 1.0 + 1.0, which is `SPEC_REVIEW_SESSION_USD`, 8.0. It holds as
+long as each turn reports within its `max_budget_usd`, which is best
+effort. `SA-0164` reserves by it. A first turn killed before its result
+event records $0, since `run_spec_review` passes it no `last_cost_usd`.
+
+**Why four fields take null.** The CLI holds the turn to the schema
+before the host sees a value. A `fixes` typed `str` would make the turn
+write a string where the review gave no tag, such as `none`. `SA-0149`
+checks each `fixes` against `SPEC_REVIEW_TAGS`, and routes that read
+`error`. A `file` or `line` that cannot be null would make the turn
+invent a place for a finding about the whole spec. `_Reported` types
+`file` and `line` without null (`saffron/phases/review.py:67-68`), since a
+lens finding is always anchored. A spec review finding is not. The spike
+measured this shape (`docs/evidence/2026-09-23-structured-output-spike.md:196-207`).
 
 **Why the model checks no tag.** `fixes` is any string or null.
 `SA-0149`'s read checks each `fixes` against `SPEC_REVIEW_TAGS` when
@@ -446,7 +500,12 @@ for a finding that names no place. It holds this sentence word for word.
 > no tag from the prose.
 
 `fixes` is null where the review gave no
-tag. The extraction turn copies tags and judges none. `SA-0164`
+tag. The extraction turn copies tags and judges none. That sentence names
+the field on purpose. In the spike, a prompt said "tag" and never
+named `fixes`. The turn wrote the tag into the claim as `[tag: build]`,
+and left `fixes` null
+(`docs/evidence/2026-09-23-structured-output-spike.md:209-212`). So
+criterion 4 pins it. `SA-0164`
 routes on the tag the review gave. It ends with these three lines, each
 on its own, as `rebut-extract.md` does.
 
@@ -493,27 +552,34 @@ asserts `SPEC_SESSION_TOOLS`, sorted, is `Bash`, `Glob`, `Grep` and
   session as the table does not say
 - an extraction turn after a rejected or failed first turn
 - `IMPLEMENT_TOOLS`, `REVIEW_TOOLS`, or a list that adds `Write`
-- the turns and budget swapped, or either constant at another value
+- the turns and budget swapped, or any constant at another value
+- `SPEC_REVIEW_SESSION_USD` written as 6.0 plus one extraction budget
 - `output_format` sent on the review turn too
 - every exception caught
 
 **Criterion 2's witness** uses the same double, with a first turn that
 returns text `J`, cost 0.5, `s-1` and 7 turns. `D` is the dict
 `{"findings": [{"severity": "blocker", "claim": "naïve read",
-"criterion": 1, "file": "a.py", "line": 3, "fixes": "build"}]}`, its
-keys in the model's order. `V` is `D` with its finding's keys in reverse
-order. `T` is a text of prose, then an `<output>` block, then a fenced
+"criterion": 1, "file": "a.py", "line": 3, "fixes": "build"},
+{"severity": "note", "claim": "the title runs long", "criterion": None,
+"file": None, "line": None, "fixes": None}]}`, its keys in the model's
+order. `V` is `D` with each finding's keys in reverse order. `T` is a text of prose, then an `<output>` block, then a fenced
 `json` block. Each block holds one `scope` blocker, and each parses. `F`
 is ```` "```json\n" + json.dumps(D, indent=2, ensure_ascii=False) + "\n```\n" ````.
 Every second turn returns or fails with text `T`. Every one that carries
 an attempt carries `structured_output` `V`, cost 0.25, `s-2` and 2 turns,
-unless its row says otherwise.
+unless its row says otherwise. The killed turn is the attempt
+`run_agent` gives a turn cut before its result event. The double builds
+it from the call it gets: no `session_id`, subtype `error`, 0 turns, no
+`structured_output`, and a cost equal to the `last_cost_usd` that call
+passed. It raises `AgentFailed("the agent produced no result event")`
+with it.
 
 | case | calls | `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` |
 |---|---|---|
 | first status none, second returns | 2 | `F`, 0.75, `None`, `None`, `s-2`, 9 |
 | first status `allowed`, reset 9, the same second turn | 2 | the same |
-| second returns `V` with `fixes` `typo` | 2 | `F` with `build` replaced by `typo`, and the rest as above |
+| second returns `V` with its first `fixes` `typo` | 2 | `F` with `build` replaced by `typo`, and the rest as above |
 | second returns with no `session_id` | 2 | `F`, 0.75, `None`, `None`, `s-1`, 9 |
 | first returns no `session_id` | 1 | empty, 0.5, `no session to extract from`, `None`, `None`, 7 |
 | second returns `rejected`, reset 9 | 2 | empty, 0.75, `None`, 9, `s-2`, 9 |
@@ -521,12 +587,15 @@ unless its row says otherwise.
 | second raises `AgentFailed("api_error")`, `rejected`, reset `"soon"` | 2 | empty, 0.75, `None`, 1, `s-2`, 9 |
 | second raises `AgentFailed("cut")` with an attempt | 2 | empty, 0.75, `cut`, `None`, `s-2`, 9 |
 | second raises `AgentFailed("gone")` with no attempt | 2 | empty, 0.5, `gone`, `None`, `s-1`, 7 |
+| second is the killed turn | 2 | empty, 1.0, `the agent produced no result event`, `None`, `s-1`, 7 |
+| first at cost 4.0, second the killed turn | 2 | empty, 5.0, `the agent produced no result event`, `None`, `s-1`, 7 |
 | second raises `RuntimeError` | 2 | raises |
 
-Each second call is asserted exactly: the container, the prompt
-`SPEC_REVIEW_EXTRACT_PROMPT`, the first call's options with
-`output_format` set to `SPEC_REVIEW_FORMAT`, `resume="s-1"` and
-`last_cost_usd=0.5`, and no other keyword. The witness also asserts
+Each second call is asserted exactly. It passes the container and the
+prompt `SPEC_REVIEW_EXTRACT_PROMPT`. Its options are the first call's,
+with `max_budget_usd` set to 1.0 and `output_format` set to
+`SPEC_REVIEW_FORMAT`. It passes `resume="s-1"`, and `last_cost_usd` of
+0.5, or 1.0 after the first turn at 4.0. It passes no other keyword. The witness also asserts
 `scope` appears nowhere in the session's `text`. So every row with a
 value is the case where the text's blocks and the value disagree.
 
@@ -538,8 +607,9 @@ is false. It follows the `$ref` under `findings.items` into `$defs`. That
 schema's properties are `severity`, `claim`, `criterion`, `file`, `line`
 and `fixes`, in order, and all six are required. Its
 `additionalProperties` is false. `severity`'s `enum` is `blocker`,
-`concern`, `note`. No `enum` or `const` appears anywhere in `fixes`'
-schema. These fail it:
+`concern`, `note`. Each of `criterion`, `file`, `line` and `fixes` has
+an `anyOf` that holds `{"type": "null"}`. No `enum` or `const` appears
+anywhere in `fixes`' schema. These fail it:
 
 - the tags read from the first turn's text, or `text` set to it
 - `text` read from the second turn's `<output>` or `json` block, alone or
@@ -551,6 +621,13 @@ schema. These fail it:
 - `text` with no fence, or the fence with no trailing newline
 - no `output_format` on the second call, or one built by hand
 - a `Literal` of the tags on `fixes`, which refuses `typo`
+- the four fields typed without null, as `_Reported` types `file` and
+  `line` (`saffron/phases/review.py:67-68`), which refuses the note and
+  drops the null branch
+- the extraction turn run at `SPEC_REVIEW_BUDGET_USD`, 6.0
+- `last_cost_usd` of the first turn's cost uncapped, which charges the
+  killed turn 4.0 after the first at 4.0
+- a killed turn's cost dropped from the sum
 - a root that is not an object, such as a bare list of findings
 - no `resume`, or `resume` of `None`, which opens a fresh session
 - no `last_cost_usd`, or the extraction turn's cost alone
@@ -615,8 +692,8 @@ appears in the result, and no `{gates}`, `{protected}`, `{elevate_on}`,
 `{ceilings}` or `{tags}` is left. It reads both files' raw text,
 collapses each run of whitespace to one space, and asserts each file's
 sentence verbatim. It asserts each of the three closing lines is a whole
-line of `SPEC_REVIEW_EXTRACT_PROMPT.splitlines()`, as
-`test_rebuts_prompts_ask_for_no_output_block` does. It asserts
+line of `SPEC_REVIEW_EXTRACT_PROMPT.splitlines()`. That REBUT test
+checks two of the three, and this witness checks all three. It asserts
 `artifacts.EXTRACTION_PROMPT` is not in that constant, and `{extraction}`
 is not in the raw file. It lowers both sides and checks each of the
 seventeen strings against each file. These fail it:
@@ -642,9 +719,9 @@ they say.
 | second's value | third | calls | `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` |
 |---|---|---|---|
 | `None` | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
-| `V` with no `claim` | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
+| `V` with no `claim` in its first finding | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
 | `V` with severity `critical` | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
-| `V` with a key `note` added to its finding | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
+| `V` with a key `note` added to its first finding | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
 | `S` | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
 | `None`, no `session_id` | returns `V` | 3 | `F`, 1.0, `None`, `None`, `s-3`, 11 |
 | `None` | returns `None` | 3 | empty, 1.0, `not the schema: the turn returned no structured output`, `None`, `s-3`, 11 |
@@ -654,6 +731,8 @@ they say.
 | `None` | raises `AgentFailed("api_error")`, `rejected`, reset `"soon"` | 3 | empty, 1.0, `None`, 1, `s-3`, 11 |
 | `None` | raises `AgentFailed("cut")` with an attempt | 3 | empty, 1.0, `cut`, `None`, `s-3`, 11 |
 | `None` | raises `AgentFailed("gone")` with no attempt | 3 | empty, 0.75, `gone`, `None`, `s-2`, 9 |
+| `None` | the killed turn | 3 | empty, 1.0, `the agent produced no result event`, `None`, `s-2`, 9 |
+| `None`, cost 3.0 | the killed turn | 3 | empty, 4.5, `the agent produced no result event`, `None`, `s-2`, 9 |
 | `None` | raises `RuntimeError` | 3 | raises |
 
 Each third call is asserted exactly. After `None` its prompt is
@@ -662,7 +741,8 @@ SPEC_REVIEW_EXTRACT_PROMPT`. After a refused value it starts `not the
 schema: ` and ends `"\n\n" + SPEC_REVIEW_EXTRACT_PROMPT`. It carries the
 second call's options, `output_format` included, and `resume="s-2"`, or
 `"s-1"` where the second carries no `session_id`. It carries
-`last_cost_usd=0.25`, and no other keyword. No row makes a fourth call,
+`last_cost_usd` of 0.25, or 1.0 after the second at 3.0, and no other
+keyword. No row makes a fourth call,
 and `scope` appears in no session's `text`. The first row is `SA-0141`'s
 fallback case: a null value beside a text whose blocks parse. These fail
 it:
@@ -681,14 +761,19 @@ it:
 - a re-ask without `output_format`, or with the first call's options
 - a re-ask with no `resume`, or `resume` of the first turn's id
 - the re-ask's cost or turns left out of the sums
+- `last_cost_usd` of the second turn's cost uncapped, which charges the
+  killed re-ask 3.0
 - a third turn's rejection read as an error
 
 **The wrong-version lists are unmeasured**, but for the model. Nothing
 below this spec's head is built. So no stand-in for the session or the
 fill can run at the tree base. Each list is reasoned from the code it
-names. A scratch copy of the two models, run at `71140772`, gave the
-schema criterion 2's witness reads. It refused `S`, `critical` and
-`note`, and `model_dump` put `V`'s keys back in `D`'s order.
+names. A scratch copy of the two models ran at `71140772`. It gave the
+schema criterion 2's witness reads, with a null branch on each of the
+four fields. It refused `S`, `critical` and `note`. `model_dump` put
+both of `V`'s findings back in `D`'s key order, so the text equalled `F`.
+A copy with the four fields typed without null refused `V`, and its
+`fixes` schema was a bare string.
 
 **What the witnesses leave undriven.** A repo file named by a string
 outside criterion 4's seventeen passes. So does a prompt that fills every
@@ -707,18 +792,25 @@ each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
+**The turn ceiling.** `max_turns` is 220. `SA-0133` hit its own
+ceiling at 161 turns on a change of 1252 changed tokens, under half this
+estimate. So 161 is a floor for a change this size, and 220 leaves room.
+
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate, in changed tokens, is about 2950, 98% of the ceiling. The
+estimate, in changed tokens, is about 3150, 105% of the ceiling. The
 session's single-turn prototype for `SA-0156` measured 218 tokens in
 `spec_review.py` and 264 in its witness. The second turn, the re-ask, the
 fill and the constants add about 380 to the source. The two models, the
 format and the validation add about 100 more, and the text parse they
-replace takes about 25 away, so about 675. `SA-0141`'s whole
+replace takes about 25 away. The two extraction constants and the
+capped `last_cost_usd` add about 35, so about 710. `SA-0141`'s whole
 `rebut.py` change, two formats, `_validate` and two reads, measured 180.
 `spec-review.md` at 60 lines runs about 370 to 550, at the 6.2 to 9.1
 words a line of the system prompts in `saffron/agents/prompts/` (`wc
 -lw`). The extraction prompt runs about 105. The five witnesses run about
-1600 to 1800, with about 37 table cases, an exact 21-line block and the
-schema's reads. `tests/test_context.py` adds about 10. The operator chose
-not to split it, and `size` stays advisory.
+1760 to 1960. They hold about 41 table cases and an exact 21-line block.
+They also hold the schema's reads, the second finding and the killed-turn
+double.
+`tests/test_context.py` adds about 10. The range is 2950 to 3335. The
+operator chose not to split it, and `size` stays advisory.

@@ -192,7 +192,7 @@ record their calls, and `follow_ups` returns one more candidate.
 - `SY-4` alone at a budget of 12.75, with budget 20, `reserve_usd` 3,
   `writer_usd` 4.5, and neither `end_review` nor `follow_ups`. It stops
   `BUDGET` and never reaches the runner.
-- Let `need` be `SPEC_WRITER_SESSION_USD`, `SPEC_REVIEW_BUDGET_USD` and 12
+- Let `need` be `SPEC_WRITER_SESSION_USD`, `SPEC_REVIEW_SESSION_USD` and 12
   together. One spec `SY-3` at a budget of 12 runs with a budget of
   `3 + need + 2` and `reserve_usd` 3. Every review of it blocks with one
   `build` blocker, as `SA-0164`'s arrangement scripts it, and costs

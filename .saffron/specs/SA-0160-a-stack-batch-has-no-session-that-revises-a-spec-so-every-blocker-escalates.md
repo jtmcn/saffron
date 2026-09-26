@@ -90,7 +90,9 @@ acceptance:
       above 0 that `session._resets_at_fields` passes, or 1 otherwise,
       whatever value it holds. A turn that raises `implement.AgentFailed`
       otherwise gives its message as `error` and no text. A first turn with
-      no `session_id` gives an error, no text and no extraction turn. An
+      no `session_id` gives the error `no session to extract from`, the
+      message `SA-0175`'s review session gives, no text and no extraction
+      turn. An
       extraction turn whose `structured_output` is `None`, or a value
       `model_validate` refuses, goes to criterion 3's re-ask. Any other
       raise propagates. The witness drives each case, from either turn,
@@ -449,7 +451,7 @@ values in turn. 1755800000 and `10**20` give themselves. `None`, `"soon"`,
 | draft | raises `AgentFailed("api_error")`, value `V`, cost 0.125 | empty, 0.625, `api_error`, `None`, `s-1`, 14 |
 | draft | raises `AgentFailed("idle bound")`, `session_id` `None`, cost 0.125 | empty, 0.625, `idle bound`, `None`, `s-1`, 14 |
 | draft | raises `AgentFailed("no result")` with no attempt | empty, 0.5, `no result`, `None`, `s-1`, 7 |
-| returned with no `session_id`, cost 0.5 | none | empty, 0.5, `session_id`, `None`, `None`, 7 |
+| returned with no `session_id`, cost 0.5 | none | empty, 0.5, `no session to extract from`, `None`, `None`, 7 |
 
 "none" in the second column means the case asserts one call. Each other case
 asserts two. The first call is exactly `c-1`, `p` and the options with

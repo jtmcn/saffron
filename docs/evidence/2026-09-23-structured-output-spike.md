@@ -192,3 +192,21 @@ Both values matched the expected text exactly, with no strip needed. The
 extraction turn is slow because it writes the whole file as output tokens.
 One run each, so a rate of failure is not measured. Not measured in a cell,
 and not with a turn ceiling low enough to cut the tool call.
+
+## Addendum, 2026-09-25: required nullable fields
+
+`SA-0175`'s finding model has four required fields that may be null. No
+schema above had one, so the delegate sent that shape through a resumed
+turn on the same host and pin: a list of findings with `severity` a
+three-value enum, `claim` a string, and `criterion`, `file`, `line` and
+`fixes` each `anyOf` a type and null, all required, with
+`additionalProperties: false`.
+
+The API took the schema, with no 400. The turn returned two findings with
+all four fields null, and both validated. Work turn $0.06, extraction turn
+$0.08, 10 s.
+
+The extraction prompt said "tag" and did not name the `fixes` field. The
+model wrote the blocker's `build` tag into its claim, as `[tag: build]`,
+and left `fixes` null. A prompt that names the field is what carries the
+tag. `SA-0175` pins that sentence.

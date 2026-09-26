@@ -97,7 +97,7 @@ acceptance:
       the task `GATE_ERROR` and counts as an abort. Before every revision
       round, the budget left is the batch's budget less `reserve_usd` and
       `batch_spend`. When it falls short of `SPEC_WRITER_SESSION_USD`,
-      `SPEC_REVIEW_BUDGET_USD` and the spec's `budget_usd` together,
+      `SPEC_REVIEW_SESSION_USD` and the spec's `budget_usd` together,
       `revise` is not called. The check runs again before a writer call
       retried after a rate-limit wait. A refused spec
       returns a `Refused` with an ` unrevised  ` line, counts no abort, and
@@ -197,7 +197,9 @@ by symbol where the chain edits them. This spec consumes these names.
   which passes it the candidate's `task_id`. The re-queue cap's phase
   clause admits `SPEC_REVIEW` and `SPEC_WRITING` beside `IMPLEMENTING`. So
   a writer attempt on a task disqualifies it from no cap.
-- From `SA-0175`: `SPEC_REVIEW_BUDGET_USD`, 6.0, and `run_spec_review`.
+- From `SA-0175`: `SPEC_REVIEW_SESSION_USD`, 8.0, and `run_spec_review`.
+  That figure bounds one review session: its review turn's 6.0 and two
+  extraction turns at 1.0 each.
   Its session's `text` is one fenced `json` block, the findings its
   extraction turn returned, or empty. It holds none of the review turn's
   prose. The extraction turn copies each `fixes` as the review gave it.
@@ -302,7 +304,7 @@ A round, in order:
   `writer_usd` to it for generation 0. `SA-0162` runs follow-ups with both
   reserves released, so it passes the generation and the round's check
   releases them too. Read `spec_review.SPEC_WRITER_SESSION_USD` and
-  `spec_review.SPEC_REVIEW_BUDGET_USD` through the module at call time.
+  `spec_review.SPEC_REVIEW_SESSION_USD` through the module at call time.
   The check must see the spec's own attempts in `batch_spend`. `SA-0155`'s
   wrapper attaches the minted run right after the mint, before the first
   review, so every review and writer attempt already counts.
@@ -473,14 +475,16 @@ otherwise.
 | 5 | `TE-5` | `b(build)`, `u`, clean | `r5a\n`, `r5b\n` |
 | 6 | `TE-10` | `b(build)` three times, then `u` | `t1\n`, `t2\n`, `t3\n` |
 | 7 | `TE-7` | clean | none |
-| 8 | `TE-9`, `budget_usd` 39.625 | `b(witness)`, `b(witness)` | `r9\n`, then rejected at cost 0.25 |
+| 8 | `TE-9`, `budget_usd` 37.625 | `b(witness)`, `b(witness)` | `r9\n`, then rejected at cost 0.25 |
 | 9 | `TE-6` | `b(build)` | `error` `api_error`, cost 0.125 |
 | 10 | `TE-8` | `b(build)` | raises `RuntimeError("writer cell would not start")` |
 | 11 | `TE-11` | none | none |
 
 **The arithmetic.** `SPEC_WRITER_SESSION_USD` is 18.5 and
-`SPEC_REVIEW_BUDGET_USD` 6.0, so `TE-9`'s need is 18.5 + 6.0 + 39.625,
-which is 64.125. The budget left is 100 less 8 less `batch_spend`, so 92
+`SPEC_REVIEW_SESSION_USD` 8.0, so `TE-9`'s need is 18.5 + 8.0 + 37.625,
+which is 64.125. Its `budget_usd` is 2.0 below the 39.625 it held while
+the review reserved 6.0, so the need and every check below stay as they
+were. The budget left is 100 less 8 less `batch_spend`, so 92
 less the spend. The specs before `TE-9` spend these.
 
 | spec | reviews | writer | runner | total | running |
@@ -501,14 +505,17 @@ less the spend. The specs before `TE-9` spend these.
 | after the wait, on the same review | 28.0 | 64.0 | refused, short by 0.125 |
 
 Leaving out any one of the five terms lets the third check pass. So does
-`SPEC_WRITER_BUDGET_USD`, 17.0, in place of `SPEC_WRITER_SESSION_USD`, and
+`SPEC_WRITER_BUDGET_USD`, 17.0, in place of `SPEC_WRITER_SESSION_USD`,
+which needs 62.625. So does `SPEC_REVIEW_BUDGET_USD`, 6.0, in place of
+`SPEC_REVIEW_SESSION_USD`, which needs 18.5 + 6.0 + 37.625, or 62.125. And
 so does a spend that misses `TE-9`'s own review, which leaves 64.5. A
 check before the first round alone, or none after a wait, calls the
 writer a third time, and the double raises. `_drive`'s own check passes
-each time `TE-9` is offered, since 39.625 is below both 66.25 and 64.0.
+each time `TE-9` is offered, since 37.625 is below both 66.25 and 64.0.
 After `TE-9`, `TE-6` spends 0.5 and 0.125, and `TE-8` 0.5, so
 `batch_spend` ends at 29.125. Every other round's check sees at most
-29.125 spent, `TE-8`'s, so at least 62.875 left against a need of 36.5. The aborts
+29.125 spent, `TE-8`'s, so at least 62.875 left. Its need is
+18.5 + 8.0 + 12, which is 38.5. The aborts
 are `TE-6` and `TE-8`, in a row, so the batch stops `INFRASTRUCTURE`
 before `TE-11`. `TE-9` runs before them and counts none. A build that
 counts its refusal as an abort stops before `TE-8`, whose writer call the
@@ -681,7 +688,8 @@ nothing ran it. Later revisions moved criterion 1's route from a word in
 a claim to the `witness` tag, and a review's text to `SA-0175`'s block
 alone. They gave a concern alone three rounds, as design section 3 routes
 it as `witness` (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:179-181`,
-`:198-199`). They moved the writer session's ceiling to 18.5, rebuilt the
+`:198-199`). They moved the writer session's ceiling to 18.5, and the
+review's reserve to `SPEC_REVIEW_SESSION_USD`, 8.0. They rebuilt the
 arrangement round `TE-9`'s wait, and recomputed its figures. No prototype ran after it, so each wrong version marked reasoned
 is unmeasured.
 
