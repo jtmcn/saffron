@@ -1030,3 +1030,17 @@ taken by hand, so no critic ran on it and it has no lines here.
   test demoted it.
   **Bucket 1**, the probe runner. **Landed:** a review commit on #515, and
   item b-19b255 by #515.
+
+## 2026-09-25, `SA-0141` (the spec loop's run 17, #519)
+
+- `SA-0141` (#519): repair pinned the old prompt text into test ids so
+  `census` saw the same names.
+  **Bucket 1**, `census`. **Open:** item b-f30189. A review commit made the
+  ids the prompt names.
+- `SA-0141` (#519): a slot test kept two cases the spec said to drop and
+  inverted their assertion, for the same gate.
+  **Bucket 1**, `census`. **Open:** item b-f30189. **Landed:** a review
+  commit on #519 dropped them.
+- `SA-0141` (#519): nothing witnessed the drive double copying
+  `structured_output` onto its result line, as the spec's notes asked.
+  **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #519.

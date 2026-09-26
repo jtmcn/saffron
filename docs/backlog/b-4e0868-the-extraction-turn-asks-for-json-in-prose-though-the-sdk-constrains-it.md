@@ -1,10 +1,11 @@
 ---
 id: b-4e0868
 title: The extraction turn asks for JSON in prose, though the pinned SDK can constrain it to a schema
-status: open
+status: partial
 tier: 2
 filed: 2026-09-23
 specs: [SA-0141]
+prs: [519]
 cites: [§5.3]
 related: [42, 60]
 ---
@@ -76,3 +77,7 @@ that choice waits on the observer's record, and this item does not make it.
 - 2026-09-23: `SA-0141` written, the first slice. It covers REBUT's rebuttal
   extraction turn and its verdict sessions. REVIEW, the plan checkpoint and
   the notes turn are later slices.
+- 2026-09-25: `SA-0141` delivered the first slice (#519). A host spike
+  first confirmed `output_format` holds beside the file system prompt
+  `SA-0140` introduced. The item stays open for REVIEW, the plan checkpoint
+  and the notes turn.

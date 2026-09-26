@@ -12,6 +12,7 @@ import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from saffron import events
 from saffron.agents import context
@@ -92,6 +93,9 @@ class AttemptResult:
     # reports and the host sums (§5.1).
     rate_limit_status: str | None = None
     rate_limit_resets_at: int | None = None
+    # The result event's own `structured_output`, whole, never re-derived
+    # from `text` (§5.3, backlog b-4e0868).
+    structured_output: Any | None = None
 
 
 def agent_options(
@@ -381,6 +385,7 @@ def run_agent(
         bound=done.bound,
         rate_limit_status=rate_limit.get("status"),
         rate_limit_resets_at=rate_limit.get("resets_at"),
+        structured_output=result.get("structured_output"),
     )
     if failed:
         # `is_error`, measured and not assumed: a cell with no credential

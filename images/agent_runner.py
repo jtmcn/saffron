@@ -127,6 +127,9 @@ def events(message: Any) -> list[dict[str, Any]]:
             "session_id": getattr(message, "session_id", None),
             "terminal_reason": getattr(message, "terminal_reason", None),
             "is_error": bool(getattr(message, "is_error", False)),
+            # Never through `_clip`: this is the one route a structured turn's
+            # whole value can reach the host on (§5.3, backlog b-4e0868).
+            "structured_output": getattr(message, "structured_output", None),
         }
         event.update(_usage_counts(getattr(message, "usage", None), _RESULT_USAGE_KEYS))
         return [event]

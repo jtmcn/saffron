@@ -1139,7 +1139,7 @@ def _stub_the_runtime(
     return cell
 
 
-def _turn(text="", cost=0.1):
+def _turn(text="", cost=0.1, structured_output=None):
     return implement.AttemptResult(
         session_id="sess-1",
         subtype="success",
@@ -1147,6 +1147,7 @@ def _turn(text="", cost=0.1):
         num_turns=1,
         cost_usd_est=cost,
         text=text,
+        structured_output=structured_output,
     )
 
 
@@ -1330,6 +1331,7 @@ def _drive(
                         "is_error": attempt.is_error,
                         "total_cost_usd": attempt.cost_usd_est,
                         "session_id": attempt.session_id,
+                        "structured_output": attempt.structured_output,
                     }
                 )
             )
@@ -3274,7 +3276,8 @@ def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
         tmp_path,
         cell=cell,
         turns=_through_rebut(
-            _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
         ),
     )
     assert outcome.state == "REBUTTING"
@@ -3399,7 +3402,7 @@ def test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker(monkeypatch, tm
             correctness=_block(_BLOCKER),
             rebut=[
                 _turn("I have addressed the findings."),
-                _turn(_block(_CLAIMED_FIX)),
+                _turn(structured_output=_CLAIMED_FIX),
             ],
         ),
         policy=_PROBE_POLICY,
@@ -3661,7 +3664,7 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
             three_probes,
             rebut=[
                 _turn("I have addressed the findings."),
-                _turn(_block(_CLAIMED_FIX)),
+                _turn(structured_output=_CLAIMED_FIX),
             ],
         ),
         policy=_PROBE_POLICY,
@@ -3755,7 +3758,7 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
             three_probes,
             rebut=[
                 _turn("I have addressed the findings."),
-                _turn(_block(_CLAIMED_FIX)),
+                _turn(structured_output=_CLAIMED_FIX),
             ],
         ),
         policy=_PROBE_POLICY,
@@ -4080,7 +4083,7 @@ def test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff(
         monkeypatch,
         tmp_path,
         cell=cell,
-        turns=_through_rebut(_turn("Fixed it."), _turn(_block(_CLAIMED_FIX))),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
     )
     assert outcome.state == "EXHAUSTED"
     assert (tmp_path / "out" / "SY-1" / "patch.diff").read_text() == _ANCHORING_DIFF
@@ -4111,7 +4114,7 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
             _turn(_block({"findings": []})),
             _turn(_block({"findings": []})),
             _turn("Fixed it."),
-            _turn(_block(_CLAIMED_FIX)),
+            _turn(structured_output=_CLAIMED_FIX),
         ],
         capture=events,
     )
@@ -4179,7 +4182,7 @@ def test_each_attempts_gate_results_carry_their_own_attempt_number(
         _turn(_block({"findings": []})),
         _turn(_block({"findings": []})),
         _turn("Fixed it."),
-        _turn(_block(_CLAIMED_FIX)),
+        _turn(structured_output=_CLAIMED_FIX),
     ]
     _outcome, _ledger, gate_events = _gate_result_events(
         monkeypatch, tmp_path, cell=cell, turns=turns
@@ -5474,7 +5477,7 @@ def test_a_review_records_the_findings_it_dropped_as_well_as_the_ones_it_kept(
             _turn(_block(_UNANCHORABLE)),
             _turn(_block({"findings": []})),
             _turn("I have addressed the findings."),
-            _turn(_block(_CLAIMED_FIX)),
+            _turn(structured_output=_CLAIMED_FIX),
         ],
     )
     (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
@@ -5496,22 +5499,18 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
         turns=_through_rebut(
             _turn("It is intentional."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "argued", "argument": "by design"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
             ),
         ),
     )
@@ -5541,22 +5540,18 @@ def test_the_verdict_session_carries_claude_md_at_the_base_commit(
         turns=_through_rebut(
             _turn("It is intentional."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "argued", "argument": "by design"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
             ),
         ),
         claude_md="working-copy rule\n",
@@ -5580,22 +5575,18 @@ def test_a_successful_outcome_carries_its_attempts_failures_reviews_and_rebuttal
         turns=_through_rebut(
             _turn("It is intentional."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "argued", "argument": "by design"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
             ),
         ),
     )
@@ -5638,22 +5629,18 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
         turns=_through_rebut(
             _turn("Fixed."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "fixed", "argument": "committed"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "committed"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                    ]
+                }
             ),
         ),
     )
@@ -5689,22 +5676,18 @@ def test_every_critic_cell_rebuts_included_is_behind_the_proxy(monkeypatch, tmp_
         turns=_through_rebut(
             _turn("Fixed."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "fixed", "argument": "committed"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "committed"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                    ]
+                }
             ),
         ),
     )
@@ -5823,22 +5806,18 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
         turns=_through_rebut(
             _turn("Fixed."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "fixed", "argument": "committed"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "committed"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                    ]
+                }
             ),
         ),
     )
@@ -5873,24 +5852,20 @@ def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
         turns=_through_rebut(
             _turn("It is intentional."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "argued", "argument": "first"},
-                            {"finding": 1, "action": "fixed", "argument": "second"},
-                            {"finding": 7, "action": "fixed", "argument": "nobody"},
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "first"},
+                        {"finding": 1, "action": "fixed", "argument": "second"},
+                        {"finding": 7, "action": "fixed", "argument": "nobody"},
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
             ),
         ),
     )
@@ -5911,7 +5886,8 @@ def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_pat
         tmp_path,
         cell=cell,
         turns=_through_rebut(
-            _turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
         ),
     )
     (line,) = ledger.queue_lines()
@@ -6961,7 +6937,10 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
             _turn(_probe_answer(anchors, "removing the guard lets a negative through")),
             _turn(_probe_answer(unanchored, "nothing checks the total's sign")),
         )
-        + [_turn("I have addressed the findings."), _turn(_block(_CLAIMED_FIX))],
+        + [
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
         spec=_spec(acceptance=[first, second]),
         policy=_PROBE_POLICY,
         gates=("tests",),
@@ -7663,29 +7642,25 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
     rebut_capture: list = []
     rebut_cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, rebut_cell, rebut_commits=1)
-    _drive(
+    rebut_outcome, _ = _drive(
         monkeypatch,
         tmp_path / "rebut",
         cell=rebut_cell,
         turns=_through_rebut(
             _turn("It is intentional."),
             _turn(
-                _block(
-                    {
-                        "rebuttals": [
-                            {"finding": 1, "action": "argued", "argument": "by design"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
             ),
             _turn(
-                _block(
-                    {
-                        "verdicts": [
-                            {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
-                        ]
-                    }
-                )
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
             ),
         ),
         real_run_agent=rebut_raw,
@@ -7702,6 +7677,8 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
         "verdict",
     ]
     _assert_digests_match_requests(rebut_raw, rebut_capture)
+    # The withdrawn verdict arrives only as the result line's `structured_output`.
+    assert rebut_outcome.state == "READY_FOR_REVIEW"
 
 
 def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(

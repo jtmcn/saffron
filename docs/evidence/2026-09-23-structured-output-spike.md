@@ -151,3 +151,24 @@ asyncio.run(main())
 
 The run's own copy also logged message kinds, tool names and timings. It
 printed each result as it arrived and caught each turn's exception.
+
+## Addendum, 2026-09-25: beside a file system prompt
+
+`SA-0140` made the runner hand the SDK its system prompt as
+`{"type": "file", "path": ...}`. The runs above sent strings. Before
+`SA-0141`'s cell, the delegate ran the same SDK pin on the host with a file
+system prompt and the production option shape: `tools`, `allowed_tools`,
+`permission_mode="dontAsk"`, `setting_sources=[]`, `max_turns=20` and
+`max_budget_usd=2.0`. The schemas were `_Rebuttals` and `_Verdicts` from
+`saffron/phases/rebut.py` at `55dba385`.
+
+The prompt file told the model to start every `argument` and `reason` with
+the word PAPRIKA. That proves the file was read.
+
+| Turn | Schema | Outcome |
+|---|---|---|
+| work | none | `success`, $0.05 |
+| resumed | `_Rebuttals` | `success`, valid, `argument` starts PAPRIKA, $0.07 |
+| fresh, `Read`/`Glob`/`Grep` | `_Verdicts` | `success`, valid, `reason` starts PAPRIKA, $0.04 |
+
+The schema and the file prompt both hold on the same turn. Total $0.15.

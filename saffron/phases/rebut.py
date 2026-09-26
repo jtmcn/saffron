@@ -14,7 +14,6 @@ read-only session that sees the argument and never the transcript behind it.
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -24,7 +23,6 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from saffron.agents import context
-from saffron.agents.artifacts import parse_output_block
 from saffron.agents.findings import Finding
 from saffron.events import Agent, Event, PhaseStart, describe
 from saffron.phases import implement, review
@@ -63,6 +61,29 @@ class Verdict(BaseModel):
 
 class _Verdicts(BaseModel):
     verdicts: list[Verdict]
+
+
+# Sent as `output_format`: the schema the host already validates against,
+# generated once per process (§5.3, backlog b-4e0868).
+_REBUTTALS_FORMAT = {"type": "json_schema", "schema": _Rebuttals.model_json_schema()}
+_VERDICTS_FORMAT = {"type": "json_schema", "schema": _Verdicts.model_json_schema()}
+
+
+def _validate[Model: BaseModel](
+    model: type[Model], value: object
+) -> tuple[Model | None, str | None]:
+    """`value` against `model`, or the `not the schema` error naming why.
+
+    A `None` value means the turn produced no structured reply at all. A
+    shape `model_validate` rejects means the turn replied with the wrong
+    schema instead.
+    """
+    if value is None:
+        return None, "not the schema: the turn returned no structured output"
+    try:
+        return model.model_validate(value), None
+    except ValidationError as exc:
+        return None, f"not the schema: {exc}"
 
 
 @dataclass
@@ -186,7 +207,7 @@ def run_rebuttal(
         extracted = agent(
             container,
             prompt=EXTRACT_PROMPT,
-            options=options,
+            options=options | {"output_format": _REBUTTALS_FORMAT},
             resume=session_id,
             emit=emit,
             last_cost_usd=attempt.cost_usd_est,
@@ -199,16 +220,13 @@ def run_rebuttal(
 
     spent = attempt.cost_usd_est + extracted.cost_usd_est
     session_id = extracted.session_id or session_id
-    try:
-        report = _Rebuttals.model_validate(
-            json.loads(parse_output_block(extracted.text))
-        )
-    except (ValueError, ValidationError) as exc:
-        # No re-prompt, as with REVIEW's extraction: the plan checkpoint retries
-        # because a rejected plan costs an attempt that has not happened yet.
-        # This attempt is already made, and HEAD already says what it did.
+    # No re-prompt, as with REVIEW's extraction: the plan checkpoint retries
+    # because a rejected plan costs an attempt that has not happened yet.
+    # This attempt is already made, and HEAD already says what it did.
+    report, error = _validate(_Rebuttals, extracted.structured_output)
+    if error or report is None:
         return RebuttalTurn(
-            cost_usd=spent, session_id=session_id, error=f"not the schema: {exc}"
+            cost_usd=spent, session_id=session_id, error=error or "not the schema"
         )
     return RebuttalTurn(
         rebuttals=report.rebuttals, cost_usd=spent, session_id=session_id
@@ -295,7 +313,7 @@ def run_verdict(
         max_turns=max_turns,
         budget_usd=budget_usd,
         tools=review.REVIEW_TOOLS,
-    )
+    ) | {"output_format": _VERDICTS_FORMAT}
     never_started = False
 
     def _watch(event: Event) -> None:
@@ -312,11 +330,10 @@ def run_verdict(
         return LensVerdicts(
             lens, cost_usd=cost, error=str(failed), never_started=never_started
         )
-    try:
-        report = _Verdicts.model_validate(json.loads(parse_output_block(attempt.text)))
-    except (ValueError, ValidationError) as exc:
+    report, error = _validate(_Verdicts, attempt.structured_output)
+    if error or report is None:
         return LensVerdicts(
-            lens, cost_usd=attempt.cost_usd_est, error=f"not the schema: {exc}"
+            lens, cost_usd=attempt.cost_usd_est, error=error or "not the schema"
         )
     asked = {n for n, _ in blockers}
     given = {v.finding for v in report.verdicts}

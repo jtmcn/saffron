@@ -429,7 +429,11 @@ def test_every_turn_prompt_file_is_loaded_by_something():
     assert {path.stem for path in context.TURNS_DIR.glob("*.md")} == set(TURN_PROMPTS)
 
 
-@pytest.mark.parametrize(("name", "constant"), sorted(TURN_PROMPTS.items()))
+# Ids by name: an id made of the prompt's text renames the case whenever the
+# prompt changes, and `census` reads that as a removed test.
+@pytest.mark.parametrize(
+    ("name", "constant"), sorted(TURN_PROMPTS.items()), ids=sorted(TURN_PROMPTS)
+)
 def test_a_turn_prompt_constant_is_its_file(name, constant):
     assert constant == context.turn_prompt(name)
 
@@ -443,11 +447,23 @@ def test_a_loaded_turn_prompt_keeps_no_unfilled_slot(name):
     )
 
 
-@pytest.mark.parametrize(
-    "name", ["plan", "review", "verdict", "rebut-extract", "notes"]
-)
+@pytest.mark.parametrize("name", ["plan", "review", "notes"])
 def test_a_prompt_declaring_the_slot_gets_the_extraction_rules(name):
     assert context.turn_prompt("extraction") in context.turn_prompt(name)
+
+
+def test_rebuts_prompts_ask_for_no_output_block():
+    """REBUT's two structured turns get their schema from `output_format`.
+    Neither prompt sends them chasing an `<output>` block or the shared
+    rules built for a text turn."""
+    verdict_system = (context.PROMPTS_DIR / "rebut-verdict.md").read_text()
+    for text in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT, verdict_system):
+        assert "<output>" not in text
+        assert "output block" not in text.lower()
+        assert artifacts.EXTRACTION_PROMPT not in text
+    lines = rebut.EXTRACT_PROMPT.splitlines()
+    assert "Do not change files." in lines
+    assert "Do not run commands." in lines
 
 
 def test_the_rebuttal_prompt_still_formats_its_blockers():

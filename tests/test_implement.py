@@ -237,6 +237,53 @@ def test_an_absent_result_event_is_an_error_not_a_success():
         )
 
 
+def test_structured_output_is_read_from_the_result_event_only():
+    """A stream can carry the tool call's clipped input, or an unrelated
+    top-level key with the same name. Only the result event's own
+    `structured_output` is ever read."""
+    result1 = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={"max_turns": 1},
+        spec_id="SY-1",
+        exec_stream=_stream(_result_line(structured_output={"rebuttals": []})),
+    )
+    assert result1.structured_output == {"rebuttals": []}
+
+    result2 = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={"max_turns": 1},
+        spec_id="SY-1",
+        exec_stream=_stream(
+            json.dumps(
+                {
+                    "type": "tool_use",
+                    "id": "t1",
+                    "name": "StructuredOutput",
+                    "input": {"rebuttals": []},
+                }
+            ),
+            _result_line(structured_output=None),
+        ),
+    )
+    assert result2.structured_output is None
+
+    result3 = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={"max_turns": 1},
+        spec_id="SY-1",
+        exec_stream=_stream(
+            json.dumps(
+                {"type": "system", "subtype": "init", "structured_output": {"x": 1}}
+            ),
+            _result_line(),
+        ),
+    )
+    assert result3.structured_output is None
+
+
 def test_a_result_that_says_success_but_flags_an_error_is_not_a_success():
     """Measured against a real cell with no credential: the session reports
     `subtype="success"` with `is_error=true` and terminal_reason `api_error`.
