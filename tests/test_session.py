@@ -7642,7 +7642,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
     rebut_capture: list = []
     rebut_cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, rebut_cell, rebut_commits=1)
-    _drive(
+    rebut_outcome, _ = _drive(
         monkeypatch,
         tmp_path / "rebut",
         cell=rebut_cell,
@@ -7677,6 +7677,8 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
         "verdict",
     ]
     _assert_digests_match_requests(rebut_raw, rebut_capture)
+    # The withdrawn verdict arrives only as the result line's `structured_output`.
+    assert rebut_outcome.state == "READY_FOR_REVIEW"
 
 
 def test_a_task_records_the_sha256_of_claude_md_at_base_or_that_it_found_none(
