@@ -142,16 +142,16 @@ cell a layer is read in, and wires the end review into
 `saffron batch --stack`. `SA-0147` then qualifies the findings.
 
 **What the tree base holds.** This spec's tree base is `SA-0146`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). The chain
 `SA-0142` to `SA-0146` puts `run_stack_batch`, the `stack_layers` table,
 `Ledger.record_stack_layer` and `saffron/end_review.py` there. So those are
-cited by symbol, and every line number below was read at `4f57467c`.
+cited by symbol, and every line number below was read at `e3020b3b`.
 
 - `SA-0143` builds `run_stack_batch` in `saffron/batch.py`. It takes the
   order, the ledger, the budget, `until` and a runner, and the keywords
   `readiness_check`, `clock` and `emit`. It returns the stop reason.
   `SA-0143` suggests it call `run_batch`, whose loop is `_drive`
-  (`saffron/batch.py:142-255`).
+  (`saffron/batch.py:146-264`).
 - `SA-0145` writes one `stack_layers` row per layer, keyed on record keys:
   `task_key`, `batch_key`, `position`, `spec_id`, `predecessor_key`,
   `predecessor_head` and `generation`. `batch_key` is the batch's id as
@@ -203,7 +203,7 @@ with it (`saffron/repos/mirror.py:152-161`).
 **Why the reserve is checked before a layer.** REVIEW's lens sessions run
 under `budget_usd` each (`saffron/phases/review.py:208-234`). Nothing counts
 their spend against a batch while they run. `_drive`'s budget comparison
-runs before each task (`saffron/batch.py:194-195`), and an end review runs
+runs before each task (`saffron/batch.py:198-200`), and an end review runs
 no task. So the end review keeps its own count against its own reserve.
 
 ## Problem
@@ -248,7 +248,7 @@ Build three things.
      cell and calls `review_layer` in it. `spec_body` is `spec.body`
      alone, and `acceptance`, `touches` and `forbidden` come from the
      same `Spec`. REVIEW appends the criteria to the body
-     (`saffron/cell/session.py:2525-2526`). Here the Spec prompt's own
+     (`saffron/cell/session.py:2538-2539`). Here the Spec prompt's own
      slots carry them, so an appended copy would send them twice.
    - A raise anywhere in that step gives each lens a `LensReview` with the
      exception's type and message as its error, and a cost of 0.
@@ -282,15 +282,25 @@ defers it while this spec is open (`.saffron/gates/dead.py:4-6`).
   The callable `SA-0154` builds calls `review_stack` and hands its list to
   `SA-0147`, which anchors, probes and groups the findings.
 - **The join lens.** Its run and its record are `SA-0154`'s.
+- **A revised layer's latest text.** ADR 7 names the end-review Spec lens
+  among the sessions whose cell holds the base text of a revised spec.
+  That lens judges a revised layer rightly only against its latest
+  recorded text, the one its cell ran. Here `specs` holds the order's queued `Spec`s,
+  read at `base_sha`. `SA-0150` builds `Ledger.spec_text`, and it sits
+  above this spec in the chain, so no recorded text exists in this tree.
+  `SA-0173` has `run_stack_batch` hand `end_review` each revised spec's
+  latest text, parsed, in place of its queued `Spec`. `review_stack` reads
+  `specs` as given, so it needs no change then.
 - **Closing the batch row after the end review.** The loop closes the row
   before `end_review` runs. `close_batch` stores `spent_usd_est` through
   `batch_spend` then (`saffron/ledger.py:820-846`), so the stored figure
   lacks the end review. Follow-ups run after the end review in the same
-  batch. `SA-0150` owns closing the row after both.
+  batch. `SA-0162` closes the row once, after both.
 - **Other money in a stack batch.** `reserve_usd` is the end review's
   alone. A spec review (`SA-0149`, `SA-0156`) runs under a task of its own
   and is charged through `batch_spend` like any task. Follow-up writing
-  (`SA-0150`) takes a reserve of its own.
+  takes a reserve of its own: `SA-0173` holds `writer_usd` back beside
+  this one, and `SA-0165` sets it from `--budget`.
 - **A raise once a lens spends.** Take a raise out of `review_layer` that
   is not `AgentFailed`, or one out of `open_cell`'s exit. Either records
   both lenses `error` at a cost of 0. `review_layer` returns both lenses
@@ -532,7 +542,7 @@ and every wrong version listed failed its own. The code of `SA-0143` to
   `review_layer` as given.
 - The stop reasons `UNTIL` and `INCOMPLETE`. `end_review` runs after the
   loop whatever it returns.
-- A layer of generation 1. Follow-up layers are `SA-0150`'s, after the
+- A layer of generation 1. Follow-up layers are `SA-0162`'s, after the
   end review.
 
 **The double's `AssertionError` is caught.** `review_stack` catches a raise

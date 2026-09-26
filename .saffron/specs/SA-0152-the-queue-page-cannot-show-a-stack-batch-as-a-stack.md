@@ -46,7 +46,7 @@ forbidden:
   - tests/test_ledger_fold_task.py
 budget_usd: 27
 max_attempts: 3
-max_turns: 160
+max_turns: 200
 acceptance:
   - claim: >-
       `stack_view(ledger, batch_id, specs)` returns `None` for a batch with
@@ -58,16 +58,24 @@ acceptance:
       summed from its attempts, its task's `budget_usd`, its highest turn
       count in one attempt, its pull request, the summary of its last
       `size` gate result or `None`, its generation, and the spec id and
-      head of the layer below as the row recorded them. The view's order is
+      head of the layer below as the row recorded them. Its end-review
+      status is `reviewed` when its `spec` and `standards` rows are both
+      `reviewed`, and `error` when either is `error`. Otherwise it is
+      `not_reached`, a layer with no row included. A `join` row plays no
+      part. The view's order is
       every task of the batch's runs in run order, each with its state and
-      its layer position or `None`. It carries the batch's spend, the
-      batch's budget, and a count of those tasks by state. The witness
+      its layer position or `None`. It carries the batch's spend as
+      `batch_spend` reads it, the batch's budget, and a count of those
+      tasks by state. The witness
       drives a layer whose predecessor was pushed again after the layer was
       recorded, a layer whose state moved to `REJECTED` afterwards, a
       generation 1 layer, a spec absent from `specs`, and a task with no
       `size` result. It drives a peak in a later attempt, and a last
       attempt with no gate result. It drives a spec with two tasks in the
-      batch, and a layer's spec with a later task outside it.
+      batch, and a layer's spec with a later task outside it. It drives a
+      layer whose two lenses are `reviewed` beside an errored `join` row, a
+      Spec `error` beside a `reviewed` Standards, the reverse, both
+      `not_reached`, and a layer of a second batch with no row.
     witness: tests/test_stack_view.py::test_the_stack_view_reads_each_layer_of_one_batch_in_position_order
   - claim: >-
       `render_stack(view)` renders one `<section>` for the batch, then one
@@ -76,11 +84,13 @@ acceptance:
       with its state and its layer or no layer, and each state with its
       count. Each order entry reads as its spec id, its state in `<code>`,
       and `layer <n>` or `no layer`. Each layer section holds every field
-      of its layer. The title and the size summary are escaped, and a
+      of its layer, its end-review status included, as `end review` and
+      the status in `<code>`. The title and the size summary are escaped, and a
       missing value renders as the placeholder `_row` uses for an unknown
       cost, never as `None`. The witness drives one layer with every value
       set and one with every optional value `None`, and a title and a size
-      summary that each hold a `<`.
+      summary that each hold a `<`, and the statuses `error` and
+      `not_reached`.
     witness: tests/test_stack_view.py::test_the_stack_view_renders_a_section_for_the_batch_and_each_layer
   - claim: >-
       `write_stack_view(out_dir, ledger, specs)` renders the newest batch's
@@ -119,10 +129,16 @@ batch. `SA-0143` adds `run_stack_batch` to `saffron/batch.py`. `SA-0144`
 makes `saffron batch --stack` call it from `cli._batch`. `SA-0145` adds the
 `stack_layers` table and `Ledger.record_stack_layer`. That table holds one
 row per layer: `task_key`, `batch_key` (the batch id as text), `position`,
-`spec_id`, `predecessor_key`, `predecessor_head` and `generation`. This spec
-reads those names and no other name the chain adds. Every line number below
-was read at `4797e80e`, where none of the four is merged. Read `cli.py` and
-`ledger.py` by symbol at the tree base.
+`spec_id`, `predecessor_key`, `predecessor_head` and `generation`.
+`SA-0153` adds the `end_reviews` table and
+`Ledger.record_end_review(task_id, *, lens, status, cost_usd, error)`. It
+writes one row per lens of each layer, keyed on `(task_key, lens)`, with a
+`status` of `reviewed`, `error` or `not_reached`. `SA-0154` writes a `join`
+row under the top layer's task. `SA-0153` also widens `batch_spend` to add
+each layer's end-review cost. This spec reads those names, and
+`SA-0151`'s `Ledger.stack_layers`, and no other name the chain adds. Every
+line number below was read at `e3020b3b`, where none of them is merged.
+Read `cli.py` and `ledger.py` by symbol at the tree base.
 
 **How the page is written today.** `append_queue_line` upserts one
 `QueueLine` into `queue.json`, then re-renders `index.html` from every row
@@ -132,8 +148,8 @@ file (`:215`, `:242-253`) and writes each file through `_atomic_write`
 (`:300-310`). `render_index` puts the header, then the table
 (`:112-140`). PACKAGE calls it once per task (`saffron/phases/package.py:968`),
 and so does `run_task` for a task that never packaged
-(`saffron/task.py:364`). `saffron batch` writes to
-`<home>/batches/v0` (`saffron/cli.py:175-176`).
+(`saffron/task.py:408`). `saffron batch` writes to
+`<home>/batches/v0` (`saffron/cli.py:182`).
 
 **What the ledger already reads.** `batch_spend` sums a batch's attempts
 through `runs.batch_id` (`saffron/ledger.py:897-911`). `task_spend` sums one
@@ -143,7 +159,7 @@ results in attempt order (`:1254-1259`). `tasks.spent_usd_est` is rolled up
 only by `set_task_state` (`:585-592`), and `set_task_package` leaves it
 alone (`:593-608`). `batches.budget_usd` holds a batch's budget (`:51-59`),
 and no read method returns it. `max_turns` bounds each attempt, not a task
-(`saffron/cell/session.py:1816`). A spec's title and `max_turns` are in no
+(`saffron/cell/session.py:1829`). A spec's title and `max_turns` are in no
 table.
 
 **§6 and the ledger.** §6 says the queue reads `queue.json`, not the
@@ -155,7 +171,7 @@ ledger, and calls that undecided. The stack view reads the ledger, because
 
 Build four things.
 
-1. **The reads.** Add three read methods to `Ledger`. The layers come
+1. **The reads.** Add four read methods to `Ledger`. The layers come
    from `SA-0151`'s `Ledger.stack_layers(batch_id)`, which returns the
    batch's rows by position, each with its task's id, state, `budget_usd`
    and `pr_url`. Add no second method for them.
@@ -165,13 +181,19 @@ Build four things.
    - `batch_budget(batch_id)`: `batches.budget_usd`, or `None` when no
      row exists.
    - `latest_batch_id()`: the highest `batch_id`, or `None`.
+   - `end_reviews(batch_id)`: every `end_reviews` row whose `task_key`
+     has a `stack_layers` row with that batch's `batch_key`, as
+     `task_key`, `lens` and `status`.
 2. **The view.** A new module, `saffron/report/stack.py`, holds two frozen
    dataclasses and three functions. It imports from
    `saffron/report/index.py`, and `index.py` imports nothing from it, so
    the two never import each other.
    - `StackLayer`: `position`, `spec_id`, `title`, `state`, `spent_usd`,
      `budget_usd`, `peak_turns`, `max_turns`, `pr_url`, `size`,
-     `generation`, `predecessor` and `predecessor_head`.
+     `generation`, `predecessor`, `predecessor_head` and `end_review`.
+     `end_review` is one of `reviewed`, `error` and `not_reached`, as
+     criterion 1 states, and never `None`. Match a row to its layer by
+     `task_key`, never by spec id.
    - `StackView`: `batch_id`, `order`, `spent_usd`, `budget_usd`,
      `outcomes` and `layers`. `order` is a list of `(spec_id, state,
      position)` tuples, with `None` for a task that added no layer.
@@ -188,7 +210,9 @@ Build four things.
      `on <spec id> at <head>`. A missing value, a missing pull request
      included, takes criterion 2's placeholder `<P>`. So a layer with no
      budget and no turns reads `of <P>` and `<P> of <P> turns`. One with no
-     predecessor reads `on <P>`. Write an order entry as its spec id, its
+     predecessor reads `on <P>`. Write the end-review status as
+     `end review <code><status></code>`, so an unreviewed layer never reads
+     as a clean one (principles 34 and 36). Write an order entry as its spec id, its
      state in `<code>`, and `layer <n>` or `no layer`. Write an outcome as
      its state in `<code>`, a space and its count. Render the pull request
      through `_link` (`saffron/report/index.py:184-193`).
@@ -207,7 +231,7 @@ Build four things.
    `specs` maps each candidate of the order to its `spec`. Import it by
    name, so a test can replace `cli.write_stack_view`. Put no catch
    around it. A raise reaches `main`'s catch-all
-   (`saffron/cli.py:216-223`) and exits 2, as a raise from `_finish`'s
+   (`saffron/cli.py:222-229`) and exits 2, as a raise from `_finish`'s
    `append_queue_line` does in `saffron cell`
    (`saffron/phases/package.py:955-984`). Otherwise map the stop reason to
    an exit code as `_batch` does now. The path without `--stack` gains no
@@ -215,12 +239,19 @@ Build four things.
 
 ## Out of scope
 
-- **Spec review.** Its revisions and blockers per layer wait for their
-  facts, which `SA-0149` adds.
-- **Findings and their outcomes.** They wait for the end review and its
-  qualification, `SA-0146` and `SA-0147`.
-- **Escalations and detours.** `SA-0167` prints each escalation as a
-  line, and no spec yet records one as a fact.
+- **Spec review's detail.** A spec its review withheld shows in the order
+  by its state, such as `SPEC_WITHHELD`. The view shows no revision count
+  and no blocker list, though `spec_reviews` (`SA-0155`) and `spec_texts`
+  (`SA-0150`) hold both.
+- **Findings and their outcomes.** The view shows each layer's end-review
+  status alone. The findings, their `qualifications` rows (`SA-0147`) and
+  the follow-up each fed are not on the page. `SA-0174` writes them to
+  the delegate's findings file.
+- **The join lens's status.** Its `end_reviews` row sits under the top
+  layer's task with the lens `join`. No layer's status reads it, so an
+  errored join shows nowhere on the page.
+- **The finish's escalations.** The finish prints each as a line
+  (`SA-0167`, `SA-0170`), and no spec records one as a fact.
 - **Follow-up titles.** A follow-up's spec is not in the order `_batch`
   resolved, so its layer shows no title and no `max_turns`. Its text is a
   recorded spec text (`SA-0150`), which a later spec can parse for both.
@@ -246,7 +277,8 @@ run fails rather than failing to collect.
 
 **`depends_on` is for the stack's order only.** It reads
 `run_stack_batch`, `record_stack_layer` and the table, which `SA-0143` to
-`SA-0145` add, and `SA-0151`'s `Ledger.stack_layers`.
+`SA-0145` add, and `SA-0151`'s `Ledger.stack_layers`. It reads `SA-0153`'s
+`end_reviews` table, `record_end_review` and its wider `batch_spend`.
 
 **Criteria 1 and 3 share one arrangement.** Write it as a helper in
 `tests/test_stack_view.py`. On a `Ledger` in `tmp_path`, upsert one repo.
@@ -288,6 +320,20 @@ attempt (4, 0.20), ended `RATE_LIMITED`. Last, create a run with no batch
 and a second `TE-7` task on it, packaged `READY_FOR_REVIEW` at `8`×40, as
 a later `saffron cell` would.
 
+Then record end reviews with `record_end_review`. Each costs 0.0 and holds
+no error unless its line says otherwise.
+
+- `TE-4`'s layer: `spec` and `standards` `reviewed`, then `join` `error`
+  with the error "join broke".
+- `TE-6`'s layer: `spec` `error` at 0.25 with the error "spec broke", then
+  `standards` `reviewed`.
+- `TE-9`'s layer: `spec` and `standards` `not_reached`.
+- `TE-7`'s layer in B: `spec` `reviewed`, then `standards` `error` with
+  the error "standards broke".
+
+`TE-2`'s layer in A and the second `TE-7` task get no row. Record them in
+one loop over tuples, to keep the helper short.
+
 `specs` holds `TE-7` (title `Seven`, `budget_usd` 25, `max_turns` 90),
 `TE-9` (`Nine`, 24, 140, `depends_on: [TE-3]`), `TE-6` (`Six`, 22, 70),
 `TE-3` and `TE-5`. It lacks `TE-4`.
@@ -301,17 +347,19 @@ other field with `==`.
   `READY_FOR_REVIEW` 1, `TE-5` `EXHAUSTED` `None`, `TE-9` `REJECTED` 2,
   `TE-6` `READY_FOR_REVIEW` 3, `TE-4` `READY_FOR_REVIEW` 4, `TE-4`
   `RATE_LIMITED` `None`
-- spend 23.20, budget 100.0, outcomes `RATE_LIMITED` 2, `GATE_ERROR` 1,
+- spend 23.45, budget 100.0, outcomes `RATE_LIMITED` 2, `GATE_ERROR` 1,
   `READY_FOR_REVIEW` 3, `EXHAUSTED` 1, `REJECTED` 1
 
-| position | spec | title | state | spent | budget | peak | max | size | gen | predecessor | head |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | `TE-7` | Seven | `READY_FOR_REVIEW` | 5.50 | 18 | 44 | 90 | the 900 summary | 0 | `None` | `None` |
-| 2 | `TE-9` | Nine | `REJECTED` | 5.00 | 20 | 50 | 140 | the 1180 summary | 0 | `TE-7` | `7`×40 |
-| 3 | `TE-6` | Six | `READY_FOR_REVIEW` | 6.10 | 16 | 61 | 70 | `None` | 0 | `TE-9` | `9`×40 |
-| 4 | `TE-4` | `None` | `READY_FOR_REVIEW` | 0.75 | 12 | 10 | `None` | the 300 summary | 1 | `TE-7` | `7`×40 |
+| position | spec | title | state | spent | budget | peak | max | size | gen | predecessor | head | end review |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `TE-7` | Seven | `READY_FOR_REVIEW` | 5.50 | 18 | 44 | 90 | the 900 summary | 0 | `None` | `None` | `error` |
+| 2 | `TE-9` | Nine | `REJECTED` | 5.00 | 20 | 50 | 140 | the 1180 summary | 0 | `TE-7` | `7`×40 | `not_reached` |
+| 3 | `TE-6` | Six | `READY_FOR_REVIEW` | 6.10 | 16 | 61 | 70 | `None` | 0 | `TE-9` | `9`×40 | `error` |
+| 4 | `TE-4` | `None` | `READY_FOR_REVIEW` | 0.75 | 12 | 10 | `None` | the 300 summary | 1 | `TE-7` | `7`×40 | `reviewed` |
 
-Each layer's `pr_url` is its own. It then creates a third batch holding
+Each layer's `pr_url` is its own. It asserts that `stack_view(ledger, A,
+specs)` holds one layer, `TE-2`, whose end-review status is `not_reached`. It
+then creates a third batch holding
 one `EXHAUSTED` task and no layer, and asserts `stack_view` returns `None`
 for it. These fail it:
 
@@ -345,6 +393,16 @@ for it. These fail it:
 - outcomes counted over layers alone
 - a view with no layers where `None` belongs, or `None` only for a batch
   with no task
+- a layer with no `end_reviews` row read as `reviewed`, or given `None`,
+  which `TE-2` fails, reasoned
+- `reviewed` for a layer with one `reviewed` lens, which misreads `TE-6`
+  and `TE-7`, reasoned
+- `error` only for a Spec row, or only for a Standards row, which misses
+  `TE-7` or `TE-6`, reasoned
+- the `join` row counted, which reads `TE-4` as `error`, reasoned
+- rows matched to a spec id's newest task, which finds none for `TE-7`,
+  reasoned
+- the batch spend summed from attempts alone, which gives 23.20, reasoned
 
 Measured at `4797e80e`. A scratch `conftest.py` added `SA-0145`'s table
 and a `record_stack_layer` written to its spec. It loaded a prototype of
@@ -352,7 +410,9 @@ the reads and `stack.py`, and ran prototypes of criteria 1 to 3's
 witnesses. The right build passed all three. Each wrong build above was
 applied as a text edit to the prototype, and each failed criterion 1's
 witness. Without an `ORDER BY`, SQLite returned the rows in the order
-written.
+written. The end-review status came after that run. So each wrong build
+marked reasoned is unmeasured, and so are the spend of 23.45 and the
+status column.
 
 **Criterion 2's witness** builds a `StackView` by hand, with no ledger. Its
 order is `TE-3` with no layer, then `TE-9` at 1, then `TE-5` with no layer,
@@ -360,7 +420,8 @@ then `TE-4` at 2. Layer 1 is `TE-9` with every value set. Its title is
 `<b>Nine</b>` and its size summary ends in `<a>`, with spend 7.25 of 20.00
 and 44 of 140 turns. It is generation 1, on `TE-7` at `7`×40. Layer 2 is `TE-4` with `title`,
 `budget_usd`, `peak_turns`, `max_turns`, `pr_url`, `size`, `predecessor`
-and `predecessor_head` all `None`. It splits the output on `<section`, and
+and `predecessor_head` all `None`. `TE-9`'s end-review status is `error`
+and `TE-4`'s is `not_reached`. It splits the output on `<section`, and
 asserts three sections: the batch, then `TE-9`, then `TE-4`. It asserts
 each value in its own section, in the formats of Problem step 2. It
 asserts each order entry whole, in order, such as
@@ -370,15 +431,19 @@ size summary, and no raw `<b>` or `<a>`. It asserts no `None` anywhere. With `<P
 (`saffron/report/index.py:144`), it asserts `TE-4`'s section holds
 `of <P>`, `<P> of <P> turns` and `on <P>`. It asserts `<P>` appears there
 at least seven times, one each for the title, budget, peak turns,
-`max_turns`, pull request, size and predecessor. These fail it:
+`max_turns`, pull request, size and predecessor. It asserts
+`end review <code>error</code>` in `TE-9`'s section and
+`end review <code>not_reached</code>` in `TE-4`'s. These fail it:
 
 - layers sorted by spec id
 - an order entry with its state left out
 - a layer number taken from the entry's index, which gives `TE-4` 4
 - an unescaped title, or an unescaped size summary
 - a `None` printed, or an empty string where the placeholder belongs
+- the end-review status left out of a layer's section, reasoned
 
-Measured by the same run: each of these failed criterion 2's witness.
+Measured by the same run: each of these failed criterion 2's witness, but
+the one marked reasoned, which is unmeasured.
 
 **Criterion 3's witness** uses the arrangement above and an `out_dir` in
 `tmp_path`. It appends two `QueueLine`s with `append_queue_line`, for
@@ -449,6 +514,10 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
+**The turn ceiling.** `max_turns` is 200. The nearest history row,
+`SA-0133`, peaked at 161 turns, cut off at its own ceiling of 160. So 161
+is a floor, and 200 leaves 39 turns above it, as `SA-0146` does.
+
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
 prototype of the whole change, formatted with `ruff`, was measured with
@@ -465,6 +534,9 @@ read moved to `SA-0151`, which takes about 54 off.
 
 The prototype carries a docstring on each function and few comments.
 About 290 more tokens cover test docstrings and comments, so the estimate
-is about 2175 tokens, 73% of the ceiling. Keep one fixture helper that
+was about 2175 tokens. The end-review status adds about 250, unmeasured.
+The fourth read takes about 50, and the status rule and its render line
+50. Nine arrangement rows in one loop take 95, and the column and the new
+asserts 55. The total is about 2425, 81% of the ceiling. Keep one fixture helper that
 every witness in `tests/test_stack_view.py` shares, and one tuple for
 each expected layer.

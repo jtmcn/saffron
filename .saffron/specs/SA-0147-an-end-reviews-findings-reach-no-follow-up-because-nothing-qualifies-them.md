@@ -62,8 +62,7 @@ acceptance:
       first, then each layer in the order given. A layer's inputs are its
       end-review findings in review order, then its in-cell concerns in the
       order recorded. An in-cell concern is a finding of a lens in
-      `review.LENSES`, of severity `concern`, with no verdict and no
-      rebuttal. Each input is anchored by `findings.anchor` against the
+      `review.LENSES`, of severity `concern`. Each input is anchored by `findings.anchor` against the
       diff `<head>^..<head>` of its own layer, reading cited lines at that
       head. A join finding is anchored against `<bottom head>^..<top head>`,
       reading at the top head, and belongs to the top layer. An anchored
@@ -151,18 +150,17 @@ probe still reaches a follow-up.
 `SA-0153` runs them over a stack and returns one `LayerReview` per layer.
 `SA-0154` adds the join lens and runs the whole end review. `SA-0157`
 wires it into `saffron batch --stack`. This spec qualifies what they
-return. `SA-0150`
-writes a follow-up spec from each group this spec returns.
+return. `SA-0161` writes a follow-up spec from each group this spec
+returns, and `SA-0165` wires that writer into `saffron batch --stack`.
 
 **What the tree base holds.** This spec's tree base is `SA-0159`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`), and the chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`), and the chain
 `SA-0142` to `SA-0159` puts these names there. `SA-0138`, the second
-entry, does not stack. It and its parent `SA-0133` merge to the default
-branch before the stack chain runs, and the chain runs after the previous
-queue merges. So `SA-0138`'s code is under the chain's root too. These
-names are cited by symbol, and every line number below was read at
-`f0c8f82d`. `SA-0133` and `SA-0138` move lines in `saffron/cell/session.py`,
-so find each name there by its name.
+entry, does not stack. It and its parent `SA-0133` are merged at
+`e3020b3b`, so their code is under the chain's root. The chain's names are
+cited by symbol, and every line number below was read at `e3020b3b`. No
+spec from `SA-0142` to `SA-0159` touches `saffron/cell/session.py`, so its
+lines stand at the tree base.
 
 - `SA-0138` gives `_probe_adequacy` a required keyword `base_results`,
   the task's pre-turn suite. After the probe cell's own baseline run it
@@ -195,34 +193,35 @@ so find each name there by its name.
   model, so no join finding carries a probe yet. The rule below still
   covers one, so a later model needs no change here.
 
-**Anchoring today.** `CONTEXT.md:439-445` defines **Anchored**: inside a
+**Anchoring today.** `CONTEXT.md:444-450` defines **Anchored**: inside a
 diff hunk, or citing a line that names an identifier the diff changed.
 `findings.anchor(findings, diff, *, read_head)` applies both halves and
 returns copies (`saffron/agents/findings.py:128-146`). The second half reads
 the cited line through `read_head` and compares its words with every
 changed line's (`:149-166`). `mirror.file_at(mirror, sha, path)` reads a
 file at a sha, and returns `None` for a path the tree lacks
-(`saffron/repos/mirror.py:231-259`). It raises `GitError` for a path it
-cannot read as a file (`:255-259`).
+(`saffron/repos/mirror.py:241-268`). It raises `UnreadablePath`, a
+`GitError` (`:43`), for a path it cannot read as a file (`:258-268`).
 
 **Probing today.** `session._probe_adequacy` probes REVIEW's anchored
-adequacy findings (`saffron/cell/session.py:1291-1442`). It takes them from
-`review.adequacy_probes(reviews)` (`:1317`) and asks each distinct edit once.
+adequacy findings (`saffron/cell/session.py:1291-1449`). It takes them from
+`review.adequacy_probes(reviews)` (`:1320`) and asks each distinct edit once.
 It enters a Gate-only cell through `critic_cell` with `network=None` and the
-repo's gate env (`:1388-1399`). The cell is seeded at `spec.tree_base` with
+repo's gate env (`:1391-1402`). The cell is seeded at `spec.tree_base` with
 `patch` applied and committed (`:1207`, `:1217`). It runs the baseline
-`tests` gate, then `probe.check_probe` per probe (`:1400-1441`). `decide` calls
-`review.apply_probe_verdict` on every finding of that probe (`:1329-1332`).
+`tests` gate, then `probe.check_probe` per probe (`:1407-1448`). `decide` calls
+`review.apply_probe_verdict` on every finding of that probe (`:1332-1335`).
 So `survived` makes it a `blocker`, `killed` a `note`, and `unproven` leaves
 it as filed (`saffron/phases/review.py:574-584`). A probe whose `find`
 matches no line, or more than one, is `unproven` with its reason
-(`saffron/cell/worktree.py:637-642`, `saffron/probe.py:189-193`). It returns
+(`saffron/cell/worktree.py:642-648`, `saffron/probe.py:206-210`). It returns
 `probes.json`'s entries, each with the `probe` dumped and its `reason`
-(`saffron/cell/session.py:1333-1347`, `saffron/probe.py:247-265`). The
+(`saffron/cell/session.py:1336-1350`, `saffron/probe.py:319-338`). The
 entries are one per distinct `review.probe_key`, and the refused probes
-come first (`:1353-1363`). So an entry's index is not its finding's. A
-patch that does not apply raises `CriticPatchRejected`, a `RuntimeError` it
-does not catch (`:1028`). `CriticPatchUnrepresentable` is one too
+come first (`saffron/cell/session.py:1356-1366`). So an entry's index is
+not its finding's. A patch that does not apply raises
+`CriticPatchRejected`, a `RuntimeError` it does not catch
+(`saffron/cell/session.py:1028`). `CriticPatchUnrepresentable` is one too
 (`:1036`), and so are `runtime.CellRuntimeError` and `mirror.GitError`.
 
 **An in-cell adequacy concern's probe did not survive.** REVIEW decides
@@ -244,10 +243,15 @@ fact with `_build_fact` and hands it to `_commit_and_append` (`:372-404`).
 task's rows through `_drop_task_rows` and applies its facts again
 (`:406-433`).
 
+**A stored concern carries no verdict and no rebuttal.** REBUT rebuts
+anchored blockers alone (`saffron/phases/review.py:534-541`,
+`saffron/cell/session.py:2676`, `:2786-2790`). A withdrawn blocker stays
+a `blocker`. So no rule here filters a concern on either field.
+
 **A run's baseline and its names.** Each cell makes its own run
-(`saffron/cell/session.py:1689`). It takes the pre-turn suite on the
-task's tree base, `baseline = suite.baseline(tree)` (`:1745`), and records
-each result under the run (`:1762-1763`). At `f0c8f82d` the ledger keeps no
+(`saffron/cell/session.py:1702`). It takes the pre-turn suite on the
+task's tree base, `baseline = suite.baseline(tree)` (`:1758`), and records
+each result under the run (`:1775-1776`). At `e3020b3b` the ledger keeps no
 `collected` (`saffron/ledger.py:1205-1233`, `:1274-1303`). `SA-0159` keeps
 it, so `ledger.baseline_results(run_id)` returns each result's `collected`
 as the run recorded it. Without that, `SA-0138`'s `added_tests` would read
@@ -272,8 +276,8 @@ Build three things.
    `_probe_adequacy` with the old signature that calls `probe_findings`
    with `review.adequacy_probes(reviews)`. Do not copy the body, since
    `size` blocks at 3000 tokens here. Two tests find
-   `_probe_adequacy` on the stack by name (`tests/test_session.py:3475`,
-   `:3691`), so it stays a function of its own.
+   `_probe_adequacy` on the stack by name (`tests/test_session.py:3543`,
+   `:3933`), so it stays a function of its own.
 2. **The record of each outcome.** Add `qualifications` to `SCHEMA` in
    `saffron/ledger.py`, with no reference to another table:
 
@@ -338,19 +342,23 @@ Build three things.
 count gains one. It also names the tables it holds, and `qualifications`
 joins them.
 
-`qualify` has no production caller until `SA-0150` passes its groups to the
-spec writer. So `qualify`, and the `groups` and `pool` fields only
-`SA-0150` reads, are `pending_symbols`. The `dead` gate defers them while this spec is open
+`qualify` has no production caller until `SA-0165` binds it for
+`SA-0161`'s `write_follow_ups`, which passes its groups to the spec
+writer. So `qualify`, and the `groups` and `pool` fields only `SA-0161`
+reads, are `pending_symbols`. The `dead` gate defers them while this spec is open
 (`.saffron/gates/dead.py:4-6`).
 
 ## Out of scope
 
-- **Writing follow-up specs.** `SA-0150` writes one from each group. It
-  keys each one's anchors and named probe to the tree it runs on
-  (principle 27).
-- **The finishing layer.** `SA-0151` links the stack and marks it ready.
-- **The delegate's `findings.json`.** The skill reads the pool, or the
-  `qualifications` rows, until a declared program files the backlog.
+- **Writing follow-up specs.** `SA-0161` writes one from each group, and
+  `SA-0165` wires it into `saffron batch --stack`.
+- **The tree a follow-up's anchors and probe are keyed to.** It is open.
+  ADR 7's Consequences lists it, and no spec in the chain answers it. ADR
+  7's principle 27 holds only once one does. A later layer can move both.
+- **The finishing layer.** `SA-0151` commits it, and `SA-0170` links the
+  stack and marks it ready.
+- **The delegate's `findings.json`.** `SA-0174` writes it from each
+  layer's `qualifications` rows.
 - **The base a bottom layer's probes count from.** A bottom layer's run
   took its baseline at its run's `base_sha`. When the default branch moved
   before PACKAGE, the head's parent is a later commit. A test the default
@@ -404,11 +412,9 @@ first:
 - `TE-1`: correctness concerns "c-a" on `src/a.py:2`, "c-m" on
   `src/m.py:1` and "c-c" on `src/c.py:10`. At `H1` that line names
   `alpha_l2_new`, which `TE-1`'s diff changed.
-- `TE-2`: a correctness concern "i1" on `src/b.py:1`. Then four on
-  `src/b.py:2`. A contract concern "i2" has the rebuttal "argued" and no
-  verdict. An adequacy note "i3" and a correctness blocker "i4" have
-  neither. A contract concern "i5" has the verdict `withdrawn` and no
-  rebuttal. Last, an adequacy concern "i6" on `src/b.py:1`.
+- `TE-2`: a correctness concern "i1" on `src/b.py:1`. Then an adequacy
+  note "i3" and a correctness blocker "i4" on `src/b.py:2`. Last, an
+  adequacy concern "i6" on `src/b.py:1`.
 
 The Spec lens's findings for `TE-2`, each on the line shown:
 
@@ -484,9 +490,8 @@ These fail it, each measured:
 - the join walked after the layers
 - the probe's tree at the head itself, with no patch
 - groups by layer alone, by file alone, or sorted
-- in-cell concerns left out, or rebutted ones kept
-- a concern with a verdict and no rebuttal kept
-- every unrebutted in-cell finding kept, not concerns alone
+- in-cell concerns left out
+- every in-cell finding kept, not concerns alone
 - every finding of the task kept, the end-review copies included
 - in-cell rows selected by excluding `spec` and `standards`, which keeps
   the join copies
@@ -550,7 +555,9 @@ config case ran as a diff with `--unified=0`. How the cell's git 2.39.5
 reads that config is unmeasured. The right build passed every assertion
 above, and each wrong version listed failed its own witness. The code of
 `SA-0138` and `SA-0145` to `SA-0159` is not at `3699aeb8`, so no witness ran
-against it.
+against it. A later revision dropped the verdict and rebuttal filter, with
+the rows i2 and i5 and the two wrong versions only they killed. Nothing
+ran after that edit.
 
 **What the witnesses leave undriven.**
 
@@ -586,6 +593,7 @@ by `size_gate` itself, came to 1962. That is 214 in `ledger.py`, 56 in
 `session.py`, 608 in `qualify.py` and 1084 in the tests. The assertions
 the prototype left short, and the docstrings and comments, bring it to
 about 2330. The adequacy rule and the round-2 arrangement add about 80
-more, near 2410. That is near the ceiling, so keep the helper shared, the
+more. Dropping the filter and two fixture rows takes about 30 off, near
+2380, 79% of the ceiling. That is near it, so keep the helper shared, the
 test docstrings short and the double compact. Rename the probe function in
 place rather than copy its body.

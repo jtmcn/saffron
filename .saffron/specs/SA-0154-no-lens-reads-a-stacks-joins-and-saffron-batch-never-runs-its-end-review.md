@@ -89,8 +89,12 @@ acceptance:
       uses" and "work a layer redoes that an earlier layer already
       provides". It holds "do not manufacture one" in any case, and the
       fields `file`, `line`, `severity` and `claim` and the three
-      severities, each in backticks. It holds `worktree.WORKTREE_MOUNT`. It
-      names no `probe`, `CONTEXT.md`, `DESIGN.md` or `driver.py`.
+      severities, each in backticks. It holds `worktree.WORKTREE_MOUNT`, and
+      no `probe` in backticks. It holds none of `.claude`, `CLAUDE.md`,
+      `CONTEXT.md`, `DESIGN.md`, `driver.py`, `pytest`, `uv run`, `make
+      check`, `ruff`, `prek`, `saffron/`, `docs/`, `/opt/` or `://`,
+      matched without regard to case. Each check reads the raw file, never
+      a filled prompt. The witness checks each of those fourteen strings.
     witness: tests/test_end_review.py::test_the_join_prompt_asks_for_adr_6s_three_joins_and_nothing_else
   - claim: >-
       `end_review.run_end_review(ledger, batch_key, reserve_usd, specs,
@@ -148,9 +152,9 @@ end review. `SA-0157` wires that call into `saffron batch --stack`.
 `SA-0147` then qualifies the findings.
 
 **What the tree base holds.** This spec's tree base is `SA-0153`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). The chain
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). The chain
 `SA-0142` to `SA-0153` puts these there, so they are cited by symbol. Every
-line number below was read at `f0c8f82d`.
+line number below was read at `e3020b3b`.
 
 - `SA-0145` writes one `stack_layers` row per layer, keyed on record keys:
   `task_key`, `batch_key`, `position`, `spec_id`, `predecessor_key`,
@@ -186,7 +190,7 @@ A lens id with no entry in
 the repo's image, the isolation asserts and the worktree at `tree_base`
 (`saffron/cell/session.py:866-972`). `cell_down` is its pair
 (`:975-1025`). `_drive_cell` removes a leftover container of its name first
-(`:1643`), and calls `cell_down` from a `finally` (`:2869-2876`). The
+(`:1650`), and calls `cell_down` from a `finally` (`:2862`, `:2884-2891`). The
 worktree's environment is `cell_env`, which carries the proxy and the
 token (`:732-748`). `critic_cell` joins the network a task brought up, or
 makes one with no proxy. Either way it applies a patch to the tree base
@@ -228,7 +232,7 @@ Build three things.
    `SA-0157` gives the reason for a share.
 3. **The critic cell.** Add `layer_cell` to `saffron/end_review.py`, as
    criterion 4 states. Its network is `saffron-cells`, the name
-   `_drive_cell` uses (`saffron/cell/session.py:1632`). Its container,
+   `_drive_cell` uses (`saffron/cell/session.py:1639`). Its container,
    volume and state names carry the layer's spec id. Its `branch` is
    `fields.branch`. Reach `cell_up`,
    `cell_down` and `runtime.remove_container` through their modules at
@@ -247,6 +251,12 @@ under the top layer's task, the first entry of `layers`.
 - **Qualification.** Anchoring, probes, severity and grouping are
   `SA-0147`'s. For the join lens, `SA-0147` anchors against the combined
   diff. It rebuilds that range from the same `stack_layers` rows.
+- **A revised layer's latest text in `{spec}`.** Each body comes from
+  `specs`, the order's queued `Spec`s read at `base_sha`. A revised layer
+  ran its latest recorded text, which `SA-0150` builds above this spec in
+  the chain. `SA-0173` has `run_stack_batch` hand `end_review` that text,
+  parsed, in place of the queued `Spec`. `review_joins` reads `specs` as
+  given, so it needs no change then.
 - **A probe on a join finding.** The join lens uses the default report
   model. The design says two parts of the rubric carry no probe, and names
   no model for the third.
@@ -310,7 +320,7 @@ TE-3 {gap}". `open_cell` records the fields it is given. It raises
 `RuntimeError("no cell for TE-8")` for `TE-8`, and yields `critic-<spec>`
 for the rest. The agent double records each call's container, options and
 keywords, and returns the next scripted reply. It raises `AssertionError`
-with none left. Call 1 returns a concern "j7 join" on `TE-7.txt:1` at a
+with none left. Call 1 returns a concern "j7 join" on line 1 of `TE-7.txt` at a
 cost of 0.25. Call 2 raises `implement.AgentFailed` with an attempt
 costing 0.4. `budget_usd` is 1.0, `max_turns` 17, and `claude_md` one
 line. Call `review_joins` once per batch, with its reserve. Then call it
@@ -364,9 +374,18 @@ These fail it, each measured:
 - a fixed `max_turns` or lens budget
 - no standing instructions
 
-**Criterion 2's witness** reads the prompt file and flattens its
-whitespace. It checks each phrase and name the claim lists, and each name
-that must be absent.
+**Criterion 2's witness** reads the raw prompt file and flattens its
+whitespace. It checks each phrase and name the claim lists. It asserts no
+`` `probe` ``. It lowers the raw file and checks each of the fourteen
+strings, lowered, against it, as `SA-0146`'s criterion 2 does for the two
+lens files. The filled prompt holds the standing instructions, which can
+name any of them, so a check there fails the right build. These fail it,
+reasoned:
+
+- a prompt that names `CLAUDE.md` or `Claude.md`, or tells the lens to run
+  `uv run pytest`
+- a prompt that cites a URL
+- the three joins in other words than the design's
 
 **Criterion 3's witness** replaces `end_review.review_joins` and
 `end_review.review_stack` with recorders, through `monkeypatch`. Each
@@ -457,5 +476,7 @@ docstring within ten lines. Check the prompt file with
 prototype of this change, with its four witnesses formatted by
 `ruff format`, measured 1946 changed tokens with `size_gate` itself.
 `saffron/end_review.py` took 471, the prompt 192 and
-`tests/test_end_review.py` 1283. That is 65% of the ceiling. Keep the
-witnesses' helpers shared and their docstrings short.
+`tests/test_end_review.py` 1283. The fourteen-string check adds about 50
+over the three names it replaces, as `SA-0146` counted its own. That is
+about 2000, 67% of the ceiling. Keep the witnesses' helpers shared and
+their docstrings short.
