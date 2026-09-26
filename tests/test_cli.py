@@ -3267,6 +3267,93 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
     ledger.close()
 
 
+def test_the_stack_runner_hands_each_task_its_predecessors_fetched_branch(
+    tmp_path, monkeypatch
+):
+    """`_stack_runner` fetches the predecessor's branch fresh into the
+    mirror rather than reading the ledger, and never falls back to
+    `_resolve_stacked_on`."""
+    from saffron.task import Handoff
+
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    _push_parent_branch(repo, "saffron/SY-5555")
+    _git(repo, "branch", "-D", "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(mirror),
+                "rev-parse",
+                "--verify",
+                "refs/heads/saffron/SY-9000",
+            ],
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+
+    ledger = Ledger(tmp_path / "l.db")
+    repo_id = _seed_repo(ledger, url)
+    parent = _seed_task(ledger, repo_id, spec_id="SY-5555", state="READY_FOR_REVIEW")
+    ledger.record_push(parent, "d" * 40)
+
+    runner = cli._stack_runner(
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        repo_id=lambda: repo_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+
+    captured: dict = {}
+
+    def _run_task(*_a, **kwargs):
+        captured["handoff"] = kwargs["handoff"]
+        return CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=1,
+            run_id=1,
+            task_dir=tmp_path / "out" / "SY-1",
+        )
+
+    monkeypatch.setattr(cli, "run_task", _run_task)
+
+    def _as_candidate(spec_id, *, depends_on=None):
+        return Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.Spec(
+                id=spec_id,
+                title="t",
+                type="chore",
+                touches=["src/**"],
+                depends_on=depends_on or [],
+            ),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    candidate = _as_candidate("SY-1", depends_on=["SY-5555"])
+
+    runner(candidate, _as_candidate("SY-9000"))
+    assert captured["handoff"] == Handoff(
+        stacked_on=head, target_branch="saffron/SY-9000"
+    )
+    assert _rev_parse(mirror, "refs/heads/saffron/SY-9000") == head
+
+    runner(candidate, None)
+    assert captured["handoff"] == Handoff(stacked_on=None, target_branch=None)
+
+    captured.clear()
+    with pytest.raises(package.ParentGone):
+        runner(candidate, _as_candidate("SY-7777"))
+    assert "handoff" not in captured
+    ledger.close()
+
+
 def test_the_night_cannot_start_without_a_readiness_gate():
     """The loop used to bind a permissive stub, so a caller who simply forgot
     the argument got a vacuous §4.4 step 1 and a night that could start on an

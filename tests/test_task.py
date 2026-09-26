@@ -451,3 +451,109 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
     logged = read_log(out_dir / "SY-11")
     assert len(logged) == 2, "only the two appends that ran before the flip land"
     assert logged[1] == events[0]
+
+
+def test_a_handoff_carries_both_halves_or_neither():
+    """`Handoff` is not imported at module scope: it does not exist at the
+    tree base, and a module-scope import would fail collection there."""
+    from saffron.task import Handoff
+
+    Handoff(stacked_on="d" * 40, target_branch="saffron/TE-8")
+    Handoff(stacked_on=None, target_branch=None)
+    with pytest.raises(ValueError):
+        Handoff(stacked_on="d" * 40, target_branch=None)
+    with pytest.raises(ValueError):
+        Handoff(stacked_on=None, target_branch="saffron/TE-9")
+
+
+def test_a_handoff_replaces_the_stacking_resolver(tmp_path, monkeypatch):
+    """Given a `Handoff`, `run_task` trusts it outright and never asks the
+    ledger. Given none, it resolves the parent the old way, once."""
+    from saffron.task import Handoff
+
+    resolver_calls: list[None] = []
+
+    def _resolver(*_a, **_k):
+        resolver_calls.append(None)
+        return "c" * 40, "saffron/TE-9"
+
+    monkeypatch.setattr(task_module, "_resolve_stacked_on", _resolver)
+
+    captured: dict = {}
+
+    def _run_one_cell(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        return CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=1,
+            run_id=1,
+            task_dir=tmp_path / "out" / "TE-1",
+        )
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+
+    def _package(_outcome, **kwargs):
+        captured["parent_branch"] = kwargs["parent_branch"]
+        return package_phase.PackageResult(state="READY_FOR_REVIEW", pr_url="u")
+
+    monkeypatch.setattr(package_phase, "package", _package)
+
+    def _call(handoff, db_name):
+        resolver_calls.clear()
+        captured.clear()
+        ledger = Ledger(tmp_path / db_name)
+        task_module.run_task(
+            Spec(
+                id="TE-1",
+                title="t",
+                type="feature",
+                touches=["src/**"],
+                acceptance_criteria=["it works"],
+                depends_on=["TE-9"],
+            ),
+            "s" * 40,
+            ceilings=ResolvedCeilings(
+                budget_usd=12.0,
+                max_attempts=4,
+                max_turns=60,
+                budget_source="default",
+                attempts_source="default",
+                turns_source="default",
+            ),
+            base=PinnedBase(
+                mirror=tmp_path / "mirror.git",
+                url="https://github.com/o/r.git",
+                base_sha="a" * 40,
+            ),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+            token=None,
+            handoff=handoff,
+        )
+        ledger.close()
+        return (
+            len(resolver_calls),
+            captured["spec"].stacked_on,
+            captured["parent_branch"],
+        )
+
+    calls, stacked_on, parent_branch = _call(
+        Handoff(stacked_on="d" * 40, target_branch="saffron/TE-8"), "one.db"
+    )
+    assert calls == 0
+    assert stacked_on == "d" * 40
+    assert parent_branch == "saffron/TE-8"
+
+    calls, stacked_on, parent_branch = _call(
+        Handoff(stacked_on=None, target_branch=None), "two.db"
+    )
+    assert calls == 0
+    assert stacked_on is None
+    assert parent_branch is None
+
+    calls, stacked_on, parent_branch = _call(None, "three.db")
+    assert calls == 1
+    assert stacked_on == "c" * 40
+    assert parent_branch == "saffron/TE-9"

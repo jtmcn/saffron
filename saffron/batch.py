@@ -264,6 +264,93 @@ def _drive(
         pending = rescan()
 
 
+def _is_layer(result: CellOutcome | Refused) -> bool:
+    """`run_stack_batch`'s one predicate. A result adds a layer only when it
+    is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
+    `EXHAUSTED`, any other terminal state, or a `Refused`."""
+    return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
+
+
+def run_stack_batch(
+    order: Sequence[Candidate],
+    ledger: Ledger,
+    budget_usd: float,
+    until: datetime | None,
+    runner: Callable[[Candidate, Candidate | None], CellOutcome | Refused],
+    *,
+    readiness_check: Callable[[], Readiness],
+    clock: Callable[[], datetime] = datetime.now,
+    emit: Callable[[str], None] = print,
+) -> StopReason:
+    """Run one stack's planned `order` once, never rescanning the repo
+    (`SA-0142` fixes the order at batch start). `runner` takes each
+    candidate and its predecessor: the last candidate before it,
+    positionally, that reached `READY_FOR_REVIEW`, or `None` before any has.
+
+    A candidate is refused here, before `run_batch` ever sees it, when a
+    `depends_on` entry reaches a spec that ran this batch and missed. It can
+    reach one directly, or through another refused spec. `--until`, the
+    budget, the breaker and the batch row stay `run_batch`'s own.
+    """
+    order = list(order)
+    ids_in_order = {candidate.spec.id for candidate in order}
+    remaining = list(order)
+    decided: dict[str, str] = {}  # spec id -> "LAYER" or "MISSED"
+    reaches: dict[str, frozenset[str]] = {}
+    predecessor: Candidate | None = None
+
+    def blocking(candidate: Candidate) -> frozenset[str]:
+        found: set[str] = set()
+        for entry in candidate.spec.depends_on:
+            if entry in ids_in_order and decided.get(entry) == "MISSED":
+                found |= reaches[entry]
+        return frozenset(found)
+
+    def resolve_prefix() -> list[Candidate]:
+        while remaining:
+            candidate = remaining[0]
+            found = blocking(candidate)
+            if not found:
+                break
+            names = ", ".join(sorted(found))
+            emit(f"{candidate.spec.id:<10} refused  reaches {names}")
+            decided[candidate.spec.id] = "MISSED"
+            reaches[candidate.spec.id] = found
+            remaining.pop(0)
+        return remaining
+
+    def wrapped(candidate: Candidate) -> CellOutcome | Refused:
+        nonlocal predecessor
+        pred = predecessor
+        try:
+            result = runner(candidate, pred)
+        except Exception:
+            decided[candidate.spec.id] = "MISSED"
+            reaches[candidate.spec.id] = frozenset({candidate.spec.id})
+            remaining.remove(candidate)
+            raise
+        remaining.remove(candidate)
+        if _is_layer(result):
+            decided[candidate.spec.id] = "LAYER"
+            predecessor = candidate
+        else:
+            decided[candidate.spec.id] = "MISSED"
+            reaches[candidate.spec.id] = frozenset({candidate.spec.id})
+        return result
+
+    return run_batch(
+        resolve_prefix(),
+        ledger,
+        budget_usd,
+        until,
+        wrapped,
+        rescan=resolve_prefix,
+        clock=clock,
+        readiness_check=readiness_check,
+        emit=emit,
+    )
+
+
 def _stop(
     ledger: Ledger,
     batch_id: int,

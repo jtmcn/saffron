@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.scheduler import REQUEUE_STATES, Candidate, build_queue
+from saffron.task import Refused
 from tests.test_scheduler import _write_spec
 
 
@@ -31,10 +33,23 @@ def _ready() -> Readiness:
     return Readiness(ok=True)
 
 
-def _candidate(spec_id: str, *, budget_usd: float = 10.0) -> Candidate:
+def _candidate(
+    spec_id: str,
+    *,
+    budget_usd: float = 10.0,
+    priority: int = 3,
+    depends_on: list[str] | None = None,
+) -> Candidate:
     return Candidate(
         path=Path(f"{spec_id}.md"),
-        spec=Spec(id=spec_id, title="t", type="chore", budget_usd=budget_usd),
+        spec=Spec(
+            id=spec_id,
+            title="t",
+            type="chore",
+            budget_usd=budget_usd,
+            priority=priority,
+            depends_on=depends_on or [],
+        ),
         spec_sha="s" * 64,
         task_id=None,
     )
@@ -87,6 +102,25 @@ class FakeRunner:
     def __call__(self, candidate: Candidate) -> CellOutcome:
         self.calls.append(candidate)
         result = self._results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class FakeStackRunner:
+    """`run_stack_batch`'s predecessor-aware runner. Records each call as
+    `(spec id, predecessor spec id or None)`, in order. Keyed by spec id
+    rather than queued, so a table's rows can be given in any order."""
+
+    def __init__(self, results: Mapping[str, CellOutcome | Refused | Exception]):
+        self._results = dict(results)
+        self.calls: list[tuple[str, str | None]] = []
+
+    def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+        self.calls.append(
+            (candidate.spec.id, predecessor.spec.id if predecessor else None)
+        )
+        result = self._results[candidate.spec.id]
         if isinstance(result, Exception):
             raise result
         return result
@@ -1086,3 +1120,160 @@ def test_a_spec_the_rescan_requeues_is_not_started_twice_in_one_night(ledger, re
     assert reason == "DRAINED"
     assert runner.calls == [first]
     assert rescan_calls["n"] == 1
+
+
+def test_a_stack_batch_hands_each_task_the_last_task_that_reached_review(
+    ledger, repo_id
+):
+    """Predecessor is purely positional. It is the last candidate, in the
+    given order, whose result was `READY_FOR_REVIEW`. Never the previous
+    candidate, never sorted by id or priority, and never `ABORT_STATES`
+    widened or narrowed."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-7", priority=3),
+        _candidate("TE-3", priority=3),
+        _candidate("TE-9", priority=2),
+        _candidate("TE-1", priority=2),
+        _candidate("TE-5", priority=2),
+        _candidate("TE-8", priority=2),
+        _candidate("TE-2", priority=1),
+        _candidate("TE-6", priority=1),
+        _candidate("TE-10", priority=1),
+        _candidate("TE-4", priority=1),
+    ]
+    results = {
+        "TE-7": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-3": _outcome(state="EXHAUSTED", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-9": _outcome(state="MERGE_FAILED", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-1": _outcome(state="GATE_ERROR", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-5": Refused(reason="nope"),
+        "TE-8": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-2": RuntimeError("boom"),
+        "TE-6": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-10": _outcome(state="PLAN_REJECTED", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-4": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+    }
+    runner = FakeStackRunner(results)
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "DRAINED"
+    assert runner.calls == [
+        ("TE-7", None),
+        ("TE-3", "TE-7"),
+        ("TE-9", "TE-7"),
+        ("TE-1", "TE-7"),
+        ("TE-5", "TE-7"),
+        ("TE-8", "TE-7"),
+        ("TE-2", "TE-8"),
+        ("TE-6", "TE-8"),
+        ("TE-10", "TE-6"),
+        ("TE-4", "TE-6"),
+    ]
+
+
+def test_a_stack_batch_refuses_every_descendant_of_a_task_that_missed_review(
+    ledger, repo_id
+):
+    """A spec whose `depends_on` reaches, at any position, a spec that ran
+    this batch and missed `READY_FOR_REVIEW` is refused before the runner
+    ever sees it. It can reach one directly or through a refused spec. Its
+    line names only the specs that ran and missed."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-11", priority=3),
+        _candidate("TE-12", priority=3, depends_on=["TE-11"]),
+        _candidate("TE-14", priority=2),
+        _candidate("TE-13", priority=2, depends_on=["TE-14", "TE-12"]),
+        _candidate("TE-15", priority=2, depends_on=["TE-14", "TE-11"]),
+        _candidate("TE-16", priority=1),
+        _candidate("TE-17", priority=1),
+        _candidate("TE-18", priority=1, depends_on=["TE-16", "TE-17"]),
+        _candidate("TE-19", priority=1, depends_on=["TE-14"]),
+        _candidate("TE-20", priority=1, depends_on=["TE-14", "TE-99"]),
+    ]
+    results = {
+        "TE-11": _outcome(state="MERGE_FAILED", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-14": _outcome(
+            state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
+        ),
+        "TE-16": RuntimeError("boom"),
+        "TE-17": Refused(reason="nope"),
+        "TE-19": _outcome(
+            state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
+        ),
+        "TE-20": _outcome(
+            state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
+        ),
+    }
+    runner = FakeStackRunner(results)
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert runner.calls == [
+        ("TE-11", None),
+        ("TE-14", None),
+        ("TE-16", "TE-14"),
+        ("TE-17", "TE-14"),
+        ("TE-19", "TE-14"),
+        ("TE-20", "TE-19"),
+    ]
+
+    refused = {line.split()[0]: line for line in lines if "refused" in line}
+    assert set(refused) == {"TE-12", "TE-13", "TE-15", "TE-18"}
+    assert "TE-11" in refused["TE-12"]
+    assert "TE-11" in refused["TE-13"]
+    assert "TE-14" not in refused["TE-13"]
+    assert "TE-12" not in refused["TE-13"], "names the miss, not the refused go-between"
+    assert "TE-11" in refused["TE-15"] and "TE-14" not in refused["TE-15"]
+    assert "TE-16" in refused["TE-18"] and "TE-17" in refused["TE-18"]
+    assert not any("TE-20" in line for line in refused.values())
+
+
+def test_a_stack_batch_counts_a_raise_as_an_abort(ledger, repo_id):
+    """A stack batch still runs on `run_batch`'s own breaker: two raises in a
+    row end the night `INFRASTRUCTURE` before a third candidate starts."""
+    from saffron.batch import run_stack_batch
+
+    order = [_candidate("TE-1"), _candidate("TE-2"), _candidate("TE-3")]
+    runner = FakeStackRunner(
+        {
+            "TE-1": RuntimeError("boom"),
+            "TE-2": RuntimeError("boom"),
+            "TE-3": _outcome(
+                state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
+            ),
+        }
+    )
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert runner.calls == [("TE-1", None), ("TE-2", None)]

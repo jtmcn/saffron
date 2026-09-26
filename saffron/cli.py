@@ -30,12 +30,14 @@ from saffron.scheduler import (
     Candidate,
     GhRunner,
     Refusal,
+    _branch,
     build_queue,
     protected_touch_refusal,
     retirement_refusal,
     run_gh,
 )
 from saffron.task import (
+    Handoff,
     PinnedBase,
     Refused,
     ResolvedCeilings,
@@ -497,6 +499,48 @@ def _batch_runner(
             ledger=ledger,
             out_dir=out_dir,
             token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        )
+
+    return run
+
+
+def _stack_runner(
+    *,
+    pinned: PinnedBase,
+    repo_id: Callable[[], int | None],
+    repo: Path,
+    ledger: Ledger,
+    out_dir: Path,
+) -> Callable[[Candidate, Candidate | None], CellOutcome | Refused]:
+    """`run_stack_batch`'s adapter. Given a predecessor, it fetches that
+    task's branch fresh into the mirror and hands `run_task` a `Handoff`
+    built from the fetch, never from `_resolve_stacked_on`. A predecessor
+    branch the origin no longer has raises `package_phase.ParentGone`, and
+    this never catches it: an unstacked cell is not this function's call to
+    make."""
+
+    def run(
+        candidate: Candidate, predecessor: Candidate | None
+    ) -> CellOutcome | Refused:
+        spec = candidate.spec
+        if predecessor is None:
+            handoff = Handoff(stacked_on=None, target_branch=None)
+        else:
+            branch = _branch(predecessor.spec.id)
+            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+            handoff = Handoff(stacked_on=head, target_branch=branch)
+        ceilings = spec_ceilings(spec)
+        return run_task(
+            spec,
+            candidate.spec_sha,
+            ceilings=ceilings,
+            base=pinned,
+            repo_id=repo_id(),
+            repo=repo,
+            ledger=ledger,
+            out_dir=out_dir,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            handoff=handoff,
         )
 
     return run
