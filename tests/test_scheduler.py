@@ -1923,7 +1923,11 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-25, a hundredth time: `SA-0177` queued for
+    """Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
+    retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
+    Every other spec of b-792ab2's chain is still refused on its parent.
+
+    Re-measured 2026-09-25, a hundredth time: `SA-0177` queued for
     backlog item b-792ab2, split from `SA-0167` on size. It builds the
     ledger's `stack_finishes` table and its two methods. It declares
     `depends_on: [SA-0174]`, so it is refused. `SA-0167` now declares
@@ -2516,7 +2520,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0142", "SA-0141"]
+    assert [c.spec.id for c in candidates] == ["SA-0142"]
     assert [r.path.name[:7] for r in refusals] == [
         "SA-0143",
         "SA-0144",
