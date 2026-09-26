@@ -1919,6 +1919,265 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
     assert "+1 more unmet" in reason
 
 
+# ---------------------------------------------------------------- stack order
+
+
+def test_a_stack_order_takes_every_dependency_first_then_priority_then_id(
+    tmp_path, ledger
+):
+    """The seven-spec fixture from `SA-0142`'s notes. Every listed wrong
+    order fails this, including the driver's own `_sequence`, which ranks by
+    descendant count before id and would put `TE-3` before `TE-2` here."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "1-te5.md", id="TE-5", priority=3)
+    _write_spec(directory, "2-te1.md", id="TE-1", priority=1, depends_on=["TE-5"])
+    _write_spec(directory, "3-te3.md", id="TE-3", priority=1)
+    _write_spec(directory, "4-te2.md", id="TE-2", priority=1)
+    _write_spec(
+        directory, "5-te4.md", id="TE-4", priority=1, depends_on=["TE-3", "TE-5"]
+    )
+    _write_spec(directory, "6-te6.md", id="TE-6", priority=4)
+    _write_spec(directory, "7-te7.md", id="TE-7", priority=2)
+
+    candidates, refusals = build_queue(directory, None, ledger, stack=True)
+
+    assert refusals == []
+    assert [c.spec.id for c in candidates] == [
+        "TE-2",
+        "TE-3",
+        "TE-7",
+        "TE-5",
+        "TE-1",
+        "TE-4",
+        "TE-6",
+    ]
+
+
+def test_a_stack_order_admits_a_spec_whose_dependencies_are_in_it_or_on_the_default_branch(
+    tmp_path, ledger
+):
+    """Four ways onto the default branch, at `depends_on[0]` and at a later
+    entry: no task at all, `MERGED` at a stale sha, retired to `done/`, and a
+    landed push a `READY_FOR_REVIEW` row never turned into `MERGED`."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "te11.md", id="TE-11", touches=["te11.py"])
+    _write_spec(
+        directory, "te12.md", id="TE-12", touches=["te12.py"], depends_on=["TE-11"]
+    )
+    _write_spec(
+        directory, "te13.md", id="TE-13", touches=["te13.py"], depends_on=["TE-12"]
+    )
+    # No file for TE-21: its merged credit must come from `merged_anywhere`,
+    # never from `_stack_order` taking it as an ordinary, dependency-free spec.
+    _write_spec(
+        directory,
+        "te31.md",
+        id="TE-31",
+        touches=["te31.py"],
+        depends_on=["TE-21", "TE-11"],
+    )
+    (directory / "done").mkdir()
+    _write_spec(directory / "done", "te22.md", id="TE-22", touches=["te22.py"])
+    _write_spec(
+        directory, "te32.md", id="TE-32", touches=["te32.py"], depends_on=["TE-22"]
+    )
+    _write_spec(directory, "te23.md", id="TE-23", touches=["te23.py"])
+    _write_spec(
+        directory, "te33.md", id="TE-33", touches=["te33.py"], depends_on=["TE-23"]
+    )
+
+    repo_id = _repo(ledger)
+    _task_at(ledger, repo_id, spec_id="TE-21", spec_sha="1" * 40, state="MERGED")
+    landed_sha = "2" * 40
+    row23 = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-23",
+        spec_sha=_sha(directory / "te23.md"),
+        state="READY_FOR_REVIEW",
+    )
+    ledger.record_push(row23, landed_sha)
+
+    def pushed_landed(sha):
+        return sha == landed_sha
+
+    candidates, refusals = build_queue(
+        directory, repo_id, ledger, pushed_landed=pushed_landed, stack=True
+    )
+
+    admitted = {"TE-11", "TE-12", "TE-13", "TE-31", "TE-32", "TE-33"}
+    admitted_files = {
+        "te11.md",
+        "te12.md",
+        "te13.md",
+        "te31.md",
+        "te32.md",
+        "te33.md",
+    }
+    assert admitted <= {c.spec.id for c in candidates}
+    assert not any(r.path.name in admitted_files for r in refusals)
+
+
+def test_a_stack_order_refuses_a_spec_with_any_dependency_outside_it_and_names_each(
+    tmp_path, ledger
+):
+    """Five ways to be outside the stack order, driven at `depends_on[0]`
+    and at a later entry. Plus a two-spec cycle, where neither member is
+    ever ready."""
+    directory = _spec_dir(tmp_path)
+    _write_spec(directory, "te41.md", id="TE-41", touches=["te41.py"])
+    _write_spec(directory, "te42.md", id="TE-42", touches=["prot42.py"])
+    _write_spec(directory, "te43.md", id="TE-43", touches=["te43.py"])
+    _write_spec(directory, "te44.md", id="TE-44", touches=["te44.py"])
+    _write_spec(
+        directory, "te51.md", id="TE-51", touches=["te51.py"], depends_on=["TE-41"]
+    )
+    _write_spec(
+        directory,
+        "te52.md",
+        id="TE-52",
+        touches=["te52.py"],
+        depends_on=["TE-44", "TE-41"],
+    )
+    _write_spec(
+        directory, "te53.md", id="TE-53", touches=["te53.py"], depends_on=["TE-42"]
+    )
+    _write_spec(
+        directory,
+        "te54.md",
+        id="TE-54",
+        touches=["te54.py"],
+        depends_on=["TE-43", "TE-49"],
+    )
+    _write_spec(
+        directory, "te55.md", id="TE-55", touches=["te55.py"], depends_on=["TE-51"]
+    )
+    _write_spec(
+        directory, "te61.md", id="TE-61", touches=["te61.py"], depends_on=["TE-62"]
+    )
+    _write_spec(
+        directory, "te62.md", id="TE-62", touches=["te62.py"], depends_on=["TE-61"]
+    )
+
+    repo_id = _repo(ledger)
+    row41 = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-41",
+        spec_sha=_sha(directory / "te41.md"),
+        state="READY_FOR_REVIEW",
+    )
+    ledger.record_push(row41, "3" * 40)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-43",
+        spec_sha=_sha(directory / "te43.md"),
+        state="EXHAUSTED",
+    )
+
+    def pushed_landed(_sha):
+        return False
+
+    candidates, refusals = build_queue(
+        directory,
+        repo_id,
+        ledger,
+        protected=["prot42.py"],
+        pushed_landed=pushed_landed,
+        stack=True,
+    )
+
+    assert [c.spec.id for c in candidates] == ["TE-44"]
+
+    reasons = {r.path.name: r.reason for r in refusals}
+    assert "TE-41" in reasons["te51.md"]
+    assert "outside the stack order" in reasons["te51.md"]
+    assert "TE-41" in reasons["te52.md"]
+    assert "TE-44" not in reasons["te52.md"]
+    assert "TE-42" in reasons["te53.md"]
+    assert "TE-43" in reasons["te54.md"]
+    assert "TE-49" in reasons["te54.md"]
+    assert "TE-51" in reasons["te55.md"]
+    assert "TE-61" in reasons["te62.md"]
+    assert "TE-62" in reasons["te61.md"]
+
+
+def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledger):
+    """One directory makes every non-dependency refusal `_refuse` and
+    `build_queue` make, and no dependency refusal at all.
+
+    Eight of them: a parse failure, a retired spec that does not parse, a
+    dangling marker, and protected `touches`. Plus an open pull request, a
+    `touches` overlap, a criterion path outside `touches`, and a retirement
+    marker outside `touches`."""
+    directory = _spec_dir(tmp_path)
+    (directory / "aa-broken.md").write_text("no frontmatter here\n")
+    (directory / "done").mkdir()
+    (directory / "done" / "bb-broken.md").write_text("no frontmatter here\n")
+    _write_spec(directory, "cc-prot.md", id="PROT-1", touches=["DESIGN.md"])
+    _write_spec(directory, "dd-ownpr.md", id="OWNPR-1", touches=["ownpr.py"])
+    _write_spec(directory, "ee-overlap.md", id="OVERLAP-1", touches=["overlap.py"])
+    _write_spec(
+        directory,
+        "ff-critpath.md",
+        id="CRIT-1",
+        touches=["saffron/scheduler.py"],
+        body=(
+            "## Acceptance criteria\n"
+            "- [ ] Reads `saffron/other_file.py` for the shape to copy.\n"
+        ),
+    )
+    _write_spec(directory, "gg-markout.md", id="MARK-1", touches=["saffron/x.py"])
+    _write_spec(directory, "hh-clean1.md", id="CLEAN-1", touches=["clean1.py"])
+    _write_spec(directory, "ii-clean2.md", id="CLEAN-2", touches=["clean2.py"])
+
+    gh = _fake_gh(
+        [
+            {"headRefName": "saffron/OWNPR-1", "url": "u1", "files": []},
+            {
+                "headRefName": "saffron/OTHER-1",
+                "url": "u2",
+                "files": [{"path": "overlap.py"}],
+            },
+        ]
+    )
+    markers = [
+        ("ghost.py", "GHOST-1"),
+        ("tests/test_other.py", "MARK-1"),
+    ]
+    protected = ["DESIGN.md"]
+
+    stacked_candidates, stacked_refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        repo_slug="o/r",
+        gh=gh,
+        protected=protected,
+        markers=markers,
+        stack=True,
+    )
+    flat_candidates, flat_refusals = build_queue(
+        directory,
+        None,
+        ledger,
+        repo_slug="o/r",
+        gh=gh,
+        protected=protected,
+        markers=markers,
+        stack=False,
+    )
+
+    stacked_set = {(r.path.name, r.reason) for r in stacked_refusals}
+    flat_set = {(r.path.name, r.reason) for r in flat_refusals}
+    assert stacked_set == flat_set
+    assert len(stacked_set) == 8
+    assert {c.spec.id for c in stacked_candidates} == {
+        c.spec.id for c in flat_candidates
+    }
+
+
 # ---------------------------------------------------------------------- smoke
 
 

@@ -631,11 +631,17 @@ def _refuse(
     protected: Sequence[str],
     markers: Sequence[tuple[str, str]],
     ancestor_branches: frozenset[str],
+    check_dependencies: bool = True,
 ) -> str | None:
     """The first of §4.2.1's remaining refusals this candidate earns, or
     `None`. Order matches the acceptance criteria's own listing — except the
     `SA-0023` check below, which runs first because it is the cheapest: no
-    `gh`, no ledger, nothing but the spec and the policy already in hand."""
+    `gh`, no ledger, nothing but the spec and the policy already in hand.
+
+    `check_dependencies=False` skips the `depends_on` loop below, leaving
+    every other check as it runs today. Stack mode (`SA-0142`) passes it.
+    A stack order decides `depends_on` in one pass over every candidate,
+    not one entry at a time here."""
     if (
         reason := protected_touch_refusal(
             candidate.spec.touches, protected, candidate.spec.forbidden
@@ -706,6 +712,9 @@ def _refuse(
     if (retirement := retirement_refusal(candidate.spec, markers)) is not None:
         return retirement
 
+    if not check_dependencies:
+        return None
+
     unmet = []
     for dep in candidate.spec.depends_on:
         reason = _dependency_refusal(
@@ -727,6 +736,66 @@ def _refuse(
     return None
 
 
+def _stack_dependency_reason(
+    candidate: Candidate, taken_ids: frozenset[str], on_default_branch: frozenset[str]
+) -> str:
+    """Why `candidate` never became ready in `_stack_order`.
+
+    Names each `depends_on` entry that is neither taken into the order nor
+    on the default branch, and no other entry."""
+    missing = [
+        dep
+        for dep in candidate.spec.depends_on
+        if dep not in taken_ids and dep not in on_default_branch
+    ]
+    verb = "is" if len(missing) == 1 else "are"
+    return (
+        f"depends_on {', '.join(missing)} {verb} outside the stack order "
+        "and not on the default branch"
+    )
+
+
+def _stack_order(
+    candidates: list[Candidate], on_default_branch: frozenset[str]
+) -> tuple[list[Candidate], list[Refusal]]:
+    """One stack's fixed run order over `candidates` (§4.2, `SA-0142`).
+
+    Takes one spec at a time. A spec is ready once every `depends_on` entry
+    is already taken or in `on_default_branch`. Each step takes the ready
+    spec with the lowest `priority`, then the lowest id as a string. It
+    stops once nothing is ready. Every spec never taken is refused, naming
+    what kept it from ever becoming ready. A cycle refuses both members,
+    since neither one ever becomes ready.
+    """
+    remaining = list(candidates)
+    taken: list[Candidate] = []
+    taken_ids: set[str] = set()
+    while True:
+        ready = [
+            c
+            for c in remaining
+            if all(
+                dep in taken_ids or dep in on_default_branch
+                for dep in c.spec.depends_on
+            )
+        ]
+        if not ready:
+            break
+        best = min(ready, key=lambda c: (c.spec.priority, c.spec.id))
+        taken.append(best)
+        taken_ids.add(best.spec.id)
+        remaining.remove(best)
+
+    refusals = [
+        Refusal(
+            path=c.path,
+            reason=_stack_dependency_reason(c, frozenset(taken_ids), on_default_branch),
+        )
+        for c in remaining
+    ]
+    return taken, refusals
+
+
 def build_queue(
     directory: Path,
     repo_id: int | None,
@@ -737,6 +806,7 @@ def build_queue(
     protected: Sequence[str] = (),
     markers: Sequence[tuple[str, str]] = (),
     pushed_landed: PushedLanded | None = None,
+    stack: bool = False,
 ) -> tuple[list[Candidate], list[Refusal]]:
     """Turn the specs `discover_specs` found in `directory` into an ordered
     queue and a list of refusals.
@@ -778,6 +848,11 @@ def build_queue(
     Ordered by `spec.priority` (lower runs first), then by `discover_specs`'
     filename order to break ties — `sorted` is stable and `discover_specs`
     already returns its specs in that order, so no second key is needed.
+
+    `stack=True` (`SA-0142`) replaces that ordering with one fixed stack
+    order. It refuses a candidate whose `depends_on` reaches outside that
+    order, rather than running each entry through `_dependency_refusal`.
+    Every other refusal in this function runs exactly as it does today.
     """
     specs, failures = discover_specs(directory)
     existing = ledger.tasks_by_spec(repo_id) if repo_id is not None else {}
@@ -882,11 +957,16 @@ def build_queue(
             protected=protected,
             markers=markers,
             ancestor_branches=_ancestor_branches(candidate.spec.id, parent_of),
+            check_dependencies=not stack,
         )
         if reason is not None:
             refusals.append(Refusal(path=candidate.path, reason=reason))
         else:
             kept.append(candidate)
-    kept.sort(key=lambda c: c.spec.priority)
 
+    if stack:
+        ordered, stack_refusals = _stack_order(kept, retired | merged_anywhere)
+        return ordered, refusals + stack_refusals
+
+    kept.sort(key=lambda c: c.spec.priority)
     return kept, refusals
