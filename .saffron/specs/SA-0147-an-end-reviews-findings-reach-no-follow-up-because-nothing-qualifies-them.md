@@ -51,7 +51,7 @@ forbidden:
 budget_usd: 18
 max_attempts: 3
 max_turns: 100
-estimated_lines: 250
+estimated_lines: 275
 pending_symbols:
   - saffron/qualify.py::qualify
   - saffron/qualify.py::groups
@@ -64,10 +64,12 @@ acceptance:
       anchored in-cell `adequacy` concern goes to the pool as
       `unverified`, since its REVIEW probe did not survive. Any other
       in-cell concern is decided as an end-review finding is, under its
-      own layer. The witness drives an in-cell correctness concern that
-      qualifies, an in-cell adequacy concern, an in-cell adequacy note and
-      correctness blocker, and a task that also holds the join's and the
-      end review's recorded copies.
+      own layer, and a layer the end review did not reach keeps its
+      in-cell concerns as its only inputs. The witness drives an in-cell
+      correctness concern that qualifies, an in-cell adequacy concern, an
+      in-cell adequacy note and correctness blocker, a task that also
+      holds the join's and the end review's recorded copies, and an
+      unreached layer with an in-cell concern.
     witness: tests/test_qualify.py::test_a_layers_own_review_concerns_follow_its_end_review_findings
   - claim: >-
       With a `join` and at least one layer, `qualify.qualify(ledger,
@@ -80,8 +82,8 @@ acceptance:
       `unverified`, with a reason that carries the message, and the walk
       goes on. The witness drives a join finding that qualifies, one left
       unanchored because its file changed only below the bottom layer, one
-      whose probe call raises, and a second run in which the top layer's
-      call raises as well.
+      whose probe call raises, and a second call of the helper in which the
+      top layer's probe call raises as well.
     witness: tests/test_qualify.py::test_the_join_is_walked_first_over_the_stack_and_belongs_to_the_top_layer
   - claim: >-
       The join's anchored findings with a probe go to one
@@ -189,10 +191,12 @@ a `blocker`. So no rule here filters a concern on either field.
 **What the probe call raises.** A patch that does not apply raises
 `CriticPatchRejected`, a `RuntimeError` that `probe_findings` does not
 catch (`saffron/cell/session.py:1028`). `CriticPatchUnrepresentable` is
-one too (`:1036`), and so are `runtime.CellRuntimeError`
-(`saffron/cell/runtime.py:35`) and `mirror.GitError`
-(`saffron/repos/mirror.py:39`). A join's patch spans every layer, so it
-is the likeliest not to apply.
+one too (`:1036`), and so is `mirror.GitError`
+(`saffron/repos/mirror.py:39`). A `runtime.CellRuntimeError` does not
+reach the caller. The body already reads one as `unproven`, at cell entry,
+at the baseline and at each probe (`saffron/cell/session.py:1404`,
+`:1411`, `:1430`). A join's patch spans every layer, so it is the
+likeliest not to apply.
 
 ## Problem
 
@@ -213,8 +217,8 @@ call `SA-0180`'s per-layer helper once for the join, before any layer:
 - The inputs are the join's findings alone, and no in-cell concerns.
 - The probe call's `spec_id` and `branch` come from the first layer's
   `LayerFields`. Its `base_sha` is the range's base, resolved to a full
-  sha. Its `base_results` is `ledger.baseline_results` of the last
-  layer's task's run.
+  sha. Pass the last layer's task's run as the helper's run the probes
+  count from, so `base_results` is that run's `baseline_results`.
 - Each finding is recorded under the first layer's task, and grouped or
   pooled under its key.
 
@@ -264,7 +268,7 @@ So they declare a witness and no mutant, and `witness` reports `skip` for
 them. With `qualify.py` reverted to the tree base, criterion 1's witness
 finds no i1 or i6, and the others meet that `ValueError`.
 
-**The arrangement is `SA-0180`'s**, with three changes. When asked, the
+**The arrangement is `SA-0180`'s**, with four changes. When asked, the
 helper records these in-cell findings under `TE-2`, before any copy: a
 correctness concern "i1" on `src/b.py:1`, an adequacy note "i3" and a
 correctness blocker "i4" on `src/b.py:2`, and an adequacy concern "i6" on
@@ -272,13 +276,23 @@ correctness blocker "i4" on `src/b.py:2`, and an adequacy concern "i6" on
 `LensReview("join", [j1, j2, j3])` as `join` when asked. The double raises
 `RuntimeError("no cell at <name>")` when `spec.base_sha` is the sha of a
 commit named in its raising set. The join's range starts at `M`, which is
-`H1`'s parent, so its call's `base_sha` is `M`.
+`H1`'s parent, so its call's `base_sha` is `M`. Last, when asked, it adds
+a layer the end review did not reach, as `review_stack` leaves one
+(`saffron/end_review.py:365-371`). It is `TE-0`, created after the other
+two tasks, on a run with `base_sha` `A` whose `tests` result collects
+`[]`. It is packaged at `M`, recorded as a layer at position 0 with no
+predecessor, and holds one in-cell correctness concern "u1" on
+`src/m.py:1`. Its `LayerReview` comes last, with no reviews. `qualify`
+reads no position or predecessor, so neither moves a result.
 
-**Criterion 1's witness** runs the helper with no join. `groups` is
-`SA-0180`'s, with i1 last in `TE-2`'s `src/b.py` group, as a concern. The
-pool is `SA-0180`'s, with i6 `unverified` before c-m, its reason "its
-REVIEW probe did not survive". `TE-2`'s rows are `SA-0180`'s twelve, then
-i1 and i6. `TE-1`'s are `SA-0180`'s three. These fail it, each measured:
+**Criterion 1's witness** runs the helper with no join and with `TE-0`.
+Its `groups` are `SA-0180`'s four, with i1 last in `TE-2`'s `src/b.py`
+group, as a concern, and then `(TE-0, src/m.py, [u1], [concern])`. Call
+the first four the in-cell groups. The pool is `SA-0180`'s, with i6
+`unverified` before c-m, its reason "its REVIEW probe did not survive".
+Call that the in-cell pool. `TE-2`'s rows are `SA-0180`'s twelve, then i1
+and i6. `TE-1`'s are `SA-0180`'s three, and `TE-0`'s are u1 alone. These
+fail it, each measured:
 
 - in-cell concerns left out
 - every in-cell finding kept, not concerns alone
@@ -287,13 +301,15 @@ i1 and i6. `TE-1`'s are `SA-0180`'s three. These fail it, each measured:
   the join copies
 - in-cell concerns walked before the end-review findings
 - an in-cell adequacy concern qualified as probe-less
+- in-cell concerns read only for a layer the end review reached
+- a layer with no end-review findings skipped whole
 
 **Criterion 2's witness** runs the helper with the join, raising on `M`.
-`groups` is `(TE-2, src/a.py, [j1], [concern])`, then criterion 1's four
-groups. The first two pool entries are j2 `unanchored` and j3
-`unverified`, whose reason holds "no cell at M". The rest is criterion
-1's pool. It then runs the helper again in a fresh directory, raising on `M`
-and `H1`. The groups are j1's, then `TE-2`'s `src/c.py` with f6 alone,
+`TE-0` is not in this arrangement. `groups` is `(TE-2, src/a.py, [j1],
+[concern])`, then the four in-cell groups. The first two pool entries are
+j2 `unanchored` and j3 `unverified`, whose reason holds "no cell at M".
+The rest is the in-cell pool. It then calls the helper again in a fresh
+directory, raising on `M` and `H1`. The groups are j1's, then `TE-2`'s `src/c.py` with f6 alone,
 then `TE-2`'s `src/b.py` with s2 and i1, then `TE-1`'s two. f1, f2, f3,
 f4, f7, f8 and f10 are all in the pool as `unverified`, each reason
 holding "no cell at H1". These fail it, each measured:
@@ -333,9 +349,13 @@ at 4 to 17. `TE-1`'s are `SA-0180`'s three. These fail it, each measured:
 **How the lists were measured.** A throwaway prototype ran on 2026-09-26
 at `eb7b7d37`, on the host's git 2.54. It is `SA-0180`'s, with the
 in-cell concerns and the join added as the Problem says. The right build
-passed all seven witnesses, and `SA-0180`'s three still passed. Each wrong version above was made from it
-by one or two edits, and each failed the witness it is listed under. How
-the cell's git 2.39.5 reads the zero-context config is unmeasured.
+passed all seven witnesses, and `SA-0180`'s three still passed. Each
+wrong version above was made from it by one or two edits, and each
+failed the witness it is listed under.
+Measured on 2026-09-26 in `saffron/cell:saffron`, whose git is 2.47.3, a
+`GIT_CONFIG_GLOBAL` setting `diff.context = 0` gives no context lines. An
+explicit `--unified=3` overrides it, giving six context lines around a
+one-line change.
 
 **What the witnesses leave undriven.**
 
@@ -355,7 +375,7 @@ or a sentence over 25 words. Keep each docstring within ten lines.
 **Size.** No path this spec touches is in `elevate_on`, so `size` is
 advisory at the `feature` ceiling of 3000 tokens
 (`saffron/gates/core/size.py:26`). The prototype's change over
-`SA-0180`'s, formatted with `ruff format`, measured 705 changed tokens
-with `size_gate`'s own count: 245 in `qualify.py` and 460 in the tests.
+`SA-0180`'s, formatted with `ruff format`, measured 781 changed tokens
+with `size_gate`'s own count: 245 in `qualify.py` and 536 in the tests.
 Sibling cells landed at 1.4 to 1.6 times their authors' estimates, so
-about 990, 33% of the ceiling.
+about 1090, 36% of the ceiling.

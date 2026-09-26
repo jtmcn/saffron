@@ -88,12 +88,13 @@ decides a stack batch. Section 2 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md`, "Qualification is
 host code", is the design.
 
-**Step 4 is three specs.** `SA-0178` lets the host probe any findings.
+**Step 4 is four specs.** `SA-0178` lets the host probe any findings.
 This spec adds the table that records what the host decided of each
-finding, and the method that writes it. `SA-0147` qualifies an end
-review's findings and calls this spec's method once per finding. The
-three were one spec, `SA-0147`, until its cell ended `PLAN_REJECTED` on
-2026-09-26 over the `size` ceiling.
+finding, and the method that writes it. `SA-0180` qualifies each layer's
+end-review findings in `saffron/qualify.py`, and calls this spec's method
+once per finding. `SA-0147` adds each layer's in-cell concerns and the
+join lens's findings. The four were one spec, `SA-0147`, until its cell
+ended `PLAN_REJECTED` on 2026-09-26 over the `size` ceiling.
 
 **What the tree base holds.** This spec's tree base is `SA-0178`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:165-166`, `:213`). `SA-0178` edits
@@ -152,23 +153,24 @@ Build two things in `saffron/ledger.py`.
    keyed on it.
 
 `outcome` is one of `qualified`, `killed`, `unverified`, `unanchored` and
-`note`, and `reason` is empty except for `unverified`. `SA-0147` holds
-both rules. This method records what it is given.
+`note`, and `reason` is empty except for `unverified`. `SA-0180` and
+`SA-0147` hold both rules. This method records what it is given.
 
 The module docstring's count of kinds that fold back becomes fourteen, and
 `qualifications` joins its list of tables `DESIGN.md` §4.1 does not
 name. The `_drop_task_rows` docstring names it with the other two.
 
-No production code calls `record_qualification` until `SA-0147` does. So
+No production code calls `record_qualification` until `SA-0180` does. So
 it is a `pending_symbols` entry, and the `dead` gate defers it while this
 spec is open (`.saffron/gates/dead.py:4-6`, `:113-127`).
 
 ## Out of scope
 
-- **Deciding a finding's outcome.** `SA-0147` builds `saffron/qualify.py`.
+- **Deciding a finding's outcome.** `SA-0180` builds `saffron/qualify.py`,
+  and `SA-0147` extends it.
 - **A read method.** `SA-0174` adds one, for the delegate's findings file.
-- **A `CHECK` on `outcome`.** The table records what `SA-0147` decides,
-  and `SA-0147`'s witness pins the five values.
+- **A `CHECK` on `outcome`.** The table records what `qualify` decides,
+  and `SA-0180`'s witness pins the five values.
 - **`DESIGN.md` §4.1's schema sketch.** It gains no `qualifications` here.
   `DESIGN.md` is protected.
 - **The vocabulary.** `CONTEXT.md` has no entry for qualification.
@@ -208,8 +210,9 @@ line are its finding's, and its severity is its `filed`. It asserts that `TE-1`'
 `Ledger` with no record and creates an unrelated repo, run and task there.
 It folds the record into the fresh ledger, and asserts its rows equal the
 source's. It folds the record into the source ledger, and asserts the
-rows unchanged. Last, `fold_task` on the fresh ledger with `TE-2`'s key and
-no facts leaves `TE-1`'s two rows alone.
+rows unchanged. Last, it calls `fold_task` on the fresh ledger with
+`TE-2`'s key and no facts. It asserts that the fresh table then holds
+exactly `TE-1`'s two rows, and nothing else.
 
 These fail them, each measured:
 
@@ -217,6 +220,8 @@ These fail them, each measured:
 - `_drop_task_rows` that leaves the rows, which raises on the primary key
 - `INSERT OR REPLACE` with `_drop_task_rows` untouched, which leaves
   `TE-2`'s rows after `fold_task(key, [])`
+- `_drop_task_rows` deleting every task's `qualifications` rows, so the
+  fold of `TE-2` loses `TE-1`'s rows
 - the severity read from the finding rather than `filed`
 - `position` counted over the whole table, not per task
 

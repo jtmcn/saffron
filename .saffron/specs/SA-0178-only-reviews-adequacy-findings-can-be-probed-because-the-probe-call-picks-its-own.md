@@ -66,10 +66,14 @@ acceptance:
       `review.adequacy_probes(reviews)`. The witness drives `spec`,
       `standards` and `adequacy` targets, an unanchored target, two targets
       sharing one probe, a refused probe, and `survived`, `killed` and
-      `unproven`. Through `_probe_adequacy` it drives a `spec` finding with
-      a probe, an anchored and an unanchored adequacy finding with a probe,
+      `unproven`. Through `_probe_adequacy` it drives an anchored `spec`
+      finding with a probe, an anchored and an unanchored adequacy finding with a probe,
       and an adequacy finding with none.
     witness: tests/test_probe_findings.py::test_any_lenses_findings_are_probed_once_per_edit_and_decided_in_place
+    mutant:
+      file: saffron/phases/review.py
+      find: if f.lens == "adequacy" and f.anchored and f.probe is not None
+      replace: if f.probe is not None
   - claim: >-
       REVIEW still probes each anchored adequacy finding once per distinct
       edit, in one suite run.
@@ -92,14 +96,15 @@ host code", is the design. ADR 3
 (`docs/adr/0003-a-test-is-judged-by-an-edit-chosen-to-break-it.md`) decides
 what a probe's verdict means.
 
-**Step 4 is three specs.** This spec lets the host probe any findings, not
+**Step 4 is four specs.** This spec lets the host probe any findings, not
 REVIEW's adequacy findings alone. `SA-0179` adds the `qualifications`
-table and its write. `SA-0147` qualifies an end review's findings, and
-calls this spec's function for the ones that carry a probe. The three
-were one spec, `SA-0147`, until its cell ended `PLAN_REJECTED` on
-2026-09-26. Its plan priced itself at 5800 changed tokens, and
-`saffron/ledger.py` and `saffron/cell/session.py` are in `elevate_on`, so
-`size` blocked it.
+table and its write. `SA-0180` qualifies each layer's end-review findings
+in `saffron/qualify.py`, and calls this spec's function for the ones that
+carry a probe. `SA-0147` adds each layer's in-cell concerns and the join
+lens's findings. The four were one spec, `SA-0147`, until its cell ended
+`PLAN_REJECTED` on 2026-09-26. Its plan priced itself at 5800 changed
+tokens, and `saffron/ledger.py` and `saffron/cell/session.py` are in
+`elevate_on`, so `size` blocked it.
 
 **What the tree base holds.** Both parents are merged at `eb7b7d37` and
 retired to `done/`, where every line below was read.
@@ -111,7 +116,7 @@ the line that picks its targets, `targets = review.adequacy_probes(reviews)`
 (`:1320`). `adequacy_probes` keeps each finding whose lens is `adequacy`,
 that is anchored and that carries a probe (`saffron/phases/review.py:555-565`).
 From there the body reads `targets` alone. It asks each distinct
-`review.probe_key` once (`saffron/cell/session.py:1356`). The probes
+`review.probe_key` once (`saffron/cell/session.py:1328`). The probes
 `probe.probe_refusal` refuses are decided first, and no cell is entered
 for them (`:1357-1368`). It enters a Gate-only cell through `critic_cell`
 with `network=None` and `env=dict(thread_env)` (`:1389-1403`). It runs the
@@ -142,12 +147,15 @@ passed as given. Do not copy the body, since `size` blocks at 3000 tokens
 here. REVIEW's call site stays as it is.
 
 Update the renamed function's docstring. It probes the findings it is
-given, and names no lens.
+given, and names no lens. Rewrite the comment on its assertion that
+each target carries a probe (`saffron/cell/session.py:1327`). It names
+`adequacy_probes`, which no longer picks the targets. Say instead that
+every caller filters first.
 
 ## Out of scope
 
-- **Qualifying an end review's findings.** `SA-0147` calls `probe_findings`
-  from `saffron/qualify.py`.
+- **Qualifying an end review's findings.** `SA-0180` calls
+  `probe_findings` from `saffron/qualify.py`, and `SA-0147` extends it.
 - **Recording what the host decided.** `SA-0179` adds the table.
 - **What a probe's verdict means.** `probe.check_probe` and
   `probe.added_tests` decide it, and neither changes here.
@@ -157,9 +165,12 @@ given, and names no lens.
 
 ## Notes for the agent
 
-**Criterion 1 is new code.** No text at the tree base names
-`probe_findings`. So it declares a witness and no mutant, and `witness`
-reports `skip` for it. Criteria 2 and 3 are `preserves` and name tests
+**Criterion 1 is mostly new code, and its wrapper half is an edit.** No
+text at the tree base names `probe_findings`. The wrapper still selects
+through `review.adequacy_probes`, whose predicate exists at the tree base
+(`saffron/phases/review.py:564`). So criterion 1 declares a mutant there.
+It drops the lens and anchoring tests from that predicate, and the
+witness's `_probe_adequacy` call kills it, since x1 is then mutated. Criteria 2 and 3 are `preserves` and name tests
 that pass at the tree base. They hold the rename to REVIEW's behaviour.
 
 **Reach the new name inside the test body.** Import `session` at module
@@ -209,7 +220,7 @@ The stub's results after the baseline are a pass, a failure of
   `env` equal to `thread_env`.
 
 The second call is `_probe_adequacy`, with two reviews. The `spec` review
-holds x1, a concern with a probe on `src/e.py`. The `adequacy` review holds
+holds x1, an anchored concern with a probe on `src/e.py`. The `adequacy` review holds
 a1, anchored with a probe on `src/d.py`, then a2, unanchored with x1's
 probe, then a3, anchored with no probe. The stub's results are a baseline
 pass and a pass. The witness asserts that only `src/d.py` was mutated,
@@ -222,12 +233,16 @@ These fail it, each measured.
 - `probe_findings` that keeps only its anchored targets
 - `_probe_adequacy` that hands over every finding with a probe
 - `_probe_adequacy` that hands over unanchored adequacy findings too
+- `_probe_adequacy` that hands over every anchored finding with a
+  probe, whatever its lens
 - one question per finding rather than per distinct edit
+- the declared mutant, applied to `review.adequacy_probes`
 
 **How the list was measured.** A throwaway test ran on 2026-09-26 at
 `eb7b7d37`. It built `probe_findings` and the wrapper from
 `_probe_adequacy`'s own source by the edits the Problem names, and each
-wrong version by one edit more. The right build passed every assertion
+wrong version by one edit more. The mutant was applied to
+`adequacy_probes`'s own source. The right build passed every assertion
 above, and each wrong version failed it.
 
 **What the witness leaves undriven.** The body past the target line is

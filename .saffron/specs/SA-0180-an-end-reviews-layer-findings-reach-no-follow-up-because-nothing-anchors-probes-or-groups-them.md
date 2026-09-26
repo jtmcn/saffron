@@ -239,6 +239,11 @@ top down, and `join` is a `LensReview` or `None`. `SA-0147` walks the
 join. Until then a `join` that is not `None` raises `ValueError`, so no
 caller loses its findings unseen. For each layer in order:
 
+- Read the layer's `task_id` and `run_id` from its record key with a
+  `ledger._db` query on `tasks`, as `end_review.layer_fields` does
+  (`saffron/end_review.py:111`). No public `Ledger` method maps a key to
+  either, and `saffron/ledger.py` is forbidden here.
+
 - Build the diff, `git diff` with `DIFF_FLAGS` over `<head>^..<head>` in
   `mirror`, `head` from the layer's `LayerFields`.
 - Anchor the inputs with `findings.anchor`. `read_head` reads the head
@@ -249,6 +254,11 @@ caller loses its findings unseen. For each layer in order:
   `base_sha` is `<head>^` resolved to a full sha. `spec_id` and `branch`
   come from the layer's `LayerFields`. `patch` is the diff.
   `base_results` is `ledger.baseline_results` of the layer's task's run.
+  `CellSpec` also requires `spec_sha`, `touches`, `spec_type` and `body`
+  (`saffron/cell/session.py:250-257`). Fill them with placeholders, such
+  as empty values. `critic_cell` reads only `spec_id`, `branch` and
+  `tree_base` (`:1170-1218`), and `probe_findings` reads nothing else of
+  `spec`.
   An `unproven` finding's reason is the entry whose `probe` has its
   `review.probe_key`.
 - Decide each finding in the order of the inputs, and record it with
@@ -257,9 +267,13 @@ caller loses its findings unseen. For each layer in order:
   since the call promotes in place.
 
 `qualify` returns the `Qualification`. Keep the per-layer walk in one
-helper that takes the range, the inputs and the task to record under.
-`SA-0147` adds each layer's in-cell concerns to its inputs, and calls the
-helper once more for the join.
+helper. It takes the range's base and head, the inputs, and the task to
+record under. It also takes the run the probes count from. That run's
+`baseline_results` become `base_results`. `qualify` passes the layer's
+own task and run for both. `SA-0147` adds each layer's in-cell concerns
+to its inputs, and calls the helper once more for the join. That call
+records under the top layer's task and counts from the bottom layer's
+run.
 
 `qualify` has no production caller until `SA-0165` binds it for
 `SA-0161`'s `write_follow_ups`, which passes its groups to the spec
@@ -285,9 +299,6 @@ is open (`.saffron/gates/dead.py:4-6`, `:113-127`).
   7's principle 27 holds only once one does. A later layer can move both.
 - **The finishing layer.** `SA-0151` commits it, and `SA-0170` links the
   stack and marks it ready.
-- **The probe call and the table.** `SA-0178` builds `probe_findings`,
-  and `SA-0179` builds the `qualifications` table and its write. This
-  spec edits neither file.
 - **The delegate's `findings.json`.** `SA-0174` writes it from each
   layer's `qualifications` rows.
 - **The base a bottom layer's probes count from.** A bottom layer's run
@@ -445,8 +456,11 @@ replaced `probe_findings` with the double. It ran the real `layer_fields`,
 `record_stack_layer`, `findings.anchor`, `mirror.file_at`,
 `probe.probe_refusal` and `review.apply_probe_verdict`. The right build
 passed all three witnesses. Each wrong version above was made from it by
-one or two edits, and each failed the witness it is listed under. How the cell's
-git 2.39.5 reads the config is unmeasured.
+one or two edits, and each failed the witness it is listed under.
+Measured on 2026-09-26 in `saffron/cell:saffron`, whose git is 2.47.3, a
+`GIT_CONFIG_GLOBAL` setting `diff.context = 0` gives no context lines. An
+explicit `--unified=3` overrides it, giving six context lines around a
+one-line change.
 
 **What the witnesses leave undriven.**
 
