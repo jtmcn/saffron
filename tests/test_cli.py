@@ -3281,20 +3281,8 @@ def test_the_stack_runner_hands_each_task_its_predecessors_fetched_branch(
     _git(repo, "branch", "-D", "saffron/SY-9000")
     mirror, url = _mirror_of(tmp_path, repo)
 
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(mirror),
-                "rev-parse",
-                "--verify",
-                "refs/heads/saffron/SY-9000",
-            ],
-            capture_output=True,
-        ).returncode
-        != 0
-    )
+    with pytest.raises(subprocess.CalledProcessError):
+        _rev_parse(mirror, "refs/heads/saffron/SY-9000")
 
     ledger = Ledger(tmp_path / "l.db")
     repo_id = _seed_repo(ledger, url)

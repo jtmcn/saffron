@@ -276,10 +276,7 @@ def run_task(
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package the result if the cell came back reviewable.
 
-    `handoff`, given, is trusted outright and `_resolve_stacked_on` is never
-    called — a stack batch has already decided the predecessor from its own
-    planned order, and re-deriving it here would ask the ledger a question
-    the batch already answered. Given none, this resolves it the old way.
+    A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
 
     `ceilings` arrives resolved, because only the attended path has flags to
     arbitrate against the spec (`cli._ceilings`); a batch has none, so there is
@@ -336,8 +333,7 @@ def run_task(
     # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
     # together for an ordinary unstacked cell (`_resolve_stacked_on`,
     # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
-    # place either has to be read. A stack batch's own `handoff` skips this
-    # entirely (`SA-0143`): its predecessor is already decided.
+    # place either has to be read.
     if handoff is not None:
         stacked_on, target_branch = handoff.stacked_on, handoff.target_branch
     else:

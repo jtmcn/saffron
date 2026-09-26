@@ -1239,6 +1239,12 @@ def test_a_stack_batch_refuses_every_descendant_of_a_task_that_missed_review(
         ("TE-20", "TE-19"),
     ]
 
+    assert [line for line in lines if " refused " in line] == [
+        f"{'TE-12':<10} refused  reaches TE-11",
+        f"{'TE-13':<10} refused  reaches TE-11",
+        f"{'TE-15':<10} refused  reaches TE-11",
+        f"{'TE-18':<10} refused  reaches TE-16, TE-17",
+    ]
     refused = {line.split()[0]: line for line in lines if "refused" in line}
     assert set(refused) == {"TE-12", "TE-13", "TE-15", "TE-18"}
     assert "TE-11" in refused["TE-12"]

@@ -267,7 +267,7 @@ def _drive(
 def _is_layer(result: CellOutcome | Refused) -> bool:
     """`run_stack_batch`'s one predicate. A result adds a layer only when it
     is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
-    `EXHAUSTED`, any other terminal state, or a `Refused`."""
+    `EXHAUSTED`, any other state, or a `Refused`."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 
@@ -293,17 +293,15 @@ def run_stack_batch(
     budget, the breaker and the batch row stay `run_batch`'s own.
     """
     order = list(order)
-    ids_in_order = {candidate.spec.id for candidate in order}
     remaining = list(order)
-    decided: dict[str, str] = {}  # spec id -> "LAYER" or "MISSED"
-    reaches: dict[str, frozenset[str]] = {}
+    missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
     predecessor: Candidate | None = None
 
     def blocking(candidate: Candidate) -> frozenset[str]:
         found: set[str] = set()
         for entry in candidate.spec.depends_on:
-            if entry in ids_in_order and decided.get(entry) == "MISSED":
-                found |= reaches[entry]
+            if entry in missed:
+                found |= missed[entry]
         return frozenset(found)
 
     def resolve_prefix() -> list[Candidate]:
@@ -314,8 +312,7 @@ def run_stack_batch(
                 break
             names = ", ".join(sorted(found))
             emit(f"{candidate.spec.id:<10} refused  reaches {names}")
-            decided[candidate.spec.id] = "MISSED"
-            reaches[candidate.spec.id] = found
+            missed[candidate.spec.id] = found
             remaining.pop(0)
         return remaining
 
@@ -325,17 +322,14 @@ def run_stack_batch(
         try:
             result = runner(candidate, pred)
         except Exception:
-            decided[candidate.spec.id] = "MISSED"
-            reaches[candidate.spec.id] = frozenset({candidate.spec.id})
+            missed[candidate.spec.id] = frozenset({candidate.spec.id})
             remaining.remove(candidate)
             raise
         remaining.remove(candidate)
         if _is_layer(result):
-            decided[candidate.spec.id] = "LAYER"
             predecessor = candidate
         else:
-            decided[candidate.spec.id] = "MISSED"
-            reaches[candidate.spec.id] = frozenset({candidate.spec.id})
+            missed[candidate.spec.id] = frozenset({candidate.spec.id})
         return result
 
     return run_batch(
