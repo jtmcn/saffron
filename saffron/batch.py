@@ -28,11 +28,12 @@ type is not importing the driver that builds it.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
 from saffron.cell.session import CellOutcome
+from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
@@ -70,6 +71,7 @@ def run_batch(
     emit: Callable[[str], None] = print,
     # Fired right after each task's attach, never for a `Refused` or a raise.
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
+    reserve_usd: float = 0.0,
 ) -> StopReason:
     """Drive one night against one repo's already-sorted candidates.
 
@@ -99,6 +101,10 @@ def run_batch(
     `rescan` takes no default, for `readiness_check`'s reason. Called after
     every task, its return replaces what is left to run — `candidates` decide
     only the first — never merged; what has started is tracked by spec id.
+
+    `reserve_usd` defaults to 0.0 and is held back from the budget
+    comparison below. It is never subtracted from `budget_usd` itself, so
+    the batch row still records the whole budget it was given.
 
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
@@ -133,6 +139,7 @@ def run_batch(
             emit=emit,
             in_flight=in_flight,
             after_attach=after_attach,
+            reserve_usd=reserve_usd,
         )
         return stopped
     finally:
@@ -160,6 +167,7 @@ def _drive(
     emit: Callable[[str], None],
     in_flight: list[tuple[str, str]],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
+    reserve_usd: float = 0.0,
 ) -> StopReason:
     """`run_batch`'s body, split out so every exit closes the batch row.
 
@@ -199,7 +207,9 @@ def _drive(
         if until is not None and clock() >= until:
             return _stop(ledger, batch_id, "UNTIL", in_flight, emit)
 
-        remaining = budget_usd - ledger.batch_spend(batch_id)
+        # `reserve_usd` is held back here, not subtracted from `budget_usd`
+        # itself. The batch row still records the whole budget it was given.
+        remaining = budget_usd - reserve_usd - ledger.batch_spend(batch_id)
         if candidate.spec.budget_usd > remaining:
             return _stop(ledger, batch_id, "BUDGET", in_flight, emit)
 
@@ -289,6 +299,8 @@ def run_stack_batch(
     readiness_check: Callable[[], Readiness],
     clock: Callable[[], datetime] = datetime.now,
     emit: Callable[[str], None] = print,
+    reserve_usd: float = 0.0,
+    end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
 ) -> StopReason:
     """Run one stack's planned `order` once, never rescanning the repo
     (`SA-0142` fixes the order at batch start). `runner` takes each
@@ -296,10 +308,10 @@ def run_stack_batch(
     positionally, that reached `READY_FOR_REVIEW`, or `None` before any has.
 
     A candidate is refused here, before `run_batch` ever sees it, when a
-    `depends_on` entry reaches a spec that ran this batch and missed. It can
-    reach one directly, or through another refused spec. `--until`, the
-    budget, the breaker and the batch row stay `run_batch`'s own.
-    """
+    `depends_on` entry reaches a spec that ran this batch and missed.
+    `reserve_usd` holds back the loop's own budget check, and once it
+    returns `end_review` runs once, with the batch id, the reserve and
+    `order`'s own specs."""
     order = list(order)
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
@@ -357,7 +369,7 @@ def run_stack_batch(
             missed[candidate.spec.id] = frozenset({candidate.spec.id})
         return result
 
-    return run_batch(
+    stopped = run_batch(
         resolve_prefix(),
         ledger,
         budget_usd,
@@ -368,7 +380,12 @@ def run_stack_batch(
         readiness_check=readiness_check,
         emit=emit,
         after_attach=record_layer,
+        reserve_usd=reserve_usd,
     )
+    if end_review is not None:
+        specs = {c.spec.id: c.spec for c in order}
+        end_review(str(ledger.latest_batch_id()), reserve_usd, specs)
+    return stopped
 
 
 def _stop(

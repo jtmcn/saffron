@@ -1,22 +1,27 @@
-"""The end review's two lenses: `LayerFields`, the prompt filler and
-`review_layer`. `saffron.end_review` is imported inside every test body
-here, never at module scope. It does not exist at this spec's own tree
-base, and a module-scope import would fail collection under `revert`.
+"""The end review's two lenses, `review_stack` over a whole stack, and
+`Ledger.record_end_review`. `saffron.end_review` is imported inside
+every test body here, never at module scope. It does not exist at this
+spec's own tree base, and a module-scope import would fail collection
+under `revert`.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 from saffron.agents import context
 from saffron.agents.findings import Finding
-from saffron.intake import Criterion, Mutant
+from saffron.intake import Criterion, Mutant, Spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
+from saffron.record.fold import fold
+from saffron.record.memory import MemoryRecord
 
 PROMPTS = Path(review.__file__).resolve().parents[1] / "agents" / "prompts"
 CONTEXT_MD = (Path(__file__).resolve().parents[1] / "CONTEXT.md").read_text()
@@ -486,3 +491,489 @@ def test_a_layer_is_read_by_the_spec_lens_then_the_standards_lens():
     assert spec_review2.cost_usd == 0.4
     assert standards_review2.error is None
     assert len(standards_review2.findings) == 1
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _stack_mirror(tmp_path: Path, monkeypatch) -> tuple[Path, str, dict[str, str]]:
+    """The git mirror criteria 1, 2, 3 and 5 share.
+
+    A global config pins `diff.noprefix`, `user.name` and `user.email`.
+    Main carries five layers from one root, and a branch carries three
+    from the same root.
+    """
+    config = tmp_path / "gitconfig"
+    config.write_text(
+        "[diff]\n    noprefix = true\n"
+        "[user]\n    name = Test\n    email = test@example.com\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+
+    def commit(filename: str, content: str) -> str:
+        (mirror / filename).write_text(content)
+        _git(mirror, "add", filename)
+        _git(mirror, "commit", "-q", "-m", f"msg {filename}")
+        return _git(mirror, "rev-parse", "HEAD").strip()
+
+    sha_a = commit("a.txt", "a\n")
+    commit("m.txt", "moved main\n")
+    shas: dict[str, str] = {}
+    for spec_id in ("TE-4", "TE-7", "TE-3", "TE-9", "TE-5"):
+        shas[spec_id] = commit(f"{spec_id}.txt", f"{spec_id} layer\n")
+
+    _git(mirror, "checkout", "-q", "-b", "branch2", sha_a)
+    commit("m2.txt", "moved main\n")
+    for spec_id in ("TE-1", "TE-8", "TE-6"):
+        shas[spec_id] = commit(f"{spec_id}.txt", f"{spec_id} layer\n")
+
+    return mirror, sha_a, shas
+
+
+_STACK_SPECS = ("TE-4", "TE-7", "TE-3", "TE-9", "TE-5", "TE-1", "TE-8", "TE-6")
+_STACK_ORDER = ("TE-9", "TE-4", "TE-7", "TE-5", "TE-3", "TE-6", "TE-1", "TE-8")
+_STACK_LAYERS = (
+    ("TE-4", 1, None),
+    ("TE-7", 2, "TE-4"),
+    ("TE-3", 3, "TE-7"),
+    ("TE-9", 4, "TE-3"),
+    ("TE-5", 5, "TE-9"),
+    ("TE-1", 1, None),
+    ("TE-8", 2, "TE-1"),
+    ("TE-6", 3, "TE-8"),
+)
+
+
+def _stack_specs() -> dict[str, Spec]:
+    return {
+        spec_id: Spec(
+            id=spec_id,
+            title="t",
+            type="chore",
+            body=f"body {spec_id}",
+            touches=[f"{spec_id}.py"],
+            forbidden=[f"no-{spec_id}.py"],
+            acceptance=[
+                Criterion(
+                    claim=f"claim {spec_id}", witness=f"tests/test_{spec_id}.py::t"
+                )
+            ],
+        )
+        for spec_id in _STACK_SPECS
+    }
+
+
+def _stack_ledger(tmp_path: Path, sha_a: str, shas: dict[str, str]):
+    """The `Ledger`, its two batches and eight `READY_FOR_REVIEW` tasks,
+    each packaged at its own commit and laid out as the two `stack_layers`
+    chains.
+
+    Returns the ledger, its record, both batch ids and `spec id -> task_id`.
+    """
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    batch1 = ledger.create_batch(100.0)
+    batch2 = ledger.create_batch(100.0)
+    batch_of = dict.fromkeys(("TE-4", "TE-7", "TE-3", "TE-9", "TE-5"), batch1)
+    batch_of.update(dict.fromkeys(("TE-1", "TE-8", "TE-6"), batch2))
+
+    task_ids: dict[str, int] = {}
+    for spec_id in _STACK_ORDER:
+        run_id = ledger.create_run(repo_id, base_sha=sha_a, batch_id=batch_of[spec_id])
+        task_id = ledger.create_task(
+            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+        )
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            f"saffron/{spec_id}",
+            shas[spec_id],
+            f"https://h/pull/{spec_id}",
+        )
+        task_ids[spec_id] = task_id
+
+    ledger.record_findings(
+        task_ids["TE-5"],
+        [
+            Finding(
+                lens="correctness",
+                severity="concern",
+                file="q.py",
+                line=1,
+                claim="in-cell c5",
+            )
+        ],
+    )
+    attempt_id = ledger.open_attempt(task_ids["TE-5"], phase="IMPLEMENT")
+    ledger.close_attempt(
+        attempt_id,
+        session_id="s",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+
+    for spec_id, position, predecessor in _STACK_LAYERS:
+        ledger.record_stack_layer(
+            task_ids[spec_id],
+            position=position,
+            predecessor_task_id=task_ids[predecessor] if predecessor else None,
+            generation=0,
+        )
+
+    return ledger, record, batch1, batch2, task_ids
+
+
+def _stack_script() -> list:
+    """The nine scripted replies, in call order across both `review_stack`
+    calls.
+
+    TE-9's Spec call fails clean and TE-6's raises raw. The difference
+    between a caught `AgentFailed` and an uncaught raise reaches both
+    lenses of one layer, and only one of the other.
+    """
+    f5_spec = {
+        "file": "TE-5.txt",
+        "line": 1,
+        "severity": "blocker",
+        "claim": "f5 spec",
+        "probe": {"file": "TE-5.txt", "find": "TE-5 layer", "replace": "fixed"},
+    }
+    f5_standards = {
+        "file": "TE-5.txt",
+        "line": 1,
+        "severity": "concern",
+        "claim": "f5 standards",
+    }
+    f9_standards = {
+        "file": "TE-9.txt",
+        "line": 1,
+        "severity": "note",
+        "claim": "f9 standards",
+    }
+    return [
+        _turn(_block([f5_spec]), cost=0.5),
+        _turn(_block([f5_standards]), cost=0.5),
+        implement.AgentFailed(
+            "boom",
+            attempt=implement.AttemptResult(
+                session_id=None,
+                subtype="error",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=0.75,
+            ),
+        ),
+        _turn(_block([f9_standards]), cost=0.25),
+        _turn(_block([]), cost=0.25),
+        _turn(_block([]), cost=0.25),
+        RuntimeError("runner crashed"),
+        _turn(_block([]), cost=0.25),
+        _turn(_block([]), cost=0.25),
+    ]
+
+
+def _open_cell_double(calls: list[str]):
+    """Records every spec id it is given, in order. Raises for `TE-8`,
+    and yields `critic-<spec>` for the rest."""
+
+    @contextmanager
+    def open_cell(fields):
+        calls.append(fields.spec_id)
+        if fields.spec_id == "TE-8":
+            raise RuntimeError("no cell for TE-8")
+        yield f"critic-{fields.spec_id}"
+
+    return open_cell
+
+
+def _end_review_kwargs(mirror: Path, open_cell, agent) -> dict:
+    return {
+        "mirror": mirror,
+        "open_cell": open_cell,
+        "context_md": CONTEXT_MD,
+        "claude_md": "Read the standards once.",
+        "prompts_dir": PROMPTS,
+        "max_turns": 17,
+        "budget_usd": 1.0,
+        "agent": agent,
+        "emit": lambda event: None,
+    }
+
+
+def test_the_end_review_reads_each_layer_top_down_until_its_reserve_runs_short(
+    tmp_path, monkeypatch
+):
+    """`review_stack` reads a batch's layers highest position first, inside
+    one reserve, and records every lens through `record_end_review`."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    ledger, record, batch1, batch2, task_ids = _stack_ledger(tmp_path, sha_a, shas)
+    specs = _stack_specs()
+    keys = {
+        spec_id: ledger.record_key(task_id) for spec_id, task_id in task_ids.items()
+    }
+
+    cell_calls: list[str] = []
+    open_cell = _open_cell_double(cell_calls)
+    agent_calls: list = []
+    agent = _scripted(agent_calls, _stack_script())
+    kwargs = _end_review_kwargs(mirror, open_cell, agent)
+
+    batch1_reviews = end_review.review_stack(ledger, str(batch1), 4.0, specs, **kwargs)
+    batch2_reviews = end_review.review_stack(ledger, str(batch2), 4.0, specs, **kwargs)
+
+    assert len(agent_calls) == 9
+    assert cell_calls == ["TE-5", "TE-9", "TE-3", "TE-6", "TE-8", "TE-1"]
+
+    assert [r.task_key for r in batch1_reviews] == [
+        keys["TE-5"],
+        keys["TE-9"],
+        keys["TE-3"],
+        keys["TE-7"],
+        keys["TE-4"],
+    ]
+    te5_review, te9_review, te3_review, te7_review, te4_review = batch1_reviews
+    assert [r.lens for r in te5_review.reviews] == ["spec", "standards"]
+    assert te5_review.reviews[0].findings[0].probe == Mutant(
+        file="TE-5.txt", find="TE-5 layer", replace="fixed"
+    )
+    assert te9_review.reviews[0].error is not None
+    assert te9_review.reviews[0].cost_usd == 0.75
+    assert te3_review.reviews[0].error is None
+    assert te7_review.reviews == []
+    assert te4_review.reviews == []
+
+    assert [r.task_key for r in batch2_reviews] == [
+        keys["TE-6"],
+        keys["TE-8"],
+        keys["TE-1"],
+    ]
+    te6_review, te8_review, te1_review = batch2_reviews
+    assert [r.lens for r in te6_review.reviews] == ["spec", "standards"]
+    assert [r.lens for r in te8_review.reviews] == ["spec", "standards"]
+    for r in te6_review.reviews:
+        assert r.cost_usd == 0.0
+        assert "runner crashed" in (r.error or "")
+    for r in te8_review.reviews:
+        assert r.cost_usd == 0.0
+        assert "no cell for TE-8" in (r.error or "")
+    assert te1_review.reviews[0].error is None
+
+    rows = {
+        (row["task_key"], row["lens"]): row
+        for row in ledger._db.execute("SELECT * FROM end_reviews").fetchall()
+    }
+    assert len(rows) == 16
+
+    def row_for(spec_id: str, lens: str):
+        return rows[(keys[spec_id], lens)]
+
+    for spec_id, cost in (("TE-5", 0.5), ("TE-3", 0.25), ("TE-1", 0.25)):
+        for lens in ("spec", "standards"):
+            row = row_for(spec_id, lens)
+            assert row["status"] == "reviewed"
+            assert row["error"] is None
+            assert row["cost_usd"] == cost
+    assert row_for("TE-9", "standards")["status"] == "reviewed"
+    assert row_for("TE-9", "standards")["error"] is None
+    assert row_for("TE-9", "spec")["status"] == "error"
+    assert row_for("TE-9", "spec")["cost_usd"] == 0.75
+    assert row_for("TE-9", "spec")["error"] is not None
+    for spec_id in ("TE-7", "TE-4"):
+        for lens in ("spec", "standards"):
+            row = row_for(spec_id, lens)
+            assert row["status"] == "not_reached"
+            assert row["cost_usd"] == 0.0
+            assert row["error"] is None
+    for lens in ("spec", "standards"):
+        row = row_for("TE-6", lens)
+        assert row["status"] == "error"
+        assert row["cost_usd"] == 0.0
+        assert "runner crashed" in row["error"]
+        row8 = row_for("TE-8", lens)
+        assert row8["status"] == "error"
+        assert row8["cost_usd"] == 0.0
+        assert "no cell for TE-8" in row8["error"]
+
+    te5_findings = ledger.findings(task_ids["TE-5"])
+    assert [f["claim"] for f in te5_findings] == [
+        "in-cell c5",
+        "f5 spec",
+        "f5 standards",
+    ]
+    assert [f["lens"] for f in te5_findings] == ["correctness", "spec", "standards"]
+    assert all(not f["anchored"] for f in te5_findings)
+
+    te9_findings = ledger.findings(task_ids["TE-9"])
+    assert [f["claim"] for f in te9_findings] == ["f9 standards"]
+
+    for spec_id in ("TE-7", "TE-4", "TE-3", "TE-6", "TE-8", "TE-1"):
+        assert ledger.findings(task_ids[spec_id]) == []
+
+    ledger.close()
+
+
+def test_each_layer_is_read_from_its_own_commit_in_its_own_cell(tmp_path, monkeypatch):
+    """The diff handed to each lens is `head^..head` in the mirror, never
+    `fields.base..head`, and every other field is that layer's own `Spec`."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    ledger, record, batch1, batch2, task_ids = _stack_ledger(tmp_path, sha_a, shas)
+    specs = _stack_specs()
+
+    agent_calls: list = []
+    agent = _scripted(agent_calls, _stack_script())
+    kwargs = _end_review_kwargs(mirror, _open_cell_double([]), agent)
+
+    end_review.review_stack(ledger, str(batch1), 4.0, specs, **kwargs)
+    end_review.review_stack(ledger, str(batch2), 4.0, specs, **kwargs)
+
+    assert len(agent_calls) == 9
+    assert [call["container"] for call in agent_calls] == [
+        "critic-TE-5",
+        "critic-TE-5",
+        "critic-TE-9",
+        "critic-TE-9",
+        "critic-TE-3",
+        "critic-TE-3",
+        "critic-TE-6",
+        "critic-TE-1",
+        "critic-TE-1",
+    ]
+    for call in agent_calls:
+        assert call["options"]["max_turns"] == 17
+        assert call["options"]["max_budget_usd"] == 1.0
+        assert "resume" not in call["kwargs"]
+
+    for index, spec_id in ((0, "TE-5"), (2, "TE-9"), (4, "TE-3")):
+        prompt = _flatten(agent_calls[index]["options"]["system_prompt"])
+        assert f"+{spec_id} layer" in prompt
+        assert f"body {spec_id}" in prompt
+        assert "Read the standards once." in prompt
+        assert f"tests/test_{spec_id}.py::t" in prompt
+        assert (
+            _flatten(
+                context.constraints_block([f"{spec_id}.py"], [f"no-{spec_id}.py"], [])
+            )
+            in prompt
+        )
+
+    for index, spec_id in ((1, "TE-5"), (3, "TE-9"), (5, "TE-3")):
+        prompt = _flatten(agent_calls[index]["options"]["system_prompt"])
+        assert f"body {spec_id}" in prompt
+        assert f"claim {spec_id}" not in prompt
+
+    assert "+TE-9 layer" not in _flatten(agent_calls[0]["options"]["system_prompt"])
+
+    bottom_prompt = _flatten(agent_calls[7]["options"]["system_prompt"])
+    assert "+TE-1 layer" in bottom_prompt
+    assert "diff --git a/TE-1.txt b/TE-1.txt" in bottom_prompt
+    assert "moved main" not in bottom_prompt
+    assert "msg TE-1" not in bottom_prompt
+
+    ledger.close()
+
+
+def test_each_layers_end_review_folds_back_from_the_record(tmp_path, monkeypatch):
+    """A fold into a fresh ledger rebuilds every `end_reviews` row and
+    finding as recorded. `fold_task` with no facts drops one layer's
+    rows, and no other."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    ledger, record, batch1, batch2, task_ids = _stack_ledger(tmp_path, sha_a, shas)
+    specs = _stack_specs()
+
+    kwargs = _end_review_kwargs(
+        mirror, _open_cell_double([]), _scripted([], _stack_script())
+    )
+    end_review.review_stack(ledger, str(batch1), 4.0, specs, **kwargs)
+    end_review.review_stack(ledger, str(batch2), 4.0, specs, **kwargs)
+
+    source_rows = {
+        (row["task_key"], row["lens"]): dict(row)
+        for row in ledger._db.execute("SELECT * FROM end_reviews").fetchall()
+    }
+    te5_key = ledger.record_key(task_ids["TE-5"])
+    te9_key = ledger.record_key(task_ids["TE-9"])
+
+    def _without_ids(row) -> dict:
+        return {
+            k: v for k, v in dict(row).items() if k not in ("finding_id", "task_id")
+        }
+
+    source_findings = [_without_ids(row) for row in ledger.findings(task_ids["TE-5"])]
+
+    fresh = Ledger(tmp_path / "fresh.db")
+    fresh_repo_id = fresh.upsert_repo(
+        "unrelated", "/other", "/m2.git", policy_sha="q" * 64
+    )
+    fresh_run_id = fresh.create_run(fresh_repo_id, base_sha="z" * 40)
+    fresh.create_task(
+        fresh_run_id, spec_id="ZZ-1", spec_sha="t" * 64, branch="saffron/ZZ-1"
+    )
+
+    fold(record, fresh)
+
+    fresh_rows = {
+        (row["task_key"], row["lens"]): dict(row)
+        for row in fresh._db.execute("SELECT * FROM end_reviews").fetchall()
+    }
+    assert fresh_rows == source_rows
+
+    fresh_te5_task_id = fresh._db.execute(
+        "SELECT task_id FROM tasks WHERE record_key = ?", (te5_key,)
+    ).fetchone()["task_id"]
+    fresh_findings = [_without_ids(row) for row in fresh.findings(fresh_te5_task_id)]
+    assert fresh_findings == source_findings
+
+    assert fresh.batch_spend(batch1) == 2.5
+
+    fold(record, ledger)
+    reloaded_rows = {
+        (row["task_key"], row["lens"]): dict(row)
+        for row in ledger._db.execute("SELECT * FROM end_reviews").fetchall()
+    }
+    assert reloaded_rows == source_rows
+    assert len(reloaded_rows) == 16
+
+    fresh.fold_task(te9_key, [])
+    remaining_rows = fresh._db.execute("SELECT * FROM end_reviews").fetchall()
+    assert len(remaining_rows) == 14
+    assert all(row["task_key"] != te9_key for row in remaining_rows)
+
+    ledger.close()
+    fresh.close()
+
+
+def test_a_batchs_spend_counts_its_own_end_review(tmp_path, monkeypatch):
+    """`batch_spend` sums an attempt and an end review together on one
+    batch, and reads a second batch's end review alone on the same
+    ledger."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    ledger, record, batch1, batch2, task_ids = _stack_ledger(tmp_path, sha_a, shas)
+    specs = _stack_specs()
+
+    kwargs = _end_review_kwargs(
+        mirror, _open_cell_double([]), _scripted([], _stack_script())
+    )
+    end_review.review_stack(ledger, str(batch1), 4.0, specs, **kwargs)
+    end_review.review_stack(ledger, str(batch2), 4.0, specs, **kwargs)
+
+    assert ledger.batch_spend(batch1) == 3.5
+    assert ledger.batch_spend(batch2) == 0.5
+
+    ledger.close()

@@ -1,23 +1,30 @@
-"""The end review's two lenses, over one stack-batch layer.
+"""The end review's two lenses, over one stack-batch layer, and
+`review_stack`, which runs both over a whole stack.
 
-`SA-0153` wires the order and the reserve. This module builds what a
-layer needs. A layer is one task's `stack_layers` row. `layer_fields`
-reads it, its task and its run, and `end_review_prompt` fills one of the
-two core prompts with the result. `review_layer` runs both lenses, in
-order, through `review.run_lens`, the same fresh-session contract every
+A layer is one task's `stack_layers` row. `layer_fields` reads it, its
+task and its run, and `end_review_prompt` fills one of the two core
+prompts with the result. `review_layer` runs both lenses, in order,
+through `review.run_lens`, the same fresh-session contract every
 in-cell lens uses.
+
+`review_stack` walks a batch's layers top down, within a reserve, and
+records each lens through `Ledger.record_end_review`. `SA-0157` wires
+it into `saffron batch --stack`.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+import subprocess
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.agents import context
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, describe
-from saffron.intake import Criterion
+from saffron.intake import Criterion, Spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 
@@ -70,6 +77,15 @@ _LAYER_ROW = """
       FROM stack_layers sl
       JOIN tasks t ON t.record_key = sl.task_key
      WHERE sl.task_key = ?
+"""
+
+# One batch's layers, highest position first. `review_stack`'s own walk.
+_BATCH_LAYERS = """
+    SELECT sl.task_key, t.task_id
+      FROM stack_layers sl
+      JOIN tasks t ON t.record_key = sl.task_key
+     WHERE sl.batch_key = ?
+     ORDER BY sl.position DESC
 """
 
 
@@ -210,3 +226,146 @@ def review_layer(
             )
         )
     return reviews
+
+
+@dataclass(frozen=True)
+class LayerReview:
+    """One layer's end review, its own key and the lens reviews collected
+    for it. Empty for a layer the reserve did not reach."""
+
+    task_key: str
+    reviews: list[review.LensReview]
+
+
+def _diff(mirror: Path, head: str) -> str:
+    """One layer's own commit, `head^..head`, `DIFF_FLAGS` pinned the same
+    way every other diff in this repository is. Never `fields.base..head`,
+    since a repushed predecessor or a bottom layer's run `base_sha` can
+    each differ from the commit PACKAGE built this head on."""
+    completed = subprocess.run(
+        ["git", "-C", str(mirror), "diff", *DIFF_FLAGS, f"{head}^..{head}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return completed.stdout
+
+
+def _review_one_layer(
+    ledger: Ledger,
+    task_key: str,
+    specs: Mapping[str, Spec],
+    *,
+    mirror: Path,
+    open_cell: Callable[[LayerFields], AbstractContextManager[str]],
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    emit: Callable[[Event], None],
+) -> list[review.LensReview]:
+    """One layer's own two lens reviews, or a synthetic error for each.
+
+    A raise reading the layer's fields, its spec or its diff is caught
+    here, and so is one opening the cell or running its lenses. Either
+    gives every lens in `END_LENSES` a `LensReview` naming the
+    exception's type and message, at cost 0. The layer below it is
+    still tried.
+    """
+    try:
+        fields = layer_fields(ledger, task_key)
+        spec = specs[fields.spec_id]
+        diff = _diff(mirror, fields.head)
+        with open_cell(fields) as container:
+            return review_layer(
+                container,
+                fields,
+                spec_body=spec.body,
+                diff=diff,
+                acceptance=spec.acceptance,
+                touches=spec.touches,
+                forbidden=spec.forbidden,
+                context_md=context_md,
+                claude_md=claude_md,
+                prompts_dir=prompts_dir,
+                max_turns=max_turns,
+                budget_usd=budget_usd,
+                agent=agent,
+                emit=emit,
+            )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        return [
+            review.LensReview(lens, cost_usd=0.0, error=error) for lens in END_LENSES
+        ]
+
+
+def review_stack(
+    ledger: Ledger,
+    batch_key: str,
+    reserve_usd: float,
+    specs: Mapping[str, Spec],
+    *,
+    mirror: Path,
+    open_cell: Callable[[LayerFields], AbstractContextManager[str]],
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> list[LayerReview]:
+    """One stack's layers, highest position first, inside one reserve.
+
+    A layer starts only while `reserve_usd`, less every lens cost spent
+    so far, covers `budget_usd` times `len(END_LENSES)`. The first layer
+    that fails that check, and every layer below it, is recorded
+    `not_reached` for each lens with no cell opened. A reached layer's
+    findings are recorded unanchored, then one `end_review` fact per
+    lens.
+    """
+    rows = ledger._db.execute(_BATCH_LAYERS, (batch_key,)).fetchall()
+    lens_cost = budget_usd * len(END_LENSES)
+    spent = 0.0
+    reached = True
+    results: list[LayerReview] = []
+    for row in rows:
+        task_key, task_id = row["task_key"], row["task_id"]
+        if reached and reserve_usd - spent >= lens_cost:
+            reviews = _review_one_layer(
+                ledger,
+                task_key,
+                specs,
+                mirror=mirror,
+                open_cell=open_cell,
+                context_md=context_md,
+                claude_md=claude_md,
+                prompts_dir=prompts_dir,
+                max_turns=max_turns,
+                budget_usd=budget_usd,
+                agent=agent,
+                emit=emit,
+            )
+            spent += sum(r.cost_usd for r in reviews)
+            findings = [f for r in reviews for f in r.findings]
+            ledger.record_findings(task_id, findings)
+            for r in reviews:
+                ledger.record_end_review(
+                    task_id,
+                    lens=r.lens,
+                    status="error" if r.error is not None else "reviewed",
+                    cost_usd=r.cost_usd,
+                    error=r.error,
+                )
+        else:
+            reached = False
+            reviews = []
+            for lens in END_LENSES:
+                ledger.record_end_review(
+                    task_id, lens=lens, status="not_reached", cost_usd=0.0, error=None
+                )
+        results.append(LayerReview(task_key, reviews))
+    return results

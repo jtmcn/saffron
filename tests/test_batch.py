@@ -1667,3 +1667,142 @@ def test_a_stack_layer_naming_an_unknown_task_raises(tmp_path):
             task_id, position=2, predecessor_task_id=998, generation=0
         )
     assert ledger._db.execute("SELECT COUNT(*) FROM stack_layers").fetchone()[0] == 0
+
+
+def _package_runner(ledger, repo_id, log: list):
+    """Criterion 4's ordinary runner: mints a real run, task and one 5.0
+    attempt per call, packages it `READY_FOR_REVIEW`, and appends the
+    spec id to `log`."""
+
+    def runner(candidate, predecessor=None):
+        log.append(candidate.spec.id)
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+        task_id = ledger.create_task(
+            run_id,
+            spec_id=candidate.spec.id,
+            spec_sha="s" * 64,
+            branch=f"saffron/{candidate.spec.id}",
+        )
+        attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
+        ledger.close_attempt(
+            attempt_id,
+            session_id="sess",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=5.0,
+        )
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            f"saffron/{candidate.spec.id}",
+            f"{candidate.spec.id}-sha",
+            "https://example.invalid/1",
+        )
+        return _outcome(state="READY_FOR_REVIEW", run_id=run_id, task_id=task_id)
+
+    return runner
+
+
+def _logging_end_review(log: list):
+    def end_review(batch_key, reserve_usd, specs):
+        log.append((batch_key, reserve_usd, specs))
+
+    return end_review
+
+
+def test_a_stack_batch_holds_its_end_review_reserve_and_calls_it_once_the_loop_returns(
+    ledger, repo_id
+):
+    """`reserve_usd` is held back before each task, and the batch row
+    still records the whole budget. `end_review` runs once the loop
+    returns, whatever the stop reason, but never after a raise."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-1", budget_usd=5.0),
+        _candidate("TE-2", budget_usd=5.0),
+        _candidate("TE-3", budget_usd=5.0),
+    ]
+    specs = {c.spec.id: c.spec for c in order}
+
+    # Batch 1: 20.0 less the 6.0 reserve leaves 14.0. TE-1 and TE-2 spend
+    # it to 10.0, and TE-3's own 5.0 no longer fits.
+    log1: list = []
+    reason1 = run_stack_batch(
+        order,
+        ledger,
+        20.0,
+        None,
+        _package_runner(ledger, repo_id, log1),
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        end_review=_logging_end_review(log1),
+    )
+    assert reason1 == "BUDGET"
+    batch_id1 = _latest_batch_id(ledger)
+    assert log1 == ["TE-1", "TE-2", (str(batch_id1), 6.0, specs)]
+    assert _batch_row(ledger, batch_id1)["status"] == "BUDGET"
+    assert _batch_row(ledger, batch_id1)["budget_usd"] == 20.0
+
+    # Batch 2: 30.0 less the reserve leaves 24.0, enough for all three.
+    log2: list = []
+    reason2 = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        _package_runner(ledger, repo_id, log2),
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        end_review=_logging_end_review(log2),
+    )
+    assert reason2 == "DRAINED"
+    batch_id2 = _latest_batch_id(ledger)
+    assert log2 == ["TE-1", "TE-2", "TE-3", (str(batch_id2), 6.0, specs)]
+    assert _batch_row(ledger, batch_id2)["status"] == "DRAINED"
+    assert _batch_row(ledger, batch_id2)["budget_usd"] == 30.0
+
+    # Batch 3: the runner raises on every call, so the breaker fires after
+    # two consecutive aborts and TE-3 is never reached.
+    log3: list = []
+
+    def _raising_runner(candidate, predecessor=None):
+        log3.append(candidate.spec.id)
+        raise RuntimeError("cell died mid-repair")
+
+    reason3 = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        _raising_runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        end_review=_logging_end_review(log3),
+    )
+    assert reason3 == "INFRASTRUCTURE"
+    batch_id3 = _latest_batch_id(ledger)
+    assert log3 == ["TE-1", "TE-2", (str(batch_id3), 6.0, specs)]
+    assert _batch_row(ledger, batch_id3)["status"] == "INFRASTRUCTURE"
+    assert _batch_row(ledger, batch_id3)["budget_usd"] == 30.0
+
+    # Batch 4: the readiness check itself raises before any candidate.
+    # The raise leaves `run_stack_batch`, and `end_review` never runs.
+    log4: list = []
+
+    def _raising_readiness():
+        raise RuntimeError("token expired")
+
+    with pytest.raises(RuntimeError, match="token expired"):
+        run_stack_batch(
+            order,
+            ledger,
+            30.0,
+            None,
+            _package_runner(ledger, repo_id, log4),
+            readiness_check=_raising_readiness,
+            reserve_usd=6.0,
+            end_review=_logging_end_review(log4),
+        )
+    assert log4 == []
