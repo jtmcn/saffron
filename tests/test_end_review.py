@@ -12,6 +12,7 @@ import re
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -977,3 +978,517 @@ def test_a_batchs_spend_counts_its_own_end_review(tmp_path, monkeypatch):
     assert ledger.batch_spend(batch2) == 0.5
 
     ledger.close()
+
+
+# The join lens's own fixture: one linear mirror, five stacks, each
+# stack's commits next to each other. `TE-7` also rewrites `TE-9`'s file.
+_JOIN_COMMIT_ORDER = (
+    "TE-9",
+    "TE-3",
+    "TE-7",
+    "TE-4",
+    "TE-2",
+    "TE-6",
+    "TE-8",
+    "TE-5",
+    "TE-1",
+    "TE-10",
+)
+# spec_id -> (position, predecessor spec_id or None), one batch per stack.
+_JOIN_STACKS = {
+    1: {"TE-9": (1, None), "TE-3": (2, "TE-9"), "TE-7": (3, "TE-3")},
+    2: {"TE-4": (1, None), "TE-2": (2, "TE-4")},
+    3: {"TE-6": (1, None), "TE-8": (2, "TE-6")},
+    4: {"TE-5": (1, None), "TE-1": (2, "TE-5")},
+    5: {"TE-10": (1, None)},
+}
+# Recorded in this order, per the spec's own table, never position order.
+_JOIN_RECORDING_ORDER = {
+    1: ("TE-3", "TE-7", "TE-9"),
+    2: ("TE-4", "TE-2"),
+    3: ("TE-6", "TE-8"),
+    4: ("TE-5", "TE-1"),
+    5: ("TE-10",),
+}
+_JOIN_RESERVES = {1: 1.0, 2: 0.75, 3: 4.0, 4: 4.0, 5: 0.5}
+
+
+def _join_mirror(tmp_path: Path, monkeypatch) -> tuple[Path, str, dict[str, str]]:
+    config = tmp_path / "join-gitconfig"
+    config.write_text(
+        "[diff]\n    noprefix = true\n"
+        "[user]\n    name = Test\n    email = test@example.com\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    mirror = tmp_path / "join-mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+
+    def commit(
+        filename: str, content: str, rewrite: dict[str, str] | None = None
+    ) -> str:
+        (mirror / filename).write_text(content)
+        _git(mirror, "add", filename)
+        for other, other_content in (rewrite or {}).items():
+            (mirror / other).write_text(other_content)
+            _git(mirror, "add", other)
+        _git(mirror, "commit", "-q", "-m", f"msg {filename}")
+        return _git(mirror, "rev-parse", "HEAD").strip()
+
+    sha_a = commit("a.txt", "a\n")
+    commit("m.txt", "moved main\n")
+    shas: dict[str, str] = {}
+    for spec_id in _JOIN_COMMIT_ORDER:
+        if spec_id == "TE-7":
+            shas[spec_id] = commit(
+                f"{spec_id}.txt",
+                f"{spec_id} layer\n",
+                rewrite={"TE-9.txt": "TE-9 layer v2\n"},
+            )
+        else:
+            shas[spec_id] = commit(f"{spec_id}.txt", f"{spec_id} layer\n")
+    return mirror, sha_a, shas
+
+
+def _join_ledger(tmp_path: Path, sha_a: str, shas: dict[str, str]):
+    """The `Ledger`, its five batches and ten `READY_FOR_REVIEW` tasks,
+    laid out as `_JOIN_STACKS`, each layer recorded in `_JOIN_RECORDING_ORDER`.
+
+    Returns the ledger, its record, `batch number -> batch id` and
+    `spec id -> task_id`.
+    """
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "join-ledger.db", record=record)
+    repo_id = ledger.upsert_repo("join-edge", "/o", "/m.git", policy_sha="p" * 64)
+
+    batch_ids = {
+        n: ledger.create_batch(reserve) for n, reserve in _JOIN_RESERVES.items()
+    }
+    spec_batch = {
+        spec_id: n for n, layers in _JOIN_STACKS.items() for spec_id in layers
+    }
+
+    task_ids: dict[str, int] = {}
+    for spec_id in _JOIN_COMMIT_ORDER:
+        run_id = ledger.create_run(
+            repo_id, base_sha=sha_a, batch_id=batch_ids[spec_batch[spec_id]]
+        )
+        task_id = ledger.create_task(
+            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+        )
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            f"saffron/{spec_id}",
+            shas[spec_id],
+            f"https://h/pull/{spec_id}",
+        )
+        task_ids[spec_id] = task_id
+
+    ledger.record_findings(
+        task_ids["TE-7"],
+        [
+            Finding(
+                lens="correctness",
+                severity="concern",
+                file="q.py",
+                line=1,
+                claim="in-cell c7",
+            )
+        ],
+    )
+
+    for batch_num, order in _JOIN_RECORDING_ORDER.items():
+        layers = _JOIN_STACKS[batch_num]
+        for spec_id in order:
+            position, predecessor = layers[spec_id]
+            ledger.record_stack_layer(
+                task_ids[spec_id],
+                position=position,
+                predecessor_task_id=task_ids[predecessor] if predecessor else None,
+                generation=0,
+            )
+
+    return ledger, record, batch_ids, task_ids
+
+
+def _join_specs() -> dict:
+    """One `Spec` per layer, built in sorted id order. Not the bottom-up
+    order the join lens must read the stack in."""
+    from saffron.intake import Criterion as _C
+    from saffron.intake import Spec as _S
+
+    specs = {}
+    for spec_id in sorted(_JOIN_COMMIT_ORDER):
+        body = "body TE-3 {gap}" if spec_id == "TE-3" else f"body {spec_id}"
+        specs[spec_id] = _S(
+            id=spec_id,
+            title="t",
+            type="chore",
+            body=body,
+            touches=[f"{spec_id}.py"],
+            forbidden=[f"no-{spec_id}.py"],
+            acceptance=[
+                _C(claim=f"claim {spec_id}", witness=f"tests/test_{spec_id}.py::t")
+            ],
+        )
+    return specs
+
+
+def _join_open_cell(calls: list):
+    """Records every `LayerFields` it is given, in order. Raises for
+    `TE-8`, and yields `critic-<spec>` for the rest."""
+
+    @contextmanager
+    def open_cell(fields):
+        calls.append(fields)
+        if fields.spec_id == "TE-8":
+            raise RuntimeError("no cell for TE-8")
+        yield f"critic-{fields.spec_id}"
+
+    return open_cell
+
+
+def _join_script() -> list:
+    j7 = {"file": "TE-7.txt", "line": 1, "severity": "concern", "claim": "j7 join"}
+    return [
+        _turn(_block([j7]), cost=0.25),
+        implement.AgentFailed(
+            "boom",
+            attempt=implement.AttemptResult(
+                session_id=None,
+                subtype="error",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=0.4,
+            ),
+        ),
+    ]
+
+
+def _join_kwargs(mirror: Path, open_cell, agent) -> dict:
+    return {
+        "mirror": mirror,
+        "open_cell": open_cell,
+        "context_md": CONTEXT_MD,
+        "claude_md": "Read the standards once.",
+        "prompts_dir": PROMPTS,
+        "max_turns": 17,
+        "budget_usd": 1.0,
+        "agent": agent,
+        "emit": lambda event: None,
+    }
+
+
+def test_the_join_lens_reads_the_whole_stack_once_from_the_top_layers_cell(
+    tmp_path, monkeypatch
+):
+    """`review_joins` reads one batch's whole stack, bottom to top. It
+    runs the join lens once, in the top layer's own cell, never per
+    layer and never on the bottom layer's cell."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _join_mirror(tmp_path, monkeypatch)
+    ledger, record, batch_ids, task_ids = _join_ledger(tmp_path, sha_a, shas)
+    specs = _join_specs()
+
+    cell_calls: list = []
+    open_cell = _join_open_cell(cell_calls)
+    agent_calls: list = []
+    agent = _scripted(agent_calls, _join_script())
+    kwargs = _join_kwargs(mirror, open_cell, agent)
+
+    result1 = end_review.review_joins(ledger, str(batch_ids[1]), 1.0, specs, **kwargs)
+    result2 = end_review.review_joins(ledger, str(batch_ids[2]), 0.75, specs, **kwargs)
+    result3 = end_review.review_joins(ledger, str(batch_ids[3]), 4.0, specs, **kwargs)
+    result4 = end_review.review_joins(ledger, str(batch_ids[4]), 4.0, specs, **kwargs)
+    result5 = end_review.review_joins(ledger, str(batch_ids[5]), 0.5, specs, **kwargs)
+    result6 = end_review.review_joins(ledger, "6", 4.0, specs, **kwargs)
+
+    assert len(agent_calls) == 2
+    assert [c["container"] for c in agent_calls] == ["critic-TE-7", "critic-TE-1"]
+    for call in agent_calls:
+        assert call["options"]["tools"] == review.REVIEW_TOOLS
+        assert call["options"]["max_turns"] == 17
+        assert call["options"]["max_budget_usd"] == 1.0
+        assert "resume" not in call["kwargs"]
+
+    assert [f.spec_id for f in cell_calls] == ["TE-7", "TE-8", "TE-1"]
+    assert cell_calls[0].head == shas["TE-7"]
+    assert cell_calls[1].head == shas["TE-8"]
+    assert cell_calls[2].head == shas["TE-1"]
+
+    prompt1 = _flatten(agent_calls[0]["options"]["system_prompt"])
+    assert "+TE-9 layer" in prompt1
+    assert "+TE-3 layer" in prompt1
+    assert "+TE-7 layer" in prompt1
+    assert "diff --git a/TE-9.txt b/TE-9.txt" in prompt1
+    assert "+TE-9 layer v2" in prompt1
+    assert "-TE-9 layer" not in prompt1
+    assert f"{shas['TE-9']}^..{shas['TE-7']}" in prompt1
+    assert "body TE-9" in prompt1
+    assert "body TE-3 {gap}" in prompt1
+    assert "body TE-7" in prompt1
+    assert "Read the standards once." in prompt1
+    assert "moved main" not in prompt1
+    assert "msg TE-" not in prompt1
+    assert "+TE-4 layer" not in prompt1
+    order9 = prompt1.index("body TE-9")
+    order3 = prompt1.index("body TE-3 {gap}")
+    order7 = prompt1.index("body TE-7")
+    assert order9 < order3 < order7
+
+    for spec_id in ("TE-9", "TE-3", "TE-7"):
+        heading = f"{spec_id} — branch `saffron/{spec_id}`, head `{shas[spec_id]}`"
+        assert heading in prompt1
+
+    assert result1 is not None
+    assert result1.lens == "join"
+    assert result1.cost_usd == 0.25
+    assert result1.error is None
+    assert [f.claim for f in result1.findings] == ["j7 join"]
+    assert result2 is None
+    assert result3 is not None
+    assert result3.cost_usd == 0.0
+    assert result3.error is not None
+    assert "no cell for TE-8" in result3.error
+    assert result4 is not None
+    assert result4.cost_usd == 0.4
+    assert result4.error is not None
+    assert result5 is None
+    assert result6 is None
+
+    rows = {
+        row["task_key"]: row
+        for row in ledger._db.execute(
+            "SELECT * FROM end_reviews WHERE lens = 'join'"
+        ).fetchall()
+    }
+    assert len(rows) == 4
+    key_of = {
+        spec_id: ledger.record_key(task_id) for spec_id, task_id in task_ids.items()
+    }
+    row7 = rows[key_of["TE-7"]]
+    assert row7["status"] == "reviewed"
+    assert row7["cost_usd"] == 0.25
+    assert row7["error"] is None
+    row2 = rows[key_of["TE-2"]]
+    assert row2["status"] == "not_reached"
+    assert row2["cost_usd"] == 0.0
+    row8 = rows[key_of["TE-8"]]
+    assert row8["status"] == "error"
+    assert row8["cost_usd"] == 0.0
+    assert "no cell for TE-8" in row8["error"]
+    row1 = rows[key_of["TE-1"]]
+    assert row1["status"] == "error"
+    assert row1["cost_usd"] == 0.4
+    assert row1["error"] is not None
+
+    te7_findings = ledger.findings(task_ids["TE-7"])
+    assert [f["claim"] for f in te7_findings] == ["in-cell c7", "j7 join"]
+    assert [f["lens"] for f in te7_findings] == ["correctness", "join"]
+    assert all(not f["anchored"] for f in te7_findings)
+    for spec_id in ("TE-9", "TE-3", "TE-8", "TE-1", "TE-10"):
+        assert ledger.findings(task_ids[spec_id]) == []
+
+    ledger.close()
+
+
+def test_the_join_prompt_asks_for_adr_6s_three_joins_and_nothing_else():
+    """`end-review-join.md` names ADR 6's three joins, in the design's own
+    words, and asks for nothing beyond them."""
+    raw = (PROMPTS / "end-review-join.md").read_text()
+    flat = _flatten(raw).lower()
+
+    for phrase in (
+        "a name one layer uses and another layer produces",
+        "a name a layer produces and no later layer uses",
+        "work a layer redoes that an earlier layer already provides",
+    ):
+        assert phrase in flat
+
+    assert "do not manufacture one" in flat
+
+    for field in ("`file`", "`line`", "`severity`", "`claim`"):
+        assert field in raw
+    for severity in ("`blocker`", "`concern`", "`note`"):
+        assert severity in raw
+    assert "`probe`" not in raw
+
+    from saffron.cell import worktree
+
+    assert worktree.WORKTREE_MOUNT in raw
+
+    lowered = raw.lower()
+    for forbidden in _FOURTEEN:
+        assert forbidden not in lowered
+
+
+def test_the_end_review_runs_the_join_lens_first_and_the_layers_on_what_it_left(
+    monkeypatch,
+):
+    """`run_end_review` calls `review_joins` then `review_stack`, on the
+    same ledger, batch key and specs. The reserve is reduced by the
+    join's own cost, an errored join's cost included. A join of `None`
+    leaves the reserve whole."""
+    import saffron.end_review as end_review
+
+    ledger = object()
+    specs = object()
+    keywords = {
+        "mirror": object(),
+        "open_cell": object(),
+        "context_md": object(),
+        "claude_md": object(),
+        "prompts_dir": object(),
+        "max_turns": object(),
+        "budget_usd": object(),
+        "agent": object(),
+        "emit": object(),
+    }
+
+    order: list[str] = []
+    join_calls: list = []
+    stack_calls: list = []
+    join_replies = [
+        review.LensReview("join", cost_usd=0.75),
+        None,
+        review.LensReview("join", cost_usd=0.5, error="boom"),
+    ]
+    fixed_layers = [end_review.LayerReview("k", [])]
+
+    def fake_review_joins(ledger_arg, batch_key, reserve_usd, specs_arg, **kw):
+        order.append("join")
+        join_calls.append((ledger_arg, batch_key, reserve_usd, specs_arg, kw))
+        return join_replies[len(join_calls) - 1]
+
+    def fake_review_stack(ledger_arg, batch_key, reserve_usd, specs_arg, **kw):
+        order.append("stack")
+        stack_calls.append((ledger_arg, batch_key, reserve_usd, specs_arg, kw))
+        return fixed_layers
+
+    monkeypatch.setattr(end_review, "review_joins", fake_review_joins)
+    monkeypatch.setattr(end_review, "review_stack", fake_review_stack)
+
+    # Sentinel `object()`s stand in for nine keywords `run_end_review` only
+    # passes through, never reads, so the untyped call is cast once here.
+    run_end_review = cast(Any, end_review.run_end_review)
+    r1 = run_end_review(ledger, "1", 5.0, specs, **keywords)
+    r2 = run_end_review(ledger, "2", 5.0, specs, **keywords)
+    r3 = run_end_review(ledger, "3", 5.0, specs, **keywords)
+
+    assert order == ["join", "stack", "join", "stack", "join", "stack"]
+    assert [c[1] for c in join_calls] == ["1", "2", "3"]
+    assert [c[1] for c in stack_calls] == ["1", "2", "3"]
+    assert [c[2] for c in join_calls] == [5.0, 5.0, 5.0]
+    assert [c[2] for c in stack_calls] == [4.25, 5.0, 4.5]
+    for ledger_arg, _key, _reserve, specs_arg, kw in join_calls + stack_calls:
+        assert ledger_arg is ledger
+        assert specs_arg is specs
+        assert kw == keywords
+
+    assert r1.join == join_replies[0]
+    assert r1.layers == fixed_layers
+    assert r2.join is None
+    assert r2.layers == fixed_layers
+    assert r3.join == join_replies[2]
+    assert r3.layers == fixed_layers
+
+
+def test_a_layers_critic_cell_is_seeded_at_its_head_and_always_torn_down(
+    tmp_path, monkeypatch
+):
+    """`layer_cell` removes a leftover container, brings a fresh one up
+    at the layer's own head through `session.cell_up`, and yields it. It
+    always tears the cell down through `session.cell_down`, whether
+    `cell_up` raises, the body raises, or neither does."""
+    import saffron.end_review as end_review
+    from saffron.cell import runtime, session
+
+    fields = end_review.LayerFields(
+        spec_id="TE-1",
+        branch="saffron/TE-1",
+        pr_url="https://h/pull/1",
+        base="b" * 40,
+        head="h" * 40,
+        known="",
+    )
+    repo = tmp_path / "repo"
+    mirror = tmp_path / "mirror"
+    gates_dir = tmp_path / "gates"
+    thread_env = {"X": "1"}
+
+    log: list = []
+
+    def fake_remove_container(container):
+        log.append(("remove", container))
+        return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+    def fake_cell_up(**kw):
+        log.append(("up", kw))
+        kw["note"]("cell_up", "up detail")
+
+    def fake_cell_down(**kw):
+        log.append(("down", kw))
+        kw["note"]("cell_down", True, "down detail")
+
+    monkeypatch.setattr(runtime, "remove_container", fake_remove_container)
+    monkeypatch.setattr(session, "cell_up", fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", fake_cell_down)
+
+    with end_review.layer_cell(
+        fields, repo=repo, mirror=mirror, gates_dir=gates_dir, thread_env=thread_env
+    ) as container:
+        log.append(("body", container))
+
+    assert [step for step, *_ in log] == ["remove", "up", "body", "down"]
+    up_kwargs = log[1][1]
+    assert up_kwargs["repo"] == repo
+    assert up_kwargs["mirror"] == mirror
+    assert up_kwargs["tree_base"] == fields.head
+    assert up_kwargs["branch"] == fields.branch
+    assert up_kwargs["network"] == "saffron-cells"
+    assert up_kwargs["gates_dir"] == gates_dir
+    assert up_kwargs["thread_env"] == thread_env
+    assert "TE-1" in up_kwargs["container"]
+    assert "TE-1" in up_kwargs["volume"]
+    assert "TE-1" in up_kwargs["state"]
+    assert log[2] == ("body", up_kwargs["container"])
+    down_kwargs = log[3][1]
+    assert down_kwargs["network"] == up_kwargs["network"]
+    assert down_kwargs["volume"] == up_kwargs["volume"]
+    assert down_kwargs["state"] == up_kwargs["state"]
+    assert down_kwargs["container"] == up_kwargs["container"]
+    assert down_kwargs["created"] is up_kwargs["created"]
+
+    log.clear()
+
+    def fake_cell_up_raises(**kw):
+        log.append(("up", kw))
+        kw["created"].add(kw["container"])
+        kw["note"]("cell_up", "boom")
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(session, "cell_up", fake_cell_up_raises)
+    with (
+        pytest.raises(RuntimeError),
+        end_review.layer_cell(
+            fields, repo=repo, mirror=mirror, gates_dir=gates_dir, thread_env=thread_env
+        ),
+    ):
+        log.append(("body", "unreached"))
+
+    assert [step for step, *_ in log] == ["remove", "up", "down"]
+    assert log[1][1]["container"] in log[1][1]["created"]
+
+    log.clear()
+    monkeypatch.setattr(session, "cell_up", fake_cell_up)
+    with (
+        pytest.raises(ValueError),
+        end_review.layer_cell(
+            fields, repo=repo, mirror=mirror, gates_dir=gates_dir, thread_env=thread_env
+        ),
+    ):
+        raise ValueError("body boom")
+
+    assert log[-1][0] == "down"

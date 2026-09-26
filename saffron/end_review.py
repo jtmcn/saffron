@@ -1,5 +1,5 @@
-"""The end review's two lenses, over one stack-batch layer, and
-`review_stack`, which runs both over a whole stack.
+"""The end review's two in-cell lenses over one layer, the join lens over
+a whole stack, and `run_end_review`, which runs both.
 
 A layer is one task's `stack_layers` row. `layer_fields` reads it, its
 task and its run, and `end_review_prompt` fills one of the two core
@@ -8,15 +8,18 @@ through `review.run_lens`, the same fresh-session contract every
 in-cell lens uses.
 
 `review_stack` walks a batch's layers top down, within a reserve, and
-records each lens through `Ledger.record_end_review`. `SA-0154`'s
-`run_end_review` calls it.
+records each lens through `Ledger.record_end_review`. `review_joins`
+reads the same batch's whole range once, under ADR 6's rubric.
+`run_end_review` runs the join first, so its cost comes out of the
+reserve before any layer starts. `layer_cell` is the critic cell a
+layer, or the whole stack, is read in.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +36,12 @@ END_LENSES = {
     "spec": "end-review-spec.md",
     "standards": "end-review-standards.md",
 }
+
+# The join lens's own ceilings, and the reserve share a stack batch
+# holds for the whole end review (`SA-0157` passes each as-is).
+LENS_BUDGET_USD = 2.5
+LENS_MAX_TURNS = 50
+RESERVE_SHARE = 0.25
 
 _WHITESPACE = re.compile(r"\s+")
 
@@ -361,3 +370,263 @@ def review_stack(
                 )
         results.append(LayerReview(task_key, reviews))
     return results
+
+
+# One batch's layer keys, lowest position first. The join lens walks
+# bottom to top, the opposite of `review_stack`'s own walk.
+_BATCH_LAYER_KEYS = """
+    SELECT task_key
+      FROM stack_layers
+     WHERE batch_key = ?
+     ORDER BY position ASC
+"""
+
+
+def _stack_spec_text(layers: Sequence[LayerFields], specs: Mapping[str, Spec]) -> str:
+    """One heading per layer, bottom first: its spec id, branch and head,
+    then its own spec body, verbatim."""
+    parts = []
+    for fields in layers:
+        heading = (
+            f"### {fields.spec_id} — branch `{fields.branch}`, head `{fields.head}`"
+        )
+        parts.append(f"{heading}\n\n{specs[fields.spec_id].body}")
+    return "\n\n".join(parts)
+
+
+def _join_prompt(
+    *,
+    base: str,
+    head: str,
+    diff: str,
+    stack_text: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+) -> str:
+    """The join lens's own file, filled with the stack's whole range."""
+    template = (prompts_dir / "end-review-join.md").read_text()
+    return context.build_system_prompt(
+        "REVIEW",
+        context_md,
+        template=template,
+        spec=stack_text,
+        diff=diff,
+        base=base,
+        head=head,
+        standing_instructions=context.standing_instructions(claude_md),
+    )
+
+
+def review_joins(
+    ledger: Ledger,
+    batch_key: str,
+    reserve_usd: float,
+    specs: Mapping[str, Spec],
+    *,
+    mirror: Path,
+    open_cell: Callable[[LayerFields], AbstractContextManager[str]],
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> review.LensReview | None:
+    """The join lens, over one batch's whole stack (ADR 6, principle 50).
+
+    Reads the batch's layers bottom to top. Fewer than two layers has no
+    seam to read, so this returns `None` and records nothing. The lens
+    starts only while `reserve_usd` covers `budget_usd`. Short of that it
+    records `not_reached` under the top layer's task and returns `None`.
+    A raise anywhere before the lens returns, `open_cell`'s included, is
+    caught in one place and recorded as an `error` review at cost 0.
+    """
+    task_keys = [
+        row["task_key"]
+        for row in ledger._db.execute(_BATCH_LAYER_KEYS, (batch_key,)).fetchall()
+    ]
+    if len(task_keys) < 2:
+        return None
+    top_key = task_keys[-1]
+    top_row = ledger._db.execute(
+        "SELECT task_id FROM tasks WHERE record_key = ?", (top_key,)
+    ).fetchone()
+    top_task_id = top_row["task_id"]
+
+    if reserve_usd < budget_usd:
+        ledger.record_end_review(
+            top_task_id, lens="join", status="not_reached", cost_usd=0.0, error=None
+        )
+        return None
+
+    try:
+        layers = [layer_fields(ledger, key) for key in task_keys]
+        top_fields, bottom_fields = layers[-1], layers[0]
+        diff = _git(
+            mirror,
+            "diff",
+            *DIFF_FLAGS,
+            f"{bottom_fields.head}^..{top_fields.head}",
+            strip=False,
+        )
+        system_prompt = _join_prompt(
+            base=f"{bottom_fields.head}^",
+            head=top_fields.head,
+            diff=diff,
+            stack_text=_stack_spec_text(layers, specs),
+            context_md=context_md,
+            claude_md=claude_md,
+            prompts_dir=prompts_dir,
+        )
+        with open_cell(top_fields) as container:
+            lens_review = review.run_lens(
+                container,
+                lens="join",
+                system_prompt=system_prompt,
+                max_turns=max_turns,
+                budget_usd=budget_usd,
+                agent=agent,
+                spec_id=top_fields.spec_id,
+                emit=emit,
+            )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        ledger.record_end_review(
+            top_task_id, lens="join", status="error", cost_usd=0.0, error=error
+        )
+        return review.LensReview("join", cost_usd=0.0, error=error)
+
+    ledger.record_findings(top_task_id, lens_review.findings)
+    ledger.record_end_review(
+        top_task_id,
+        lens="join",
+        status="error" if lens_review.error is not None else "reviewed",
+        cost_usd=lens_review.cost_usd,
+        error=lens_review.error,
+    )
+    return lens_review
+
+
+@dataclass(frozen=True)
+class StackReview:
+    """A whole stack's end review: the join lens once, and every layer's
+    own two lenses (`LayerReview`, one per layer)."""
+
+    join: review.LensReview | None
+    layers: list[LayerReview]
+
+
+def run_end_review(
+    ledger: Ledger,
+    batch_key: str,
+    reserve_usd: float,
+    specs: Mapping[str, Spec],
+    *,
+    mirror: Path,
+    open_cell: Callable[[LayerFields], AbstractContextManager[str]],
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> StackReview:
+    """One stack's whole end review: the join lens first, the layers on
+    what it left (ADR 6, principles 40 and 50).
+
+    Each layer already gets two in-cell lenses of its own. The joins get
+    none, so the join lens spends first. `review_stack` then starts a
+    layer only while what remains of `reserve_usd` still covers it. An
+    errored join's cost counts the same as a clean one's, and a join of
+    `None` leaves the reserve whole.
+    """
+    join = review_joins(
+        ledger,
+        batch_key,
+        reserve_usd,
+        specs,
+        mirror=mirror,
+        open_cell=open_cell,
+        context_md=context_md,
+        claude_md=claude_md,
+        prompts_dir=prompts_dir,
+        max_turns=max_turns,
+        budget_usd=budget_usd,
+        agent=agent,
+        emit=emit,
+    )
+    spent_on_join = join.cost_usd if join is not None else 0.0
+    layers = review_stack(
+        ledger,
+        batch_key,
+        reserve_usd - spent_on_join,
+        specs,
+        mirror=mirror,
+        open_cell=open_cell,
+        context_md=context_md,
+        claude_md=claude_md,
+        prompts_dir=prompts_dir,
+        max_turns=max_turns,
+        budget_usd=budget_usd,
+        agent=agent,
+        emit=emit,
+    )
+    return StackReview(join=join, layers=layers)
+
+
+@contextmanager
+def layer_cell(
+    fields: LayerFields,
+    *,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+) -> Iterator[str]:
+    """A fresh critic cell, seeded at a layer's own head, for the end
+    review to read (`review_stack`'s and `review_joins`'s `open_cell`).
+
+    No task's own network is up once the end review runs. So this brings
+    a whole cell up through `session.cell_up`, rather than joining one the
+    way `critic_cell` does. `cell_up` and `cell_down` are reached through
+    their own module, never imported by name, so a caller that replaces
+    them there reaches this call too. `cell_down` always runs from a
+    `finally`, whether `cell_up` raised, the body raised, or neither did.
+    """
+    from saffron.cell import runtime, session
+
+    container = f"saffron-endreview-{fields.spec_id}"
+    volume = f"saffron-endreview-wt-{fields.spec_id}"
+    state = f"saffron-endreview-st-{fields.spec_id}"
+    network = "saffron-cells"
+    created: set[str] = set()
+
+    runtime.remove_container(container)
+    try:
+        session.cell_up(
+            repo=repo,
+            mirror=mirror,
+            tree_base=fields.head,
+            branch=fields.branch,
+            network=network,
+            volume=volume,
+            state=state,
+            container=container,
+            gates_dir=gates_dir,
+            thread_env=thread_env,
+            created=created,
+            note=lambda step, detail: print(detail),
+        )
+        yield container
+    finally:
+        session.cell_down(
+            network=network,
+            volume=volume,
+            state=state,
+            container=container,
+            created=created,
+            note=lambda step, ok, detail: print(detail),
+        )
