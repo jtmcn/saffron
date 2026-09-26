@@ -6,6 +6,7 @@ priority: 1
 depends_on: [SA-0174]
 touches:
   - saffron/finish.py
+  - saffron/ledger.py
   - saffron/cli.py
   - tests/test_finish.py
   - tests/test_cli.py
@@ -26,7 +27,6 @@ forbidden:
   - records/**
   - saffron/task.py
   - saffron/batch.py
-  - saffron/ledger.py
   - saffron/end_review.py
   - saffron/spec_review.py
   - saffron/qualify.py
@@ -47,43 +47,52 @@ forbidden:
   - tests/test_scheduler.py
   - tests/test_ledger.py
   - tests/test_task.py
-budget_usd: 23
+budget_usd: 25
 max_attempts: 3
-max_turns: 130
+max_turns: 200
 acceptance:
   - claim: >-
-      `finish.publish_finish(ledger, batch_id, sha, *, mirror, url, verify,
-      gh, workdir)` pushes a green finishing commit and returns its lines.
-      It calls `verify(sha, <the top layer's pushed_sha>)` once, while a
-      branch in the mirror named `saffron-finish` and the batch id points at
-      `sha`. It deletes that branch after `verify` returns or raises. It
-      reads each layer's pull request base with `gh pr view`, bottom to
-      top. With no escalation, it pushes `sha` to the top layer's branch at
-      `url`, leased on that layer's `pushed_sha`. It records that push on
-      the top layer's task and no other, before it removes its worktree. So
-      a raise from that removal still leaves the push recorded. It returns
-      one line, `finish.PUSHED` then `<sha12> to <branch>`, where `PUSHED`
-      is `pushed `. The mirror's refs end as they began. The witness drives
-      three layers and one layer, on a remote whose default branch is not
-      `main`. It drives three layers whose worktree removal raises after
-      the push.
-    witness: tests/test_finish.py::test_a_green_finish_pushes_to_the_top_layer_and_records_the_push
+      `finish.publish_finish(ledger, batch_id, sha, *, mirror, url, slug,
+      verify, gh, workdir)` pushes a green finishing commit to a branch of
+      its own, opens its draft pull request, and returns its lines. It
+      calls `verify(sha, <the top layer's pushed_sha>)` once, while a branch
+      in the mirror named `saffron-finish` and the batch id points at `sha`.
+      It deletes that branch after `verify` returns or raises. It reads each
+      layer's pull request base with `gh pr view`, bottom to top. With no
+      escalation, it pushes `sha` at `url` to the finishing branch, `saffron/`
+      then `batch-<batch id>-finish`, leased on that branch being absent. Straight after the push,
+      `Ledger.record_stack_finish` records the branch and `sha` for the
+      batch. It then runs `gh pr create --draft` in `slug`, with that
+      branch as head and the top layer's branch as base, and records the
+      URL `gh` prints. Both records land before it removes its worktree, so
+      a raise from that removal leaves them. No layer's branch or
+      `pushed_sha` moves. It returns one line, `finish.PUSHED` then `<sha12>
+      to <branch>, draft pull request <url>`, where `PUSHED` is `pushed `.
+      When `gh` opens no pull request, `PackageError` propagates, and the
+      record holds the branch and `sha` with no URL.
+      `Ledger.stack_finish(batch_id)` returns the batch's record, or `None`
+      for a batch with none. The mirror's refs end as they began. The
+      witness drives three layers and one layer, on a remote whose default
+      branch is not `main`. It drives three layers whose worktree removal
+      raises after the pull request opens, and three whose `gh` opens none.
+    witness: tests/test_finish.py::test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request
   - claim: >-
       `publish_finish` pushes nothing in each of five cases, and returns one
       line starting `finish.ESCALATE`, `escalate: `. The remote's refs, the
       mirror's refs and worktrees, and each layer's `pushed_sha` stay as
-      they were. The cases are checked in this order, all before the push.
-      The suite reports new failures, or `verify` raises `PackageError` or
-      `CellRuntimeError`, which both read as errored. A predecessor's
-      branch head on the remote differs from the `predecessor_head` its
-      layer recorded. A pull request's base reads back as other than its
-      predecessor's branch, or the default branch for the bottom layer, or
-      cannot be read. Last, the lease refuses the push because the top
-      layer's branch moved. The witness drives each on three layers. It
-      drives a red suite, and a suite that raises each of the two errors. It
-      drives a hand push to the bottom and to the middle branch, and a wrong
-      base on the bottom and on the middle. It drives an unreadable base on
-      the top, and a hand push to the top.
+      they were, and `stack_finish` stays `None`. The cases are checked in
+      this order, all before the push. The suite reports new failures, or
+      `verify` raises `PackageError` or `CellRuntimeError`, which both read
+      as errored. A predecessor's branch head on the remote differs from the
+      `predecessor_head` its layer recorded, or the top layer's branch head
+      there differs from its `pushed_sha`. A pull request's base reads back as other than
+      its predecessor's branch, or the default branch for the bottom layer,
+      or cannot be read. Last, the lease refuses the push because the
+      finishing branch already exists. The witness drives each on three
+      layers. It drives a red suite, and a suite that raises each of the two
+      errors. It drives a hand push to the bottom, the middle and the top
+      branch, and a wrong base on the bottom and on the middle. It drives an
+      unreadable base on the top, and a finishing branch already pushed.
     witness: tests/test_finish.py::test_each_escalation_leaves_the_stack_unpushed
   - claim: >-
       `finish.finish_suite(policy)` returns the spec and the policy that the
@@ -105,18 +114,19 @@ acceptance:
       `saffron batch --stack` publishes the finish. When `commit_finish`
       returns a sha, `cli._stack_finish` prints `finish: committed <sha>`. It
       then calls `finish.publish_finish` and prints each line it returns
-      after `finish: `. It passes the pinned mirror and url, a `workdir` of
-      `out_dir / "finish" / <batch id> / "push"`, a `verify`, and
-      `_guarded_gh` as `gh`. `verify(sha, base)` exports `.saffron/` from
+      after `finish: `. It passes the pinned mirror and url, the slug
+      `github_slug` reads from that url, a `workdir` of `out_dir / "finish"
+      / <batch id> / "push"`, a `verify`, and `_guarded_gh` as `gh`.
+      `verify(sha, base)` exports `.saffron/` from
       the pinned mirror at the pinned `base_sha` into `out_dir / "finish" /
       <batch id> / "gates"`. It calls `package_phase.reverify` on `sha` over
       `base`, with that export, the spec and policy `finish_suite` makes of
       its policy, and `repo_image.cell_tag(repo)`. It returns the count of
       new failures. The `gh` returns exit 127 when `run_gh` cannot start the
-      program. A raise from `publish_finish` prints one line naming its type
-      and message, and the exit code stays the stop reason's. A `None`
-      commit calls no publish. The witness drives a sha, a raise and a
-      `None` commit.
+      program. A raise from `publish_finish`, or from `github_slug` before
+      it, prints one line naming its type and message, and the exit code
+      stays the stop reason's. A `None` commit calls no publish. The witness
+      drives a sha, a raise from each, and a `None` commit.
     witness: tests/test_cli.py::test_a_stack_batch_publishes_its_finish_through_the_finishing_suite
   - claim: >-
       `saffron batch` without `--stack` still hands `run_batch` its budget
@@ -135,10 +145,11 @@ acceptance:
 Backlog item **b-792ab2**, step 8 of its Done. It cites `DESIGN.md` §4.2,
 §4.2.1, §5.4 and §5.7. ADR 7
 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
-decides that the host commits the batch's revised and follow-up specs into
-the top layer, and that nothing merges. Section 4 of
-`docs/superpowers/specs/2026-09-23-stack-batch-design.md`, under "The
-finishing layer" and "Linking", is the design.
+decides that the host commits the batch's revised and follow-up specs in
+its own finishing layer, which it adds above every task. The repo's gate
+suite runs on that layer in a cell before any push, and nothing merges.
+Section 4 of `docs/superpowers/specs/2026-09-23-stack-batch-design.md`,
+under "The finishing layer" and "Linking", is the design.
 
 A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**. The next task is cut from
@@ -149,13 +160,26 @@ layer's branch.
 it in `run_stack_batch`'s `finish` callable. It pushes nothing, and prints
 `finish: committed <sha>, not pushed`. `SA-0174` writes `findings.json`
 before the commit. This spec judges that commit with the repo's gate suite
-in a gate-only cell. Then it compares each predecessor's head, reads every
-base back, and pushes. `SA-0170` follows it, and links the pushed stack
-with `gh stack link`. With `--ready` it marks each layer ready.
+in a gate-only cell. Then it compares each predecessor's head and reads
+every base back. It pushes the commit to a branch of its own, and opens
+that branch's draft pull request. `SA-0170` follows it, and links the pushed
+stack with `gh stack link`, the finishing layer included. With `--ready`
+it marks each layer ready.
+
+**Why the finishing layer has its own branch.** The top layer's branch
+has one writer, PACKAGE, which pushed the top task's head. A host commit
+pushed there would be a second. The commit that made the finishing layer
+the host's own gives that reason: "so no branch gets a second writer"
+(ADR 7's history, `bcd3c583`). So the finish pushes to
+`saffron/batch-<batch id>-finish`. It follows `_branch`'s `saffron/`
+prefix (`saffron/scheduler.py:162-163`), and no spec id can take it,
+since an id ends in digits (`saffron/intake.py:140`). The layer has no
+task, so PACKAGE opens no pull request for it. This spec opens it, as a
+draft (§5.7, `DESIGN.md:1127`), with the top layer's branch as its base.
 
 **What the tree base holds.** This spec's tree base is `SA-0174`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). None of the chain
-from `SA-0142` on exists at `68892367`, where every line number below was
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). None of the chain
+from `SA-0142` on exists at `475929b1`, where every line number below was
 read. So chain names are cited by symbol.
 
 - From `SA-0145`: the `stack_layers` table, with `task_key`, `batch_key`,
@@ -163,7 +187,8 @@ read. So chain names are cited by symbol.
   `generation`, and `Ledger.record_stack_layer(task_id, *, position,
   predecessor_task_id, generation)`. It records the predecessor's
   `pushed_sha` as `predecessor_head`. The bottom layer's `predecessor_key`
-  and `predecessor_head` are `NULL`.
+  and `predecessor_head` are `NULL`. `task_key` is the table's primary
+  key.
 - From `SA-0151`: `Ledger.stack_layers(batch_id)`, the batch's rows by
   `position`, each joined to its task for `task_id`, `pr_url`, `branch` and
   `pushed_sha`. `run_stack_batch` calls `finish(batch_id, unrun)` once,
@@ -184,27 +209,49 @@ commit and on a fresh baseline (`saffron/phases/package.py:466-575`). Each
 runs in its own gate-only cell. It raises `PackageError` when a gate
 errors or the two suites drift (`:558-574`), and returns the comparison.
 Each gate-only cell seeds its tree by `git fetch` from the mirror, then
-checks the sha out (`saffron/cell/worktree.py:89-95`). That fetch takes
+checks the sha out (`saffron/cell/worktree.py:91-95`). That fetch takes
 `refs/heads/*` alone, so a commit no branch reaches cannot be checked out.
-PACKAGE names that failure (`saffron/phases/package.py:722-726`). A failed
+PACKAGE names that failure (`saffron/phases/package.py:724-727`). A failed
 seed raises `CellRuntimeError` (`saffron/cell/worktree.py:105-108`,
 `saffron/cell/runtime.py:35`), which is not a `PackageError`.
-`push_with_lease` pushes a worktree's `HEAD` leased on an expected head, and
-raises `LeaseRejected` when the branch moved (`:372-391`, `:76-77`).
+`push_with_lease` pushes a worktree's `HEAD` leased on an expected head.
+An empty expected head means the branch must be absent. It raises
+`LeaseRejected` when the lease fails (`saffron/phases/package.py:372-391`, `:76-77`).
 `remote_sha` reads a branch's head on the remote, `""` when it is absent
 (`:360-369`). `default_branch` reads the remote's `HEAD` (`:123-131`).
-`add_worktree` and `remove_worktree` check a detached tree out of the
-mirror and remove it (`saffron/repos/mirror.py:113-124`).
-`Ledger.record_push` records a task's pushed head
-(`saffron/ledger.py:1073-1079`). `repo_image.cell_tag` names a repo's cell
-image (`saffron/repos/image.py:24-30`). `_guarded_gh` wraps `run_gh`, and
-turns a `gh` that cannot start into exit 127 (`saffron/cli.py:1065-1079`).
-`gh pr view <url>` names its repository by the URL. An unmarked test that
-starts `gh` raises (`tests/conftest.py:13`, `:86-91`).
+`github_slug` reads `owner/repo` from a GitHub URL, and raises
+`PackageError` on any other (`saffron/phases/package.py:112-120`). `open_draft_pr` runs `gh pr
+create` with `--repo`, `--draft`, `--base`, `--head`, `--title` and
+`--body-file`, and returns the URL `gh` prints. When the create fails, it
+asks `gh pr view <branch>` for an open one, and raises `PackageError` when
+that fails too (`saffron/phases/package.py:401-457`). PACKAGE records its push before it opens the
+pull request, so a `gh` failure leaves the pushed sha recorded
+(`saffron/phases/package.py:916-927`). `add_worktree` and `remove_worktree` check a detached tree
+out of the mirror and remove it (`saffron/repos/mirror.py:122-133`).
+`repo_image.cell_tag` names a repo's cell image
+(`saffron/repos/image.py:24-30`). `_guarded_gh` wraps `run_gh`, and turns
+a `gh` that cannot start into exit 127 (`saffron/cli.py:1075-1090`). `gh
+pr view <url>` names its repository by the URL. An unmarked test that
+starts `gh` raises (`tests/conftest.py:13`, `:86-94`).
+
+**Where the finishing layer is recorded.** The layer has no task, so it
+takes no `stack_layers` row. `task_key` is that table's primary key, and
+`SA-0145` files each `stack_layer` fact under a task's key. A column on
+`batches` would break a rebuild the ledger already runs.
+`_widen_batch_status` builds `batches` afresh from `SCHEMA`'s definition,
+then copies seven named columns into it (`saffron/ledger.py:292-316`). A
+column added to that definition makes the copy fail on any ledger from
+before `INCOMPLETE`. So the finish gets a table of its own,
+`stack_finishes`, with one row per batch. `SCHEMA` runs on every open
+(`saffron/ledger.py:216`), so a ledger file from before gains the table
+with no migration. It keys on the batch id as text and references no
+table, as `stack_layers` does. The row holds the branch, the pushed head,
+and the pull request's URL, which carries its number. `SA-0170` reads the
+URL, since `gh stack link` takes URLs.
 
 ## Problem
 
-Build four things.
+Build five things.
 
 1. **The finishing suite's terms.** In `saffron/finish.py`, add
    `FINISH_TOUCHES` and `finish_suite(policy)`, as criterion 3 states.
@@ -212,11 +259,28 @@ Build four things.
    `the finishing layer`, since `reverify` takes a `Spec`. Build the policy
    with `model_copy`, so every field it does not name stays as the repo
    declared it.
-2. **The publish.** In `saffron/finish.py`, add `ESCALATE = "escalate: "`,
+2. **The record.** In `saffron/ledger.py`, add `stack_finishes` to
+   `SCHEMA`, with no reference to another table:
+
+   | column | type |
+   |---|---|
+   | `batch_key` | `TEXT PRIMARY KEY` |
+   | `branch` | `TEXT NOT NULL` |
+   | `head_sha` | `TEXT NOT NULL` |
+   | `pr_url` | `TEXT` |
+
+   Add `Ledger.record_stack_finish(batch_id, *, branch, head_sha,
+   pr_url=None)`. It writes the row for `str(batch_id)`, and replaces a row
+   already there. Add `Ledger.stack_finish(batch_id)`, which returns that
+   row or `None`. Neither builds a fact. `SA-0145` names `stack_layers` in
+   the module docstring as a table `DESIGN.md` §4.1 does not list. Name
+   `stack_finishes` beside it.
+3. **The publish.** In `saffron/finish.py`, add `ESCALATE = "escalate: "`,
    `PUSHED = "pushed "` and `publish_finish`, as criteria 1 and 2 state.
    Start every escalation line with `ESCALATE`, and the pushed line with
-   `PUSHED`. `SA-0170` links only after a line that starts with `PUSHED`. Read the layers with `ledger.stack_layers`. The top is the last,
-   and a layer's predecessor is the row whose `task_key` is its
+   `PUSHED`. `SA-0170` links only after a line that starts with `PUSHED`.
+   Read the layers with `ledger.stack_layers`. The top is the last, and a
+   layer's predecessor is the row whose `task_key` is its
    `predecessor_key`. In order:
    1. Point `refs/heads/saffron-finish/<batch_id>` in the mirror at `sha`
       with `git_mirror._git(mirror, "update-ref", <ref>, sha)`. Call
@@ -228,32 +292,43 @@ Build four things.
       cwd=mirror)`. For each layer with a predecessor, bottom to top, read
       the predecessor's branch with `package_phase.remote_sha`. A head
       other than the layer's `predecessor_head` returns the moved line.
+      Then read the top layer's branch the same way. The top is the
+      finishing layer's predecessor, and the commit's parent is its
+      `pushed_sha`. A head other than that returns the moved line too.
    3. For each layer, bottom to top, run `gh pr view <pr_url> --json
       baseRefName --jq .baseRefName`. A non-zero exit reads as no base. A
       base other than the predecessor's branch, or the default branch for
       the bottom, returns the wrong-base line.
    4. Check `sha` out into `workdir` with `git_mirror.add_worktree`, and
-      push it with `package_phase.push_with_lease` to the top's branch,
-      expecting the top's `pushed_sha`. Straight after the push returns,
-      inside the same `try`, call `ledger.record_push` for the top's
-      `task_id`. Remove the worktree in the `finally`. `LeaseRejected`
-      returns the top-moved line. Then return the pushed line.
+      push it with `package_phase.push_with_lease` to
+      `saffron/batch-<batch_id>-finish`, expecting `""`. Inside the same
+      `try`, straight after the push returns, call
+      `ledger.record_stack_finish` with the branch and `sha`. Write the
+      pull request's body to `workdir.parent / "pr-body.md"`, naming the
+      batch id. Call `package_phase.open_draft_pr` with `slug`, that
+      branch, the top layer's branch as `base`, the title `saffron batch
+      <batch_id>: finishing layer`, the body, and `gh`. Record again with
+      the URL it returns. Remove the worktree in the `finally`.
+      `LeaseRejected` returns the exists line. Then return the pushed
+      line.
 
    Write each line in full, naming what escalated and the heads or bases
    involved. The witnesses match each escalation on the words fixed in its
    notes below.
-3. **The suite callable.** In `saffron/cli.py`, add
+4. **The suite callable.** In `saffron/cli.py`, add
    `_finish_verify(*, pinned, repo, gates_dir)`, as criterion 4 states.
    `gates_dir` is `out_dir / "finish" / <batch id> / "gates"`, and the
    export goes there. Import
-   `repo_image` as `saffron/task.py` does (`:45`).
-4. **The wiring.** `_stack_finish` gains a `repo` keyword. Build it with
-   the `repo` `_batch` resolves (`saffron/cli.py:783`). After a commit, it
+   `repo_image` as `saffron/task.py` does (`:50`).
+5. **The wiring.** `_stack_finish` gains a `repo` keyword. Build it with
+   the `repo` `_batch` resolves (`saffron/cli.py:793`). After a commit, it
    prints `finish: committed <sha>` in place of `SA-0151`'s line. A `None`
-   commit keeps `SA-0151`'s lines and publishes nothing. It calls
-   `finish.publish_finish` inside its own `try`, with `gh=_guarded_gh([])`,
-   and prints each returned line after `finish: `. Reach
-   `finish.publish_finish`, `package_phase.reverify` and
+   commit keeps `SA-0151`'s lines and publishes nothing. Inside its own
+   `try`, it computes `package_phase.github_slug(pinned.url)`, then calls
+   `finish.publish_finish` with that slug and `gh=_guarded_gh([])`. It
+   prints each returned line after `finish: `. A raise prints `finish:
+   publish stopped: <type>: <message>`, since a push can come before it.
+   Reach `finish.publish_finish`, `package_phase.reverify` and
    `git_mirror.export_saffron_dir` through their modules at call time,
    since the witness replaces them there.
 
@@ -261,8 +336,9 @@ Build four things.
 before the repo's gate suite reads it (items 40 and 97). The head and base
 comparisons read the remote and write nothing. So a stack that escalates
 stays exactly as its cells left it, and the operator starts from a known
-state. A lease still guards the one push, since the top's branch can move
-between the reads and the write.
+state. The top layer's head is compared like every other predecessor's,
+since the finishing layer is cut from it. A lease still guards the one
+push, so a finishing branch already on the remote is never overwritten.
 
 **Why the commit gets a ref for the suite.** `commit_finish` moves no ref,
 and each gate-only cell fetches `refs/heads/*` alone. So `reverify` could
@@ -271,10 +347,12 @@ ref under `saffron-finish/` names the commit for the suite's span and no
 longer. It sits outside `saffron/`, so no task's branch can collide with
 it.
 
-**How `scope` treats the host's commit.** `DESIGN.md` §5.4 states the rule.
+**How `scope` treats the host's commit.** ADR 7's Consequences leaves this
+open. This spec answers it for the finishing suite, and the bound below is
+that answer. `DESIGN.md` §5.4 states the rule.
 `scope` passes a diff whose changed files are inside `touches` and match
 neither `forbidden` nor `protected`. The repo's `protected` list holds
-`.saffron/**` (`.saffron/policy.yaml:60-67`), and `scope_gate` fails every
+`.saffron/**` (`.saffron/policy.yaml:60-68`), and `scope_gate` fails every
 changed file that matches it (`saffron/gates/core/scope.py:99-103`). So
 under the repo's own list, every finishing commit is red. ADR 7 names the
 host's commit to `.saffron/specs/` as the protected path's one exception.
@@ -313,24 +391,38 @@ repo's gates doing their job.
 ## Out of scope
 
 - **Linking and marking ready.** `gh stack link`, `--ready` and `gh pr
-  ready` are `SA-0170`'s. Until it lands, a pushed stack stays unlinked and
-  every pull request a draft.
+  ready` are `SA-0170`'s, the finishing layer's pull request included.
+  Until it lands, a pushed stack stays unlinked and every pull request a
+  draft.
 - **The escalation as a record fact.** No spec owns the fact kind yet. So
   an escalation is a printed line, `finish: escalate: ...`, and nothing
   more.
+- **The finishing layer as a record fact.** A fact is filed under a task's
+  key (`saffron/record/contract.py:71-77`), and the layer has no task. The
+  fold rebuilds no `batches` row either (`saffron/record/fold.py:8-13`).
+  So the `stack_finishes` row is the ledger's alone, as the batch's own
+  row is.
+- **A finishing branch an earlier ledger left.** Batch ids start again in a
+  fresh ledger, so `saffron/batch-<batch id>-finish` can already be on the
+  remote. The lease refuses the push, and the finish escalates.
+- **A credential scan of the finishing diff.** PACKAGE scans each task's
+  patch for credentials and for the OAuth token
+  (`saffron/phases/package.py:766`). The finish does not. Its texts come
+  from sessions in critic cells, which hold no target-repo credential but
+  do hold that token. The delegate files a backlog item for the scan.
 - **This repo's queue smoke test, and `census`.**
   `tests/test_scheduler.py::test_saffron_queue_smoke_reproduces_this_repos_measured_queue`
   copies the live `.saffron/specs/` and pins its queue
-  (`tests/test_scheduler.py:2451`, `:2462-2487`). A finishing commit retires
-  specs, so the pinned lists no longer hold, and `tests` fails. Two tests in
-  `tests/test_queued_specs.py` take one case per queued spec file
-  (`:66-67`, `:102-103`). A retired spec removes its cases, and `census`
-  fails on any removed name (`saffron/gates/core/census.py`). So in this
-  repo, each finish with a layer escalates red. The finish reads it as the
-  red suite it is. Both tests are this repo's design, and core knows
+  (`tests/test_scheduler.py:1925`, `:2512-2544`). A finishing commit retires
+  specs, so the pinned lists no longer hold, and `tests` fails. Three tests
+  in `tests/test_queued_specs.py` take one case per queued spec file
+  (`:66-67`, `:102-103`, `:178-179`). A retired spec removes its cases, and
+  `census` fails on any removed name (`saffron/gates/core/census.py`). So in
+  this repo, each finish with a layer escalates red. The finish reads it as
+  the red suite it is. Both files are this repo's design, and core knows
   nothing of them. The delegate files one backlog item for both.
 - **A prune while the temporary ref lives.** `ensure_mirror` fetches
-  `--prune` with `+refs/*:refs/*` (`saffron/repos/mirror.py:60-63`). A
+  `--prune` with `+refs/*:refs/*` (`saffron/repos/mirror.py:69-72`). A
   concurrent call in that window deletes the temporary ref and any layer
   branch the remote lacks, and the suite's seed fails. That reads as
   errored, and nothing is pushed.
@@ -338,9 +430,9 @@ repo's gates doing their job.
   `update-ref -d` leaves the ref in the mirror and reaches
   `_stack_finish`'s catch. The next finish of the same batch id
   overwrites it.
-- **A lower branch moved after the comparison.** The heads are read before
-  the push, and the lease guards the top branch alone. A hand push to a
-  lower branch between the read and the push goes unseen.
+- **A branch moved after the comparison.** The heads are read before the
+  push, and the lease guards the finishing branch alone. A hand push to a
+  layer's branch between the read and the push goes unseen.
 - **A hand push before the handoff's fetch.** `SA-0145` records the
   predecessor's `pushed_sha`, and the handoff cuts from the head it fetched.
   A hand push between the two makes them differ, so it escalates too.
@@ -353,11 +445,11 @@ repo's gates doing their job.
 ## Notes for the agent
 
 **Every criterion but the last two is new code.** No text at the tree base
-publishes a finish. So criteria 1 to 4 declare a witness and no mutant, and
-`witness` reports `skip` for them. Import `publish_finish`, `finish_suite`,
-`ESCALATE` and `FINISH_TOUCHES` inside each test body, so the reverted run
-fails rather than failing to collect. Criteria 5 and 6 name tests that pass
-now.
+publishes a finish or records one. So criteria 1 to 4 declare a witness
+and no mutant, and `witness` reports `skip` for them. Import
+`publish_finish`, `finish_suite`, `ESCALATE` and `FINISH_TOUCHES` inside
+each test body, so the reverted run fails rather than failing to collect.
+Criteria 5 and 6 name tests that pass now.
 
 **The tree base's command-line witnesses change.**
 `test_a_stack_batch_commits_its_finish_and_survives_a_raise` (`SA-0151`)
@@ -385,46 +477,62 @@ directory:
   task ids nor the order recorded follow position.
 - The finishing commit is `git commit-tree` of the top head's tree, with
   the top head as its parent.
-- `url` is the bare remote's path.
+- `url` is the bare remote's path, and `slug` is `o/r`.
 
-Beside it, `gh` is a fake that records each argv. It answers `pr view`
-with the layer's right base, unless a case overrides it, and exits 0 on
-any other call. `verify` records each call. While it runs, it asserts that
+Beside it, `gh` is a fake that records each argv. It answers `pr view
+<url>` with the layer's right base, unless a case overrides it. It answers
+`pr create` with exit 0 and `https://github.com/o/r/pull/200` on stdout,
+unless a case overrides it, and exits 0 on any other call. `verify`
+records each call. While it runs, it asserts that
 `refs/heads/saffron-finish/<batch id>` in the mirror resolves to its first
 argument. Keep `git for-each-ref` of the remote and of the mirror before
-each call.
+each call. Let `F` be `saffron/batch-<batch id>-finish`.
 
 **Criterion 1's witness** runs three layers, then one layer, and asserts
 in each:
 
 - the calls to `verify` are exactly `[(sha, top head)]`
-- the remote's refs are as before, save the top branch, now at `sha`
-- the `pushed_sha` of the layers are their heads, save the top's, now `sha`
-- `gh`'s calls are exactly each `pr view` bottom to top
-- the lines are exactly `[f"pushed {sha[:12]} to <top branch>"]`, and the
-  line starts with `PUSHED`
+- the remote's refs are as before, save `F`, now there at `sha`
+- the `pushed_sha` of the layers are their heads, unchanged
+- `gh`'s calls are exactly each `pr view` bottom to top, then one more.
+  That is `gh pr create --repo o/r --draft --base <top branch> --head F
+  --title "saffron batch <batch id>: finishing layer" --body-file <path>`
+- the body file names the batch id
+- `ledger.stack_finish(<batch id>)` holds `F`, `sha` and
+  `https://github.com/o/r/pull/200`, and `stack_finish` of another batch id
+  is `None`
+- the lines are exactly `[f"pushed {sha[:12]} to F, draft pull request
+  https://github.com/o/r/pull/200"]`, and the line starts with `PUSHED`
 - the mirror's refs are as before, and one worktree is listed there
 
-Last, on three layers, it replaces `git_mirror.remove_worktree` with one
-that removes the tree and then raises `OSError` for the push's worktree.
-It asserts the raise, and the top layer's `pushed_sha` now `sha`. These
-fail it:
+Then two more runs on three layers. In the first, `git_mirror.remove_worktree`
+removes the tree and then raises `OSError` for the push's worktree. It
+asserts the raise, and `stack_finish` holding all three values. In the
+second, `gh` exits 1 on `pr create` and on `pr view F`. It asserts
+`PackageError`, `F` at `sha` on the remote, `stack_finish` holding `F` and
+`sha` with a `None` URL, and one worktree listed. These fail it:
 
 - the layers taken by task id, or in the order recorded
 - no ref naming the commit while the suite runs
 - the ref left behind after the suite
 - the suite based on the bottom layer's head
-- the push to the bottom layer's branch
-- no push recorded, or the push recorded on the bottom layer
-- a raise from `remove_worktree` after the push skips the record
+- the commit pushed to the top layer's branch, which gives it a second
+  writer
+- the branch named from a spec id, such as `saffron/TE-3`
+- the pull request based on the bottom layer's branch or the default
+  branch
+- the pull request opened with no `--draft`
+- no record, or one record made only once the pull request opens
+- a raise from `remove_worktree` skips the record
 - the default branch spelled `main`
 - the bottom layer's base left unchecked
 - the worktree left registered
 
-**Criterion 2's witness** runs nine cases on three layers. It asserts one
+**Criterion 2's witness** runs ten cases on three layers. It asserts one
 line, its start, the remote's and the mirror's refs unchanged, the
 `pushed_sha` of the layers unchanged, and one worktree listed. It asserts
-`gh`'s calls are exactly the `pr view` calls given, bottom to top.
+`stack_finish` is `None`, and that `gh`'s calls are exactly the `pr view`
+calls given, bottom to top.
 
 | case | arrangement | line starts | `pr view` calls |
 |---|---|---|---|
@@ -433,10 +541,11 @@ line, its start, the remote's and the mirror's refs unchanged, the
 | cell broke | `verify` raises `CellRuntimeError` | `escalate: the finishing suite errored` | 0 |
 | bottom moved | a hand push to `saffron/TE-1` on the remote | `escalate: saffron/TE-1 is at` | 0 |
 | middle moved | a hand push to `saffron/TE-2` | `escalate: saffron/TE-2 is at` | 0 |
+| top moved | a hand push to `saffron/TE-3` | `escalate: saffron/TE-3 is at` | 0 |
 | bottom base | `TE-1`'s base reads `saffron/TE-9` | `escalate: TE-1's pull request targets saffron/TE-9, not trunk` | 1 |
 | middle base | `TE-2`'s base reads `trunk` | `escalate: TE-2's pull request targets trunk, not saffron/TE-1` | 2 |
 | top unread | `TE-3`'s `pr view` exits 1 | `escalate: TE-3's pull request targets nothing readable, not saffron/TE-2` | 3 |
-| top moved | a hand push to `saffron/TE-3` | `escalate: saffron/TE-3 moved since its push` | 3 |
+| finish exists | `F` pushed to the remote at the top head first | `escalate: F already exists` | 3 |
 
 A hand push clones the remote at that branch, commits a file, and pushes
 it back. It also asserts each line starts with `ESCALATE`. These fail it:
@@ -444,10 +553,11 @@ it back. It also asserts each line starts with `ESCALATE`. These fail it:
 - the suite's count ignored, or an errored suite read as 0
 - a `CellRuntimeError` from the suite left to escape, or read as red
 - the push before the suite, or before the base read-back
-- the heads compared for the top layer alone, or for the first layer with
-  a predecessor alone
+- the heads compared for the layers with a predecessor alone, which
+  misses the top, or for the first such layer alone
 - a predecessor's head read from the ledger, not the remote
-- a push leased on the branch's current head, which is no lease
+- a push leased on the finishing branch's current head, or forced with no
+  lease, which overwrites the branch already there
 - the bottom layer's base left unchecked
 
 **Criterion 3's witness** loads this repository's policy with `load_policy`
@@ -458,7 +568,7 @@ equals `list(FINISH_TOUCHES)`, and its `forbidden` and `acceptance` are
 empty. It builds `GateSuite(gates={}, spec=spec, policy=policy,
 diff_base="base")` and compares a head `_Tree` against an empty
 `_Tree`'s baseline. `_Tree` is the in-memory tree in `tests/test_suite.py`
-(`:19-60`). Import it, and leave that file as it is. Write each file of the
+(`:20-61`). Import it, and leave that file as it is. Write each file of the
 diff by hand, in the `a/` `b/` shape `scope` reads, with one hunk of added
 lines. Take the suppression token from the loaded policy's
 `integrity.suppressions`, and never spell one in the test file, since the
@@ -475,9 +585,13 @@ repo's own `integrity` scans it. These fail it:
 `record_stack_layer`, and for `SA-0151`'s `Ledger.stack_layers`. It loaded a
 prototype of `finish_suite` and `publish_finish`, and ran prototypes of
 criteria 1 to 3's witnesses on the host's git. The right build passed all
-three. Each of the 29 wrong builds above was applied as a text edit to the
-prototype, and each failed its witness. The push before the suite and
-before the read-back were modelled by moving the push block.
+three. Each of the 29 wrong builds that run named was applied as a text
+edit to the prototype, and each failed its witness. The push before the
+suite and before the read-back were modelled by moving the push block.
+That prototype pushed to the top layer's branch. ADR 7's revision then
+gave the finishing layer its own branch and pull request. So the wrong
+builds on the branch, the pull request, the record and the finish that
+already exists are unmeasured.
 
 **Criterion 4's witness** follows `SA-0151`'s witness for `saffron batch
 --stack`, with `_readiness_passes` (`tests/test_cli.py:2603-2621`) and
@@ -495,16 +609,19 @@ has two `new_failures`. The fake `publish_finish` records its arguments,
 calls `verify("c"×40, "d"×40)` and keeps its result, and returns one line.
 
 The first run asserts exit 0, the commit line, and the returned line after
-`finish: `. It asserts each argument, `verify`'s 2, and one export of the
-pinned mirror at `a`×40 into `<out>/finish/3/gates`. It asserts
-`reverify`'s arguments: the mirror, `c`×40 over `d`×40, that directory,
-and `saffron/cell:<repo name>`. Its policy has an empty `protected` list
-and the repo's gates, and its spec's `touches` is `FINISH_TOUCHES`. Then,
-under `monkeypatch.context()`, it makes `cli.run_gh` raise `OSError`, and
-the kept `gh` returns exit 127. Two more runs follow, each with its own
-`--home`. A `publish_finish` raising `GitError("gone")` prints `finish:
-nothing published: GitError: gone` and exits 0. A `None` commit calls no
-publish. These fail it:
+`finish: `. It asserts each argument, `slug` of `o/r` among them,
+`verify`'s 2, and one export of the pinned mirror at `a`×40 into
+`<out>/finish/3/gates`. It asserts `reverify`'s arguments: the mirror,
+`c`×40 over `d`×40, that directory, and `saffron/cell:<repo name>`. Its
+policy has an empty `protected` list and the repo's gates, and its spec's
+`touches` is `FINISH_TOUCHES`. Then, under `monkeypatch.context()`, it
+makes `cli.run_gh` raise `OSError`, and the kept `gh` returns exit 127.
+Three more runs follow, each with its own `--home`. A `publish_finish`
+raising `GitError("gone")` prints `finish: publish stopped: GitError:
+gone` and exits 0. A `package_phase.github_slug` raising
+`PackageError("no slug")` prints `finish: publish stopped: PackageError:
+no slug`, exits 0, and calls no publish. A `None` commit calls no publish.
+These fail it:
 
 - a `gh` that raises on a program it cannot start
 - the repo's policy passed to `reverify` unchanged
@@ -513,16 +630,19 @@ publish. These fail it:
 - `verify` returning the comparison, or whether it is red, not the count
 - `SA-0151`'s `not pushed` line kept
 - a publish on a `None` commit
+- the slug computed outside the `try`, so its raise reaches `main`
 - a raise that reaches `main`, which exits 2
 
 Criterion 4 is unmeasured. `saffron batch --stack` and `_stack_finish` do
-not exist at `68892367`.
+not exist at `475929b1`.
 
 **What the witnesses leave undriven.** They drive no layer without a pull
 request URL, and no `remote_sha` or push that raises `PackageError`. Nor do
 they drive a `verify` raise other than the two criterion 2 names. Each
-reaches `_stack_finish`'s catch, and nothing is pushed. Build each as the
-Problem states.
+reaches `_stack_finish`'s catch, and nothing is pushed. They drive no `gh
+pr create` that fails while `gh pr view F` finds an open pull request,
+which `open_draft_pr` returns as a success. Build each as the Problem
+states.
 
 **The `prose` gate** reads every new comment and docstring
 (`.saffron/gates/prose.py`). Write no em dash, semicolon, contraction,
@@ -531,10 +651,10 @@ ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** No path in `touches` is in `elevate_on`, so `size` is advisory
-at the `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`).
-A prototype of the whole change, formatted with `ruff`, was measured with
-`size_gate` at `68892367`. It came to 2048 tokens.
+**Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
+`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
+prototype of the change before ADR 7's revision, formatted with `ruff`,
+was measured with `size_gate` at `68892367`. It came to 2048 tokens.
 
 | part | lines | tokens |
 |---|---|---|
@@ -546,5 +666,18 @@ A prototype of the whole change, formatted with `ruff`, was measured with
 The test prototype carried its own git helpers, which `SA-0151`'s tests
 already hold. They measured 62 tokens, and they go. It carried no
 docstrings, and it lacked the edits to the tree base's witnesses. About
-130 more tokens cover those. So the estimate is about 2120 tokens, 71% of
-the ceiling.
+130 more tokens cover those, for about 2120.
+
+The revision is estimated, not measured, at the prototype's own rates of
+3.7 tokens a line in code and 3.2 in tests.
+
+| part | lines | tokens |
+|---|---|---|
+| the table and its two methods in `saffron/ledger.py` | 27 | 100 |
+| the top's head check, the push, both records and the pull request in `publish_finish` | 19 | 70 |
+| criterion 1's new assertions and its `gh` failure run | 31 | 100 |
+| criterion 2's two changed cases | 3 | 10 |
+| the slug in `_stack_finish` and its witness | 3 | 10 |
+
+So the estimate is about 2410 tokens, 80% of the ceiling. Unlike the
+first version, it now blocks there.

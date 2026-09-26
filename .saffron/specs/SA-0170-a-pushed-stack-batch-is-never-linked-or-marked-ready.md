@@ -52,16 +52,20 @@ max_turns: 120
 acceptance:
   - claim: >-
       `finish.link_stack(ledger, batch_id, *, mirror, url, gh, ready)` links
-      a pushed stack and returns its lines. With two layers or more, it runs
-      `gh stack link --base <default branch>` with each layer's pull request
-      URL, bottom to top. With `ready`, it runs `gh pr ready` on each URL,
-      bottom to top, and stops at the first that fails. A failed link marks
-      nothing. The lines are `linked <n> pull requests`, then `marked <n>
-      ready`, each only where it happened. A failed link's line replaces
-      both. A failed mark's line follows `marked <k> ready`, where `k`
-      counts the marks made before it. The witness drives three layers with `ready` and without it,
-      and one layer with it. It drives a failed link and a failed mark on
-      the middle layer, on a remote whose default branch is not `main`.
+      a pushed stack, the finishing layer included, and returns its lines.
+      It runs `gh stack link --base <default branch>` with each layer's
+      pull request URL, bottom to top, then the URL
+      `Ledger.stack_finish(batch_id)` holds. With `ready`, it runs `gh pr
+      ready` on each of those URLs in the same order, and stops at the first
+      that fails. A failed link marks nothing. The lines are `linked <n>
+      pull requests`, then `marked <n> ready`, each only where it happened.
+      A failed link's line replaces both. A failed mark's line follows
+      `marked <k> ready`, where `k` counts the marks made before it. A
+      batch with no finishing URL recorded raises `ValueError` before any
+      `gh` call. The witness drives three layers with `ready` and without
+      it, and one layer with it. It drives a failed link, a failed mark on
+      the middle layer, and a batch with no finishing URL, on a remote whose
+      default branch is not `main`.
     witness: tests/test_finish.py::test_a_pushed_stack_is_linked_bottom_to_top_and_marked_ready_on_request
   - claim: >-
       `saffron batch --stack` links the finish it pushed, and only that.
@@ -106,13 +110,15 @@ layer's branch. PACKAGE opens each pull request as a draft (§5.7).
 
 **Step 8 is four specs.** `SA-0151` builds the finishing commit, and
 `SA-0174` the findings file. `SA-0167` judges the commit with the gate
-suite, compares each predecessor's head, reads every base back, and pushes
-the commit to the top layer. This spec links the pushed stack, and with
-`--ready` marks each layer ready.
+suite, compares each predecessor's head and reads every base back. It
+pushes the commit to the finishing layer's own branch, and opens that
+branch's draft pull request against the top layer's branch. This spec
+links the pushed stack, and with `--ready` marks each layer ready. Both
+take in the finishing layer, which ADR 7 adds above every task.
 
 **What the tree base holds.** This spec's tree base is `SA-0167`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). None of the chain
-from `SA-0142` on exists at `68892367`, where every line number below was
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). None of the chain
+from `SA-0142` on exists at `475929b1`, where every line number below was
 read. So chain names are cited by symbol.
 
 - From `SA-0151`: `Ledger.stack_layers(batch_id)`, the batch's rows by
@@ -120,7 +126,12 @@ read. So chain names are cited by symbol.
   `finish(batch_id, unrun)`, and `cli._stack_finish` builds it.
 - From `SA-0167`: `finish.publish_finish`, which returns lines. Its one
   success line starts with `finish.PUSHED`, `pushed `, and each
-  escalation line with `finish.ESCALATE`. `_stack_finish` takes `repo`. It
+  escalation line with `finish.ESCALATE`. Before that line, it records
+  the finishing layer in the ledger's `stack_finishes` table, one row per
+  batch. `Ledger.record_stack_finish(batch_id, *, branch, head_sha,
+  pr_url=None)` writes the row, and `Ledger.stack_finish(batch_id)`
+  returns it with `branch`, `head_sha` and `pr_url`, or `None`. The
+  branch is `saffron/batch-<batch id>-finish`. `_stack_finish` takes `repo`. It
   calls `publish_finish` inside its own `try` only after `commit_finish`
   returns a sha, and prints each line after `finish: `. `tests/test_finish.py`
   holds a helper, `_stack(root, count)`, that builds a stack of layers on
@@ -130,12 +141,12 @@ read. So chain names are cited by symbol.
 
 **What the base already offers.** `default_branch` reads the remote's
 `HEAD` (`saffron/phases/package.py:123-131`), and `github_slug` its
-`owner/repo` (`:112-120`). `_guarded_gh` wraps `run_gh`, and turns a `gh`
-that cannot start into exit 127 (`saffron/cli.py:1065-1079`). `run_gh`
+`owner/repo` (`saffron/phases/package.py:112-120`). `_guarded_gh` wraps `run_gh`, and turns a `gh`
+that cannot start into exit 127 (`saffron/cli.py:1075-1090`). `run_gh`
 takes an argv alone (`saffron/scheduler.py:60-61`). The `saffron batch`
-parser holds `--repo`, `--budget` and `--until` (`saffron/cli.py:104-115`),
-and `main` parses at `:174`. An unmarked test that starts `gh` raises
-(`tests/conftest.py:13`, `:86-91`).
+parser holds `--repo`, `--budget` and `--until` (`saffron/cli.py:110-121`),
+and `main` parses at `:180`. An unmarked test that starts `gh` raises
+(`tests/conftest.py:13`, `:86-94`).
 
 **What gh-stack does, measured.** `gh stack link --help` for gh-stack
 0.1.1, read on 2026-09-24, says the arguments go bottom to top. A branch
@@ -153,13 +164,15 @@ checkout, is unmeasured. No run here linked a real stack.
 Build three things.
 
 1. **The link.** In `saffron/finish.py`, add `link_stack`, as criterion 1
-   states. Read the layers with `ledger.stack_layers`, and the default
-   branch with `package_phase.default_branch(url, cwd=mirror)`. Pass pull
-   request URLs, never branch names, since gh-stack pushes a branch it is
-   given. Skip the link with one layer, which gh-stack refuses. Mark with
-   `gh pr ready` on each URL, not with `--open`, so a one-layer stack is
-   marked too. On a failed mark, append `marked <k> ready` for the marks
-   made before it, then the failure's line.
+   states. Read the layers with `ledger.stack_layers`, the finishing
+   layer's URL with `ledger.stack_finish`, and the default branch with
+   `package_phase.default_branch(url, cwd=mirror)`. Pass pull request URLs,
+   never branch names, since gh-stack pushes a branch it is given. The
+   finishing layer's URL goes last, since the layer sits above every task.
+   So a pushed stack holds two pull requests or more, which gh-stack
+   requires. Mark with `gh pr ready` on each URL, not with `--open` on the
+   link, so a failed mark names its URL. On a failed mark, append `marked
+   <k> ready` for the marks made before it, then the failure's line.
 2. **The runner.** In `saffron/cli.py`, add `_finish_gh(slug, repo)`. It is
    `_guarded_gh`'s shape, and runs `subprocess.run` with
    `capture_output=True`, `text=True`, `check=False`, `cwd=repo` and
@@ -177,7 +190,7 @@ Build three things.
    flag. In `main`, after `parse_args`, a `batch` with `--ready` and no
    `--stack` calls `parser.error` with the words `--ready needs --stack`.
    That exits 2, as every other malformed argv does
-   (`saffron/cli.py:977-980`). Reach `finish.link_stack` through the module
+   (`saffron/cli.py:987-990`). Reach `finish.link_stack` through the module
    at call time, since the witness replaces it there.
 
 **Why the link waits for a positive signal.** `SA-0167` pushes nothing when
@@ -222,17 +235,23 @@ test that passes now.
 returns an empty list.
 
 **Criterion 1's witness** builds on `SA-0167`'s `_stack` helper, and needs
-no push. Give the fake `gh` a way to fail one argv with exit 1 and `boom`
-on stderr. It runs five cases and asserts in each that `gh`'s calls and
-the lines are exactly as the claim states:
+no push. In each case but the last, it records the finishing layer with
+`ledger.record_stack_finish`. The row holds `saffron/batch-<batch
+id>-finish`, the top head, and `https://github.com/o/r/pull/200`. Give the
+fake `gh` a way to fail one argv with exit 1 and `boom` on stderr. It runs
+six cases and asserts in each that `gh`'s calls and the lines are exactly
+as the claim states:
 
-- three layers with `ready`, and three without it
-- one layer with `ready`
+- three layers with `ready`, and three without it, where the link names
+  four URLs, pull 200 last
+- one layer with `ready`, where the link names pull 101, then pull 200
 - three layers with `ready` and the link failing, which gives `gh stack
   link failed, so every pull request stays a draft: boom`
 - three layers with `ready` and the middle URL's mark failing, which gives
-  `linked 3 pull requests`, `marked 1 ready`, then `gh pr ready <url>
+  `linked 4 pull requests`, `marked 1 ready`, then `gh pr ready <url>
   failed: boom`
+- three layers and no finishing row, which raises `ValueError` with no
+  `gh` call
 
 `_stack` creates tasks and records layers top first, so neither order
 follows position. These fail it:
@@ -240,7 +259,11 @@ follows position. These fail it:
 - the layers taken by task id
 - the default branch spelled `main`
 - the URLs passed top to bottom, or branch names in place of URLs
-- a link with one layer, which gh-stack refuses
+- the finishing layer's URL left out of the link or the marks, or put
+  first
+- the link skipped with one task layer, which leaves the finishing layer
+  unlinked
+- a batch with no finishing URL linked without it
 - marks made without `ready`, or `--open` on the link in place of each mark
 - marks made after a failed link, or past a failed mark
 - no count of the marks made before a failed one
@@ -249,8 +272,11 @@ follows position. These fail it:
 `68892367` stood in for `SA-0145`'s table and writer and `SA-0151`'s
 `Ledger.stack_layers`. It loaded a prototype of `link_stack` with a
 prototype of `SA-0167`'s `_stack`. The right build passed. Each of the 10
-wrong builds above was applied as a text edit to `link_stack` alone, and
-each failed the witness.
+wrong builds that run named was applied as a text edit to `link_stack`
+alone, and each failed the witness. That prototype linked the task layers
+alone. ADR 7's revision then gave the finishing layer its own pull
+request. So the three wrong builds on the finishing layer are unmeasured,
+and so is the witness's finishing row.
 
 **Criterion 2's witness** follows `SA-0167`'s witness for `saffron batch
 --stack`, with `_readiness_passes` (`tests/test_cli.py:2603-2621`) and
@@ -259,7 +285,8 @@ each failed the witness.
 [5, 6])` and returns `UNTIL`. It stubs `finish.write_findings` and
 `finish.commit_finish` with `*args, **kwargs`, the commit returning
 `c`×40. `finish.publish_finish` returns `["pushed cccccccccccc to
-saffron/SY-2"]`. The fake `link_stack` records its arguments and returns
+saffron/batch-3-finish, draft pull request
+https://github.com/o/r/pull/200"]`. The fake `link_stack` records its arguments and returns
 two lines.
 
 The first run passes `--stack --ready`. It asserts exit 0, the pushed line
@@ -315,5 +342,7 @@ A prototype of the whole change, formatted with `ruff`, was measured with
 | criterion 2's witness in `tests/test_cli.py` | 175 | 438 |
 
 It carried no docstrings and lacked the fake `gh`'s failing argv. About 80
-more tokens cover those, so the estimate is about 1050 tokens, 35% of the
+more tokens cover those. The finishing layer's URL, its `ValueError` and
+the witness's finishing row and sixth case add about 100 more, estimated
+and not measured. So the estimate is about 1150 tokens, 38% of the
 ceiling.

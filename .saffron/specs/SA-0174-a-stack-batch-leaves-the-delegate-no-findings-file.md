@@ -65,10 +65,12 @@ acceptance:
       reason wins. Every other `qualified` row is `follow_up`, with an
       empty reason. A row whose outcome is `unverified`, `unanchored` or
       `note` is listed as it stands, and a `killed` row is left out. For a
-      generation 1 layer, each in-cell concern follows, as `unrebutted`
-      with an empty reason. An in-cell concern is a finding of a lens in
-      `review.LENSES`, of severity `concern`, with no verdict and no
-      rebuttal. Each entry holds the layer's spec id and its `pushed_sha`
+      generation 1 layer, every finding its own critic left follows, in the
+      order recorded, as `left_by_critic`. That is each finding of a lens
+      in `review.LENSES`, of any severity, anchored or not, with a verdict
+      or without one.
+      Its reason is its verdict, or empty when it has none. Each entry
+      holds the layer's spec id and its `pushed_sha`
       as `head`, then the lens, severity, file, line, claim, outcome and
       reason. `follow_ups` lists each follow-up task of the batch that is no
       layer and not in `unrun`, in task order. Each holds its spec id, its
@@ -81,10 +83,11 @@ acceptance:
       one of the same finding on another layer. It drives four qualified
       rows that differ from the pooled finding in its line alone, its file
       alone, its lens alone and its claim alone. It drives two `Pooled`
-      holding one finding, another batch's pooled group, a generation 0 layer's in-cell concern, and layers
-      recorded out of position order. On a follow-up layer it drives a
-      concern with a verdict, one with a rebuttal, a blocker, a note and a
-      `spec` lens concern. It drives a follow-up that ran and missed after
+      holding one finding, another batch's pooled group, a generation 0
+      layer's in-cell concern, and layers recorded out of position order.
+      On a follow-up layer it drives a concern, a blocker with a verdict, a
+      blocker with a rebuttal alone, an unanchored note and a `spec` lens
+      concern. It drives a follow-up that ran and missed after
       a revision, one that gate 0 refused, an unrun one, a revised queued
       spec with no layer, and another batch's follow-up.
     witness: tests/test_finish.py::test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_no_layer
@@ -117,22 +120,28 @@ layer", is the design. The finish writes the backlog pool to
 `findings.json` in the batch tree. The delegate files the backlog, its
 `rejections.md` lines and the origin items from it, in a pull request on
 top of the stack. A program core runs that is not a gate would break ADR 2,
-so core writes the file and files nothing.
+so core writes the file and files nothing. ADR 7
+(`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
+sends "the findings a follow-up's own critic leaves" to the backlog, not
+to a second generation. It sends every end-review `note` to the backlog
+pool too. So the file lists every finding a follow-up's critic left,
+notes included.
 
 **Which `findings.json` this is.** It lives at `out_dir / "finish" /
 <batch id> / "findings.json"`, one per stack batch. Each cell already
 writes its own critic's `findings.json` into its task directory,
-`out_dir / <spec id>` (`saffron/cell/session.py:1639`, `:2636-2638`). The
+`out_dir / <spec id>` (`saffron/cell/session.py:1646`, `:2652-2654`). The
 two files share a name and nothing else.
 
 **Step 8 is four specs.** `SA-0151` builds the finishing commit and runs
 it at the end of the batch. This spec writes `findings.json` beside it.
-`SA-0167` follows. It runs the gate suite on the finishing tree and pushes
-the commit. `SA-0170` links the stack.
+`SA-0167` follows. It runs the gate suite on the finishing tree, pushes
+the commit to the finishing layer's own branch, and opens its pull
+request. `SA-0170` links the stack.
 
 **What the tree base holds.** This spec's tree base is `SA-0151`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). None of the chain
-from `SA-0142` on exists at `68892367`, where every line number below was
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). None of the chain
+from `SA-0142` on exists at `475929b1`, where every line number below was
 read. So chain names are cited by symbol. This spec consumes these.
 
 - From `SA-0145`: the `stack_layers` table and `Ledger.record_stack_layer`.
@@ -168,9 +177,10 @@ findings in the order recorded (`saffron/ledger.py:1190-1196`), and
 `record_rebuttal` writes a verdict and a rebuttal (`:1171-1188`).
 `review.LENSES` names the three in-cell lenses
 (`saffron/phases/review.py:39-43`). REBUT rebuts anchored blockers alone
-(`saffron/phases/rebut.py:3-5`), so a layer's concerns reach its pull
-request unrebutted. `saffron batch` writes its batch tree under `out_dir`,
-which is `<home>/batches/v0` by default (`saffron/cli.py:175-176`).
+(`saffron/phases/rebut.py:3-5`). The cell writes a verdict and a rebuttal
+onto each anchored blocker's row alone (`saffron/cell/session.py:2785-2790`),
+so a concern or a note carries neither. `saffron batch` writes its batch tree under `out_dir`, which is
+`<home>/batches/v0` by default (`saffron/cli.py:182`).
 
 ## Problem
 
@@ -270,9 +280,10 @@ where it lacks one, and reach each task by its spec id. Then record these
 | `TE-6` | `spec` | concern | `qualified` | `qualified.py` | pooled spec | |
 
 It records one `correctness` concern on `TE-10`. On `TE-20` it records
-six findings. They are a `correctness` concern, a `contract` concern given
-the verdict `confirmed`, and an `adequacy` concern given a rebuttal. Then
-come a `correctness` blocker, a `correctness` note and a `spec` concern.
+five findings. They are a `correctness` concern, a `contract` blocker
+given the verdict `confirmed` and a rebuttal, and an `adequacy` blocker
+given a rebuttal and no verdict. Then come a `correctness` note, recorded
+unanchored, and a `spec` concern.
 `pooled` holds three groups on `qualified.py`, each of one `spec` finding
 at line 3 with the claim "pooled spec" and the severity `blocker`. They
 name `TE-10`'s key with "cap", `TE-6`'s with "O", and `TE-10`'s again with
@@ -286,8 +297,10 @@ layer's packaged head. `findings` holds `TE-10`'s rows in order:
   as `follow_up`
 - the `unanchored`, `note` and `unverified` rows
 
-Then comes `TE-7`'s row as `follow_up`, then `TE-20`'s first concern as
-`unrebutted`. `follow_ups` is `TE-22` `EXHAUSTED`, with its path and its
+Then comes `TE-7`'s row as `follow_up`. Then come `TE-20`'s first four
+findings in the order recorded, each as `left_by_critic`, each with its
+severity as filed. The blocker with a verdict has the reason `confirmed`,
+and the other three an empty reason. `follow_ups` is `TE-22` `EXHAUSTED`, with its path and its
 revised text, then `TE-23` `QUEUED` with its path and text. Last, an empty
 batch writes both lists empty. These fail it:
 
@@ -304,8 +317,10 @@ batch writes both lists empty. These fail it:
   `qualified`
 - each entry's head taken from its predecessor, or as the top layer's
 - a generation 0 layer's in-cell concern kept
-- a concern with a verdict, or one with a rebuttal, kept
-- every severity but `note` kept
+- a follow-up's in-cell finding with a verdict, or with a rebuttal, dropped
+- a follow-up's in-cell blocker or note dropped, or its concerns alone kept
+- a follow-up's unanchored in-cell finding dropped
+- a verdict left out of the reason, or a rebuttal put there
 - an end-review lens's concern kept
 - a follow-up's kind read off its latest row, which drops `TE-22`
 - a follow-up's first text, not its latest
@@ -321,8 +336,11 @@ batch writes both lists empty. These fail it:
 and writers. It stood in for `SA-0161`'s `Pooled` and `FollowUpGroup`
 too. It loaded a prototype of the two reads and of `write_findings`, and
 ran a prototype of criterion 1's witness. The right build passed. Each
-wrong build above was applied as a text edit to the prototype, and each
-failed the witness.
+wrong build that run named was applied as a text edit to the prototype,
+and each failed the witness. That prototype listed a follow-up's
+concerns with no verdict and no rebuttal alone. ADR 7 names every finding
+a follow-up's own critic leaves, so the four wrong builds on that list are
+unmeasured.
 
 **Criterion 2's witness** follows `SA-0151`'s command-line witness, with
 `_readiness_passes` (`tests/test_cli.py:2603-2621`) and

@@ -125,8 +125,8 @@ acceptance:
 Backlog item **b-792ab2**, step 8 of its Done. It cites `DESIGN.md` §4.2,
 §4.2.1 and §5.7. ADR 7
 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`)
-decides that the host commits the batch's revised and follow-up specs, and
-that they land in the top layer. Section 4 of
+decides that the host commits the batch's revised and follow-up specs in
+its own finishing layer, which it adds above every task. Section 4 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md`, "The finishing
 layer", is the design.
 
@@ -139,14 +139,15 @@ as spec text until the finish commits them.
 **Step 8 is four specs.** This one builds the finishing commit and runs
 it at the end of the batch. `SA-0174` follows it and writes
 `findings.json` beside the commit. `SA-0167` follows that. It runs the
-repo's gate suite on the finishing tree in a cell, and pushes the commit
-only when the suite is green. It checks each layer's predecessor head and
-reads every base back. `SA-0170` then links the stack with `gh stack
-link`. So nothing this spec builds pushes or opens anything.
+repo's gate suite on the finishing tree in a cell. Only when the suite is
+green does it push the commit, to the finishing layer's own branch, and
+open that branch's pull request. It checks each layer's predecessor head
+and reads every base back first. `SA-0170` then links the stack with `gh
+stack link`. So nothing this spec builds pushes or opens anything.
 
 **What the tree base holds.** This spec's tree base is `SA-0162`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:133-136`). None of the chain
-from `SA-0142` on exists at `68892367`, where every line number below was
+Only `depends_on[0]` stacks (`saffron/task.py:144-147`). None of the chain
+from `SA-0142` on exists at `475929b1`, where every line number below was
 read. So chain names are cited by symbol. This spec consumes these.
 
 - From `SA-0145`: the `stack_layers` table, keyed on `task_key`, with
@@ -188,19 +189,19 @@ read. So chain names are cited by symbol. This spec consumes these.
 default branch (`.saffron/specs/done/README.md:3-5`). A retired spec's id
 is read from its frontmatter, never its filename (`saffron/scheduler.py:516`).
 `discover_specs` globs `*.md` in one directory, not below it
-(`saffron/intake.py:311`, `:340`). `add_worktree` checks a detached tree out
+(`saffron/intake.py:356`, `:385`). `add_worktree` checks a detached tree out
 of the mirror at a sha, and `remove_worktree` removes it
-(`saffron/repos/mirror.py:113-124`). `_git` raises `GitError` on a non-zero
-exit (`:51-57`). PACKAGE commits with its identity on the command line,
+(`saffron/repos/mirror.py:122-133`). `_git` raises `GitError` on a non-zero
+exit (`:58-61`). PACKAGE commits with its identity on the command line,
 because a `--mirror` clone inherits none (`saffron/phases/package.py:342-350`).
 `saffron batch` writes its batch tree under `out_dir`, which is
-`<home>/batches/v0` by default (`saffron/cli.py:175-176`).
+`<home>/batches/v0` by default (`saffron/cli.py:182`).
 
 **Why the parent is remembered, not fetched.** §5.7 says a parent's head is
-fetched, never remembered (`DESIGN.md:1111`). The finish departs from it on
+fetched, never remembered (`DESIGN.md:1114`). The finish departs from it on
 purpose. Its parent is the top layer's recorded `pushed_sha`, because
-`SA-0167` leases its push on that sha. A branch moved since then fails the
-lease, so it escalates in place of a push.
+`SA-0167` compares the top layer's branch with that sha before any push.
+A branch moved since then escalates in place of a push.
 
 ## Problem
 
@@ -264,7 +265,8 @@ stop reason.
 
 **Why the commit moves no ref.** The design pushes no host commit before
 the repo's gate suite reads it (items 40 and 97). `SA-0167` runs that
-suite, then pushes this sha to the top layer's branch.
+suite, then pushes this sha to the finishing layer's own branch. So the
+top layer's branch keeps one writer, PACKAGE.
 
 **Why the path and hash checks repeat `SA-0150`'s.** `record_spec_text`
 refuses a path outside the spec directory and hashes the text itself. A
@@ -276,10 +278,11 @@ one host write to a protected path, so it checks again at the write.
 - **`findings.json`.** `SA-0174` writes it, from the `qualifications`
   rows, the pooled groups `SA-0165` collects and the follow-ups that added
   no layer.
-- **The gate suite, the push and the link.** The gate suite and the push are
-  `SA-0167`'s. So are the predecessor-head check and each escalation. The
-  link and `--ready` are `SA-0170`'s. So is how the `scope` gate treats the host's commit to
-  `.saffron/specs/`.
+- **The gate suite, the push and the link.** The gate suite, the push and
+  the finishing layer's pull request are `SA-0167`'s. So are the
+  predecessor-head check and each escalation, and how the finishing
+  suite's `scope` treats the host's commit to `.saffron/specs/`. The link
+  and `--ready` are `SA-0170`'s.
 - **A revision that missed.** A revised queued spec with no layer commits
   nothing. A later night mints a fresh task for it, and its review revises
   the original again.
@@ -310,7 +313,7 @@ the new `finish` keyword, through `**kwargs` or by name. The file is in
 
 **Criteria 1 and 2 share one fixture, `stack`,** in `tests/test_finish.py`. Point
 `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at
-nothing, as `tests/test_package.py:1645-1653` does. Build an origin repo
+nothing, as `tests/test_package.py:1647-1652` does. Build an origin repo
 whose base commit holds `a.py` and these files in `.saffron/specs/`:
 `TE-1-one.md` (id `TE-1`), `ten.md` (`TE-10`), `TE-7-seven.md` (`TE-7`),
 `TE-5-five.md` (`TE-5`), `TE-6-six.md` (`TE-6`) and `done/README.md`.
