@@ -1,4 +1,4 @@
-"""The end review's two in-cell lenses over one layer, the join lens over
+"""The end review's two lenses over one layer, the join lens over
 a whole stack, and `run_end_review`, which runs both.
 
 A layer is one task's `stack_layers` row. `layer_fields` reads it, its
@@ -37,8 +37,8 @@ END_LENSES = {
     "standards": "end-review-standards.md",
 }
 
-# The join lens's own ceilings, and the reserve share a stack batch
-# holds for the whole end review (`SA-0157` passes each as-is).
+# Each end-review lens's ceilings, over the measured in-cell peak of $1.80
+# and 41 turns. The reserve is this share of `--budget` (`SA-0157`).
 LENS_BUDGET_USD = 2.5
 LENS_MAX_TURNS = 50
 RESERVE_SHARE = 0.25
@@ -372,23 +372,13 @@ def review_stack(
     return results
 
 
-# One batch's layer keys, lowest position first. The join lens walks
-# bottom to top, the opposite of `review_stack`'s own walk.
-_BATCH_LAYER_KEYS = """
-    SELECT task_key
-      FROM stack_layers
-     WHERE batch_key = ?
-     ORDER BY position ASC
-"""
-
-
 def _stack_spec_text(layers: Sequence[LayerFields], specs: Mapping[str, Spec]) -> str:
     """One heading per layer, bottom first: its spec id, branch and head,
     then its own spec body, verbatim."""
     parts = []
     for fields in layers:
         heading = (
-            f"### {fields.spec_id} — branch `{fields.branch}`, head `{fields.head}`"
+            f"### {fields.spec_id}, branch `{fields.branch}`, head `{fields.head}`"
         )
         parts.append(f"{heading}\n\n{specs[fields.spec_id].body}")
     return "\n\n".join(parts)
@@ -440,20 +430,14 @@ def review_joins(
     seam to read, so this returns `None` and records nothing. The lens
     starts only while `reserve_usd` covers `budget_usd`. Short of that it
     records `not_reached` under the top layer's task and returns `None`.
-    A raise anywhere before the lens returns, `open_cell`'s included, is
-    caught in one place and recorded as an `error` review at cost 0.
+    A raise from the diff, the prompt, the cell or the lens is caught in
+    one place. It is recorded as an `error` review at cost 0.
     """
-    task_keys = [
-        row["task_key"]
-        for row in ledger._db.execute(_BATCH_LAYER_KEYS, (batch_key,)).fetchall()
-    ]
-    if len(task_keys) < 2:
+    rows = ledger._db.execute(_BATCH_LAYERS, (batch_key,)).fetchall()[::-1]
+    if len(rows) < 2:
         return None
-    top_key = task_keys[-1]
-    top_row = ledger._db.execute(
-        "SELECT task_id FROM tasks WHERE record_key = ?", (top_key,)
-    ).fetchone()
-    top_task_id = top_row["task_id"]
+    task_keys = [row["task_key"] for row in rows]
+    top_task_id = rows[-1]["task_id"]
 
     if reserve_usd < budget_usd:
         ledger.record_end_review(
@@ -537,7 +521,7 @@ def run_end_review(
     """One stack's whole end review: the join lens first, the layers on
     what it left (ADR 6, principles 40 and 50).
 
-    Each layer already gets two in-cell lenses of its own. The joins get
+    Each layer already had three in-cell lenses of its own. The joins had
     none, so the join lens spends first. `review_stack` then starts a
     layer only while what remains of `reserve_usd` still covers it. An
     errored join's cost counts the same as a clean one's, and a join of

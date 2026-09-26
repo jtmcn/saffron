@@ -1,12 +1,13 @@
-"""The end review's two lenses, `review_stack` over a whole stack, and
-`Ledger.record_end_review`. `saffron.end_review` is imported inside
-every test body here, never at module scope. It does not exist at this
-spec's own tree base, and a module-scope import would fail collection
+"""The end review's lenses, `review_stack`, the join lens, `run_end_review`,
+`layer_cell` and `Ledger.record_end_review`. `saffron.end_review` is
+imported inside every test body here, never at module scope. It does not
+exist at this spec's own tree base, and a module-scope import would fail collection
 under `revert`.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import subprocess
@@ -1115,13 +1116,11 @@ def _join_ledger(tmp_path: Path, sha_a: str, shas: dict[str, str]):
 def _join_specs() -> dict:
     """One `Spec` per layer, built in sorted id order. Not the bottom-up
     order the join lens must read the stack in."""
-    from saffron.intake import Criterion as _C
-    from saffron.intake import Spec as _S
 
     specs = {}
     for spec_id in sorted(_JOIN_COMMIT_ORDER):
         body = "body TE-3 {gap}" if spec_id == "TE-3" else f"body {spec_id}"
-        specs[spec_id] = _S(
+        specs[spec_id] = Spec(
             id=spec_id,
             title="t",
             type="chore",
@@ -1129,7 +1128,9 @@ def _join_specs() -> dict:
             touches=[f"{spec_id}.py"],
             forbidden=[f"no-{spec_id}.py"],
             acceptance=[
-                _C(claim=f"claim {spec_id}", witness=f"tests/test_{spec_id}.py::t")
+                Criterion(
+                    claim=f"claim {spec_id}", witness=f"tests/test_{spec_id}.py::t"
+                )
             ],
         )
     return specs
@@ -1166,20 +1167,6 @@ def _join_script() -> list:
     ]
 
 
-def _join_kwargs(mirror: Path, open_cell, agent) -> dict:
-    return {
-        "mirror": mirror,
-        "open_cell": open_cell,
-        "context_md": CONTEXT_MD,
-        "claude_md": "Read the standards once.",
-        "prompts_dir": PROMPTS,
-        "max_turns": 17,
-        "budget_usd": 1.0,
-        "agent": agent,
-        "emit": lambda event: None,
-    }
-
-
 def test_the_join_lens_reads_the_whole_stack_once_from_the_top_layers_cell(
     tmp_path, monkeypatch
 ):
@@ -1196,7 +1183,7 @@ def test_the_join_lens_reads_the_whole_stack_once_from_the_top_layers_cell(
     open_cell = _join_open_cell(cell_calls)
     agent_calls: list = []
     agent = _scripted(agent_calls, _join_script())
-    kwargs = _join_kwargs(mirror, open_cell, agent)
+    kwargs = _end_review_kwargs(mirror, open_cell, agent)
 
     result1 = end_review.review_joins(ledger, str(batch_ids[1]), 1.0, specs, **kwargs)
     result2 = end_review.review_joins(ledger, str(batch_ids[2]), 0.75, specs, **kwargs)
@@ -1239,7 +1226,7 @@ def test_the_join_lens_reads_the_whole_stack_once_from_the_top_layers_cell(
     assert order9 < order3 < order7
 
     for spec_id in ("TE-9", "TE-3", "TE-7"):
-        heading = f"{spec_id} — branch `saffron/{spec_id}`, head `{shas[spec_id]}`"
+        heading = f"{spec_id}, branch `saffron/{spec_id}`, head `{shas[spec_id]}`"
         assert heading in prompt1
 
     assert result1 is not None
@@ -1388,6 +1375,8 @@ def test_the_end_review_runs_the_join_lens_first_and_the_layers_on_what_it_left(
         assert kw == keywords
 
     assert r1.join == join_replies[0]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        r1.__setattr__("join", None)
     assert r1.layers == fixed_layers
     assert r2.join is None
     assert r2.layers == fixed_layers
@@ -1450,7 +1439,7 @@ def test_a_layers_critic_cell_is_seeded_at_its_head_and_always_torn_down(
     assert up_kwargs["network"] == "saffron-cells"
     assert up_kwargs["gates_dir"] == gates_dir
     assert up_kwargs["thread_env"] == thread_env
-    assert "TE-1" in up_kwargs["container"]
+    assert log[0] == ("remove", up_kwargs["container"])
     assert "TE-1" in up_kwargs["volume"]
     assert "TE-1" in up_kwargs["state"]
     assert log[2] == ("body", up_kwargs["container"])
