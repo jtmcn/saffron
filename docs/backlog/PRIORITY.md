@@ -164,7 +164,7 @@ session too big for argv left `SA-0128` halted at `REBUTTING`.
 `SA-0129` ended `NOT_IMPLEMENTED`. Its by-hand pull request then merged, and
 the ledger still refused its child.
 
-**Placed 2026-09-26**, from the spec loop's run 18: **b-76f08d**. The `tests`
+**Placed 2026-09-26**, from the spec loop's run 18: ~~**b-76f08d**~~. The `tests`
 gate reads a flag error in captured output as its own, so `revert` skips every
 witness for a new CLI flag.
 
