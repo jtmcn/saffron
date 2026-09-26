@@ -9,12 +9,14 @@ That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
-to put in it. `stack_layers` and `end_reviews` are a tenth and an eleventh
-table, outside that count: `DESIGN.md` §4.1 does not list either.
+to put in it. `stack_layers`, `end_reviews` and `baseline_names` are a tenth,
+an eleventh and a twelfth table, outside that count: `DESIGN.md` §4.1 does
+not list any of them.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -134,6 +136,13 @@ CREATE TABLE IF NOT EXISTS gate_results (
     duration_ms    INTEGER,
     summary        TEXT,
     CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
+);
+
+-- Keeps a run's baseline names, the node ids `collected` enumerated, one row
+-- per gate result. No reference to another table, so a ledger with none reads None.
+CREATE TABLE IF NOT EXISTS baseline_names (
+    gate_result_id INTEGER PRIMARY KEY,
+    names          TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS failures (
@@ -1371,6 +1380,11 @@ class Ledger:
                         for f in result.failures
                     ],
                 )
+                if result.collected is not None:
+                    self._db.execute(
+                        "INSERT INTO baseline_names (gate_result_id, names) VALUES (?, ?)",
+                        (gate_result_id, json.dumps(result.collected)),
+                    )
             return gate_result_id
         owner = self._attempt_of(attempt_id, "record a gate result against")
         fact = self._build_fact(
@@ -1423,6 +1437,13 @@ class Ledger:
                 "SELECT * FROM failures WHERE gate_result_id = ? ORDER BY failure_id",
                 (row["gate_result_id"],),
             ).fetchall()
+            names_row = self._db.execute(
+                "SELECT names FROM baseline_names WHERE gate_result_id = ?",
+                (row["gate_result_id"],),
+            ).fetchone()
+            collected = (
+                json.loads(names_row["names"]) if names_row is not None else None
+            )
             results.append(
                 GateResult(
                     gate=row["gate"],
@@ -1430,6 +1451,7 @@ class Ledger:
                     tool=row["tool"],
                     summary=row["summary"] or "",
                     duration_ms=row["duration_ms"],
+                    collected=collected,
                     failures=[
                         Failure(
                             file=f["file"],
