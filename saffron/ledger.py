@@ -138,8 +138,8 @@ CREATE TABLE IF NOT EXISTS gate_results (
     CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
 );
 
--- Keeps a run's baseline names, the node ids `collected` enumerated, one row
--- per gate result. No reference to another table, so a ledger with none reads None.
+-- One row per run result whose `GateResult.collected` is not None, as a JSON
+-- list. A result with no row reads None.
 CREATE TABLE IF NOT EXISTS baseline_names (
     gate_result_id INTEGER PRIMARY KEY,
     names          TEXT NOT NULL
