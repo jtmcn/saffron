@@ -81,7 +81,10 @@ acceptance:
       add with a throwaway script." as a whole line too.
       The raw `spec-writer-extract.md` holds the Problem's two lines, "Put
       the whole spec file in the block, frontmatter first." and "Do not
-      wrap the file in a code fence.", each as a whole line.
+      wrap the file in a code fence.", each as a whole line. Its last
+      non-blank line is `{extraction}`. The raw `spec-writer.md` holds
+      `{gates}`, `{protected}`, `{elevate_on}` and `{ceilings}` once each,
+      and no other brace pair.
       `SPEC_WRITER_EXTRACT_PROMPT` is
       `context.turn_prompt("spec-writer-extract")`, and holds
       `artifacts.EXTRACTION_PROMPT`. Neither
@@ -179,8 +182,8 @@ Build two things.
    Do not wrap the file in a code fence.
    ```
 
-   It asks for nothing else in the block. It ends with the `{extraction}`
-   slot, and holds no other `{word}` brace pair, since
+   It asks for nothing else in the block. Its last non-blank line is the
+   `{extraction}` slot. It holds no other `{word}` brace pair, since
    `test_a_loaded_turn_prompt_keeps_no_unfilled_slot` reads one as a slot
    (`tests/test_context.py:437-443`). Load it at import into
    `SPEC_WRITER_EXTRACT_PROMPT`, as `rebut.EXTRACT_PROMPT` is loaded
@@ -227,10 +230,13 @@ slots once, and no other brace. It covers these, in words of its own.
 - You write one spec file: YAML frontmatter between `---` fences, then a
   body. Each acceptance criterion holds a claim and a witness test.
 - The user prompt takes one of two forms. A `review:` line asks you to
-  revise the spec it names against the review it quotes. Apply each
-  blocker and concern that holds at the base, and keep the spec's
-  purpose. A `context:` line asks for a new spec from the findings it
-  gives.
+  revise a spec. The review sits between review tags, and the spec's
+  current text sits between spec tags. The `spec:` line names the path
+  where that text will live, and the text replaces the file there. Read
+  the current text from the spec tags, never from that path in the
+  checkout. Apply each blocker and concern that holds at the base, and
+  keep the spec's purpose. A `context:` line asks for a new spec from the
+  findings it gives.
 - Each witness fails a plausible wrong build, and a claim over a set
   drives every member. New code declares a witness and no mutant.
 - Every sentence about current code names a file and line you read at
@@ -262,8 +268,9 @@ blocking, `protected` `uv.lock` then `docs/{a,b}.md`, and `elevate_on`
 `monkeypatch.setitem`. It asserts `SPEC_WRITER_PROMPT` is
 `spec-writer.md`. For the first policy and for `Policy()`, the writer's
 fill equals `spec_review_system_prompt` of the same policy over the same
-directory. The first policy's fill holds ``- `lint` (advisory)``,
-``- `docs/{a,b}.md` `` and ``- `feature`: 2999 changed tokens``. Last, it
+directory. The first policy's fill holds each of three lines, given
+here as Python strings with no trailing space: ``"- `lint` (advisory)"``,
+``"- `docs/{a,b}.md`"`` and ``"- `feature`: 2999 changed tokens"``. Last, it
 rewrites `spec-writer.md` alone as ``"W\n{gates}\n"``, and the writer's
 fill is exactly ``"W\n- `tests`\n- `lint` (advisory)\n"``. These fail it:
 
@@ -300,9 +307,12 @@ holds each of these four blocks.
 
 It reads `spec-writer.md` raw, splits
 it into lines, and asserts each of `SA-0156`'s three account lines and the
-throwaway-script line is one of them. It reads `spec-writer-extract.md`
-raw, splits it into lines, and asserts each of the Problem's two lines is
-one of them. It asserts `SPEC_WRITER_EXTRACT_PROMPT` equals
+throwaway-script line is one of them. It asserts
+`sorted(re.findall(r"\{[^{}]*\}", raw))` for `spec-writer.md` equals
+`["{ceilings}", "{elevate_on}", "{gates}", "{protected}"]`. It reads
+`spec-writer-extract.md` raw, splits it into lines, and asserts each of
+the Problem's two lines is one of them. Its last non-blank line is
+`{extraction}`. It asserts `SPEC_WRITER_EXTRACT_PROMPT` equals
 `context.turn_prompt("spec-writer-extract")`, and holds
 `artifacts.EXTRACTION_PROMPT`. It lowers both raw files and checks each of
 the fifteen strings against each. These fail it, reasoned:
@@ -311,6 +321,11 @@ the fifteen strings against each. These fail it, reasoned:
   ban otherwise, which a check for the words `code fence` passes
 - a turn file that asks for the body alone, or the frontmatter last
 - a template that leaves a slot out, or spells a stray brace
+- a `{tags}` slot in the writer's template, which the fill passes over
+  unseen
+- a slot written twice, which fills both places
+- a turn file with text after `{extraction}`, which asks for more than the
+  block
 - an account line reworded, joined to another line, or left out
 - the account lines in the user prompt alone, where a follow-up's
   session never reads them
@@ -336,7 +351,10 @@ each docstring within ten lines.
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 800 to 950 changed tokens, 27% to 32% of the ceiling.
+estimate is about 900 to 1100 changed tokens, 30% to 37% of the
+ceiling. The `history` rows beside this spec measured lines against the
+old ceiling of 600 changed lines, so none compares with this figure
+directly.
 The fill and its two constants run about 80 to 130 tokens in
 `saffron/spec_review.py`. `spec-writer.md` at 50 lines runs about 310 to
 460 tokens. That is 6.2 to 9.1 words a line, as the system prompts in
