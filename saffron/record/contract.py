@@ -35,6 +35,11 @@ KINDS = (
     "batch_created",
     "batch_closed",
     "repo_upserted",
+    "stack_layer",
+    "end_review",
+    "qualification",
+    "spec_review",
+    "spec_text",
 )
 
 

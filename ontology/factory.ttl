@@ -141,7 +141,7 @@ factory:SCOPE_REVIEW a factory:TerminalState . factory:PLAN_REJECTED a factory:T
 factory:EXHAUSTED a factory:TerminalState . factory:READY_FOR_REVIEW a factory:TerminalState .
 factory:MERGE_FAILED a factory:TerminalState . factory:PREFLIGHT_FAILED a factory:TerminalState .
 factory:NOT_IMPLEMENTED a factory:TerminalState . factory:GATE_ERROR a factory:TerminalState .
-factory:RATE_LIMITED a factory:TerminalState .
+factory:RATE_LIMITED a factory:TerminalState . factory:SPEC_WITHHELD a factory:TerminalState .
 
 # What the operator's decision produces, plus the state a crash produces. None of
 # these reaches the operator — they are downstream of a judgement they already made.
@@ -188,6 +188,11 @@ factory:rebuttal a factory:FactKind . factory:decision a factory:FactKind .
 factory:run_created a factory:FactKind . factory:run_finished a factory:FactKind .
 factory:run_preflight a factory:FactKind . factory:batch_created a factory:FactKind .
 factory:batch_closed a factory:FactKind . factory:repo_upserted a factory:FactKind .
+factory:stack_layer a factory:FactKind .
+factory:end_review a factory:FactKind .
+factory:qualification a factory:FactKind .
+factory:spec_review a factory:FactKind .
+factory:spec_text a factory:FactKind .
 
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .

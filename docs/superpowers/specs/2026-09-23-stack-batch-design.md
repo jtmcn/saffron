@@ -74,16 +74,21 @@ other state adds no layer. The next task starts from the same head the failed
 one used. Each `depends_on` descendant of the failed task is refused with a
 reason that names it.
 
-**Gate 0's open-PR overlap check exempts the batch's own tasks.** Every lower
-layer's PR is open and often touches nearby files. Without the exemption,
-stack mode refuses its own second task. Backlog item 59 exempted a
-declared chain, and no item covers a stack's layers yet.
+**Gate 0's open-PR overlap check needs no exemption at plan time.** The plan
+is made once, before any of the batch's own PRs exist, so the check has
+nothing of the batch's to refuse. Follow-ups are planned against the open
+stack, so step 7 exempts the batch's own tasks there. Backlog item 59
+exempted a declared chain, and no item covers a stack's layers yet.
 
-**Recording.** A ledger table `stack_layers` holds `batch_id`, `position`,
-`spec_id`, `task_id`, `predecessor_task_id` and `generation`. Generation 0 is
-a queued spec, and generation 1 is a follow-up. Under item 170's direction, a
-record fact carries the same row and the ledger folds it. The driver's `stack`
-and `status` read this table in place of `.saffron-loop/order.json`.
+**Recording.** Each layer is a `stack_layer` fact (added by hand in
+`75edb212`), and the ledger folds it into a `stack_layers` table. The table
+keys on record keys, since a fold re-mints task ids: `task_key`,
+`batch_key`, `position`, `spec_id`, `predecessor_key`, `predecessor_head` and
+`generation`. It has no foreign key, because the fold rebuilds no `batches`
+row. `predecessor_head` is the predecessor's `pushed_sha` when the layer is
+recorded. Generation 0 is a queued spec, and generation 1 is a follow-up. The
+driver's `stack` and `status` read this table in place of
+`.saffron-loop/order.json`.
 
 **Unchanged.** Each cell takes its baseline on its own starting tree, the
 predecessor's head (§4.4 step 2). A batch without `--stack` behaves as today.
@@ -106,7 +111,14 @@ They run once per reviewable layer, in a critic cell seeded at that layer's
 head. The host fills the template fields from the ledger. A layer's `{BASE}` is
 its predecessor's head. `{KNOWN}` is that layer's in-cell findings and its
 `rebuttal.json`. Each field is filled once, and a filled value is never
-expanded again (principle 22).
+expanded again (principle 22). The diff each layer's lenses read is
+`head^..head`, because PACKAGE squashes a layer to one commit. The bottom
+layer's run `base_sha` is not its head's parent once main moves, so
+`base..head` would carry foreign commits. The Spec lens also gets each
+criterion's witness and `preserves` flag, and the `touches` and `forbidden`
+rules the implementer was held to. The Standards lens judges vocabulary
+against the standards documents the target repo declares, not Saffron's
+glossary (`SA-0146`).
 
 **One lens reads the joins.** It reads the top layer's tree with the whole
 stack's range, under ADR 6's rubric:
@@ -155,9 +167,14 @@ repo supplies none of them (ADR 2). This repo's `.claude/agents/spec-writer.md`,
 `spec-reviewer.md` and the skill's `REVIEW-PROMPT.md` stay the hand path's
 own. They name this repo's tools, so they differ from core's by design.
 
-**Queued specs are reviewed before their cells.** At batch start one spec
-review runs per queued spec, up to K at once. A spec's first cell waits only
-for its own review. Blockers route by their tag.
+**Queued specs are reviewed before their cells, one at a time.** Each spec's
+review runs just before its own cell, on the current last layer, which is the
+tree that cell is cut from. The cell runtime cannot run a critic cell beside a
+task cell: one network and one proxy serve every cell, and `cell_up` and
+`cell_down` remove both. Concurrent reviews wait for per-cell names
+(b-6a692d). A review that errors counts toward the breaker, as `GATE_ERROR`
+does. A rate-limited review goes through the same wait as a rate-limited
+task (`SA-0149`). Blockers route by their tag.
 
 - `build` or `witness`: the writer revises, and a fresh spec review reads the
   whole spec again, beside the original. Up to three rounds. Each round walks
@@ -287,15 +304,22 @@ three small specs before any full run.
 
 One spec per step. Each step ships usable on its own.
 
-1. Handoff and `stack_layers`.
-2. The overlap exemption.
-3. The seat lenses and the join lens.
-4. Qualification.
-5. The rate-limit wait.
-6. Spec review in the batch.
-7. Spec writing and follow-ups.
-8. The finishing layer.
-9. The stack view on the queue page.
+1. Handoff and `stack_layers`, as four specs: the stack order (`SA-0142`),
+   the handoff (`SA-0143`), the `--stack` flags (`SA-0144`) and the layers'
+   record (`SA-0145`).
+2. Folded into step 7. A plan made once has no open PR of its own to exempt.
+3. The end review, as three specs: the Spec and Standards lenses
+   (`SA-0146`), their run over the stack (`SA-0153`), and the join lens with
+   the CLI wiring (`SA-0154`).
+4. Qualification (`SA-0147`).
+5. The rate-limit wait (`SA-0148`).
+6. Spec review in the batch, as two specs: the routing (`SA-0149`) and the
+   review session with its facts (`SA-0155`).
+7. Spec writing and follow-ups, with the overlap exemption (`SA-0150`).
+8. The finishing layer (`SA-0151`).
+9. The stack view on the queue page (`SA-0152`).
+
+These ids are provisional. A step that splits takes the next free id.
 
 Steps 1 to 5 run through today's loop. From step 6 on, each step shortens the
 loop that builds the next one.

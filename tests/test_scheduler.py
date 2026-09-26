@@ -1923,9 +1923,127 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-25, an eighty-third time: the spec loop's run 17
-    retired `SA-0141` (#519) to `done/`. No spec is left queued, so there is
-    no candidate and nothing is refused.
+    """Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
+    retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
+    Every other spec of b-792ab2's chain is still refused on its parent.
+
+    Re-measured 2026-09-25, a hundredth time: `SA-0177` queued for
+    backlog item b-792ab2, split from `SA-0167` on size. It builds the
+    ledger's `stack_finishes` table and its two methods. It declares
+    `depends_on: [SA-0174]`, so it is refused. `SA-0167` now declares
+    `depends_on: [SA-0177]`. The candidates are unmoved.
+
+    Re-measured 2026-09-25, a ninety-ninth time: `SA-0176` queued for
+    backlog item b-792ab2, split from `SA-0160` on size. It builds core's
+    spec writer prompt, its extraction turn prompt and their fill. It
+    declares `depends_on: [SA-0150]`, so it is refused. `SA-0160` now
+    declares `depends_on: [SA-0176]`. The candidates are unmoved.
+
+    Re-measured 2026-09-25, a ninety-eighth time: `SA-0175` queued for
+    backlog item b-792ab2, split from `SA-0156` when ADR 7 made the spec
+    review's prompt core's. It builds the session, its extraction turn and
+    core's prompt. It declares `depends_on: [SA-0169]`, so it is refused.
+    `SA-0156` now declares `depends_on: [SA-0175]`. The candidates are
+    unmoved.
+
+    Re-measured 2026-09-25, a ninety-seventh time: the spec loop's run 16
+    retired `SA-0133` to `SA-0139` to `done/`. `SA-0142`'s parent `SA-0136`
+    is among them, so `SA-0142` is a candidate beside `SA-0141`. Every other
+    spec of b-792ab2's chain is still refused on a parent that has not run.
+
+    Re-measured 2026-09-25, a ninety-sixth time: fourteen specs queued
+    for backlog item b-792ab2, the stack batch's build steps 6 to 9. They
+    are `SA-0150`, `SA-0151`, `SA-0152`, `SA-0160`, `SA-0161`, `SA-0162`,
+    `SA-0164`, `SA-0165`, `SA-0167`, `SA-0168`, `SA-0169`, `SA-0170`,
+    `SA-0173` and `SA-0174`. They cover the spec writer and its revision
+    rounds, the follow-ups and their layers, the finishing layer and the
+    stack view. Each declares a parent in the same chain that has not run,
+    so each is refused. `SA-0156` now declares `depends_on: [SA-0169]`.
+    The candidates are unmoved.
+
+    Re-measured 2026-09-23, a ninety-fifth time: `SA-0156` queued for
+    backlog item b-792ab2, step 6's third spec. It builds the spec review
+    session and the mint that `saffron batch --stack` passes, and runs each
+    cell on the task its review is recorded on. It declares
+    `depends_on: [SA-0155]`, so it is refused, since `SA-0155` has not run.
+    The candidates are unmoved.
+
+    Re-measured 2026-09-23, a ninety-fourth time: `SA-0159` queued for
+    backlog item b-792ab2, split from `SA-0147`. It keeps the names each gate
+    of a run's baseline collected. It declares `depends_on: [SA-0157]`, so it
+    is refused, since `SA-0157` has not run. `SA-0147` now declares
+    `depends_on: [SA-0159, SA-0138]`. The candidates are unmoved.
+
+    Re-measured 2026-09-23, a ninety-third time: `SA-0157` queued for
+    backlog item b-792ab2, split from `SA-0154` to keep its size under the
+    margin. It wires the end review into `saffron batch --stack`, with a
+    reserve of a quarter of `--budget`. It declares `depends_on: [SA-0154]`,
+    so it is refused, since `SA-0154` has not run. The candidates are
+    unmoved.
+
+    Re-measured 2026-09-23, a ninety-second time: `SA-0155` queued for
+    backlog item b-792ab2, step 6's second spec. It mints each reviewed
+    spec's task before its review and records the review as facts on it. It
+    declares `depends_on: [SA-0149]`, so it is refused, since `SA-0149` has
+    not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, a ninety-first time: `SA-0149` queued for
+    backlog item b-792ab2, step 6 of its build order. It reads a spec
+    review's findings block and routes each spec in a stack batch on it. It
+    declares `depends_on: [SA-0148]`, so it is refused, since `SA-0148` has
+    not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, a ninetieth time: `SA-0148` queued for
+    backlog item b-792ab2, step 5 of its build order. A rate limit in a
+    stack batch waits for the window and runs the same spec again. It
+    declares `depends_on: [SA-0147]`, so it is refused, since `SA-0147` has
+    not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, an eighty-ninth time: `SA-0147` queued for
+    backlog item b-792ab2, step 4. It qualifies the end review's findings in
+    host code. It declares `depends_on: [SA-0154]`, so it is refused, since
+    `SA-0154` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, an eighty-eighth time: `SA-0154` queued for
+    backlog item b-792ab2, the third of three for step 3's end review. It
+    adds the join lens and a layer's critic cell, and runs the whole end
+    review in one call, which `SA-0157` wires into `saffron batch --stack`.
+    It declares `depends_on: [SA-0153]`, so it
+    is refused, since `SA-0153` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, an eighty-seventh time: `SA-0153` queued for
+    backlog item b-792ab2, the second of three for step 3's end review. It
+    runs the end-review lenses over a stack, top down within a reserve, and
+    records each layer's end review. It declares `depends_on: [SA-0146]`, so
+    it is refused, since `SA-0146` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, an eighty-sixth time: `SA-0146` queued for
+    backlog item b-792ab2, the first of three for step 3's end review. It
+    builds the Spec and Standards end-review lenses and fills their fields
+    from the ledger. It declares `depends_on: [SA-0145]`, so it is refused,
+    since `SA-0145` has not run. The candidates are unmoved.
+
+    Re-measured 2026-09-23, an eighty-fifth time: `SA-0145` queued for
+    backlog item b-792ab2, the last of four for a stack batch. It records
+    each layer in a `stack_layers` table the fold rebuilds. It declares
+    `depends_on: [SA-0144]`, so it is refused, since `SA-0144` has not run.
+    The candidates are unmoved.
+
+    Re-measured 2026-09-23, an eighty-fourth time: `SA-0143` and `SA-0144`
+    queued for backlog item b-792ab2, the second and third of four for a
+    stack batch. `SA-0143` hands each task its predecessor's branch, and
+    `SA-0144` adds the `--stack` flags. `SA-0142` now declares
+    `depends_on: [SA-0136]`, so `SA-0143`'s tree holds both chains. It moves
+    from the candidates to the refusals, since `SA-0136` has not run.
+    `SA-0143` depends on `SA-0142`, and `SA-0144` on `SA-0143`, so both are
+    refused too.
+
+    Re-measured 2026-09-23, an eighty-third time: `SA-0142` queued for
+    backlog item b-792ab2, the first of three for a stack batch's order. It
+    edits `saffron/scheduler.py` and `tests/test_scheduler.py`, which no
+    queued spec touches, and declares no `depends_on`. At priority 1 it sorts
+    after `SA-0140` by filename, so it is the second of six candidates. The
+    refusals are unmoved.
 
     Re-measured 2026-09-25, an eighty-second time: the spec loop's run 16
     retired `SA-0133` to `SA-0139` to `done/`. `SA-0141` depends on
@@ -2402,8 +2520,39 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == []
-    assert [r.path.name[:7] for r in refusals] == []
+    assert [c.spec.id for c in candidates] == ["SA-0142"]
+    assert [r.path.name[:7] for r in refusals] == [
+        "SA-0143",
+        "SA-0144",
+        "SA-0145",
+        "SA-0146",
+        "SA-0147",
+        "SA-0148",
+        "SA-0149",
+        "SA-0150",
+        "SA-0151",
+        "SA-0152",
+        "SA-0153",
+        "SA-0154",
+        "SA-0155",
+        "SA-0156",
+        "SA-0157",
+        "SA-0159",
+        "SA-0160",
+        "SA-0161",
+        "SA-0162",
+        "SA-0164",
+        "SA-0165",
+        "SA-0167",
+        "SA-0168",
+        "SA-0169",
+        "SA-0170",
+        "SA-0173",
+        "SA-0174",
+        "SA-0175",
+        "SA-0176",
+        "SA-0177",
+    ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
