@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from saffron.agents.findings import Finding
+from saffron.agents.findings import Finding, Severity
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, new_task_key
 
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS end_reviews (
 );
 
 -- What the host decided of one review finding (`SA-0180`). Keyed on record
--- keys, like `stack_layers`, so the row carries the finding and reads alone.
+-- keys, like `stack_layers`, so a fold into a fresh ledger places it.
 CREATE TABLE IF NOT EXISTS qualifications (
     task_key      TEXT NOT NULL,
     position      INTEGER NOT NULL,
@@ -1337,7 +1337,7 @@ class Ledger:
         task_id: int,
         *,
         finding: Finding,
-        filed: str,
+        filed: Severity,
         outcome: str,
         reason: str,
     ) -> None:
