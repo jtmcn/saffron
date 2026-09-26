@@ -1,12 +1,14 @@
 ---
 id: b-76f08d
 title: The `tests` gate reads a flag error anywhere in pytest's output, so `revert` skips every witness for a new CLI flag
-status: open
+status: done
 tier: 1
 filed: 2026-09-26
+closed: 2026-09-26
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [dfa1b5a8]
 cites: [§5.4]
 related: [b-66e82d, b-4a63b7]
 ---
@@ -38,3 +40,6 @@ Every spec that adds a CLI flag gets a blind `revert`.
 
 - 2026-09-26: filed from the spec loop's run 18 (stack #531). The Spec seat
   reproduced the skip path by hand.
+- 2026-09-26: fixed by hand in dfa1b5a8, since `.saffron/**` is protected. The
+  gate keys on pytest's exit codes 3 and 4, and a witness fails on the old
+  gate.
