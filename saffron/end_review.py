@@ -8,14 +8,13 @@ through `review.run_lens`, the same fresh-session contract every
 in-cell lens uses.
 
 `review_stack` walks a batch's layers top down, within a reserve, and
-records each lens through `Ledger.record_end_review`. `SA-0157` wires
-it into `saffron batch --stack`.
+records each lens through `Ledger.record_end_review`. `SA-0154`'s
+`run_end_review` calls it.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -27,6 +26,7 @@ from saffron.events import Event, describe
 from saffron.intake import Criterion, Spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
+from saffron.repos.mirror import _git
 
 # Lens id, in the order a layer is read, mapped to its own prompt file.
 END_LENSES = {
@@ -242,13 +242,7 @@ def _diff(mirror: Path, head: str) -> str:
     way every other diff in this repository is. Never `fields.base..head`,
     since a repushed predecessor or a bottom layer's run `base_sha` can
     each differ from the commit PACKAGE built this head on."""
-    completed = subprocess.run(
-        ["git", "-C", str(mirror), "diff", *DIFF_FLAGS, f"{head}^..{head}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return completed.stdout
+    return _git(mirror, "diff", *DIFF_FLAGS, f"{head}^..{head}", strip=False)
 
 
 def _review_one_layer(
@@ -328,13 +322,12 @@ def review_stack(
     lens.
     """
     rows = ledger._db.execute(_BATCH_LAYERS, (batch_key,)).fetchall()
-    lens_cost = budget_usd * len(END_LENSES)
+    layer_cost = budget_usd * len(END_LENSES)
     spent = 0.0
-    reached = True
     results: list[LayerReview] = []
     for row in rows:
         task_key, task_id = row["task_key"], row["task_id"]
-        if reached and reserve_usd - spent >= lens_cost:
+        if reserve_usd - spent >= layer_cost:
             reviews = _review_one_layer(
                 ledger,
                 task_key,
@@ -361,7 +354,6 @@ def review_stack(
                     error=r.error,
                 )
         else:
-            reached = False
             reviews = []
             for lens in END_LENSES:
                 ledger.record_end_review(

@@ -689,7 +689,7 @@ def _open_cell_double(calls: list[str]):
     def open_cell(fields):
         calls.append(fields.spec_id)
         if fields.spec_id == "TE-8":
-            raise RuntimeError("no cell for TE-8")
+            raise OSError("no cell for TE-8")
         yield f"critic-{fields.spec_id}"
 
     return open_cell

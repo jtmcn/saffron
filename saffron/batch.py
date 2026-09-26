@@ -102,10 +102,6 @@ def run_batch(
     every task, its return replaces what is left to run — `candidates` decide
     only the first — never merged; what has started is tracked by spec id.
 
-    `reserve_usd` defaults to 0.0 and is held back from the budget
-    comparison below. It is never subtracted from `budget_usd` itself, so
-    the batch row still records the whole budget it was given.
-
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
     `SA-0051` owns the mapping to an exit code.
@@ -308,10 +304,10 @@ def run_stack_batch(
     positionally, that reached `READY_FOR_REVIEW`, or `None` before any has.
 
     A candidate is refused here, before `run_batch` ever sees it, when a
-    `depends_on` entry reaches a spec that ran this batch and missed.
-    `reserve_usd` holds back the loop's own budget check, and once it
-    returns `end_review` runs once, with the batch id, the reserve and
-    `order`'s own specs."""
+    `depends_on` entry reaches a spec that ran this batch and missed. It
+    can reach one through a refused spec. `reserve_usd` holds back the loop's budget check, and
+    once the loop returns `end_review` runs once, with the batch id, the
+    reserve and `order`'s own specs."""
     order = list(order)
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
