@@ -49,3 +49,7 @@ deadline plus one task plus its end review. Each cites ADR 7.
   narrowed departures for a spec session's cell (`SA-0169`).
   `.claude/agents/spec-reviewer.md` drops "runs no test" before the key is
   set. `.saffron/policy.yaml` gains both keys after the cells merge.
+- 2026-09-25: the two policy keys and the edit to
+  `.claude/agents/spec-reviewer.md` no longer apply. ADR 7's revision makes
+  both prompts core's, so §2.1's key list is unchanged. §5.1 and §5.5 still
+  record the narrowed departures (`SA-0169`).

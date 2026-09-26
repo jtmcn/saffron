@@ -121,3 +121,7 @@ escalations.
   hold `Bash` in their critic cell, run as an unprivileged account whose
   cell alone gets `CAP_SETUID` and `CAP_SETGID` (`SA-0169`). Prompt paths
   are declared in `policy.yaml` (`SA-0156`, `SA-0160`).
+- 2026-09-25: ADR 7's revision reverses the prompt-path decision. Core owns
+  the spec review and spec writer prompts in `saffron/agents/prompts/`
+  (`SA-0175`, `SA-0160`), and no policy key names them. `SA-0175` joins the
+  chain between `SA-0169` and `SA-0156`.

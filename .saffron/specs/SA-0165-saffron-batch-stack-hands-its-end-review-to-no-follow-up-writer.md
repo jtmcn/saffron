@@ -106,7 +106,8 @@ acceptance:
       `out_dir`. Its `cap_usd` equals `writer_usd`, and its `pooled` is an
       empty list. The budget still passes whole. The plan header prints
       `writer $<writer_usd>` after the reserve. When readiness fails, it
-      builds no callable and passes `follow_ups=None`.
+      builds no callable and passes `follow_ups=None`, and still passes
+      the same `writer_usd`.
     witness: tests/test_cli.py::test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer
   - claim: >-
       A night without `--stack` prints its plan header as before, with no
@@ -174,7 +175,7 @@ number below was read at `68892367`, where none of them exist.
   `spec_writer_system_prompt(policy, *, prompts_dir)` fills core's
   `saffron/agents/prompts/spec-writer.md` from a `Policy`, and names no
   repo file. `cli._stack_revise` fills the writer prompt the way this
-  spec does. No policy key names a prompt, and no start refusal reads
+  spec does, except that it reads a missing `policy.yaml` as `Policy()`. No policy key names a prompt, and no start refusal reads
   one.
 - From `SA-0164`: the `revise` route, and `_stack_revise` wired into the
   `--stack` path.
@@ -254,7 +255,9 @@ Build two things in `saffron/cli.py`.
    create `pooled: list[follow_up.Pooled] = []`. Compute `writer_usd` as
    `args.budget * follow_up.WRITER_SHARE`. Build the callable once, and
    pass `run_stack_batch` `writer_usd` and `follow_ups`. Pass
-   `follow_ups=None` when readiness fails. Add `writer_usd`, `None` by
+   `follow_ups=None` when readiness fails, with the same `writer_usd`.
+   `SA-0173` holds the share either way, which costs nothing on a night
+   that runs no task. Add `writer_usd`, `None` by
    default, to `_print_batch_plan`. Given one, the header reads `budget
    $<budget>, reserve $<reserve>, writer $<writer>, until <deadline>`.
    The `--stack` path passes it.
@@ -301,8 +304,8 @@ probe cell removes its own names in its `finally`
 own. A second removal of the same names would only repeat those calls and
 print their misses.
 
-**The share.** `SA-0161` sizes `WRITER_SHARE` so a $100 night writes at
-least two follow-ups. It passes the same number as `writer_usd` and as
+**The share.** `SA-0161` sets `WRITER_SHARE` to 0.25, so a $100 night
+writes at least one follow-up at `SPEC_WRITER_SESSION_USD` of 18.5. It passes the same number as `writer_usd` and as
 `cap_usd`, so the loop holds back exactly the writer's sub-cap. With
 `SA-0157`'s reserve, generation 0 runs within half of `--budget`.
 
@@ -336,7 +339,17 @@ spec creates the list, and `SA-0174` must pass that same object to
   prompt's fill, the repo lookup and `layer_fields` come first. A raise
   there leaves no `Qualification` and no `qualification` rows, so no
   finding reaches `pooled`. This is a residual.
-- **The wall clock past `--until`.** Each writer session runs up to two
+- **A base with no `policy.yaml`.** `load_policy` raises `PolicyError`
+  for it, where `_stack_revise` reads `Policy()`. The case cannot reach
+  this callable. Every task's cell loads the policy from the same
+  export of the base, and stops without one
+  (`saffron/cell/session.py:1674-1676`). So no layer exists, and the
+  callable returns `[]` before it exports. No witness drives it.
+- **A raise from `ledger.spec_text` in the `except` branch.** The
+  accepted check reads the ledger after a raise. A second raise there
+  escapes the callable, though `SA-0173` expects `follow_ups` never to
+  raise. The ledger read failing twice in one night is a residual.
+- **The wall clock past `--until`.** Each writer session runs up to three
   turns at `SPEC_WRITER_TIMEOUT_S`, after the loop stops. The sub-cap
   bounds how many sessions start. `README.md:123-124` and the overshoot
   bound at `DESIGN.md:203` gain this too. Both files are forbidden here,
@@ -396,6 +409,8 @@ id is 2. Replace these through `monkeypatch`.
   and calls the original. `session.assert_bash_is_unprivileged` is
   replaced with a recorder of its container, as `SA-0156`'s witness
   replaces it. The fake container would make a correct build raise.
+- One call log is shared. `cell_up` appends `up`, the check `check`, the
+  writer double `writer`, the agent `agent` and `cell_down` `down`.
 - `implement.run_agent` declares `spec_id` and `timeout_s` as keywords
   with no default, and records each call. `SPEC_WRITER_TIMEOUT_S` equals
   `run_agent`'s own default of 3600. The double has none, so it still
@@ -438,9 +453,10 @@ callable with `cap_usd` 6.5 and `pooled` holding `P0`, and calls it with
   Its `gates_dir` is `out_dir / "follow-ups" / "7"`, whose policy reads
   `X: base`. Its `created` is a set. Its `note`, called as
   `note("survived", False, "volume v survived")`, prints that detail.
-- the calls ran up, writer, agent, down, twice over. Each `layer_cell`
-  call carried `spec_session=True`, and each check ran on its own
-  `cell_up`'s container. Each `cell_up` got
+- the log reads up, check, writer, agent, down, twice over. `SA-0169`'s
+  `layer_cell` runs the check after `cell_up` and before it yields. Each
+  `layer_cell` call carried `spec_session=True`, and each check ran on its
+  own `cell_up`'s container. Each `cell_up` got
   `"2" * 40`, `saffron/SY-2`, `repo`, the pinned mirror, `{"X": "base"}`
   and a `gates_dir` whose policy reads `X: base`.
 - each writer call ran in its own `cell_up`'s container, with the prompts
@@ -489,8 +505,10 @@ Last, it removes `out_dir` and calls a fresh callable with an empty
 stack. That returns `[]`, calls and prints nothing, and leaves `out_dir`
 absent.
 
-These fail it. Each was measured, except the first and the third, which
-changed when the prompt became core's:
+These fail it. Each was measured, except three. The first and the third
+changed when the prompt became core's. The `spec_session=True` item came
+with `SA-0169`'s keyword, which the prototype's `layer_cell` lacked. Those
+three, the check's recorder and the shared log are unmeasured.
 
 - the prompt filled from `repo`'s policy, or from the one at the mirror's
   `HEAD`
@@ -501,7 +519,7 @@ changed when the prompt became core's:
 - `qualify` given no `test_paths`, no join, or a return it drops
 - the writer's cell with an empty `thread_env`
 - `layer_cell` called without `spec_session=True`, which leaves the
-  writer no `Bash`
+  writer no `Bash` (unmeasured)
 - the cell seeded at the group's own layer's head, the last layer's, or
   the pinned `base_sha`
 - one cell for every `write`
@@ -551,7 +569,8 @@ No other callable at this tree base takes that list, so the witness can
 assert no identity beyond it. `SA-0174`'s witness asserts that
 `_stack_finish` gets the same object.
 It then fails readiness as `SA-0144`'s witness does, and runs `main`
-again. The recorder is not called, and the fake gets `follow_ups=None`.
+again. The recorder is not called, and the fake gets `follow_ups=None`
+and `writer_usd` 5.25.
 
 0.125 keeps the writer's figure apart from the reserve's. A share bound
 at import, or `RESERVE_SHARE` in its place, gives 10.5. The budget less
@@ -620,5 +639,5 @@ took 422, and criterion 1's witness 1180, of which about 45 are imports
 and its four raise cases go, about 40 in `cli.py` and 150 in the witness.
 The `protected` lines and the fill's assertion add about 40. A sketch of
 criterion 2's witness measured 157. The `_batch` wiring and the edits to
-other fakes add about 70, estimated. The `layer_cell` spy and the check's recorder add about 40. That is about 1740 tokens, 58% of
+other fakes add about 70, estimated. The `layer_cell` spy and the check's recorder add about 40, and the shared log about 40. That is about 1780 tokens, 59% of
 the ceiling. Keep the raise cases in one table.

@@ -59,11 +59,13 @@ acceptance:
       is `witness`, the tag from `SPEC_REVIEW_TAGS`. A blocker whose `fixes`
       is anything but `build` or `witness` routes the read `escalate`,
       whatever else the read holds and in either order. `wait` and `error`
-      keep their precedence. Every other read routes `run`, whatever a
-      claim says. The witness drives `scope`, `build`, `witness`, null and
-      absent on a blocker and on a concern, a tag patched into
-      `SPEC_REVIEW_TAGS` on a blocker, a mix in both orders, a note tagged
-      `witness`, and a concern with no `fixes` whose claim holds
+      keep their precedence. A note, or a concern with any other tag,
+      beside those findings leaves a `revise` route as it is. Every other
+      read routes `run`, whatever a claim says. The witness drives `scope`,
+      `build`, `witness`, null and absent on a blocker and on a concern, a
+      tag patched into `SPEC_REVIEW_TAGS` on a blocker, a mix in both
+      orders, a revisable read beside a note or another concern, a note
+      tagged `witness`, and a concern with no `fixes` whose claim holds
       `unmeasured`.
     witness: tests/test_spec_review.py::test_a_build_or_witness_blocker_and_a_witness_concern_route_to_a_revision
   - claim: >-
@@ -75,13 +77,13 @@ acceptance:
       review of a spec whose task holds a spec text gets the latest as the
       keyword `spec_text`, and a review of one that holds none gets no
       `spec_text`. Rounds are counted per call of `run_stack_batch`, never
-      from the ledger. A read with a blocker still routed `revise` once
-      `MAX_REVISE_ROUNDS`, 3, revisions ran escalates as `SA-0149`'s
-      `escalate` does. Its line ends ` after 3 revisions`, and its
-      descendants are refused. A read with no blocker never escalates. It is
-      revised only when the spec has had no revision in this call, and
-      otherwise routes `run`. With `revise` unset, a `revise` route with a
-      blocker escalates with no suffix, and one without routes `run`. Each
+      from the ledger. A blocker and a concern tagged `witness` share one
+      count. A read still routed `revise` once `MAX_REVISE_ROUNDS`, 3,
+      revisions ran escalates as `SA-0149`'s `escalate` does, with or
+      without a blocker. Its line counts the read's blockers, 0 for a
+      concern alone, and ends ` after 3 revisions`. Its descendants are
+      refused. With `revise` unset, a `revise` route with a blocker
+      escalates with no suffix, and one without routes `run`. Each
       runner call's task holds, as its latest spec text, the text its last
       review read.
     witness: tests/test_batch.py::test_a_revisable_blocker_is_revised_and_reviewed_again_for_at_most_three_rounds
@@ -96,7 +98,8 @@ acceptance:
       round, the budget left is the batch's budget less `reserve_usd` and
       `batch_spend`. When it falls short of `SPEC_WRITER_SESSION_USD`,
       `SPEC_REVIEW_BUDGET_USD` and the spec's `budget_usd` together,
-      `revise` is not called. The spec
+      `revise` is not called. The check runs again before a writer call
+      retried after a rate-limit wait. A refused spec
       returns a `Refused` with an ` unrevised  ` line, counts no abort, and
       keeps its task's state.
     witness: tests/test_batch.py::test_a_revision_waits_on_a_rate_limit_and_stops_on_an_error_a_raise_or_the_budget
@@ -107,11 +110,12 @@ acceptance:
       carries an error, and `success` otherwise. A `revise` that raises adds
       none. Each text a session returns is one `spec_text` fact of origin
       `revision`, at `.saffron/specs/` and the candidate's file name,
-      numbered on from the task's earlier rows. A review that led to a
-      revision is recorded routed `revise`. One escalated for spent rounds
-      or no writer is recorded `escalate`, and ends its task
-      `SPEC_WITHHELD`. A read with no blocker that is not revised is
-      recorded `run`.
+      numbered on from the task's earlier rows. A review is recorded with
+      its route before any budget check. So a review routed `revise` stays
+      `revise` whether its revision is written, rate-limited or refused for
+      budget. One escalated for spent rounds or no writer is recorded
+      `escalate`, and ends its task `SPEC_WITHHELD`. A read with no blocker
+      and no writer is recorded `run`.
       `batch_spend` counts each writer session once.
     witness: tests/test_batch.py::test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task
   - claim: >-
@@ -119,7 +123,8 @@ acceptance:
       Given one, its prompt is the prompt it builds with none, then a
       sentence and the text inside a pair of spec tags. The sentence says
       to review that text, and that a change to what the spec is for is a
-      scope blocker. `cli._stack_revise`'s callable, handed `None` as the
+      scope blocker. It holds the words `review that text` and `scope
+      blocker`. `cli._stack_revise`'s callable, handed `None` as the
       spec text, reads `.saffron/specs/` and the candidate's file name at
       the pinned `base_sha`, and runs on that text. A path absent there
       raises `ValueError` naming it, before any cell comes up. The witness
@@ -210,9 +215,10 @@ by symbol where the chain edits them. This spec consumes these names.
   the pinned base, or at an earlier row's path on the task. Given a
   `task_id` whose task holds a spec text, `run_task` runs the latest text
   in place of the handed spec.
-- From `SA-0160`: `SpecWriterSession`, `SPEC_WRITER_SESSION_USD`, the
-  ceiling of both turns of one session, at most 12.50, and
-  `cli._stack_revise`. Its callable takes a candidate, its layer, the
+- From `SA-0160`: `SpecWriterSession`, `SPEC_WRITER_SESSION_USD` and
+  `cli._stack_revise`. `SPEC_WRITER_SESSION_USD` is 18.5, the writer's
+  `SPEC_WRITER_BUDGET_USD` of 17.0 plus its extraction turn's 1.5. The
+  session re-asks its extraction once, at up to 1.5 more. Its callable takes a candidate, its layer, the
   spec's current text and a review's text. It returns what
   `run_spec_writer` returns: the whole spec file as `text`, or empty text
   with an `error` or a `resets_at`. It records nothing.
@@ -282,12 +288,14 @@ A round, in order:
 
 - Review the spec on the layer. Read the task's latest spec text first,
   and hand it to the review as `spec_text` when there is one.
-- Route the read. A `revise` route with a blocker becomes `escalate` with
-  `revise` unset or three revisions run. One with no blocker becomes `run`
-  with `revise` unset or one revision run. Record the review's attempt
-  and fact with the route taken, as `SA-0155` does.
-- On `revise`, check the budget left before every round, as criterion 3
-  states. Compute it where the task loop computes its own comparison, from
+- Route the read. A `revise` route becomes `escalate` once three revisions
+  ran, with a blocker or without. With `revise` unset, one with a blocker
+  becomes `escalate`, and one without becomes `run`. Record the review's
+  attempt and fact with the route taken, as `SA-0155` does, before the
+  budget check.
+- On `revise`, check the budget left before every writer call, as
+  criterion 3 states. That includes a call retried after a rate-limit
+  wait. Compute it where the task loop computes its own comparison, from
   one held amount. Here that amount is `reserve_usd`. `SA-0173` adds
   `writer_usd` to it for generation 0. `SA-0162` runs follow-ups with both
   reserves released, so it passes the generation and the round's check
@@ -352,11 +360,13 @@ keyword. Import each new name inside the test body.
 **Keep the older witnesses as they are.** The loop witnesses of `SA-0149`
 and `SA-0155` pass no `revise`. So a `build` or `witness` blocker there
 still escalates with the same line. No spec there holds a spec text, so
-the batch hands their review doubles no `spec_text`. `SA-0149`'s route
-witness has a row holding one `concern` tagged `witness` and no blocker,
-which it routes `run`. Change that row's route to `revise`, and do the
-same for any row holding only `build` or `witness` blockers. Change
-nothing else. Type the `review` keyword so
+the batch hands their review doubles no `spec_text`. In `SA-0149`'s route
+witness, change two kinds of row to `revise`. One is each row routed
+`escalate` whose blockers all carry `build` or `witness`. The other is
+each row routed `run` whose only finding is a `c(witness)`. Change nothing else. Keep each flipped row's test id,
+since `census` fails a name collected at base and gone at head, with no
+override (`saffron/gates/core/census.py:34-37`). Where the ids come from
+the parameter values, give the row an explicit `id=` holding its old id. Type the `review` keyword so
 it accepts the new keyword. A `run_stack_batch` fake in `tests/test_cli.py`
 that names its keywords with no `**kwargs` gets `revise=None` added, and
 nothing else.
@@ -386,14 +396,18 @@ key. Each finding holds `criterion`, `file` `a.py`, `line` and `claim`
 | `c(witness)`, then `b(build)` | `revise` |
 | `c(witness)`, then `b(scope)` | `escalate` |
 | `b(null)`, then `c(witness)` | `escalate` |
+| `b(build)`, `c(null)`, a note | `revise` |
+| `b(witness)`, `c(scope)` | `revise` |
+| `c(witness)`, `c(scope)`, a note | `revise` |
+| `c(witness)`, `c(-)` | `revise` |
 | `b(build)` with `resets_at` 9 | `wait` |
 | `c(witness)` with `resets_at` 9 | `wait` |
 | `b(build)` with `error` set | `error` |
 | `c(witness)` with `error` set | `error` |
 
 It patches the tags with `monkeypatch.setattr` on the module, as
-`SA-0149`'s route witness does. These fail it. The four marked reasoned
-came with this revision, and the prototype measured the rest.
+`SA-0149`'s route witness does. These fail it. The five marked reasoned
+came after the prototype, which measured the rest.
 
 - the first blocker's tag deciding the route
 - an untagged blocker, or a null one, routed `revise`
@@ -405,9 +419,11 @@ came with this revision, and the prototype measured the rest.
 - a note tagged `witness` routed `revise`, reasoned
 - a concern tagged `witness` outranking a `scope` or null blocker, or
   `wait` and `error`, reasoned
+- the tag check run over every finding rather than every blocker, which
+  escalates a revisable read beside a note or another concern, reasoned
 
 The route trusts the review's tag. A concern tagged `witness` that is not
-about a witness costs one round. An unmeasured witness the review leaves
+about a witness costs up to three rounds. An unmeasured witness the review leaves
 untagged routes `run`, as every concern did before. The tag is the
 review's claim, and the next round's fresh review is its check (principle
 15, ADR 7).
@@ -428,16 +444,18 @@ otherwise.
 - **The review double** takes `(candidate, layer, **kw)`. It records the
   spec id, the layer's spec id or `None`, and `kw`. It returns the spec's
   next scripted session. Each session's text is a fenced `json` block
-  alone, as `SA-0175`'s session returns. Its body is `json.dumps` of the
-  findings with `indent=2`, and each finding's claim names its spec and
-  the review's number, such as `TE-2 review 3`. So a writer handed
-  another review's text, or the read's findings dumped again, fails. Each
-  review costs 0.5. `u` below is a read holding one concern tagged
-  `witness`, and no blocker.
+  alone, as `SA-0175`'s session returns. Its body is
+  `json.dumps({"findings": [...]}, indent=2)`, and each finding's claim
+  names its spec and the review's number, such as `TE-2 review 3`. So a
+  writer handed another review's text, or the read's findings dumped
+  again, fails. Each review costs 0.5. `u` below is a read holding one
+  concern tagged `witness`, and no blocker.
 - **The revise double** records `(spec id, layer id, spec text, review
   text)`, and the state of the spec's task at the call. It returns or
-  raises the spec's next scripted turn. A written turn has `session_id`
-  `w-1`, 9 turns and cost 1.0 unless its row says otherwise.
+  raises the spec's next scripted turn, and raises `AssertionError` when
+  none is left. A written turn has `session_id` `w-1`, 9 turns and cost
+  1.0 unless its row says otherwise. A rejected turn has a `resets_at`
+  60 seconds past the clock.
 - **The runner double** records the spec id, `candidate.task_id`, and the
   text of `ledger.spec_text` of that task or `None`. It mints its own run
   and task with one closed attempt at 1.0, and returns
@@ -446,58 +464,89 @@ otherwise.
 | order | spec | reviews in turn | writer turns in turn |
 |---|---|---|---|
 | 1 | `TE-1` | `b(build)`, `b(witness)`, clean | `r1a\n`, `r1b\n` |
-| 2 | `TE-2` | `b(witness)`, `b(witness)`, `b(build)`, `b(witness)` | rejected at cost 0.25 with `resets_at` 60 s on, then `r2a\n`, `r2b\n` and `r2c\n` |
+| 2 | `TE-2` | `b(witness)`, `b(witness)`, `b(build)`, `b(witness)` | rejected at cost 0.25, then `r2a\n`, `r2b\n` and `r2c\n` |
 | 3 | `TE-3`, on `TE-2` | none | none |
-| 4 | `TE-4` | `u`, `u` | `r4\n` |
-| 5 | `TE-5` | `b(build)`, `u` | `r5\n` |
+| 4 | `TE-4` | `u` four times | `r4a\n`, `r4b\n`, `r4c\n` |
+| 5 | `TE-5` | `b(build)`, `u`, clean | `r5a\n`, `r5b\n` |
 | 6 | `TE-10` | `b(build)` three times, then `u` | `t1\n`, `t2\n`, `t3\n` |
 | 7 | `TE-7` | clean | none |
-| 8 | `TE-6` | `b(build)` | `error` `api_error`, cost 0.125 |
-| 9 | `TE-9`, `budget_usd` 48.5 | `b(witness)`, `b(witness)` | `r9\n` |
+| 8 | `TE-9`, `budget_usd` 39.625 | `b(witness)`, `b(witness)` | `r9\n`, then rejected at cost 0.25 |
+| 9 | `TE-6` | `b(build)` | `error` `api_error`, cost 0.125 |
 | 10 | `TE-8` | `b(build)` | raises `RuntimeError("writer cell would not start")` |
 | 11 | `TE-11` | none | none |
 
-`TE-9`'s first round sees 24.375 spent, so 67.625 is left against a need
-of 67. Its second sees 25.875 spent, so 66.125 is left, and it is refused.
-Leaving out any one of the five terms lets the second round run. So does
-`SPEC_WRITER_BUDGET_USD` in place of `SPEC_WRITER_SESSION_USD`, and a
-check before the first round alone. The spec review's figure of 56 assumed
-the earlier order, and `TE-10` and the rounds moved the spend. The aborts
-are `TE-6` and `TE-8`, with `TE-9` between them counting none. So the batch
-stops `INFRASTRUCTURE` before `TE-11`. Each cost is a sum of powers of two,
-so each total is exact.
+**The arithmetic.** `SPEC_WRITER_SESSION_USD` is 18.5 and
+`SPEC_REVIEW_BUDGET_USD` 6.0, so `TE-9`'s need is 18.5 + 6.0 + 39.625,
+which is 64.125. The budget left is 100 less 8 less `batch_spend`, so 92
+less the spend. The specs before `TE-9` spend these.
+
+| spec | reviews | writer | runner | total | running |
+|---|---|---|---|---|---|
+| `TE-1` | 3 × 0.5 | 2 × 1.0 | 1.0 | 4.5 | 4.5 |
+| `TE-2` | 4 × 0.5 | 0.25 + 3 × 1.0 | none | 5.25 | 9.75 |
+| `TE-4` | 4 × 0.5 | 3 × 1.0 | none | 5.0 | 14.75 |
+| `TE-5` | 3 × 0.5 | 2 × 1.0 | 1.0 | 4.5 | 19.25 |
+| `TE-10` | 4 × 0.5 | 3 × 1.0 | none | 5.0 | 24.25 |
+| `TE-7` | 0.5 | none | 1.0 | 1.5 | 25.75 |
+
+`TE-9` then checks three times.
+
+| check | spend | left | against 64.125 |
+|---|---|---|---|
+| before round 1, after its first review | 26.25 | 65.75 | runs `r9\n` |
+| before round 2, after its second review | 27.75 | 64.25 | runs, and the writer is rejected |
+| after the wait, on the same review | 28.0 | 64.0 | refused, short by 0.125 |
+
+Leaving out any one of the five terms lets the third check pass. So does
+`SPEC_WRITER_BUDGET_USD`, 17.0, in place of `SPEC_WRITER_SESSION_USD`, and
+so does a spend that misses `TE-9`'s own review, which leaves 64.5. A
+check before the first round alone, or none after a wait, calls the
+writer a third time, and the double raises. `_drive`'s own check passes
+each time `TE-9` is offered, since 39.625 is below both 66.25 and 64.0.
+After `TE-9`, `TE-6` spends 0.5 and 0.125, and `TE-8` 0.5, so
+`batch_spend` ends at 29.125. Every other round's check sees at most
+29.125 spent, `TE-8`'s, so at least 62.875 left against a need of 36.5. The aborts
+are `TE-6` and `TE-8`, in a row, so the batch stops `INFRASTRUCTURE`
+before `TE-11`. `TE-9` runs before them and counts none. A build that
+counts its refusal as an abort stops before `TE-8`, whose writer call the
+witness asserts. Each cost is a sum of powers of two, so each total is
+exact.
 
 **Criterion 2's witness** asserts these.
 
 - The reviews are `TE-1` on `None` with no keyword, then with `spec_text`
   `r1a\n`, then `r1b\n`. Then `TE-2` on `TE-1` four times, with no keyword,
-  `r2a\n`, `r2b\n` and `r2c\n`. Then `TE-4` on `TE-1` with none, then
-  `r4\n`. Then `TE-5` on `TE-4` with `s3\n`, then `r5\n`. Then `TE-10` on
-  `TE-5` with none, `t1\n`, `t2\n` and `t3\n`. Then `TE-7` on `TE-10`.
-- The writer calls for `TE-1` hand it `None`, then `r1a\n`. Each call gets
-  the text of the review before it. For `TE-2` on `TE-1` the calls hand it
-  `None` twice, then `r2a\n` and `r2b\n`. `TE-4` gets one call, with `None`.
-  `TE-5` gets one, with `s3\n`. `TE-10` gets three.
-- The runner calls are `TE-1` with `r1b\n`, `TE-4` with `r4\n`, `TE-5`
-  with `r5\n`, `TE-10` with `t3\n` and `TE-7` with none, each on its own
-  task.
-- The lines hold `TE-1`'s ` revised  2`, `TE-5`'s ` revised  1`, `TE-2`'s
-  ` revised  3` and `TE-2`'s ` escalated  1 after 3 revisions`. `TE-3` is
-  refused.
-- A second batch in the same process, on a fresh ledger, runs `TE-2` and
-  `TE-9`, each with `b(build)` then clean and one writer turn. Each prints
-  ` revised  1`, so a store of rounds at module scope fails.
+  `r2a\n`, `r2b\n` and `r2c\n`. Then `TE-4` on `TE-1` four times, with no
+  keyword, `r4a\n`, `r4b\n` and `r4c\n`. Then `TE-5` on `TE-1` with
+  `s3\n`, `r5a\n` and `r5b\n`. Then `TE-10` on `TE-5` with none, `t1\n`,
+  `t2\n` and `t3\n`. Then `TE-7` on `TE-5` with none.
+- Each writer call gets the text of the review before it, exactly. For
+  `TE-1` the calls hand it `None`, then `r1a\n`. For `TE-2` on `TE-1` they
+  hand it `None` twice, then `r2a\n` and `r2b\n`, and the first two get
+  the same review text. `TE-4` gets `None`, `r4a\n` and `r4b\n`. `TE-5`
+  gets `s3\n`, then `r5a\n`. `TE-10` gets `None`, `t1\n` and `t2\n`.
+- The runner calls are `TE-1` with `r1b\n`, `TE-5` with `r5b\n` and `TE-7`
+  with none, each on its own task.
+- The lines hold `TE-1`'s ` revised  2`, `TE-5`'s ` revised  2`, and
+  ` revised  3` for each of `TE-2`, `TE-4` and `TE-10`. `TE-2`'s line ends
+  ` escalated  1 after 3 revisions`. `TE-4`'s and `TE-10`'s end
+  ` escalated  0 after 3 revisions`. `TE-3` is refused.
+- A second batch in the same process runs on a fresh ledger. It runs
+  `TE-2` and `TE-9`, each with `budget_usd` 12, `b(build)` then clean,
+  and one writer turn. Each prints ` revised  1`, so a store of rounds at module scope
+  fails.
 - A third batch on a fresh ledger runs `TE-11` with `b(build)` and `TE-12`
   with `u`, and no `revise`. It stops `DRAINED`, calls no writer, runs
   `TE-12` alone. Its last line for `TE-11` ends ` escalated  1`, with no
   suffix.
 
-**Criterion 3's witness** asserts the sleeps are `[60.0]`. `TE-2`'s first
-two writer calls see its task `QUEUED`, then `RATE_LIMITED`. The last
-writer calls are `TE-6`, `TE-9` once, and `TE-8`, each on `TE-7`. The last
-reviews are `TE-6`, `TE-9` twice, the second with `spec_text` `r9\n`, and
-`TE-8`. One line for `TE-6` ends ` unrevised  api_error`. `TE-9` prints
-` revised  1`, then one line holding ` unrevised  `. Exactly one line for
+**Criterion 3's witness** asserts the sleeps are `[60.0, 60.0]`, one for
+`TE-2` and one for `TE-9`. `TE-2`'s first two writer calls see its task
+`QUEUED`, then `RATE_LIMITED`. The last writer calls are `TE-9` twice,
+then `TE-6` and `TE-8`, each on `TE-7`. The last reviews are `TE-9`
+twice, the second with `spec_text` `r9\n`, then `TE-6` and `TE-8`.
+`TE-9` prints ` revised  1`, then exactly one line holding ` unrevised  `.
+One line for `TE-6` ends ` unrevised  api_error`. Exactly one line for
 `TE-8` holds `raised RuntimeError`. The stop reason is `INFRASTRUCTURE`,
 and no line names `TE-11`.
 
@@ -508,45 +557,49 @@ With `R` for `SPEC_REVIEW` at 0.5 and `W` for `SPEC_WRITING` at 1.0:
 |---|---|---|
 | `TE-1` | R, W, R, W, R | `QUEUED` |
 | `TE-2` | R, W at 0.25, W, R, W, R, W, R | `SPEC_WITHHELD` |
+| `TE-4` | R, W, R, W, R, W, R | `SPEC_WITHHELD` |
+| `TE-9` | R, W, R, W at 0.25 | `RATE_LIMITED` |
 | `TE-6` | R, W at 0.125 with subtype `error` | `GATE_ERROR` |
 | `TE-8` | R | `GATE_ERROR` |
-| `TE-9` | R, W, R | `QUEUED` |
 
 Every other attempt's subtype is `success`. `TE-1`'s first `W` carries
 `w-1` and 9 turns. `TE-1`'s `spec_text` facts are `(1, revision,
 .saffron/specs/TE-1-x.md, r1a\n)`, then the same with 2 and `r1b\n`.
-`TE-2`'s texts are `r2a\n`, `r2b\n` and `r2c\n`. `TE-5`'s fourth is `(4,
-revision, .saffron/specs/TE-5-x.md, r5\n)`. `TE-6` and `TE-8` hold none.
-The `spec_review` routes are these.
+`TE-2`'s texts are `r2a\n`, `r2b\n` and `r2c\n`, and `TE-4`'s `r4a\n`,
+`r4b\n` and `r4c\n`. `TE-5`'s fourth and fifth are `(4, revision,
+.saffron/specs/TE-5-x.md, r5a\n)` and the same with 5 and `r5b\n`. `TE-9`
+holds one, `r9\n`. `TE-6` and `TE-8` hold none. The `spec_review` routes
+are these.
 
 | spec | routes |
 |---|---|
 | `TE-1` | `revise`, `revise`, `run` |
 | `TE-2` | `revise` three times, then `escalate` |
-| `TE-4` | `revise`, `run` |
-| `TE-5` | `revise`, `run` |
-| `TE-10` | `revise` three times, then `run` |
+| `TE-4` | `revise` three times, then `escalate` |
+| `TE-5` | `revise`, `revise`, `run` |
+| `TE-10` | `revise` three times, then `escalate` |
 | `TE-9` | `revise`, `revise` |
 
-`batch_spend` is exactly 26.375. In the third batch, `TE-11`'s fact is
+`batch_spend` is exactly 29.125. In the third batch, `TE-11`'s fact is
 routed `escalate` and its task is `SPEC_WITHHELD`. `TE-12`'s is routed
 `run`.
 
-These fail criteria 2 to 4, each measured:
+These fail criteria 2 to 4. The prototype measured the list against an
+earlier arrangement, with a writer session of 12.50 and one round for a
+concern alone. The six marked reasoned came after it, and this
+arrangement's figures are reasoned too.
 
 - no fresh review after a revision
 - the fresh review handed no text, or a text only after tonight's revision
 - each revision handed the queued file, or no layer
 - each revision handed the read's findings dumped again, or the first
-  review's text on every round, reasoned since the prototype's text held
-  prose
+  review's text on every round, reasoned
 - rounds counted across the batch, from the task's spec texts, or at
   module scope
 - a bound of 2 or of 4
-- a read with no blocker escalated after the rounds, or with no writer
-- a read with no blocker given three rounds
-- D4 read as one round for a witness concern whatever ran before, which
-  revises `TE-5` a second time
+- a concern alone given one round, or routed `run` after three, reasoned
+- rounds counted apart for blockers and for a concern, which gives
+  `TE-10`'s concern three more, reasoned
 - a rate-limited session counted as a round, or followed by a fresh review
 - a rate-limited session read as an error, or leaving the state
 - an errored revision returned as a refusal, or ending `SPEC_WITHHELD`
@@ -554,6 +607,8 @@ These fail criteria 2 to 4, each measured:
 - the budget refusal raised as an abort, or ending `SPEC_WITHHELD`
 - no budget check, one before the first round alone, or one that leaves
   out any of its five terms
+- no budget check before a writer call retried after a wait, reasoned
+- a budget check blind to the spec's own review, reasoned
 - the writer's first-turn ceiling in place of the session's
 - no writer read as `run` for a blocker, or no suffix after the rounds
 - no state for an escalation with no writer
@@ -573,8 +628,8 @@ the checkout\n`. The fetch returns `head`. It pins `base`.
 
 - It calls the review for `SY-1` with no text, then with `spec_text`
   `revised\n`. The second prompt starts with the first. The rest holds
-  `<spec>\nrevised\n</spec>` and `scope blocker`. The first holds no
-  `<spec>`.
+  `<spec>\nrevised\n</spec>`, `review that text` and `scope blocker`. The
+  first holds no `<spec>`, `review that text` or `scope blocker`.
 - It calls the writer for `SY-1` with no layer and `None`, with the layer
   `SY-7` and `None`, and with no layer and `given\n`. The first two
   prompts hold `<spec>\nqueued at base\n</spec>`, and the third
@@ -592,6 +647,7 @@ These fail it, each measured:
 - a missing file sent as an empty spec
 - the text with no spec tags, or in place of the prompt
 - no sentence naming a scope blocker
+- a sentence that never asks for a review of that text, reasoned
 
 **Criterion 6's witness** follows `SA-0156`'s wiring witness, with
 `_readiness_passes` and `_fake_batch_resolution`. It replaces
@@ -618,15 +674,21 @@ for every spec, as D1 decides. It built
 criteria 1 to 5 and their witnesses. The right build passed all of them.
 Each wrong build listed as measured was applied as a text edit, and each
 failed its witness. Criterion 6 needs `SA-0144`'s `--stack` path, so
-nothing ran it. A later revision moved criterion 1's route from a word in
+nothing ran it. Later revisions moved criterion 1's route from a word in
 a claim to the `witness` tag, and a review's text to `SA-0175`'s block
-alone. No prototype ran after it, so each wrong version marked reasoned
+alone. They gave a concern alone three rounds, as design section 3 routes
+it as `witness` (`docs/superpowers/specs/2026-09-23-stack-batch-design.md:179-181`,
+`:198-199`). They moved the writer session's ceiling to 18.5, rebuilt the
+arrangement round `TE-9`'s wait, and recomputed its figures. No prototype ran after it, so each wrong version marked reasoned
 is unmeasured.
 
 **What the witnesses leave undriven.**
 
 - A budget left exactly equal to a round's need. The check runs the round
   then.
+- A budget refusal straight after a review, with no wait between. `TE-9`
+  meets its refusal after a wait, so the `revise` route recorded for a
+  review refused at once is stated, not driven.
 - A follow-up's rounds with both reserves released. `SA-0162` passes the
   generation and drives it.
 - A raise from `record_spec_text`. It propagates as an abort, and the task
@@ -647,7 +709,8 @@ prototype, formatted by `ruff format`, measured 2138 changed tokens with
 callables 96. The witnesses for criteria 1 to 5 took 1704, about 80 of it
 a helper and imports `tests/test_batch.py` already carries. Criterion 6's
 witness, the wiring and the docstrings add about 320. The tag route's
-new rows add about 100 to criterion 1's witness. The route reads a tag
-in place of a word. That is about
-2480 tokens, 83% of the ceiling. Keep the arrangement's helpers shared
+new rows add about 160 to criterion 1's witness. The route reads a tag
+in place of a word. The longer scripts for `TE-4` and `TE-5`, `TE-9`'s
+wait and their asserts add about 80, and criterion 5's phrase about 10.
+That is about 2590 tokens, 86% of the ceiling. Keep the arrangement's helpers shared
 across the three batch witnesses.

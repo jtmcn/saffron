@@ -53,7 +53,7 @@ forbidden:
   - tests/test_session.py
   - tests/test_task.py
   - tests/test_review.py
-budget_usd: 22
+budget_usd: 24
 max_attempts: 3
 max_turns: 180
 pending_symbols:
@@ -65,29 +65,33 @@ acceptance:
       agent)` calls `agent` with the container, the prompt, and
       `implement.agent_options` of that system prompt,
       `SPEC_WRITER_MAX_TURNS`, `SPEC_WRITER_BUDGET_USD` and
-      `SPEC_SESSION_TOOLS`, and nothing else. A first turn that returns with
-      a `session_id` and no rejected window gets one extraction turn. That
-      call passes the same container, the options with
-      `SPEC_WRITER_EXTRACT_BUDGET_USD` in place of the writer's budget, the
-      prompt `context.turn_prompt("spec-writer-extract")`, `resume` of the
-      first turn's `session_id` and `last_cost_usd` of its cost.
-      `SPEC_WRITER_SESSION_USD` is the sum of the two budgets, and at most
-      12.50. The result is a `SpecWriterSession`. Its text starts at the
+      `SPEC_SESSION_TOOLS`, and nothing else. `SPEC_WRITER_MAX_TURNS` is
+      the `int` 120, `SPEC_WRITER_BUDGET_USD` 17.0,
+      `SPEC_WRITER_EXTRACT_BUDGET_USD` 1.5, `SPEC_WRITER_SESSION_USD` their
+      sum, 18.5, and `SPEC_WRITER_TIMEOUT_S` 3600.0. A first turn that
+      returns with a `session_id` and no rejected window gets one
+      extraction turn. That call passes the same container,
+      `SPEC_WRITER_EXTRACT_PROMPT`, the options with
+      `SPEC_WRITER_EXTRACT_BUDGET_USD` in place of the writer's budget,
+      `resume` of the first turn's `session_id`, and `last_cost_usd` of the
+      smaller of the first turn's cost and `SPEC_WRITER_EXTRACT_BUDGET_USD`.
+      The result is a `SpecWriterSession`. Its text starts at the
       extraction turn's first opening output tag that optional whitespace
       and a `---` fence follow. It runs from that fence to the last closing
       output tag, stripped, plus one newline. Its `spec_sha` is
       `artifacts.hash_artifact` of that text, or `None` with no text. Its
-      turns sum each turn that returned or failed with an attempt, and so
-      does its cost. A failed extraction attempt with no `session_id` and 0
-      turns carries no result event, and adds no cost. Its `session_id` is
-      the last one any turn set. A turn whose rate-limit status is `rejected`, returned or
-      raised, gives no text, no error and a `resets_at` shaped as
-      `run_spec_review` shapes one, whatever block it holds. A turn that
-      raises `implement.AgentFailed` gives its message as `error` and no
-      text. An extraction turn with no such block gives an error and no
-      text. A first turn with no `session_id` does too, and runs no
-      extraction turn. Any other raise propagates. The witness drives each
-      case, from either turn.
+      cost and its turns sum every attempt a turn returned or failed with,
+      a killed turn's included. Its `session_id` is the last one any turn
+      carried. A turn whose rate-limit status is `rejected`, returned or
+      raised, gives no text, no error and a `resets_at` of the clean `int`
+      above 0 that `session._resets_at_fields` passes, or 1 otherwise,
+      whatever block it holds. A turn that raises `implement.AgentFailed`
+      otherwise gives its message as `error` and no text. A first turn with
+      no `session_id` gives an error, no text and no extraction turn. An
+      extraction turn with no such block goes to criterion 5's re-ask. Any
+      other raise propagates. The witness drives each case, from either
+      turn, and reset values of 10**20, 0, -5, `True`, a float, `None` and
+      a string.
     witness: tests/test_spec_review.py::test_a_spec_writer_session_returns_the_extraction_turns_spec
   - claim: >-
       `spec_review.spec_writer_system_prompt(policy, *, prompts_dir)` reads
@@ -110,9 +114,12 @@ acceptance:
       of the three account lines `SA-0156` quotes, verbatim, each as a
       whole line. It holds the line "Measure any list of wrong builds you
       add with a throwaway script." as a whole line too.
+      The raw `spec-writer-extract.md` holds the Problem's two lines, "Put
+      the whole spec file in the block, frontmatter first." and "Do not
+      wrap the file in a code fence.", each as a whole line.
       `SPEC_WRITER_EXTRACT_PROMPT` is
       `context.turn_prompt("spec-writer-extract")`, and holds
-      `artifacts.EXTRACTION_PROMPT`, `frontmatter` and `code fence`. Neither
+      `artifacts.EXTRACTION_PROMPT`. Neither
       raw file holds any of the fifteen strings `SA-0175`'s criterion 4
       lists. The witness checks each of those fifteen in each file,
       case-insensitively.
@@ -143,6 +150,25 @@ acceptance:
       spec id. Both turns run in that one cell, and the callable returns
       what `run_spec_writer` returns.
     witness: tests/test_cli.py::test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head
+  - claim: >-
+      When the extraction turn returns, with no rejected window, and its
+      text holds no output block that opens on a `---` fence,
+      `run_spec_writer` re-asks once. Its third call passes the container,
+      the prompt `no <output> block opening on a --- fence`, a blank line
+      and `SPEC_WRITER_EXTRACT_PROMPT`, and the extraction turn's options.
+      It passes `resume` of the last `session_id` a turn carried, and
+      `last_cost_usd` of the smaller of the extraction turn's cost and
+      `SPEC_WRITER_EXTRACT_BUDGET_USD`. It passes nothing else. A third
+      turn that holds a spec block gives that block's text, read as
+      criterion 1 reads it. One that holds none gives that same message as
+      `error` and an empty `text`, and there is no fourth call. A rejected
+      third turn, returned or raised, gives no error, an empty `text` and
+      criterion 1's reset rule. A third turn that raises `AgentFailed`
+      otherwise gives its text as `error`, and any other raise propagates.
+      Cost and turns sum every attempt, and `session_id` is the last one a
+      turn carried. The witness drives each case, an empty block and a
+      block with no fence included.
+    witness: tests/test_spec_review.py::test_a_spec_writer_re_asks_once_when_its_extraction_holds_no_spec
 ---
 
 ## Context
@@ -238,13 +264,25 @@ by symbol where the chain edits them. This spec consumes these names.
 the same session for the record. "Two turns, because §5.3 allows exactly one
 way to produce a structured artifact" (`saffron/phases/rebut.py:164-165`).
 The second call passes `resume` and `last_cost_usd`, and the costs of
-both turns are summed (`saffron/phases/rebut.py:186-200`). A turn killed before its result event
-raises `AgentFailed` with an attempt of no `session_id`, 0 turns and a cost
-of `last_cost_usd` (`saffron/phases/implement.py:330-341`). So REBUT's
-failed extraction adds the first turn's cost a second time. Its handler
-adds the failed attempt's cost to the first turn's
-(`saffron/phases/rebut.py:194-198`). This spec adds nothing for such an
-attempt. `parse_output_block` returns the last non-greedy `<output>` block
+both turns are summed (`saffron/phases/rebut.py:186-200`). A turn killed
+before its result event raises `AgentFailed` with an attempt of no
+`session_id`, 0 turns and a cost of `last_cost_usd`
+(`saffron/phases/implement.py:330-341`). A failed turn that reported 0
+falls back to that same figure (`saffron/phases/implement.py:406-418`).
+That fallback is §4.1's rule. "An attempt that burned $4 and then crashed
+records $0 unless the supervisor falls back to the last good figure it
+saw" (`DESIGN.md:343`). So this spec counts every failed attempt. It caps
+the figure it passes at the next turn's own budget, since the first
+turn's cost can run past ten times an extraction's. Salvage scales its fallback
+for the same reason (`saffron/cell/session.py:2113-2119`).
+
+**How a schema failure is retried.** §5.3 feeds a schema failure back
+"twice, then reject" (`DESIGN.md:727`). `SA-0175`'s review re-asks once,
+as `run_lens` does, and this spec's writer does the same. A writer
+session whose second answer still holds no spec has spent two turns on
+shape, and `SA-0164` counts its error.
+
+`parse_output_block` returns the last non-greedy `<output>` block
 (`saffron/agents/artifacts.py:27`, `saffron/agents/artifacts.py:196-202`).
 A spec that quotes a closing tag loses its tail there, and a draft block or
 a tag in prose moves its start. So this spec reads its own block.
@@ -277,10 +315,11 @@ Build four things.
      `cost_usd: float`, `error: str | None`, `resets_at: int | None`,
      `session_id: str | None`, `num_turns: int` and
      `spec_sha: str | None`.
-   - `SPEC_WRITER_MAX_TURNS` of 120, `SPEC_WRITER_BUDGET_USD` of 11.0,
+   - `SPEC_WRITER_MAX_TURNS` of 120, `SPEC_WRITER_BUDGET_USD` of 17.0,
      `SPEC_WRITER_EXTRACT_BUDGET_USD` of 1.5, `SPEC_WRITER_SESSION_USD` as
      their sum, and `SPEC_WRITER_TIMEOUT_S` of 3600.0.
-   - `run_spec_writer`, as criterion 1 states. Read the block with a
+   - `run_spec_writer`, as criteria 1 and 5 state. Build the re-ask as
+     `SA-0175`'s `run_spec_review` builds its own. Read the block with a
      regular expression local to this module. It opens on the first
      `<output>` that optional whitespace and `---` follow, and reads
      greedily to the last `</output>`. It takes any prompt, so `SA-0161`
@@ -292,10 +331,18 @@ Build four things.
    substituting text and formatting the result.
 3. **The prompt files.** Write `saffron/agents/prompts/spec-writer.md`, as
    the notes below say. Add
-   `saffron/agents/prompts/turns/spec-writer-extract.md`. It asks for the
-   whole spec file, frontmatter first, and nothing else in the block. It
-   forbids a code fence around the file, in words holding `code fence`. It
-   ends with the `{extraction}` slot. Load it at import into
+   `saffron/agents/prompts/turns/spec-writer-extract.md`. It holds these
+   two lines, each word for word and on a line of its own.
+
+   ```
+   Put the whole spec file in the block, frontmatter first.
+   Do not wrap the file in a code fence.
+   ```
+
+   It asks for nothing else in the block. It ends with the `{extraction}`
+   slot, and holds no other `{word}` brace pair, since
+   `test_a_loaded_turn_prompt_keeps_no_unfilled_slot` reads one as a slot
+   (`tests/test_context.py:437-443`). Load it at import into
    `SPEC_WRITER_EXTRACT_PROMPT`, as `rebut.EXTRACT_PROMPT` is loaded
    (`saffron/phases/rebut.py:38`). Add `"spec-writer-extract"` to
    `tests/test_context.py`'s `TURN_PROMPTS` with that constant, and to the
@@ -354,9 +401,6 @@ are `pending_symbols` entries.
 - **Parsing the revised text.** `SA-0150` runs `parse_spec`'s refusals and
   gate 0 again on a recorded text before its cell. The session returns the
   text as the block holds it.
-- **A re-ask on a missing block.** `SA-0175`'s review re-asks once on a
-  block that is not the schema. The writer's extraction turn gets none. A
-  session with no block ends with an error, and `SA-0164` counts it.
 - **The fresh review of a revision.** `SA-0164` has the next review read
   the revision beside the original.
 - **A spec text of `None`.** The callable's type takes it, because
@@ -370,10 +414,6 @@ are `pending_symbols` entries.
 - **Follow-up specs.** `SA-0161` builds their user prompt and host logic
   around `run_spec_writer`, and reserves by `SPEC_WRITER_SESSION_USD`.
   `SA-0165` runs them with `spec_writer_system_prompt`.
-- **REBUT's double charge.** Its failed extraction turn adds the
-  attempt's cost (`saffron/phases/rebut.py:194-198`). A kill before the
-  result event sets that cost to the first turn's. `saffron/phases/**`
-  is forbidden here, so the delegate files it as its own backlog item.
 - **Concurrent sessions.** They wait for per-cell network names
   (b-6a692d).
 - **The vocabulary.** `CONTEXT.md` names the `spec-writer` agent only as a
@@ -412,7 +452,12 @@ slots once, and no other brace. It covers these, in words of its own.
 - Every sentence about current code names a file and line you read at
   the base.
 - Every file the change edits sits in `touches`, and none sits in
-  `{protected}`. The size estimate stays under its type's ceiling in
+  `forbidden` or `{protected}`. A file the change must not edit goes in
+  `forbidden`.
+- `pending_symbols` names each new name that nothing calls until a later
+  spec lands, as `<path>::<name>`. A name left out can fail a declared
+  gate that reads unused code.
+- The size estimate stays under its type's ceiling in
   `{ceilings}`. The size check blocks when a changed path matches
   `{elevate_on}`.
 - A line that ends in a colon, then `{gates}` on the lines below it, says
@@ -439,59 +484,56 @@ return `spec` at cost 0.25, with `session_id` `s-2`.
   `</output>`
 
 The killed turn is the attempt `run_agent` gives a turn cut before its
-result event: no `session_id`, subtype `error`, 0 turns and cost 0.5.
+result event. The double builds it from the call it gets: no
+`session_id`, subtype `error`, 0 turns, and a cost equal to the
+`last_cost_usd` that call passed. It raises `AgentFailed("the agent
+produced no result event")` with it. `R` stands for each of seven reset
+values in turn. 1755800000 and `10**20` give themselves. `None`, `"soon"`,
+`True`, 1755800000.0, 0 and -5 each give 1.
 
 | first turn | extraction turn | text, cost, error holds, `resets_at`, `session_id`, turns |
 |---|---|---|
 | draft | final | `spec`, 0.75, none, `None`, `s-2`, 14 |
 | draft | prose | `spec`, 0.75, none, `None`, `s-2`, 14 |
 | draft | drafted | `spec`, 0.75, none, `None`, `s-2`, 14 |
-| draft | raises `AgentFailed` with the killed turn | empty, 0.5, `no result event`, `None`, `s-1`, 7 |
+| draft | the killed turn | empty, 1.0, `no result event`, `None`, `s-1`, 7 |
+| draft at cost 4.0 | the killed turn | empty, 5.5, `no result event`, `None`, `s-1`, 7 |
 | draft | raises `AgentFailed("api_error")` with 7 turns and cost 0.5 | empty, 1.0, `api_error`, `None`, `s-1`, 14 |
 | status `allowed`, reset 9, cost 0.5 | final | `spec`, 0.75, none, `None`, `s-2`, 14 |
-| status `rejected`, reset 1755800000, cost 0.25 | none | empty, 0.25, none, 1755800000, `s-1`, 7 |
-| raises `AgentFailed("api_error")`, `rejected`, reset `"soon"`, cost 0.125 | none | empty, 0.125, none, 1, `s-1`, 7 |
+| status `rejected`, reset `R`, cost 0.25 | none | empty, 0.25, none, what `R` gives, `s-1`, 7 |
+| raises `AgentFailed("api_error")`, `rejected`, reset `R`, cost 0.125 | none | empty, 0.125, none, what `R` gives, `s-1`, 7 |
 | draft | `rejected`, reset 1755800000, cost 0.0625, the final text | empty, 0.5625, none, 1755800000, `s-1`, 14 |
+| draft | `rejected`, reset -5, cost 0.0625, the final text | empty, 0.5625, none, 1, `s-1`, 14 |
 | draft | raises `AgentFailed("api_error")`, `rejected`, no reset, cost 0.0625 | empty, 0.5625, none, 1, `s-1`, 14 |
 | raises `AgentFailed("idle bound")`, text `<output>x</output>`, cost 0.0625 | none | empty, 0.0625, `idle bound`, `None`, `s-1`, 7 |
 | raises `AgentFailed("no result")` with no attempt | none | empty, 0.0, `no result`, `None`, `None`, 0 |
 | draft | raises `AgentFailed("api_error")`, text `<output>partial</output>`, cost 0.125 | empty, 0.625, `api_error`, `None`, `s-1`, 14 |
 | draft | raises `AgentFailed("idle bound")`, `session_id` `None`, cost 0.125 | empty, 0.625, `idle bound`, `None`, `s-1`, 14 |
 | draft | raises `AgentFailed("no result")` with no attempt | empty, 0.5, `no result`, `None`, `s-1`, 7 |
-| draft | text `no block`, cost 0.25 | empty, 0.75, `<output>`, `None`, `s-1`, 14 |
-| draft | text `<output>` then two spaces and a newline, then `</output>`, cost 0.25 | empty, 0.75, `<output>`, `None`, `s-1`, 14 |
 | returned with no `session_id`, cost 0.5 | none | empty, 0.5, `session_id`, `None`, `None`, 7 |
 
 "none" in the second column means the case asserts one call. Each other case
 asserts two. The first call is exactly `c-1`, `p` and the options with
 `SPEC_WRITER_BUDGET_USD`, with no other keyword. The second is `c-1`,
-`context.turn_prompt("spec-writer-extract")`, the options with
-`SPEC_WRITER_EXTRACT_BUDGET_USD`, `resume` `s-1` and `last_cost_usd` 0.5,
-with no other keyword. Each case asserts `spec_sha` is the SHA-256 of the
-expected text, or `None` where the text is empty. It asserts
-`SPEC_WRITER_SESSION_USD` is the sum of the two budgets and at most 12.50.
-Each rejected case asserts `type(resets_at) is int`. Last, a
-`RuntimeError` from the first turn, and one from the extraction turn, each
-propagate.
+`SPEC_WRITER_EXTRACT_PROMPT`, the options with
+`SPEC_WRITER_EXTRACT_BUDGET_USD`, `resume` `s-1` and `last_cost_usd`, with
+no other keyword. That `last_cost_usd` is 0.5, or 1.5 after the draft at
+cost 4.0. Each case asserts `spec_sha` is the SHA-256 of the expected text,
+or `None` where the text is empty. Each rejected case asserts
+`type(resets_at) is int`. The witness asserts `SPEC_WRITER_MAX_TURNS ==
+120` with `type(...) is int`, `SPEC_WRITER_BUDGET_USD == 17.0`,
+`SPEC_WRITER_EXTRACT_BUDGET_USD == 1.5`, `SPEC_WRITER_SESSION_USD == 18.5`
+and `SPEC_WRITER_TIMEOUT_S == 3600`. Last, a `RuntimeError` from the first
+turn, and one from the extraction turn, each propagate.
 
-These fail it, each measured:
+These fail it, measured on the earlier prototype:
 
 - one turn, with the text read from the first turn
-- the last block alone, as `parse_output_block` reads it
-- the first block alone, read non-greedy, or the whole turn text
-- a block from the first opening tag with no fence required
-- a block from the last opening tag, as `rpartition` reads it
-- an anchored block read to the first closing tag
-- the block not stripped, or no newline appended
 - an extraction turn not resumed, or with no `last_cost_usd`
 - the writer's budget on the extraction turn, or the session sum on the
   writer turn
-- an extraction budget that puts the session above 12.50
 - an extraction turn after a rejected first turn
 - the extraction turn's cost dropped, or a failed turn's cost dropped
-- a killed extraction turn's cost added
-- every extraction attempt with no `session_id` skipped, whatever its turns
-- a failed extraction skipped for a cost equal to the first turn's
 - a rejection read from the first turn only, or from a returned turn only
 - the block parsed before the rejection is read
 - `stop_on_rejected` around the agent
@@ -506,6 +548,28 @@ These fail it, each measured:
 - `artifacts.EXTRACTION_PROMPT` as the extraction turn's prompt
 - no `spec_sha`, a hash of the text before its newline, a hash of the
   whole turn text, or a hash of empty text
+
+These fail its block rows, measured on 2026-09-25 in a throwaway script
+over the final, prose and drafted texts:
+
+- the last block alone, as `parse_output_block` reads it
+- the first block alone, read non-greedy
+- a block from the first opening tag with no fence required
+- a block from the last opening tag, as `rpartition` reads it
+- a block read from the first fenced opening to the first closing tag
+- the block not stripped, or no newline appended
+
+These fail it too, reasoned, since the cost rule and the reset rows are
+new:
+
+- a killed extraction turn's cost dropped, or every failed attempt with 0
+  turns or no `session_id` skipped
+- `last_cost_usd` of the first turn's cost uncapped, which charges 8.0
+  after the draft at 4.0
+- a cap at `SPEC_WRITER_BUDGET_USD` or at the session sum
+- a reset at or below 0, `True` or a float passed through, or `None`
+  where it cannot be shaped
+- any of the five constants at another value
 
 **Criterion 2's witness** writes one template into a `tmp_path` prompts
 directory, as both `spec-review.md` and `spec-writer.md`:
@@ -555,15 +619,16 @@ holds each of these four blocks.
 
 It reads `spec-writer.md` raw, splits
 it into lines, and asserts each of `SA-0156`'s three account lines and the
-throwaway-script line is one of them. It asserts
-`SPEC_WRITER_EXTRACT_PROMPT` equals
+throwaway-script line is one of them. It reads `spec-writer-extract.md`
+raw, splits it into lines, and asserts each of the Problem's two lines is
+one of them. It asserts `SPEC_WRITER_EXTRACT_PROMPT` equals
 `context.turn_prompt("spec-writer-extract")`, and holds
-`artifacts.EXTRACTION_PROMPT`, `frontmatter` and `code fence`. It lowers
-both raw files and checks each of the fifteen strings against each. These
-fail it. The first was measured on the old turn file, and the rest are
-reasoned.
+`artifacts.EXTRACTION_PROMPT`. It lowers both raw files and checks each of
+the fifteen strings against each. These fail it, reasoned:
 
-- a turn file that does not forbid a code fence
+- a turn file that asks for the file inside a code fence, or words the
+  ban otherwise, which a check for the words `code fence` passes
+- a turn file that asks for the body alone, or the frontmatter last
 - a template that leaves a slot out, or spells a stray brace
 - an account line reworded, joined to another line, or left out
 - the account lines in the user prompt alone, where a follow-up's
@@ -621,7 +686,7 @@ one`. `SY-2`, whose `depends_on` is `SY-9`, is on the layer `SY-7`, with
 - three agent calls: `SY-1`, then `SY-1` resuming in the same container,
   then `SY-2`. The resumed call's prompt is the extraction turn's, with
   `SPEC_WRITER_EXTRACT_BUDGET_USD`. Every call's `timeout_s` is
-  `SPEC_WRITER_TIMEOUT_S`.
+  `SPEC_WRITER_TIMEOUT_S` and equals 3600.
 - each first call runs in the container its `cell_up` got. Its system
   prompt equals `spec_writer_system_prompt` of `load_policy` over that
   `gates_dir`, with `prompts_dir=context.PROMPTS_DIR`. It holds
@@ -659,14 +724,64 @@ with no layer. The system prompt equals `spec_writer_system_prompt` of
 - `run_spec_review` called in place of `run_spec_writer`
 - `stop_on_rejected` around the agent
 
+**Criterion 5's witness** uses criterion 1's double, its draft first turn
+at cost 0.5, its final text and its killed turn. `N` is the text
+`no block`. `E` is `<output>` then two spaces and a newline, then
+`</output>`. `U` is `<output>id: SY-1</output>`, a block with no fence.
+`M` is the message `no <output> block opening on a --- fence`. Every
+second turn carries cost 0.25, `s-2` and 7 turns. Every third turn that
+carries an attempt carries cost 0.25, `s-3` and 7 turns. A row can say
+otherwise.
+
+| second | third | calls | text, cost, error, `resets_at`, `session_id`, turns |
+|---|---|---|---|
+| `N` | final | 3 | `spec`, 1.0, `None`, `None`, `s-3`, 21 |
+| `E` | final | 3 | the same |
+| `U` | final | 3 | the same |
+| `N` with no `session_id` | final | 3 | the same |
+| `N` | final with no `session_id` | 3 | `spec`, 1.0, `None`, `None`, `s-2`, 21 |
+| `N` | `N` | 3 | empty, 1.0, `M`, `None`, `s-3`, 21 |
+| `N` | `rejected`, reset 9 | 3 | empty, 1.0, `None`, 9, `s-3`, 21 |
+| `N` | `rejected`, reset 0 | 3 | empty, 1.0, `None`, 1, `s-3`, 21 |
+| `N` | raises `AgentFailed("api_error")`, `rejected`, reset `"soon"` | 3 | empty, 1.0, `None`, 1, `s-3`, 21 |
+| `N` | raises `AgentFailed("cut")` with an attempt | 3 | empty, 1.0, `cut`, `None`, `s-3`, 21 |
+| `N` | the killed turn | 3 | empty, 1.0, `no result event`, `None`, `s-2`, 14 |
+| `N` at cost 3.0 | the killed turn | 3 | empty, 5.0, `no result event`, `None`, `s-2`, 14 |
+| `N` | raises `AgentFailed("gone")` with no attempt | 3 | empty, 0.75, `gone`, `None`, `s-2`, 14 |
+| `N` | raises `RuntimeError` | 3 | raises |
+
+Each third call is asserted exactly. It passes `c-1`, the prompt
+`M + "\n\n" + SPEC_WRITER_EXTRACT_PROMPT`, the second call's options, and
+`resume="s-2"`, or `"s-1"` where the second carries no `session_id`. It
+passes `last_cost_usd=0.25`, or 1.5 after `N` at cost 3.0, and no other
+keyword. No row makes a fourth call. Each rejected row asserts
+`type(resets_at) is int`, and each `spec_sha` follows criterion 1's rule.
+These fail it, reasoned:
+
+- no re-ask, which routes `N` to an error after two calls
+- a second re-ask, which makes a fourth call on `N` then `N`
+- `E` or `U` taken as the spec, or given an error with no re-ask
+- the message or the extraction prompt left out of the re-ask's prompt,
+  or `EXTRACTION_PROMPT` alone in place of `SPEC_WRITER_EXTRACT_PROMPT`
+- a re-ask with no `resume`, or `resume` of the first turn's id
+- the re-ask's `last_cost_usd` uncapped, which charges 6.5 after `N` at
+  cost 3.0
+- the writer's options on the re-ask
+- the re-ask's cost or turns left out of the sums
+- a third turn's rejection read as an error
+
 **How the lists were measured.** A throwaway prototype ran on 2026-09-24,
 and after each of the two reviews. Its tree was `SA-0156`'s prototype,
 `24e8152f`. It built an earlier shape of this spec, whose prompt came from
-a file the policy named. Criterion 1 and its list are unchanged from it.
+a file the policy named. Criterion 1's first list is unchanged from it.
 The right build passed its witness, and each wrong version listed as
-measured was applied as a text edit and failed it. Criteria 2 to 4 changed
-when ADR 7 made the prompt core's. Their lists are unmeasured in the new
-shape, and so are their witnesses' reverted runs.
+measured was applied as a text edit and failed it. `24e8152f` is not in
+this repository's history, so a reader cannot rerun it. On 2026-09-25 a
+throwaway script ran the block read alone over criterion 1's texts. It
+checked the right read and each wrong read the second list names. The
+cost rule, the reset rows and criterion 5 are new since the prototype.
+Criteria 2 to 4 changed when ADR 7 made the prompt core's. Those lists are
+unmeasured, and so is each witness's reverted run.
 
 **What the witnesses leave undriven.**
 
@@ -676,6 +791,9 @@ shape, and so are their witnesses' reverted runs.
   `PolicyError`, and the callable raises with it.
 - A block whose text is not a spec. `SA-0150`'s `parse_spec` refuses it at
   run time.
+- A read from the last fenced opening to the last closing tag. It
+  passes every row, measured in the same script, since no row holds two
+  fenced openings.
 - A draft block that itself opens on a `---` fence, before the real
   one. The read starts at the draft and runs to the last closing tag. The
   extraction prompt asks for one block, and `parse_spec` refuses the
@@ -684,20 +802,27 @@ shape, and so are their witnesses' reverted runs.
   So does one that fills every slot and writes badly. Its quality is
   measured on the first stack night.
 
-**The ceilings.** The backtest's 39 spec reviews cost $71.38, a mean of
-$1.83 (`docs/evidence/2026-09-14-spec-reviewer-backtest.md:174`). Design
-section 3 measures writing at about six times a review
-(`docs/superpowers/specs/2026-09-23-stack-batch-design.md:222-223`). So
-`SPEC_WRITER_BUDGET_USD` is 11.0, six times that mean. The chain's token
-tables put a draft at 1.4 to 2.0 times a review
-(`docs/evidence/2026-09-23-spec-chain-feedback.md:69-86`). So 11.0 is three
-to four times a draft's estimated mean. The extraction turn writes one
+**The ceilings.** `SA-0161` priced 74 hand `spec-writer` sessions from
+their transcripts. Their mean was $6.24, their p90 $16.92 and their max
+$23.43
+(`.saffron/specs/SA-0161-a-stack-batchs-qualified-findings-reach-no-writer-so-no-follow-up-spec-exists.md:209-211`).
+`SPEC_WRITER_BUDGET_USD` is 17.0, that p90 rounded up. A turn that
+reaches `max_budget_usd` raises, and the session ends in an error, so the
+ceiling sits above nine sessions in ten. The extraction turn writes one
 spec out on a context already cached. `SPEC_WRITER_EXTRACT_BUDGET_USD` of
-1.5 is reasoned from that, not measured. It keeps
-`SPEC_WRITER_SESSION_USD` at 12.50, the most `SA-0161`'s sub-cap allows.
-That sum is best effort. `max_budget_usd` bounds each call, and no session
-was ever seen reaching it. So a sibling reserves by
-`SPEC_WRITER_SESSION_USD` as a bound on its plan, not as a hard cap.
+1.5 is reasoned from that, not measured. `SPEC_WRITER_SESSION_USD` is
+their sum, 18.5. `SA-0161` and `SA-0164` reserve by it.
+
+**The bound on one session.** Every turn's `max_budget_usd` bounds its
+call, and each fallback figure is at most that turn's own budget. So a
+session records at most `SPEC_WRITER_BUDGET_USD` plus twice
+`SPEC_WRITER_EXTRACT_BUDGET_USD`, $20.00. That is `SPEC_WRITER_SESSION_USD`
+plus the re-ask's cap. It holds as long as each turn reports within its
+`max_budget_usd`, which is best effort. A first turn killed before its
+result event records $0, since no turn came before it. `run_agent`'s
+default `last_cost_usd` is 0.0 (`saffron/phases/implement.py:192-201`).
+So a sibling reserves by `SPEC_WRITER_SESSION_USD` as a bound on its plan,
+not as a hard cap.
 `SPEC_WRITER_MAX_TURNS` of 120 is a third above `SA-0175`'s 90.
 
 **The turn bound.** `SA-0165`'s writer measured 79 hand `spec-writer`
@@ -717,16 +842,18 @@ each docstring within ten lines.
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 2150 to 2500 changed tokens, 72% to 83% of the ceiling.
-The earlier prototype, formatted by `ruff format`, measured
-`saffron/spec_review.py` at 383 tokens and its turn file at 33, and those
-carry over. The system prompt's fill adds about 60 to 110, so about 470.
-`saffron/cli.py` measured 309 with a start refusal and a prompt-file read.
-Both go, and so do six prompt lines, so about 200.
-`spec-writer.md` at 50 lines runs about 310 to 460 tokens. That is 6.2 to
-9.1 words a line, as the system prompts in `saffron/agents/prompts/` run
-(`wc -lw`). The earlier witnesses measured 1331, with a policy witness and a
-refusal witness that go. Criteria 1 and 4 keep about 1000, with the spy
-and the account check's recorder added. Criteria 2 and 3 run about 150
-each, and `tests/test_context.py` about 10. Keep the doubles shared and
-the docstrings short.
+estimate is about 2750 to 3050 changed tokens, 92% to 102% of the
+ceiling. The earlier prototype,
+formatted by `ruff format`, measured `saffron/spec_review.py` at 383
+tokens and its turn file at 33. The fill adds about 60 to 110, and the
+re-ask and the cap about 80, so about 550. `saffron/cli.py` measured 309
+with a start refusal and a prompt-file read. Both go, and so do six
+prompt lines, so about 200. `spec-writer.md` at 50 lines runs about 310
+to 460 tokens. That is 6.2 to 9.1 words a line, as the system prompts in
+`saffron/agents/prompts/` run (`wc -lw`). The earlier witnesses measured
+1331, with a policy witness and a refusal witness that go. Criteria 1 and
+4 keep about 1100, with the reset rows, the literals, the spy and the
+account check's recorder added. Criteria 2 and 3 run about 160 each, and
+criterion 5 about 300, as `SA-0175`'s criterion 5 is estimated.
+`tests/test_context.py` takes about 10. Keep the doubles shared, the
+reset values in one loop, and the docstrings short.

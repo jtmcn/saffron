@@ -109,11 +109,11 @@ acceptance:
       on two layers, one of them with an empty slug.
     witness: tests/test_follow_up.py::test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_cost
   - claim: >-
-      A sub-cap of $100 times `follow_up.WRITER_SHARE` writes two
-      follow-ups whose sessions each cost
-      `spec_review.SPEC_WRITER_SESSION_USD`. It pools the third group as
-      over the sub-cap.
-    witness: tests/test_follow_up.py::test_a_hundred_dollar_night_writes_two_follow_ups_at_the_writer_ceiling
+      A sub-cap of $100 times `follow_up.WRITER_SHARE` writes one
+      follow-up whose session costs
+      `spec_review.SPEC_WRITER_SESSION_USD`. It pools the second and third
+      groups as over the sub-cap.
+    witness: tests/test_follow_up.py::test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling
   - claim: >-
       `follow_up.next_spec_id(origin_id, specs_dir, ledger, repo_id)`
       returns one more than the highest number carrying the origin id's
@@ -175,8 +175,9 @@ Every line number below was read at `f2a08a9f`, where none of them exist.
   `Ledger.task_run(task_id)`.
 - `SA-0160`: `spec_review.SpecWriterSession`, a frozen dataclass of
   `text`, `cost_usd`, `error`, `resets_at`, `session_id`, `num_turns` and
-  `spec_sha`. `SPEC_WRITER_SESSION_USD` is the ceiling of one session's two
-  turns, at most 12.50. `run_spec_writer` returns the spec text from its
+  `spec_sha`. `SPEC_WRITER_SESSION_USD` is 18.5, the budget of one
+  session's writer and extraction turns. Its one re-ask can add 1.5
+  more. `run_spec_writer` returns the spec text from its
   extraction turn.
 - `SA-0164`: `spec_review.WRITING_PHASE`, `SPEC_WRITING`, the phase of
   every writer session's attempt. It charges each revision session as an
@@ -273,10 +274,11 @@ body or a claim spells the `find`. A writer can leave it out of both.
 **The sub-cap.** `SA-0165` passes `--budget` times `WRITER_SHARE` as
 `cap_usd`, and `SA-0173` holds the same amount back from generation 0. A
 writer starts only while the sub-cap covers one session at
-`SPEC_WRITER_SESSION_USD`. A $100 night holds $25, which covers two
-sessions at a ceiling of $12.50. At the measured mean of $6.24 it writes
-three. Criterion 3 fails if the ceiling rises past $12.50 with the share
-unchanged. With `SA-0157`'s quarter for the end review, generation 0 runs
+`SPEC_WRITER_SESSION_USD`, 18.5. A $100 night holds $25, which covers one
+session at that ceiling, since $6.50 is left after it. At the measured
+mean of $6.24 it writes two, since $18.76 is left after the first.
+Criterion 3 fails if the ceiling falls to $12.50 or below with the share
+unchanged, since two sessions then fit. With `SA-0157`'s quarter for the end review, generation 0 runs
 within half of `--budget`.
 
 ## Out of scope
@@ -407,7 +409,7 @@ three calls on the same arrangement.
 These fail it, each measured:
 
 - a gate of spent under `cap_usd`, or a strict one against the ceiling
-- the gate at `SPEC_WRITER_BUDGET_USD`, or fixed at 12.5
+- the gate at `SPEC_WRITER_BUDGET_USD`, or fixed at 18.5
 - no session's cost counted
 - the test paths from the origin layer's diff
 - `touches` matched as globs, or an empty `touches` accepted
@@ -464,9 +466,10 @@ not `+beta_rate`. These fail it, each measured:
 
 **Criterion 3's witness** runs the same arrangement with the real
 constants. Three groups on `SA-0102`, each written at exactly
-`SPEC_WRITER_SESSION_USD` with a valid text. It asserts `SA-0108` and
-`SA-0109`, and one entry pooled over the sub-cap. A share of 0.2 fails
-it, measured.
+`SPEC_WRITER_SESSION_USD` with a valid text. It asserts `SA-0108` alone,
+and two entries pooled over the sub-cap. A share of 0.18 writes none, and
+one of 0.37 writes two. Both fail it, reasoned, since the figure changed
+after the prototype ran.
 
 **Criterion 4's witness** has `SA-0003-x.md` and `SB-0900-x.md` in
 `specs_dir`, and expects `SA-0004`. It adds `done/SA-0012-y.md` and
@@ -484,9 +487,10 @@ gives `SB-901`. These fail it, each measured:
 an error, and `success` otherwise, as `SA-0164` records a revision's. Its
 `terminal_reason` is `None`.
 
-**The ceiling's tail.** The measured writer sessions have a p90 of $16.92.
-So more than one in ten sessions shaped like them would reach
-`SPEC_WRITER_SESSION_USD`, stop there, and see its group pooled.
+**The ceiling's tail.** The measured writer sessions have a p90 of $16.92
+and a max of $23.43. `SPEC_WRITER_BUDGET_USD` of 17.0 sits above the p90
+(`SA-0160`). So fewer than one in ten sessions shaped like them would
+reach it, stop there, and see its group pooled.
 
 **How the lists were measured.** A throwaway prototype ran on 2026-09-24,
 on the host's git. It stood in for `StackReview`, `LayerReview`,

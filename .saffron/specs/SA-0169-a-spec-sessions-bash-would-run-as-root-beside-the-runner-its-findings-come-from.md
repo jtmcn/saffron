@@ -95,15 +95,26 @@ acceptance:
       `session.assert_bash_is_unprivileged(container)` calls
       `runtime.exec_` once, with the container and an argv of
       `implement.UNPRIVILEGED_BASH` and one probe script. It raises
-      `runtime.CellRuntimeError` naming "did not leave root" unless the
-      exit status is 0, the first output line is a uid other than 0, and
-      each later line reports a refused write, at least six of them. A
-      `missing <path>` line fails it. The witness drives a passing report,
+      `runtime.CellRuntimeError` naming "did not leave root" unless three
+      things hold. The exit status is 0, and the first output line is a
+      uid other than 0. Every later line is `refused <path>` or `skipped
+      <path>`, and at least six are `refused`. So a `wrote` line or a
+      `missing` line fails it, and a `skipped` line counts as no refusal.
+      The witness drives a passing report, one with a `skipped` line added,
       a uid of 0, a write the account made to a path on `PATH`, one to the
-      runner, a missing path, five refusals, exit status 127, empty
-      output, a uid with no write lines, and a first line that is not a
-      number.
+      runner, a missing fixed path, five refusals, five refusals and a
+      `skipped` line, exit status 127, empty output, a uid with no other
+      lines, and a first line that is not a number.
     witness: tests/test_session.py::test_the_bash_wrapper_self_check_refuses_a_cell_where_it_stayed_root
+  - claim: >-
+      The probe script `assert_bash_is_unprivileged` passes prints `wrote
+      <dir>` for a directory on `PATH` the running user can write. It
+      prints `skipped <entry>` for a `PATH` entry that does not exist, and
+      no `missing` line for it. The witness takes the script from the argv
+      criterion 5's `exec_` double recorded. It runs it under the host's
+      `bash`, with a writable directory in `tmp_path` and an entry that
+      does not exist on `PATH`.
+    witness: tests/test_session.py::test_the_bash_self_checks_probe_reports_a_writable_path_directory_as_written
 ---
 
 ## Context
@@ -273,16 +284,26 @@ Build six things.
    (`saffron/cell/runtime.py:225-226`). It says "No capabilities", and a
    caller can now name some.
 5. **The self-check.** Add `assert_bash_is_unprivileged` to
-   `saffron/cell/session.py`, as criterion 5 states. Its probe prints `id
-   -u`, then one line per path. That is `missing <path>` where `[ -e ]`
-   fails, then `wrote <path>` or `refused <path>` by `[ -w ]`. The paths
-   are `/opt/saffron`, the runner, the wrapper, and the CLI binary as
-   `readlink -f /opt/saffron/claude-code` resolves it. Then the SDK's
-   package directory and the `site-packages` above it, and each directory
-   on the cell's `PATH` with its parent, `/` for a top-level one. The probe
-   finds the SDK with `/opt/saffron/python`. Core names no repository path,
-   so a repo's own tree is reached through `PATH`. In this repo that covers
-   `/opt/venv/bin` and `/opt/venv`.
+   `saffron/cell/session.py`, as criteria 5 and 6 state. Its probe prints
+   `id -u`, then exactly one line per path.
+   - Six fixed paths come first. They are `/opt/saffron`, the runner, the
+     wrapper, and the CLI binary as `readlink -f /opt/saffron/claude-code`
+     resolves it. Then the SDK's package directory, which the probe finds
+     with `/opt/saffron/python`, and the `site-packages` above it. Each
+     prints `missing <path>` where `[ -e ]` fails, and otherwise
+     `wrote <path>` or `refused <path>` by `[ -w ]`.
+   - Then each directory on the cell's `PATH`, and its parent, `/` for a
+     top-level one. Each prints `skipped <path>` where `[ -e ]` fails, and
+     otherwise `wrote <path>` or `refused <path>` by `[ -w ]`.
+
+   A path that fails `[ -e ]` prints only its `missing` or `skipped` line.
+   The probe sets no `-e`, so a fixed path it cannot resolve prints
+   `missing` and the probe goes on to `PATH`.
+   Core names no repository path, so a repo's own tree is reached through
+   `PATH`. In this repo that covers `/opt/venv/bin` and `/opt/venv`. A
+   `PATH` entry the account cannot reach, such as one under a root-only
+   home, is skipped. The account cannot write through it either, and
+   failing on it would refuse every spec session in that repo's image.
 
    The self-check is forgeable only by code the image controls, since it
    runs before any session. It guards against a misbuilt image or a
@@ -304,11 +325,11 @@ toolchain or the state volume. The session's transcript lives in the state
 volume, and a resumed extraction turn reads it. So neither the turn under
 way nor any later turn in the cell runs anything the account wrote.
 
-**What `SA-0175`, `SA-0156` and `SA-0160` pass.** `SA-0175`'s
+**What `SA-0175`, `SA-0156`, `SA-0160` and `SA-0165` pass.** `SA-0175`'s
 `run_spec_review` passes `agent_options` of `SPEC_SESSION_TOOLS`, which
 hold `Bash` and neither `Write` nor `Edit`. So the prefix reaches that
-session with no argument. Each of `SA-0156`'s and `SA-0160`'s callables
-opens its cell with
+session with no argument. Each of `SA-0156`'s, `SA-0160`'s and
+`SA-0165`'s callables opens its cell with
 `layer_cell(..., spec_session=True)`, and that grants the capabilities and
 runs the self-check. A cell whose wrapper stays root raises
 `CellRuntimeError` before any session starts.
@@ -433,21 +454,25 @@ two. These fail it, each measured:
 
 **What criterion 3 leaves undriven.** `critic_cell` has five callers, and
 all share its one `prepare_worktree` call (`saffron/cell/session.py:1204`).
-The witness reaches it through two of them. PACKAGE's re-verification cell
-(`saffron/phases/package.py:525`) and the proxy (`saffron/cell/proxy.py:60`)
-pass no `cap_add`. Neither file is in `touches`, so neither can gain one.
+The witness reaches it through two of them. Two more cells come up
+outside `critic_cell`. PACKAGE's re-verification cell calls
+`prepare_worktree` directly (`saffron/phases/package.py:525`), and the
+proxy calls `runtime.run_detached` directly (`saffron/cell/proxy.py:60`).
+Neither passes `cap_add`. Neither file is in `touches`, so neither can
+gain one.
 
 **Criterion 4's witness** replaces `runtime.remove_container`,
 `session.cell_up`, `session.cell_down` and
 `session.assert_bash_is_unprivileged` with recorders that append to one
-log. It enters `layer_cell` with no keyword and with `spec_session=False`.
-Each time the log reads up, body, down, and the up call's
-`kwargs.get("cap_add", ())` is `()`. It enters once more with
-`spec_session=True`. The log reads up, check, body, down. The up call's
-`cap_add`, as a tuple, is the literal pair. The check got the container
-the up call named, which is also the one yielded. Last, it replaces the
-check with one that logs and raises `CellRuntimeError`. The error leaves
-`layer_cell`, and the log reads up, check, down. These fail it, each
+log, `remove_container` included. It enters `layer_cell` with no keyword
+and with `spec_session=False`. Each time the log reads remove, up, body,
+down, and the up call's `kwargs.get("cap_add", ())` is `()`. It enters
+once more with `spec_session=True`. The log reads remove, up, check,
+body, down. The up call's `cap_add`, as a tuple, is the literal pair. The
+check got the container the up call named, which is also the one
+yielded. Last, it replaces the check with one that logs and raises
+`CellRuntimeError`. The error leaves `layer_cell`, and the log reads
+remove, up, check, down. These fail it, each
 measured against a stand-in `layer_cell`:
 
 - the capabilities granted to every `layer_cell`
@@ -463,11 +488,14 @@ measured against a stand-in `layer_cell`:
 records its container and argv and returns the case's output and exit
 status. The passing report is `999`, then seven `refused` lines:
 `/opt/saffron`, the runner, the wrapper, `/cli`, `/sdk`, `/site` and
-`/opt/venv/bin`. One case turns `/cli` into a `missing` line, and one
-keeps only the first five. It passes, and
-the one call's argv is `/opt/saffron/unprivileged` and one script. Each
-other case raises `CellRuntimeError` matching "did not leave root". These
-fail it, each measured:
+`/opt/venv/bin`. Two cases pass: that report, and that report with
+`skipped /root/.local/bin` added. In each, the one call's argv is
+`/opt/saffron/unprivileged` and one script. Every other case raises
+`CellRuntimeError` matching "did not leave root". Those include the
+report with `/cli` turned into `missing /cli`, and the report cut to its
+first five `refused` lines. They include the same five with
+`skipped /root/.local/bin` added. These fail it. The last two are
+reasoned, and the prototype measured the rest.
 
 - a uid of 0 accepted
 - a `wrote` line accepted
@@ -477,10 +505,35 @@ fail it, each measured:
 - the probe run through `sh` rather than the wrapper
 - a `missing` line counted as a refusal
 - two refusals enough to pass
+- a `skipped` line read as a failure, reasoned
+- a `skipped` line counted as a refusal, reasoned
 
 Two probe wrong builds, measured against the cell test below, not this
 witness: the probe without the existence test, and the probe without the
 three new paths.
+
+**Criterion 6's witness** calls `assert_bash_is_unprivileged` with
+criterion 5's double and its passing report, and takes the script from
+the recorded argv. It makes a directory `w` in `tmp_path`, and runs
+`bash -c` on the script with `subprocess.run`. Its `PATH` is `w`, then
+`tmp_path / "absent"`, then `/usr/bin` and `/bin`. It asserts the output
+holds the line `wrote <w>` and the line `skipped <tmp_path>/absent`, and
+no line `missing <tmp_path>/absent`. It asserts nothing of the fixed
+paths, since the host has no `/opt/saffron`, and nothing of the exit
+status. It holds whether the suite runs as root or not, since `w` is
+the running user's own directory. These fail it, reasoned, since no
+prototype ran it:
+
+- a probe printing `refused` for every path that exists
+- a probe that reads no `PATH`
+- a probe printing `missing` for a `PATH` entry that does not exist,
+  or nothing for it
+- a probe run under `set -e`, which stops at the host's absent
+  `/opt/saffron/python` before it reaches `PATH`
+
+A probe testing `[ -r ]` or `[ -x ]` in place of `[ -w ]` passes it,
+since `w` is readable and searchable too. The cell test catches it,
+since it asserts `refused` for paths the account can read.
 
 **How the lists were measured.** A prototype ran on 2026-09-25 at
 `f2a08a9f`, with a stand-in `layer_cell` as `SA-0154` states it. The right
@@ -490,7 +543,10 @@ build passed all five witnesses, and `test_implement.py`, `test_runtime.py`,
 above was applied as a text edit, and each failed its own witness. Two
 also failed another: the prefix with an argument failed criterion 5, and
 a third capability granted failed criterion 4. With the source
-reverted, all five failed.
+reverted, all five failed. Criterion 6 and the `skipped` line came
+later, so criterion 5's two `skipped` cases and all of criterion 6 are
+reasoned. With the source reverted, criterion 6's witness fails, since
+`assert_bash_is_unprivileged` does not exist.
 
 **The cell test, which no criterion declares.** Add
 `test_a_spec_sessions_bash_cannot_write_what_root_runs` to
@@ -528,8 +584,9 @@ the cell it runs one Python program as root through `runtime.exec_` and
 - the self-check's own probe, run again, reports `refused` for
   `/opt/venv/bin` and then `/opt/venv`, and for `/opt/saffron`, the
   wrapper and the resolved CLI binary
-- the same probe with `PATH=/nonexistent:/usr/bin` reports `missing
-  /nonexistent`
+- the same probe with `PATH=/nonexistent:/root/x:/usr/bin` reports
+  `skipped /nonexistent` and `skipped /root/x`, and no `missing` line for
+  either
 - the wrapper with no argument, or with two, exits non-zero and prints
   nothing
 - the transcribed `_y` and `b8o` build the composite command around
@@ -555,10 +612,14 @@ that cell test, through the real `layer_cell` and this repo's image:
 | no `--no-new-privs` | `NoNewPrivs` was not 1 |
 | a root fallback after `setpriv` | the image build |
 | `CAP_SETGID` not granted | the self-check raised in `layer_cell` |
-| the probe without the existence test | no `missing /nonexistent` |
+| the probe without the existence test | no `missing /nonexistent`, the line the probe then printed |
 | the probe without the new paths | no `refused /opt/saffron` |
 | no `--inh-caps=-all` | nothing |
 | a third capability granted | nothing |
+
+The probe then printed `missing` for a `PATH` entry too. Its `skipped`
+spelling, the `/root/x` entry and criterion 6's witness came after this
+run, so they are unmeasured.
 
 The last two pass the cell test. Root's inheritable set is already empty
 under `--cap-drop ALL`, so `--inh-caps=-all` changes nothing measured
@@ -604,4 +665,5 @@ prototype measured 1883 changed tokens with `size_gate`'s own count. The
 Dockerfile took 163, the wrapper 70, `implement.py` 83, `runtime.py` 33,
 `worktree.py` 5, `session.py` 204 and `end_review.py` 11. The tests took
 1314, with the cell test 688 of `test_end_review.py`'s 871. That is 63% of
-the ceiling.
+the ceiling. The `skipped` branch, criterion 5's three new cases and
+criterion 6's witness add about 200, so about 2080, 69%.

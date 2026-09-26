@@ -52,7 +52,7 @@ forbidden:
   - tests/test_ledger.py
 budget_usd: 27
 max_attempts: 3
-max_turns: 170
+max_turns: 200
 pending_symbols:
   - saffron/end_review.py::layer_fields
   - saffron/end_review.py::review_layer
@@ -88,11 +88,12 @@ acceptance:
       `known` pass through. The Spec prompt carries one line per acceptance
       criterion, holding its claim and its witness node id, and `preserves`
       only on a criterion that preserves. It carries
-      `context.constraints_block(touches, forbidden, [])` whole. Each carries the sentence "do not
-      manufacture one" in any case, the three severities and the fields
-      `file`, `line`, `severity` and `claim`, each in backticks. The Spec
-      prompt names `probe`, `find` and `replace` in backticks, and the
-      Standards prompt names no `probe`. The Standards prompt file holds
+      `context.constraints_block(touches, forbidden, [])` whole. Each
+      lens's raw prompt file holds the sentence "do not manufacture one"
+      in any case, the three severities `blocker`, `concern` and `note`,
+      and the fields `file`, `line`, `severity` and `claim`, each in
+      backticks. The Spec file names `probe`, `find` and `replace` in
+      backticks, and the Standards file names no `probe`. The Standards prompt file holds
       the phrase "never against a file in the worktree", and not the value
       of `worktree.WORKTREE_MOUNT`. It holds the phrase "is Saffron's
       process glossary, not this repository's", said of its vocabulary.
@@ -404,11 +405,23 @@ in no other value, so it reaches the prompt only through `{spec_id}`.
 It reads `CONTEXT.md` from the repository root, as `tests/test_review.py:18` does.
 For each lens it asserts each value appears verbatim, with
 `context.sections_for("REVIEW", CONTEXT_MD)` as the vocabulary. It checks
-the range as the two shas joined by `..`. It checks the other text in a
-whitespace-flattened copy. It lowers each prompt file's raw text and
-checks each of the fourteen strings, lowered, against it. It reads the
-Standards file, whitespace-flattened, for the worktree phrase and the
+the range as the two shas joined by `..`. It checks the other filled
+values in a whitespace-flattened copy of the filled prompt.
+
+It checks each file's own text in that file's raw text, never in the
+filled prompt. The filled prompt holds text the file does not. Measured
+at `060a758c`, the REVIEW vocabulary holds `` `blocker` `` five times,
+`` `concern` `` three times, `` `note` `` four times and `/work` twice.
+The standing instructions block names `/work` too
+(`saffron/agents/context.py:146-148`). So a prompt with no severity
+scale, or one naming the mount, would pass a check of the filled text.
+In each raw file, whitespace-flattened, it checks the sentence, the three
+severities, the four fields, and the Spec file's `probe`, `find` and
+`replace`. It asserts the Standards file holds no `` `probe` ``. It
+lowers each raw file and checks each of the fourteen strings, lowered,
+against it. It reads the Standards file for the worktree phrase and the
 glossary phrase, and asserts `worktree.WORKTREE_MOUNT` is not in it.
+
 These fail it, each measured:
 
 - both lenses on one file
@@ -425,9 +438,11 @@ These fail it, each measured:
 - a Standards prompt judging vocabulary against `{vocabulary}`
 - a Spec prompt with no `{spec_id}` slot
 
-Three more are reasoned, not measured, since this revision came after the
+Four more are reasoned, not measured, since they came after the
 simulations:
 
+- a prompt with no severity scale, which a check of the filled prompt
+  passes on the vocabulary's severities
 - a Standards prompt that reads the files its instructions name from
   the worktree mount, as this spec's earlier text asked
 - a Standards prompt with no sentence keeping its standards off the
@@ -544,6 +559,11 @@ Criterion 2's witness raises on a single one.
 
 **Commit as each witness passes**, before the full suite runs.
 
+**The turn ceiling.** `max_turns` is 200. The nearest history row,
+`SA-0133`, peaked at 161 turns, cut off at its own ceiling of 160. So 161
+is a floor, and what that cell needed above it was never measured. 200
+leaves 39 turns above the floor, as `SA-0169` does.
+
 **Size.** No path here is in `elevate_on`, so `size` is advisory. Two
 prompt files of about 35 lines each run near 10 tokens a line, about 700.
 About 100 lines in `saffron/end_review.py` at 5.5 is about 550, and 8 in
@@ -553,5 +573,6 @@ about 2300 tokens of the `feature` ceiling of 3000
 Standards lens's worktree phrase and their asserts add about 190 more.
 The second review's asserts and the glossary phrase add about 40. The
 fourteen-string check adds about 50 over the three names it replaces.
-That is about 2580 in all, 86% of the ceiling. Keep the prompts near the length of
+Reading each file's own text raw adds about 40. That is about 2620 in
+all, 87% of the ceiling. Keep the prompts near the length of
 `criterion-probe.md` (56 lines), not of the in-cell lenses'.
