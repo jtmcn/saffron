@@ -13,9 +13,10 @@ from pathlib import Path
 
 from saffron.agents.findings import Finding
 from saffron.cell import session
-from saffron.gates.contract import Failure, GateResult
+from saffron.gates.contract import Failure
 from saffron.intake import Mutant
 from saffron.phases import review
+from tests.test_session import _tests_result
 
 _SPEC = session.CellSpec(
     spec_id="SA-9999",
@@ -67,17 +68,6 @@ def _mutated_stub(monkeypatch):
     return mutated
 
 
-def _tests_result(status, collected, failures=()):
-    return GateResult(
-        gate="tests",
-        status=status,
-        tool="pytest 8.0",
-        collected=list(collected),
-        failures=list(failures),
-        summary="stub",
-    )
-
-
 def test_any_lenses_findings_are_probed_once_per_edit_and_decided_in_place(
     monkeypatch,
 ):
@@ -87,15 +77,17 @@ def test_any_lenses_findings_are_probed_once_per_edit_and_decided_in_place(
     _run_gate_stub(
         monkeypatch,
         [
-            _tests_result("pass", collected),  # the probe cell's own baseline
-            _tests_result("pass", collected),  # src/a.py
+            _tests_result("pass", collected=collected),  # the probe cell's own baseline
+            _tests_result("pass", collected=collected),  # src/a.py
             _tests_result(
-                "fail", collected, [Failure(file="t.py", code="t.py::test_added")]
+                "fail",
+                collected=collected,
+                failures=[Failure(file="t.py", code="t.py::test_added")],
             ),  # src/b.py
-            _tests_result("pass", collected),  # src/c.py
+            _tests_result("pass", collected=collected),  # src/c.py
         ],
     )
-    base_results = [_tests_result("pass", ["t.py::test_old"])]
+    base_results = [_tests_result("pass", collected=["t.py::test_old"])]
     probe_a = Mutant(file="src/a.py", find="a", replace="A")
     probe_b = Mutant(file="src/b.py", find="b", replace="B")
     probe_t = Mutant(file="tests/test_x.py", find="t", replace="T")
@@ -205,8 +197,8 @@ def test_any_lenses_findings_are_probed_once_per_edit_and_decided_in_place(
     _run_gate_stub(
         monkeypatch,
         [
-            _tests_result("pass", collected),  # the probe cell's own baseline
-            _tests_result("pass", collected),  # src/d.py
+            _tests_result("pass", collected=collected),  # the probe cell's own baseline
+            _tests_result("pass", collected=collected),  # src/d.py
         ],
     )
     probe_e = Mutant(file="src/e.py", find="e", replace="E")

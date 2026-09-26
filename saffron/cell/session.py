@@ -1303,11 +1303,11 @@ def probe_findings(
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> list[dict]:
-    """Each finding in `targets` carries a probe. Each is asked once per
-    distinct edit (backlog item 117), in a Gate-only cell entered after
-    REVIEW's own critic cell is torn down. `base_results` is the task's
-    pre-turn baseline (b-19b255), and a kill counts only against names
-    `added_tests` reads from it and this run.
+    """Each finding in `targets` carries a probe, asked once per distinct
+    edit (backlog item 117) in a Gate-only cell, never a critic cell
+    (`SA-0087`). `base_results` is the task's pre-turn baseline (b-19b255),
+    and a kill counts only against names `added_tests` reads from it and
+    this run.
 
     Decides each finding's `severity` and `probe_verdict` in place before
     returning, so the caller's later `ledger.record_findings` sees the
@@ -1464,8 +1464,8 @@ def _probe_adequacy(
     note: Callable[[str, bool, str], None],
 ) -> list[dict]:
     """REVIEW's own caller of `probe_findings`, over its anchored adequacy
-    findings alone. Kept so REVIEW's call site and the stack-name checks
-    in `tests/test_session.py` need no change.
+    findings alone. Kept so REVIEW's call site, `tests/test_probe_cell.py`
+    and the stack-name checks in `tests/test_session.py` need no change.
     """
     return probe_findings(
         review.adequacy_probes(reviews),
