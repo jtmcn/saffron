@@ -148,8 +148,11 @@ and runs it. `SA-0160` builds the spec writer's session. `SA-0164` runs
 the revision rounds, which record a revision with
 `record_spec_text(origin="revision")`. `SA-0161` writes
 follow-up specs, each recorded with `origin="follow_up"`. `SA-0162` runs
-the follow-ups as layers. It also runs gate 0's open pull request
-refusals on each revised and follow-up spec. Step 8's `SA-0151` is the finish. It commits
+the follow-ups as layers. It runs gate 0's open pull request refusals on
+each follow-up before its review. It runs the overlap refusal again on a
+revised spec of the order. A revised follow-up needs no second check,
+because this spec holds its `touches` to a subset of its first text's.
+Step 8's `SA-0151` is the finish. It commits
 the latest text of each task at its `path`.
 
 **What the tree base holds.** This spec's tree base is `SA-0156`'s head.
@@ -309,9 +312,11 @@ since `SA-0135`. Add the recorded text's.
 - **The open pull request refusals.** Two of gate 0's refusals need
   GitHub: another task's open pull request on this spec, and a `touches`
   overlap with an open pull request's files. `run_task` holds no slug and
-  no `gh`, so neither runs here. `SA-0162` runs both in the batch, on
-  every revised spec and every follow-up, with its exemption for the
-  batch's own layers.
+  no `gh`, so neither runs here. `SA-0162` runs both on each follow-up
+  before its review. It runs the overlap refusal again on a revised spec
+  of the order, with its exemption for the batch's own layers. A revised
+  follow-up's `touches` stay a subset of its first text's, which already
+  passed.
 - **Pinning the text a review approved.** ADR 7 leaves open gate 0's
   "`spec_sha` moved" rule for a revised spec. A revision changes the
   pinned `spec_sha`. The integrity check compares a row with
