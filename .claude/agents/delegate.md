@@ -1,6 +1,7 @@
 ---
 name: delegate
 description: The operator's delegate for the Saffron spec loop, opened as the main session with `claude --agent delegate`. Runs the queued specs through cells and review into a stack, and turns backlog items into specs. Not for dispatch as a subagent.
+color: pink
 ---
 
 You are the operator's delegate, as `CONTEXT.md` defines the word.
@@ -15,9 +16,10 @@ action, and follow it.
 - `create-saffron-spec` turns a backlog item into a spec, through the
   `spec-writer` and `spec-reviewer` agents.
 
-A session opened with no request starts with
-`uv run .claude/skills/run-saffron-spec-loop/driver.py status`. Report the
-order it shows and ask which work to run.
+A `SessionStart` hook (`hooks/delegate_status.py`) prints
+`driver.py status` when this session opens and puts it in your context.
+When your first message names no work, report the order it shows and ask
+which work to run.
 
 ## End every loop with an HTML summary
 

@@ -1,0 +1,277 @@
+---
+id: 7
+title: "A stack batch runs the spec DAG into one stack and writes its own follow-ups"
+status: accepted
+date: 2026-09-23
+supersedes: []
+superseded_by: []
+appendices: [A, D, E, F, H, I, J, K, L, N, P, U]
+principles: [2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62]
+---
+
+## Context
+
+The spec loop skill runs each queued spec through an attended `saffron cell`.
+A delegate reviews each pull request by hand, pushes review commits, and
+chains the pull requests into one stack. Each step it does by hand is a gap in
+Saffron's gates, lenses or phases.
+
+`saffron batch` already walks a DAG. It rescans after every task (`SA-0106`),
+admits a child once its parent is `READY_FOR_REVIEW`, and cuts the child from
+the parent's branch (§4.2). A spec with no `depends_on` is cut from the
+default branch, so a batch yields siblings, not one stack.
+
+The review commits a delegate pushes reach a pull request that no gate or
+critic reads (backlog items 40 and 97).
+
+§1.4 refuses "agents writing their own specs from a roadmap", as the part most
+likely to waste money. The operator asked for review findings to become specs
+inside the same batch.
+
+## Decision
+
+**A stack batch hands each task's branch to the next.**
+
+It plans its order once. A task's **predecessor** is the last task below it at
+`READY_FOR_REVIEW`. The task is cut from the predecessor's head, and its pull
+request targets the predecessor's branch. One stack batch yields one pull
+request stack.
+
+**Every task in a stack batch stacks.** Every `depends_on` entry of a spec
+comes before it in the order, so its tree holds that code. A spec is refused
+when any `depends_on` entry is outside the plan and not on the default branch.
+A composite's members stay contiguous in the order. The last member's tree
+still carries every layer below the composite, not only its members. So the
+composite review's range starts at the first member's predecessor head. The
+layers below that head are its base, as the default branch is outside a stack
+batch. A name a member takes from a layer below is not a join. This narrows ADR
+6's composite review inside a stack batch. Outside a stack batch, §4.2 and ADR
+6 stack as before, on `depends_on[0]`.
+
+**A task that misses `READY_FOR_REVIEW` adds no layer.** Its `depends_on`
+descendants are refused with a reason. The batch goes on.
+
+**Spec review runs inside the batch.**
+
+It runs before each spec's first cell. A blocker that asks for a better witness
+or a buildable spec is revised by an agent, for a bounded number of rounds. A
+blocker that asks to change what the spec is for skips the spec and its
+descendants, and reaches the operator. Each round's fresh review reads the
+revision beside the original, and a changed purpose it finds routes the same
+way. The batch never pauses for the operator.
+
+The spec prompts, the end-review lens prompts and the tags blockers route by
+are core's, in `saffron/agents/prompts/`. A target repo supplies none of them,
+so ADR 2 holds. They name no repo file, tool or URL. A repo's facts reach them
+as input the host fills from what the repo declares in `.saffron/`. The host
+reads those at the `base_sha` export, never at a layer's head (principle 43).
+
+**A stack batch runs spec text that is not at `base_sha`.** The text is a spec
+review's revision or a follow-up, and nothing else. Every spec the operator
+queued is first read at `base_sha`. Outside a stack batch, §4.2.1's input rule
+holds unchanged.
+
+A revised spec's cell holds the base text at the spec's path. The implement
+prompt carries the revision, and core's gates read the host's parsed copy. A
+repo gate reads `.saffron/` from the read-only `base_sha` export, never from
+`/work`, so it sees the base text too. This repo's `dead` gate reads
+`pending_symbols` there. A name a revision adds goes unseen, and a name it
+drops stays deferred. A follow-up has no file there at all. Every session in
+the spec's cells can also read a contract the host no longer judges. That
+covers the implementer, the criterion session, each lens and verdict session,
+and the end-review Spec lens. That departs from principle 20, as ADR 3 records
+and backlog item 85 measured. `spec_drift` reports it on every revised spec.
+
+**One end review reads the whole stack once.** Two end-review lenses, Spec and
+Standards, read each layer. One join lens reads the stack under ADR 6's rubric.
+Each layer's in-cell concerns join their findings as inputs. The
+host decides which findings qualify. A qualified finding is anchored, and any
+probe it carries survived. An end-review lens emits its block in the same turn
+as the work, with read-only tools, as ADR 4's lenses do. It inherits ADR 4's
+departure from principle 18, and so does the join lens. A spec writer returns
+its spec through a separate extraction turn. A spec review returns its tags
+the same way, since a tag decides whether a spec is revised. Both keep
+principle 18.
+
+**The end review takes four exceptions to ADR 4, and this ADR carries them.**
+Its lenses are not ADR 4's declared lenses. They run once per batch, not on
+every reviewed diff. Its severities route differently. A qualified `blocker` or
+`concern` feeds a follow-up spec, in place of REBUT and the operator. A `note`
+goes to the backlog pool, not the pull request. A lens that errors has no task
+to stop, so its layer shows as unreviewed. Every in-cell critic keeps ADR 4
+whole, a follow-up's included.
+
+**Qualified findings become follow-up specs, one generation deep.** An agent
+writes each follow-up in a critic cell. It passes the same spec review and runs
+on top of the stack. The findings a follow-up's own critic leaves go to the
+backlog, not to a second generation. A second generation needs an ADR that
+amends this one.
+
+**The host commits the batch's revised and follow-up specs in its own
+finishing layer.** It adds that layer above every task, with no model involved.
+The repo's gate suite runs on it in a cell before any push. It is the one
+agent-written text a protected path takes, and the host writes it, never a
+cell. The host also moves each spec with a reviewable layer to
+`.saffron/specs/done/`, in the same finishing layer. That move asserts a
+retired spec's work is in the default branch. It reaches the default branch
+only when the operator merges the stack, so the operator's merge makes the
+assertion.
+
+**Nothing merges.** The batch links the stack, and `--ready` marks it ready.
+Merging stays the operator's, as §1.4 says of every version.
+
+This ADR narrows §1.4's refusal, and §1.4's entry says so. An agent writes a
+follow-up only from a qualified finding, inside a batch the operator started.
+An agent revises a queued spec only for a witness or buildability blocker,
+within the round bound. ADR 6's rule that the operator writes each new member
+spec stands. A follow-up has no `depends_on`, so it is never a member spec.
+An agent revising a member spec is an exception to ADR 6, because §1.4's
+reason reaches it. It takes the same bounds as any queued spec. ADR 6's
+composite review still reads the joins a revision moves.
+
+`docs/superpowers/specs/2026-09-23-stack-batch-design.md` holds the design
+this decision rests on.
+
+## Options considered
+
+- **Keep the attended loop.** Each spec costs the operator a round of
+  questions, and each review commit passes no gate.
+- **Saffron runs the cells, and the delegate writes the follow-ups.** The
+  delegate stays a required step in the middle of every batch.
+- **Orchestrate from the skill's driver.** The control lives in a script that
+  no gate reads, which is the reverse of the loop's goal.
+- **A stack mode of `saffron batch` (chosen).** Every model call is a
+  host-invoked session in a critic cell, and every fix passes a cell's gates.
+
+## Principles
+
+- **2** departs. A spec whose dependency sits in an unmerged stack outside the
+  plan is refused. Cutting it from its predecessor would drop that code. The
+  residual is a spec that waits for a merge, as §4.2 avoided.
+- **4** upholds. Every end-review lens and every spec session runs in a critic
+  cell. The host decides what qualifies.
+- **6** departs. A follow-up that carries a probe exists to kill it, and
+  blocking teaches the cheapest satisfaction. ADR 3 measured this in
+  `SA-0079`. The answer is the criterion probe a fresh session names in the
+  follow-up's own critic.
+- **15** departs. A finding feeds a follow-up only once the host anchors it
+  and runs any probe it carries. A spec review's tag is a claim, and it decides
+  whether an agent revises a spec. The next round's fresh review is its check.
+- **16** upholds. One generation, bounded revision rounds and the batch budget
+  bound the batch.
+- **17** departs. Spec review runs before a spec's first cell. A descendant
+  refused after its parent's review has paid for its own review and revisions.
+  The round bound caps that spend, and no cell starts.
+- **21** departs. A hand push to a lower layer mid-batch leaves the layers
+  above on a stale head. The residual holds until the spec records each
+  handoff's head and checks it at the finish.
+- **23** upholds. §1.4's entry is narrowed in the same pull request, with the
+  operator's request, its reason and the seam that covers the rest. ADR 5
+  moves §1.4 only on a measured result. Its own 23 bullet scopes that rule to
+  the ontology entry, so it does not reach this one. The measurement
+  below still decides whether this narrowing stays.
+- **26** upholds. "Predecessor" names the task below in the stack. "Parent"
+  keeps its one referent, `depends_on[0]`. The refusal names every
+  `depends_on` entry, not the parent alone.
+- **27** upholds. It holds once the spec keys a follow-up's anchors and named
+  probe to the tree it runs on. A later layer can move both.
+- **28** upholds. It holds once the spec checks qualification against each
+  producer. A finding with no probe must still reach a follow-up.
+- **29** upholds. This ADR carries its exceptions to §1.4, §4.2.1, ADR 4, ADR
+  6 and the protected path, each with its bound. §1.4 names its own.
+- **30** departs. Stack mode widens definitions in `CONTEXT.md`, §4.2 and
+  §4.2.1. The specs that build each piece edit them. Until then the old
+  sentences stand. ADR 4 and ADR 6 each point to this ADR's exceptions.
+- **34** upholds. It holds once the spec shows a layer the end review did not
+  reach, or reached with an error, apart from a clean one.
+- **36** departs. When the reserve runs short, the end review covers layers
+  from the top down. Follow-ups are then written from part of the findings.
+  The summary names each layer it did not reach, so no follow-up reads as
+  covering it.
+- **38** upholds. The join lens reads the stack's pushed top head, not a tree
+  assembled for the review.
+- **40** upholds. The join lens reads the seams between layers. The residual
+  is the seams around the follow-ups and the top layer, which it never sees.
+- **41** upholds. Core's prompts learn no repo's language or tools, and core
+  demands nothing of a repo. The Standards lens reads the standards documents
+  a repo declares at `base_sha`, and none when it declares none. A probe runs
+  through the repo's declared gates, never a named test runner.
+- **44** departs. The follow-up path has never run. The criterion probe that
+  answers principles 6 and 49 has not run live either (ADR 3). Its cost and
+  its catch rate are both forecasts.
+- **45** upholds. A finding with a probe qualifies by a run against the
+  layer's tests, not by the author's report.
+- **47** departs. A follow-up that names a surviving probe lets its cell kill
+  that exact edit and no other. Principle 6's answer covers it.
+- **49** departs. The implementer sees a named probe and can run it before it
+  reports. The criterion probe its critic names stays hidden until REBUT.
+- **50** departs. Under ADR 4 the operator rules on a confirmed blocker before
+  anything acts on it. Here a qualified finding becomes code first. Each
+  follow-up is its own layer, and nothing merges. So the operator still rules
+  on every finding, by keeping or dropping its layer. Rejecting a follow-up is
+  cheap only at the top. Dropping a lower one rebuilds every layer above it,
+  the finishing layer included. Today nothing re-gates that rebuild, which
+  is backlog item 97. §6.1's merge train would, once it is built.
+- **54** upholds. It holds once the spec re-runs gate 0 and `parse_spec`'s
+  refusals on every revised and follow-up spec, not only on files at
+  `base_sha`.
+- **62** departs. §1.4 refuses specs written "from a roadmap". A follow-up is
+  written from a qualified finding instead, but §1.4's reason, money, still
+  reaches follow-ups and revisions. One generation and the round bound answer
+  it, and the measurement below tests the answer. §4.2.1's reason reaches them
+  too. It refuses a draft run while nobody is awake, and a task that rewrites
+  its own queue. Every queued spec is read at `base_sha`, and other text comes
+  only from spec review or a qualified finding. A task's diff reaches the queue
+  only as the follow-up writer's input. The host enforces the follow-up's
+  fields, and it runs one generation deep. Revisions and follow-ups return from
+  host-invoked sessions, and the host commits them. A follow-up only appends
+  above the stack. It edits, reorders and removes no queued spec. Nothing
+  merges, so the operator can reject each one as a layer, at the rebuild cost
+  the 50 bullet names.
+
+## Consequences
+
+`CONTEXT.md` gains "predecessor", "stack batch", "follow-up spec", "end
+review", "end-review lens" and "join lens" through `ontology/factory.ttl`.
+"Spec review", "critic cell", "lens", "run", "stacked branch", "tree base" and
+"spec chain" widen.
+
+These are left to the specs that build it. The design record proposes an
+answer to each.
+
+- how blockers route by the spec review's tags, and the round bound.
+- how every gate 0 and `parse_spec` refusal re-runs on a revised or
+  follow-up spec.
+- what qualifies a finding with no probe, which kill rule a probe meets, and
+  whether a surviving probe promotes a `note`, as ADR 3 does.
+- how an end-review lens takes finding text. It is a filled value and never
+  template input, so a `{…}` inside it stays text (principle 22).
+- which follow-up spec fields the host enforces: `touches`, budget, risk.
+- where the ledger and the record keep the stack's layers.
+- how gate 0's open pull request check treats the batch's own tasks. Backlog
+  item 59 exempted a declared chain, and no item covers a stack's layers.
+- what `RATE_LIMITED` does to the breaker in a stack batch (§4.2.1).
+- what `--until` and the budget leave running, and the reserve for the end
+  review, the spec work and the finish.
+- what the operator sees for an escalation and for an unreviewed layer.
+- how the delegate files the backlog from the batch's findings, until a
+  declared program does it.
+
+These are left open, and the design record does not answer them yet.
+
+- how a revised or follow-up spec's fields reach a repo gate. It reads the
+  `base_sha` export, so they arrive through that export or a host-supplied
+  input, never through `/work`.
+- how a repo declares its standards documents in `.saffron/`.
+- gate 0's "`spec_sha` moved" rule for a revised spec, whose pinned
+  `spec_sha` the revision changes.
+- which tree a follow-up's anchors and named probe are keyed to.
+- how the `scope` gate treats the host's commit to `.saffron/specs/`.
+
+Whether follow-ups earn their cost is to be measured. The first measure is the
+share of follow-ups that reach `READY_FOR_REVIEW` with a clean critic. The
+second is the spend per follow-up, across its writing, spec review and cell.
+They decide whether an amendment for a second generation is worth proposing.
+They also decide whether the narrowing of §1.4 stands. If follow-ups do not
+earn their cost, an amendment withdraws it and §1.4's entry returns to its old
+text.

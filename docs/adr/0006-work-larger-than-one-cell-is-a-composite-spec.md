@@ -38,7 +38,9 @@ members live in its repo, because dependencies do not cross repos (§4.2).
 **The members stack.** Each member after the first names the member before it
 as `depends_on[0]`, the only entry that stacks (§4.2). So they schedule as
 §4.2 already describes. The composite's list is authoritative. A member whose `depends_on` disagrees with it is refused at
-gate 0 (§4.2.1).
+gate 0 (§4.2.1). Inside a stack batch, every task stacks, and ADR 7 narrows
+the composite review's range to the members' own layers. ADR 7 also lets an
+agent revise a member spec, within its bounds.
 
 **One composite review reads the joins.** It runs once the last member reaches
 `READY_FOR_REVIEW`, in a critic cell (§5.5). Its rubric has three parts:

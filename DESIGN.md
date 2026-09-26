@@ -66,6 +66,9 @@ The important inversion: **the product of this factory is not code, it is a revi
 - Autonomous merge. Never, at any version.
 - Cloud runners. Local only until throughput actually binds.
 - Agents writing their own specs from a roadmap. That's v3 and it's the part most likely to waste money.
+  ADR 7 narrows this, at the operator's request of 2026-09-23. A stack batch writes a follow-up spec only from a finding the host qualified, one generation deep.
+  It also revises a queued spec, but only for a witness or buildability blocker.
+  The money reason still holds, so one generation and a bound on revision rounds limit it. Qualification is the seam.
 - A bespoke diff viewer. GitHub already built the best one you'll ever have (§6).
 - An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record; it never controls execution. SHACL shapes validate the projection; they do not gate state transitions, and no scheduling decision reads a triple. (Stands for v1, and the spike that would have reopened it has now run and did not: Appendix O's rule closed the question on 2026-09-04, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`.)
 - Publishing the vocabulary at a resolvable IRI, or `owl:imports` of external ontologies at run time. Cells have no network (§5.1); external vocabularies are vendored and committed.
@@ -1696,3 +1699,4 @@ the ADR records, so a hand edit here is discarded.
 | 4 | The critic is host-invoked lenses, and any one blocker goes to REBUT | accepted | 4, 9, 15, 16, 17, 18, 27, 28, 29, 30, 34, 36, 42, 48, 50, 51, 55, 57, 58, 61 |
 | 5 | The ontology describes the run record and never controls execution | accepted | 10, 11, 23, 24, 25, 29, 30, 34, 36, 56, 57, 61, 62 |
 | 6 | Work larger than one cell is a composite spec, reviewed once at the joins | accepted | 2, 4, 12, 15, 17, 25, 26, 28, 29, 34, 38, 40, 45, 48, 49, 50 |
+| 7 | A stack batch runs the spec DAG into one stack and writes its own follow-ups | accepted | 2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62 |

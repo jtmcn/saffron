@@ -14,6 +14,17 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && python3 hooks/delegate_status.py",
+            "timeout": 60
+          }
+        ]
+      }
     ]
   }
 }
