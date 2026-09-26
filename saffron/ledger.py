@@ -3,13 +3,14 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the eleven kinds
+by `saffron/record/fold.py`, deletable at any time. Only the twelve kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
-to put in it.
+to put in it. `stack_layers` is a tenth table, outside that count: `DESIGN.md`
+§4.1 does not list it.
 """
 
 from __future__ import annotations
@@ -162,6 +163,21 @@ CREATE TABLE IF NOT EXISTS findings (
     verdict      TEXT,
     adjudication TEXT,
     rebuttal     TEXT
+);
+
+-- One layer of a stack batch (`run_stack_batch`, `saffron/batch.py`). Keyed
+-- on the layer's own record key, never a task_id, so a fold need not resolve
+-- one. `batch_key` carries the batch's id as text with no reference to
+-- `batches`, since a fold rebuilds no batch row. `predecessor_key` and
+-- `predecessor_head` are `NULL` for a stack's first layer.
+CREATE TABLE IF NOT EXISTS stack_layers (
+    task_key         TEXT PRIMARY KEY,
+    batch_key        TEXT,
+    position         INTEGER NOT NULL,
+    spec_id          TEXT NOT NULL,
+    predecessor_key  TEXT,
+    predecessor_head TEXT,
+    generation       INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
@@ -413,7 +429,9 @@ class Ledger:
 
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
-        `fold_task` an upsert, and a no-op on a task with no row yet."""
+        `fold_task` an upsert, and a no-op on a task with no row yet.
+        `stack_layers` is keyed on `key` itself, so its delete runs first."""
+        self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -614,6 +632,24 @@ class Ledger:
             return None
         if fact.kind == "task_policy":
             self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
+            return None
+        if fact.kind == "stack_layer":
+            # Every value but `batch_key` comes straight from the payload,
+            # never a fresh lookup, so a later push cannot change this row.
+            self._db.execute(
+                "INSERT INTO stack_layers (task_key, batch_key, position, "
+                "spec_id, predecessor_key, predecessor_head, generation) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    fact.batch_key,
+                    payload["position"],
+                    payload["spec_id"],
+                    payload["predecessor_key"],
+                    payload["predecessor_head"],
+                    payload["generation"],
+                ),
+            )
             return None
         if fact.kind == "finding":
             if payload["position"] != self._finding_count(task_id) + 1:
@@ -1136,6 +1172,45 @@ class Ledger:
                 "pr_url": pr_url,
                 "added": added,
                 "removed": removed,
+            },
+        )
+        self._commit_and_append(fact)
+
+    def record_stack_layer(
+        self,
+        task_id: int,
+        *,
+        position: int,
+        predecessor_task_id: int | None,
+        generation: int,
+    ) -> None:
+        """One layer of a stack batch (`run_stack_batch`, `saffron/batch.py`).
+
+        Looks up the predecessor's record key and pushed sha by its task_id,
+        once, and bakes both into the payload. Filed under the layer's own
+        key, never the predecessor's, and never carrying a task_id."""
+        spec_row = self._db.execute(
+            "SELECT spec_id FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        predecessor_key = None
+        predecessor_head = None
+        if predecessor_task_id is not None:
+            pred_row = self._db.execute(
+                "SELECT record_key, pushed_sha FROM tasks WHERE task_id = ?",
+                (predecessor_task_id,),
+            ).fetchone()
+            if pred_row is not None:
+                predecessor_key = pred_row["record_key"]
+                predecessor_head = pred_row["pushed_sha"]
+        fact = self._build_fact(
+            task_id,
+            "stack_layer",
+            {
+                "position": position,
+                "spec_id": spec_row["spec_id"],
+                "predecessor_key": predecessor_key,
+                "predecessor_head": predecessor_head,
+                "generation": generation,
             },
         )
         self._commit_and_append(fact)

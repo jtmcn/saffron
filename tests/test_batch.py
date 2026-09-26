@@ -55,6 +55,17 @@ def _candidate(
     )
 
 
+def _spend_task(ledger, repo_id: int, cost_usd: float) -> tuple[int, int]:
+    """`_spend`, plus the `task_id` it minted. A layer's outcome must carry
+    its own task_id, never the shared default `_outcome` otherwise uses,
+    because `record_stack_layer` reads the row it names."""
+    run_id = _spend(ledger, repo_id, cost_usd)
+    row = ledger._db.execute(
+        "SELECT task_id FROM tasks WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    return run_id, int(row["task_id"])
+
+
 def _outcome(*, state: str, run_id: int, task_id: int = 1) -> CellOutcome:
     return CellOutcome(
         state=state,
@@ -126,6 +137,62 @@ class FakeStackRunner:
         return result
 
 
+class ScriptedRunner:
+    """Both `stack_layers` witnesses' one arrangement. Each call plays back
+    the next `(spec id, entry)` pair from an ordered script. A `Refused`
+    entry creates nothing. Any other entry creates a run and a task, records
+    a push unique to the spec, and packages `READY_FOR_REVIEW` or
+    `MERGE_FAILED` through `set_task_package`. It then returns an outcome,
+    or raises the entry once the task exists."""
+
+    def __init__(
+        self,
+        ledger: Ledger,
+        repo_id: int,
+        script: list[tuple[str, str | Refused | Exception]],
+    ):
+        self._ledger = ledger
+        self._repo_id = repo_id
+        self._script = list(script)
+        self.calls: list[tuple[str, str | None]] = []
+        self.task_ids: dict[str, int] = {}
+        self.pushed_shas: dict[str, str] = {}
+
+    def __call__(
+        self, candidate: Candidate, predecessor: Candidate | None = None
+    ) -> CellOutcome | Refused:
+        self.calls.append(
+            (candidate.spec.id, predecessor.spec.id if predecessor else None)
+        )
+        spec_id, entry = self._script.pop(0)
+        if spec_id != candidate.spec.id:
+            raise ValueError(f"script expected {spec_id!r}, got {candidate.spec.id!r}")
+        if isinstance(entry, Refused):
+            return entry
+        run_id = self._ledger.create_run(self._repo_id, base_sha="a" * 40)
+        task_id = self._ledger.create_task(
+            run_id,
+            spec_id=spec_id,
+            spec_sha="s" * 64,
+            branch=f"saffron/{spec_id}",
+        )
+        self.task_ids[spec_id] = task_id
+        pushed_sha = f"{spec_id}-sha"
+        self.pushed_shas[spec_id] = pushed_sha
+        self._ledger.record_push(task_id, pushed_sha)
+        if isinstance(entry, Exception):
+            raise entry
+        if entry in ("READY_FOR_REVIEW", "MERGE_FAILED"):
+            self._ledger.set_task_package(
+                task_id,
+                entry,
+                f"saffron/{spec_id}",
+                pushed_sha,
+                "https://example.invalid/1",
+            )
+        return _outcome(state=entry, run_id=run_id, task_id=task_id)
+
+
 class CrashingRunner:
     """Mints a real run, task and billed attempt — exactly what a real
     `run_one_cell` does before its phase loop even opens — then raises
@@ -168,6 +235,38 @@ def _latest_batch_id(ledger) -> int:
         "SELECT batch_id FROM batches ORDER BY batch_id DESC LIMIT 1"
     ).fetchone()
     return int(row["batch_id"])
+
+
+def _stack_layers(ledger, *, batch_id: int | None = None) -> list[dict]:
+    """Every `stack_layers` row, ordered by position, as plain dicts so an
+    assertion can compare them by value. Scoped to one batch when asked."""
+    if batch_id is None:
+        rows = ledger._db.execute(
+            "SELECT * FROM stack_layers ORDER BY position"
+        ).fetchall()
+    else:
+        rows = ledger._db.execute(
+            "SELECT * FROM stack_layers WHERE batch_key = ? ORDER BY position",
+            (str(batch_id),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _stack_script() -> list[tuple[str, str | Refused | Exception]]:
+    """The eight-spec script both `stack_layers` witnesses drive, in order.
+    Three specs reach `READY_FOR_REVIEW` and become layers 1, 2 and 3. The
+    other five miss it in five different ways. No two misses sit next to
+    each other, so the breaker never fires."""
+    return [
+        ("TE-7", "READY_FOR_REVIEW"),
+        ("TE-3", "GATE_ERROR"),
+        ("TE-9", "READY_FOR_REVIEW"),
+        ("TE-1", RuntimeError("boom")),
+        ("TE-5", "EXHAUSTED"),
+        ("TE-8", "MERGE_FAILED"),
+        ("TE-2", Refused(reason="scripted")),
+        ("TE-6", "READY_FOR_REVIEW"),
+    ]
 
 
 def test_a_drained_queue_runs_every_candidate_once_in_order(ledger, repo_id):
@@ -1143,17 +1242,21 @@ def test_a_stack_batch_hands_each_task_the_last_task_that_reached_review(
         _candidate("TE-10", priority=1),
         _candidate("TE-4", priority=1),
     ]
+    run_te7, task_te7 = _spend_task(ledger, repo_id, 1.0)
+    run_te8, task_te8 = _spend_task(ledger, repo_id, 1.0)
+    run_te6, task_te6 = _spend_task(ledger, repo_id, 1.0)
+    run_te4, task_te4 = _spend_task(ledger, repo_id, 1.0)
     results = {
-        "TE-7": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-7": _outcome(state="READY_FOR_REVIEW", run_id=run_te7, task_id=task_te7),
         "TE-3": _outcome(state="EXHAUSTED", run_id=_spend(ledger, repo_id, 1.0)),
         "TE-9": _outcome(state="MERGE_FAILED", run_id=_spend(ledger, repo_id, 1.0)),
         "TE-1": _outcome(state="GATE_ERROR", run_id=_spend(ledger, repo_id, 1.0)),
         "TE-5": Refused(reason="nope"),
-        "TE-8": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-8": _outcome(state="READY_FOR_REVIEW", run_id=run_te8, task_id=task_te8),
         "TE-2": RuntimeError("boom"),
-        "TE-6": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-6": _outcome(state="READY_FOR_REVIEW", run_id=run_te6, task_id=task_te6),
         "TE-10": _outcome(state="PLAN_REJECTED", run_id=_spend(ledger, repo_id, 1.0)),
-        "TE-4": _outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)),
+        "TE-4": _outcome(state="READY_FOR_REVIEW", run_id=run_te4, task_id=task_te4),
     }
     runner = FakeStackRunner(results)
 
@@ -1202,19 +1305,16 @@ def test_a_stack_batch_refuses_every_descendant_of_a_task_that_missed_review(
         _candidate("TE-19", priority=1, depends_on=["TE-14"]),
         _candidate("TE-20", priority=1, depends_on=["TE-14", "TE-99"]),
     ]
+    run_te14, task_te14 = _spend_task(ledger, repo_id, 1.0)
+    run_te19, task_te19 = _spend_task(ledger, repo_id, 1.0)
+    run_te20, task_te20 = _spend_task(ledger, repo_id, 1.0)
     results = {
         "TE-11": _outcome(state="MERGE_FAILED", run_id=_spend(ledger, repo_id, 1.0)),
-        "TE-14": _outcome(
-            state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
-        ),
+        "TE-14": _outcome(state="READY_FOR_REVIEW", run_id=run_te14, task_id=task_te14),
         "TE-16": RuntimeError("boom"),
         "TE-17": Refused(reason="nope"),
-        "TE-19": _outcome(
-            state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
-        ),
-        "TE-20": _outcome(
-            state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 1.0)
-        ),
+        "TE-19": _outcome(state="READY_FOR_REVIEW", run_id=run_te19, task_id=task_te19),
+        "TE-20": _outcome(state="READY_FOR_REVIEW", run_id=run_te20, task_id=task_te20),
     }
     runner = FakeStackRunner(results)
     lines: list[str] = []
@@ -1283,3 +1383,263 @@ def test_a_stack_batch_counts_a_raise_as_an_abort(ledger, repo_id):
 
     assert reason == "INFRASTRUCTURE"
     assert runner.calls == [("TE-1", None), ("TE-2", None)]
+
+
+def test_a_stack_batch_records_one_layer_for_each_task_that_reached_review(tmp_path):
+    """One `stack_layers` row per layer that reached `READY_FOR_REVIEW`. The
+    same three rows come back with no record behind the ledger. A second
+    batch opens its own count. A plain `run_batch` writes none."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "with-record.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    script = _stack_script()
+    order = [_candidate(spec_id) for spec_id, _ in script]
+    runner = ScriptedRunner(ledger, repo_id, script)
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "DRAINED"
+    batch_id = _latest_batch_id(ledger)
+    rows = _stack_layers(ledger)
+    assert len(rows) == 3
+
+    def key(spec_id: str) -> str | None:
+        return ledger.record_key(runner.task_ids[spec_id])
+
+    def sha(spec_id: str) -> str:
+        return runner.pushed_shas[spec_id]
+
+    expected = [
+        {
+            "task_key": key("TE-7"),
+            "batch_key": str(batch_id),
+            "position": 1,
+            "spec_id": "TE-7",
+            "predecessor_key": None,
+            "predecessor_head": None,
+            "generation": 0,
+        },
+        {
+            "task_key": key("TE-9"),
+            "batch_key": str(batch_id),
+            "position": 2,
+            "spec_id": "TE-9",
+            "predecessor_key": key("TE-7"),
+            "predecessor_head": sha("TE-7"),
+            "generation": 0,
+        },
+        {
+            "task_key": key("TE-6"),
+            "batch_key": str(batch_id),
+            "position": 3,
+            "spec_id": "TE-6",
+            "predecessor_key": key("TE-9"),
+            "predecessor_head": sha("TE-9"),
+            "generation": 0,
+        },
+    ]
+    assert rows == expected
+
+    layered_keys = {row["task_key"] for row in rows}
+    stack_fact_counts = {
+        task_key: sum(1 for f in record.read(task_key) if f.kind == "stack_layer")
+        for task_key in record.task_keys()
+    }
+    for task_key, count in stack_fact_counts.items():
+        assert count == (1 if task_key in layered_keys else 0)
+    assert sum(stack_fact_counts.values()) == 3
+
+    # The same three rows, by the same rules, with no record behind the ledger.
+    no_record = Ledger(tmp_path / "no-record.db")
+    repo_id_2 = no_record.upsert_repo(
+        "thermal-edge", "/o2", "/m2.git", policy_sha="p" * 64
+    )
+    script_2 = _stack_script()
+    order_2 = [_candidate(spec_id) for spec_id, _ in script_2]
+    runner_2 = ScriptedRunner(no_record, repo_id_2, script_2)
+
+    reason_2 = run_stack_batch(
+        order_2,
+        no_record,
+        budget_usd=100.0,
+        until=None,
+        runner=runner_2,
+        readiness_check=_ready,
+    )
+
+    assert reason_2 == "DRAINED"
+    batch_id_2 = _latest_batch_id(no_record)
+    rows_2 = _stack_layers(no_record)
+
+    def key_2(spec_id: str) -> str | None:
+        return no_record.record_key(runner_2.task_ids[spec_id])
+
+    def sha_2(spec_id: str) -> str:
+        return runner_2.pushed_shas[spec_id]
+
+    assert rows_2 == [
+        {
+            "task_key": key_2("TE-7"),
+            "batch_key": str(batch_id_2),
+            "position": 1,
+            "spec_id": "TE-7",
+            "predecessor_key": None,
+            "predecessor_head": None,
+            "generation": 0,
+        },
+        {
+            "task_key": key_2("TE-9"),
+            "batch_key": str(batch_id_2),
+            "position": 2,
+            "spec_id": "TE-9",
+            "predecessor_key": key_2("TE-7"),
+            "predecessor_head": sha_2("TE-7"),
+            "generation": 0,
+        },
+        {
+            "task_key": key_2("TE-6"),
+            "batch_key": str(batch_id_2),
+            "position": 3,
+            "spec_id": "TE-6",
+            "predecessor_key": key_2("TE-9"),
+            "predecessor_head": sha_2("TE-9"),
+            "generation": 0,
+        },
+    ]
+
+    # A second stack batch on the same ledger opens its own position count
+    # and its own predecessor chain, and leaves the first batch's rows alone.
+    script_3 = _stack_script()
+    order_3 = [_candidate(spec_id) for spec_id, _ in script_3]
+    runner_3 = ScriptedRunner(no_record, repo_id_2, script_3)
+
+    reason_3 = run_stack_batch(
+        order_3,
+        no_record,
+        budget_usd=100.0,
+        until=None,
+        runner=runner_3,
+        readiness_check=_ready,
+    )
+
+    assert reason_3 == "DRAINED"
+    batch_id_3 = _latest_batch_id(no_record)
+    assert batch_id_3 != batch_id_2
+    rows_3 = _stack_layers(no_record, batch_id=batch_id_3)
+    assert [row["position"] for row in rows_3] == [1, 2, 3]
+    assert rows_3[0]["spec_id"] == "TE-7"
+    assert rows_3[0]["predecessor_key"] is None
+    assert _stack_layers(no_record, batch_id=batch_id_2) == rows_2
+
+    # A plain `run_batch` writes no `stack_layers` row at all.
+    plain = Ledger(tmp_path / "run-batch.db")
+    repo_id_3 = plain.upsert_repo("thermal-edge", "/o3", "/m3.git", policy_sha="p" * 64)
+    script_4 = _stack_script()
+    order_4 = [_candidate(spec_id) for spec_id, _ in script_4]
+    runner_4 = ScriptedRunner(plain, repo_id_3, script_4)
+
+    reason_4 = run_batch(
+        order_4,
+        plain,
+        budget_usd=100.0,
+        until=None,
+        runner=runner_4,
+        rescan=lambda: order_4,
+        readiness_check=_ready,
+    )
+
+    assert reason_4 == "DRAINED"
+    assert _stack_layers(plain) == []
+
+
+def test_the_stack_layers_fold_back_from_the_record_alone(tmp_path):
+    """Folding the record alone rebuilds every `stack_layers` row. Each
+    keeps a predecessor's key and head as first pushed. `fold_task` with
+    no facts removes exactly the layer it names."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.fold import fold
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    script = _stack_script()
+    order = [_candidate(spec_id) for spec_id, _ in script]
+    runner = ScriptedRunner(ledger, repo_id, script)
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+    assert reason == "DRAINED"
+
+    run_te4 = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_te4 = ledger.create_task(
+        run_te4, spec_id="TE-4", spec_sha="s" * 64, branch="saffron/TE-4"
+    )
+    ledger.record_push(task_te4, "TE-4-sha")
+    ledger.set_task_package(
+        task_te4,
+        "READY_FOR_REVIEW",
+        "saffron/TE-4",
+        "TE-4-sha",
+        "https://example.invalid/4",
+    )
+    ledger.record_stack_layer(
+        task_te4,
+        position=4,
+        predecessor_task_id=runner.task_ids["TE-6"],
+        generation=1,
+    )
+
+    source_rows = _stack_layers(ledger)
+    assert len(source_rows) == 4
+    assert source_rows[3]["spec_id"] == "TE-4"
+    assert source_rows[3]["generation"] == 1
+
+    # Taken before the push below, and before either fold.
+    te7_key = ledger.record_key(runner.task_ids["TE-7"])
+    te7_sha = runner.pushed_shas["TE-7"]
+    te9_key = ledger.record_key(runner.task_ids["TE-9"])
+    assert te9_key is not None
+
+    ledger.record_push(runner.task_ids["TE-7"], "TE-7-new-sha")
+
+    fresh = Ledger(tmp_path / "fresh.db")
+    other_repo = fresh.upsert_repo(
+        "other-repo", "/other/o", "/other/m.git", policy_sha="q" * 64
+    )
+    other_run = fresh.create_run(other_repo, base_sha="b" * 40)
+    fresh.create_task(
+        other_run, spec_id="ZZ-0", spec_sha="z" * 64, branch="saffron/ZZ-0"
+    )
+
+    fold(record, fresh)
+
+    fresh_rows = _stack_layers(fresh)
+    assert fresh_rows == source_rows
+
+    te9_row = next(row for row in fresh_rows if row["spec_id"] == "TE-9")
+    assert te9_row["predecessor_key"] == te7_key
+    assert te9_row["predecessor_head"] == te7_sha
+
+    fold(record, ledger)
+    assert _stack_layers(ledger) == source_rows
+
+    fresh.fold_task(te9_key, [])
+    remaining = {row["spec_id"] for row in _stack_layers(fresh)}
+    assert remaining == {"TE-7", "TE-6", "TE-4"}

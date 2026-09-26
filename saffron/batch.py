@@ -68,6 +68,7 @@ def run_batch(
     clock: Callable[[], datetime] = datetime.now,
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None] = print,
+    after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
 ) -> StopReason:
     """Drive one night against one repo's already-sorted candidates.
 
@@ -101,6 +102,11 @@ def run_batch(
     Returns the stop reason itself, one of `DRAINED`, `BUDGET`, `UNTIL`,
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
     `SA-0051` owns the mapping to an exit code.
+
+    `after_attach` fires once per task attached to the batch, right after
+    that attach. Never for a `Refused` and never for a raise.
+    `run_stack_batch` is the one caller that supplies it. An ordinary batch
+    passes none.
     """
     # UTC, and space-separated: `batches.started_at` is `datetime('now')`,
     # which is both. A naive local `isoformat()` matched neither, so the two
@@ -130,6 +136,7 @@ def run_batch(
             readiness_check=readiness_check,
             emit=emit,
             in_flight=in_flight,
+            after_attach=after_attach,
         )
         return stopped
     finally:
@@ -156,6 +163,7 @@ def _drive(
     readiness_check: Callable[[], Readiness],
     emit: Callable[[str], None],
     in_flight: list[tuple[str, str]],
+    after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
 ) -> StopReason:
     """`run_batch`'s body, split out so every exit closes the batch row.
 
@@ -240,6 +248,10 @@ def _drive(
                 # the shape `record_push` and `set_task_package` already use on
                 # `tasks`: the row exists, then the fact about it arrives.
                 ledger.attach_run_to_batch(outcome.run_id, batch_id)
+                # After the attach above, so any fact `after_attach` builds
+                # already carries this run's `batch_id`.
+                if after_attach is not None:
+                    after_attach(candidate, outcome, batch_id)
 
                 if outcome.state in ABORT_STATES:
                     consecutive_aborts += 1
@@ -296,6 +308,23 @@ def run_stack_batch(
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
     predecessor: Candidate | None = None
+    predecessor_task_id: int | None = None
+    position = 0
+
+    # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at
+    # generation 0. The predecessor is the last such task, not `candidate`.
+    def record_layer(candidate: Candidate, outcome: CellOutcome, batch_id: int) -> None:
+        nonlocal position, predecessor_task_id
+        if not _is_layer(outcome):
+            return
+        position += 1
+        ledger.record_stack_layer(
+            outcome.task_id,
+            position=position,
+            predecessor_task_id=predecessor_task_id,
+            generation=0,
+        )
+        predecessor_task_id = outcome.task_id
 
     def blocking(candidate: Candidate) -> frozenset[str]:
         found: set[str] = set()
@@ -342,6 +371,7 @@ def run_stack_batch(
         clock=clock,
         readiness_check=readiness_check,
         emit=emit,
+        after_attach=record_layer,
     )
 
 
