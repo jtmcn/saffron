@@ -2495,6 +2495,90 @@ def test_the_printed_queue_is_unchanged_by_sharing_the_base(tmp_path, capsys):
         "refusal list above is incomplete\n"
     )
 
+    # A real `depends_on` edge, where the stack order (`SA-0142`) admits
+    # both specs. This checks that `--stack` truly defaults to `False`.
+    parent = _dep_spec("SY-5")
+    child = _dep_spec("SY-6", "SY-5")
+    stack_default_repo = _repo_with_spec(
+        tmp_path,
+        spec_text=parent,
+        dirname="repo-unchanged-by-sharing-stack-default",
+        extra_specs={"SY-6.md": child},
+    )
+    stack_default_home = tmp_path / "home-stack-default"
+
+    assert (
+        cli.main(
+            [
+                "--home",
+                str(stack_default_home),
+                "queue",
+                "--repo",
+                str(stack_default_repo),
+            ]
+        )
+        == 0
+    )
+
+    without_stack = capsys.readouterr().out
+    assert "queue: 1 candidate(s)" in without_stack
+    admitted = without_stack.split("refusals:")[0]
+    assert "SY-5" in admitted
+    assert "SY-6" not in admitted
+
+
+def test_queue_stack_prints_the_stack_order(tmp_path, capsys):
+    """`saffron queue --stack` prints `build_queue`'s stack order
+    (`SA-0142`): SY-1 depends on SY-2 and runs after it in that order, ahead
+    of SY-2's own priority. SY-3 depends on SY-9, which no spec here
+    declares, and stays refused either way. Without `--stack` the same repo
+    admits SY-2 alone and refuses SY-1, since no task recorded it merged."""
+    sy2 = (
+        "---\nid: SY-2\ntitle: t\ntype: chore\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    sy1 = (
+        "---\nid: SY-1\ntitle: t\ntype: chore\npriority: 1\n"
+        "depends_on:\n  - SY-2\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    sy3 = (
+        "---\nid: SY-3\ntitle: t\ntype: chore\n"
+        "depends_on:\n  - SY-9\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=sy1,
+        dirname="repo-queue-stack",
+        extra_specs={"SY-2.md": sy2, "SY-3.md": sy3},
+    )
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo), "--stack"]) == 0
+
+    stacked = capsys.readouterr().out
+    assert "queue: 2 candidate(s)" in stacked
+    ordered = [line for line in stacked.splitlines() if line.startswith("  SY-")]
+    assert [line.split()[0] for line in ordered] == ["SY-2", "SY-1"]
+    assert any(
+        "SY-3.md" in line and "SY-9" in line
+        for line in stacked.splitlines()
+        if line.startswith("  ")
+    )
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    plain = capsys.readouterr().out
+    assert "queue: 1 candidate(s)" in plain
+    plain_candidates = [line for line in plain.splitlines() if line.startswith("  SY-")]
+    assert [line.split()[0] for line in plain_candidates] == ["SY-2"]
+    assert any(
+        "SY-1.md" in line and "SY-2" in line
+        for line in plain.splitlines()
+        if line.startswith("  ")
+    )
+
 
 def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
     """The existing guarantee, re-asserted at the level where it could
@@ -2654,7 +2738,9 @@ def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
 
     captured: dict = {}
 
-    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
         captured["repo"] = repo
         return _fake_batch_resolution(tmp_path)
 
@@ -2716,7 +2802,9 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
         task_id=None,
     )
 
-    def _fake_resolve_queue(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
         resolve_calls.append({"stamp_orphaned": stamp_orphaned, "pinned": pinned})
         # The opening call: `None`, no candidates. The rescan: an id, its own list.
         if len(resolve_calls) == 1:
@@ -2751,6 +2839,156 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
     assert resolve_calls[0]["pinned"] is not None
     assert resolve_calls[1]["pinned"] is resolve_calls[0]["pinned"]
     assert recorded_repo_ids == [99]
+
+
+def test_saffron_batch_stack_plans_once_and_runs_that_order(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack` resolves the queue once, with `stack=True` and
+    `stamp_orphaned=True`, against the pinned base. It never calls
+    `run_batch`. It hands the resolved order to `run_stack_batch`, with the
+    runner `_stack_runner` builds. That runner looks up `repo_id` fresh per
+    task, so a repo this batch itself records still reaches a later
+    candidate. A readiness failure and a queue that raises both still reach
+    the real `run_stack_batch`, so both still close the batch row
+    `INFRASTRUCTURE`."""
+    real_stack_runner = cli._stack_runner
+    real_run_stack_batch = cli.run_stack_batch
+    sentinel_runner = object()
+
+    def _run_batch_must_not_run(*_a, **_k):
+        pytest.fail("cli.run_batch was called on the --stack path")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "run_batch", _run_batch_must_not_run)
+
+    # Case 1: readiness passes.
+    sy2 = Candidate(
+        path=Path("SY-2.md"),
+        spec=intake.Spec(id="SY-2", title="t", type="chore", priority=3),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+    sy1 = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(
+            id="SY-1", title="t", type="chore", priority=1, depends_on=["SY-2"]
+        ),
+        spec_sha="r" * 64,
+        task_id=None,
+    )
+    resolve_calls: list[dict] = []
+    stack_runner_calls: list[dict] = []
+    recorded: dict = {}
+
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
+        resolve_calls.append(
+            {"stamp_orphaned": stamp_orphaned, "pinned": pinned, "stack": stack}
+        )
+        return _fake_batch_resolution(tmp_path, repo_id=None, candidates=[sy2, sy1])
+
+    def _fake_stack_runner(**kwargs):
+        stack_runner_calls.append(kwargs)
+        return sentinel_runner
+
+    def _recording_run_task(
+        spec, spec_sha, *, repo_id, handoff, repo, out_dir, ledger, base, **kwargs
+    ):
+        recorded["repo_id"] = repo_id
+        recorded["handoff"] = handoff
+        recorded["repo"] = repo
+        recorded["out_dir"] = out_dir
+        recorded["ledger"] = ledger
+        recorded["base"] = base
+        return CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    def _fake_run_stack_batch(
+        candidates, ledger, budget_usd, until, runner, *, readiness_check, **kwargs
+    ):
+        recorded["candidates"] = candidates
+        recorded["runner"] = runner
+        recorded["upserted_repo_id"] = ledger.upsert_repo(
+            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+        )
+        built = real_stack_runner(**stack_runner_calls[0])
+        built(candidates[0], None)
+        return "DRAINED"
+
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "_stack_runner", _fake_stack_runner)
+    monkeypatch.setattr(cli, "run_task", _recording_run_task)
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    home_pass = tmp_path / "home-pass"
+    assert main(["--home", str(home_pass), "batch", "--stack"]) == 0
+
+    assert len(resolve_calls) == 1
+    assert resolve_calls[0]["stack"] is True
+    assert resolve_calls[0]["stamp_orphaned"] is True
+    assert resolve_calls[0]["pinned"] is not None
+    assert [c.spec.id for c in recorded["candidates"]] == ["SY-2", "SY-1"]
+    assert recorded["runner"] is sentinel_runner
+    assert recorded["repo_id"] == recorded["upserted_repo_id"]
+    assert recorded["handoff"] == task.Handoff(stacked_on=None, target_branch=None)
+    assert recorded["repo"] == tmp_path.resolve()
+    assert recorded["out_dir"] == home_pass / "batches" / "v0"
+    assert recorded["repo"] != recorded["out_dir"]
+
+    # Case 2: readiness fails, with the real `run_stack_batch`.
+    monkeypatch.setattr(cli, "run_stack_batch", real_run_stack_batch)
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+
+    home_fails = tmp_path / "home-fails"
+    assert main(["--home", str(home_fails), "batch", "--stack"]) == 2
+
+    out = capsys.readouterr().out
+    assert "auth" in out
+    assert "token invalid" in out
+
+    ledger = Ledger(home_fails / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    ledger.close()
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
+
+    # Case 3: `_resolve_queue` raises, with the real `run_stack_batch`.
+    _readiness_passes(monkeypatch)
+
+    def _raise(*a, **k):
+        raise RuntimeError("the mirror could not be fetched mid-scan")
+
+    monkeypatch.setattr(cli, "_resolve_queue", _raise)
+
+    home_raises = tmp_path / "home-raises"
+    assert main(["--home", str(home_raises), "batch", "--stack"]) == 2
+
+    out = capsys.readouterr().out
+    batch_lines = [line for line in out.splitlines() if line.startswith("batch:")]
+    assert any(
+        "the queue could not be resolved" in line and "mid-scan" in line
+        for line in batch_lines
+    )
+    assert "readiness failed" not in out
+
+    ledger = Ledger(home_raises / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status, ended_at FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    ledger.close()
+    assert row["status"] == "INFRASTRUCTURE"
+    assert row["ended_at"] is not None
 
 
 def test_a_deadline_earlier_than_now_resolves_to_tomorrow():
@@ -3088,7 +3326,7 @@ def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, c
     monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
 
     args = argparse.Namespace(
-        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None, stack=False
     )
     ledger = Ledger(tmp_path / "l.db")
     assert cli._batch(args, ledger, tmp_path / "out") == 0
@@ -3516,7 +3754,7 @@ def test_readiness_still_runs_before_the_scan_it_now_feeds(tmp_path, monkeypatch
 
     seen: dict = {}
 
-    def _resolve(repo, home_arg, ledger, *, stamp_orphaned, pinned=None):
+    def _resolve(repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False):
         order.append("resolve")
         seen["pinned"] = pinned
         return _fake_batch_resolution(tmp_path)
@@ -3835,7 +4073,7 @@ def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
 
     args = argparse.Namespace(
-        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None, stack=False
     )
     ledger = Ledger(tmp_path / "l.db")
     assert cli._batch(args, ledger, tmp_path / "out") == 0
@@ -3866,6 +4104,7 @@ def test_a_night_says_what_it_set_out_to_do_before_what_became_of_it(
         home=tmp_path / "home",
         budget=25.0,
         until=None,
+        stack=False,
     )
     ledger = Ledger(tmp_path / "l.db")
     assert cli._batch(args, ledger, tmp_path / "out") == 0
@@ -3911,7 +4150,7 @@ def test_the_printed_night_is_unchanged_by_sharing_the_base(
     monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
 
     args = argparse.Namespace(
-        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None
+        repo=tmp_path, home=tmp_path / "home", budget=50.0, until=None, stack=False
     )
     ledger = Ledger(tmp_path / "l.db")
     assert cli._batch(args, ledger, tmp_path / "out") == 0

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from saffron import preflight
-from saffron.batch import run_batch
+from saffron.batch import run_batch, run_stack_batch
 from saffron.cell import runtime
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec, load_spec
@@ -108,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         "queue", help="show what a batch would run tonight, agent-free"
     )
     queue_parser.add_argument("--repo", type=Path, default=Path.cwd())
+    queue_parser.add_argument("--stack", action="store_true")
 
     batch_parser = subcommands.add_parser(
         "batch", help="run one repo's night, unattended (§4.2.1)"
@@ -121,6 +122,9 @@ def main(argv: list[str] | None = None) -> int:
     # duration would need no "which day" question at all, and a time of day
     # is the shape an operator actually types before going to bed.
     batch_parser.add_argument("--until", type=_clock_time, default=None)
+    # A stack batch plans its order once, at batch start, and runs it into
+    # one pull request stack (ADR 7, `DESIGN.md` §4.2.1).
+    batch_parser.add_argument("--stack", action="store_true")
 
     reconcile_parser = subcommands.add_parser(
         "reconcile",
@@ -585,6 +589,7 @@ def _resolve_queue(
     *,
     stamp_orphaned: bool,
     pinned: PinnedBase | None = None,
+    stack: bool = False,
 ) -> QueueResolution:
     """Resolve one repo's queue over its pinned `base_sha` — the mirror, the
     pinned base, the reconcile, the slug, the export, and the scan over that
@@ -615,6 +620,10 @@ def _resolve_queue(
 
     `resolve_repo_id`, never `upsert_repo`: an unseen repo gets `None`, which
     both `build_queue` and `reconcile` treat as nothing to do.
+
+    `stack` is passed straight through to `build_queue`. `False` is every
+    caller's queue order. `True` is the stack order `saffron queue --stack`
+    and `saffron batch --stack` ask for instead.
     """
     repo = repo.resolve()
 
@@ -670,6 +679,7 @@ def _resolve_queue(
             # (`SA-0131`).
             pushed_landed=lambda sha: _pushed_landed(mirror, base_sha, sha),
             gh=_guarded_gh(gh_failures),
+            stack=stack,
         )
 
     return QueueResolution(
@@ -758,6 +768,20 @@ def _no_candidate_should_run(candidate: Candidate) -> CellOutcome | Refused:
     )
 
 
+def _no_stack_candidate_should_run(
+    candidate: Candidate, predecessor: Candidate | None
+) -> CellOutcome | Refused:
+    """`_no_candidate_should_run`'s own twin for `--stack`: the runner a
+    stack batch gets when the loop was never meant to start.
+    `run_stack_batch` takes its runner before it knows whether it will use
+    it. Reaching this is a bug in the ordering above, not an operator's
+    problem."""
+    raise AssertionError(
+        "readiness failed or the queue could not be resolved, yet "
+        f"{candidate.spec.id} was started anyway"
+    )
+
+
 def _no_candidates_to_rescan() -> list[Candidate]:
     """The rescan `_no_candidate_should_run`'s own night gets: readiness
     failed, or the opening scan itself could not be resolved, so there is no
@@ -809,11 +833,13 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     watching); binds a real readiness check to this run's own paths and
     token, never the loop's "proceed" default; builds the adapter that turns
     a candidate into a cell (`_batch_runner`) and the rescan; and hands them
-    to `saffron.batch.run_batch`, which owns the loop itself and is the only
-    thing in this module that calls `ledger.create_batch`/`close_batch` —
-    true whether the night gets past readiness or not.
+    to `saffron.batch.run_batch`, or to `run_stack_batch` under `--stack`.
+    Both own the loop and are the only things in this module that call
+    `ledger.create_batch`/`close_batch` — true whether the night gets past
+    readiness or not.
 
-    Exit codes are `run_batch`'s own five stop reasons, mapped per §4.2.1:
+    Exit codes are `run_batch`'s and `run_stack_batch`'s own five stop
+    reasons, mapped per §4.2.1:
     `0` for `DRAINED`, `BUDGET` and `UNTIL`, `2` for `INFRASTRUCTURE` and for
     `INCOMPLETE` — never `1`, which is reserved for a task's own failure and
     a batch is not a task. `INCOMPLETE` shares `INFRASTRUCTURE`'s exit code
@@ -859,6 +885,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     runner: Callable[[Candidate], CellOutcome | Refused] = _no_candidate_should_run
     # Matches `candidates`' own empty default — nothing reaches it.
     rescan: Callable[[], Sequence[Candidate]] = _no_candidates_to_rescan
+    stack_runner: Callable[[Candidate, Candidate | None], CellOutcome | Refused] = (
+        _no_stack_candidate_should_run
+    )
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches `run_batch` and its row.
     resolution_error: Exception | None = None
@@ -876,7 +905,12 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         )
         try:
             resolved = _resolve_queue(
-                repo, args.home, ledger, stamp_orphaned=True, pinned=pinned
+                repo,
+                args.home,
+                ledger,
+                stamp_orphaned=True,
+                pinned=pinned,
+                stack=args.stack,
             )
         except Exception as exc:
             # A discovery refusal (`SA-0065`), a mirror fetch, a reconcile:
@@ -891,29 +925,40 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             # the one path where nobody is awake to notice.
             _print_reconcile_summary(resolved.reconciled)
             _print_batch_plan(resolved, budget_usd=args.budget, until=until)
-
-            # Updated by every rescan, so `_batch_runner`'s `repo_id`
-            # callable reads the latest answer, not the opening one.
-            latest_repo_id: list[int | None] = [resolved.repo_id]
-
-            def _rescan() -> list[Candidate]:
-                # `False`: a task left in flight tonight is live, not a
-                # corpse. `pinned`: the same base the opening scan paid for.
-                rescanned = _resolve_queue(
-                    repo, args.home, ledger, stamp_orphaned=False, pinned=pinned
-                )
-                latest_repo_id[0] = rescanned.repo_id
-                return rescanned.candidates
-
-            rescan = _rescan
-            runner = _batch_runner(
-                pinned=pinned,
-                repo_id=lambda: latest_repo_id[0],
-                repo=repo,
-                ledger=ledger,
-                out_dir=out_dir,
-            )
             candidates = resolved.candidates
+
+            if args.stack:
+                # A stack batch never rescans: the order is fixed right here.
+                # `repo_id` is still looked up fresh per task, not pinned now.
+                stack_runner = _stack_runner(
+                    pinned=pinned,
+                    repo_id=lambda: ledger.resolve_repo_id(pinned.url),
+                    repo=repo,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                )
+            else:
+                # Updated by every rescan, so `_batch_runner`'s `repo_id`
+                # callable reads the latest answer, not the opening one.
+                latest_repo_id: list[int | None] = [resolved.repo_id]
+
+                def _rescan() -> list[Candidate]:
+                    # `False`: a task left in flight tonight is live, not a
+                    # corpse. `pinned`: the same base the opening scan paid for.
+                    rescanned = _resolve_queue(
+                        repo, args.home, ledger, stamp_orphaned=False, pinned=pinned
+                    )
+                    latest_repo_id[0] = rescanned.repo_id
+                    return rescanned.candidates
+
+                rescan = _rescan
+                runner = _batch_runner(
+                    pinned=pinned,
+                    repo_id=lambda: latest_repo_id[0],
+                    repo=repo,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                )
 
     def _readiness_or_raise() -> preflight.Readiness:
         # Raised inside `run_batch`'s `try`, so its `finally` closes the row
@@ -923,17 +968,29 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         return readiness
 
     try:
-        stop = run_batch(
-            candidates,
-            ledger,
-            args.budget,
-            until,
-            runner,
-            rescan=rescan,
-            # The readiness already measured above, or the scan's raise — never
-            # a second probe of the same host.
-            readiness_check=_readiness_or_raise,
-        )
+        if args.stack:
+            # `run_stack_batch` in place of `run_batch`, and no rescan: the
+            # order this batch runs was fixed by the single resolve above.
+            stop = run_stack_batch(
+                candidates,
+                ledger,
+                args.budget,
+                until,
+                stack_runner,
+                readiness_check=_readiness_or_raise,
+            )
+        else:
+            stop = run_batch(
+                candidates,
+                ledger,
+                args.budget,
+                until,
+                runner,
+                rescan=rescan,
+                # The readiness already measured above, or the scan's raise —
+                # never a second probe of the same host.
+                readiness_check=_readiness_or_raise,
+            )
     except Exception as exc:
         if exc is not resolution_error:
             # Identity, not presence: `create_batch` can still raise after a
@@ -991,7 +1048,9 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
     asserts exactly that: `_resolve_queue`'s own docstring names the premise
     this passes on.
     """
-    resolved = _resolve_queue(args.repo, args.home, ledger, stamp_orphaned=False)
+    resolved = _resolve_queue(
+        args.repo, args.home, ledger, stamp_orphaned=False, stack=args.stack
+    )
 
     _print_reconcile_summary(resolved.reconciled)
     _print_queue(
