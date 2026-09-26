@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The `prose` gate's limit, applied to a commit and to each edit.
 
-Each staged file in scope, Markdown or Python, may not carry more hits of
-any `prose` rule than its `HEAD` version. A new file compares against zero, and a rename
-against its old path. The gate gets the same limit from baseline subtraction.
+Each staged file in scope, Markdown or Python, must not carry a `prose` hit its
+`HEAD` version lacks. A hit is its sentence, or its block's name and length. A new
+file compares against zero, and a rename against its old path. The gate gets the
+same limit from baseline subtraction (backlog item b-044ae7).
 Standard library only, like the gate it loads.
 
 With `--edited`, a Claude Code PostToolUse hook: the edited file's new hits
@@ -69,38 +70,25 @@ def staged(root: Path) -> list[tuple[str | None, str]]:
     return pairs
 
 
+def _identity(hit: Any) -> tuple[str, str]:
+    return hit.code, hit.key or hit.excerpt
+
+
 def new_hits(
     prose: Any, root: Path, gate: str, path: str, old_text: str | None, new_text: str
 ) -> list[Any]:
-    """Hits in `new_text` with no matching excerpt in `old_text`, counted."""
+    """Hits in `new_text` whose identity `old_text` lacks, counted, the way
+    baseline subtraction reads the gate's messages."""
     before = Counter(
-        f.excerpt for f in prose.check(old_text or "", path, gate, root=root)
+        _identity(f) for f in prose.check(old_text or "", path, gate, root=root)
     )
     fresh = []
     for hit in prose.check(new_text, path, gate, root=root):
-        if before[hit.excerpt]:
-            before[hit.excerpt] -= 1
+        if before[_identity(hit)]:
+            before[_identity(hit)] -= 1
         else:
             fresh.append(hit)
     return fresh
-
-
-def rises(
-    prose: Any, root: Path, gate: str, path: str, old_text: str | None, new_text: str
-) -> dict[str, tuple[int, int]]:
-    """Rule codes whose count went up, as `code -> (before, after)`."""
-    before = Counter(f.code for f in prose.check(old_text or "", path, gate, root=root))
-    after = Counter(f.code for f in prose.check(new_text, path, gate, root=root))
-    return {code: (before[code], n) for code, n in after.items() if n > before[code]}
-
-
-def risen_hits(
-    prose: Any, root: Path, gate: str, path: str, old_text: str | None, new_text: str
-) -> tuple[dict[str, tuple[int, int]], list[Any]]:
-    """The codes whose count rose, and the new hits of those codes."""
-    risen = rises(prose, root, gate, path, old_text, new_text)
-    fresh = new_hits(prose, root, gate, path, old_text, new_text)
-    return risen, [hit for hit in fresh if hit.code in risen]
 
 
 def _show(root: Path, spec: str) -> str:
@@ -117,9 +105,9 @@ def commit_time(root: Path) -> int:
             continue
         old_text = _show(root, f"HEAD:{old}") if old else None
         new_text = _show(root, f":{new}")
-        risen, hits = risen_hits(prose, root, "prose", new, old_text, new_text)
-        for code, (was, now) in sorted(risen.items()):
-            print(f"{new}: {code} rose from {was} to {now}")
+        hits = new_hits(prose, root, "prose", new, old_text, new_text)
+        for code, n in sorted(Counter(hit.code for hit in hits).items()):
+            print(f"{new}: {n} new {code} hit{'' if n == 1 else 's'}")
             failed = True
         for hit in hits:
             print(f"  {new}:{hit.line}: {hit.code}: {hit.excerpt}")
@@ -142,14 +130,13 @@ def _against_head(root: Path, path: str, file_path: Path) -> tuple[str | None, s
     )
 
 
-def _risen_lines(
+def _new_lines(
     prose: Any, root: Path, path: str, old_text: str | None, new_text: str
 ) -> list[str]:
-    # Only a code whose count actually rose, like `commit_time` does: an
-    # untouched hit sharing its line with an edit is not new.
+    # An untouched hit sharing its line with an edit is not new.
     lines = []
     for gate in prose.GATES:
-        _, hits = risen_hits(prose, root, gate, path, old_text, new_text)
+        hits = new_hits(prose, root, gate, path, old_text, new_text)
         lines += [f"{path}:{hit.line}: {hit.code}: {hit.excerpt}" for hit in hits]
     return lines
 
@@ -175,7 +162,7 @@ def file_time(root: Path, raw_path: str) -> int:
         print(f"out of the gates' scope: {raw_path}", file=sys.stderr)
         return 2
     old_text, new_text = _against_head(root, path, file_path)
-    lines = _risen_lines(prose, root, path, old_text, new_text)
+    lines = _new_lines(prose, root, path, old_text, new_text)
     baseline = "HEAD" if old_text is not None else "zero"
     plural = "" if len(lines) == 1 else "s"
     print(f"{path}: {len(lines)} new hit{plural} against {baseline}", *lines, sep="\n")
@@ -201,7 +188,7 @@ def edit_time(root: Path, event: object) -> int:
     if path is None or not prose.in_scope(path) or not file_path.is_file():
         return 0
     old_text, new_text = _against_head(root, path, file_path)
-    lines = _risen_lines(prose, root, path, old_text, new_text)
+    lines = _new_lines(prose, root, path, old_text, new_text)
     if not lines:
         return 0
     print(

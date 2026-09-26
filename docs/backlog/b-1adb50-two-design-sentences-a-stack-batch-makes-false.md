@@ -53,3 +53,5 @@ deadline plus one task plus its end review. Each cites ADR 7.
   `.claude/agents/spec-reviewer.md` no longer apply. ADR 7's revision makes
   both prompts core's, so §2.1's key list is unchanged. §5.1 and §5.5 still
   record the narrowed departures (`SA-0169`).
+- 2026-09-26: the spec loop's run 18 found a third. `DESIGN.md` §4.2 item 1
+  meets a dependency at `READY_FOR_REVIEW`, and a stack order does not.

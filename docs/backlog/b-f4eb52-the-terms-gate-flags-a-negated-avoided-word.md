@@ -30,3 +30,5 @@ words to rule them out or by rewording `intake.py:133`.
 ## Record
 
 - 2026-09-23: filed from the spec loop's run 15.
+- 2026-09-26: `terms` failed at base on all nine of the spec loop's run 18
+  cells.

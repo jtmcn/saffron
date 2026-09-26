@@ -20,8 +20,8 @@ gates:
   # first three. Declared unconditionally, for the reason `shacl` gives above.
   structure: { blocking: true }
   # House style over living Markdown, and comment and docstring length over
-  # code. It fails at base as well: subtraction
-  # counts, so a task fails only when a file gains hits of one rule.
+  # code. It fails at base as well: each message names its sentence or block,
+  # so a task fails only on a hit the base lacks (item b-044ae7).
   prose: { blocking: true }
   # Code no production caller reaches. It fails at base too, so only a task's new
   # failures count; an open spec's `pending_symbols` defers one.

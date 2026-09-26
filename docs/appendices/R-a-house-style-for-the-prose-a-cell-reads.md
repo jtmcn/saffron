@@ -21,7 +21,9 @@ words. A cell reads that prose on every task. The `prose` gate now holds it
 
 - A blocking `prose` gate counts hits per file and rule. Baseline subtraction
   (§5.4) does the limiting, with no change under `saffron/`. Its failure
-  message is fixed per rule, so the identity is the file and the rule.
+  message is fixed per rule, so the identity is the file and the rule. A new
+  hit then cancelled an old one. On 2026-09-26 the message took the hit's
+  sentence, or its block's name and length (item b-044ae7).
 - An advisory `terms` gate names the Saffron term for an avoided phrase. Each
   entry is quoted on an `_Avoid_` line in `CONTEXT.md`.
 - A prek hook applies the same limit to a commit. A Claude Code hook reports

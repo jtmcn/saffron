@@ -1044,3 +1044,70 @@ taken by hand, so no critic ran on it and it has no lines here.
 - `SA-0141` (#519): nothing witnessed the drive double copying
   `structured_output` onto its result line, as the spec's notes asked.
   **Bucket 1**, the spec's arrangement. **Landed:** a review commit on #519.
+
+## 2026-09-26, `SA-0142` to `SA-0159` (the spec loop's run 18, stack #531)
+
+- `SA-0142` (#522): no witness put an unmet `depends_on` entry first and a met
+  one after it, so readiness read from the last entry alone passed every test.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #522.
+- `SA-0142` (#522): `build_queue`'s docstring grew five lines past the
+  ten-line rule, and `_stack_order` cited §4.2 for the rule §4.2 contradicts.
+  **Bucket 1**, `prose`. **Open:** item b-044ae7. **Landed:** a review commit.
+- `SA-0143` (#523): the refusal witness keyed lines by their first token, so
+  a duplicated line or a dropped padding passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #523.
+- `SA-0143` (#523): `run_task`'s new docstring broke three prose rules, and
+  the repair turn rewrote an older comment so the file's count went flat.
+  **Bucket 1**, `prose`. **Open:** item b-044ae7. **Landed:** a review commit.
+- `SA-0143` (#523): one fact was held three ways, with tags that read as task
+  states.
+  **Bucket 3**, contract. **Landed:** a review commit on #523.
+- `SA-0144` (#524): nothing witnessed that a plain `saffron batch` still asks
+  for the ordinary queue order.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #524.
+- `SA-0144` (#524): `revert` skipped both new witnesses, since the `tests`
+  gate reads a flag error in captured output as its own.
+  **Bucket 1**, `tests`. **Open:** item b-76f08d.
+- `SA-0144` (#524): an unrequested and false four-line docstring paragraph
+  grew past the ten-line rule, and a test restated a helper.
+  **Bucket 1**, `prose`. **Open:** item b-044ae7. **Landed:** a review commit.
+- `SA-0145` (#525): `record_stack_layer` wrote an unknown predecessor as a
+  stack's first layer.
+  **Bucket 3**, correctness. **Landed:** a review commit on #525.
+- `SA-0145` (#525): a five-line SQL comment sat in the `SCHEMA` string, and
+  `run_batch`'s docstring grew five lines.
+  **Bucket 1**, `prose`. **Open:** items b-43061c and b-044ae7. **Landed:** a
+  review commit on #525.
+- `SA-0146` (#526): the Standards prompt judged a repo's words against
+  Saffron's own glossary, the wrong version the spec named.
+  **Bucket 3**, contract. **Landed:** a review commit on #526.
+- `SA-0146` (#526): four wrong versions passed criterion 2's witness, one of
+  them because it checked a constant's name and not its value.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #526.
+- `SA-0153` (#527): both raises the witness drove were `RuntimeError`, so a
+  catch narrowed to it passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #527.
+- `SA-0153` (#527): `_diff` recorded a bare `CalledProcessError`, which drops
+  git's stderr.
+  **Bucket 2**, the record contract's stated reason. **Landed:** a review
+  commit on #527.
+- `SA-0153` (#527): the end review finds its batch by the latest id.
+  **Bucket 3**, correctness. **Open:** item b-615466.
+- `SA-0154` (#528): nothing asserted `StackReview` is frozen, and a cell
+  removed by its volume's name passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #528.
+- `SA-0154` (#528): a second query restated `_BATCH_LAYERS` and needed an
+  unguarded lookup, and a helper was a byte copy of another.
+  **Bucket 2**, one source. **Open:** item b-50a704. **Landed:** a review
+  commit on #528.
+- `SA-0157` (#529): the error fallback read the join row as the top layer's
+  own lens row.
+  **Bucket 3**, correctness. **Landed:** a review commit on #529.
+- `SA-0157` (#529): `cli.py` restated a query and a root path, and a
+  docstring miscounted the cells the review opens.
+  **Bucket 2**, one source. **Open:** item b-50a704. **Landed:** a review
+  commit on #529.
+- `SA-0159` (#530): the `baseline_names` comment claimed a row per gate
+  result and a false cause for a `None` read.
+  **Bucket 1**, `prose`. **Open:** item b-43061c. **Landed:** a review commit
+  on #530.

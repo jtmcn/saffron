@@ -1,12 +1,12 @@
 ---
 id: b-792ab2
 title: ADR 7's stack batch is decided and unbuilt, so the spec loop still runs each spec by hand
-status: open
+status: partial
 tier: 1
 filed: 2026-09-23
 closed:
 specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0150, SA-0151, SA-0152, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159, SA-0160, SA-0161, SA-0162, SA-0164, SA-0165, SA-0167, SA-0168, SA-0169, SA-0170, SA-0173, SA-0174, SA-0175, SA-0176, SA-0177]
-prs: []
+prs: [522, 523, 524, 525, 526, 527, 528, 529, 530]
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
 related: [40, 59, 97, 170, b-e1afbb]
@@ -134,3 +134,6 @@ escalations.
   the ledger making `size` block. So the ledger's `stack_finishes` table and
   its two methods split out as `SA-0177`. `SA-0177` depends on `SA-0174`,
   and `SA-0167` on `SA-0177`.
+- 2026-09-26: the spec loop's run 18 ran the first nine specs, `SA-0142`
+  through `SA-0159`, into stack #531 (#522 to #530). Twenty-two remain.
+  `snapshot` stranded them behind a merged parent (b-fab381).

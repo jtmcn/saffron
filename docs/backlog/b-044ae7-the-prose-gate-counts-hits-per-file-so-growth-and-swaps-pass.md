@@ -1,12 +1,14 @@
 ---
 id: b-044ae7
 title: The `prose` gate counts hits per file, so a docstring that grows or a comment block swapped for another passes
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-09-26
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [39ab1e4b]
 cites: [§8]
 related: [b-122686, 70]
 ---
@@ -46,3 +48,11 @@ fails whatever the diff removes elsewhere in the file. A test holds both, with
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-09-26: recurred six times in the spec loop's run 18 (stack #531).
+  Docstrings grew past ten lines unseen on #522, #525, #527 and #529. On #523
+  the repair turn was pointed at an older comment near `task.py:421`. It
+  rewrote that, the count went flat, and the cell's own em dash and 34-word
+  sentence shipped. Review fixed each by hand.
+- 2026-09-26: fixed by hand in 39ab1e4b, since `.saffron/**` is protected. Each
+  failure's identity is its sentence, or its block's name and length. The
+  commit hook reads the same identity.

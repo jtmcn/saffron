@@ -222,7 +222,7 @@ def test_prose_names_its_tool_and_reports_on_this_repo():
     assert result.status in ("pass", "fail"), result.summary
     assert result.tool and result.tool.startswith("saffron-prose ")
     messages = _prose().MESSAGES
-    assert all(f.message == messages[f.code] for f in result.failures)
+    assert all(f.message.startswith(messages[f.code]) for f in result.failures)
 
 
 def test_prose_reports_the_version_the_script_printed():
@@ -253,13 +253,16 @@ def test_prose_passes_a_clean_tree_and_fails_a_long_sentence(tmp_path):
     ]
 
 
-def test_a_message_is_constant_per_rule(tmp_path):
+def test_a_message_names_its_own_sentence(tmp_path):
+    """Two hedges are two identities, so baseline subtraction cancels only the
+    sentence it saw at base (backlog item b-044ae7)."""
     from saffron.gates.contract import parse_gate_json
 
     _init(tmp_path, {"README.md": "The gate should pass.\n\nThe cell might stop.\n"})
     result = parse_gate_json(_run_gate("prose", tmp_path).stdout, expected_gate="prose")
     assert [f.line for f in result.failures] == [1, 3]
-    assert len({f.message for f in result.failures}) == 1
+    assert "The gate should pass." in result.failures[0].message
+    assert "The cell might stop." in result.failures[1].message
 
 
 def test_a_mangled_closed_set_fails_rather_than_errors(tmp_path):
@@ -286,29 +289,75 @@ def test_prose_errors_rather_than_passes_when_nothing_is_in_scope(tmp_path):
     assert "in scope" in result.summary
 
 
-def test_a_rewritten_hit_is_not_new_and_an_added_one_is():
-    """The per-file limit is baseline subtraction over `(file, code, message)`."""
+def _new_at_head(path: str, base: str, head: str) -> list[tuple[int | None, str]]:
+    """What baseline subtraction leaves of `prose` over `head` against `base`."""
     from saffron.gates.baseline import subtract_baseline
     from saffron.gates.contract import Failure, GateResult
 
     prose = _prose()
 
-    def result(text: str) -> GateResult:
+    def result(text: str) -> list[GateResult]:
         failures = [
-            Failure(
-                file="README.md",
-                line=f.line,
-                code=f.code,
-                message=prose.MESSAGES[f.code],
-            )
-            for f in prose.check(text, "README.md", "prose", root=REPO)
+            Failure(file=path, line=f.line, code=f.code, message=prose.message(f))
+            for f in prose.check(text, path, "prose", root=REPO)
         ]
-        return GateResult(gate="prose", status="fail", tool="t", failures=failures)
+        return [GateResult(gate="prose", status="fail", tool="t", failures=failures)]
 
-    base = [result(LONG_A + "\n")]
-    assert subtract_baseline([result("Intro.\n\n" + LONG_B + "\n")], base) == []
-    added = subtract_baseline([result(LONG_A + "\n\n" + LONG_B + "\n")], base)
-    assert [(n.gate, n.failure.code) for n in added] == [("prose", "sentence-length")]
+    added = subtract_baseline(result(head), result(base))
+    return [(n.failure.line, n.failure.code) for n in added]
+
+
+def test_a_moved_hit_is_not_new_and_a_rewritten_one_is():
+    """Subtraction cancels a hit whose sentence is unchanged, wherever it moved.
+    A long sentence rewritten into another long one is new."""
+    assert _new_at_head("README.md", LONG_A + "\n", "Intro.\n\n" + LONG_A + "\n") == []
+    assert _new_at_head("README.md", LONG_A + "\n", LONG_B + "\n") == [
+        (1, "sentence-length")
+    ]
+
+
+def test_a_long_sentence_that_grows_past_its_excerpt_is_new():
+    """The excerpt stops at 80 characters, so identity hashes the whole sentence."""
+    grown = LONG_A.replace("end.", "and then some more words end.")
+    assert _new_at_head("README.md", LONG_A + "\n", grown + "\n") == [
+        (1, "sentence-length")
+    ]
+
+
+def test_a_reflowed_sentence_keeps_its_identity():
+    reflowed = LONG_A.replace(" ", "\n", 4)
+    assert _new_at_head("README.md", LONG_A + "\n", reflowed + "\n") == []
+
+
+def test_an_added_hit_is_new_though_the_diff_removes_another():
+    """SA-0143's repair: an older em-dash rewritten away kept the file's count
+    level, and the cell's own new one shipped (backlog item b-044ae7)."""
+    base = "# One old \u2014 reason.\nx = 1\n# Two, fine.\ny = 2\n"
+    head = "# One old reason.\nx = 1\n# Two, fine.\ny = 2  # a new \u2014 aside\n"
+    assert _new_at_head("saffron/x.py", base, head) == [(4, "em-dash")]
+
+
+def test_a_long_docstring_that_grows_is_new_and_one_edited_in_place_is_not():
+    """`22855a4` grew `run_batch`'s docstring from 33 lines to 53 unseen."""
+
+    def sentences(n: int) -> str:
+        body = "\n".join(f"    Line {i}." for i in range(2, n + 1))
+        return f'def run_batch():\n    """Line 1.\n{body}"""\n'
+
+    base, grown = sentences(33), sentences(38)
+    reworded = base.replace("Line 5.", "Line five.")
+    assert _new_at_head("saffron/b.py", base, grown) == [(2, "docstring-length")]
+    assert _new_at_head("saffron/b.py", base, reworded) == []
+
+
+def test_a_new_long_comment_is_new_though_an_old_one_is_trimmed():
+    """`22855a4` added three long comments and cut three older ones to two lines."""
+    old = "# a1\n# a2\n# a3\nx = 1\n"
+    base = old + "\ny = 2\n"
+    head = "# a1\n# a2\nx = 1\n\n# b1\n# b2\n# b3\ny = 2\n"
+    assert _new_at_head("saffron/c.py", base, head) == [(5, "comment-block")]
+    grown = "# a1\n# a2\n# a3\n# a4\nx = 1\n\ny = 2\n"
+    assert _new_at_head("saffron/c.py", base, grown) == [(1, "comment-block")]
 
 
 def _tracked() -> list[str]:
@@ -498,27 +547,9 @@ def test_a_form_feed_does_not_shift_a_comment_off_its_line():
 
 
 def test_an_em_dash_added_to_a_python_comment_is_new_at_head():
-    from saffron.gates.baseline import subtract_baseline
-    from saffron.gates.contract import Failure, GateResult
-
-    prose = _prose()
-
-    def result(text: str) -> GateResult:
-        failures = [
-            Failure(
-                file="saffron/x.py",
-                line=f.line,
-                code=f.code,
-                message=prose.MESSAGES[f.code],
-            )
-            for f in prose.check(text, "saffron/x.py", "prose", root=REPO)
-        ]
-        return GateResult(gate="prose", status="fail", tool="t", failures=failures)
-
-    base = [result("x = 1  # one \u2014 old\n")]
-    head = [result("y = 0\nx = 1  # one \u2014 old\nz = 2  # two \u2014 new\n")]
-    added = subtract_baseline(head, base)
-    assert [(n.failure.line, n.failure.code) for n in added] == [(3, "em-dash")]
+    base = "x = 1  # one \u2014 old\n"
+    head = "y = 0\nx = 1  # one \u2014 old\nz = 2  # two \u2014 new\n"
+    assert _new_at_head("saffron/x.py", base, head) == [(3, "em-dash")]
 
 
 def test_scope_reaches_python_a_cell_writes_and_leaves_evidence_scripts():
@@ -541,10 +572,37 @@ def _docstring_hits(text: str) -> list[str]:
 def test_a_docstring_over_ten_lines_is_a_hit_and_ten_are_not():
     # Run 7: SA-0105's cell answered "a short comment" with an 18-line docstring.
     text = _docstring("short", 10) + _docstring("test_long", 11)
-    assert _docstring_hits(text) == ["test_long: line 1"]
+    assert _docstring_hits(text) == ["test_long, 11 lines: line 1"]
 
 
 def test_a_module_docstring_is_exempt_and_a_class_docstring_is_not():
     long = "\n".join(f"line {i}" for i in range(1, 13))
     text = f'"""{long}"""\n\nclass C:\n    """{long}"""\n'
-    assert _docstring_hits(text) == ["C: line 1"]
+    assert _docstring_hits(text) == ["C, 12 lines: line 1"]
+
+
+def test_an_sql_comment_in_a_string_is_held_to_the_comment_rules():
+    """#525 put a five-line comment in `ledger.py`'s `SCHEMA`, where no rule read
+    it (backlog item b-43061c). Two lines stay allowed."""
+    long = 'S = """\n-- one.\n-- two.\n-- three.\nCREATE TABLE t (x);\n"""\n'
+    short = 'S = """\n-- one.\n-- two.\nCREATE TABLE t (x);\n"""\n'
+    assert _python_codes(long) == [(2, "comment-block")]
+    assert _python_codes(short) == []
+
+
+def test_a_word_rule_reads_an_sql_comment_in_an_f_string():
+    """`SCHEMA` is an f-string, and doubled braces misplace its tokens' ends."""
+    text = 'n = 1\nS = f"""\nCREATE {{t}} (x);\n-- one; two\nX {n}\n"""\n'
+    assert _python_codes(text) == [(4, "semicolon")]
+
+
+def test_a_flag_or_a_rule_line_in_a_string_is_not_an_sql_comment():
+    text = 'H = """\nrun it with\n--stack; enabled\n---\n"""\n'
+    assert _python_codes(text) == []
+
+
+def test_an_sql_comment_added_to_a_schema_is_new_at_head():
+    """#530's two-line comment carried a false claim. Its sentence is its identity."""
+    base = 'S = """\n-- Old; kept.\nCREATE TABLE t (x);\n"""\n'
+    head = 'S = """\n-- Old; kept.\nCREATE TABLE t (x);\n-- New; added.\n"""\n'
+    assert _new_at_head("saffron/l.py", base, head) == [(4, "semicolon")]

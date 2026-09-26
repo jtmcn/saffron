@@ -85,3 +85,9 @@ The **Refusal** entry names the stack order's refusal. This lands after
   writer sub-cap and the backlog pool. `SA-0162` adds a layer's generation,
   and `SA-0151` the finishing layer. `SA-0174` adds `findings.json`,
   `SA-0167` an escalation line, and `SA-0170` linking a stack.
+- 2026-09-26: the spec loop's run 18 adds four terms. The Stacked branch
+  entry says a dependency is met at `READY_FOR_REVIEW`, false in stack mode.
+  The Lens entry calls lenses disjoint, and the end review's Spec lens overlaps
+  adequacy. Lens statuses `reviewed`, `error` and `not_reached` have no entry.
+  An end-review `error` is charged to the reserve, against `CLAUDE.md`'s
+  charged to nobody.

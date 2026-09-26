@@ -208,8 +208,8 @@ writing one.
 - `ponytail:` comments mark deliberate simplifications and name their ceiling; leave them.
 - A comment is one or two lines naming the non-obvious why. The rationale behind it goes in
   the commit message or the PR body, and a spec's notes are that rationale, not comment text.
-  A function, class or test docstring stays within ten lines. **(gated: `prose` counts both,
-  per file)**
+  A function, class or test docstring stays within ten lines. **(gated: `prose` judges each
+  by its own text and length)**
 - A new file starts the `prose` ratchet at zero, however many hits its neighbours carry.
   New Markdown and new comments take no em-dash, semicolon, contraction, perfect tense,
   hedge or sentence over 25 words. `python3 hooks/prose_limit.py --file <path>` counts one
