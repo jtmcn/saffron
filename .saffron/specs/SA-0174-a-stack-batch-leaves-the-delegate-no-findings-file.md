@@ -364,10 +364,11 @@ and writers. It stood in for `SA-0161`'s `Pooled` and `FollowUpGroup`
 too. It loaded a prototype of the two reads and of `write_findings`, and
 ran a prototype of criterion 1's witness. The right build passed. Each
 wrong build that run named was applied as a text edit to the prototype,
-and each failed the witness. That prototype listed a follow-up layer's
-concerns with no verdict and no rebuttal alone. ADR 7 names every finding
-a follow-up's own critic leaves, layer or not. So the nine wrong builds on
-that list are unmeasured, and so are `TE-27` to `TE-29`.
+and each failed the witness. That prototype predates criterion 1's
+`left_by_critic` rule. It listed a follow-up layer's concerns alone. The
+rule now lists every finding a lens in `review.LENSES` left, of any
+severity, on a follow-up layer or off the stack. So the nine wrong builds
+on that list are unmeasured, and so are `TE-27` to `TE-29`.
 
 **Criterion 2's witness** follows `SA-0151`'s command-line witness, with
 `_readiness_passes` (`tests/test_cli.py:2603-2621`) and

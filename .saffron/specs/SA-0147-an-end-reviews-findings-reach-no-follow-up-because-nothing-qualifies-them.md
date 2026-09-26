@@ -159,7 +159,7 @@ Only `depends_on[0]` stacks (`saffron/task.py:144-147`), and the chain
 entry, does not stack. It and its parent `SA-0133` are merged at
 `e3020b3b`, so their code is under the chain's root. The chain's names are
 cited by symbol, and every line number below was read at `e3020b3b`. No
-spec from `SA-0142` to `SA-0159` touches `saffron/cell/session.py`, so its
+spec in the chain below this one touches `saffron/cell/session.py`, so its
 lines stand at the tree base.
 
 - `SA-0138` gives `_probe_adequacy` a required keyword `base_results`,
@@ -555,9 +555,10 @@ config case ran as a diff with `--unified=0`. How the cell's git 2.39.5
 reads that config is unmeasured. The right build passed every assertion
 above, and each wrong version listed failed its own witness. The code of
 `SA-0138` and `SA-0145` to `SA-0159` is not at `3699aeb8`, so no witness ran
-against it. A later revision dropped the verdict and rebuttal filter, with
-the rows i2 and i5 and the two wrong versions only they killed. Nothing
-ran after that edit.
+against it. That list was measured before a later revision. It dropped
+the verdict and rebuttal filter, the rows i2 and i5, and the two wrong
+versions only they killed. The list was then re-derived by reading the
+fixture without those rows, and nothing ran after that edit.
 
 **What the witnesses leave undriven.**
 

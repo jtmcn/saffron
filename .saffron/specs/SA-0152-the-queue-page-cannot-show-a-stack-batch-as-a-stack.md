@@ -61,8 +61,9 @@ acceptance:
       head of the layer below as the row recorded them. Its end-review
       status is `reviewed` when its `spec` and `standards` rows are both
       `reviewed`, and `error` when either is `error`. Otherwise it is
-      `not_reached`, a layer with no row included. A `join` row plays no
-      part. The view's order is
+      `not_reached`. That includes a layer with no row, and one with a
+      lone `reviewed` row and no row for the other lens. A `join` row plays
+      no part. The view's order is
       every task of the batch's runs in run order, each with its state and
       its layer position or `None`. It carries the batch's spend as
       `batch_spend` reads it, the batch's budget, and a count of those
@@ -74,8 +75,8 @@ acceptance:
       attempt with no gate result. It drives a spec with two tasks in the
       batch, and a layer's spec with a later task outside it. It drives a
       layer whose two lenses are `reviewed` beside an errored `join` row, a
-      Spec `error` beside a `reviewed` Standards, the reverse, both
-      `not_reached`, and a layer of a second batch with no row.
+      Spec `error` beside a `reviewed` Standards, the reverse, a lone
+      `reviewed` Spec row, and a layer of a second batch with no row.
     witness: tests/test_stack_view.py::test_the_stack_view_reads_each_layer_of_one_batch_in_position_order
   - claim: >-
       `render_stack(view)` renders one `<section>` for the batch, then one
@@ -252,6 +253,10 @@ Build four things.
   errored join shows nowhere on the page.
 - **The finish's escalations.** The finish prints each as a line
   (`SA-0167`, `SA-0170`), and no spec records one as a fact.
+- **Detours.** Design section 4 puts the batch's detours in its section.
+  A rate-limit wait and a revision round are the batch's detours. The
+  view shows a wait only as a `RATE_LIMITED` state in the order, and no
+  revision round at all, though `spec_texts` holds each one.
 - **Follow-up titles.** A follow-up's spec is not in the order `_batch`
   resolved, so its layer shows no title and no `max_turns`. Its text is a
   recorded spec text (`SA-0150`), which a later spec can parse for both.
@@ -327,7 +332,7 @@ no error unless its line says otherwise.
   with the error "join broke".
 - `TE-6`'s layer: `spec` `error` at 0.25 with the error "spec broke", then
   `standards` `reviewed`.
-- `TE-9`'s layer: `spec` and `standards` `not_reached`.
+- `TE-9`'s layer: `spec` `reviewed`, and no `standards` row.
 - `TE-7`'s layer in B: `spec` `reviewed`, then `standards` `error` with
   the error "standards broke".
 
@@ -395,8 +400,10 @@ for it. These fail it:
   with no task
 - a layer with no `end_reviews` row read as `reviewed`, or given `None`,
   which `TE-2` fails, reasoned
-- `reviewed` for a layer with one `reviewed` lens, which misreads `TE-6`
-  and `TE-7`, reasoned
+- `reviewed` for a layer with one `reviewed` lens, which misreads `TE-6`,
+  `TE-7` and `TE-9`, reasoned
+- a precedence of `error` for any `error` row, then `reviewed` for any
+  `reviewed` row, which reads `TE-9` as `reviewed`, reasoned
 - `error` only for a Spec row, or only for a Standards row, which misses
   `TE-7` or `TE-6`, reasoned
 - the `join` row counted, which reads `TE-4` as `error`, reasoned
@@ -412,7 +419,9 @@ applied as a text edit to the prototype, and each failed criterion 1's
 witness. Without an `ORDER BY`, SQLite returned the rows in the order
 written. The end-review status came after that run. So each wrong build
 marked reasoned is unmeasured, and so are the spend of 23.45 and the
-status column.
+status column. A layer whose two rows are both `not_reached` is not
+driven. It falls to the same `otherwise` as `TE-9`, the lone `reviewed`
+row, and no-row `TE-2`.
 
 **Criterion 2's witness** builds a `StackView` by hand, with no ledger. Its
 order is `TE-3` with no layer, then `TE-9` at 1, then `TE-5` with no layer,

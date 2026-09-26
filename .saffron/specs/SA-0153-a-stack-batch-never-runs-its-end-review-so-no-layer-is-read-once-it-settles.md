@@ -134,11 +134,12 @@ it. One is that a lens with an error has no task to stop, so its layer
 shows as unreviewed. Principle 34 holds only once a layer the end review did
 not reach, or reached with an error, reads apart from a clean one.
 
-**This spec is the second of three for step 3.** `SA-0146` builds the two
+**This spec is the second of four for step 3.** `SA-0146` builds the two
 lenses and one call that runs both on a layer. This spec runs
 that call over a stack, top down, within a reserve. It records each lens of
-each layer, reached or not. `SA-0154` adds the join lens, builds the critic
-cell a layer is read in, and wires the end review into
+each layer, reached or not. `SA-0154` adds the join lens, `layer_cell`, the
+critic cell a layer is read in, and `run_end_review`, the one call that
+runs the whole end review. `SA-0157` wires that call into
 `saffron batch --stack`. `SA-0147` then qualifies the findings.
 
 **What the tree base holds.** This spec's tree base is `SA-0146`'s head.
@@ -198,7 +199,7 @@ applied it to. A run's `base_sha` is that parent only while the default
 branch has not moved. PACKAGE diffs the same range for the pull request
 (`:857`). `DIFF_FLAGS` pins the diff's shape against a git config
 (`saffron/cell/worktree.py:132-166`), and `mirror.diff_stat` reads a mirror
-with it (`saffron/repos/mirror.py:152-161`).
+with it (`saffron/repos/mirror.py:161-170`).
 
 **Why the reserve is checked before a layer.** REVIEW's lens sessions run
 under `budget_usd` each (`saffron/phases/review.py:208-234`). Nothing counts
@@ -269,18 +270,21 @@ the kinds that fold back gains one. `SA-0145` leaves a sentence naming
 `batch_spend`'s docstring names the join through attempts as the whole
 figure (`saffron/ledger.py:898-903`), and it gains the end review's part.
 
-`review_stack` has no production caller until `SA-0154` passes it to
-`run_stack_batch`. So it is a `pending_symbols` entry, and the `dead` gate
+`review_stack` has no production caller until `SA-0154`'s
+`run_end_review` calls it. `SA-0157` then passes a callable over
+`run_end_review` to `run_stack_batch`. So it is a `pending_symbols` entry, and the `dead` gate
 defers it while this spec is open (`.saffron/gates/dead.py:4-6`).
 
 ## Out of scope
 
-- **The critic cell.** `SA-0154` builds `open_cell`. It seeds a critic cell
-  at the layer's head, and wires `review_stack` into
-  `saffron batch --stack`. It sets the reserve as a share of `--budget`.
-- **Qualification.** `run_stack_batch` discards what `end_review` returns.
-  The callable `SA-0154` builds calls `review_stack` and hands its list to
-  `SA-0147`, which anchors, probes and groups the findings.
+- **The critic cell and the wiring.** `SA-0154` builds `layer_cell`,
+  which `open_cell` takes. It seeds a critic cell at the layer's head.
+  `SA-0154` also builds `run_end_review` (`SA-0154`'s Problem steps 2 and
+  3). `SA-0157` wires it into `saffron batch --stack`, with the
+  `review_stack` callable and a reserve that is a share of `--budget`.
+- **Qualification.** `run_stack_batch` hands what `end_review` returns to
+  `follow_ups` (`SA-0173`). `SA-0165`'s `follow_ups` callable binds
+  `SA-0147`'s `qualify`, which anchors, probes and groups the findings.
 - **The join lens.** Its run and its record are `SA-0154`'s.
 - **A revised layer's latest text.** ADR 7 names the end-review Spec lens
   among the sessions whose cell holds the base text of a revised spec.

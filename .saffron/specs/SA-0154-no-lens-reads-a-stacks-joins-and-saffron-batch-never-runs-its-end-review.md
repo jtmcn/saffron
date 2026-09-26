@@ -240,9 +240,9 @@ Build three things.
    their detail line.
 
 **`SA-0147` reads the `StackReview`.** `run_end_review` returns it.
-`SA-0157`'s callable returns it to `run_stack_batch`, which discards it.
-So `SA-0147` qualifies inside that callable or inside `run_end_review`. It
-reads `StackReview.layers`, the `LayerReview` list top down, and
+`SA-0157`'s callable returns it to `run_stack_batch`. `SA-0173` hands it
+on to `follow_ups`, and `SA-0165` binds `SA-0147`'s `qualify` in that
+`follow_ups` callable. `qualify` reads `StackReview.layers`, the `LayerReview` list top down, and
 `StackReview.join`, a `LensReview` or `None`. The join's findings sit
 under the top layer's task, the first entry of `layers`.
 

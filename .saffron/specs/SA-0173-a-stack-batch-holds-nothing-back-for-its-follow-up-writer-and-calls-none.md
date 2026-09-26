@@ -150,7 +150,11 @@ number below was read at `f2a08a9f`, where none of them exist.
 3. **The texts the end review reads.** Build `end_review`'s mapping as
    criterion 2 states. Read each minted task's text with
    `ledger.spec_text` once the loop returns, and parse it with
-   `intake.parse_spec`. Catch `SpecError` alone.
+   `intake.parse_spec`. Catch `SpecError` alone. So the map from each spec
+   id to the task this call minted must be reachable after the loop.
+   Where `SA-0155`'s wrapper keeps it in a local of its own, lift it to
+   `run_stack_batch`'s scope. This spec touches `saffron/batch.py`, so
+   that edit is in bounds.
 
 ## Out of scope
 
@@ -222,15 +226,22 @@ list ran on the stand-in alone.
 `revise` runs. The order is `SY-1`, `SY-2` and `SY-3`, each at a budget of
 1, with a batch budget of 20. The mint creates a run and a task. For
 `SY-1` it records two `revision` texts on that task, at
-`.saffron/specs/SY-1.md`. Each is `---`, `id: SY-1`, `title: t`,
-`type: chore`, `---`, then the body `rev one` for the first and `rev two`
-for the second. For `SY-3` it records one text, `not a spec`. The runner
-returns `READY_FOR_REVIEW` on the task it is handed. `end_review` records
-its third argument. It asserts that mapping's keys are the three ids.
-`SY-1`'s value has the body `rev two`. `SY-2`'s and `SY-3`'s are the
-queued `Spec` objects, by `is`. These fail it, reasoned:
+`.saffron/specs/SY-1.md`. The first is `---`, `id: SY-1`, `title: t`,
+`type: chore`, `---`, then the body `rev one`. The second, `REV_TWO`, has
+the same three fields and `touches: [src/two.py]`. It declares one
+criterion, whose claim is `two holds` and whose witness is
+`tests/test_two.py::test_two`. Its body is `rev two`. For `SY-3` it
+records one text of origin `revision`, `not a spec`, at
+`.saffron/specs/SY-3.md`. The runner returns `READY_FOR_REVIEW` on the
+task it is handed. `end_review` records its third argument. It asserts
+that mapping's keys are the three ids. `SY-1`'s value equals
+`intake.parse_spec(REV_TWO)` with `==`, and is not the queued `Spec`.
+`SY-2`'s and `SY-3`'s are the queued `Spec` objects, by `is`. These fail
+it, reasoned:
 
 - the queued `Spec` for every spec, which gives `SY-1` no `rev` body
+- the queued `Spec` with the latest body copied in, which keeps no
+  `touches` and no criterion
 - the first text in place of the latest, which gives `rev one`
 - the text read through the candidate's own `task_id`, which is `None`
 - a `SpecError` that propagates from `SY-3`
@@ -238,6 +249,8 @@ queued `Spec` objects, by `is`. These fail it, reasoned:
 
 **What criterion 2 leaves undriven.** A batch with no `mint`. Its mapping
 holds each queued `Spec`, as `SA-0153`'s criterion 4 witness asserts.
+Catching `SpecError` alone is not driven either. A bare `except` passes
+the witness, and so does one over `Exception`.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense, a hedge or a
