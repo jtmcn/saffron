@@ -278,6 +278,63 @@ def test_a_red_run_is_a_failure_even_when_a_test_is_named_for_a_crash(tmp_path):
     assert result.failures
 
 
+def test_a_red_test_that_prints_a_usage_error_is_a_failure_not_an_error(tmp_path):
+    """A witness for a new CLI flag prints the flag's usage error when `revert`
+    runs it at base. Read as pytest's own, it made `tests` an `error` and
+    `revert` a `skip` (backlog item b-76f08d)."""
+    (tmp_path / "test_flag.py").write_text(
+        "import sys\n"
+        "def test_flag():\n"
+        "    print('saffron: error: unrecognized arguments: --stack', file=sys.stderr)\n"
+        "    print('INTERNALERROR in a message')\n"
+        "    assert False\n"
+    )
+    done = subprocess.run(
+        [str(GATES / "tests")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="tests")
+    assert result.status == "fail", result.summary
+    assert result.failures
+
+
+def test_a_flag_pytest_itself_rejects_is_an_error(tmp_path):
+    """The mechanism breaking is `error`, charged to nobody (§5.4). The summary
+    names it, where the later no-parsed-failures branch would not."""
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    done = subprocess.run(
+        [str(GATES / "tests"), "--no-such-flag"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="tests")
+    assert result.status == "error", result.summary
+    assert result.summary == "pytest failed to run"
+
+
+def test_a_pytest_internal_error_is_an_error(tmp_path):
+    """A raising hook exits 3, INTERNAL_ERROR, measured on pytest 9.1.1."""
+    (tmp_path / "conftest.py").write_text(
+        "def pytest_collection_finish(session):\n    raise RuntimeError('boom')\n"
+    )
+    (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+    done = subprocess.run(
+        [str(GATES / "tests")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="tests")
+    assert result.status == "error", result.summary
+    assert result.summary == "pytest failed to run"
+
+
 def test_shacl_names_its_tool_and_passes_on_this_repos_graphs():
     """pyshacl prints its version on stderr, so reading stdout alone produced a
     passing gate with `tool: ""` — a gate that ran and a gate that did not,

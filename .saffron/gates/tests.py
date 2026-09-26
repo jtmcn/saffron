@@ -68,7 +68,9 @@ if "node down" in out or "replacing crashed worker" in out:
             "summary": "a test worker crashed; the run is not trustworthy",
         }
     )
-if "INTERNALERROR" in out or "error: unrecognized arguments" in out:
+# pytest's own exit codes, INTERNAL_ERROR and USAGE_ERROR. A test that prints
+# either word exits 1, where a substring match read its output as the gate's.
+if proc.returncode in (3, 4):
     emit(
         {
             "gate": "tests",
