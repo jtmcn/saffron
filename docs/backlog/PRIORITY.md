@@ -34,7 +34,9 @@ That is the gate now.
 
 **b-792ab2** leads tier 1 from 2026-09-23. The operator asked for a loop that runs
 every queued spec with little input, and ADR 7 decides how. Its build specs
-come before the rest of this tier.
+come before the rest of this tier. **b-b0cd68** comes before the finish's
+specs run: until it lands, every finish with a layer turns this repo's gate
+suite red and pushes nothing.
 
 Soundness first: **79**, ~~**69**~~, **117** (69 answered by running the probe the lens
 already names), **93**, **94**, ~~**109**~~ (filed 2026-09-12; it

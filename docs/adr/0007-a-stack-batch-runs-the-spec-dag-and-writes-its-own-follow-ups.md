@@ -109,7 +109,10 @@ amends this one.
 
 **The host commits the batch's revised and follow-up specs in its own
 finishing layer.** It adds that layer above every task, with no model involved.
-The repo's gate suite runs on it in a cell before any push. It is the one
+The repo's gate suite runs on it in a cell before any push. That run empties
+`protected` and the integrity suppression list for the finishing commit
+alone. The commit writes `.saffron/specs/`, and a retired spec names
+suppression tokens as text. It is the one
 agent-written text a protected path takes, and the host writes it, never a
 cell. The host also moves each spec with a reviewable layer to
 `.saffron/specs/done/`, in the same finishing layer. That move asserts a
@@ -266,7 +269,6 @@ These are left open, and the design record does not answer them yet.
 - gate 0's "`spec_sha` moved" rule for a revised spec, whose pinned
   `spec_sha` the revision changes.
 - which tree a follow-up's anchors and named probe are keyed to.
-- how the `scope` gate treats the host's commit to `.saffron/specs/`.
 
 Whether follow-ups earn their cost is to be measured. The first measure is the
 share of follow-ups that reach `READY_FOR_REVIEW` with a clean critic. The

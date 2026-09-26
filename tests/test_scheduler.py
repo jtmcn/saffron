@@ -1923,7 +1923,13 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-25, a ninety-ninth time: `SA-0176` queued for
+    """Re-measured 2026-09-25, a hundredth time: `SA-0177` queued for
+    backlog item b-792ab2, split from `SA-0167` on size. It builds the
+    ledger's `stack_finishes` table and its two methods. It declares
+    `depends_on: [SA-0174]`, so it is refused. `SA-0167` now declares
+    `depends_on: [SA-0177]`. The candidates are unmoved.
+
+    Re-measured 2026-09-25, a ninety-ninth time: `SA-0176` queued for
     backlog item b-792ab2, split from `SA-0160` on size. It builds core's
     spec writer prompt, its extraction turn prompt and their fill. It
     declares `depends_on: [SA-0150]`, so it is refused. `SA-0160` now
@@ -2541,6 +2547,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0174",
         "SA-0175",
         "SA-0176",
+        "SA-0177",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
