@@ -215,6 +215,52 @@ def _comments(text: str) -> list[tokenize.TokenInfo] | None:
     ]
 
 
+# An SQL comment line inside a string literal: `--`, then a space or the line end.
+_SQL_COMMENT = re.compile(r"^[ \t]*--([ \t][^\n]*)?$", re.M)
+
+
+def _sql_comments(text: str) -> list[tuple[int, int, str]] | None:
+    """`(offset of the dashes, line, text after them)` for each SQL comment line
+    in a string literal, such as `ledger.py`'s `SCHEMA` (item b-43061c). A
+    prompt a cell reads is a `.md` file in scope, so no other string text is
+    read. `None` when `text` does not tokenize."""
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, SyntaxError, ValueError):
+        return None
+    starts = [0]
+    for line in io.StringIO(text).readlines():
+        starts.append(starts[-1] + len(line))
+    fstring = (
+        getattr(tokenize, "FSTRING_START", -1),
+        getattr(tokenize, "FSTRING_END", -1),
+    )
+    spans, depth, opened = [], 0, 0
+    for t in tokens:
+        # A span from each literal's own start and end, since an f-string's
+        # middle tokens misplace their ends around doubled braces.
+        begin, end = (
+            starts[t.start[0] - 1] + t.start[1],
+            starts[t.end[0] - 1] + t.end[1],
+        )
+        if t.type == tokenize.STRING and not depth:
+            spans.append((begin, end))
+        elif t.type == fstring[0]:
+            opened = begin if not depth else opened
+            depth += 1
+        elif t.type == fstring[1] and depth:
+            depth -= 1
+            if not depth:
+                spans.append((opened, end))
+    found = []
+    for begin, end in spans:
+        for match in _SQL_COMMENT.finditer(text, begin, end):
+            dashes = text.index("--", match.start())
+            line = bisect.bisect_right(starts, dashes)
+            found.append((dashes, line, match.group(1) or ""))
+    return found
+
+
 _DOCUMENTED = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 
@@ -234,22 +280,26 @@ def _documented(text: str) -> list[Any] | None:
 
 
 def _comment_blocks(text: str) -> list[Hit]:
-    """Runs of full-line comments longer than `COMMENT_LIMIT`."""
-    comments = _comments(text)
-    if comments is None:
+    """Runs of full-line comments longer than `COMMENT_LIMIT`, `#` lines in the
+    code and `--` lines in a string literal each counted apart."""
+    comments, sql = _comments(text), _sql_comments(text)
+    if comments is None or sql is None:
         return []  # unparseable Python is the `lint` gate's to report
-    lines = [
+    hashed = [
         (t.start[0], t.string) for t in comments if not t.line[: t.start[1]].strip()
     ]
-    found, run = [], []
-    for number, comment in [*lines, (-1, "")]:
-        if run and number != run[-1][0] + 1:
-            if len(run) > COMMENT_LIMIT:
-                excerpt = _excerpt(f"{len(run)} lines: {run[0][1]}")
-                found.append(Hit(run[0][0], "comment-block", excerpt))
-            run = []
-        run.append((number, comment))
-    return found
+    dashed = [(line, f"--{body}") for _, line, body in sql]
+    found = []
+    for lines in (hashed, dashed):
+        run: list[tuple[int, str]] = []
+        for number, comment in [*lines, (-1, "")]:
+            if run and number != run[-1][0] + 1:
+                if len(run) > COMMENT_LIMIT:
+                    excerpt = _excerpt(f"{len(run)} lines: {run[0][1]}")
+                    found.append(Hit(run[0][0], "comment-block", excerpt))
+                run = []
+            run.append((number, comment))
+    return sorted(found, key=lambda hit: hit.line)
 
 
 def _long_docstrings(text: str) -> list[Hit]:
@@ -272,7 +322,8 @@ def _python_prose(text: str) -> str | None:
     """The comments and docstrings of `text`, at their own offsets, with the
     code blanked. `None` when `text` does not parse, which `lint` reports."""
     comments, documented = _comments(text), _documented(text)
-    if comments is None or documented is None:
+    sql = _sql_comments(text)
+    if comments is None or documented is None or sql is None:
         return None
     # Split as `tokenize` reads, since `str.splitlines` also breaks on a form feed.
     lines = io.StringIO(text).readlines()
@@ -297,6 +348,8 @@ def _python_prose(text: str) -> str | None:
         # start: a list marker in the blanked code ends the one before it.
         if token.start[1] >= 2 and token.line[: token.start[1]].strip():
             kept[start - 2] = "-"
+    for dashes, _, body in sql:
+        keep(dashes, dashes + 2 + len(body), "  " + body)
     for node in documented:
         first = node.body[0]
         start = offset(first.lineno, first.col_offset)

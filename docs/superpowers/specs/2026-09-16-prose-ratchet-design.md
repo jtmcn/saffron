@@ -112,6 +112,12 @@ equal identities (§5.4). A hit the base holds cancels wherever it moved. A new
 hit fails whatever the diff removed elsewhere in the file. There is still no
 change to `saffron/`.
 
+Amended 2026-09-26 (item b-43061c). In Python the rules also read each `--`
+line inside a string literal, as a comment. That is how `ledger.py`'s `SCHEMA`
+explains its tables. No other string text is read. A prompt a cell reads is a
+`.md` file under `saffron/agents/prompts/`, in scope as Markdown. A fragment an
+f-string adds to one, such as a heading, is data the rules do not reach.
+
 Amended 2026-09-26 (item b-044ae7). The first design fixed the message per
 rule, so identity was the file and the rule. A cell then grew a long docstring,
 or traded a new em-dash for an old one, and passed.

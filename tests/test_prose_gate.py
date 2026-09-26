@@ -579,3 +579,30 @@ def test_a_module_docstring_is_exempt_and_a_class_docstring_is_not():
     long = "\n".join(f"line {i}" for i in range(1, 13))
     text = f'"""{long}"""\n\nclass C:\n    """{long}"""\n'
     assert _docstring_hits(text) == ["C, 12 lines: line 1"]
+
+
+def test_an_sql_comment_in_a_string_is_held_to_the_comment_rules():
+    """#525 put a five-line comment in `ledger.py`'s `SCHEMA`, where no rule read
+    it (backlog item b-43061c). Two lines stay allowed."""
+    long = 'S = """\n-- one.\n-- two.\n-- three.\nCREATE TABLE t (x);\n"""\n'
+    short = 'S = """\n-- one.\n-- two.\nCREATE TABLE t (x);\n"""\n'
+    assert _python_codes(long) == [(2, "comment-block")]
+    assert _python_codes(short) == []
+
+
+def test_a_word_rule_reads_an_sql_comment_in_an_f_string():
+    """`SCHEMA` is an f-string, and doubled braces misplace its tokens' ends."""
+    text = 'n = 1\nS = f"""\nCREATE {{t}} (x);\n-- one; two\nX {n}\n"""\n'
+    assert _python_codes(text) == [(4, "semicolon")]
+
+
+def test_a_flag_or_a_rule_line_in_a_string_is_not_an_sql_comment():
+    text = 'H = """\nrun it with\n--stack; enabled\n---\n"""\n'
+    assert _python_codes(text) == []
+
+
+def test_an_sql_comment_added_to_a_schema_is_new_at_head():
+    """#530's two-line comment carried a false claim. Its sentence is its identity."""
+    base = 'S = """\n-- Old; kept.\nCREATE TABLE t (x);\n"""\n'
+    head = 'S = """\n-- Old; kept.\nCREATE TABLE t (x);\n-- New; added.\n"""\n'
+    assert _new_at_head("saffron/l.py", base, head) == [(4, "semicolon")]
