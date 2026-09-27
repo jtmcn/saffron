@@ -190,9 +190,9 @@ refusing (`saffron/cell/session.py:91`).
 **The cell on the recorded text.** In `saffron/task.py`, add a private
 function. It takes the ledger, the task id, the handed spec and the
 pinned base. It returns the parsed text and its `spec_sha`, a `Refused`,
-or `None` when the task holds no text. It reads the task's latest row with `spec_text`, and checks in this
-order. The
-integrity check, the text's hash against its row's `spec_sha`.
+or `None` when the task holds no text. It reads the task's latest row
+with `spec_text`, and checks in this order. The integrity check, the
+text's hash against its row's `spec_sha`.
 `parse_spec`, catching `SpecError`. The id, then `depends_on` as a list.
 Then each of `budget_usd`, `max_attempts` and `max_turns` against the
 handed spec's, refusing only a greater one. Compare every field, declared

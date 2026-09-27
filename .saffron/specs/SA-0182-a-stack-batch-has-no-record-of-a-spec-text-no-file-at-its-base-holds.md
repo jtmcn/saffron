@@ -226,7 +226,7 @@ path `.saffron/specs/<id>-a.md`.
 - `[dict(r) for r in spec_texts(...)]` gives that task's two full rows,
   `first` then `second`, each with all seven keys. The second `SY-1`
   task's is its one full row, `again`.
-- That task's `spec_text` facts carry exactly the two payloads, each hash
+- The first `SY-1` task's `spec_text` facts carry exactly the two payloads, each hash
   computed with `hashlib.sha256(t.encode("utf-8"))`.
 
 Then each call below raises `ValueError`, and the rows and the record's
@@ -301,10 +301,9 @@ These fail it:
 - an `n` counted from the rows in `_apply`, which gives the last row 1
 
 **How the lists were measured.** A prototype ran on 2026-09-27 at
-`f492629e`, ported from `SA-0150`'s of 2026-09-24. Both witnesses passed,
-and a review round added the full `spec_texts` rows. A `spec_texts`
-selecting only `n` and `text` passed the witness before that, and fails it
-now. Both witnesses then passed,
+`f492629e`, ported from `SA-0150`'s of 2026-09-24. A review round added
+the full `spec_texts` rows. A `spec_texts` selecting only `n` and `text`
+passed the witness before that, and fails it now. Both witnesses passed,
 and the whole suite and `ty` stayed green. Each wrong version above was
 applied as a text edit, with no bytecode cache, and each failed its own
 witness. With `saffron/ledger.py` reverted, both witnesses failed, and

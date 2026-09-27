@@ -234,9 +234,14 @@ JSON object. It takes the prefix from `implement.agent_options` with
 
 `SA-0181` exposes no name for the self-check's probe script. So the test
 wraps `runtime.exec_` in a recorder that still calls the real one. While
-`layer_cell` runs, the recorder keeps the argv the self-check passes. The
-test then runs that argv's second item through the wrapper again, once
-as it is and once under the altered `PATH` below. It asserts:
+`layer_cell` runs, the recorder keeps each argv it sees. The probe is the
+second item of the first recorded argv whose first item is
+`implement.UNPRIVILEGED_BASH`, the call `SA-0181`'s criterion 4 pins. The
+test then runs that probe through the wrapper again, once as it is and
+once under the altered `PATH` below. `runtime.exec_` takes no `env`, so
+the `PATH` goes in the argv: `["env", "PATH=...", <wrapper>, <probe>]`.
+No run collected this recorder route yet, since the prototype of
+2026-09-27 read a private name for the probe instead. The test asserts:
 
 - the uid equals `id -u unprivileged` and is not 0, with no group 0 and a
   writable `HOME`

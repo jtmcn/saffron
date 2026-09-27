@@ -166,10 +166,11 @@ This spec consumes these names.
 - From `SA-0168`: `CellSpec.task_id`, and the cell that runs on it.
 - From `SA-0181`: a spec session's `Bash` runs as an unprivileged user,
   who cannot write the runner or its files.
-- From `SA-0169`: `layer_cell` grants the wrapper its two capabilities,
-  and checks it, only when called with `spec_session=True`. So this spec
-  passes that. Without it the wrapper runs nothing, and the review loses
-  its `Bash`.
+- From `SA-0169`: `layer_cell` grants the cell's root the two
+  capabilities the wrapper needs, through `cell_up`, and checks the
+  wrapper. It does both only when called with `spec_session=True`, so this
+  spec passes that. Without it the wrapper runs nothing, and the review
+  loses its `Bash`.
 - From `SA-0175`, in `saffron/spec_review.py`: `run_spec_review(container,
   *, system_prompt, prompt, agent)`, which runs the review turn and its
   extraction turn and returns a `SpecReviewSession`.
@@ -212,9 +213,10 @@ runner a lens re-executes. A spec session's `Bash` runs commands the
 model writes in that cell. `SA-0181` narrows the departure: those
 commands run as a user that cannot write the runner or its files. The
 operator records the narrowed departure in `DESIGN.md` by hand. This
-spec also makes the capability grant `SA-0181` and `SA-0169` build live. §5.1 says "No
-capability is granted to anything" (`DESIGN.md:587`), and the spec
-session's `Bash` wrapper gets two. The operator records that departure
+spec also makes the capability grant `SA-0181` and `SA-0169` build live.
+§5.1 says "No capability is granted to anything" (`DESIGN.md:587`). The
+root of a spec session's cell gets two, so its `Bash` wrapper can switch
+to the account. The operator records that departure
 too, by hand.
 
 ## Problem
@@ -424,8 +426,9 @@ pinned url with no `policy_sha`. These fail it, each measured:
 It runs `main` three times.
 
 - With `batch --stack` and readiness passing, it exits 0. Each recorder
-  was called once, with the pinned base `_readiness_passes` returns and
-  the resolved `--repo`. The review got `main`'s `out_dir`, and the mint
+  was called once, with the pinned base of the `Readiness` that
+  `_readiness_passes`'s stub of `check_readiness` returns, and the
+  resolved `--repo`. The review got `main`'s `out_dir`, and the mint
   the ledger the fake received. The fake got the two sentinels as
   `review` and `mint`. The export double was not called before the fake.
 - With readiness failing, neither recorder is called, and the fake gets
@@ -455,8 +458,10 @@ earlier shape of this spec, whose prompt came from a file the policy
 named. Criterion 2 and its wrong versions are unchanged from it, and
 each wrong version failed its witness there. A second prototype ran on
 2026-09-27 at `f492629e`, in the shape above. All three witnesses passed
-on it, and each failed with `saffron/cli.py` reverted. No wrong version
-of criteria 1 and 3 ran against it, so those two lists stay unmeasured.
+on it, and each failed with `saffron/cli.py` reverted. Then each wrong
+version in criteria 1 and 3's lists was applied to it as a text edit. No
+bytecode cache ran, and each failed its own witness. A list naming two or
+four versions in one bullet ran each apart.
 
 **What the witnesses leave undriven.**
 

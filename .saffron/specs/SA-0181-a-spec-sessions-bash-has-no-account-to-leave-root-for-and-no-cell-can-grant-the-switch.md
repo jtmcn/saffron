@@ -516,14 +516,16 @@ the running user's own directory. These fail it:
 - a probe that reads no `PATH`
 - a probe printing `missing` for a `PATH` entry that does not exist,
   or nothing for it
-- a probe run under `set -e`, only on a host with no `/opt/saffron`. There
-  it stops at the absent `/opt/saffron/python` before it reaches `PATH`.
-  The `tests` gate executes in the cell, whose image has that interpreter
-  (`images/cell-base.python.Dockerfile:63`), so there it survives, unmeasured.
 
 A probe testing `[ -r ]` in place of `[ -w ]` passes it, since `w` is
 readable too. `SA-0169`'s cell test catches it, since it asserts
 `refused` for paths the account can read.
+
+A probe run under `set -e` passes it in the cell too, unmeasured. The
+`tests` gate executes there, and the image has `/opt/saffron/python`
+(`images/cell-base.python.Dockerfile:63`). On a host with no
+`/opt/saffron`, the probe stops at that absent interpreter before it
+reaches `PATH`, and fails the witness.
 
 **How the lists were measured.** A prototype of this spec and `SA-0169`
 ran on 2026-09-27 at `f492629e`. Its five witnesses here passed. The

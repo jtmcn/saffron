@@ -159,7 +159,8 @@ gives an empty list. These fail it:
 
 - `batch_tasks` with no batch filter, which brings in `TE-2`
 - `batch_tasks` ordered by spec id, or by task id alone, either way
-- `batch_tasks` with no `ORDER BY`, which returns rows in task id order
+- `batch_tasks` with no `ORDER BY`, which the host's SQLite returned in
+  task id order, measured
 - `batch_budget` giving 0.0 for a batch with no row
 - `end_reviews` with no batch filter, which brings in `TE-2`'s row
 - `end_reviews` matched on a layer's spec id, which brings in the second
