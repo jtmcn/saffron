@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 from saffron.agents.findings import Severity
 
@@ -114,7 +114,7 @@ def read_spec_review(session: SpecReviewSession) -> SpecReview:
         if not isinstance(raw, dict):
             return _error(session, "spec review finding is not an object")
         severity = raw.get("severity")
-        if severity not in ("blocker", "concern", "note"):
+        if severity not in get_args(Severity):
             return _error(
                 session, f"spec review finding has an unknown severity: {severity!r}"
             )

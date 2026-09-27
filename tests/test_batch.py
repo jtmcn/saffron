@@ -2280,8 +2280,8 @@ def _note() -> dict:
 class ReviewScript:
     """A `review` double keyed by spec id. Each call pops the next queued
     session for that spec id and records `(spec id, predecessor spec id or
-    None)`, in order — `run_stack_batch`'s own review witnesses' one
-    arrangement."""
+    None)`, in order. It is the one arrangement of `run_stack_batch`'s review
+    witnesses."""
 
     def __init__(self, sessions):
         self._sessions = {spec_id: list(queue) for spec_id, queue in sessions.items()}
@@ -2401,14 +2401,22 @@ def test_a_stack_batch_runs_a_spec_only_when_its_own_review_routes_it_to_run(
         ("TE-15", "TE-18"),
     ]
 
-    escalated = {line.split()[0]: line for line in lines if " escalated  " in line}
+    escalated = {
+        line[:10].strip(): line
+        for line in lines
+        if line[10:].startswith(" escalated  ")
+    }
     assert set(escalated) == {"TE-2", "TE-3", "TE-4", "TE-5"}
     assert escalated["TE-2"].strip().endswith("2")
     assert escalated["TE-3"].strip().endswith("1")
     assert escalated["TE-4"].strip().endswith("1")
     assert escalated["TE-5"].strip().endswith("1")
 
-    unreviewed = {line.split()[0]: line for line in lines if " unreviewed  " in line}
+    unreviewed = {
+        line[:10].strip(): line
+        for line in lines
+        if line[10:].startswith(" unreviewed  ")
+    }
     assert set(unreviewed) == {"TE-7", "TE-8"}
     assert "review session failed" in unreviewed["TE-7"]
 
@@ -2483,7 +2491,8 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
     """A review that raises counts as an abort, exactly as a raising runner
     does, and so does one that routes `error`. Two in a row fire the breaker
     before the third spec's runner is ever called. Readiness or the budget
-    stopping the first spec calls no review at all."""
+    stopping the first spec calls no review at all. A raising review is a
+    miss, so its dependent is refused unreviewed."""
     from saffron.batch import run_stack_batch
 
     order = [_candidate("TE-31"), _candidate("TE-32"), _candidate("TE-33")]
@@ -2552,6 +2561,20 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
     )
     assert reason3 == "INFRASTRUCTURE"
     assert reviews3.calls == []
+
+    order5 = [_candidate("TE-31"), _candidate("TE-34", depends_on=["TE-31"])]
+    reviews5 = RaisingReviews([RuntimeError("boom"), _clean_review()])
+    reason5 = run_stack_batch(
+        order5,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews5,
+    )
+    assert reason5 == "DRAINED"
+    assert reviews5.calls == [("TE-31", None)]
 
     reviews4 = RaisingReviews([_clean_review(), _clean_review(), _clean_review()])
     reason4 = run_stack_batch(

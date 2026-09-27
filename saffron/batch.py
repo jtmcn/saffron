@@ -428,9 +428,13 @@ def run_stack_batch(
         nonlocal predecessor
         pred = predecessor
         if review is not None and candidate.spec.id not in reviewed:
-            # A raise from `review` itself leaves this untouched, as a raise
-            # from `runner` leaves `remaining` for the `except` below.
-            session = review(candidate, pred)
+            # A raise from `review` is a miss, as a raise from `runner` is below.
+            try:
+                session = review(candidate, pred)
+            except Exception:
+                missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                remaining.remove(candidate)
+                raise
             spec_review = read_spec_review(session)
             route = spec_review_route(spec_review)
             if route == "wait":

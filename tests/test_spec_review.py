@@ -72,7 +72,7 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
         (_session("```json\nnot json at all\n```"), "error"),
         (_session(_block([{**finding, "severity": "blocker"}])), "error"),
         (_session(_block({"nope": []})), "error"),
-        (_session(_block({"findings": "nope"})), "error"),
+        (_session(_block({"findings": ""})), "error"),
         (_session(_block({"findings": [{**finding, "severity": "Blocker"}]})), "error"),
         (
             _session(_block({"findings": [{**finding, "severity": "critical"}]})),
@@ -102,7 +102,10 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
             ),
             "error",
         ),
-        (_session(_block({"findings": [finding, "nope"]})), "error"),
+        (
+            _session(_block({"findings": [{**finding, "severity": "note"}, "nope"]})),
+            "error",
+        ),
         (
             _session(
                 _block(
@@ -152,6 +155,7 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
     for session, expected in rows:
         review = sr.read_spec_review(session)
         assert sr.spec_review_route(review) == expected
+        assert review.cost_usd == 0.5
 
     first, second = rows[0][0], rows[1][0]
     assert sr.read_spec_review(first).cost_usd == 0.5
