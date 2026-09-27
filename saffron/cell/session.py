@@ -277,6 +277,9 @@ class CellSpec:
     # `task._resolve_stacked_on` (`SA-0026`) puts the parent's fetched branch
     # head here, and `None` when there is no parent to stack on.
     stacked_on: str | None = None
+    # A stack batch's own task, minted by its spec review before this cell
+    # runs. `_drive_cell` reads its run and reuses it, rather than minting one.
+    task_id: int | None = None
 
     def __post_init__(self) -> None:
         # A resolver that could not find the parent must say `None`. An empty
@@ -391,15 +394,15 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
 def previous_cut_orphan(
     ledger: Ledger, repo_id: int, spec: CellSpec, task_id: int
 ) -> int | None:
-    """The re-queue cap (SA-0126, backlog item b-36b551). Only the first
-    zero-commit cut at one `spec_sha` earns `ORPHANED`, and the next settles
-    as `NOT_IMPLEMENTED`. No fact says "orphaned by a cut" apart from the
-    other three paths that write it, so this reads `ledger._db` directly, as
-    `chain_walk._task_rows` does. A cut task's run finished `COMPLETE` while
-    every attempt it holds stayed phase `IMPLEMENTING`, the state
-    `_drive_cell` never leaves before its zero-commit return. Scoped to this
-    repo, spec id and `spec_sha`, excluding `task_id` itself. Call only when
-    a bound cut this task and nothing survived the salvage.
+    """The re-queue cap (SA-0126, backlog item b-36b551). Only the first zero-commit cut at
+    one `spec_sha` earns `ORPHANED`, and the next settles as `NOT_IMPLEMENTED`. No fact
+    says "orphaned by a cut" apart from the other three paths that write it, so this
+    reads `ledger._db` directly, as `chain_walk._task_rows` does. A cut task's run
+    finished `COMPLETE` while every attempt it holds stayed phase `IMPLEMENTING`,
+    `SPEC_REVIEW` or `SPEC_WRITING`. Scoped to this repo and spec id, its `spec_sha`
+    checked against `task_id`'s own row, never `CellSpec.spec_sha` (SA-0150). Excludes
+    `task_id` itself. Call only when a bound cut this task and nothing survived the
+    salvage.
     """
     row = ledger._db.execute(
         """
@@ -408,18 +411,19 @@ def previous_cut_orphan(
           JOIN runs rn ON rn.run_id = t.run_id
          WHERE rn.repo_id = ?
            AND t.spec_id = ?
-           AND t.spec_sha = ?
+           AND t.spec_sha = (SELECT spec_sha FROM tasks WHERE task_id = ?)
            AND t.task_id != ?
            AND t.state = 'ORPHANED'
            AND rn.status = 'COMPLETE'
            AND NOT EXISTS (
                SELECT 1 FROM attempts a
-                WHERE a.task_id = t.task_id AND a.phase != 'IMPLEMENTING'
+                WHERE a.task_id = t.task_id
+                  AND a.phase NOT IN ('IMPLEMENTING', 'SPEC_REVIEW', 'SPEC_WRITING')
            )
          ORDER BY t.task_id
          LIMIT 1
         """,
-        (repo_id, spec.spec_id, spec.spec_sha, task_id),
+        (repo_id, spec.spec_id, task_id, task_id),
     ).fetchone()
     return int(row["task_id"]) if row is not None else None
 
@@ -1736,25 +1740,38 @@ def _drive_cell(
     except package.PackageError:
         origin_url = str(repo)
     repo_id = ledger.upsert_repo(repo.name, origin_url, str(mirror), policy_sha)
-    run_id = ledger.create_run(repo_id, spec.base_sha)
-    task_id = ledger.create_task(
-        run_id,
-        spec.spec_id,
-        spec.spec_sha,
-        branch=spec.branch,
-        budget_usd=spec.budget_usd,
-        # The spec-declared tier only: no diff exists yet for an `elevate_on`
-        # path to have matched, and there is no later write to correct it
-        # against (§5.6). `_suite` below computes the real, per-attempt
-        # effective tier from the diff it already has.
-        risk=spec.risk,
-        # The declaration these gates actually ran under, read above from the
-        # export at base_sha — never the working copy (§5.4, backlog item 16).
-        policy_sha=policy_sha,
-        # The prompt tree the cell was given, digested as authored — the
-        # third input beside spec_sha and policy_sha (§4.1).
-        prompt_sha=context.prompt_sha(),
-    )
+    if spec.task_id is not None:
+        # A stack batch's own task: read its run rather than minting one, and
+        # a task_id naming nothing raises before any cell comes up.
+        task_id = spec.task_id
+        run_id = ledger.task_run(task_id)
+        start_spend = ledger.task_spend(task_id)
+    else:
+        run_id = ledger.create_run(repo_id, spec.base_sha)
+        task_id = ledger.create_task(
+            run_id,
+            spec.spec_id,
+            spec.spec_sha,
+            branch=spec.branch,
+            budget_usd=spec.budget_usd,
+            # The spec-declared tier only: no diff exists yet for an `elevate_on`
+            # path to have matched, and there is no later write to correct it
+            # against (§5.6). `_suite` below computes the real, per-attempt
+            # effective tier from the diff it already has.
+            risk=spec.risk,
+            # The declaration these gates actually ran under, read above from the
+            # export at base_sha — never the working copy (§5.4, backlog item 16).
+            policy_sha=policy_sha,
+            # The prompt tree the cell was given, digested as authored — the
+            # third input beside spec_sha and policy_sha (§4.1).
+            prompt_sha=context.prompt_sha(),
+        )
+        start_spend = 0.0
+
+    # Recorded only where this cell's declaration differs from what the task
+    # is already on record for, a given task with an older one included.
+    if ledger.task_policy_sha(task_id) != policy_sha:
+        ledger.record_policy(task_id, policy_sha)
 
     # Only what this run reached the creation of can leak. `volume rm` on a
     # name that never existed also exits non-zero, so reporting every failure
@@ -2860,9 +2877,9 @@ def _drive_cell(
         # Read back, not reported: `spent` loses the walled turn — the raise
         # comes from outside it, past the `spent +=` — and loses the whole
         # tally when the window closed inside plan_checkpoint's frame. Every
-        # turn recorded its own attempt before the rate limit was raised, so
-        # the roll-up here is the figure that survived both.
-        spent_read_back = ledger.task_spend(task_id)
+        # turn recorded its own attempt before the rate limit fired, and the
+        # figure here also subtracts what this task already spent before this cell.
+        spent_read_back = ledger.task_spend(task_id) - start_spend
         resets_at, resets_at_unreadable = _resets_at_fields(stopped.resets_at)
         emit(
             TaskOutcome(

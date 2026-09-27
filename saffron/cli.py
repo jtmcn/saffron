@@ -529,7 +529,8 @@ def _stack_runner(
     built from the fetch, never from `_resolve_stacked_on`. A predecessor
     branch the origin no longer has raises `package_phase.ParentGone`, and
     this never catches it: an unstacked cell is not this function's call to
-    make."""
+    make. It hands `run_task` the candidate's own `task_id`, never the
+    predecessor's, so a review's task is the one this cell runs on."""
 
     def run(
         candidate: Candidate, predecessor: Candidate | None
@@ -553,6 +554,7 @@ def _stack_runner(
             out_dir=out_dir,
             token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
             handoff=handoff,
+            task_id=candidate.task_id,
         )
 
     return run

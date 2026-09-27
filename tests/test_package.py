@@ -3349,6 +3349,41 @@ def test_unpackaged_work_replaces_its_own_earlier_unpackaged_push(packageable):
     assert "attempts not recorded" in message
 
 
+def test_a_rerun_on_one_task_replaces_that_tasks_own_unpackaged_push(packageable):
+    """The recorded heads a rerun can replace now include this outcome's own
+    task, not only another task's row. A head an operator moved past that
+    push stays refused as not ours."""
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+    packageable.ledger.record_push(packageable.task_id, packageable.base)
+
+    packageable.outcome.state = "RATE_LIMITED"
+    packageable.outcome.attempts = 0
+    result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert result.pushed is True
+    head = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+    assert head == result.pushed_sha != packageable.base
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["pushed_sha"] == result.pushed_sha
+
+    git(work, "fetch", "-q", "origin", "saffron/SA-0005")
+    git(work, "checkout", "-q", "-B", "saffron/SA-0005", "FETCH_HEAD")
+    (work / "f.txt").write_text("a\nb\nOPERATOR\nd\ne\n")
+    git(work, "commit", "-qam", "operator's own fix")
+    git(work, "push", "-q", "-f", "origin", "saffron/SA-0005")
+    moved_sha = _rev_parse(work, "saffron/SA-0005")
+    git(work, "checkout", "-q", "main")
+
+    second = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert second.pushed is False
+    assert "not ours to replace" in second.note
+    assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == moved_sha
+
+
 def test_unpackaged_work_is_pushed_with_a_lease(packageable, monkeypatch):
     """The branch read as absent and then appeared: a plain force would erase
     whoever pushed it."""

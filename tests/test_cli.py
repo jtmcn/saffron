@@ -3971,6 +3971,74 @@ def test_the_stack_runner_hands_each_task_its_predecessors_fetched_branch(
     ledger.close()
 
 
+def test_only_the_stack_runner_hands_run_task_the_candidates_task(
+    tmp_path, monkeypatch
+):
+    """`_stack_runner` forwards each candidate's own `task_id`, never a
+    predecessor's, so its cell runs on the task its own review opened.
+    `_batch_runner` forwards none: that departure is its own backlog item."""
+    monkeypatch.setattr(package, "fetch_parent_branch", lambda *_a, **_k: "d" * 40)
+
+    recorded: list[int | None] = []
+
+    def _recording_run_task(
+        spec,
+        spec_sha,
+        *,
+        ceilings,
+        base,
+        repo_id,
+        repo,
+        ledger,
+        out_dir,
+        token,
+        handoff=None,
+        task_id=None,
+        emit=None,
+    ):
+        recorded.append(task_id)
+        return CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    monkeypatch.setattr(cli, "run_task", _recording_run_task)
+
+    def _candidate(spec_id, task_id):
+        return Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.Spec(id=spec_id, title="t", type="chore"),
+            spec_sha="s" * 64,
+            task_id=task_id,
+        )
+
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    stack_runner = cli._stack_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+    stack_runner(_candidate("SY-1", 7), None)
+    stack_runner(_candidate("SY-2", 8), _candidate("SY-1", 3))
+
+    batch_runner = cli._batch_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+    batch_runner(_candidate("SY-5", 5))
+    ledger.close()
+
+    assert recorded == [7, 8, None]
+
+
 def test_the_night_cannot_start_without_a_readiness_gate():
     """The loop used to bind a permissive stub, so a caller who simply forgot
     the argument got a vacuous §4.4 step 1 and a night that could start on an

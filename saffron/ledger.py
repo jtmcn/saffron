@@ -829,9 +829,9 @@ class Ledger:
         recorded against on an earlier night is still the one a re-queue or a
         done-state check must find.
 
-        Every task, not the newest one per key: `cell/session.py` mints a run
-        and a task on each invocation without consulting what exists, so one
-        key routinely holds many. This repo's own ledger carries ten tasks at
+        Every task, not the newest one per key: an unstacked
+        `cell/session.py` call still mints a fresh run and task each time.
+        This repo's own ledger carries ten tasks at
         `SA-0013`/`ce08b1eb`, mixing `READY_FOR_REVIEW` with three `ORPHANED`.
         §4.2.1 asks whether *a* task at this `spec_sha` is done with the spec,
         and folding to the highest `task_id` answers a different question —

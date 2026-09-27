@@ -18,7 +18,15 @@ import pytest
 from saffron.agents import artifacts, context
 from saffron.cell import runtime, session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
-from saffron.events import Agent, Attempt, Baseline, PhaseStart, Preflight, describe
+from saffron.events import (
+    Agent,
+    Attempt,
+    Baseline,
+    PhaseStart,
+    Preflight,
+    TaskOutcome,
+    describe,
+)
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.size import _CEILINGS
@@ -2247,6 +2255,231 @@ def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp
     assert states[task4] == "ORPHANED" and statuses[run4] == "COMPLETE"
     assert outcome5.state == "ORPHANED"
     assert not any("cut again at this spec_sha" in line for line in cell5.watched)
+
+
+def test_a_cell_given_a_task_runs_on_it_and_its_run_and_mints_neither(
+    monkeypatch, tmp_path
+):
+    """A `task_id` on `CellSpec` sends `_drive_cell` to `Ledger.task_run`
+    rather than `create_run`/`create_task`, so a stack batch's review and
+    its cell share one row. `record_policy` fires only where the given
+    task's own recorded declaration differs. The rate limit read-back
+    subtracts what the task carried in before this cell took it, so it
+    counts only this cell's own attempts. A `task_id` naming nothing
+    raises before any cell comes up. With none given, the old shape
+    still mints a fresh task on a fresh run."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo(
+        "repo", str(tmp_path / "repo"), str(tmp_path / "m.git"), None
+    )
+
+    def _closed(task_id, phase, cost):
+        attempt_id = ledger.open_attempt(task_id, phase=phase)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s",
+            subtype="success",
+            terminal_reason="completed",
+            num_turns=1,
+            cost_usd_est=cost,
+        )
+
+    older_run = ledger.create_run(repo_id, "e" * 40)
+    older_task = ledger.create_task(
+        older_run, "SY-1", "a" * 64, branch="saffron/SY-1", policy_sha="p" * 64
+    )
+    _closed(older_task, "IMPLEMENTING", 2.0)
+    ledger.set_task_state(older_task, "GATE_ERROR")
+
+    minted_run = ledger.create_run(repo_id, "b" * 40)
+    minted_task = ledger.create_task(
+        minted_run, "SY-1", "a" * 64, branch="saffron/SY-1"
+    )
+    _closed(minted_task, "SPEC_REVIEW", 0.75)
+    ledger.close()
+
+    recorded_policy: list[tuple[int, str]] = []
+    real_record_policy = Ledger.record_policy
+
+    def _recording_record_policy(self, task_id, policy_sha):
+        recorded_policy.append((task_id, policy_sha))
+        return real_record_policy(self, task_id, policy_sha)
+
+    monkeypatch.setattr(Ledger, "record_policy", _recording_record_policy)
+    expected_policy_sha = hashlib.sha256(b"gates: {}\n").hexdigest()
+
+    events1: list = []
+    cell1 = _stub_the_runtime(monkeypatch)
+    outcome1, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[implement.AgentFailed("api_error", attempt=_rejected(cost=0.25))],
+        spec=_spec(task_id=minted_task),
+        capture=events1,
+    )
+    assert (outcome1.task_id, outcome1.run_id) == (minted_task, minted_run)
+    assert outcome1.state == "RATE_LIMITED"
+    assert outcome1.spent_usd == 0.25
+    (event1,) = [e for e in events1 if isinstance(e, TaskOutcome)]
+    assert event1.spent_usd_est == 0.25
+
+    events2: list = []
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[
+            _turn(_block(_PLAN), cost=0.5),
+            implement.AgentFailed("api_error", attempt=_rejected(cost=0.125)),
+        ],
+        spec=_spec(task_id=minted_task),
+        capture=events2,
+    )
+    assert (outcome2.task_id, outcome2.run_id) == (minted_task, minted_run)
+    assert outcome2.state == "RATE_LIMITED"
+    assert outcome2.spent_usd == 0.625
+    (event2,) = [e for e in events2 if isinstance(e, TaskOutcome)]
+    assert event2.spent_usd_est == 0.625
+
+    cell3 = _stub_the_runtime(monkeypatch)
+    outcome3, _ = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell3,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=minted_task),
+    )
+    assert (outcome3.task_id, outcome3.run_id) == (minted_task, minted_run)
+
+    cell4 = _stub_the_runtime(monkeypatch)
+    outcome4, ledger4 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell4,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=older_task),
+    )
+    assert (outcome4.task_id, outcome4.run_id) == (older_task, older_run)
+
+    cell5 = _stub_the_runtime(monkeypatch)
+    with pytest.raises(ValueError):
+        _drive(monkeypatch, tmp_path, cell=cell5, turns=[], spec=_spec(task_id=999))
+    assert cell5.networks_created == []
+
+    assert recorded_policy == [
+        (minted_task, expected_policy_sha),
+        (older_task, expected_policy_sha),
+    ]
+
+    states = {
+        r["task_id"]: r["state"]
+        for r in ledger4._db.execute("SELECT task_id, state FROM tasks").fetchall()
+    }
+    assert states == {older_task: outcome4.state, minted_task: outcome3.state}
+    assert states[older_task] != "GATE_ERROR"
+    run_count = ledger4._db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()[0]
+    assert run_count == 2
+
+    cell6 = _stub_the_runtime(monkeypatch)
+    outcome6, ledger6 = _drive(
+        monkeypatch, tmp_path, cell=cell6, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome6.task_id not in (minted_task, older_task)
+    assert outcome6.run_id not in (minted_run, older_run)
+    task_count = ledger6._db.execute("SELECT COUNT(*) AS n FROM tasks").fetchone()[0]
+    final_run_count = ledger6._db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()[
+        0
+    ]
+    assert (task_count, final_run_count) == (3, 3)
+
+
+def test_a_revised_specs_second_cut_settles_on_its_task_rows_spec_sha(
+    monkeypatch, tmp_path
+):
+    """The cap compares an earlier cut's `spec_sha` against tonight's task
+    row, not `CellSpec.spec_sha`: a revision in progress can carry a newer
+    hash than the row a stack batch's review minted (SA-0150). Only the
+    `revised` case, whose earlier row matches tonight's task row, settles
+    `NOT_IMPLEMENTED`. The phase clause allows `SPEC_REVIEW` and
+    `SPEC_WRITING` beside `IMPLEMENTING`, but a `REVIEWING` or `REPAIRING`
+    attempt still disqualifies the earlier row."""
+    cases = {
+        "revised": (
+            ("SPEC_WRITING", "SPEC_REVIEW", "IMPLEMENTING"),
+            "a" * 64,
+            "NOT_IMPLEMENTED",
+        ),
+        "other_sha": (
+            ("SPEC_WRITING", "SPEC_REVIEW", "IMPLEMENTING"),
+            "f" * 64,
+            "ORPHANED",
+        ),
+        "reviewed": (
+            ("SPEC_REVIEW", "IMPLEMENTING", "REVIEWING"),
+            "a" * 64,
+            "ORPHANED",
+        ),
+        "repaired": (
+            ("SPEC_REVIEW", "IMPLEMENTING", "REPAIRING"),
+            "a" * 64,
+            "ORPHANED",
+        ),
+    }
+    for case, (phases, last_nights_sha, expected) in cases.items():
+        case_dir = tmp_path / case
+        case_dir.mkdir()
+        ledger = Ledger(case_dir / "ledger.db")
+        repo_id = ledger.upsert_repo(
+            "repo", str(case_dir / "repo"), str(case_dir / "m.git"), None
+        )
+
+        def _closed(task_id, phase, ledger=ledger):
+            attempt_id = ledger.open_attempt(task_id, phase=phase)
+            ledger.close_attempt(
+                attempt_id,
+                session_id="s",
+                subtype="success",
+                terminal_reason="completed",
+                num_turns=1,
+                cost_usd_est=0.1,
+            )
+
+        last_run = ledger.create_run(repo_id, "b" * 40)
+        last_night = ledger.create_task(
+            last_run, "SY-1", last_nights_sha, branch="saffron/SY-1"
+        )
+        for phase in phases:
+            _closed(last_night, phase)
+        ledger.set_task_state(last_night, "ORPHANED")
+        ledger.finish_run(last_run, "COMPLETE")
+
+        tonight_run = ledger.create_run(repo_id, "b" * 40)
+        tonight = ledger.create_task(
+            tonight_run, "SY-1", "a" * 64, branch="saffron/SY-1"
+        )
+        for phase in ("SPEC_REVIEW", "SPEC_WRITING", "SPEC_REVIEW"):
+            _closed(tonight, phase)
+        ledger.close()
+
+        cell = _stub_the_runtime(monkeypatch, commits=0)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            case_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+            spec=_spec(spec_sha="f" * 64, task_id=tonight),
+        )
+
+        assert outcome.task_id == tonight, case
+        assert outcome.state == expected, case
+        named = [line for line in cell.watched if "cut again at this spec_sha" in line]
+        if expected == "NOT_IMPLEMENTED":
+            assert len(named) == 1, case
+            assert f"task {last_night}" in named[0], case
+        else:
+            assert not named, case
 
 
 def test_a_proposed_scope_reaches_scope_review_and_spends_no_further_turns(
