@@ -1,8 +1,10 @@
+import copy
 import json
+from functools import partial
 
 import pytest
 
-from saffron.phases import implement as _implement
+from saffron.phases import implement
 
 
 def _block(obj: object, *, lang: str = "json") -> str:
@@ -34,7 +36,7 @@ def _attempt(
     """An `AttemptResult` as `run_agent` would return it. Pre-existing
     shape, never a name this spec adds, so it stays importable at module
     scope for a reverted run."""
-    return _implement.AttemptResult(
+    return implement.AttemptResult(
         session_id=session_id,
         subtype="success",
         terminal_reason=None,
@@ -64,9 +66,10 @@ class _Agent:
 
     def __call__(self, *args, **kwargs):
         self.calls.append((args, kwargs))
+        assert self.script, "unexpected call"
         outcome = self.script.pop(0)
         if outcome is _KILLED:
-            killed = _implement.AttemptResult(
+            killed = implement.AttemptResult(
                 session_id=None,
                 subtype="error",
                 terminal_reason=None,
@@ -79,7 +82,7 @@ class _Agent:
                 rate_limit_resets_at=None,
                 structured_output=None,
             )
-            raise _implement.AgentFailed("the agent produced no result event", killed)
+            raise implement.AgentFailed("the agent produced no result event", killed)
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
@@ -131,13 +134,12 @@ V = {"findings": [dict(reversed(list(f.items()))) for f in D["findings"]]}
 
 # A second-turn text: prose, an <output> block, then a fenced json block.
 # Each block holds one scope blocker, and each parses on its own.
-_T_FINDING = dict(_J_FINDING)
 T = (
     "Some review prose.\n\n"
     "<output>\n"
-    + json.dumps({"findings": [_T_FINDING]})
+    + json.dumps({"findings": [_J_FINDING]})
     + "\n</output>\n\n"
-    + _block({"findings": [_T_FINDING]})
+    + _block({"findings": [_J_FINDING]})
 )
 
 # The host's own serialization of `D`: what a clean extraction turn gives.
@@ -146,11 +148,72 @@ F = "```json\n" + json.dumps(D, indent=2, ensure_ascii=False) + "\n```\n"
 # `V`, dumped as a plain JSON string rather than validated as a value.
 S = json.dumps(V)
 
+# What the criteria 1, 2 and 5 witnesses pass `run_spec_review`. Each helper
+# imports this spec's names inside its body, so a reverted run skips no test.
+_CONTAINER = "c-1"
+_SYSTEM_PROMPT = "sys"
+_PROMPT = "p"
+
+
+def _first_options():
+    from saffron.spec_review import (
+        SPEC_REVIEW_BUDGET_USD,
+        SPEC_REVIEW_MAX_TURNS,
+        SPEC_SESSION_TOOLS,
+    )
+
+    return implement.agent_options(
+        system_prompt=_SYSTEM_PROMPT,
+        max_turns=SPEC_REVIEW_MAX_TURNS,
+        budget_usd=SPEC_REVIEW_BUDGET_USD,
+        tools=SPEC_SESSION_TOOLS,
+    )
+
+
+def _extract_options():
+    from saffron.spec_review import SPEC_REVIEW_EXTRACT_BUDGET_USD, SPEC_REVIEW_FORMAT
+
+    return _first_options() | {
+        "max_budget_usd": SPEC_REVIEW_EXTRACT_BUDGET_USD,
+        "output_format": SPEC_REVIEW_FORMAT,
+    }
+
+
+def _run(double):
+    from saffron.spec_review import run_spec_review
+
+    return run_spec_review(
+        _CONTAINER, system_prompt=_SYSTEM_PROMPT, prompt=_PROMPT, agent=double
+    )
+
+
+def _first(**overrides):
+    return _attempt(
+        **{"text": J, "cost": 0.5, "session_id": "s-1", "num_turns": 7} | overrides
+    )
+
+
+def _second(**overrides):
+    base = {
+        "text": T,
+        "cost": 0.25,
+        "session_id": "s-2",
+        "num_turns": 2,
+        "structured_output": V,
+    }
+    return _attempt(**base | overrides)
+
+
+def _assert_first_call(double):
+    args, kwargs = double.calls[0]
+    assert args == (_CONTAINER,)
+    assert kwargs == {"prompt": _PROMPT, "options": _first_options()}
+
 
 def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypatch):
     from saffron import spec_review as sr
 
-    finding = {"claim": "c", "criterion": "1", "file": "f.py", "line": 1}
+    finding = {"claim": "c", "criterion": 1, "file": "f.py", "line": 1}
 
     rows = [
         (_session(_block({"findings": []})), "run"),
@@ -249,7 +312,7 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
                         "findings": [
                             {
                                 "severity": "note",
-                                "criterion": "1",
+                                "criterion": 1,
                                 "file": "f",
                                 "line": 1,
                             }
@@ -334,7 +397,7 @@ def test_a_spec_review_carries_its_last_json_block_and_its_hash():
     clean = '{"findings":  []}'
     blocker = (
         '{"findings": [{"severity": "blocker", "claim": "c", '
-        '"criterion": "1", "file": "f", "line": 1}]}'
+        '"criterion": 1, "file": "f", "line": 1}]}'
     )
 
     rows = [
@@ -366,7 +429,6 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
         SPEC_SESSION_TOOLS,
         UNREADABLE_RESET,
         SpecReviewSession,
-        run_spec_review,
     )
 
     assert SPEC_REVIEW_MAX_TURNS == 90
@@ -377,27 +439,10 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
     assert UNREADABLE_RESET == 1
     assert sorted(SPEC_SESSION_TOOLS) == ["Bash", "Glob", "Grep", "Read"]
 
-    container = "c-1"
-    system_prompt = "sys"
-    prompt = "p"
-    expected_options = _implement.agent_options(
-        system_prompt=system_prompt,
-        max_turns=SPEC_REVIEW_MAX_TURNS,
-        budget_usd=SPEC_REVIEW_BUDGET_USD,
-        tools=SPEC_SESSION_TOOLS,
-    )
-
-    def _run(double):
-        return run_spec_review(
-            container, system_prompt=system_prompt, prompt=prompt, agent=double
-        )
-
     def _assert_one_call(double):
         assert len(double.calls) == 1
-        args, kwargs = double.calls[0]
-        assert args == (container,)
-        assert kwargs == {"prompt": prompt, "options": expected_options}
-        assert "output_format" not in kwargs["options"]
+        _assert_first_call(double)
+        assert "output_format" not in double.calls[0][1]["options"]
 
     # Returned, rejected.
     double = _Agent(
@@ -427,7 +472,7 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
     # Raised, rejected, a huge but clean reset.
     double = _Agent(
         [
-            _implement.AgentFailed(
+            implement.AgentFailed(
                 "api_error",
                 _attempt(
                     status="rejected",
@@ -455,7 +500,7 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
     for bad_reset in (None, "soon", True, 1755800000.0, 0, -5):
         double = _Agent(
             [
-                _implement.AgentFailed(
+                implement.AgentFailed(
                     "api_error",
                     _attempt(
                         status="rejected",
@@ -482,7 +527,7 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
     # Raised, not rejected, with an attempt.
     double = _Agent(
         [
-            _implement.AgentFailed(
+            implement.AgentFailed(
                 "idle bound",
                 _attempt(text=J, cost=0.0625, session_id="s-1", num_turns=7),
             )
@@ -500,7 +545,7 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
     )
 
     # Raised, with no attempt at all.
-    double = _Agent([_implement.AgentFailed("no result")])
+    double = _Agent([implement.AgentFailed("no result")])
     result = _run(double)
     _assert_one_call(double)
     assert result == SpecReviewSession(
@@ -520,62 +565,19 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
 
 
 def test_a_spec_review_returns_its_tags_from_a_separate_extraction_turn():
-    import copy
-
     from saffron.spec_review import (
-        SPEC_REVIEW_BUDGET_USD,
-        SPEC_REVIEW_EXTRACT_BUDGET_USD,
         SPEC_REVIEW_EXTRACT_PROMPT,
         SPEC_REVIEW_FORMAT,
-        SPEC_REVIEW_MAX_TURNS,
-        SPEC_SESSION_TOOLS,
         SpecReviewSession,
         _SpecReviewFindings,
-        run_spec_review,
     )
-
-    container = "c-1"
-    system_prompt = "sys"
-    prompt = "p"
-    first_options = _implement.agent_options(
-        system_prompt=system_prompt,
-        max_turns=SPEC_REVIEW_MAX_TURNS,
-        budget_usd=SPEC_REVIEW_BUDGET_USD,
-        tools=SPEC_SESSION_TOOLS,
-    )
-    extract_options = first_options | {
-        "max_budget_usd": SPEC_REVIEW_EXTRACT_BUDGET_USD,
-        "output_format": SPEC_REVIEW_FORMAT,
-    }
-
-    def _run(double):
-        return run_spec_review(
-            container, system_prompt=system_prompt, prompt=prompt, agent=double
-        )
-
-    def _first(**overrides):
-        base = dict(text=J, cost=0.5, session_id="s-1", num_turns=7)
-        base.update(overrides)
-        return _attempt(**base)
-
-    def _second(**overrides):
-        base = dict(
-            text=T, cost=0.25, session_id="s-2", num_turns=2, structured_output=V
-        )
-        base.update(overrides)
-        return _attempt(**base)
-
-    def _assert_first_call(double):
-        args, kwargs = double.calls[0]
-        assert args == (container,)
-        assert kwargs == {"prompt": prompt, "options": first_options}
 
     def _assert_second_call(double, *, last_cost_usd=0.5):
         args, kwargs = double.calls[1]
-        assert args == (container,)
+        assert args == (_CONTAINER,)
         assert kwargs == {
             "prompt": SPEC_REVIEW_EXTRACT_PROMPT,
-            "options": extract_options,
+            "options": _extract_options(),
             "resume": "s-1",
             "last_cost_usd": last_cost_usd,
         }
@@ -678,7 +680,7 @@ def test_a_spec_review_returns_its_tags_from_a_separate_extraction_turn():
     double = _Agent(
         [
             _first(),
-            _implement.AgentFailed(
+            implement.AgentFailed(
                 "api_error",
                 _attempt(
                     status="rejected",
@@ -701,7 +703,7 @@ def test_a_spec_review_returns_its_tags_from_a_separate_extraction_turn():
     double = _Agent(
         [
             _first(),
-            _implement.AgentFailed(
+            implement.AgentFailed(
                 "cut", _attempt(cost=0.25, session_id="s-2", num_turns=2)
             ),
         ]
@@ -718,7 +720,7 @@ def test_a_spec_review_returns_its_tags_from_a_separate_extraction_turn():
     )
 
     # Second raises AgentFailed("gone") with no attempt.
-    double = _Agent([_first(), _implement.AgentFailed("gone")])
+    double = _Agent([_first(), implement.AgentFailed("gone")])
     result = _run(double)
     assert len(double.calls) == 2
     assert result == SpecReviewSession(
@@ -881,7 +883,7 @@ def test_cores_spec_review_prompts_fill_every_slot_and_name_no_repo_tool():
             "tests": GateDeclaration(blocking=True),
             "lint": GateDeclaration(blocking=False),
         },
-        protected=["uv.lock"],
+        protected=["uv.lock", "docs/{a,b}.md"],
         elevate_on=["saffron/ledger.py"],
     )
     rendered = spec_review_system_prompt(policy, prompts_dir=context.PROMPTS_DIR)
@@ -891,7 +893,10 @@ def test_cores_spec_review_prompts_fill_every_slot_and_name_no_repo_tool():
         "- `tests`",
         "- `lint` (advisory)",
         "- `uv.lock`",
+        "- `docs/{a,b}.md`",
         "- `saffron/ledger.py`",
+        "- `feature`: 3000 changed tokens",
+        "- any other type: 4200 changed tokens",
         "- `scope`",
         "- `build`",
         "- `witness`",
@@ -963,76 +968,26 @@ def test_cores_spec_review_prompts_fill_every_slot_and_name_no_repo_tool():
 
 
 def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
-    import copy
+    from saffron.spec_review import SPEC_REVIEW_EXTRACT_PROMPT, SpecReviewSession
 
-    from saffron.spec_review import (
-        SPEC_REVIEW_BUDGET_USD,
-        SPEC_REVIEW_EXTRACT_BUDGET_USD,
-        SPEC_REVIEW_EXTRACT_PROMPT,
-        SPEC_REVIEW_FORMAT,
-        SPEC_REVIEW_MAX_TURNS,
-        SPEC_SESSION_TOOLS,
-        SpecReviewSession,
-        run_spec_review,
-    )
+    # The re-ask: the second turn answers with nothing structured by default.
+    _second_null = partial(_second, structured_output=None)
+    _third = partial(_second, session_id="s-3")
 
-    container = "c-1"
-    system_prompt = "sys"
-    prompt = "p"
-    first_options = _implement.agent_options(
-        system_prompt=system_prompt,
-        max_turns=SPEC_REVIEW_MAX_TURNS,
-        budget_usd=SPEC_REVIEW_BUDGET_USD,
-        tools=SPEC_SESSION_TOOLS,
-    )
-    extract_options = first_options | {
-        "max_budget_usd": SPEC_REVIEW_EXTRACT_BUDGET_USD,
-        "output_format": SPEC_REVIEW_FORMAT,
-    }
-
-    def _run(double):
-        return run_spec_review(
-            container, system_prompt=system_prompt, prompt=prompt, agent=double
-        )
-
-    def _first(**overrides):
-        base = dict(text=J, cost=0.5, session_id="s-1", num_turns=7)
-        base.update(overrides)
-        return _attempt(**base)
-
-    def _second(**overrides):
-        base = dict(
-            text=T, cost=0.25, session_id="s-2", num_turns=2, structured_output=None
-        )
-        base.update(overrides)
-        return _attempt(**base)
-
-    def _third(**overrides):
-        base = dict(
-            text=T, cost=0.25, session_id="s-3", num_turns=2, structured_output=V
-        )
-        base.update(overrides)
-        return _attempt(**base)
-
-    def _assert_third_call(double, *, prompt_text, resume, last_cost_usd):
+    def _assert_third_call(double, *, resume, last_cost_usd, prompt_text=None):
+        """`prompt_text` `None` checks only the refusal's shape, for a row
+        whose validation message the test does not spell out."""
         args, kwargs = double.calls[2]
-        assert args == (container,)
-        assert kwargs == {
-            "prompt": prompt_text,
-            "options": extract_options,
-            "resume": resume,
-            "last_cost_usd": last_cost_usd,
-        }
-
-    def _assert_third_call_refused(double, *, resume, last_cost_usd):
-        args, kwargs = double.calls[2]
-        assert args == (container,)
+        assert args == (_CONTAINER,)
         assert set(kwargs) == {"prompt", "options", "resume", "last_cost_usd"}
-        assert kwargs["options"] == extract_options
+        assert kwargs["options"] == _extract_options()
         assert kwargs["resume"] == resume
         assert kwargs["last_cost_usd"] == last_cost_usd
-        assert kwargs["prompt"].startswith("not the schema: ")
-        assert kwargs["prompt"].endswith("\n\n" + SPEC_REVIEW_EXTRACT_PROMPT)
+        if prompt_text is None:
+            assert kwargs["prompt"].startswith("not the schema: ")
+            assert kwargs["prompt"].endswith("\n\n" + SPEC_REVIEW_EXTRACT_PROMPT)
+        else:
+            assert kwargs["prompt"] == prompt_text
 
     reask_prompt_null = (
         "not the schema: the turn returned no structured output"
@@ -1051,10 +1006,10 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     # Every refused-value row: the second turn's own value, then a clean
     # third turn that returns `V`. All five give the same result.
     for bad_value in (v_no_claim, v_critical, v_extra_key, S):
-        double = _Agent([_first(), _second(structured_output=bad_value), _third()])
+        double = _Agent([_first(), _second_null(structured_output=bad_value), _third()])
         result = _run(double)
         assert len(double.calls) == 3
-        _assert_third_call_refused(double, resume="s-2", last_cost_usd=0.25)
+        _assert_third_call(double, resume="s-2", last_cost_usd=0.25)
         assert result == SpecReviewSession(
             text=F,
             cost_usd=1.0,
@@ -1066,7 +1021,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
         assert "scope" not in result.text
 
     # A null value, then a clean third turn.
-    double = _Agent([_first(), _second(), _third()])
+    double = _Agent([_first(), _second_null(), _third()])
     result = _run(double)
     assert len(double.calls) == 3
     _assert_third_call(
@@ -1078,7 +1033,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     assert "scope" not in result.text
 
     # A null value, second carries no session_id: the re-ask resumes the first.
-    double = _Agent([_first(), _second(session_id=None), _third()])
+    double = _Agent([_first(), _second_null(session_id=None), _third()])
     result = _run(double)
     assert len(double.calls) == 3
     _assert_third_call(
@@ -1089,7 +1044,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Third also returns nothing structured: no fourth call.
-    double = _Agent([_first(), _second(), _third(structured_output=None)])
+    double = _Agent([_first(), _second_null(), _third(structured_output=None)])
     result = _run(double)
     assert len(double.calls) == 3
     assert result == SpecReviewSession(
@@ -1102,7 +1057,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Third returns a refused value: no fourth call.
-    double = _Agent([_first(), _second(), _third(structured_output=S)])
+    double = _Agent([_first(), _second_null(), _third(structured_output=S)])
     result = _run(double)
     assert len(double.calls) == 3
     assert result.text == ""
@@ -1113,7 +1068,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     assert result.num_turns == 11
 
     # Third returns V with no session_id.
-    double = _Agent([_first(), _second(), _third(session_id=None)])
+    double = _Agent([_first(), _second_null(), _third(session_id=None)])
     result = _run(double)
     assert len(double.calls) == 3
     assert result == SpecReviewSession(
@@ -1121,7 +1076,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Third returns rejected, reset 9.
-    double = _Agent([_first(), _second(), _third(status="rejected", resets_at=9)])
+    double = _Agent([_first(), _second_null(), _third(status="rejected", resets_at=9)])
     result = _run(double)
     assert len(double.calls) == 3
     assert result == SpecReviewSession(
@@ -1133,8 +1088,8 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     double = _Agent(
         [
             _first(),
-            _second(),
-            _implement.AgentFailed(
+            _second_null(),
+            implement.AgentFailed(
                 "api_error",
                 _attempt(
                     status="rejected",
@@ -1156,8 +1111,8 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     double = _Agent(
         [
             _first(),
-            _second(),
-            _implement.AgentFailed(
+            _second_null(),
+            implement.AgentFailed(
                 "cut", _attempt(cost=0.25, session_id="s-3", num_turns=2)
             ),
         ]
@@ -1174,7 +1129,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Third raises AgentFailed("gone") with no attempt.
-    double = _Agent([_first(), _second(), _implement.AgentFailed("gone")])
+    double = _Agent([_first(), _second_null(), implement.AgentFailed("gone")])
     result = _run(double)
     assert len(double.calls) == 3
     assert result == SpecReviewSession(
@@ -1187,7 +1142,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Third is the killed turn.
-    double = _Agent([_first(), _second(), _KILLED])
+    double = _Agent([_first(), _second_null(), _KILLED])
     result = _run(double)
     assert len(double.calls) == 3
     _assert_third_call(
@@ -1203,7 +1158,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Second at cost 3.0, third the killed turn: `last_cost_usd` caps at 1.0.
-    double = _Agent([_first(), _second(cost=3.0), _KILLED])
+    double = _Agent([_first(), _second_null(cost=3.0), _KILLED])
     result = _run(double)
     assert len(double.calls) == 3
     _assert_third_call(
@@ -1219,7 +1174,7 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     )
 
     # Third raises an exception the module does not know about.
-    double = _Agent([_first(), _second(), RuntimeError("boom")])
+    double = _Agent([_first(), _second_null(), RuntimeError("boom")])
     with pytest.raises(RuntimeError):
         _run(double)
     assert len(double.calls) == 3

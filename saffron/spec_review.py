@@ -14,14 +14,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
 from saffron.agents import context
 from saffron.agents.artifacts import hash_artifact
 from saffron.agents.findings import Severity
 from saffron.cell import session
 from saffron.gates.core import size
-from saffron.phases import implement
+from saffron.phases import implement, rebut
 from saffron.repos.policy import Policy
 
 # The tags a `concern` or `blocker` can name as its own fix. Looked up by
@@ -32,24 +32,26 @@ SPEC_REVIEW_TAGS: tuple[str, ...] = ("scope", "build", "witness")
 # neither `Write` nor `Edit`, so `Bash` runs unprivileged (SA-0169).
 SPEC_SESSION_TOOLS = ["Read", "Glob", "Grep", "Bash"]
 
+# Reasoned, unmeasured in a batch: SA-0155 records each review's turns.
 SPEC_REVIEW_MAX_TURNS = 90
 
+# Reasoned, unmeasured in a batch: SA-0155 records each review's cost.
 SPEC_REVIEW_BUDGET_USD = 6.0
 
-# The extraction turn and its one re-ask, each a dozen times the spike's own
-# extraction turn ($0.08, `docs/evidence/2026-09-23-structured-output-spike.md`).
+# Reasoned, unmeasured in a cell: each is a dozen times the spike's extraction
+# turn ($0.08, `docs/evidence/2026-09-23-structured-output-spike.md`).
 SPEC_REVIEW_EXTRACT_BUDGET_USD = 1.0
 
 # What one session records at most, best effort: the review turn plus both
 # extraction turns.
 SPEC_REVIEW_SESSION_USD = SPEC_REVIEW_BUDGET_USD + 2 * SPEC_REVIEW_EXTRACT_BUDGET_USD
 
-# Twice `session.TURN_TIMEOUT_S`. The hand reviews of this chain, run with
-# `Bash` on 2026-09-24, took 566 to 681 seconds.
-SPEC_REVIEW_TIMEOUT_S = 1800.0
+# The hand reviews of this chain, run with `Bash` on 2026-09-24, took 566
+# to 681 seconds.
+SPEC_REVIEW_TIMEOUT_S = 2 * session.TURN_TIMEOUT_S
 
-# `if review.resets_at:` reads 0 as unset, so a reset time that is missing,
-# unreadable, or at or below 0 is shaped to this instead.
+# SA-0148's wait reads a reset at or before now as unreadable. So a
+# missing, unreadable or non-positive reset is shaped to this.
 UNREADABLE_RESET = 1
 
 # A file name, not a loaded template: `spec_review_system_prompt` reads it
@@ -65,9 +67,9 @@ class _SpecReviewFinding(BaseModel):
 
     Every field is required. A `default` here would let the turn omit one
     rather than answer `null`. Four of the six take `null`. A spec review's
-    finding can name no place at all. `fixes` is a tag or none, never a
-    tag the model invents. `read_spec_review` checks `SPEC_REVIEW_TAGS` on
-    read, not on write."""
+    finding can name no place at all. `fixes` is any string or null.
+    `read_spec_review` alone checks it against `SPEC_REVIEW_TAGS`, when
+    called."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -118,7 +120,7 @@ class SpecReviewFinding:
     severity: Severity
     claim: str
     fixes: str | None
-    criterion: str | None
+    criterion: int | None
     file: str | None
     line: int | None
 
@@ -254,25 +256,12 @@ def spec_review_route(
 def _reset(raw: object) -> int:
     """`resets_at`, shaped for a spec review: a clean, positive `int`, or
     `UNREADABLE_RESET`. `session._resets_at_fields` alone still passes 0
-    and a negative number through unshaped. `if review.resets_at:` reads
-    either as unset, so this floors them too."""
+    and a negative number through unshaped. SA-0148's wait reads either
+    as unreadable, so this floors them too."""
     value, unreadable = session._resets_at_fields(raw)
     if unreadable or value is None or value <= 0:
         return UNREADABLE_RESET
     return value
-
-
-def _validate(value: object) -> tuple[_SpecReviewFindings | None, str | None]:
-    """`value` against `_SpecReviewFindings`, or the `not the schema` error
-    naming why. The same two messages `rebut._validate` gives, for the same
-    two reasons: a turn that answered with nothing structured, and a turn
-    whose answer was the wrong shape."""
-    if value is None:
-        return None, "not the schema: the turn returned no structured output"
-    try:
-        return _SpecReviewFindings.model_validate(value), None
-    except ValidationError as exc:
-        return None, f"not the schema: {exc}"
 
 
 def _findings_text(report: _SpecReviewFindings) -> str:
@@ -405,7 +394,7 @@ def run_spec_review(
     )
     if isinstance(extracted, SpecReviewSession):
         return extracted
-    report, error = _validate(extracted.structured_output)
+    report, error = rebut._validate(_SpecReviewFindings, extracted.structured_output)
     if report is not None:
         return SpecReviewSession(
             text=_findings_text(report),
@@ -416,8 +405,8 @@ def run_spec_review(
             num_turns=turns,
         )
 
-    # The CLI already retries the shape inside a turn, so this one re-ask is
-    # a backstop. No second re-ask: HEAD already holds this attempt's cost.
+    # One re-ask, as run_lens makes (§5.3 says two). The CLI already retries
+    # the shape inside a turn.
     reasked = _extraction_turn(
         turn_prompt=f"{error}\n\n{SPEC_REVIEW_EXTRACT_PROMPT}",
         resume=sid,
@@ -425,7 +414,7 @@ def run_spec_review(
     )
     if isinstance(reasked, SpecReviewSession):
         return reasked
-    report, error = _validate(reasked.structured_output)
+    report, error = rebut._validate(_SpecReviewFindings, reasked.structured_output)
     if report is not None:
         return SpecReviewSession(
             text=_findings_text(report),
