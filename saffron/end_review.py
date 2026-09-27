@@ -592,7 +592,7 @@ def layer_cell(
     runtime.remove_container(container)
     try:
         # A spec session's Bash runs a prior layer's code, so only its
-        # cell gets the wrapper's capabilities and the root-left check.
+        # cell gets the wrapper's capabilities and the self-check.
         if spec_session:
             session.cell_up(
                 repo=repo,

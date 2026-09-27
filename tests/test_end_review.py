@@ -1572,3 +1572,177 @@ def test_only_a_spec_sessions_layer_cell_is_granted_capabilities_and_checked(
         log.append(("body", "unreached"))
 
     assert [step for step, *_ in log] == ["remove", "up", "check", "down"]
+
+
+# Runs as root in the layer's cell. Each probe goes through the prefix as the
+# CLI calls it, `bash -c -l "'<prefix>' '<command>'"`, and one JSON object is printed.
+_ROOT_PROBE = r"""
+import glob, json, os, re, subprocess, sys, time
+prefix = sys.argv[1]
+def run(argv, **kw):
+    return subprocess.run(argv, capture_output=True, text=True, **kw)
+def bash(cmd):
+    q = cmd.replace("'", "'\"'\"'")
+    return run(["bash", "-c", "-l", f"'{prefix}' '{q}'"], cwd="/work")
+SAFE = re.compile(r"^[A-Za-z0-9_./:=@+,-]+$")
+def _y(args):
+    return " ".join("''" if r == "" else r if SAFE.match(r)
+                    else "'" + r.replace("'", "'\"'\"'") + "'" for r in map(str, args))
+def b8o(e, t):
+    return f"{_y([e])} {_y([t])}"
+composite = "eval " + _y(["echo 'a'\"'\"'; id -u; echo '; id -u"]) + " && pwd -P >| /tmp/claude-ab12-cwd"
+out = {"breakout": run(["bash", "-c", "-l", b8o(prefix, composite)], cwd="/work").stdout}
+out["argc"] = [[r.returncode, r.stdout, r.stderr]
+               for r in (run([prefix]), run([prefix, "id -u", "id -u"]))]
+out["uid"] = bash("id -u").stdout.strip()
+out["user"] = run(["id", "-u", "unprivileged"]).stdout.strip()
+out["groups"] = bash("id -G").stdout.split()
+out["status"] = bash("grep -E 'Cap|NoNewPrivs' /proc/self/status").stdout
+out["home"] = bash('test -w "$HOME" && echo yes').stdout.strip()
+out["token"] = bash("echo ${CLAUDE_CODE_OAUTH_TOKEN-unset}").stdout.strip()
+out["root_token"] = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "unset")
+out["path"] = bash("echo $PATH").stdout.strip()
+out["pytest"] = bash("command -v pytest").stdout.strip()
+out["git"] = bash("git -C /work log -1 --format=%H").stdout.strip()
+out["read_work"] = bash("cat /work/a.txt").stdout.strip()
+out["write_tmp"] = bash("echo t > /tmp/probe.txt && cat /tmp/probe.txt").stdout.strip()
+out["copy_runs"] = bash("git clone -q /work /tmp/w && cd /tmp/w && echo two >> a.txt"
+                        " && git status --porcelain && /opt/venv/bin/pytest --version").stdout
+out["sysctl"] = {k: open(f"/proc/sys/fs/{k}").read().strip()
+                 for k in ("protected_symlinks", "protected_regular")}
+run(["sh", "-c", "cp /usr/bin/id /tmp/rid && chmod u+s /tmp/rid"], check=True)
+out["setuid"] = bash("/tmp/rid -u").stdout.strip()
+sdk = run([sys.executable, "-c", "import claude_agent_sdk, os; "
+           "print(os.path.dirname(claude_agent_sdk.__file__))"], check=True).stdout.strip()
+site = glob.glob("/opt/venv/lib/python*/site-packages")[0]
+targets = ["/opt/saffron/agent_runner.py", "/opt/saffron/claude-code", prefix,
+           sdk + "/__init__.py", "/opt/venv/pyvenv.cfg", site + "/probe.pth",
+           "/opt/venv/bin/probe", "/agent-state/probe", "/work/probe",
+           "/work/.git/config", "/etc/probe"]
+out["writes"] = {t: bash(f"echo x >> {t}").stderr for t in targets}
+out["cli"] = os.path.realpath("/opt/saffron/claude-code")
+out["pipes"] = {}
+for fd in (3, 0):
+    r, w = os.pipe()
+    os.set_inheritable(w, True)
+    def onto_fd3(w=w):
+        os.dup2(w, 3)
+    cmd = "echo L >&3; echo L >&0; echo L > /proc/self/fd/3; echo L > /proc/self/fd/0; true"
+    q = cmd.replace("'", "'\"'\"'")
+    subprocess.run(["bash", "-c", "-l", f"'{prefix}' '{q}'"], cwd="/work",
+                   stdin=w if fd == 0 else subprocess.DEVNULL,
+                   preexec_fn=onto_fd3 if fd == 3 else None, close_fds=fd == 0,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["sh", "-c", "echo ROOT >&3"], preexec_fn=onto_fd3, close_fds=False)
+    os.close(w)
+    out["pipes"][str(fd)] = os.read(r, 200).decode()
+    os.close(r)
+r, w = os.pipe()
+pid = os.fork()
+if pid == 0:
+    os.close(r)
+    os.dup2(w, 1)
+    time.sleep(5)
+    os._exit(0)
+os.close(w)
+bash(f"echo FORGED > /proc/{pid}/fd/1")
+run(["sh", "-c", f"echo ROOT > /proc/{pid}/fd/1"])
+time.sleep(0.3)
+os.set_blocking(r, False)
+out["stream"] = os.read(r, 200).decode()
+print(json.dumps(out))
+"""
+
+
+@pytest.mark.cell
+def test_a_spec_sessions_bash_cannot_write_what_root_runs(tmp_path, monkeypatch):
+    """Enters a spec session's layer cell on this repository, as production
+    does, and probes the Bash wrapper from inside it (Appendix I).
+
+    The self-check's probe is read from the recorded `exec_` calls. It runs
+    again through the wrapper, once as it is and once under an altered `PATH`.
+    """
+    import saffron.end_review as end_review
+    from saffron.cell import runtime
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-probe-not-a-token")
+    seen: list[list[str]] = []
+    real_exec = runtime.exec_
+
+    def recording_exec(container, command, **kw):
+        seen.append(list(command))
+        return real_exec(container, command, **kw)
+
+    monkeypatch.setattr(runtime, "exec_", recording_exec)
+    repo = Path(__file__).resolve().parent.parent
+    origin = tmp_path / "origin"
+    origin.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=origin, check=True, capture_output=True, text=True
+        )
+
+    git("init", "-q", "-b", "main")
+    (origin / "a.txt").write_text("one\n")
+    git("add", "a.txt")
+    git("-c", "user.email=t@e", "-c", "user.name=t", "commit", "-qm", "first")
+    head = git("rev-parse", "HEAD").stdout.strip()
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    gates = tmp_path / "gates"
+    (gates / ".saffron" / "gates").mkdir(parents=True)
+    fields = end_review.LayerFields(
+        spec_id="SY-1", branch="saffron/SY-1", pr_url="", base=head, head=head, known=""
+    )
+    wrapper = implement.UNPRIVILEGED_BASH
+    prefix = implement.agent_options(
+        system_prompt="s",
+        max_turns=1,
+        budget_usd=1.0,
+        tools=["Read", "Glob", "Grep", "Bash"],
+    )["env"]["CLAUDE_CODE_SHELL_PREFIX"]
+    assert prefix == wrapper
+    odd_path = "PATH=/nonexistent:/root/x:/usr/bin"
+    with end_review.layer_cell(
+        fields,
+        repo=repo,
+        mirror=mirror,
+        gates_dir=gates,
+        thread_env={},
+        spec_session=True,
+    ) as container:
+        probe = next(argv[1] for argv in seen if argv[0] == wrapper)
+        done = runtime.exec_(container, [implement.PYTHON, "-c", _ROOT_PROBE, prefix])
+        check = runtime.exec_(container, [wrapper, probe])
+        odd = runtime.exec_(container, ["env", odd_path, wrapper, probe])
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout)
+    print(json.dumps(got, indent=1), check.stdout, odd.stdout, sep="\n")
+    assert got["uid"] == got["user"] and got["uid"] not in ("", "0")
+    assert "0" not in got["groups"] and got["home"] == "yes"
+    assert "CapEff:\t0000000000000000" in got["status"]
+    assert "CapPrm:\t0000000000000000" in got["status"]
+    assert "NoNewPrivs:\t1" in got["status"]
+    assert got["setuid"] == got["user"]
+    assert got["token"] == "unset" and got["root_token"] == "sk-probe-not-a-token"
+    assert got["git"] == head and got["read_work"] == "one"
+    assert got["write_tmp"] == "t"
+    assert got["copy_runs"].startswith(" M a.txt\npytest ")
+    assert len(got["writes"]) == 11
+    for target, stderr in got["writes"].items():
+        assert "Permission denied" in stderr, target
+    assert got["pipes"] == {"3": "ROOT\n", "0": "ROOT\n"}
+    assert got["stream"] == "ROOT\n"
+    assert check.returncode == 0, check.stderr
+    assert "refused /opt/venv/bin\nrefused /opt/venv\n" in check.stdout
+    for path in ("/opt/saffron", wrapper, got["cli"]):
+        assert f"refused {path}\n" in check.stdout, path
+    for path in ("/nonexistent", "/root/x"):
+        assert f"skipped {path}\n" in odd.stdout, path
+        assert f"missing {path}\n" not in odd.stdout, path
+    for code, stdout, stderr in got["argc"]:
+        assert code != 0 and stdout == "" and stderr == ""
+    assert got["breakout"] == f"a'; id -u; echo \n{got['user']}\n"
