@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from saffron.agents.artifacts import hash_artifact
 from saffron.batch import ABORT_STATES, run_batch
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec
@@ -32,6 +33,12 @@ def _ready() -> Readiness:
     used to bind a permissive stub, so a caller who simply forgot got a
     vacuous §4.4 step 1 and a night that could start on an expired token."""
     return Readiness(ok=True)
+
+
+def _soon() -> int:
+    """A `resets_at` a minute past now, read for a `RATE_LIMITED` outcome
+    that never needs an exact figure checked."""
+    return int(datetime.now(UTC).timestamp()) + 60
 
 
 def _candidate(
@@ -2231,7 +2238,16 @@ def test_a_stack_batch_waits_an_hour_when_it_cannot_read_the_reset_time(
     assert len(rate_lines) == 9
 
 
-def _review_session(findings=(), *, cost=0.5, error=None, resets_at=None, fenced=True):
+def _review_session(
+    findings=(),
+    *,
+    cost=0.5,
+    error=None,
+    resets_at=None,
+    fenced=True,
+    session_id=None,
+    num_turns=0,
+):
     """A `SpecReviewSession` fixture for the review witnesses below. Imports
     lazily, so a reverted `saffron/spec_review.py` fails a calling test at
     call time rather than failing collection for the whole file."""
@@ -2244,7 +2260,14 @@ def _review_session(findings=(), *, cost=0.5, error=None, resets_at=None, fenced
         text = f"```json\n{body}\n```"
     else:
         text = "spec review text with no fenced block"
-    return SpecReviewSession(text=text, cost_usd=cost, error=error, resets_at=resets_at)
+    return SpecReviewSession(
+        text=text,
+        cost_usd=cost,
+        error=error,
+        resets_at=resets_at,
+        session_id=session_id,
+        num_turns=num_turns,
+    )
 
 
 def _clean_review(**kwargs):
@@ -2292,6 +2315,538 @@ class ReviewScript:
             (candidate.spec.id, predecessor.spec.id if predecessor else None)
         )
         return self._sessions[candidate.spec.id].pop(0)
+
+
+class MintDouble:
+    """The `mint` double shared by every `review`-driven witness. Each call
+    records the spec id, in order, before raising for a spec id named in
+    `raise_on`. Otherwise it mints a run and a task for the candidate, keeps
+    the task id by spec id in `tasks`, and returns it."""
+
+    def __init__(self, ledger: Ledger, repo_id: int, raise_on=frozenset()):
+        self._ledger = ledger
+        self._repo_id = repo_id
+        self._raise_on = frozenset(raise_on)
+        self.calls: list[str] = []
+        self.tasks: dict[str, int] = {}
+
+    def __call__(self, candidate: Candidate) -> int:
+        self.calls.append(candidate.spec.id)
+        if candidate.spec.id in self._raise_on:
+            raise RuntimeError(f"mint failed for {candidate.spec.id}")
+        run_id = self._ledger.create_run(self._repo_id, base_sha="a" * 40)
+        task_id = self._ledger.create_task(
+            run_id,
+            spec_id=candidate.spec.id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{candidate.spec.id}",
+        )
+        self.tasks[candidate.spec.id] = task_id
+        return task_id
+
+
+class ReviewDouble:
+    """The `review` double for the mint-and-review witnesses. Records
+    `(spec id, length of the mint log at the moment of the call)`, and pops
+    the next scripted session or exception for that spec id, raising
+    `AssertionError` for a spec id the table names nothing for. It also
+    records the batch that holds the run of the spec's newest task.
+    `TE-5`'s own spend is captured at its second call. `TE-2` gets an
+    unrelated $8 run and task, as an attended `saffron cell` would leave
+    behind."""
+
+    def __init__(self, ledger: Ledger, repo_id: int, mint_log: list[str], table):
+        self._ledger = ledger
+        self._repo_id = repo_id
+        self._mint_log = mint_log
+        self._table = {spec_id: list(queue) for spec_id, queue in table.items()}
+        self.calls: list[tuple[str, int]] = []
+        self.batches_at_call: list[int | None] = []
+        self.te5_second_call_spend: float | None = None
+
+    def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+        spec_id = candidate.spec.id
+        self.calls.append((spec_id, len(self._mint_log)))
+        queue = self._table.get(spec_id)
+        if not queue:
+            raise AssertionError(f"no review scripted for {spec_id}")
+        entry = queue.pop(0)
+
+        newest = self._ledger.tasks_by_spec_id(self._repo_id, spec_id)[-1]["task_id"]
+        run_id = self._ledger.task_run(newest)
+        batch_row = self._ledger._db.execute(
+            "SELECT batch_id FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        self.batches_at_call.append(batch_row["batch_id"])
+
+        if spec_id == "TE-5" and not queue:
+            self.te5_second_call_spend = self._ledger.batch_spend(batch_row["batch_id"])
+
+        if spec_id == "TE-2":
+            unrelated_run = self._ledger.create_run(self._repo_id, base_sha="b" * 40)
+            unrelated_task = self._ledger.create_task(
+                unrelated_run,
+                spec_id="TE-2-unrelated",
+                spec_sha="u" * 64,
+                branch="saffron/TE-2-unrelated",
+            )
+            attempt_id = self._ledger.open_attempt(unrelated_task, phase="IMPLEMENT")
+            self._ledger.close_attempt(
+                attempt_id,
+                session_id=None,
+                subtype="success",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=8.0,
+            )
+
+        if isinstance(entry, Exception):
+            raise entry
+        return entry
+
+
+class RunnerDouble:
+    """The `runner` double for the mint-and-review witnesses. Records
+    `(spec id, candidate.task_id)`. Mints its own run and task with one
+    closed $1 attempt, as `SA-0149`'s own runner double does. Returns the
+    next scripted state for the spec, wrapped in a `CellOutcome`."""
+
+    def __init__(self, ledger: Ledger, repo_id: int, table):
+        self._ledger = ledger
+        self._repo_id = repo_id
+        self._table = {spec_id: list(queue) for spec_id, queue in table.items()}
+        self.calls: list[tuple[str, int | None]] = []
+
+    def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+        self.calls.append((candidate.spec.id, candidate.task_id))
+        run_id = self._ledger.create_run(self._repo_id, base_sha="a" * 40)
+        task_id = self._ledger.create_task(
+            run_id,
+            spec_id=candidate.spec.id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{candidate.spec.id}-run",
+        )
+        attempt_id = self._ledger.open_attempt(task_id, phase="IMPLEMENT")
+        self._ledger.close_attempt(
+            attempt_id,
+            session_id=None,
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=1.0,
+        )
+        state = self._table[candidate.spec.id].pop(0)
+        outcome = _outcome(state=state, run_id=run_id, task_id=task_id)
+        if state == "RATE_LIMITED":
+            outcome = dataclasses.replace(outcome, resets_at=_soon())
+        return outcome
+
+
+def _spec_reviews(ledger: Ledger) -> list[dict]:
+    """Every `spec_reviews` row, ordered by `(task_key, n)`, as plain dicts
+    so an assertion can compare them by value."""
+    rows = ledger._db.execute(
+        "SELECT * FROM spec_reviews ORDER BY task_key, n"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _mint_and_review_arrangement(ledger: Ledger, repo_id: int):
+    """The one arrangement shared by every mint-and-review witness. The
+    ten-spec order comes from the spec's own table, with an older `TE-7`
+    task left `GATE_ERROR` in an earlier batch. Returns `(order, older_task,
+    earlier_batch, mint, reviews, runner)`, the doubles that drive the rest."""
+    earlier_batch = ledger.create_batch(10.0)
+    older_run = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=earlier_batch)
+    older_task = ledger.create_task(
+        older_run, spec_id="TE-7", spec_sha="s" * 64, branch="saffron/TE-7"
+    )
+    older_attempt = ledger.open_attempt(older_task, phase="IMPLEMENT")
+    ledger.close_attempt(
+        older_attempt,
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=2.0,
+    )
+    ledger.set_task_state(older_task, "GATE_ERROR")
+    ledger.close_batch(earlier_batch, "DRAINED")
+
+    order = [
+        _candidate("TE-1"),
+        _candidate("TE-2"),
+        _candidate("TE-3", depends_on=["TE-2"]),
+        _candidate("TE-4"),
+        _candidate("TE-5"),
+        _candidate("TE-6"),
+        dataclasses.replace(_candidate("TE-7"), task_id=older_task),
+        _candidate("TE-9"),
+        _candidate("TE-80"),
+        _candidate("TE-81"),
+    ]
+
+    mint = MintDouble(ledger, repo_id, raise_on={"TE-80"})
+    reviews = ReviewDouble(
+        ledger,
+        repo_id,
+        mint.calls,
+        {
+            "TE-1": [_review_session([], cost=0.5, session_id="s-1", num_turns=7)],
+            "TE-2": [_review_session([_blocker("scope")], cost=0.25)],
+            "TE-4": [_review_session([], error="cell died", cost=0.125)],
+            "TE-5": [
+                _review_session([], fenced=False, resets_at=_soon(), cost=0.0625),
+                _review_session([], cost=0.03125),
+            ],
+            "TE-6": [RuntimeError("critic cell would not start")],
+            "TE-7": [_review_session([], cost=0.75)],
+            "TE-9": [_review_session([], fenced=False, cost=0.015625)],
+        },
+    )
+    runner = RunnerDouble(
+        ledger,
+        repo_id,
+        {
+            "TE-1": ["READY_FOR_REVIEW"],
+            "TE-5": ["RATE_LIMITED", "READY_FOR_REVIEW"],
+            "TE-7": ["RATE_LIMITED", "READY_FOR_REVIEW"],
+        },
+    )
+    return order, older_task, earlier_batch, mint, reviews, runner
+
+
+def test_a_stack_batch_mints_each_reviewed_specs_task_before_its_first_review(
+    ledger, repo_id
+):
+    """`mint` runs once per spec, before that spec's own first review,
+    whatever the candidate's `task_id` names. It never runs for a spec
+    refused before its review reaches it. It never runs twice for the same
+    spec, and never on the older task a re-queued candidate carries. A
+    `mint` that raises counts as an abort, as a runner's raise does, and its
+    spec is never reviewed."""
+    from saffron.batch import run_stack_batch
+
+    order, older_task, _earlier_batch, mint, reviews, runner = (
+        _mint_and_review_arrangement(ledger, repo_id)
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+        review=reviews,
+        mint=mint,
+        sleep=lambda seconds: None,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert mint.calls == [
+        "TE-1",
+        "TE-2",
+        "TE-4",
+        "TE-5",
+        "TE-6",
+        "TE-7",
+        "TE-9",
+        "TE-80",
+    ]
+    assert reviews.calls == [
+        ("TE-1", 1),
+        ("TE-2", 2),
+        ("TE-4", 3),
+        ("TE-5", 4),
+        ("TE-5", 4),
+        ("TE-6", 5),
+        ("TE-7", 6),
+        ("TE-9", 7),
+    ]
+    raised_te80 = [
+        line
+        for line in lines
+        if line.startswith(f"{'TE-80':<10}") and "raised RuntimeError" in line
+    ]
+    assert len(raised_te80) == 1
+
+    assert runner.calls == [
+        ("TE-1", mint.tasks["TE-1"]),
+        ("TE-5", mint.tasks["TE-5"]),
+        ("TE-5", mint.tasks["TE-5"]),
+        ("TE-7", mint.tasks["TE-7"]),
+        ("TE-7", mint.tasks["TE-7"]),
+    ]
+    assert mint.tasks["TE-7"] != older_task
+
+    # A second batch on the same ledger mints TE-1 a fresh task.
+    mint2 = MintDouble(ledger, repo_id)
+    reviews2 = ReviewDouble(
+        ledger, repo_id, mint2.calls, {"TE-1": [_review_session([], cost=0.1)]}
+    )
+    runner2 = RunnerDouble(ledger, repo_id, {"TE-1": ["READY_FOR_REVIEW"]})
+
+    reason2 = run_stack_batch(
+        [_candidate("TE-1")],
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner2,
+        readiness_check=_ready,
+        review=reviews2,
+        mint=mint2,
+    )
+
+    assert reason2 == "DRAINED"
+    assert mint2.calls == ["TE-1"]
+    rows = [
+        row
+        for row in _spec_reviews(ledger)
+        if row["task_key"] == ledger.record_key(mint2.tasks["TE-1"])
+    ]
+    assert [row["n"] for row in rows] == [1]
+
+    batches_before = ledger._db.execute("SELECT COUNT(*) AS n FROM batches").fetchone()[
+        "n"
+    ]
+    with pytest.raises(ValueError):
+        run_stack_batch(
+            [_candidate("TE-90")],
+            ledger,
+            budget_usd=100.0,
+            until=None,
+            runner=runner2,
+            readiness_check=_ready,
+            review=reviews2,
+        )
+    batches_after = ledger._db.execute("SELECT COUNT(*) AS n FROM batches").fetchone()[
+        "n"
+    ]
+    assert batches_after == batches_before
+
+
+def test_each_spec_review_is_a_fact_on_its_specs_minted_task(tmp_path):
+    """Each reviewed task's `spec_review` facts, attempts and state match its
+    own review's route. The older task `TE-7`'s candidate carries keeps its
+    own state and its one attempt, and gets no `spec_review` fact at all."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "reviews.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    order, older_task, _earlier_batch, mint, reviews, runner = (
+        _mint_and_review_arrangement(ledger, repo_id)
+    )
+
+    run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews,
+        mint=mint,
+        sleep=lambda seconds: None,
+    )
+
+    def facts(task_id: int) -> list:
+        key = ledger.record_key(task_id)
+        assert key is not None
+        return [f for f in record.read(key) if f.kind == "spec_review"]
+
+    def state(task_id: int) -> str:
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["state"]
+
+    te1 = mint.tasks["TE-1"]
+    te1_facts = facts(te1)
+    assert [f.payload["n"] for f in te1_facts] == [1]
+    assert te1_facts[0].payload["route"] == "run"
+    assert te1_facts[0].payload["error"] is None
+    te1_attempts = ledger.attempts(te1)
+    assert len(te1_attempts) == 1
+    assert te1_attempts[0]["phase"] == "SPEC_REVIEW"
+    assert te1_attempts[0]["cost_usd_est"] == 0.5
+    assert te1_attempts[0]["subtype"] == "success"
+    assert te1_attempts[0]["session_id"] == "s-1"
+    assert te1_attempts[0]["num_turns"] == 7
+    assert state(te1) == "QUEUED"
+
+    te2 = mint.tasks["TE-2"]
+    te2_facts = facts(te2)
+    assert len(te2_facts) == 1 and te2_facts[0].payload["n"] == 1
+    assert te2_facts[0].payload["route"] == "escalate"
+    block = te2_facts[0].payload["block"]
+    assert block is not None
+    assert te2_facts[0].payload["block_sha256"] == hash_artifact(block)
+    te2_attempts = ledger.attempts(te2)
+    assert len(te2_attempts) == 1
+    assert te2_attempts[0]["cost_usd_est"] == 0.25
+    assert te2_attempts[0]["subtype"] == "success"
+    assert te2_attempts[0]["session_id"] is None
+    assert state(te2) == "SPEC_WITHHELD"
+
+    te4 = mint.tasks["TE-4"]
+    te4_facts = facts(te4)
+    assert len(te4_facts) == 1
+    assert te4_facts[0].payload["route"] == "error"
+    assert te4_facts[0].payload["error"] == "cell died"
+    assert te4_facts[0].payload["block"] is not None
+    te4_attempts = ledger.attempts(te4)
+    assert len(te4_attempts) == 1
+    assert te4_attempts[0]["cost_usd_est"] == 0.125
+    assert te4_attempts[0]["subtype"] == "error"
+    assert state(te4) == "GATE_ERROR"
+
+    te5 = mint.tasks["TE-5"]
+    te5_facts = facts(te5)
+    assert [f.payload["n"] for f in te5_facts] == [1, 2]
+    assert [f.payload["route"] for f in te5_facts] == ["wait", "run"]
+    te5_attempts = ledger.attempts(te5)
+    assert [a["cost_usd_est"] for a in te5_attempts] == [0.0625, 0.03125]
+    assert [a["subtype"] for a in te5_attempts] == ["success", "success"]
+    assert state(te5) == "RATE_LIMITED"
+
+    te6 = mint.tasks["TE-6"]
+    te6_facts = facts(te6)
+    assert len(te6_facts) == 1 and te6_facts[0].payload["n"] == 1
+    assert te6_facts[0].payload["route"] == "error"
+    assert te6_facts[0].payload["block"] is None
+    assert te6_facts[0].payload["block_sha256"] is None
+    assert te6_facts[0].payload["error"] == "RuntimeError: critic cell would not start"
+    assert ledger.attempts(te6) == []
+    assert state(te6) == "GATE_ERROR"
+
+    te7 = mint.tasks["TE-7"]
+    te7_facts = facts(te7)
+    assert len(te7_facts) == 1
+    assert te7_facts[0].payload["route"] == "run"
+    assert te7_facts[0].payload["error"] is None
+    te7_attempts = ledger.attempts(te7)
+    assert len(te7_attempts) == 1 and te7_attempts[0]["cost_usd_est"] == 0.75
+    assert state(te7) == "QUEUED"
+
+    assert state(older_task) == "GATE_ERROR"
+    assert len(ledger.attempts(older_task)) == 1
+    assert facts(older_task) == []
+
+    te9 = mint.tasks["TE-9"]
+    te9_facts = facts(te9)
+    assert len(te9_facts) == 1
+    assert te9_facts[0].payload["route"] == "error"
+    te9_attempts = ledger.attempts(te9)
+    assert len(te9_attempts) == 1
+    assert te9_attempts[0]["cost_usd_est"] == 0.015625
+    assert te9_attempts[0]["subtype"] == "success"
+    assert state(te9) == "GATE_ERROR"
+
+
+def test_a_stack_batch_counts_each_spec_review_once_in_its_spend(ledger, repo_id):
+    """`ledger.batch_spend` counts each review's own cost once, plus every
+    runner call, and nothing minted outside the batch it reviewed."""
+    from saffron.batch import run_stack_batch
+
+    order, older_task, earlier_batch, mint, reviews, runner = (
+        _mint_and_review_arrangement(ledger, repo_id)
+    )
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews,
+        mint=mint,
+        sleep=lambda seconds: None,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    batch_id = ledger.latest_batch_id()
+    assert batch_id != earlier_batch
+    assert ledger.batch_spend(batch_id) == 6.734375
+    assert ledger.batch_spend(earlier_batch) == 2.0
+    assert reviews.te5_second_call_spend == 1.9375
+    assert set(reviews.batches_at_call) == {batch_id}
+
+    with pytest.raises(ValueError):
+        ledger.task_run(999999)
+
+
+def test_the_spec_reviews_fold_back_from_the_record_alone(tmp_path):
+    """Folding the record rebuilds every `spec_reviews` row as written, into
+    a fresh ledger and back into the source alike. `fold_task` with no facts
+    drops exactly the task it names, and with an earlier fact missing keeps
+    the later one's own `n`."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.fold import fold
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    order, _older_task, _earlier_batch, mint, reviews, runner = (
+        _mint_and_review_arrangement(ledger, repo_id)
+    )
+
+    run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews,
+        mint=mint,
+        sleep=lambda seconds: None,
+    )
+
+    te5_key = ledger.record_key(mint.tasks["TE-5"])
+    assert te5_key is not None
+    source_rows = _spec_reviews(ledger)
+
+    fresh = Ledger(tmp_path / "fresh.db")
+    other_repo = fresh.upsert_repo(
+        "other-repo", "/other/o", "/other/m.git", policy_sha="q" * 64
+    )
+    other_run = fresh.create_run(other_repo, base_sha="c" * 40)
+    fresh.create_task(
+        other_run, spec_id="ZZ-0", spec_sha="z" * 64, branch="saffron/ZZ-0"
+    )
+
+    fold(record, fresh)
+    assert _spec_reviews(fresh) == source_rows
+
+    fold(record, ledger)
+    assert _spec_reviews(ledger) == source_rows
+
+    fresh.fold_task(te5_key, [])
+    after_drop = _spec_reviews(fresh)
+    assert [row for row in after_drop if row["task_key"] == te5_key] == []
+    assert [row for row in after_drop if row["task_key"] != te5_key] == [
+        row for row in source_rows if row["task_key"] != te5_key
+    ]
+
+    te5_facts = record.read(te5_key)
+    dropped_first = False
+    kept: list = []
+    for fact in te5_facts:
+        if not dropped_first and fact.kind == "spec_review":
+            dropped_first = True
+            continue
+        kept.append(fact)
+    fresh.fold_task(te5_key, kept)
+    te5_rows = [row for row in _spec_reviews(fresh) if row["task_key"] == te5_key]
+    assert len(te5_rows) == 1
+    assert te5_rows[0]["n"] == 2
 
 
 def test_a_stack_batch_runs_a_spec_only_when_its_own_review_routes_it_to_run(
@@ -2371,6 +2926,7 @@ def test_a_stack_batch_runs_a_spec_only_when_its_own_review_routes_it_to_run(
         readiness_check=_ready,
         emit=lines.append,
         review=reviews,
+        mint=MintDouble(ledger, repo_id),
     )
 
     assert reason == "DRAINED"
@@ -2475,6 +3031,7 @@ def test_a_spec_run_again_after_a_rate_limit_keeps_its_first_review(ledger, repo
         runner=runner,
         readiness_check=_ready,
         review=reviews,
+        mint=MintDouble(ledger, repo_id),
         sleep=lambda seconds: None,
     )
 
@@ -2522,6 +3079,7 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
         runner=runner,
         readiness_check=_ready,
         review=reviews,
+        mint=MintDouble(ledger, repo_id),
     )
     assert reason == "INFRASTRUCTURE"
     assert runner.calls == []
@@ -2541,6 +3099,7 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
         runner=runner,
         readiness_check=_ready,
         review=reviews2,
+        mint=MintDouble(ledger, repo_id),
     )
     assert reason2 == "INFRASTRUCTURE"
     assert runner.calls == []
@@ -2558,6 +3117,7 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
         runner=runner,
         readiness_check=_failing_readiness,
         review=reviews3,
+        mint=MintDouble(ledger, repo_id),
     )
     assert reason3 == "INFRASTRUCTURE"
     assert reviews3.calls == []
@@ -2572,6 +3132,7 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
         runner=runner,
         readiness_check=_ready,
         review=reviews5,
+        mint=MintDouble(ledger, repo_id),
     )
     assert reason5 == "DRAINED"
     assert reviews5.calls == [("TE-31", None)]
@@ -2585,6 +3146,7 @@ def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, r
         runner=runner,
         readiness_check=_ready,
         review=reviews4,
+        mint=MintDouble(ledger, repo_id),
     )
     assert reason4 == "BUDGET"
     assert reviews4.calls == []
@@ -2645,6 +3207,7 @@ def test_a_rate_limited_spec_review_waits_and_reviews_again(
         sleep=clock.sleep,
         emit=lines.append,
         review=reviews,
+        mint=MintDouble(ledger, repo_id),
     )
 
     assert reason == "DRAINED"
@@ -2682,6 +3245,7 @@ def test_a_rate_limited_spec_review_waits_and_reviews_again(
         clock=clock2,
         sleep=clock2.sleep,
         review=reviews2,
+        mint=MintDouble(ledger, repo_id),
     )
 
     assert reason2 == "UNTIL"

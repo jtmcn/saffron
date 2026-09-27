@@ -28,6 +28,7 @@ type is not importing the driver that builds it.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -369,6 +370,9 @@ def run_stack_batch(
     # `None` means no review runs, and nothing here changes. `SA-0156` passes
     # the production one, and `saffron batch` passes none until then.
     review: Callable[[Candidate, Candidate | None], SpecReviewSession] | None = None,
+    # Required whenever `review` is given (checked below). Mints the task a
+    # review's own facts are recorded against. `SA-0156` passes the real one.
+    mint: Callable[[Candidate], int] | None = None,
 ) -> StopReason:
     """Run one stack's planned `order` once, without rescanning (`SA-0142`). `runner`
     takes each candidate and its predecessor, the last one that reached
@@ -380,6 +384,8 @@ def run_stack_batch(
     spec that ran and missed, direct or through a refused spec. `reserve_usd` holds
     back the budget check, and `end_review` runs once with the batch id, the
     reserve and `order`'s own specs."""
+    if review is not None and mint is None:
+        raise ValueError("run_stack_batch needs mint whenever review is given")
     order = list(order)
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
@@ -389,6 +395,9 @@ def run_stack_batch(
     # Spec ids cleared `run`. A `wait` route is never added here, so the
     # next call for that spec reviews it again (ADR 7).
     reviewed: set[str] = set()
+    # Spec id -> the task `mint` gave it, kept for one call only. A rerun
+    # after `wait` or `RATE_LIMITED` reuses it rather than minting again.
+    task_ids: dict[str, int] = {}
 
     # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at
     # generation 0. The predecessor is the last such task, not `candidate`.
@@ -427,17 +436,65 @@ def run_stack_batch(
     def wrapped(candidate: Candidate) -> CellOutcome | Refused:
         nonlocal predecessor
         pred = predecessor
+        # `remaining` holds the object `run_batch` offered, not the one
+        # `dataclasses.replace` builds below. `list.remove` matches by value.
+        original = candidate
+        if review is not None:
+            if candidate.spec.id not in task_ids:
+                # Minted once per spec, whatever `candidate.task_id` names.
+                # A raise here is a miss, as one from `review` or `runner` is.
+                assert mint is not None
+                try:
+                    task_id = mint(candidate)
+                except Exception:
+                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                    remaining.remove(original)
+                    raise
+                task_ids[candidate.spec.id] = task_id
+                ledger.attach_run_to_batch(
+                    ledger.task_run(task_id), ledger.latest_batch_id()
+                )
+            candidate = dataclasses.replace(
+                candidate, task_id=task_ids[candidate.spec.id]
+            )
         if review is not None and candidate.spec.id not in reviewed:
-            # A raise from `review` is a miss, as a raise from `runner` is below.
+            task_id = task_ids[candidate.spec.id]
+            # A raise from `review` is a miss, as one from `runner` is below.
+            # No session opened, so it gets a `spec_review` fact and no attempt.
             try:
                 session = review(candidate, pred)
-            except Exception:
+            except Exception as exc:
+                ledger.record_spec_review(
+                    task_id,
+                    route="error",
+                    block=None,
+                    block_sha256=None,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                ledger.set_task_state(task_id, "GATE_ERROR")
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(candidate)
+                remaining.remove(original)
                 raise
             spec_review = read_spec_review(session)
             route = spec_review_route(spec_review)
+            attempt_id = ledger.open_attempt(task_id, phase="SPEC_REVIEW")
+            ledger.close_attempt(
+                attempt_id,
+                session_id=session.session_id,
+                subtype="error" if session.error is not None else "success",
+                terminal_reason=None,
+                num_turns=session.num_turns,
+                cost_usd_est=session.cost_usd,
+            )
+            ledger.record_spec_review(
+                task_id,
+                route=route,
+                block=spec_review.block,
+                block_sha256=spec_review.block_sha256,
+                error=spec_review.error,
+            )
             if route == "wait":
+                ledger.set_task_state(task_id, "RATE_LIMITED")
                 raise SpecReviewWait(resets_at=spec_review.resets_at)
             if route == "escalate":
                 blockers = sum(
@@ -446,15 +503,17 @@ def run_stack_batch(
                     if finding.severity == "blocker"
                 )
                 emit(f"{candidate.spec.id:<10} escalated  {blockers}")
+                ledger.set_task_state(task_id, "SPEC_WITHHELD")
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(candidate)
+                remaining.remove(original)
                 return Refused(
                     reason=f"spec review escalated with {blockers} blocker(s)"
                 )
             if route == "error":
                 emit(f"{candidate.spec.id:<10} unreviewed  {spec_review.error}")
+                ledger.set_task_state(task_id, "GATE_ERROR")
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(candidate)
+                remaining.remove(original)
                 raise RuntimeError(
                     f"spec review for {candidate.spec.id} could not be read"
                 )
@@ -463,13 +522,13 @@ def run_stack_batch(
             result = runner(candidate, pred)
         except Exception:
             missed[candidate.spec.id] = frozenset({candidate.spec.id})
-            remaining.remove(candidate)
+            remaining.remove(original)
             raise
         if isinstance(result, CellOutcome) and result.state == "RATE_LIMITED":
-            # Neither a layer nor a miss: `candidate` stays in `remaining` so
+            # Neither a layer nor a miss: `original` stays in `remaining` so
             # the same spec is offered again, against this same `pred`.
             return result
-        remaining.remove(candidate)
+        remaining.remove(original)
         if _is_layer(result):
             predecessor = candidate
         else:

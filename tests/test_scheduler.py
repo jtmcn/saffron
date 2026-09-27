@@ -267,6 +267,30 @@ def test_a_spec_done_at_this_sha_is_not_queued(tmp_path, ledger, state):
     assert refusals == []
 
 
+def test_a_spec_withheld_at_this_sha_is_not_queued_until_it_is_edited(tmp_path, ledger):
+    """`SPEC_WITHHELD` learned something about the spec's text, so it is not
+    queued again at the same `spec_sha` (`DONE_STATES`). An edit changes the
+    `spec_sha`, and the spec is queued fresh, with no task to resume."""
+    directory = _spec_dir(tmp_path)
+    _write(directory, "a.md", id="TE-1")
+    repo_id = _repo(ledger)
+    _, spec_sha = load_spec(directory / "a.md")
+    _task_at(ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="SPEC_WITHHELD")
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert candidates == []
+    assert refusals == []
+
+    _write(directory, "a.md", id="TE-1", sha_salt="edited")
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert len(candidates) == 1
+    assert candidates[0].spec.id == "TE-1"
+    assert candidates[0].task_id is None
+
+
 @pytest.mark.parametrize("state", sorted(REQUEUE_STATES))
 def test_a_spec_that_should_requeue_resumes_its_task_id(tmp_path, ledger, state):
     directory = _spec_dir(tmp_path)

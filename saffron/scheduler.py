@@ -77,6 +77,7 @@ DONE_STATES = frozenset(
         "NOT_IMPLEMENTED",
         "PLAN_REJECTED",
         "SCOPE_REVIEW",
+        "SPEC_WITHHELD",
     }
 )
 

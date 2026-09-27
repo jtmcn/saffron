@@ -5,6 +5,12 @@ def _block(obj: object, *, lang: str = "json") -> str:
     return f"```{lang}\n{json.dumps(obj)}\n```"
 
 
+def _fenced(body: str, *, lang: str = "json") -> str:
+    """A fence around raw text, never `json.dumps`, so the criterion-5
+    witness can tell the kept block apart from a re-serialized one."""
+    return f"```{lang}\n{body}\n```"
+
+
 def _session(text: str, *, cost: float = 0.5, error=None, resets_at=None):
     from saffron.spec_review import SpecReviewSession
 
@@ -187,3 +193,33 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
         _block({"findings": [{**finding, "severity": "blocker", "fixes": "rewrite"}]})
     )
     assert sr.spec_review_route(sr.read_spec_review(patched)) == "escalate"
+
+
+def test_a_spec_review_carries_its_last_json_block_and_its_hash():
+    from saffron.agents.artifacts import hash_artifact
+    from saffron.spec_review import read_spec_review
+
+    # Two spaces after the colon, so a block serialised again through
+    # `json.dumps` reads differently from the text kept here.
+    clean = '{"findings":  []}'
+    blocker = (
+        '{"findings": [{"severity": "blocker", "claim": "c", '
+        '"criterion": "1", "file": "f", "line": 1}]}'
+    )
+
+    rows = [
+        (_session(_fenced(clean)), clean),
+        (_session(_fenced(blocker)), blocker),
+        (_session(_fenced(clean), error="boom"), clean),
+        (_session(_fenced(clean), resets_at=1893456000), clean),
+        (_session(_fenced(blocker) + "\n" + _fenced(clean)), clean),
+        (_session(_fenced(clean, lang="text")), None),
+        (_session("no fence here at all"), None),
+        (_session(_fenced("not json")), "not json"),
+    ]
+
+    for session, expected in rows:
+        review = read_spec_review(session)
+        assert review.block == expected
+        expected_hash = hash_artifact(expected) if expected is not None else None
+        assert review.block_sha256 == expected_hash
