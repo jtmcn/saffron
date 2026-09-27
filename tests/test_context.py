@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from saffron import spec_review
 from saffron.agents import artifacts, context
 from saffron.phases import implement, rebut, review
 
@@ -421,6 +422,7 @@ TURN_PROMPTS = {
     "notes": artifacts.NOTES_PROMPT,
     "extraction": artifacts.EXTRACTION_PROMPT,
     "criterion-probe": review.CRITERION_PROBE_PROMPT,
+    "spec-review-extract": spec_review.SPEC_REVIEW_EXTRACT_PROMPT,
 }
 
 

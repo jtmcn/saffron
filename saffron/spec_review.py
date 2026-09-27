@@ -9,15 +9,88 @@ can parse and validate itself.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, get_args
 
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from saffron.agents import context
 from saffron.agents.artifacts import hash_artifact
 from saffron.agents.findings import Severity
+from saffron.cell import session
+from saffron.gates.core import size
+from saffron.phases import implement
+from saffron.repos.policy import Policy
 
 # The tags a `concern` or `blocker` can name as its own fix. Looked up by
 # name at call time, never bound to a local, so a patched tuple is honored.
 SPEC_REVIEW_TAGS: tuple[str, ...] = ("scope", "build", "witness")
+
+# One host-invoked session's tools (ADR 7): read-only plus `Bash`, with
+# neither `Write` nor `Edit`, so `Bash` runs unprivileged (SA-0169).
+SPEC_SESSION_TOOLS = ["Read", "Glob", "Grep", "Bash"]
+
+SPEC_REVIEW_MAX_TURNS = 90
+
+SPEC_REVIEW_BUDGET_USD = 6.0
+
+# The extraction turn and its one re-ask, each a dozen times the spike's own
+# extraction turn ($0.08, `docs/evidence/2026-09-23-structured-output-spike.md`).
+SPEC_REVIEW_EXTRACT_BUDGET_USD = 1.0
+
+# What one session records at most, best effort: the review turn plus both
+# extraction turns.
+SPEC_REVIEW_SESSION_USD = SPEC_REVIEW_BUDGET_USD + 2 * SPEC_REVIEW_EXTRACT_BUDGET_USD
+
+# Twice `session.TURN_TIMEOUT_S`. The hand reviews of this chain, run with
+# `Bash` on 2026-09-24, took 566 to 681 seconds.
+SPEC_REVIEW_TIMEOUT_S = 1800.0
+
+# `if review.resets_at:` reads 0 as unset, so a reset time that is missing,
+# unreadable, or at or below 0 is shaped to this instead.
+UNREADABLE_RESET = 1
+
+# A file name, not a loaded template: `spec_review_system_prompt` reads it
+# fresh from `prompts_dir` on every call.
+SPEC_REVIEW_PROMPT = "spec-review.md"
+
+# Loaded once at import, as `rebut.EXTRACT_PROMPT` is.
+SPEC_REVIEW_EXTRACT_PROMPT = context.turn_prompt("spec-review-extract")
+
+
+class _SpecReviewFinding(BaseModel):
+    """One finding as the extraction turn's schema demands it.
+
+    Every field is required. A `default` here would let the turn omit one
+    rather than answer `null`. Four of the six take `null`. A spec review's
+    finding can name no place at all. `fixes` is a tag or none, never a
+    tag the model invents. `read_spec_review` checks `SPEC_REVIEW_TAGS` on
+    read, not on write."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    severity: Severity
+    claim: str
+    criterion: int | None
+    file: str | None
+    line: int | None
+    fixes: str | None
+
+
+class _SpecReviewFindings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    findings: list[_SpecReviewFinding]
+
+
+# Sent as `output_format`: built once per process, as `rebut._REBUTTALS_FORMAT`
+# is (§5.3, backlog b-4e0868).
+SPEC_REVIEW_FORMAT = {
+    "type": "json_schema",
+    "schema": _SpecReviewFindings.model_json_schema(),
+}
 
 
 @dataclass(frozen=True)
@@ -176,3 +249,241 @@ def spec_review_route(
     if any(finding.severity == "blocker" for finding in review.findings):
         return "escalate"
     return "run"
+
+
+def _reset(raw: object) -> int:
+    """`resets_at`, shaped for a spec review: a clean, positive `int`, or
+    `UNREADABLE_RESET`. `session._resets_at_fields` alone still passes 0
+    and a negative number through unshaped. `if review.resets_at:` reads
+    either as unset, so this floors them too."""
+    value, unreadable = session._resets_at_fields(raw)
+    if unreadable or value is None or value <= 0:
+        return UNREADABLE_RESET
+    return value
+
+
+def _validate(value: object) -> tuple[_SpecReviewFindings | None, str | None]:
+    """`value` against `_SpecReviewFindings`, or the `not the schema` error
+    naming why. The same two messages `rebut._validate` gives, for the same
+    two reasons: a turn that answered with nothing structured, and a turn
+    whose answer was the wrong shape."""
+    if value is None:
+        return None, "not the schema: the turn returned no structured output"
+    try:
+        return _SpecReviewFindings.model_validate(value), None
+    except ValidationError as exc:
+        return None, f"not the schema: {exc}"
+
+
+def _findings_text(report: _SpecReviewFindings) -> str:
+    """The host's own serialization of `report`, fenced the way
+    `read_spec_review` reads. `model_dump` fixes the key order to the
+    model's own. The same findings always hash the same, whatever key
+    order the turn's answer arrived in."""
+    body = json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False)
+    return f"```json\n{body}\n```\n"
+
+
+def run_spec_review(
+    container: str,
+    *,
+    system_prompt: str,
+    prompt: str,
+    agent: Callable[..., implement.AttemptResult],
+) -> SpecReviewSession:
+    """One host-invoked, tool-using session that reads a spec before any
+    cell is cut for it (ADR 7). A second turn then extracts its findings
+    through `output_format`, never a fenced block this module would have
+    to trust.
+
+    Calls `agent` directly, never through `session.stop_on_rejected`.
+    That wrapper raises on a rejected window before its caller sees the
+    turn's own cost. A rejected review must still be charged for what it
+    spent (§4.1).
+    """
+    options = implement.agent_options(
+        system_prompt=system_prompt,
+        max_turns=SPEC_REVIEW_MAX_TURNS,
+        budget_usd=SPEC_REVIEW_BUDGET_USD,
+        tools=SPEC_SESSION_TOOLS,
+    )
+    cost = 0.0
+    turns = 0
+    sid: str | None = None
+
+    def _measure(attempt: implement.AttemptResult | None) -> None:
+        nonlocal cost, turns, sid
+        if attempt is None:
+            return
+        cost += attempt.cost_usd_est
+        turns += attempt.num_turns
+        sid = attempt.session_id or sid
+
+    def _rejected(attempt: implement.AttemptResult) -> SpecReviewSession:
+        return SpecReviewSession(
+            text="",
+            cost_usd=cost,
+            error=None,
+            resets_at=_reset(attempt.rate_limit_resets_at),
+            session_id=sid,
+            num_turns=turns,
+        )
+
+    try:
+        first = agent(container, prompt=prompt, options=options)
+    except implement.AgentFailed as failed:
+        _measure(failed.attempt)
+        if failed.attempt and session.terminal_for_rate_limit(
+            failed.attempt.rate_limit_status
+        ):
+            return _rejected(failed.attempt)
+        return SpecReviewSession(
+            text="",
+            cost_usd=cost,
+            error=str(failed),
+            resets_at=None,
+            session_id=sid,
+            num_turns=turns,
+        )
+
+    if session.terminal_for_rate_limit(first.rate_limit_status):
+        _measure(first)
+        return _rejected(first)
+    _measure(first)
+    if first.session_id is None:
+        return SpecReviewSession(
+            text="",
+            cost_usd=cost,
+            error="no session to extract from",
+            resets_at=None,
+            session_id=None,
+            num_turns=turns,
+        )
+
+    extract_options = options | {
+        "max_budget_usd": SPEC_REVIEW_EXTRACT_BUDGET_USD,
+        "output_format": SPEC_REVIEW_FORMAT,
+    }
+
+    def _extraction_turn(
+        *, turn_prompt: str, resume: str | None, last_cost_usd: float
+    ) -> SpecReviewSession | implement.AttemptResult:
+        """One extraction attempt: a rejected or failed `SpecReviewSession`,
+        or the clean `AttemptResult` for the caller to validate."""
+        try:
+            got = agent(
+                container,
+                prompt=turn_prompt,
+                options=extract_options,
+                resume=resume,
+                last_cost_usd=last_cost_usd,
+            )
+        except implement.AgentFailed as failed:
+            _measure(failed.attempt)
+            if failed.attempt and session.terminal_for_rate_limit(
+                failed.attempt.rate_limit_status
+            ):
+                return _rejected(failed.attempt)
+            return SpecReviewSession(
+                text="",
+                cost_usd=cost,
+                error=str(failed),
+                resets_at=None,
+                session_id=sid,
+                num_turns=turns,
+            )
+        if session.terminal_for_rate_limit(got.rate_limit_status):
+            _measure(got)
+            return _rejected(got)
+        _measure(got)
+        return got
+
+    extracted = _extraction_turn(
+        turn_prompt=SPEC_REVIEW_EXTRACT_PROMPT,
+        resume=first.session_id,
+        last_cost_usd=min(first.cost_usd_est, SPEC_REVIEW_EXTRACT_BUDGET_USD),
+    )
+    if isinstance(extracted, SpecReviewSession):
+        return extracted
+    report, error = _validate(extracted.structured_output)
+    if report is not None:
+        return SpecReviewSession(
+            text=_findings_text(report),
+            cost_usd=cost,
+            error=None,
+            resets_at=None,
+            session_id=sid,
+            num_turns=turns,
+        )
+
+    # The CLI already retries the shape inside a turn, so this one re-ask is
+    # a backstop. No second re-ask: HEAD already holds this attempt's cost.
+    reasked = _extraction_turn(
+        turn_prompt=f"{error}\n\n{SPEC_REVIEW_EXTRACT_PROMPT}",
+        resume=sid,
+        last_cost_usd=min(extracted.cost_usd_est, SPEC_REVIEW_EXTRACT_BUDGET_USD),
+    )
+    if isinstance(reasked, SpecReviewSession):
+        return reasked
+    report, error = _validate(reasked.structured_output)
+    if report is not None:
+        return SpecReviewSession(
+            text=_findings_text(report),
+            cost_usd=cost,
+            error=None,
+            resets_at=None,
+            session_id=sid,
+            num_turns=turns,
+        )
+    return SpecReviewSession(
+        text="",
+        cost_usd=cost,
+        error=error,
+        resets_at=None,
+        session_id=sid,
+        num_turns=turns,
+    )
+
+
+def _gate_lines(policy: Policy) -> str:
+    lines = [
+        f"- `{name}`" + ("" if decl.blocking else " (advisory)")
+        for name, decl in policy.gates.items()
+    ]
+    return "\n".join(lines) if lines else "none"
+
+
+def _path_lines(paths: Sequence[str]) -> str:
+    return "\n".join(f"- `{path}`" for path in paths) if paths else "none"
+
+
+def _ceiling_lines() -> str:
+    lines = [
+        f"- `{spec_type}`: {ceiling} changed tokens"
+        for spec_type, ceiling in size._CEILINGS.items()
+    ]
+    lines.append(f"- any other type: {size._DEFAULT_CEILING} changed tokens")
+    return "\n".join(lines)
+
+
+def _tag_lines() -> str:
+    return "\n".join(f"- `{tag}`" for tag in SPEC_REVIEW_TAGS)
+
+
+def spec_review_system_prompt(policy: Policy, *, prompts_dir: Path) -> str:
+    """Core's own spec-review prompt, with the repo's declarations filled
+    in as `format` arguments. Never by substituting text and formatting
+    the result, which a path like `docs/{a,b}.md` in `protected` would
+    break.
+
+    The template is read fresh on every call, not cached at import: a
+    ceiling or a tag list can change within one process.
+    """
+    template = (prompts_dir / SPEC_REVIEW_PROMPT).read_text()
+    return template.format(
+        gates=_gate_lines(policy),
+        protected=_path_lines(policy.protected),
+        elevate_on=_path_lines(policy.elevate_on),
+        ceilings=_ceiling_lines(),
+        tags=_tag_lines(),
+    )
