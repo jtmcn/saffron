@@ -5,7 +5,7 @@ status: partial
 tier: 1
 filed: 2026-09-23
 closed:
-specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0150, SA-0151, SA-0152, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159, SA-0160, SA-0161, SA-0162, SA-0164, SA-0165, SA-0167, SA-0168, SA-0169, SA-0170, SA-0173, SA-0174, SA-0175, SA-0176, SA-0177, SA-0178, SA-0179, SA-0180]
+specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0148, SA-0149, SA-0150, SA-0151, SA-0152, SA-0153, SA-0154, SA-0155, SA-0156, SA-0157, SA-0159, SA-0160, SA-0161, SA-0162, SA-0164, SA-0165, SA-0167, SA-0168, SA-0169, SA-0170, SA-0173, SA-0174, SA-0175, SA-0176, SA-0177, SA-0178, SA-0179, SA-0180, SA-0181, SA-0182, SA-0183]
 prs: [522, 523, 524, 525, 526, 527, 528, 529, 530]
 commits: []
 cites: [§1.4, §4.2, §4.2.1, §4.4, §5.5, §6]
@@ -145,3 +145,18 @@ escalations.
   `saffron/qualify.py`. `SA-0147` adds each layer's in-cell REVIEW
   concerns and the join lens's findings. The chain runs `SA-0178`,
   `SA-0179`, `SA-0180`, `SA-0147`, `SA-0148`.
+- 2026-09-27: `SA-0169`'s cell ended `PLAN_REJECTED`, its plan priced at
+  8400 changed tokens with `size` blocking at `elevated`. The plan read the
+  spec's token count as lines. It splits in two. `SA-0181` builds the
+  account, the wrapper, the shell prefix, the capabilities and the
+  self-check. `SA-0169` gives `layer_cell` its `spec_session` keyword and
+  carries the cell test. The chain runs `SA-0168`, `SA-0181`, `SA-0169`,
+  `SA-0175`.
+- 2026-09-27: a pricing of the sixteen queued specs found three that
+  `size` could refuse at `elevated`, each for its `saffron/ledger.py`
+  edits. `SA-0150` splits in two. `SA-0182` adds the `spec_texts` table,
+  its fact and its reads, and `SA-0150` runs the text at `standard`.
+  `SA-0152`'s three reads move to `SA-0183`, so `SA-0152` runs at
+  `standard`. `SA-0156` drops its one `ledger.py` docstring edit, which
+  b-41664e now holds. The chain runs `SA-0156`, `SA-0182`, `SA-0150`, and
+  later `SA-0170`, `SA-0183`, `SA-0152`.
