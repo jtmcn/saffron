@@ -87,16 +87,12 @@ def _last_json_block(text: str) -> str | None:
             break
         found = lines[start:end]
         i = end + 1
-    return "\n".join(found) if found is not None else None
+    return "\n".join(found).strip() if found is not None else None
 
 
-def _error(
-    session: SpecReviewSession,
-    message: str,
-    *,
-    block: str | None,
-    block_sha256: str | None,
-) -> SpecReview:
+def _error(session: SpecReviewSession, message: str) -> SpecReview:
+    block = _last_json_block(session.text)
+    block_sha256 = hash_artifact(block) if block is not None else None
     return SpecReview(
         findings=[],
         cost_usd=session.cost_usd,
@@ -118,71 +114,35 @@ def read_spec_review(session: SpecReviewSession) -> SpecReview:
     block = _last_json_block(session.text)
     block_sha256 = hash_artifact(block) if block is not None else None
     if session.error is not None:
-        return _error(session, session.error, block=block, block_sha256=block_sha256)
+        return _error(session, session.error)
     if block is None:
-        return _error(
-            session,
-            "no fenced json block in spec review text",
-            block=block,
-            block_sha256=block_sha256,
-        )
+        return _error(session, "no fenced json block in spec review text")
     try:
         parsed = json.loads(block)
     except json.JSONDecodeError as exc:
-        return _error(
-            session,
-            f"spec review json block did not parse: {exc}",
-            block=block,
-            block_sha256=block_sha256,
-        )
+        return _error(session, f"spec review json block did not parse: {exc}")
     if not isinstance(parsed, dict):
-        return _error(
-            session,
-            "spec review json block is not an object",
-            block=block,
-            block_sha256=block_sha256,
-        )
+        return _error(session, "spec review json block is not an object")
     raw_findings = parsed.get("findings")
     if not isinstance(raw_findings, list):
-        return _error(
-            session,
-            "spec review findings is not a list",
-            block=block,
-            block_sha256=block_sha256,
-        )
+        return _error(session, "spec review findings is not a list")
 
     findings: list[SpecReviewFinding] = []
     for raw in raw_findings:
         if not isinstance(raw, dict):
-            return _error(
-                session,
-                "spec review finding is not an object",
-                block=block,
-                block_sha256=block_sha256,
-            )
+            return _error(session, "spec review finding is not an object")
         severity = raw.get("severity")
         if severity not in get_args(Severity):
             return _error(
-                session,
-                f"spec review finding has an unknown severity: {severity!r}",
-                block=block,
-                block_sha256=block_sha256,
+                session, f"spec review finding has an unknown severity: {severity!r}"
             )
         claim = raw.get("claim")
         if not isinstance(claim, str):
-            return _error(
-                session,
-                "spec review finding has no claim",
-                block=block,
-                block_sha256=block_sha256,
-            )
+            return _error(session, "spec review finding has no claim")
         fixes = raw.get("fixes")
         if fixes is not None and fixes not in SPEC_REVIEW_TAGS:
             return _error(
-                session,
-                f"spec review finding has an unfixable tag: {fixes!r}",
-                block=block,
-                block_sha256=block_sha256,
+                session, f"spec review finding has an unfixable tag: {fixes!r}"
             )
         findings.append(
             SpecReviewFinding(

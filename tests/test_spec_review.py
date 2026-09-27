@@ -216,6 +216,7 @@ def test_a_spec_review_carries_its_last_json_block_and_its_hash():
         (_session(_fenced(clean, lang="text")), None),
         (_session("no fence here at all"), None),
         (_session(_fenced("not json")), "not json"),
+        (_session(_fenced(f"\n  {clean}  \n")), clean),
     ]
 
     for session, expected in rows:

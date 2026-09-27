@@ -2627,6 +2627,20 @@ def test_a_stack_batch_mints_each_reviewed_specs_task_before_its_first_review(
     ]
     assert batches_after == batches_before
 
+    mint3 = MintDouble(ledger, repo_id, raise_on={"TE-80"})
+    order3 = [_candidate("TE-80"), _candidate("TE-82", depends_on=["TE-80"])]
+    run_stack_batch(
+        order3,
+        ledger,
+        100.0,
+        None,
+        runner2,
+        readiness_check=_ready,
+        review=reviews2,
+        mint=mint3,
+    )
+    assert mint3.calls == ["TE-80"]
+
 
 def test_each_spec_review_is_a_fact_on_its_specs_minted_task(tmp_path):
     """Each reviewed task's `spec_review` facts, attempts and state match its
@@ -2691,6 +2705,7 @@ def test_each_spec_review_is_a_fact_on_its_specs_minted_task(tmp_path):
     assert te2_attempts[0]["cost_usd_est"] == 0.25
     assert te2_attempts[0]["subtype"] == "success"
     assert te2_attempts[0]["session_id"] is None
+    assert te2_attempts[0]["num_turns"] == 0
     assert state(te2) == "SPEC_WITHHELD"
 
     te4 = mint.tasks["TE-4"]
@@ -2698,7 +2713,7 @@ def test_each_spec_review_is_a_fact_on_its_specs_minted_task(tmp_path):
     assert len(te4_facts) == 1
     assert te4_facts[0].payload["route"] == "error"
     assert te4_facts[0].payload["error"] == "cell died"
-    assert te4_facts[0].payload["block"] is not None
+    assert te4_facts[0].payload["block"] == '{"findings": []}'
     te4_attempts = ledger.attempts(te4)
     assert len(te4_attempts) == 1
     assert te4_attempts[0]["cost_usd_est"] == 0.125
@@ -2741,6 +2756,7 @@ def test_each_spec_review_is_a_fact_on_its_specs_minted_task(tmp_path):
     te9_facts = facts(te9)
     assert len(te9_facts) == 1
     assert te9_facts[0].payload["route"] == "error"
+    assert te9_facts[0].payload["block"] is None
     te9_attempts = ledger.attempts(te9)
     assert len(te9_attempts) == 1
     assert te9_attempts[0]["cost_usd_est"] == 0.015625
@@ -2812,6 +2828,11 @@ def test_the_spec_reviews_fold_back_from_the_record_alone(tmp_path):
     te5_key = ledger.record_key(mint.tasks["TE-5"])
     assert te5_key is not None
     source_rows = _spec_reviews(ledger)
+    assert [r for r in source_rows if r["task_key"] == te5_key] == [
+        {"task_key": te5_key, **f.payload}
+        for f in record.read(te5_key)
+        if f.kind == "spec_review"
+    ]
 
     fresh = Ledger(tmp_path / "fresh.db")
     other_repo = fresh.upsert_repo(
