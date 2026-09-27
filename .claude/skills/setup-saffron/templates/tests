@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""The test runner's output -> the gate contract (DESIGN.md §5.4).
+
+Copied to `.saffron/gates/tests`. Any arguments are test names, and only those
+run. Fill the FILL constants for the runner.
+"""
+
+import json
+import re
+import subprocess
+import sys
+
+# FILL: the runner's own version command. `tool` must come from running it.
+VERSION = ["FILL-runner", "--version"]
+# FILL: lists every test name without running one.
+COLLECT = ["FILL-runner", "--list"]
+# FILL: runs tests. Names appended run only those.
+RUN = ["FILL-runner"]
+# FILL: COLLECT's exit codes for a listing that finished.
+COLLECT_CODES = {0}
+# FILL: a line of COLLECT's output that is one test name.
+NAME = re.compile(r"^(?P<name>\S+::\S+)$")
+# FILL: a line of RUN's output naming one failed test.
+FAILED = re.compile(r"^FAILED (?P<name>\S+)(?: - (?P<message>.*))?$")
+# FILL: RUN's exit codes for "all passed" and "some failed". Any other is a broken run.
+RESULT_CODES = {0, 1}
+
+
+def file_of(name):
+    # FILL: the file a test name lives in.
+    return name.split("::")[0]
+
+
+def emit(status, summary, tool=None, **fields):
+    print(
+        json.dumps(
+            {
+                "gate": "tests",
+                "status": status,
+                "tool": tool,
+                "summary": summary,
+                **fields,
+            }
+        )
+    )
+
+
+def names():
+    """The names COLLECT lists, or None when the listing broke."""
+    done = subprocess.run(COLLECT, capture_output=True, text=True)
+    if done.returncode not in COLLECT_CODES:
+        return None
+    return [m["name"] for m in map(NAME.match, done.stdout.splitlines()) if m]
+
+
+def main():
+    subset = sys.argv[1:]
+    try:
+        version = subprocess.run(VERSION, capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        emit("error", f"{VERSION[0]} could not run: {exc}")
+        return 0
+    tool = (version.stdout or version.stderr).strip().splitlines()[0]
+
+    every = names()
+    if every is None:
+        emit("error", "collection broke", tool)
+        return 0
+    collected = [n for n in subset if n in every] if subset else every
+    # A handed name the runner cannot find is reported, not run (SA-0127).
+    uncollected = [n for n in subset if n not in collected]
+    if subset and not collected:
+        emit(
+            "pass",
+            "no handed name was collected",
+            tool,
+            collected=[],
+            uncollected=uncollected,
+            failures=[],
+        )
+        return 0
+
+    done = subprocess.run(
+        RUN + (collected if subset else []), capture_output=True, text=True
+    )
+    if done.returncode not in RESULT_CODES:
+        # A partial run is not a result: error for the whole run.
+        emit("error", f"runner exited {done.returncode}", tool)
+        return 0
+    failures = [
+        {
+            "file": file_of(m["name"]),
+            "code": m["name"],
+            "message": m["message"] or "failed",
+        }
+        for m in map(FAILED.match, done.stdout.splitlines())
+        if m
+    ]
+    if done.returncode != 0 and not failures:
+        emit("error", f"exited {done.returncode}, parsed no failures", tool)
+        return 0
+    fields = {"collected": collected, "failures": failures}
+    if subset:
+        fields["uncollected"] = uncollected
+    status = "fail" if failures else "pass"
+    emit(status, f"{len(failures)} of {len(collected)} failed", tool, **fields)
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

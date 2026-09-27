@@ -13,11 +13,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from saffron.cell.worktree import STATUS_ARGS, porcelain_paths
 from saffron.gates.contract import GateResult
+from saffron.gates.core.revert import _argv_safe
 from saffron.gates.runner import run_gate
+from saffron.repos.image import BASE_TAG
 from saffron.repos.policy import Policy, PolicyError, load_policy
 
-BASE_PREFIX = "FROM saffron/cell-base:"
+# `FROM saffron/cell-base:`, with any runtime after the colon.
+BASE_PREFIX = "FROM " + BASE_TAG.rsplit(":", 1)[0] + ":"
 
 
 def layout_problems(repo: Path) -> list[str]:
@@ -29,47 +33,57 @@ def layout_problems(repo: Path) -> list[str]:
     elif not any(
         line.startswith(BASE_PREFIX) for line in dockerfile.read_text().splitlines()
     ):
-        problems.append(f"{dockerfile} does not build {BASE_PREFIX}<runtime>")
+        problems.append(f"{dockerfile} does not start {BASE_PREFIX}<runtime>")
     if not (repo / ".saffron" / "specs").is_dir():
         problems.append(f"{repo / '.saffron' / 'specs'} is missing")
     return problems
 
 
-def result_problems(result: GateResult) -> list[str]:
-    """`fail` at base is fine: the baseline subtracts it. `error` never is."""
-    if result.status == "error":
-        return [f"{result.gate}: error: {result.summary}"]
+def collected_problems(full: GateResult) -> list[str]:
+    """`census`, `criteria`, `revert` and `witness` each read `collected`."""
+    if not full.collected:
+        return [
+            "tests: reports no `collected`, so `census`, `criteria`, `revert` "
+            "and `witness` skip"
+        ]
+    codes = {f.code for f in full.failures}
+    if codes and not codes & set(full.collected):
+        return ["tests: no failure `code` is a collected name, so `criteria` skips"]
     return []
 
 
-def tests_problems(full: GateResult, subset: GateResult | None) -> list[str]:
-    """`census`, `criteria` and `revert` each need one more thing of `tests`."""
+def subset_problems(name: str, probe: GateResult) -> list[str]:
+    """The witness probe's two refusals (`runner.run_witness`)."""
+    if probe.status == "error":
+        return [f"tests: a one-name subset errored: {probe.summary}"]
+    if probe.collected is None or set(probe.collected) - {name}:
+        return [f"tests: handed {name!r}, it collected more than that name"]
+    return []
+
+
+def dirty_paths(repo: Path) -> set[str]:
+    done = subprocess.run(
+        ["git", *STATUS_ARGS], cwd=repo, capture_output=True, text=True, check=True
+    )
+    return set(porcelain_paths(done.stdout))
+
+
+def run_gates(repo: Path, policy: Policy) -> list[str]:
     problems = []
-    if not full.collected:
-        problems.append(
-            "tests: reports no `collected`, so `census` and `criteria` skip"
-        )
-        return problems
-    codes = {f.code for f in full.failures}
-    if codes and not codes & set(full.collected):
-        problems.append(
-            "tests: no failure `code` is a collected name, so `criteria` skips"
-        )
-    if subset is not None and subset.status == "error":
-        problems.append(f"tests: a one-name subset errored: {subset.summary}")
+    for name, executable in policy.gate_executables(repo).items():
+        result = run_gate(name, executable, repo)
+        print(f"{name:12} {result.status:6} {result.tool or '-':24} {result.summary}")
+        if result.status == "error":
+            problems.append(f"{name}: error: {result.summary}")
+            continue
+        if name != "tests":
+            continue
+        problems += collected_problems(result)
+        probe_name = next((n for n in result.collected or [] if _argv_safe(n)), None)
+        if probe_name is not None:
+            probe = run_gate(name, executable, repo, subset=[probe_name])
+            problems += subset_problems(probe_name, probe)
     return problems
-
-
-def dirty_paths(repo: Path) -> list[str]:
-    """What `committed` would fail on after the suite: a gate's leftovers."""
-    out = subprocess.run(
-        ["git", "status", "--porcelain", "-uall"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return [line[3:] for line in out.splitlines()]
 
 
 def check(repo: Path) -> list[str]:
@@ -78,22 +92,13 @@ def check(repo: Path) -> list[str]:
         policy, _ = load_policy(repo)
     except PolicyError as exc:
         return [*problems, f"policy: {exc}"]
+    # The onboarding itself is uncommitted, so only a path the gates add counts.
+    before = dirty_paths(repo)
     problems += run_gates(repo, policy)
-    problems += [f"committed: a gate left {p} in the tree" for p in dirty_paths(repo)]
-    return problems
-
-
-def run_gates(repo: Path, policy: Policy) -> list[str]:
-    problems = []
-    for name, executable in policy.gate_executables(repo).items():
-        result = run_gate(name, executable, repo)
-        print(f"{name:12} {result.status:6} {result.tool or '-':24} {result.summary}")
-        problems += result_problems(result)
-        if name == "tests" and result.status != "error":
-            subset = None
-            if result.collected:
-                subset = run_gate(name, executable, repo, subset=result.collected[:1])
-            problems += tests_problems(result, subset)
+    problems += [
+        f"committed: a gate left {path}, which .gitignore does not cover"
+        for path in sorted(dirty_paths(repo) - before)
+    ]
     return problems
 
 

@@ -1,7 +1,7 @@
 # Writing a gate and the Dockerfile
 
 §5.4 is authoritative, and `saffron/gates/contract.py` is the schema. This file is the part a gate author trips on.
-Saffron's own `.saffron/gates/format` is a worked shell example, and `.saffron/gates/tests.py` a worked test runner.
+The seed templates in `templates/` keep every rule below. Saffron's own `.saffron/gates/` holds worked examples.
 
 ## The contract
 
@@ -25,7 +25,8 @@ A gate is an executable that prints one JSON object on stdout and nothing else t
 ## The `tests` gate
 
 - It takes test names as arguments and runs only those. `revert` and `witness` call it this way.
-- It fills `collected` with every name it enumerated, in the form the runner accepts back as an argument. Without it `census` and `criteria` skip.
+- It fills `collected` with every name it enumerated, in the form the runner accepts back as an argument. Without it `census`, `criteria`, `revert` and `witness` skip.
+- Handed a subset, it collects only those names. The `witness` probe skips a gate that collects more.
 - A failed test's `code` is its collected name, so `criteria` can tell which witness failed.
 - A handed name the runner cannot find goes in `uncollected`. A subset run that accounts for every name is `pass` or `fail`, never `error` (SA-0127). Only `revert` reads the field.
 
