@@ -41,7 +41,7 @@ forbidden:
   - tests/test_ledger_fold_task.py
 budget_usd: 16
 max_attempts: 3
-max_turns: 100
+max_turns: 130
 pending_symbols:
   - saffron/ledger.py::record_stack_finish
   - saffron/ledger.py::stack_finish
