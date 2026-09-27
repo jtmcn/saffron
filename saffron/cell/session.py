@@ -342,8 +342,8 @@ class CellOutcome:
     # notes turn runs, and on one that ran it but had nothing to say.
     notes: str = ""
     notes_sha256: str = ""
-    # The reset time a closed window reported, the same value the RATE_LIMITED
-    # TaskOutcome carries. None on every path that never raised RateLimited.
+    # The reset time a closed window reported, the same value the `RATE_LIMITED`
+    # `TaskOutcome` carries. `None` on every path that never raised `RateLimited`.
     resets_at: int | None = None
 
 

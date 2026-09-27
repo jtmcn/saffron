@@ -1951,7 +1951,7 @@ def test_a_rate_limit_in_a_stack_batch_neither_counts_toward_the_breaker_nor_res
     ledger, repo_id, monkeypatch
 ):
     """A `RATE_LIMITED` result leaves `_drive`'s own breaker count exactly
-    where it was. A second miss right after it can still fire the breaker.
+    where it was. A second abort right after it can still fire the breaker.
     Plain `run_batch` keeps its old breaker treatment for the same rate
     limit instead."""
     from saffron.batch import run_stack_batch

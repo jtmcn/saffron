@@ -184,8 +184,8 @@ def _drive(
         return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
     consecutive_aborts = 0
-    # By spec id, not whole `Candidate`: a re-offered spec returns as a new
-    # `Candidate` with its resumed `task_id`, and would start twice.
+    # By spec id: a re-offered spec returns as a new `Candidate` and would
+    # start twice. A rate-limited one with `sleep` set is taken back out.
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -308,7 +308,7 @@ def _wait_out_rate_limit(
     the caller retries the same spec.
 
     Bounds come before any subtraction. An untrusted cell's `resets_at`
-    can be far larger than a plain subtraction can carry."""
+    can be far larger than a plain subtraction can carry (measured)."""
     now = clock()
     now_ts = now.timestamp()
     resets_at = outcome.resets_at
