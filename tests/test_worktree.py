@@ -564,7 +564,7 @@ def test_a_worktree_cell_carries_exactly_the_capabilities_it_is_given(
     monkeypatch, tmp_path
 ):
     """`cap_add` reaches `--cap-add` flags right after `--cap-drop ALL`, and a
-    caller naming none gets none (§5.5)."""
+    caller naming none gets none (§5.1)."""
     monkeypatch.setattr(runtime, "_admit", lambda: None)
     monkeypatch.setattr(runtime, "create_volume", lambda name: None)
     monkeypatch.setattr(
@@ -579,7 +579,7 @@ def test_a_worktree_cell_carries_exactly_the_capabilities_it_is_given(
 
     monkeypatch.setattr(runtime, "_must", _record)
 
-    def _up(container, cap_add):
+    def _up(container, **cap_add):
         worktree.prepare_worktree(
             mirror=tmp_path / "m.git",
             volume="vol",
@@ -592,15 +592,17 @@ def test_a_worktree_cell_carries_exactly_the_capabilities_it_is_given(
             gates_dir=_gates_dir(tmp_path),
             state_volume="st",
             created=set(),
-            cap_add=cap_add,
+            **cap_add,
         )
 
     from saffron.phases.implement import UNPRIVILEGED_BASH_CAPS
 
-    _up("saffron-cell-cap", UNPRIVILEGED_BASH_CAPS)
-    _up("saffron-cell-nocap", ())
+    _up("saffron-cell-cap", cap_add=UNPRIVILEGED_BASH_CAPS)
+    _up("saffron-cell-nocap")
+    runtime.run_detached("saffron-proxy-nocap", "img")
 
-    with_caps, without_caps = recorded
+    with_caps, without_caps, detached = recorded
+    assert "--cap-add" not in detached
     start = with_caps.index("--cap-drop")
     assert with_caps[start : start + 6] == [
         "--cap-drop",

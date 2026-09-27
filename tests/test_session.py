@@ -5623,7 +5623,7 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
 
 def test_no_cell_a_task_brings_up_is_granted_a_capability(monkeypatch, tmp_path):
     """`_drive_cell` and `critic_cell` pass no `cap_add`, so every cell a
-    task brings up on its own keeps `--cap-drop ALL` alone (§5.5). A direct
+    task brings up on its own keeps `--cap-drop ALL` alone (§5.1). A direct
     `cell_up` call is the one path that can ask for one."""
     cell = _stub_the_runtime(monkeypatch)
     outcome, _ledger = _drive(
@@ -5659,14 +5659,14 @@ def test_no_cell_a_task_brings_up_is_granted_a_capability(monkeypatch, tmp_path)
     assert tuple(last["cap_add"]) == ("CAP_X", "CAP_Y")
 
 
-# The passing shape: a uid, then one `refused` line per fixed path and one
-# for the sole `PATH` entry a stand-in cell offers (§5.5's own six, plus one).
+# The passing shape: a uid, then a `refused` line for each of the six fixed
+# paths. The seventh is the one `PATH` entry a stand-in cell offers.
 _PASSING_PROBE_REPORT = "\n".join(
     [
         "999",
         "refused /opt/saffron",
         f"refused {implement.RUNNER}",
-        f"refused {implement.UNPRIVILEGED_BASH}",
+        "refused /opt/saffron/unprivileged",
         "refused /cli",
         "refused /sdk",
         "refused /site",
@@ -5703,6 +5703,8 @@ def test_the_bash_wrapper_self_check_refuses_a_cell_where_it_stayed_root(
     assert len(argv) == 2
 
     _run(_PASSING_PROBE_REPORT + "\nskipped /root/.local/bin\n")
+    six = "\n".join(_PASSING_PROBE_REPORT.splitlines()[:7])
+    _run(six + "\n")
 
     cut = "\n".join(_PASSING_PROBE_REPORT.splitlines()[:6])
     failing = [
@@ -5714,7 +5716,7 @@ def test_the_bash_wrapper_self_check_refuses_a_cell_where_it_stayed_root(
         (_PASSING_PROBE_REPORT.replace("refused /cli", "missing /cli") + "\n", 0),
         (cut + "\n", 0),
         (cut + "\nskipped /root/.local/bin\n", 0),
-        ("abc\nrefused /x\n", 0),
+        (_PASSING_PROBE_REPORT.replace("999", "abc", 1) + "\n", 0),
     ]
     for stdout, returncode in failing:
         with pytest.raises(runtime.CellRuntimeError, match="did not leave root"):
@@ -5745,6 +5747,8 @@ def test_the_bash_self_checks_probe_reports_a_writable_path_directory_as_written
     )
     lines = result.stdout.splitlines()
     assert f"wrote {writable}" in lines
+    assert f"wrote {tmp_path}" in lines
+    assert "wrote ." not in lines and "refused ." not in lines
     assert f"skipped {absent}" in lines
     assert f"missing {absent}" not in lines
 

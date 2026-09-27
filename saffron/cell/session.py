@@ -1057,7 +1057,7 @@ _cli=$(readlink -f /opt/saffron/claude-code)
 _fixed "$_cli"
 _sdk=$({implement.PYTHON} -c 'import claude_agent_sdk, pathlib; print(pathlib.Path(claude_agent_sdk.__file__).parent)' 2>/dev/null)
 _fixed "$_sdk"
-_fixed "$(dirname "$_sdk")"
+_fixed "${{_sdk:+$(dirname "$_sdk")}}"
 _saved_ifs=$IFS
 IFS=:
 set -- $PATH

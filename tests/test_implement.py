@@ -142,7 +142,7 @@ def test_a_session_that_cannot_write_the_tree_runs_its_bash_unprivileged():
     empty_env = env_for([])
     bash_env = env_for(["Bash"])
     prefix = bash_env.pop("CLAUDE_CODE_SHELL_PREFIX")
-    assert prefix == implement.UNPRIVILEGED_BASH
+    assert prefix == "/opt/saffron/unprivileged"
     # No argument: the CLI splits a prefix at its last " -".
     assert " -" not in prefix
     assert bash_env == empty_env

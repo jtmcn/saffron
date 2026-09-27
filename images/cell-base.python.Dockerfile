@@ -82,7 +82,7 @@ COPY images/unprivileged.sh /opt/saffron/unprivileged
 RUN chmod 0755 /opt/saffron/unprivileged
 
 # Asserts the wrapper drops root, the account cannot write the runner, and
-# the CLI still names the prefix env var the wrapper relies on (§5.5).
+# the CLI still names the env var that routes Bash through the wrapper (§5.5).
 RUN set -eu; \
     uid=$(/opt/saffron/unprivileged 'id -u'); \
     want=$(id -u unprivileged); \
