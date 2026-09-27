@@ -36,6 +36,13 @@ RUNNER = "/opt/saffron/agent_runner.py"
 # first, and the SDK is not installed in it (measured).
 PYTHON = "/opt/saffron/python"
 
+# Installed by the base image's account step. Takes one command argument and
+# drops it to the unprivileged account (§5.5).
+UNPRIVILEGED_BASH = "/opt/saffron/unprivileged"
+# What the wrapper needs to reach the account, measured against
+# apple/container 1.3.0. No more, no less.
+UNPRIVILEGED_BASH_CAPS = ("CAP_SETUID", "CAP_SETGID")
+
 PLAN_PROMPT = context.turn_prompt("plan")
 
 IMPLEMENT_PROMPT = context.turn_prompt("implement")
@@ -141,6 +148,10 @@ def agent_options(
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         },
     }
+    # A Bash with no Write or Edit has no other way to touch the tree.
+    # Its commands run under the unprivileged account, not root (§5.5).
+    if "Bash" in tools and "Write" not in tools and "Edit" not in tools:
+        options["env"]["CLAUDE_CODE_SHELL_PREFIX"] = UNPRIVILEGED_BASH
     return options
 
 

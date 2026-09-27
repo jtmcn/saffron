@@ -51,6 +51,7 @@ def prepare_worktree(
     gates_dir: Path,
     state_volume: str | None = None,
     created: set[str] | None = None,
+    cap_add: Sequence[str] = (),
 ) -> None:
     """Clone the mirror into the volume at the base it is given, on `branch`,
     cell running.
@@ -121,6 +122,7 @@ def prepare_worktree(
         mounts=mounts(volume, state, gates_dir),
         cpus=1,
         memory="4g",
+        cap_add=cap_add,
     )
 
 

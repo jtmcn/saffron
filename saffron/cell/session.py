@@ -884,6 +884,7 @@ def cell_up(
     thread_env: Mapping[str, str],
     created: set[str],
     note: Callable[[str, str], None],
+    cap_add: Sequence[str] = (),
 ) -> None:
     """Bring a cell up: network, proxy, image, isolation asserts, worktree.
 
@@ -975,6 +976,7 @@ def cell_up(
         env=cell_env(proxy_ip, thread_env),
         gates_dir=gates_dir,
         state_volume=state,
+        cap_add=cap_add,
     )
     note("cell_up", f"{container} up, worktree at {tree_base[:8]}")
 
@@ -1030,6 +1032,67 @@ def cell_down(
                 False,
                 f"{kind} {name} survived — {done.stderr.strip()[:160]}",
             )
+
+
+# Prints a uid, then a `refused`/`wrote`/`missing` line per fixed path and
+# a `refused`/`wrote`/`skipped` line per `PATH` entry and its parent (§5.5).
+_BASH_PROBE_SCRIPT = f"""\
+id -u
+_fixed() {{
+  if [ ! -e "$1" ]; then echo "missing $1"
+  elif [ -w "$1" ]; then echo "wrote $1"
+  else echo "refused $1"
+  fi
+}}
+_onpath() {{
+  if [ ! -e "$1" ]; then echo "skipped $1"
+  elif [ -w "$1" ]; then echo "wrote $1"
+  else echo "refused $1"
+  fi
+}}
+_fixed /opt/saffron
+_fixed {implement.RUNNER}
+_fixed {implement.UNPRIVILEGED_BASH}
+_cli=$(readlink -f /opt/saffron/claude-code)
+_fixed "$_cli"
+_sdk=$({implement.PYTHON} -c 'import claude_agent_sdk, pathlib; print(pathlib.Path(claude_agent_sdk.__file__).parent)' 2>/dev/null)
+_fixed "$_sdk"
+_fixed "$(dirname "$_sdk")"
+_saved_ifs=$IFS
+IFS=:
+set -- $PATH
+IFS=$_saved_ifs
+for _dir in "$@"; do
+  _onpath "$_dir"
+  _onpath "$(dirname "$_dir")"
+done
+"""
+
+
+def assert_bash_is_unprivileged(container: str) -> None:
+    """Refuse a cell whose wrapper did not leave root, before any spec
+    session's Bash tool ever runs there (§5.5).
+
+    Raises `runtime.CellRuntimeError` unless the probe exits 0 and its first
+    line is a nonzero uid. Every later line must be `refused` or `skipped`,
+    at least six of them `refused`.
+    """
+    done = runtime.exec_(container, [implement.UNPRIVILEGED_BASH, _BASH_PROBE_SCRIPT])
+    lines = done.stdout.splitlines()
+    refusals = sum(1 for line in lines[1:] if line.startswith("refused "))
+    ok = (
+        done.returncode == 0
+        and bool(lines)
+        and lines[0].strip().isdigit()
+        and lines[0].strip() != "0"
+        and all(line.startswith(("refused ", "skipped ")) for line in lines[1:])
+        and refusals >= 6
+    )
+    if not ok:
+        raise runtime.CellRuntimeError(
+            "the unprivileged bash self-check did not leave root: "
+            f"exit {done.returncode}, {done.stdout!r}"
+        )
 
 
 class CriticPatchRejected(RuntimeError):

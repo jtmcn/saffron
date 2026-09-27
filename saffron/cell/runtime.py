@@ -219,12 +219,15 @@ def _run_argv(
     mounts: Sequence[Mount],
     detach: bool,
     user: str | None = None,
+    cap_add: Sequence[str] = (),
 ) -> list[str]:
     argv = [dialect().binary, "run"]
     argv += ["-d"] if detach else ["--rm"]
-    # No capabilities. §5.1: a cell that could install firewall rules could
-    # rewrite its own, which is why egress is a proxy and not iptables.
+    # No capabilities unless the caller names one. A cell that could install
+    # firewall rules could rewrite its own, so egress is a proxy (§5.1).
     argv += ["--cap-drop", "ALL"]
+    for cap in cap_add:
+        argv += ["--cap-add", cap]
     # Whatever in-guest hardening this runtime has to offer. Empty under a
     # VM-per-cell runtime, which offers the kernel instead (§5.1).
     argv += dialect().security_flags
@@ -374,6 +377,7 @@ def run_detached(
     memory: str | None = None,
     mounts: Sequence[Mount] = (),
     user: str | None = None,
+    cap_add: Sequence[str] = (),
 ) -> None:
     _admit()
     _must(
@@ -388,6 +392,7 @@ def run_detached(
             mounts=mounts,
             detach=True,
             user=user,
+            cap_add=cap_add,
         ),
         timeout_s=300,
     )

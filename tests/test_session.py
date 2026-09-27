@@ -5621,6 +5621,134 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
         assert all(i < first_lens_turn for i in indices), (kind, name)
 
 
+def test_no_cell_a_task_brings_up_is_granted_a_capability(monkeypatch, tmp_path):
+    """`_drive_cell` and `critic_cell` pass no `cap_add`, so every cell a
+    task brings up on its own keeps `--cap-drop ALL` alone (§5.5). A direct
+    `cell_up` call is the one path that can ask for one."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates: {}\nthread_env:\n  SAFFRON_GATE_MARK: '1'\n",
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    caps = {w["container"]: tuple(w.get("cap_add", ())) for w in cell.worktrees}
+    assert caps[_IMPLEMENTER_CONTAINER] == ()
+    assert caps[_CRITIC_CONTAINER] == ()
+    assert caps[_GATE_CONTAINER] == ()
+
+    session.cell_up(
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        tree_base="a" * 40,
+        branch="saffron/SY-1",
+        network="net",
+        volume="vol",
+        state="state",
+        container="c-2",
+        gates_dir=tmp_path / "gates",
+        thread_env={},
+        created=set(),
+        note=lambda *a: None,
+        cap_add=("CAP_X", "CAP_Y"),
+    )
+    (last,) = [w for w in cell.worktrees if w["container"] == "c-2"]
+    assert tuple(last["cap_add"]) == ("CAP_X", "CAP_Y")
+
+
+# The passing shape: a uid, then one `refused` line per fixed path and one
+# for the sole `PATH` entry a stand-in cell offers (§5.5's own six, plus one).
+_PASSING_PROBE_REPORT = "\n".join(
+    [
+        "999",
+        "refused /opt/saffron",
+        f"refused {implement.RUNNER}",
+        f"refused {implement.UNPRIVILEGED_BASH}",
+        "refused /cli",
+        "refused /sdk",
+        "refused /site",
+        "refused /opt/venv/bin",
+    ]
+)
+
+
+def _probe_double(monkeypatch, recorded, *, stdout, returncode=0):
+    def _exec(container, command, **kwargs):
+        recorded.append((container, list(command)))
+        return runtime.Completed(returncode, stdout, "")
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+
+
+def test_the_bash_wrapper_self_check_refuses_a_cell_where_it_stayed_root(
+    monkeypatch,
+):
+    """The self-check's own report parsing: a bad uid, a `wrote` line, a
+    bad exit, too few `refused` lines, or a bad first line must each refuse
+    the cell (§5.5)."""
+    recorded: list[tuple[str, list[str]]] = []
+
+    def _run(stdout, returncode=0):
+        recorded.clear()
+        _probe_double(monkeypatch, recorded, stdout=stdout, returncode=returncode)
+        return session.assert_bash_is_unprivileged("c-1")
+
+    _run(_PASSING_PROBE_REPORT + "\n")
+    container, argv = recorded[0]
+    assert container == "c-1"
+    assert argv[0] == implement.UNPRIVILEGED_BASH
+    assert len(argv) == 2
+
+    _run(_PASSING_PROBE_REPORT + "\nskipped /root/.local/bin\n")
+
+    cut = "\n".join(_PASSING_PROBE_REPORT.splitlines()[:6])
+    failing = [
+        (_PASSING_PROBE_REPORT.replace("999", "0", 1) + "\n", 0),
+        (_PASSING_PROBE_REPORT.replace("refused /cli", "wrote /cli") + "\n", 0),
+        (_PASSING_PROBE_REPORT + "\n", 127),
+        ("", 0),
+        ("999\n", 0),
+        (_PASSING_PROBE_REPORT.replace("refused /cli", "missing /cli") + "\n", 0),
+        (cut + "\n", 0),
+        (cut + "\nskipped /root/.local/bin\n", 0),
+        ("abc\nrefused /x\n", 0),
+    ]
+    for stdout, returncode in failing:
+        with pytest.raises(runtime.CellRuntimeError, match="did not leave root"):
+            _run(stdout, returncode=returncode)
+
+
+def test_the_bash_self_checks_probe_reports_a_writable_path_directory_as_written(
+    monkeypatch, tmp_path
+):
+    """The probe script itself, run for real: a writable `PATH` entry prints
+    `wrote`, and one that does not exist prints `skipped`, never `missing`
+    (§5.5)."""
+    recorded: list[tuple[str, list[str]]] = []
+    _probe_double(monkeypatch, recorded, stdout=_PASSING_PROBE_REPORT + "\n")
+    session.assert_bash_is_unprivileged("c-1")
+    script = recorded[0][1][1]
+
+    writable = tmp_path / "w"
+    writable.mkdir()
+    absent = tmp_path / "absent"
+    probe_path = ":".join([str(writable), str(absent), "/usr/bin", "/bin"])
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env={"PATH": probe_path},
+    )
+    lines = result.stdout.splitlines()
+    assert f"wrote {writable}" in lines
+    assert f"skipped {absent}" in lines
+    assert f"missing {absent}" not in lines
+
+
 def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subnet_and_nothing_else(
     monkeypatch, tmp_path
 ):

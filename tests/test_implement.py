@@ -11,7 +11,7 @@ from saffron.events import Agent, Event, describe
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure
 from saffron.intake import Spec
-from saffron.phases import implement
+from saffron.phases import implement, review
 
 
 def test_the_permission_mode_denies_rather_than_asks():
@@ -122,6 +122,45 @@ def test_the_target_repo_cannot_configure_the_agent_working_on_it():
         system_prompt="s", cwd="/work", max_turns=40, budget_usd=12.0
     )
     assert options["setting_sources"] == []
+
+
+def test_a_session_that_cannot_write_the_tree_runs_its_bash_unprivileged():
+    """A Bash with no Write or Edit has no other way to touch the tree, so
+    the wrapper, not root, runs its commands (DESIGN.md §5.5)."""
+
+    def env_for(tools=None):
+        if tools is None:
+            options = implement.agent_options(
+                system_prompt="s", max_turns=5, budget_usd=1.0
+            )
+        else:
+            options = implement.agent_options(
+                system_prompt="s", max_turns=5, budget_usd=1.0, tools=tools
+            )
+        return dict(options["env"])
+
+    empty_env = env_for([])
+    bash_env = env_for(["Bash"])
+    prefix = bash_env.pop("CLAUDE_CODE_SHELL_PREFIX")
+    assert prefix == implement.UNPRIVILEGED_BASH
+    # No argument: the CLI splits a prefix at its last " -".
+    assert " -" not in prefix
+    assert bash_env == empty_env
+
+    rggb_env = env_for(["Read", "Glob", "Grep", "Bash"])
+    assert rggb_env.pop("CLAUDE_CODE_SHELL_PREFIX") == implement.UNPRIVILEGED_BASH
+
+    for tools in (
+        implement.IMPLEMENT_TOOLS,
+        ["Bash", "Write"],
+        ["Bash", "Edit"],
+        review.REVIEW_TOOLS,
+        [],
+    ):
+        assert "CLAUDE_CODE_SHELL_PREFIX" not in env_for(tools)
+
+    # No tools named at all: the implementer's own default.
+    assert "CLAUDE_CODE_SHELL_PREFIX" not in env_for(None)
 
 
 def test_a_crashed_attempt_falls_back_to_the_last_good_cost():
