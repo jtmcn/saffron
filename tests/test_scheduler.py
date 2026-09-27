@@ -2201,10 +2201,10 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-26, a hundred-and-third time: `SA-0147` split in
-    four on size. `SA-0178` is the one candidate. `SA-0179`, `SA-0180` and
-    `SA-0147` are each refused on the one before it, and the rest of b-792ab2's
-    chain on its parent. Run 18 retired nine specs to `done/` (stack #531).
+    """Re-measured 2026-09-27, a hundred-and-fourth time: `SA-0169` split off
+    `SA-0181`, `SA-0150` split off `SA-0182`, and `SA-0152` split off `SA-0183`,
+    each on size. `SA-0178` is still the one candidate, and every new spec is
+    refused on its parent, as the rest of b-792ab2's chain is.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -2829,6 +2829,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0177",
         "SA-0179",
         "SA-0180",
+        "SA-0181",
+        "SA-0182",
+        "SA-0183",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.

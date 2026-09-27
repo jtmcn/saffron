@@ -3,11 +3,9 @@ id: SA-0150
 title: A stack batch cannot run a spec text that no file at its base holds, so a revised or follow-up spec has nowhere to live
 type: feature
 priority: 1
-depends_on: [SA-0156]
+depends_on: [SA-0182]
 touches:
-  - saffron/ledger.py
   - saffron/task.py
-  - tests/test_ledger_fold_task.py
   - tests/test_task.py
 forbidden:
   - DESIGN.md
@@ -24,6 +22,7 @@ forbidden:
   - images/**
   - harness/**
   - records/**
+  - saffron/ledger.py
   - saffron/cli.py
   - saffron/batch.py
   - saffron/scheduler.py
@@ -44,6 +43,7 @@ forbidden:
   - tests/test_cli.py
   - tests/test_scheduler.py
   - tests/test_ledger.py
+  - tests/test_ledger_fold_task.py
   - tests/test_session.py
   - tests/test_spec_review.py
   - tests/test_consumes.py
@@ -51,33 +51,10 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
+estimated_lines: 500
 pending_symbols:
   - saffron/ledger.py::record_spec_text
 acceptance:
-  - claim: >-
-      `Ledger.record_spec_text(task_id, *, origin, spec_id, path, text)`
-      appends one `spec_text` fact on the task and returns its `n`, 1 more
-      than the rows that task already holds. The payload is exactly `n`,
-      `origin`, `spec_id`, `path`, `text` and `spec_sha`, the SHA-256 of
-      the text's UTF-8 bytes. `Ledger.spec_text(task_id)` returns the
-      task's row with the highest `n`, all seven columns, or `None` for a
-      task that holds none. `Ledger.spec_texts(task_id)` returns every
-      row the task holds, oldest first, or an empty list. All three count
-      and read by the task, never by its spec id. Each method raises
-      `ValueError` for a task id that names no task. `record_spec_text` raises `ValueError`, and writes no row and no
-      fact, for an origin outside `SPEC_TEXT_ORIGINS`, a `spec_id` the task
-      does not carry, or a path the notes' rule refuses for its origin. The
-      witness drives both origins and three outside them, a second spec
-      id, a second task of one spec id, and each path in the notes.
-    witness: tests/test_ledger_fold_task.py::test_a_spec_text_is_numbered_on_its_task_and_read_back_latest
-  - claim: >-
-      Folding the record rebuilds the `spec_texts` rows as written. A fold
-      into a fresh ledger whose task ids differ gives the same rows. A fold
-      into the ledger that wrote them leaves them as they were. `fold_task`
-      with a key and no facts removes that task's rows and no other, a
-      second task of the same spec id included. Each row's `n` is the
-      fact's own.
-    witness: tests/test_ledger_fold_task.py::test_the_spec_texts_fold_back_from_the_record_alone
   - claim: >-
       Given a `task_id` whose task holds a spec text, `run_task` runs the
       latest one in place of the spec it was handed. The `CellSpec` takes
@@ -143,145 +120,104 @@ A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
 from the last layer, its **predecessor**.
 
-**Step 7 is five specs, and this is the first.** This spec holds the text
-and runs it. `SA-0160` builds the spec writer's session. `SA-0164` runs
-the revision rounds, which record a revision with
-`record_spec_text(origin="revision")`. `SA-0161` writes
-follow-up specs, each recorded with `origin="follow_up"`. `SA-0162` runs
-the follow-ups as layers. It runs gate 0's open pull request refusals on
-each follow-up before its review. It runs the overlap refusal again on a
-revised spec of the order. A revised follow-up needs no second check,
-because this spec holds its `touches` to a subset of its first text's.
-Step 8's `SA-0151` is the finish. It commits
-the latest text of each task at its `path`.
+**Step 7 is seven specs, and this is the second.** `SA-0182` holds the text
+in the ledger and the record. This spec runs it. `SA-0176` and `SA-0160`
+build the spec writer's prompt and session. `SA-0164` runs the revision
+rounds, which record a revision with `record_spec_text(origin="revision")`.
+`SA-0161` writes follow-up specs, each recorded with `origin="follow_up"`.
+`SA-0162` runs the follow-ups as layers. It runs gate 0's open pull
+request refusals on each follow-up before its review. It runs the overlap
+refusal again on a revised spec of the order. A revised follow-up needs no
+second check, because this spec holds its `touches` to a subset of its
+first text's. Step 8's `SA-0151` is the finish. It commits the latest text
+of each task at its `path`.
 
-**What the tree base holds.** This spec's tree base is `SA-0156`'s head.
-Every line number below was read at `a5d52c29`, where no chain code from
-`SA-0142` on exists. `SA-0135`'s `Refused` and `consumes` check are
-there. So `task.py` and `ledger.py` are cited by symbol where the chain
-edits them. This spec consumes these names.
+**This spec and `SA-0182` were one.** A pricing of the queue on 2026-09-27
+put that one at the `feature` ceiling of 3000 changed tokens.
+`saffron/ledger.py` is in `elevate_on`, so `size` would block its plan.
+This spec forbids `saffron/ledger.py`, so it runs at `standard`.
 
+**What the tree base holds.** This spec's tree base is `SA-0182`'s head.
+Every line number below was read at `f492629e`, `SA-0168`'s head, where
+`SA-0135`'s `Refused` and `consumes` check and `SA-0168`'s `task_id` are.
+No spec between edits `saffron/task.py` or `tests/test_task.py`. This spec
+consumes these names.
+
+- From `SA-0182`, the seam its `## Problem` names:
+  `ledger.SPEC_TEXT_ORIGINS`, `("revision", "follow_up")`.
+  `Ledger.spec_text(task_id) -> sqlite3.Row | None`, the task's row with
+  the highest `n`, and `Ledger.spec_texts(task_id) -> list[sqlite3.Row]`,
+  every row in rising `n`. Each row's keys are `task_key`, `n`, `origin`,
+  `spec_id`, `path`, `text` and `spec_sha`.
+  `Ledger.record_spec_text(task_id, *, origin, spec_id, path, text) -> int`
+  writes one. All three raise `ValueError` for a task id that names no
+  task.
 - From `SA-0135`: `Refused` in `saffron/task.py`, a frozen dataclass
-  holding only `reason`. `run_task` returns `CellOutcome | Refused`. It
-  refuses a spec whose `consumes` entry does not resolve at its tree base,
-  after the tree base is known and before the `CellSpec`. It prints
-  `f"{spec.id:<10} refused  {reason}"` first.
-- From `SA-0143`: `run_task`'s keyword `handoff`.
-- From `SA-0155`: the `spec_reviews` table, keyed on `task_key` and `n`,
-  and `record_spec_review`. It numbers a fact 1 more than the task's rows
-  and applies it through `_commit_and_append`. `_drop_task_rows` deletes
-  its rows by key.
-- From `SA-0168`: `run_task`'s keyword `task_id`, which reaches
-  `CellSpec.task_id`, and `cli._stack_runner` passing it the candidate's
-  task. `cli._batch_runner` and `saffron cell` pass no `task_id`.
+  holding only `reason` (`saffron/task.py:250-259`). `run_task` returns
+  `CellOutcome | Refused` (`:262-278`). It refuses a spec whose `consumes`
+  entry does not resolve at its tree base, after the `CellSpec` is built
+  (`:377-392`). It prints `f"{spec.id:<10} refused  {reason}"` first.
+- From `SA-0168`: `run_task`'s keyword `task_id` (`:276`), which reaches
+  `CellSpec.task_id`. `cli._stack_runner` passes it the candidate's task.
+  `cli._batch_runner` and `saffron cell` pass no `task_id`.
 - From `SA-0156`: `cli._stack_mint`. A stack batch mints a fresh task
   for each spec every night, with the candidate's `spec_sha`, the file's
   at `base_sha`.
-- By hand, before this spec's commit: the `spec_text` fact kind in
-  `ontology/factory.ttl`, its render in `CONTEXT.md` and
-  `ontology/shapes/factory-shapes.ttl`, and `"spec_text"` in
-  `saffron/record/contract.py`'s `KINDS`. No cell can add a fact kind,
-  and `KINDS` is held equal to the ontology
-  (`tests/ontology/test_vocabulary_agrees_with_code.py`). Commit
-  `ccfa1553` did the same for `spec_review`.
-
-**What `spec_sha` means at the base.** `load_spec` hashes a file's raw
-bytes with SHA-256 (`saffron/intake.py:308-319`). A recorded text's
-`spec_sha` is the same hash over the text's UTF-8 bytes. Those are the
-bytes the finish writes, so the committed file hashes to it.
 
 **Where a spec reaches a cell today.** `run_task` takes the parsed spec
-and its `spec_sha` (`saffron/task.py:241-253`). It emits the `Ceilings`
-event from its `ceilings` argument (`:296-307`). It builds the `CellSpec`
-from the spec's fields (`:330-345`). It hands the spec to PACKAGE
-(`:372-386`), or to the push of unpackaged work (`:395-405`).
-`cli._batch_runner` resolves the ceilings with `spec_ceilings` of the
-candidate's spec (`saffron/cli.py:485-500`).
+and its `spec_sha` (`saffron/task.py:262-264`). It emits the `Ceilings`
+event from its `ceilings` argument (`:323-334`). It builds the `CellSpec`
+from the spec's fields (`:360-376`). It hands the spec to PACKAGE
+(`:403`), or to the push of unpackaged work (`:425`). `cli._batch_runner`
+resolves the ceilings with `spec_ceilings` of the candidate's spec
+(`saffron/cli.py:503`).
 
 **Gate 0 at the base.** §4.2 refuses a spec that is malformed or whose
 `spec_sha` moved (`DESIGN.md:363`). §4.2.1 counts eight refusals
 (`DESIGN.md:398`). `build_queue` runs them at scan time
-(`saffron/scheduler.py:623-727`). `saffron cell` runs the two that need
-no ledger and no GitHub before its cell. It reads `protected` from
+(`saffron/scheduler.py:800`). `saffron cell` runs the two that need no
+ledger and no GitHub before its cell. It reads `protected` from
 `.saffron/` at `base_sha` and the retirement markers from the mirror at
-`base_sha` (`saffron/cli.py:403-435`). `_unmatched_criterion_path` needs
-the spec alone (`saffron/scheduler.py:311-342`), and `_refuse` words its
-refusal (`:700-701`). Inside the cell, `spec_drift` compares the spec file
+`base_sha` (`saffron/cli.py:318-351`). `_unmatched_criterion_path` needs
+the spec alone (`saffron/scheduler.py:312`), and `_refuse` words its
+refusal (`:624`). `protected_touch_refusal` and `retirement_refusal` are
+at `:346` and `:418`. Inside the cell, `spec_drift` compares the spec file
 at `base_sha` with `CellSpec.spec_sha`, and reports a difference without
-refusing (`saffron/cell/session.py:91-133`, `:1685-1686`).
-
-**How a fact reaches the record.** Each write method builds one fact with
-`_build_fact` and applies it through `_commit_and_append`
-(`saffron/ledger.py:372-404`). `fold_task` drops a task's rows and applies
-its facts again (`:406-433`). `_apply` resolves a task by its record key
-before most kinds (`:532-537`).
+refusing (`saffron/cell/session.py:91`).
 
 ## Problem
 
-Build three things.
+**The cell on the recorded text.** In `saffron/task.py`, add a private
+function. It takes the ledger, the task id, the handed spec and the
+pinned base. It returns the parsed text and its `spec_sha`, a `Refused`,
+or `None` when the task holds no text. It checks in this order. The
+integrity check, the text's hash against its row's `spec_sha`.
+`parse_spec`, catching `SpecError`. The id, then `depends_on` as a list.
+Then each of `budget_usd`, `max_attempts` and `max_turns` against the
+handed spec's, refusing only a greater one. Compare every field, declared
+or defaulted. Then, when the task's first row is a `follow_up`, the
+text's `touches` as a subset of that row's parsed `touches`, read through
+`spec_texts`. Then, for a text whose row's origin is `revision`, the
+path. It passes when an earlier row on the task has the same path.
+Otherwise it passes when `git_mirror.file_at` at the pinned `base_sha`
+finds a file there, and that file parses to the task's spec id. A file
+that does not parse fails the check. Then `.saffron/` exported at the
+pinned `base_sha` into a temporary directory, with `load_policy` of it.
+`protected_touch_refusal` of the text's `touches`, the policy's
+`protected` and the text's `forbidden` comes next. Then
+`_unmatched_criterion_path`, worded as `_refuse` words it. Then
+`retirement_refusal` over `git_mirror.retirement_markers` at the pinned
+`base_sha`.
 
-1. **The table and the fact.** Add `spec_texts` to `SCHEMA` in
-   `saffron/ledger.py`, with no reference to another table.
-
-   | column | type |
-   |---|---|
-   | `task_key` | `TEXT NOT NULL` |
-   | `n` | `INTEGER NOT NULL` |
-   | `origin` | `TEXT NOT NULL` |
-   | `spec_id` | `TEXT NOT NULL` |
-   | `path` | `TEXT NOT NULL` |
-   | `text` | `TEXT NOT NULL` |
-   | `spec_sha` | `TEXT NOT NULL` |
-
-   The primary key is `(task_key, n)`. Add `SPEC_TEXT_ORIGINS`, the tuple
-   `("revision", "follow_up")`. `_apply` places a `spec_text` fact as one
-   row, every value from the fact and the key from `fact.task_key`.
-   `_drop_task_rows` deletes the task's rows by its key.
-2. **The three methods.** Add `Ledger.record_spec_text(task_id, *,
-   origin, spec_id, path, text) -> int`, `Ledger.spec_text(task_id)` and
-   `Ledger.spec_texts(task_id)`, as criterion 1 states. A follow-up's
-   path must match
-   `re.fullmatch(rf"\.saffron/specs/{re.escape(spec_id)}-[A-Za-z0-9._-]+\.md", path)`,
-   since the host names that file. The slug is required, because
-   `projection` and `session._spec_path` find a spec only as
-   `<id>-*.md` (`saffron/projection.py:145`,
-   `saffron/cell/session.py:461`, `:466`). A revision's path is the queued spec's
-   own file, and nothing ties a spec file's name to its id
-   (`saffron/cell/session.py:440-442`). So a revision's path takes any
-   one file name in the spec directory:
-   `re.fullmatch(r"\.saffron/specs/[A-Za-z0-9][A-Za-z0-9._-]*\.md", path)`.
-   Check every argument before `_build_fact`, so a refused call writes
-   nothing.
-3. **The cell on the recorded text.** In `saffron/task.py`, add a private
-   function. It takes the ledger, the task id, the handed spec and the
-   pinned base. It returns the parsed text and its `spec_sha`, a
-   `Refused`, or `None` when the task holds no text. It checks in this
-   order. The integrity check, the text's hash against its row's
-   `spec_sha`. `parse_spec`, catching `SpecError`. The id, then
-   `depends_on` as a list. Then each of `budget_usd`, `max_attempts` and
-   `max_turns` against the handed spec's, refusing only a greater one.
-   Compare every field, declared or defaulted. Then, when the task's
-   first row is a `follow_up`, the text's `touches` as a subset of that
-   row's parsed `touches`, read through `spec_texts`. Then, for a text whose
-   row's origin is `revision`, the path. It passes when an earlier row on
-   the task has the same path. Otherwise it passes when
-   `git_mirror.file_at` at the pinned `base_sha` finds a file there, and
-   that file parses to the task's spec id. A file that does not parse
-   fails the check. Then `.saffron/` exported at the pinned
-   `base_sha` into a temporary directory, with `load_policy` of it.
-   `protected_touch_refusal` of the text's `touches`, the policy's
-   `protected` and the text's `forbidden` comes next. Then
-   `_unmatched_criterion_path`, worded as `_refuse` words it. Then
-   `retirement_refusal` over `git_mirror.retirement_markers` at the
-   pinned `base_sha`. Call it first thing in `run_task`, only when
-   `task_id` is set. On a `Refused`, print the refused line and return it.
-   On a text, rebind `spec` and `spec_sha` to it, and `ceilings` to
-   `spec_ceilings` of it. Everything after that reads the rebound names,
-   `SA-0135`'s `consumes` check included.
+Call it first thing in `run_task`, only when `task_id` is set. On a
+`Refused`, print the refused line and return it. On a text, rebind `spec`
+and `spec_sha` to it, and `ceilings` to `spec_ceilings` of it. Everything
+after that reads the rebound names, `SA-0135`'s `consumes` check
+included.
 
 The ceiling check keeps a revision inside what the batch reserved for
 the queued spec. The batch's budget check reads the file's `budget_usd`
-(`saffron/batch.py:198-200`). It mirrors `SA-0161`'s refusal of a
+(`saffron/batch.py:229`). It mirrors `SA-0161`'s refusal of a
 follow-up whose budget exceeds its origin spec's. A follow-up's handed
 spec is its own text, so it passes this check by construction. The
 `touches` check holds a follow-up to what the host allowed it. A queued
@@ -294,21 +230,29 @@ earlier row's path is its own.
 
 The reason for each refusal names the text's `n` and the task. A
 `SpecError`'s text can span lines, and the refused line is one line, so
-collapse it with `" ".join(str(exc).split())`. Let each
-read failure propagate: `GitError` from `file_at`, the export or the
-markers, and `PolicyError` from `load_policy`.
+collapse it with `" ".join(str(exc).split())`. Let each read failure
+propagate: `GitError` from `file_at`, the export or the markers, and
+`PolicyError` from `load_policy`.
 
-Two docstrings become false. `saffron/ledger.py`'s module docstring counts
-the kinds that fold back and the tables it builds, and each count gains
-one. `saffron/task.py`'s docstring names the refusals `run_task` makes
-since `SA-0135`. Add the recorded text's.
+`saffron/task.py`'s module docstring names the one refusal `run_task`
+makes (`saffron/task.py:16-26`), and `Refused`'s names its one cause
+(`:254-255`). Add the recorded text's to each.
+
+**One existing test breaks, and this spec mends it.**
+`test_run_task_hands_its_cell_the_task_it_was_given`
+(`tests/test_task.py:102-142`) passes `task_id=9` on a ledger that holds
+no task. `spec_text` raises `ValueError` for it, by `SA-0182`'s contract.
+Keep what the test checks, that `task_id` reaches the `CellSpec`. A
+prototype replaced `Ledger.spec_text` with a stand-in that returns
+`None`, inside that test only.
 
 ## Out of scope
 
+- **The table, the fact and the reads.** They are `SA-0182`'s.
 - **Recording a revision, and writing a follow-up.** They are `SA-0164`'s
   and `SA-0161`'s. No code in `saffron/` calls `record_spec_text` until
-  `SA-0164`, so it is a `pending_symbols` entry and the `dead` gate defers
-  it while this spec is open.
+  `SA-0164`. So it stays a `pending_symbols` entry here too. The `dead`
+  gate defers it while this spec is open.
 - **The open pull request refusals.** Two of gate 0's refusals need
   GitHub: another task's open pull request on this spec, and a `touches`
   overlap with an open pull request's files. `run_task` holds no slug and
@@ -362,109 +306,23 @@ since `SA-0135`. Add the recorded text's.
   path checks
   are refusals §4.2.1 does not count (`DESIGN.md:398`). `DESIGN.md` is forbidden, so the
   operator files it.
-- **`saffron/record/fold.py:1-3`**, which lists what the fold rebuilds and
-  becomes incomplete. That file is forbidden here, so the operator files
-  it.
 
 ## Notes for the agent
 
-**Every criterion is new code.** No text at the tree base places a
-`spec_text` fact or reads a recorded spec. So each criterion declares a
-witness and no mutant, and `witness` reports `skip` for each.
+**Every criterion is new code.** No text at the tree base reads a
+recorded spec in `run_task`. So each criterion declares a witness and no
+mutant, and `witness` reports `skip` for each.
 
-**Every witness fails with the source reverted.** Each one calls
-`record_spec_text`, which the tree base lacks.
+**Every witness fails with the source reverted.** Revert
+`saffron/task.py` to the tree base, and `run_task` runs the handed spec.
+So each witness fails on an assertion. Import every new name inside a test body.
 
-**Criterion 1's witness** opens a `Ledger` with a `MemoryRecord` and makes
-three tasks with `_minimal`: `SY-1`, `SY-2` and `SY-3`. The text `first`
-is `"---\nid: SY-1\n---\nfirst é\n"`, and `second` is
-`"second\n"`. The fields default to origin `revision` and path
-`.saffron/specs/<id>-a.md`.
-
-- `SY-3` gives `None` and `spec_texts` an empty list, before any write.
-- It records `first` on `SY-1` and gets 1. `spec_text` then has `n` 1.
-- It records `b` on `SY-2` with origin `follow_up` and path
-  `.saffron/specs/SY-2-b.md`, and gets 1.
-- It records `second` on `SY-1` and gets 2.
-- It makes a second `SY-1` task with `_minimal`. That task gives `None`,
-  and recording `again` on it gives 1.
-- It records `o` on `SY-3` with origin `revision` and path
-  `.saffron/specs/other.md`, and gets 1.
-- `dict(spec_text(...))` of the first `SY-1` task is the key, 2,
-  `revision`, `SY-1`, the path, `second` and `second`'s hash.
-- `spec_texts` gives that task's texts as `first` then `second`, and the
-  second `SY-1` task's as `again` alone.
-- That task's `spec_text` facts carry exactly the two payloads, each hash
-  computed with `hashlib.sha256(t.encode("utf-8"))`.
-
-Then each call below raises `ValueError`, and the rows and the record's
-fact count are unchanged: origins `Revision`, `follow-up` and the empty
-string, spec id `SY-2` on `SY-1`'s task, task 999 for all three methods,
-and these paths.
-
-| path | origin | wrong because |
-|---|---|---|
-| `docs/SY-1-a.md` | both | outside the spec directory |
-| `.saffron/specs/done/SY-1-a.md` | both | the retired directory |
-| `.saffron/specs/../SY-1-a.md` | both | climbs out |
-| `/r/.saffron/specs/SY-1-a.md` | both | absolute |
-| `./.saffron/specs/SY-1-a.md` | both | not the plain spelling |
-| `.saffron/specs/SY-1-a.txt` | both | not Markdown |
-| `.saffron/specs/SY-1-a/b.md` | both | a subdirectory |
-| `.saffron/specs/SY-1-a.md.bak` | both | ends past `.md` |
-| `.saffron/specs/SY-10-a.md` | `follow_up` | another id sharing the prefix |
-| `.saffron/specs/other.md` | `follow_up` | not named for its id |
-| `.saffron/specs/SY-1.md` | `follow_up` | no slug |
-
-These fail it, each measured:
-
-- a count across the ledger, which gives `SY-2` 2
-- the follow-up slug left optional, which admits `SY-1.md`
-- `spec_texts` newest first, or keyed on the spec id
-- a count per spec id, which gives the second `SY-1` task 3
-- a read by spec id, which gives the second `SY-1` task a row
-- the lowest `n` read back, which gives 1 after the second write
-- `spec_text` that returns `None` for a missing task
-- no origin check, or no spec id check
-- the origin checked after the write, which leaves a fact
-- a path checked by its prefix, which admits `done/` and `..`
-- a path checked by its parent and `.md`, which admits `other.md` for a
-  follow-up
-- either name pattern ending `.*`, which admits the subdirectory or
-  another id
-- a revision held to the follow-up pattern, which refuses `other.md`
-- a follow-up given the revision pattern, which admits `SY-10-a.md`
-- a hash over the stripped text, or over Latin-1 bytes
-
-**Criterion 2's witness** follows
-`test_every_task_fact_kind_folds_back_to_the_rows_its_write_made` in
-`tests/test_ledger_fold_task.py`. It reads the rows through a `sqlite3`
-connection of its own, ordered by `task_key` and `n`. On a source ledger
-with a `MemoryRecord`, it makes `SY-1` and `SY-2` with `_minimal`. It
-records `first` on `SY-1`, `other` on `SY-2` with origin `follow_up`, and
-`second` on `SY-1`. It makes a second `SY-1` task and records `again` on
-it. It keeps `SY-1`'s key now. A later fold drops and
-inserts each task again, so a key looked up afterwards by the old
-`task_id` names another task.
-
-- A fresh ledger, seeded by `_seed_unrelated_task`, takes `fold(record,
-  into)`. Its rows equal the source's.
-- `fold_task` of each key into the source leaves its rows unchanged.
-- `fold_task(key, [])` on the fresh ledger leaves `SY-2`'s row and the
-  second `SY-1` task's row alone.
-- `fold_task` there with `SY-1`'s facts less its first `spec_text` fact
-  leaves one `SY-1` row, with `n` 2.
-
-These fail it, each measured:
-
-- `_apply` with no branch for `spec_text`, which raises at the first write,
-  since the live write applies the fact too
-- `_drop_task_rows` that leaves the rows, which raises on the primary key
-- `_drop_task_rows` that deletes by the task's spec id, which drops the
-  second `SY-1` task's row
-- `INSERT OR REPLACE` with `_drop_task_rows` untouched, which leaves
-  `SY-1`'s rows after `fold_task(key, [])`
-- an `n` counted from the rows in `_apply`, which gives the last row 1
+**Spell the marker apart.** The arrangement writes a retirement marker
+naming `SY-1` into the mirror. Written as one literal in
+`tests/test_task.py`, it fails
+`tests/test_queued_specs.py::test_every_retired_by_marker_names_a_spec`,
+since no spec declares `SY-1`. Build it from a name, as
+`tests/test_cli.py:489` does.
 
 **Criteria 3 and 4 share one arrangement** in `tests/test_task.py`. Name
 its helpers apart from the chain's, such as `_recorded_mirror` and
@@ -622,31 +480,28 @@ These fail it, each measured unless marked:
   paths, as `cli._protected_paths_at` reads it
 - the text rebound after `SA-0135`'s `consumes` check, unmeasured
 
-**How the lists were measured.** A throwaway prototype ran on 2026-09-24
-at `68892367`. It stood in for `SA-0135`'s `Refused`, `SA-0156`'s
-`task_id` keyword and the hand-added `spec_text` kind. It built the table,
-the three methods, the fold branch and the check in `run_task`, with
-witnesses for criteria 1 to 4. The right build passed all four. Each
-wrong version marked measured was applied as a text edit, with no
-bytecode cache, and each failed its own witness. The `consumes` case needs `SA-0135`'s check, which is
-not at `68892367`, so it and its wrong build are unmeasured.
+**How the lists were measured.** A prototype ran on 2026-09-27 at
+`f492629e`, over `SA-0182`'s prototype, ported from this spec's of
+2026-09-24. Both witnesses passed, and the whole suite and `ty` stayed
+green once the `task_id=9` test and the marker were mended. Each wrong
+version above was applied as a text edit, with no bytecode cache, and
+each failed its own witness. The `consumes` case and the text rebound
+after the `consumes` check were measured this time. With `saffron/task.py`
+reverted to `SA-0182`'s head, both witnesses failed, and neither failed
+collection.
 
 **What the witnesses leave undriven.**
 
 - A text whose `parse_spec` refusal comes from `SA-0136`'s malformed
   `consumes` shapes. `parse_spec` raises `SpecError` for each, which the
   same catch takes.
-- Two texts recorded for one task at once. SQLite serialises the two
-  writes, and the second takes the next `n`.
-- A text holding a lone surrogate. `text.encode()` raises
-  `UnicodeEncodeError` while the payload is built, before any write.
 
-**`ty` reads the tests.** `ty` checks `tests/` as well. `spec_text`
-returns `sqlite3.Row | None`, so assert the row is not `None` before
-indexing it.
+**`ty` reads the tests.** `ty` checks `tests/` as well. Build `Refused`
+with its keyword, since it is `kw_only`.
 
 **Measure with no bytecode cache.** Two text edits of equal length in one
-second leave a stale `.pyc`. The second edit then runs as the first. Set `PYTHONDONTWRITEBYTECODE=1` when you try a wrong build.
+second leave a stale `.pyc`. The second edit then runs as the first. Set
+`PYTHONDONTWRITEBYTECODE=1` when you try a wrong build.
 
 **The `prose` gate** counts every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
@@ -654,11 +509,12 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-prototype, formatted by `ruff format`, measured 2214 changed tokens with
-`size_gate`'s own count. `saffron/ledger.py` took 399, `saffron/task.py`
-401, `tests/test_ledger_fold_task.py` 479 and `tests/test_task.py` 935.
-The `consumes` case and the two docstrings add about 80. That is about
-2300 tokens, 77% of the ceiling. Keep test helpers shared and
-docstrings short, since the margin is about 100 tokens.
+**Size.** Neither file this spec touches is in `elevate_on`, so `size` is
+advisory at the `feature` ceiling of 3000 changed tokens
+(`saffron/gates/core/size.py:26`). The prototype, formatted with
+`ruff format`, measured 1426 changed tokens with `size_gate`'s own count:
+437 in `task.py` and 989 in `tests/test_task.py`. Sibling cells landed at
+1.4 times their authors' estimates, so about 1996 tokens, 67% of the
+ceiling. The plan's `estimated_lines` counts lines, and the checkpoint
+prices each line at 4 tokens (`saffron/gates/core/size.py:39`). So plan
+this at about 500 changed lines, not at a token count.

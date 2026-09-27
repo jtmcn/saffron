@@ -6,7 +6,6 @@ priority: 1
 depends_on: [SA-0175]
 touches:
   - saffron/cli.py
-  - saffron/ledger.py
   - tests/test_cli.py
 forbidden:
   - DESIGN.md
@@ -23,6 +22,7 @@ forbidden:
   - images/**
   - harness/**
   - records/**
+  - saffron/ledger.py
   - saffron/spec_review.py
   - saffron/batch.py
   - saffron/task.py
@@ -54,6 +54,7 @@ forbidden:
 budget_usd: 27
 max_attempts: 3
 max_turns: 180
+estimated_lines: 504
 acceptance:
   - claim: >-
       `cli._stack_review(*, pinned, repo, out_dir)` returns a callable that
@@ -248,14 +249,15 @@ Build three things.
    so either side of `_resolve_queue` is safe. Build them beside
    `_stack_runner`.
 
-One docstring in `saffron/ledger.py` becomes false. `attach_run_to_batch`
-says `run_one_cell` is the only call that mints a run
-(`saffron/ledger.py:849-850`). It is false already, since `replay` mints
-one (`saffron/replay.py:54`), and `_stack_mint` mints one too. Reword it
-to name all three.
 
 ## Out of scope
 
+- **`attach_run_to_batch`'s docstring.** It says `run_one_cell` is the
+  only call that mints a run (`saffron/ledger.py:990-991` at `f492629e`).
+  That is false already, since `replay` mints one
+  (`saffron/replay.py:53`), and `_stack_mint` mints a third. Backlog item
+  b-41664e owns the reword. `saffron/ledger.py` is forbidden here, so this
+  spec runs at `standard`.
 - **The session and core's prompts.** They are `SA-0175`'s. This spec
   edits neither `saffron/spec_review.py` nor `saffron/agents/prompts/`.
 - **This repo's hand path.** `.claude/agents/spec-reviewer.md` stays as
@@ -470,13 +472,16 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Commit as each witness passes**, before the full suite runs.
 
-**Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-estimate is about 1900 to 2300 changed tokens, 64% to 77% of the
-ceiling. The earlier prototype measured 466 tokens in `saffron/cli.py`
-and 14 in `ledger.py`. Its start refusal and prompt-file read go, about
-150, and the quoted lines and the empty-policy branch add about 70. So
-`cli.py` runs about 390, and the reworded docstring about 25. The
-witnesses run about 1500 to 1900. Criterion 1's runs about 800 to 1100,
-with its three commits, six replacements and the `bare` call. The mint's
-runs about 350, the wiring's about 320, and the fakes about 40.
+**Size.** No file this spec touches is in `elevate_on`, so `size` is
+advisory at the `feature` ceiling of 3000 changed tokens
+(`saffron/gates/core/size.py:26`). A prototype ran on 2026-09-27 at
+`f492629e`, over the prototypes of `SA-0181` and `SA-0169`, with
+stand-ins for `SA-0175`'s three names. Formatted with
+`ruff format`, it measured 1438 changed tokens with `size_gate`'s own
+count: 328 in `saffron/cli.py` and 1110 in `tests/test_cli.py`. Its three
+witnesses passed, `tests/test_cli.py` and `ty` stayed green, and each
+witness failed with `cli.py` reverted. Sibling cells landed at 1.4 times
+their authors' estimates, so about 2013 tokens, 67% of the ceiling. The
+plan's `estimated_lines` counts lines, and the checkpoint prices each
+line at 4 tokens (`saffron/gates/core/size.py:39`). So plan this at
+about 504 changed lines, not at a token count.

@@ -3,9 +3,8 @@ id: SA-0152
 title: The queue page lists a stack batch's tasks one by one and cannot show them as a stack
 type: feature
 priority: 2
-depends_on: [SA-0170]
+depends_on: [SA-0183]
 touches:
-  - saffron/ledger.py
   - saffron/report/stack.py
   - saffron/report/index.py
   - saffron/cli.py
@@ -13,6 +12,7 @@ touches:
   - tests/test_cli.py
 forbidden:
   - DESIGN.md
+  - saffron/ledger.py
   - CONTEXT.md
   - CLAUDE.md
   - README.md
@@ -172,19 +172,26 @@ ledger, and calls that undecided. The stack view reads the ledger, because
 
 Build four things.
 
-1. **The reads.** Add four read methods to `Ledger`. The layers come
-   from `SA-0151`'s `Ledger.stack_layers(batch_id)`, which returns the
-   batch's rows by position, each with its task's id, state, `budget_usd`
-   and `pr_url`. Add no second method for them.
-   - `batch_tasks(batch_id)`: every task whose run has that `batch_id`,
-     ordered by `run_id`, then `task_id`, with its spec id, state and
-     record key.
-   - `batch_budget(batch_id)`: `batches.budget_usd`, or `None` when no
-     row exists.
-   - `latest_batch_id()`: the highest `batch_id`, or `None`.
-   - `end_reviews(batch_id)`: every `end_reviews` row whose `task_key`
-     has a `stack_layers` row with that batch's `batch_key`, as
-     `task_key`, `lens` and `status`.
+1. **The reads.** Add no read method. `saffron/ledger.py` is forbidden
+   here, so this spec runs at `standard`. The layers come from
+   `SA-0151`'s `Ledger.stack_layers(batch_id)`, which returns the batch's
+   rows by position, each with its task's id, state, `budget_usd` and
+   `pr_url`. `SA-0183` adds the other three, with the shapes its seam
+   names.
+   - `batch_tasks(batch_id) -> list[sqlite3.Row]`: every task whose run
+     has that `batch_id`, ordered by `run_id`, then `task_id`, with keys
+     `task_id`, `spec_id`, `state` and `record_key`.
+   - `batch_budget(batch_id) -> float | None`: `batches.budget_usd`, or
+     `None` when no row exists.
+   - `end_reviews(batch_id) -> list[sqlite3.Row]`: every `end_reviews`
+     row whose `task_key` has a `stack_layers` row with that batch's
+     `batch_key`, with keys `task_key`, `lens` and `status`, in no set
+     order.
+
+   `latest_batch_id()` is already on `Ledger`. It returns the highest
+   `batch_id`, or 0 before the first batch, never `None`
+   (`saffron/ledger.py:1032-1040` at `f492629e`). No batch has the id 0,
+   so `stack_view` of it returns `None`.
 2. **The view.** A new module, `saffron/report/stack.py`, holds two frozen
    dataclasses and three functions. It imports from
    `saffron/report/index.py`, and `index.py` imports nothing from it, so
@@ -221,7 +228,7 @@ Build four things.
    it between the header and the table. With `stack` empty, its output is
    what it is today. Add `write_stack_view(out_dir, ledger, specs)` to
    `saffron/report/stack.py`. It reads `latest_batch_id()` and builds that
-   batch's view. With no view it returns `None` and writes nothing. With
+   batch's view, 0 included. With no view it returns `None` and writes nothing. With
    one, it creates `out_dir` as `append_queue_line` does, then takes the
    lock `_locked` holds (`saffron/report/index.py:242-253`). It reads the
    rows through `_existing_queue_rows`, counts `tasks` and `spend` as
@@ -282,7 +289,8 @@ run fails rather than failing to collect.
 
 **`depends_on` is for the stack's order only.** It reads
 `run_stack_batch`, `record_stack_layer` and the table, which `SA-0143` to
-`SA-0145` add, and `SA-0151`'s `Ledger.stack_layers`. It reads `SA-0153`'s
+`SA-0145` add, `SA-0151`'s `Ledger.stack_layers`, and `SA-0183`'s three
+reads. It reads `SA-0153`'s
 `end_reviews` table, `record_end_review` and its wider `batch_spend`.
 
 **Criteria 1 and 3 share one arrangement.** Write it as a helper in
@@ -527,25 +535,15 @@ sentence over 25 words. Keep each docstring within ten lines.
 `SA-0133`, peaked at 161 turns, cut off at its own ceiling of 160. So 161
 is a floor, and 200 leaves 39 turns above it, as `SA-0146` does.
 
-**Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
-prototype of the whole change, formatted with `ruff`, was measured with
-`size_gate` at `4797e80e`. It came to 1937 tokens, before the `stack_layers`
-read moved to `SA-0151`, which takes about 54 off.
-
-| part | lines | tokens |
-|---|---|---|
-| the three reads in `ledger.py`, estimated | 25 | 115 |
-| `stack.py` | 168 | 516 |
-| `render_index` and the call in `cli.py` | 8 | 42 |
-| `tests/test_stack_view.py` | 363 | 954 |
-| criterion 4's witness in `tests/test_cli.py` | 78 | 256 |
-
-The prototype carries a docstring on each function and few comments.
-About 290 more tokens cover test docstrings and comments, so the estimate
-was about 2175 tokens. The end-review status adds about 250, unmeasured.
-The fourth read takes about 50, and the status rule and its render line
-50. Nine arrangement rows in one loop take 95, and the column and the new
-asserts 55. The total is about 2425, 81% of the ceiling. Keep one fixture helper that
-every witness in `tests/test_stack_view.py` shares, and one tuple for
-each expected layer.
+**Size.** No file this spec touches is in `elevate_on`, so `size` is
+advisory at the `feature` ceiling of 3000 changed tokens
+(`saffron/gates/core/size.py:26`). Its reads moved to `SA-0183` on
+2026-09-27 so that `size` cannot refuse its plan. The prototype of
+2026-09-23, re-measured with `size_gate`'s own count on 2026-09-27, gives
+this spec's own part 1768 tokens. `stack.py` took 516, `render_index`
+and the call in `cli.py` 42, `tests/test_stack_view.py` 954, and
+criterion 4's witness 256. The end-review status, test docstrings and
+comments add about 540, unmeasured. That is about 2310 tokens, and 3230,
+108% of the ceiling, at the 1.4 times sibling cells landed at. Keep one
+fixture helper that every witness in `tests/test_stack_view.py` shares,
+and one tuple for each expected layer.
