@@ -41,7 +41,7 @@ forbidden:
 budget_usd: 20
 max_attempts: 3
 max_turns: 130
-estimated_lines: 135
+estimated_lines: 146
 pending_symbols:
   - saffron/ledger.py::batch_tasks
   - saffron/ledger.py::batch_budget
@@ -139,7 +139,9 @@ creates batch `a` with budget 50 and batch `b` with budget 100. It
 creates each task on a run of its own, and sets its state. In run order
 they are `TE-7` in `b` as `READY_FOR_REVIEW`, `TE-3` in `b` as
 `GATE_ERROR`, and `TE-2` in `a` as `READY_FOR_REVIEW`. Then a second
-`TE-7` on a run with no batch, and `TE-9` in `b` as `EXHAUSTED`. It
+`TE-7` on a run with no batch, and `TE-9` in `b` as `EXHAUSTED`. The runs
+of `TE-7` and `TE-3` come first, and their tasks after, `TE-3`'s first.
+So task id order differs from run order there. It
 records `TE-7` in `b` and `TE-2` as layers at position 1. It records end
 reviews on:
 
@@ -156,7 +158,8 @@ rows. `end_reviews(a)` is `TE-2`'s one row, and a batch id past both
 gives an empty list. These fail it:
 
 - `batch_tasks` with no batch filter, which brings in `TE-2`
-- `batch_tasks` ordered by spec id, or by task id descending
+- `batch_tasks` ordered by spec id, or by task id alone, either way
+- `batch_tasks` with no `ORDER BY`, which returns rows in task id order
 - `batch_budget` giving 0.0 for a batch with no row
 - `end_reviews` with no batch filter, which brings in `TE-2`'s row
 - `end_reviews` matched on a layer's spec id, which brings in the second
@@ -167,7 +170,9 @@ gives an empty list. These fail it:
 **How the list was measured.** A prototype ran on 2026-09-27 at
 `f492629e`. The witness passed, and `ty` stayed green. Each wrong version
 above was applied as a text edit, with no bytecode cache, and each
-failed the witness. With `saffron/ledger.py` reverted, the witness failed
+failed the witness. A review round reversed the two tasks' creation. The
+witness before that let `ORDER BY task_id` and no `ORDER BY` through, and
+now kills both. With `saffron/ledger.py` reverted, the witness failed
 on a missing method, not at collection.
 
 **What the witness leaves undriven.** Two tasks on one run of a batch.
@@ -180,10 +185,10 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 changed tokens (`saffron/gates/core/size.py:26`).
-The prototype, formatted with `ruff format`, measured 386 changed tokens
-with `size_gate`'s own count: 135 in `ledger.py` and 251 in the test.
-Sibling cells landed at 1.4 times their authors' estimates, so about 540
-tokens, 18% of the ceiling. The plan's `estimated_lines` counts lines,
-and the checkpoint prices each line at 4 tokens
-(`saffron/gates/core/size.py:39`). So plan this at about 135 changed
-lines, not at a token count.
+The prototype, formatted with `ruff format`, measured 417 changed tokens
+with `size_gate`'s own count: 135 tokens in `ledger.py` and 282 in the
+test. Sibling cells landed at 1.4 times their authors' estimates,
+so about 584 tokens, 19% of the ceiling. The plan's `estimated_lines`
+counts lines, and the checkpoint prices each line at 4 tokens
+(`saffron/gates/core/size.py:39`). So plan this at about 146 changed
+lines, which is 584 tokens divided by 4.

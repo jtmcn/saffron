@@ -136,8 +136,9 @@ row per layer: `task_key`, `batch_key` (the batch id as text), `position`,
 writes one row per lens of each layer, keyed on `(task_key, lens)`, with a
 `status` of `reviewed`, `error` or `not_reached`. `SA-0154` writes a `join`
 row under the top layer's task. `SA-0153` also widens `batch_spend` to add
-each layer's end-review cost. This spec reads those names, and
-`SA-0151`'s `Ledger.stack_layers`, and no other name the chain adds. Every
+each layer's end-review cost. This spec reads those names,
+`SA-0151`'s `Ledger.stack_layers` and `SA-0183`'s three reads, and no
+other name the chain adds. Every
 line number below was read at `e3020b3b`, where none of them is merged.
 Read `cli.py` and `ledger.py` by symbol at the tree base.
 
@@ -159,7 +160,7 @@ task's attempts (`:1053-1063`). `attempts` lists them in order
 results in attempt order (`:1254-1259`). `tasks.spent_usd_est` is rolled up
 only by `set_task_state` (`:585-592`), and `set_task_package` leaves it
 alone (`:593-608`). `batches.budget_usd` holds a batch's budget (`:51-59`),
-and no read method returns it. `max_turns` bounds each attempt, not a task
+and `SA-0183`'s `batch_budget` returns it. `max_turns` bounds each attempt, not a task
 (`saffron/cell/session.py:1829`). A spec's title and `max_turns` are in no
 table.
 
@@ -407,17 +408,16 @@ for it. These fail it:
 - a view with no layers where `None` belongs, or `None` only for a batch
   with no task
 - a layer with no `end_reviews` row read as `reviewed`, or given `None`,
-  which `TE-2` fails, reasoned
+  which `TE-2` fails
 - `reviewed` for a layer with one `reviewed` lens, which misreads `TE-6`,
-  `TE-7` and `TE-9`, reasoned
+  `TE-7` and `TE-9`
 - a precedence of `error` for any `error` row, then `reviewed` for any
-  `reviewed` row, which reads `TE-9` as `reviewed`, reasoned
+  `reviewed` row, which reads `TE-9` as `reviewed`
 - `error` only for a Spec row, or only for a Standards row, which misses
-  `TE-7` or `TE-6`, reasoned
-- the `join` row counted, which reads `TE-4` as `error`, reasoned
-- rows matched to a spec id's newest task, which finds none for `TE-7`,
-  reasoned
-- the batch spend summed from attempts alone, which gives 23.20, reasoned
+  `TE-7` or `TE-6`
+- the `join` row counted, which reads `TE-4` as `error`
+- rows matched to a spec id's newest task, which finds none for `TE-7`
+- the batch spend summed from attempts alone, which gives 23.20
 
 Measured at `4797e80e`. A scratch `conftest.py` added `SA-0145`'s table
 and a `record_stack_layer` written to its spec. It loaded a prototype of
@@ -425,10 +425,13 @@ the reads and `stack.py`, and ran prototypes of criteria 1 to 3's
 witnesses. The right build passed all three. Each wrong build above was
 applied as a text edit to the prototype, and each failed criterion 1's
 witness. Without an `ORDER BY`, SQLite returned the rows in the order
-written. The end-review status came after that run. So each wrong build
-marked reasoned is unmeasured, and so are the spend of 23.45 and the
-status column. A layer whose two rows are both `not_reached` is not
-driven. It falls to the same `otherwise` as `TE-9`, the lone `reviewed`
+written. The end-review status came after that run. A second prototype
+ran on 2026-09-27 at `f492629e`, over `SA-0183`'s reads and a stand-in
+for `SA-0151`'s `stack_layers`. It added the end-review rows and the
+status column to criterion 1's witness. The witness passed, with the
+spend of 23.45 and each layer's status. It failed under each wrong
+build in the last seven bullets above, both halves of a bullet included. A layer whose two rows are both
+`not_reached` is not driven. It falls to the same `otherwise` as `TE-9`, the lone `reviewed`
 row, and no-row `TE-2`.
 
 **Criterion 2's witness** builds a `StackView` by hand, with no ledger. Its

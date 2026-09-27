@@ -51,7 +51,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
-estimated_lines: 500
+estimated_lines: 505
 pending_symbols:
   - saffron/ledger.py::record_spec_text
 acceptance:
@@ -190,7 +190,8 @@ refusing (`saffron/cell/session.py:91`).
 **The cell on the recorded text.** In `saffron/task.py`, add a private
 function. It takes the ledger, the task id, the handed spec and the
 pinned base. It returns the parsed text and its `spec_sha`, a `Refused`,
-or `None` when the task holds no text. It checks in this order. The
+or `None` when the task holds no text. It reads the task's latest row with `spec_text`, and checks in this
+order. The
 integrity check, the text's hash against its row's `spec_sha`.
 `parse_spec`, catching `SpecError`. The id, then `depends_on` as a list.
 Then each of `budget_usd`, `max_attempts` and `max_turns` against the
@@ -302,10 +303,12 @@ prototype replaced `Ledger.spec_text` with a stand-in that returns
   no queued file at `base_sha`, so it is still a follow-up. `SA-0151`
   reads the first row to decide whether it adds a new file or rewrites a
   queued one.
-- **The refusal count.** The id, `depends_on`, ceiling, `touches` and
-  path checks
-  are refusals §4.2.1 does not count (`DESIGN.md:398`). `DESIGN.md` is forbidden, so the
-  operator files it.
+- **The refusal count and its wording.** The id, `depends_on`, ceiling,
+  `touches` and path checks are refusals §4.2.1 does not count
+  (`DESIGN.md:398`). `DESIGN.md:363` says one refusal comes later, in
+  `run_task`, and names only `consumes`. `CONTEXT.md:203-208`'s
+  **Refusal** names only the same one. Both files are forbidden, so the
+  operator files all three.
 
 ## Notes for the agent
 
@@ -324,7 +327,7 @@ naming `SY-1` into the mirror. Written as one literal in
 since no spec declares `SY-1`. Build it from a name, as
 `tests/test_cli.py:489` does.
 
-**Criteria 3 and 4 share one arrangement** in `tests/test_task.py`. Name
+**Criteria 1 and 2 share one arrangement** in `tests/test_task.py`. Name
 its helpers apart from the chain's, such as `_recorded_mirror` and
 `_run_recorded`. Each witness opens one ledger in its `tmp_path` and runs
 every one of its cases on it, with one repo and one run at `base`. The
@@ -363,20 +366,24 @@ whose witness is `tests/test_a.py::test_two`. Its body is `revised body`.
 A backtick cannot start a plain YAML scalar, so quote the claim. Each
 task is created on the run at `base`, for `SY-1`, with `spec_sha` `"f" *
 64`. Its texts are recorded with origin `revision` at
-`.saffron/specs/SY-1-x.md` unless a case says otherwise.
+`.saffron/specs/SY-1-x.md` unless a case says otherwise. Every text is
+recorded with `spec_id` `SY-1`, the task's, whatever id the text
+declares. `SA-0182` raises `ValueError` for any other.
 
-**Criterion 3's witness** replaces `task_module.run_one_cell`,
+**Criterion 1's witness** replaces `task_module.run_one_cell`,
 `package_phase.package` and `package_phase.push_unpackaged_work` with
 recorders. The cell returns the state the case sets.
 
 - It records `older`, which is `REV` with `budget_usd` 5.0 and `touches`
   `['src/**']`, then `REV`, on a task, and runs
-  it with the cell returning `READY_FOR_REVIEW`. It does the same on a
-  fresh task with `EXHAUSTED`. Each `CellSpec` carries `REV`'s hash, its
-  parsed body, `touches`, `forbidden` and `acceptance`, `elevated`, `bug`,
-  9.5, 4 and 50. The one `Ceilings` event carries 9.5, 4 and 50, and
-  `spec` as each of its three sources. PACKAGE then the push each got
-  `parse_spec(REV)`.
+  it with the cell returning `READY_FOR_REVIEW`. On a fresh task it
+  records `older`, then `REV` with `max_attempts` 3, and runs it with the
+  cell returning `EXHAUSTED`. Each `CellSpec` carries its latest text's
+  hash, its parsed body, `touches`, `forbidden` and `acceptance`,
+  `elevated`, `bug`, 9.5, 50, and `max_attempts` 4 then 3. The one
+  `Ceilings` event of each carries the same three values, and `spec` as
+  each of its three sources. PACKAGE got `parse_spec(REV)`, and the push
+  the parsed text with 3.
 - It runs a task holding `REV` alone, origin `follow_up`, at
   `.saffron/specs/SY-1-g.md`. It runs a task holding `REV` as
   `follow_up`, then `REV` as `revision`, both at
@@ -397,6 +404,8 @@ These fail it, each measured:
 - a ceiling equal to the handed spec's refused, which refuses `REV`
 - the file's `spec_sha` kept
 - the first text in place of the latest, which gives 5.0
+- the text's sources with the caller's `max_attempts`, or the greater of
+  the two, which gives 4 where 3 belongs
 - PACKAGE handed the file's spec, or the push handed it
 - the `touches` check applied to a queued spec's revision too, which
   refuses `REV` after `older`
@@ -407,7 +416,7 @@ These fail it, each measured:
   mirror
 - a spec text read with no `task_id`
 
-**Criterion 4's witness** replaces `task_module.run_one_cell` with a call
+**Criterion 2's witness** replaces `task_module.run_one_cell` with a call
 that fails the test. For each case it creates a task, records the text,
 and runs it at `base`. It asserts a `Refused` whose reason holds the
 phrase and no run of two spaces. The `yaml` case's error carries runs of
@@ -478,7 +487,7 @@ These fail it, each measured unless marked:
 - the parse error's raw text, which prints the YAML error over five lines
 - a `PolicyError` or a `GitError` from the export read as no protected
   paths, as `cli._protected_paths_at` reads it
-- the text rebound after `SA-0135`'s `consumes` check, unmeasured
+- the text rebound after `SA-0135`'s `consumes` check
 
 **How the lists were measured.** A prototype ran on 2026-09-27 at
 `f492629e`, over `SA-0182`'s prototype, ported from this spec's of
@@ -486,7 +495,9 @@ These fail it, each measured unless marked:
 green once the `task_id=9` test and the marker were mended. Each wrong
 version above was applied as a text edit, with no bytecode cache, and
 each failed its own witness. The `consumes` case and the text rebound
-after the `consumes` check were measured this time. With `saffron/task.py`
+after the `consumes` check were measured this time. So were the two
+`max_attempts` wrong versions, which passed the witness until its
+`EXHAUSTED` case took a text with 3. With `saffron/task.py`
 reverted to `SA-0182`'s head, both witnesses failed, and neither failed
 collection.
 
@@ -512,9 +523,9 @@ sentence over 25 words. Keep each docstring within ten lines.
 **Size.** Neither file this spec touches is in `elevate_on`, so `size` is
 advisory at the `feature` ceiling of 3000 changed tokens
 (`saffron/gates/core/size.py:26`). The prototype, formatted with
-`ruff format`, measured 1426 changed tokens with `size_gate`'s own count:
-437 in `task.py` and 989 in `tests/test_task.py`. Sibling cells landed at
-1.4 times their authors' estimates, so about 1996 tokens, 67% of the
+`ruff format`, measured 1442 changed tokens with `size_gate`'s own count:
+437 in `task.py` and 1005 in `tests/test_task.py`. Sibling cells landed at
+1.4 times their authors' estimates, so about 2019 tokens, 67% of the
 ceiling. The plan's `estimated_lines` counts lines, and the checkpoint
 prices each line at 4 tokens (`saffron/gates/core/size.py:39`). So plan
-this at about 500 changed lines, not at a token count.
+this at about 505 changed lines, not at a token count.

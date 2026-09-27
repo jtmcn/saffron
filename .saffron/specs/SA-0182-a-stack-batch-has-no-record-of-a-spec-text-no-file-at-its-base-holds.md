@@ -49,7 +49,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
-estimated_lines: 320
+estimated_lines: 334
 pending_symbols:
   - saffron/ledger.py::record_spec_text
   - saffron/ledger.py::spec_texts
@@ -152,8 +152,8 @@ Build two things.
    path must match
    `re.fullmatch(rf"\.saffron/specs/{re.escape(spec_id)}-[A-Za-z0-9._-]+\.md", path)`,
    since the host names that file. The slug is required, because
-   `projection` and `session._spec_path` find a spec only as `<id>-*.md`
-   (`saffron/projection.py:144`, `saffron/cell/session.py:443-468`). A
+   `projection` finds a committed spec only as `<id>-*.md`
+   (`saffron/projection.py:144-145`). A
    revision's path is the queued spec's own file, and nothing ties a spec
    file's name to its id. So a revision's path takes any one file name in
    the spec directory:
@@ -223,8 +223,9 @@ path `.saffron/specs/<id>-a.md`.
   `.saffron/specs/other.md`, and gets 1.
 - `dict(spec_text(...))` of the first `SY-1` task is the key, 2,
   `revision`, `SY-1`, the path, `second` and `second`'s hash.
-- `spec_texts` gives that task's texts as `first` then `second`, and the
-  second `SY-1` task's as `again` alone.
+- `[dict(r) for r in spec_texts(...)]` gives that task's two full rows,
+  `first` then `second`, each with all seven keys. The second `SY-1`
+  task's is its one full row, `again`.
 - That task's `spec_text` facts carry exactly the two payloads, each hash
   computed with `hashlib.sha256(t.encode("utf-8"))`.
 
@@ -252,6 +253,8 @@ These fail it:
 - a count across the ledger, which gives `SY-2` 2
 - the follow-up slug left optional, which admits `SY-1.md`
 - `spec_texts` newest first, or keyed on the spec id
+- `spec_texts` returning fewer than the seven columns, or a `list[str]` of
+  texts
 - a count per spec id, which gives the second `SY-1` task 3
 - a read by spec id, which gives the second `SY-1` task a row
 - the lowest `n` read back, which gives 1 after the second write
@@ -299,6 +302,9 @@ These fail it:
 
 **How the lists were measured.** A prototype ran on 2026-09-27 at
 `f492629e`, ported from `SA-0150`'s of 2026-09-24. Both witnesses passed,
+and a review round added the full `spec_texts` rows. A `spec_texts`
+selecting only `n` and `text` passed the witness before that, and fails it
+now. Both witnesses then passed,
 and the whole suite and `ty` stayed green. Each wrong version above was
 applied as a text edit, with no bytecode cache, and each failed its own
 witness. With `saffron/ledger.py` reverted, both witnesses failed, and
@@ -326,10 +332,10 @@ sentence over 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 changed tokens (`saffron/gates/core/size.py:26`).
-The prototype, formatted with `ruff format`, measured 913 changed tokens
-with `size_gate`'s own count: 431 in `ledger.py` and 482 in the test.
-Sibling cells landed at 1.4 times their authors' estimates, so about 1278
-tokens, 43% of the ceiling. The plan's `estimated_lines` counts lines, and
+The prototype, formatted with `ruff format`, measured 952 changed tokens
+with `size_gate`'s own count: 431 in `ledger.py` and 521 in the test.
+Sibling cells landed at 1.4 times their authors' estimates, so about 1333
+tokens, 44% of the ceiling. The plan's `estimated_lines` counts lines, and
 the checkpoint prices each line at 4 tokens
-(`saffron/gates/core/size.py:39`). So plan this at about 320 changed
+(`saffron/gates/core/size.py:39`). So plan this at about 334 changed
 lines, not at a token count.

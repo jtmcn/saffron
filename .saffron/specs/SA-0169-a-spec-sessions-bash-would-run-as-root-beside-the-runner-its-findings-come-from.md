@@ -230,7 +230,13 @@ runs one Python program as root through `runtime.exec_` and
 `implement.PYTHON`. The program runs each probe as
 `bash -c -l "'<prefix>' '<command>'"`, the CLI's own call, and prints one
 JSON object. It takes the prefix from `implement.agent_options` with
-`["Read", "Glob", "Grep", "Bash"]`. It asserts:
+`["Read", "Glob", "Grep", "Bash"]`.
+
+`SA-0181` exposes no name for the self-check's probe script. So the test
+wraps `runtime.exec_` in a recorder that still calls the real one. While
+`layer_cell` runs, the recorder keeps the argv the self-check passes. The
+test then runs that argv's second item through the wrapper again, once
+as it is and once under the altered `PATH` below. It asserts:
 
 - the uid equals `id -u unprivileged` and is not 0, with no group 0 and a
   writable `HOME`

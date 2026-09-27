@@ -125,22 +125,24 @@ A stack batch runs the queued specs into one pull request stack. Each task
 that reaches `READY_FOR_REVIEW` is a **layer**, and the next task is cut
 from the last layer, its **predecessor**.
 
-**Step 6 is six specs, and this is the last.** `SA-0149` reads a review
+**Step 6 is seven specs, and this is the last.** `SA-0149` reads a review
 and routes each spec on it, through an injected `review` callable.
 `SA-0155` gives each review a task and a record. It calls an injected
 `mint` for every spec before its first review, whatever `task_id` the
 candidate carries. The operator decided that on 2026-09-24. `SA-0168`
-runs the cell on that task. `SA-0169` runs a spec session's `Bash` in its
-critic cell as an unprivileged user. `SA-0175` builds the session and
+runs the cell on that task. `SA-0181` builds the account a spec
+session's `Bash` runs as, and `SA-0169` grants a spec session's critic
+cell the switch to it. `SA-0175` builds the session and
 core's prompt for it. This spec builds the production `review` and
 `mint`, and passes both from `saffron batch --stack`.
 
 **What the tree base holds.** This spec's tree base is `SA-0175`'s head.
 The chain below it runs `SA-0135`, `SA-0136`, `SA-0142` to `SA-0146`,
 `SA-0153`, `SA-0154`, `SA-0157`, `SA-0159`, `SA-0147`, `SA-0148`,
-`SA-0149`, `SA-0155`, `SA-0168`, `SA-0169` and `SA-0175`. Every line
-number below was read at `71140772`, where none of their code exists. So
-`cli.py` and `ledger.py` are cited by symbol where the chain edits them.
+`SA-0149`, `SA-0155`, `SA-0168`, `SA-0181`, `SA-0169` and `SA-0175`.
+Every line number below was read at `71140772`, where none of their
+code exists, unless it names `f492629e`. So `cli.py` is cited by symbol
+where the chain edits it.
 This spec consumes these names.
 
 - From `SA-0143`: `run_stack_batch` and `cli._stack_runner`.
@@ -162,11 +164,12 @@ This spec consumes these names.
   `ValueError`. `SA-0155` records the review's attempt, cost and fact,
   and attaches its run to the batch.
 - From `SA-0168`: `CellSpec.task_id`, and the cell that runs on it.
-- From `SA-0169`: a spec session's `Bash` runs as an unprivileged user in
-  the critic cell `layer_cell` brings up. It cannot write the runner or
-  its files. `layer_cell` grants the wrapper its two capabilities only
-  when called with `spec_session=True`, so this spec passes that. Without
-  it the wrapper runs nothing, and the review loses its `Bash`.
+- From `SA-0181`: a spec session's `Bash` runs as an unprivileged user,
+  who cannot write the runner or its files.
+- From `SA-0169`: `layer_cell` grants the wrapper its two capabilities,
+  and checks it, only when called with `spec_session=True`. So this spec
+  passes that. Without it the wrapper runs nothing, and the review loses
+  its `Bash`.
 - From `SA-0175`, in `saffron/spec_review.py`: `run_spec_review(container,
   *, system_prompt, prompt, agent)`, which runs the review turn and its
   extraction turn and returns a `SpecReviewSession`.
@@ -206,10 +209,10 @@ does the same, so it demands no policy of a repo.
 **Where `Bash` departs from §5.5.** §5.5 keeps model-authored code out of
 the critic cell (`DESIGN.md:1065`). There it would run as root beside the
 runner a lens re-executes. A spec session's `Bash` runs commands the
-model writes in that cell. `SA-0169` narrows the departure: those
+model writes in that cell. `SA-0181` narrows the departure: those
 commands run as a user that cannot write the runner or its files. The
 operator records the narrowed departure in `DESIGN.md` by hand. This
-spec also makes `SA-0169`'s capability grant live. §5.1 says "No
+spec also makes the capability grant `SA-0181` and `SA-0169` build live. §5.1 says "No
 capability is granted to anything" (`DESIGN.md:587`), and the spec
 session's `Bash` wrapper gets two. The operator records that departure
 too, by hand.
@@ -235,7 +238,7 @@ Build three things.
    Call a tool by its full path when its name does not resolve.
    ```
 
-   `SA-0169` measured all three in a cell. They name no tool path, since
+   `SA-0181` records the measurement of all three in a cell. They name no tool path, since
    ADR 7 bars a repo's tools from core's spec prompts. `SA-0176` puts
    these lines in core's writer prompt. Reach `package_phase.fetch_parent_branch`,
    `git_mirror.export_saffron_dir`, `end_review.layer_cell`,
@@ -331,7 +334,7 @@ It asserts:
 - two `cell_up` calls, seeded at `base` then `"d" * 40`, and two
   `cell_down` calls. Each has `repo`, the pinned mirror and `thread_env`
   `{"X": "base"}`. Its `gates_dir` is `out_dir / "spec-review" / <spec
-  id>`, and its `policy.yaml` holds `X: base`.
+  id>`, and its `.saffron/policy.yaml` holds `X: base`.
 - two `layer_cell` calls, each with `spec_session=True`, on fields whose
   `branch` is `saffron/SY-1` then `saffron/SY-2`.
 - two unprivileged checks, one per cell, each on the container its
@@ -450,9 +453,10 @@ asserts the exact keywords the fake got, widen that assertion to allow
 at `f2a08a9f`, on the host's git, over `SA-0168`'s prototype. It built an
 earlier shape of this spec, whose prompt came from a file the policy
 named. Criterion 2 and its wrong versions are unchanged from it, and
-each wrong version failed its witness there. Criteria 1 and 3 changed
-when ADR 7 made the prompt core's. Their lists are unmeasured in the new
-shape, and so are both witnesses' reverted runs.
+each wrong version failed its witness there. A second prototype ran on
+2026-09-27 at `f492629e`, in the shape above. All three witnesses passed
+on it, and each failed with `saffron/cli.py` reverted. No wrong version
+of criteria 1 and 3 ran against it, so those two lists stay unmeasured.
 
 **What the witnesses leave undriven.**
 

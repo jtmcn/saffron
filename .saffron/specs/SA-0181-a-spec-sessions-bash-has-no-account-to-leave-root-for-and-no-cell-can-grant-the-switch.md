@@ -369,8 +369,10 @@ writer prompt tell the session so. This spec writes no prompt text.
   running, in the background or detached, shares the account's uid. It can
   open a later command's output descriptor through `/proc` and write lines
   the model then reads as that command's output. It cannot reach the
-  runner's stream. Nothing kills it, since a kill would also end a
-  background command the session asked for.
+  runner's stream. Nothing kills it between turns, since a kill would also
+  end a background command the session asked for. After a turn that timed
+  out, `reap_cell` kills every process but PID 1
+  (`saffron/phases/implement.py:299-304`, `saffron/cell/runtime.py:462-471`).
 - **The CLI's working directory.** The account writes the file that
   names the CLI's working directory. So the CLI then works from any
   directory the account names. Its file tools read from there, as root.
@@ -402,6 +404,12 @@ writer prompt tell the session so. This spec writes no prompt text.
 - **The SDK's `user` option and the runtime's `exec --user`.** Each runs the
   CLI and its Bash as one uid, which the third measurement shows is
   forgeable. So neither is used, and `images/agent_runner.py` is unchanged.
+- **A base built by podman or `images/bootstrap-base.sh`.** The new build
+  step runs `useradd` and a `setpriv` uid switch on every base build. A
+  host with no registry builds a bootstrap base, and that script defaults
+  to `podman` (`images/bootstrap-base.sh:15-18`). This host builds with
+  apple/container, and a rootless podman build of the step is unmeasured.
+  The operator accepts that risk here.
 - **podman.** It is not on the measuring host. Its spelling of
   `--cap-add`, and `setpriv` under its `no-new-privileges`, are unmeasured.
   A night does not run on podman yet.
@@ -508,8 +516,10 @@ the running user's own directory. These fail it:
 - a probe that reads no `PATH`
 - a probe printing `missing` for a `PATH` entry that does not exist,
   or nothing for it
-- a probe run under `set -e`, which stops at the host's absent
-  `/opt/saffron/python` before it reaches `PATH`
+- a probe run under `set -e`, only on a host with no `/opt/saffron`. There
+  it stops at the absent `/opt/saffron/python` before it reaches `PATH`.
+  The `tests` gate executes in the cell, whose image has that interpreter
+  (`images/cell-base.python.Dockerfile:63`), so there it survives, unmeasured.
 
 A probe testing `[ -r ]` in place of `[ -w ]` passes it, since `w` is
 readable too. `SA-0169`'s cell test catches it, since it asserts
@@ -518,7 +528,7 @@ readable too. `SA-0169`'s cell test catches it, since it asserts
 **How the lists were measured.** A prototype of this spec and `SA-0169`
 ran on 2026-09-27 at `f492629e`. Its five witnesses here passed. The
 whole suite and `ty` stayed green at this spec's head and at `SA-0169`'s. Each wrong version above was applied
-as a text edit and failed its own witness. Two also failed another
+as a text edit, on the host, and failed its own witness. Two also failed another
 witness. The prefix with an argument failed criterion 4, and
 `CAP_SETPCAP` in the constant failed `SA-0169`'s. The `[ -r ]` probe
 passed criterion 5, as stated. With this spec's source reverted, all five
