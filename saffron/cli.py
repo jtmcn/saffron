@@ -690,7 +690,7 @@ def _stack_review(
 ) -> Callable[[Candidate, Candidate | None], spec_review.SpecReviewSession]:
     """`run_stack_batch`'s `review` adapter (ADR 7). Given a layer, it
     fetches that spec's branch fresh and seeds the cell there. Given
-    `None`, it seeds the cell at the pinned `base_sha`. The prompt and
+    `None`, it seeds the cell at the pinned `base_sha`. The system prompt and
     gates always come from `base_sha`'s own export, never a layer's head.
     """
 

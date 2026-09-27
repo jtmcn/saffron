@@ -4662,6 +4662,8 @@ def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_p
     repo row is upserted at the pinned url, and an older task's run and
     state are left alone."""
     ledger = Ledger(tmp_path / "l.db")
+    # Another repo first, so the upserted one's id is not 1.
+    ledger.upsert_repo("other", "https://github.com/o/other.git", "/other.git", None)
     repo_id = ledger.upsert_repo(
         "old", "https://github.com/o/r.git", "/old.git", policy_sha="p" * 64
     )
@@ -4695,7 +4697,7 @@ def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_p
         return ledger._db.execute(
             "SELECT t.spec_id, t.spec_sha, t.branch, t.state, t.risk, "
             "t.budget_usd, t.policy_sha, t.prompt_sha, t.run_id, "
-            "r.base_sha, r.batch_id FROM tasks t "
+            "r.base_sha, r.batch_id, r.repo_id FROM tasks t "
             "JOIN runs r ON r.run_id = t.run_id WHERE t.task_id = ?",
             (task_id,),
         ).fetchone()
@@ -4710,6 +4712,7 @@ def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_p
         assert row["prompt_sha"] == context.prompt_sha()
         assert row["base_sha"] == "a" * 40
         assert row["batch_id"] is None
+        assert row["repo_id"] == repo_id
     assert row1["budget_usd"] == 7.5 and row1["risk"] == "elevated"
     assert row2["budget_usd"] == 7.5 and row2["risk"] == "elevated"
     assert row3["budget_usd"] == 12.0 and row3["risk"] == "standard"
