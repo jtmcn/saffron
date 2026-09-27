@@ -77,7 +77,8 @@ uv run .claude/skills/setup-saffron/check.py <target>
 
 It loads the policy with Saffron's loader and runs every gate on the host through Saffron's own runner. Then it runs `tests` on one collected name and reads the tree for leftovers. Each `PROBLEM` line names a gate and what Saffron would do with it.
 A gate that reports `fail` is fine at this point, since the baseline subtracts failures already on the base.
-A tool missing on the host is an `error` here and says nothing about the image. Install it or read past it.
+A tool missing on the host is an `error` here and says nothing about the image.
+Gates never see Saffron's own virtualenv. Put the target's tool directory first on `PATH`, as `PATH=<target>/.venv/bin:$PATH`, or read past it.
 
 Then build the image, which runs every tool at build time:
 
