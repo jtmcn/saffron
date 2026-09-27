@@ -28,8 +28,9 @@ type is not importing the driver that builds it.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from saffron.cell.session import CellOutcome
@@ -72,6 +73,9 @@ def run_batch(
     # Fired right after each task's attach, never for a `Refused` or a raise.
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
     reserve_usd: float = 0.0,
+    # `None` for every direct caller. Only `run_stack_batch` passes one,
+    # through this same keyword (SA-0148).
+    sleep: Callable[[float], None] | None = None,
 ) -> StopReason:
     """Drive one night against one repo's already-sorted candidates.
 
@@ -136,6 +140,7 @@ def run_batch(
             in_flight=in_flight,
             after_attach=after_attach,
             reserve_usd=reserve_usd,
+            sleep=sleep,
         )
         return stopped
     finally:
@@ -164,6 +169,7 @@ def _drive(
     in_flight: list[tuple[str, str]],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
     reserve_usd: float = 0.0,
+    sleep: Callable[[float], None] | None = None,
 ) -> StopReason:
     """`run_batch`'s body, split out so every exit closes the batch row.
 
@@ -255,27 +261,65 @@ def _drive(
                 if after_attach is not None:
                     after_attach(candidate, outcome, batch_id)
 
-                if outcome.state in ABORT_STATES:
-                    consecutive_aborts += 1
+                if outcome.state == "RATE_LIMITED" and sleep is not None:
+                    # A stack batch's own rule: the account's own limit
+                    # closes the window for the next spec too (SA-0148).
+                    wait_stop = _wait_out_rate_limit(
+                        candidate, outcome, until, clock, emit, sleep
+                    )
+                    if wait_stop is not None:
+                        return _stop(ledger, batch_id, wait_stop, in_flight, emit)
+                    started.discard(candidate.spec.id)
                 else:
-                    # Any state a task earned resets the counter, `EXHAUSTED`
-                    # included — "any terminal state" would also reset on
-                    # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
-                    # would never reach two. An in-flight state resets it the same
-                    # way: two provider blips in a row must not end a night that
-                    # would have recovered on its third task (backlog item 70).
-                    consecutive_aborts = 0
+                    if outcome.state in ABORT_STATES:
+                        consecutive_aborts += 1
+                    else:
+                        # Any state a task earned resets the counter, `EXHAUSTED`
+                        # included — "any terminal state" would also reset on
+                        # `GATE_ERROR` and `PREFLIGHT_FAILED` themselves, and the counter
+                        # would never reach two. An in-flight state resets it the same
+                        # way: two provider blips in a row must not end a night that
+                        # would have recovered on its third task (backlog item 70).
+                        consecutive_aborts = 0
 
-                if outcome.state in IN_FLIGHT_STATES:
-                    # Read from `reconcile`, never copied: the next batch scan's own
-                    # definition of "in flight" is what decides a corpse there, and a
-                    # second list here is how the two would come to disagree about
-                    # what a finished task is.
-                    in_flight.append((candidate.spec.id, outcome.state))
+                    if outcome.state in IN_FLIGHT_STATES:
+                        # Read from `reconcile`, never copied: the next batch scan's own
+                        # definition of "in flight" is what decides a corpse there, and a
+                        # second list here is how the two would come to disagree about
+                        # what a finished task is.
+                        in_flight.append((candidate.spec.id, outcome.state))
 
         # Rescanned after every task, success or not, so a child whose parent
         # just packaged is reachable tonight rather than tomorrow.
         pending = rescan()
+
+
+def _wait_out_rate_limit(
+    candidate: Candidate,
+    outcome: CellOutcome,
+    until: datetime | None,
+    clock: Callable[[], datetime],
+    emit: Callable[[str], None],
+    sleep: Callable[[float], None],
+) -> Literal["UNTIL"] | None:
+    """A `RATE_LIMITED` task's own wait, capped at six hours (SA-0148).
+    Returns `UNTIL` when one clock read shows the wait running at or past
+    `until`. Otherwise it emits one line, sleeps, and returns `None`, so
+    the caller retries the same spec.
+
+    Bounds come before any subtraction. An untrusted cell's `resets_at`
+    can be far larger than a plain subtraction can carry."""
+    now = clock()
+    now_ts = now.timestamp()
+    resets_at = outcome.resets_at
+    readable = resets_at is not None and now_ts < resets_at <= now_ts + 21600
+    wait = resets_at - now_ts if readable else 3600.0
+    if until is not None and wait >= (until - now).total_seconds():
+        return "UNTIL"
+    reopen = (now + timedelta(seconds=wait)).strftime("%H:%M")
+    emit(f"{candidate.spec.id:<10} rate limited, window reopens {reopen}")
+    sleep(wait)
+    return None
 
 
 def _is_layer(result: CellOutcome | Refused) -> bool:
@@ -297,17 +341,19 @@ def run_stack_batch(
     emit: Callable[[str], None] = print,
     reserve_usd: float = 0.0,
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
+    # A real default. `SA-0144`'s caller passes none (SA-0148).
+    sleep: Callable[[float], None] = time.sleep,
 ) -> StopReason:
-    """Run one stack's planned `order` once, never rescanning the repo
-    (`SA-0142` fixes the order at batch start). `runner` takes each
-    candidate and its predecessor: the last candidate before it,
-    positionally, that reached `READY_FOR_REVIEW`, or `None` before any has.
+    """Run one stack's planned `order` once, without rescanning (`SA-0142`).
+    `runner` takes each candidate and its predecessor, the last one that
+    reached `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED`
+    task keeps this predecessor and waits, through `sleep`, rather than
+    refusing anything (SA-0148).
 
-    A candidate is refused here, before `run_batch` ever sees it, when a
-    `depends_on` entry reaches a spec that ran this batch and missed. It
-    can reach one through a refused spec. `reserve_usd` holds back the loop's budget check, and
-    once the loop returns `end_review` runs once, with the batch id, the
-    reserve and `order`'s own specs."""
+    A candidate is refused before `run_batch` sees it, when `depends_on`
+    reaches a spec that ran and missed, direct or through a refused spec.
+    `reserve_usd` holds back the budget check, and `end_review` runs once,
+    with the batch id, the reserve and `order`'s own specs."""
     order = list(order)
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
@@ -358,6 +404,10 @@ def run_stack_batch(
             missed[candidate.spec.id] = frozenset({candidate.spec.id})
             remaining.remove(candidate)
             raise
+        if isinstance(result, CellOutcome) and result.state == "RATE_LIMITED":
+            # Neither a layer nor a miss: `candidate` stays in `remaining` so
+            # the same spec is offered again, against this same `pred`.
+            return result
         remaining.remove(candidate)
         if _is_layer(result):
             predecessor = candidate
@@ -377,6 +427,7 @@ def run_stack_batch(
         emit=emit,
         after_attach=record_layer,
         reserve_usd=reserve_usd,
+        sleep=sleep,
     )
     if end_review is not None:
         specs = {c.spec.id: c.spec for c in order}

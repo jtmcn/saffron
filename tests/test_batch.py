@@ -1,5 +1,6 @@
+import dataclasses
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -222,6 +223,77 @@ class FakeClock:
 
     def __call__(self) -> datetime:
         return self._times.pop(0) if len(self._times) > 1 else self._times[0]
+
+
+class AdvancingClock:
+    """A clock whose `now` its own `sleep` advances by exactly the seconds
+    slept. A plain read never moves it forward."""
+
+    def __init__(self, start: datetime):
+        self._now = start
+        self.sleeps: list[float] = []
+
+    def __call__(self) -> datetime:
+        return self._now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self._now += timedelta(seconds=seconds)
+
+    def advance(self, seconds: float) -> None:
+        self._now += timedelta(seconds=seconds)
+
+
+class RateLimitScript:
+    """`run_stack_batch`'s runner for the rate-limit witnesses. Each call
+    pops the next step queued for its spec id, mints a run and task at the
+    step's cost, and returns a `CellOutcome`. A step can advance the clock,
+    name `resets_at` directly, or name an `offset` read from the clock,
+    after its own advance."""
+
+    def __init__(
+        self,
+        ledger: Ledger,
+        repo_id: int,
+        clock: AdvancingClock,
+        steps: Mapping[str, list[dict]],
+    ):
+        self._ledger = ledger
+        self._repo_id = repo_id
+        self._clock = clock
+        self._steps = {spec_id: list(queue) for spec_id, queue in steps.items()}
+        self.calls: list[tuple[str, str | None]] = []
+
+    def __call__(
+        self, candidate: Candidate, predecessor: Candidate | None = None
+    ) -> CellOutcome:
+        spec_id = candidate.spec.id
+        self.calls.append((spec_id, predecessor.spec.id if predecessor else None))
+        step = self._steps[spec_id].pop(0)
+        if step.get("advance"):
+            self._clock.advance(step["advance"])
+        run_id, task_id = _spend_task(
+            self._ledger, self._repo_id, step.get("cost", 1.0)
+        )
+        outcome = _outcome(state=step["state"], run_id=run_id, task_id=task_id)
+        if "offset" in step:
+            resets_at = int(self._clock().timestamp()) + step["offset"]
+            outcome = dataclasses.replace(outcome, resets_at=resets_at)
+        elif "resets_at" in step:
+            outcome = dataclasses.replace(outcome, resets_at=step["resets_at"])
+        return outcome
+
+
+def _raise_on_real_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A build that calls `time.sleep` by its module attribute, rather
+    than the injected `sleep` keyword, fails loudly here instead of
+    sleeping for real seconds."""
+    import time
+
+    def _raise(seconds: float) -> None:
+        raise AssertionError(f"real time.sleep called with {seconds}")
+
+    monkeypatch.setattr(time, "sleep", _raise)
 
 
 def _batch_row(ledger, batch_id: int):
@@ -1806,3 +1878,354 @@ def test_a_stack_batch_holds_its_end_review_reserve_and_calls_it_once_the_loop_r
             end_review=_logging_end_review(log4),
         )
     assert log4 == []
+
+
+def test_a_stack_batch_waits_out_a_rate_limit_and_runs_the_same_spec_again(
+    ledger, repo_id, monkeypatch
+):
+    """SA-0148: a `RATE_LIMITED` task waits out its own window, adds no
+    layer, and runs again on the same predecessor. Driven under a naive
+    clock and an aware one at a fixed offset of minus seven hours."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    starts = [
+        datetime(2030, 1, 1, 2, 0),
+        datetime(2030, 1, 1, 2, 0, tzinfo=timezone(timedelta(hours=-7))),
+    ]
+    for start in starts:
+        order = [
+            _candidate("TE-1"),
+            _candidate("TE-2"),
+            _candidate("TE-3", depends_on=["TE-2"]),
+        ]
+        clock = AdvancingClock(start)
+        runner = RateLimitScript(
+            ledger,
+            repo_id,
+            clock,
+            {
+                "TE-1": [{"state": "READY_FOR_REVIEW"}],
+                "TE-2": [
+                    {"state": "RATE_LIMITED", "offset": 3900},
+                    {"state": "READY_FOR_REVIEW"},
+                ],
+                "TE-3": [{"state": "READY_FOR_REVIEW"}],
+            },
+        )
+        lines: list[str] = []
+
+        reason = run_stack_batch(
+            order,
+            ledger,
+            budget_usd=100.0,
+            until=start + timedelta(hours=4),
+            runner=runner,
+            readiness_check=_ready,
+            clock=clock,
+            sleep=clock.sleep,
+            emit=lines.append,
+        )
+
+        assert reason == "DRAINED"
+        assert runner.calls == [
+            ("TE-1", None),
+            ("TE-2", "TE-1"),
+            ("TE-2", "TE-1"),
+            ("TE-3", "TE-2"),
+        ]
+        assert clock.sleeps == [3900.0]
+        batch_id = _latest_batch_id(ledger)
+        assert ledger.batch_spend(batch_id) == 4.0
+        rate_lines = [
+            line
+            for line in lines
+            if line.startswith(f"{'TE-2':<10}") and "rate limited" in line
+        ]
+        assert len(rate_lines) == 1
+        assert "03:05" in rate_lines[0]
+        assert not any(" refused " in line for line in lines)
+
+
+def test_a_rate_limit_in_a_stack_batch_neither_counts_toward_the_breaker_nor_resets_it(
+    ledger, repo_id, monkeypatch
+):
+    """A `RATE_LIMITED` result leaves `_drive`'s own breaker count exactly
+    where it was. A second miss right after it can still fire the breaker.
+    Plain `run_batch` keeps its old breaker treatment for the same rate
+    limit instead."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    order = [
+        _candidate("TE-1"),
+        _candidate("TE-2"),
+        _candidate("TE-3", depends_on=["TE-2"]),
+    ]
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    runner = RateLimitScript(
+        ledger,
+        repo_id,
+        clock,
+        {
+            "TE-1": [{"state": "GATE_ERROR"}],
+            "TE-2": [
+                {"state": "RATE_LIMITED", "offset": 60},
+                {"state": "GATE_ERROR"},
+            ],
+            "TE-3": [{"state": "READY_FOR_REVIEW"}],
+        },
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert runner.calls == [
+        ("TE-1", None),
+        ("TE-2", None),
+        ("TE-2", None),
+    ]
+    refused = [line for line in lines if " refused " in line]
+    assert len(refused) == 1
+    assert refused[0].startswith(f"{'TE-3':<10}")
+
+    order2 = [_candidate("TE-4"), _candidate("TE-5")]
+    clock2 = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    runner2 = RateLimitScript(
+        ledger,
+        repo_id,
+        clock2,
+        {
+            "TE-4": [
+                {"state": "RATE_LIMITED", "offset": 60},
+                {"state": "RATE_LIMITED", "offset": 60},
+                {"state": "READY_FOR_REVIEW"},
+            ],
+            "TE-5": [{"state": "READY_FOR_REVIEW"}],
+        },
+    )
+
+    reason2 = run_stack_batch(
+        order2,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner2,
+        readiness_check=_ready,
+        clock=clock2,
+        sleep=clock2.sleep,
+    )
+
+    assert reason2 == "DRAINED"
+    assert runner2.calls == [
+        ("TE-4", None),
+        ("TE-4", None),
+        ("TE-4", None),
+        ("TE-5", "TE-4"),
+    ]
+
+    candidates3 = [_candidate("TE-1"), _candidate("TE-2")]
+    run_one = _spend(ledger, repo_id, 1.0)
+    run_two = _spend(ledger, repo_id, 1.0)
+    runner3 = FakeRunner(
+        [
+            _outcome(state="GATE_ERROR", run_id=run_one),
+            _outcome(state="RATE_LIMITED", run_id=run_two),
+        ]
+    )
+
+    reason3 = run_batch(
+        candidates3,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner3,
+        rescan=lambda: candidates3,
+        readiness_check=_ready,
+    )
+
+    assert reason3 == "INFRASTRUCTURE"
+    assert runner3.calls == candidates3
+
+
+def test_a_stack_batch_stops_at_until_rather_than_wait_past_it(
+    ledger, repo_id, monkeypatch
+):
+    """The wait and the distance to `until` both come from one clock read
+    taken after the task returns. A wait that would end at or past `until`
+    stops the batch `UNTIL` at once, with no sleep and no line."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    start = datetime(2030, 1, 1, 2, 0)
+
+    def _run(*, until_hours, steps, budget=100.0, spec_budget=10.0):
+        clock = AdvancingClock(start)
+        until = (
+            start + timedelta(hours=until_hours) if until_hours is not None else None
+        )
+        runner = RateLimitScript(ledger, repo_id, clock, {"TE-1": steps})
+        lines: list[str] = []
+        reason = run_stack_batch(
+            [_candidate("TE-1", budget_usd=spec_budget)],
+            ledger,
+            budget,
+            until,
+            runner,
+            readiness_check=_ready,
+            clock=clock,
+            sleep=clock.sleep,
+            emit=lines.append,
+        )
+        return reason, runner, clock, lines
+
+    reason, runner, clock, lines = _run(
+        until_hours=1,
+        steps=[
+            {"state": "RATE_LIMITED", "offset": 3 * 3600},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "UNTIL"
+    assert len(runner.calls) == 1
+    assert clock.sleeps == []
+    assert not any("rate limited" in line for line in lines)
+    assert ledger.batch_spend(_latest_batch_id(ledger)) == 1.0
+
+    reason, runner, clock, _ = _run(
+        until_hours=1,
+        steps=[
+            {"state": "RATE_LIMITED", "offset": 3600},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "UNTIL"
+    assert len(runner.calls) == 1
+    assert clock.sleeps == []
+
+    reason, runner, clock, _ = _run(
+        until_hours=20 / 60,
+        steps=[
+            {"state": "RATE_LIMITED", "resets_at": None},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "UNTIL"
+    assert len(runner.calls) == 1
+    assert clock.sleeps == []
+
+    reason, runner, clock, _ = _run(
+        until_hours=0.5,
+        steps=[
+            {"state": "RATE_LIMITED", "advance": 3600, "offset": 3 * 3600},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "UNTIL"
+    assert len(runner.calls) == 1
+    assert clock.sleeps == []
+
+    reason, runner, clock, _ = _run(
+        until_hours=2,
+        steps=[
+            {"state": "RATE_LIMITED", "resets_at": None},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "DRAINED"
+    assert len(runner.calls) == 2
+    assert clock.sleeps == [3600.0]
+
+    reason, runner, clock, _ = _run(
+        until_hours=None,
+        steps=[
+            {"state": "RATE_LIMITED", "advance": 3600, "offset": 60},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "DRAINED"
+    assert len(runner.calls) == 2
+    assert clock.sleeps == [60.0]
+
+    reason, runner, clock, _ = _run(
+        until_hours=2,
+        steps=[
+            {"state": "RATE_LIMITED", "advance": 3600, "offset": 90 * 60},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "UNTIL"
+    assert len(runner.calls) == 1
+    assert clock.sleeps == []
+
+    reason, runner, clock, _ = _run(
+        until_hours=None,
+        budget=15.0,
+        spec_budget=10.0,
+        steps=[
+            {"state": "RATE_LIMITED", "cost": 6.0, "offset": 60},
+            {"state": "READY_FOR_REVIEW"},
+        ],
+    )
+    assert reason == "BUDGET"
+    assert len(runner.calls) == 1
+
+
+def test_a_stack_batch_waits_an_hour_when_it_cannot_read_the_reset_time(
+    ledger, repo_id, monkeypatch
+):
+    """`resets_at` values `_wait_out_rate_limit` cannot read all wait an
+    hour. Only a value strictly after now and no more than six hours on is
+    read, and waited in full."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    start = datetime(2030, 1, 1, 2, 0)
+    clock = AdvancingClock(start)
+    steps = (
+        [{"state": "RATE_LIMITED", "resets_at": None}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**20}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**12}]
+        + [{"state": "RATE_LIMITED", "offset": 0}]
+        + [{"state": "RATE_LIMITED", "offset": -60}]
+        + [{"state": "RATE_LIMITED", "offset": 7 * 3600}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**400}]
+        + [{"state": "RATE_LIMITED", "resets_at": -(10**400)}]
+        + [{"state": "RATE_LIMITED", "offset": 6 * 3600}]
+        + [{"state": "READY_FOR_REVIEW"}]
+    )
+    runner = RateLimitScript(ledger, repo_id, clock, {"TE-1": steps})
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        [_candidate("TE-1")],
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert runner.calls == [("TE-1", None)] * 10
+    assert clock.sleeps == [3600.0] * 8 + [21600.0]
+    rate_lines = [
+        line
+        for line in lines
+        if line.startswith(f"{'TE-1':<10}") and "rate limited" in line
+    ]
+    assert len(rate_lines) == 9

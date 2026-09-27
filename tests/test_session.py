@@ -4460,6 +4460,35 @@ def test_an_unreadable_reset_time_still_stops_rate_limited(monkeypatch, tmp_path
         assert not any(str(resets_at) in line for line in cell.watched), resets_at
 
 
+def test_a_rate_limited_outcome_carries_the_reset_time(monkeypatch, tmp_path):
+    """`CellOutcome.resets_at` carries the same value the `TaskOutcome` event
+    does: a clean `int` kept as itself, and everything `_resets_at_fields`
+    calls unreadable turned to `None` (SA-0148)."""
+    cases = [
+        (1755800000, 1755800000),
+        (10**20, 10**20),
+        (None, None),
+        ("soon", None),
+        ([1], None),
+        (float("nan"), None),
+    ]
+    for i, (resets_at, expected) in enumerate(cases):
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / str(i),
+            cell=cell,
+            turns=[
+                implement.AgentFailed(
+                    "api_error", attempt=_rejected(resets_at=resets_at)
+                )
+            ],
+        )
+        assert outcome.resets_at == expected, resets_at
+        if expected is not None:
+            assert isinstance(outcome.resets_at, int), resets_at
+
+
 def _task_outcome(tmp_path, spec_id="SY-1"):
     """The one `TaskOutcome` a `use_default_emit=True` run logged."""
     from saffron.events import TaskOutcome, read_log

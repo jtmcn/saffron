@@ -342,6 +342,9 @@ class CellOutcome:
     # notes turn runs, and on one that ran it but had nothing to say.
     notes: str = ""
     notes_sha256: str = ""
+    # The reset time a closed window reported, the same value the RATE_LIMITED
+    # TaskOutcome carries. None on every path that never raised RateLimited.
+    resets_at: int | None = None
 
 
 def repair_decision(
@@ -2881,6 +2884,7 @@ def _drive_cell(
             spent_usd=spent_read_back,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),
+            resets_at=resets_at,
         )
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight
