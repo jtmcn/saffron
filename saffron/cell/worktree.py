@@ -303,12 +303,20 @@ def commit_dirty(container: str, message: str) -> bool:
     raise runtime.CellRuntimeError(f"commit failed: {commit.stderr.strip()}")
 
 
+STATUS_ARGS = ("status", "--porcelain", "-z", "--untracked-files=all")
+
+
 def dirty_paths(container: str) -> list[str]:
     """Paths with uncommitted changes, verbatim, untracked files included."""
-    done = _git(container, "status", "--porcelain", "-z", "--untracked-files=all")
+    done = _git(container, *STATUS_ARGS)
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"status failed: {done.stderr.strip()}")
-    chunks = [chunk for chunk in done.stdout.split("\0") if chunk]
+    return porcelain_paths(done.stdout)
+
+
+def porcelain_paths(stdout: str) -> list[str]:
+    """The paths in `git status` output produced with `STATUS_ARGS`."""
+    chunks = [chunk for chunk in stdout.split("\0") if chunk]
     paths: list[str] = []
     index = 0
     while index < len(chunks):
