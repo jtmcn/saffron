@@ -20,6 +20,7 @@ from saffron.agents.findings import Finding, Severity, anchor
 from saffron.cell import session
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.contract import GateResult
+from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
 from saffron.repos.mirror import GitError, _git, file_at
@@ -65,7 +66,7 @@ def _read_head(mirror: Path, head: str, path: str) -> str | None:
 
 def _layer_task(ledger: Ledger, task_key: str) -> tuple[int, int]:
     """The task and run a record key names. No public `Ledger` method maps a
-    key to either (`saffron/ledger.py` is closed to this spec)."""
+    key to either."""
     row = ledger._db.execute(
         "SELECT task_id, run_id FROM tasks WHERE record_key = ?", (task_key,)
     ).fetchone()
@@ -76,22 +77,22 @@ def _layer_task(ledger: Ledger, task_key: str) -> tuple[int, int]:
 
 def _reasons_by_probe(entries: list[dict]) -> dict[tuple[str, str, str], str]:
     return {
-        (e["probe"]["file"], e["probe"]["find"], e["probe"]["replace"]): e["reason"]
+        review.probe_key(Mutant.model_validate(e["probe"])): e["reason"]
         for e in entries
     }
 
 
 def _qualify_range(
     ledger: Ledger,
-    findings: list[Finding],
+    inputs: list[Finding],
     *,
     base: str,
+    head: str,
     task_id: int,
     task_key: str,
     run_id: int,
     spec_id: str,
     branch: str,
-    diff: str,
     mirror: Path,
     repo: Path,
     gates_dir: Path,
@@ -101,10 +102,12 @@ def _qualify_range(
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> list[Qualified]:
-    """One range's already-anchored findings, probed and decided, each
-    recorded under `task_id` in the order given. Builds no group.
+    """One range's findings, anchored over `base..head`, probed and decided,
+    each recorded under `task_id` in the order given. Builds no group.
     `qualify` does, across every range's own call, so a later one can
     extend an earlier one's."""
+    diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
+    findings = anchor(inputs, diff, read_head=partial(_read_head, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
     probed = [f for f in findings if f.anchored and f.probe is not None]
     reasons: dict[tuple[str, str, str], str] = {}
@@ -151,7 +154,7 @@ def _decide(f: Finding, reasons: dict[tuple[str, str, str], str]) -> tuple[str, 
         return "unanchored", ""
     if f.probe is None:
         return ("note", "") if f.severity == "note" else ("qualified", "")
-    key = (f.probe.file, f.probe.find, f.probe.replace)
+    key = review.probe_key(f.probe)
     if f.probe_verdict == "killed":
         return "killed", ""
     if f.probe_verdict == "survived":
@@ -187,19 +190,16 @@ def qualify(
         fields = end_review.layer_fields(ledger, layer.task_key)
         task_id, run_id = _layer_task(ledger, layer.task_key)
         head = fields.head
-        diff = _git(mirror, "diff", *DIFF_FLAGS, f"{head}^..{head}", strip=False)
-        inputs = [f for r in layer.reviews for f in r.findings]
-        anchored = anchor(inputs, diff, read_head=partial(_read_head, mirror, head))
         decided = _qualify_range(
             ledger,
-            anchored,
+            [f for r in layer.reviews for f in r.findings],
             base=f"{head}^",
+            head=head,
             task_id=task_id,
             task_key=layer.task_key,
             run_id=run_id,
             spec_id=fields.spec_id,
             branch=fields.branch,
-            diff=diff,
             mirror=mirror,
             repo=repo,
             gates_dir=gates_dir,

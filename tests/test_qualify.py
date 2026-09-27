@@ -157,7 +157,7 @@ def _spec_findings_te2() -> list[Finding]:
         ),
         _finding(
             "spec",
-            "concern",
+            "note",
             "src/c.py",
             6,
             "f10",
@@ -410,16 +410,21 @@ def test_each_layers_findings_are_anchored_probed_and_grouped_by_layer_and_file(
         (te1_key, "src/c.py", [("c-c", "concern")]),
     ]
 
-    pool = [(q.finding.claim, q.outcome, q.reason) for q in result.pool]
+    pool = [(q.task_key, q.finding.claim, q.outcome, q.reason) for q in result.pool]
     assert pool == [
-        ("f3", "unverified", "src/c.py: find text not found for x"),
-        ("f5", "unanchored", ""),
-        ("f7", "unverified", "src/c.py: find text not found for x"),
-        ("f8", "unverified", "tests/test_c.py is a test; a probe must target source"),
-        ("f10", "unverified", "src/c.py: find text not found for y"),
-        ("s1", "note", ""),
-        ("s3", "unanchored", ""),
-        ("c-m", "unanchored", ""),
+        (te2_key, "f3", "unverified", "src/c.py: find text not found for x"),
+        (te2_key, "f5", "unanchored", ""),
+        (te2_key, "f7", "unverified", "src/c.py: find text not found for x"),
+        (
+            te2_key,
+            "f8",
+            "unverified",
+            "tests/test_c.py is a test; a probe must target source",
+        ),
+        (te2_key, "f10", "unverified", "src/c.py: find text not found for y"),
+        (te2_key, "s1", "note", ""),
+        (te2_key, "s3", "unanchored", ""),
+        (te1_key, "c-m", "unanchored", ""),
     ]
 
 
