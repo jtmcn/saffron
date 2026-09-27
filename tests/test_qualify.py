@@ -197,6 +197,21 @@ def _spec_findings_te1() -> list[Finding]:
     ]
 
 
+def _in_cell_findings_te2() -> list[Finding]:
+    """`TE-2`'s own REVIEW concerns, plus two decoys: `i3` and `i4` are not
+    `concern` severity, so `qualify` never reads them at all."""
+    return [
+        _finding("correctness", "concern", "src/b.py", 1, "i1"),
+        _finding("adequacy", "note", "src/b.py", 2, "i3"),
+        _finding("correctness", "blocker", "src/b.py", 2, "i4"),
+        _finding("adequacy", "concern", "src/b.py", 1, "i6"),
+    ]
+
+
+def _in_cell_findings_te0() -> list[Finding]:
+    return [_finding("correctness", "concern", "src/m.py", 1, "u1")]
+
+
 _VERDICT_BY_EDIT: dict[tuple[str, str], Verdict] = {
     ("beta_rate", "beta_gone"): "survived",
     ("beta_l3", "beta_k"): "killed",
@@ -206,16 +221,24 @@ _VERDICT_BY_EDIT: dict[tuple[str, str], Verdict] = {
 }
 
 
-def _install_probe_double(monkeypatch, h1_sha: str) -> list[dict]:
+def _install_probe_double(
+    monkeypatch, shas: dict[str, str], raise_on: frozenset[str] = frozenset()
+) -> list[dict]:
     """`session.probe_findings`'s own dedup and ordering, over a fixed
-    verdict table rather than a real cell. Raises `KeyError` for any
-    `spec.base_sha` but `H1`, the way a lookup keyed on it would."""
+    verdict table rather than a real cell. Raises `RuntimeError` for a
+    `spec.base_sha` named in `raise_on`, and `KeyError` for any sha this
+    fixture never committed."""
     calls: list[dict] = []
+    by_sha = {sha: name for name, sha in shas.items()}
 
     def fake(targets, **kw):
-        if kw["spec"].base_sha != h1_sha:
-            raise KeyError(kw["spec"].base_sha)
+        base_sha = kw["spec"].base_sha
+        name = by_sha.get(base_sha)
+        if name is None:
+            raise KeyError(base_sha)
         calls.append({"targets": targets, **kw})
+        if name in raise_on:
+            raise RuntimeError(f"no cell at {name}")
         by_key: dict[tuple, list[Finding]] = {}
         for f in targets:
             by_key.setdefault(review.probe_key(f.probe), []).append(f)
@@ -267,12 +290,13 @@ class _Built:
     gates: dict[str, Path]
     created: set[str]
     note: object
+    join_review: review.LensReview | None = None
 
     def run(self, qualify_fn):
         return qualify_fn(
             self.ledger,
             self.layers,
-            None,
+            self.join_review,
             mirror=self.mirror,
             repo=self.repo,
             gates_dir=self.gates_dir,
@@ -291,7 +315,26 @@ def _key(ledger: Ledger, task_id: int) -> str:
     return key
 
 
-def _build(tmp_path: Path, monkeypatch) -> _Built:
+def _spec_key(ledger: Ledger, spec_id: str) -> str:
+    """The record key of the one task this fixture ever creates for
+    `spec_id`."""
+    return _key(
+        ledger,
+        ledger._db.execute(
+            "SELECT task_id FROM tasks WHERE spec_id = ?", (spec_id,)
+        ).fetchone()["task_id"],
+    )
+
+
+def _build(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    in_cell: bool = False,
+    join: bool = False,
+    te0: bool = False,
+    raise_on: frozenset[str] = frozenset(),
+) -> _Built:
     mirror, shas = _stack_mirror(tmp_path, monkeypatch)
     ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
     repo_id = ledger.upsert_repo(
@@ -345,8 +388,10 @@ def _build(tmp_path: Path, monkeypatch) -> _Built:
     ledger.record_findings(task2, _join_findings())
     ledger.record_findings(task2, _spec_findings_te2() + _standards_findings_te2())
     ledger.record_findings(task1, _spec_findings_te1())
+    if in_cell:
+        ledger.record_findings(task2, _in_cell_findings_te2())
 
-    calls = _install_probe_double(monkeypatch, shas["H1"])
+    calls = _install_probe_double(monkeypatch, shas, raise_on)
 
     layers = [
         LayerReview(
@@ -361,6 +406,27 @@ def _build(tmp_path: Path, monkeypatch) -> _Built:
             [review.LensReview("spec", _spec_findings_te1())],
         ),
     ]
+
+    if te0:
+        run0 = ledger.create_run(repo_id, base_sha=shas["A"])
+        task0 = ledger.create_task(
+            run0, spec_id="TE-0", spec_sha="s" * 64, branch="saffron/TE-0"
+        )
+        ledger.record_gate_result(
+            GateResult(gate="tests", status="pass", tool="pytest 8.0", collected=[]),
+            run_id=run0,
+        )
+        ledger.set_task_package(
+            task0, "READY_FOR_REVIEW", "saffron/TE-0", shas["M"], "https://pr/0"
+        )
+        ledger.record_stack_layer(
+            task0, position=0, predecessor_task_id=None, generation=1
+        )
+        ledger.record_findings(task0, _in_cell_findings_te0())
+        layers.append(LayerReview(_key(ledger, task0), []))
+
+    join_review = review.LensReview("join", _join_findings()) if join else None
+
     return _Built(
         ledger,
         layers,
@@ -374,6 +440,7 @@ def _build(tmp_path: Path, monkeypatch) -> _Built:
         gates={"tests": Path("/gates-sentinel/tests")},
         created=set(),
         note=lambda step, ok, detail: None,
+        join_review=join_review,
     )
 
 
@@ -536,3 +603,258 @@ def test_each_layers_qualifications_are_facts_numbered_within_its_task(
 
     f5 = te2[5]
     assert (f5["probe_verdict"], f5["outcome"]) == (None, "unanchored")
+
+
+def test_a_layers_own_review_concerns_follow_its_end_review_findings(
+    tmp_path, monkeypatch
+):
+    from saffron.qualify import qualify
+
+    built = _build(tmp_path, monkeypatch, in_cell=True, te0=True)
+    result = built.run(qualify)
+
+    te1_key = _spec_key(built.ledger, "TE-1")
+    te2_key = _spec_key(built.ledger, "TE-2")
+    te0_key = _spec_key(built.ledger, "TE-0")
+
+    groups = [
+        (
+            g.task_key,
+            g.file,
+            [(f.finding.claim, f.finding.severity) for f in g.findings],
+        )
+        for g in result.groups
+    ]
+    assert groups == [
+        (te2_key, "src/c.py", [("f6", "concern"), ("f4", "blocker")]),
+        (
+            te2_key,
+            "src/b.py",
+            [("f1", "blocker"), ("s2", "blocker"), ("i1", "concern")],
+        ),
+        (te1_key, "src/a.py", [("c-a", "concern")]),
+        (te1_key, "src/c.py", [("c-c", "concern")]),
+        (te0_key, "src/m.py", [("u1", "concern")]),
+    ]
+
+    pool = [(q.task_key, q.finding.claim, q.outcome, q.reason) for q in result.pool]
+    assert pool == [
+        (te2_key, "f3", "unverified", "src/c.py: find text not found for x"),
+        (te2_key, "f5", "unanchored", ""),
+        (te2_key, "f7", "unverified", "src/c.py: find text not found for x"),
+        (
+            te2_key,
+            "f8",
+            "unverified",
+            "tests/test_c.py is a test; a probe must target source",
+        ),
+        (te2_key, "f10", "unverified", "src/c.py: find text not found for y"),
+        (te2_key, "s1", "note", ""),
+        (te2_key, "s3", "unanchored", ""),
+        (te2_key, "i6", "unverified", "its REVIEW probe did not survive"),
+        (te1_key, "c-m", "unanchored", ""),
+    ]
+
+    def rows(spec_id: str) -> list:
+        task_key = _spec_key(built.ledger, spec_id)
+        return list(
+            built.ledger._db.execute(
+                "SELECT * FROM qualifications WHERE task_key = ? ORDER BY position",
+                (task_key,),
+            )
+        )
+
+    assert [r["claim"] for r in rows("TE-2")] == [
+        "f6",
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+        "f5",
+        "f7",
+        "f8",
+        "f10",
+        "s1",
+        "s2",
+        "s3",
+        "i1",
+        "i6",
+    ]
+    assert [r["claim"] for r in rows("TE-1")] == ["c-a", "c-m", "c-c"]
+    assert [r["claim"] for r in rows("TE-0")] == ["u1"]
+
+
+def test_the_join_is_walked_first_over_the_stack_and_belongs_to_the_top_layer(
+    tmp_path, monkeypatch
+):
+    from saffron.qualify import qualify
+
+    built = _build(
+        tmp_path, monkeypatch, in_cell=True, join=True, raise_on=frozenset({"M"})
+    )
+    result = built.run(qualify)
+
+    te1_key = _spec_key(built.ledger, "TE-1")
+    te2_key = _spec_key(built.ledger, "TE-2")
+
+    groups = [
+        (
+            g.task_key,
+            g.file,
+            [(f.finding.claim, f.finding.severity) for f in g.findings],
+        )
+        for g in result.groups
+    ]
+    assert groups == [
+        (
+            te2_key,
+            "src/c.py",
+            [("j1", "concern"), ("f6", "concern"), ("f4", "blocker")],
+        ),
+        (
+            te2_key,
+            "src/b.py",
+            [("f1", "blocker"), ("s2", "blocker"), ("i1", "concern")],
+        ),
+        (te1_key, "src/a.py", [("c-a", "concern")]),
+        (te1_key, "src/c.py", [("c-c", "concern")]),
+    ]
+
+    pool = [(q.task_key, q.finding.claim, q.outcome, q.reason) for q in result.pool]
+    assert pool == [
+        (te2_key, "j2", "unanchored", ""),
+        (te2_key, "j3", "unverified", "no cell at M"),
+        (te2_key, "f3", "unverified", "src/c.py: find text not found for x"),
+        (te2_key, "f5", "unanchored", ""),
+        (te2_key, "f7", "unverified", "src/c.py: find text not found for x"),
+        (
+            te2_key,
+            "f8",
+            "unverified",
+            "tests/test_c.py is a test; a probe must target source",
+        ),
+        (te2_key, "f10", "unverified", "src/c.py: find text not found for y"),
+        (te2_key, "s1", "note", ""),
+        (te2_key, "s3", "unanchored", ""),
+        (te2_key, "i6", "unverified", "its REVIEW probe did not survive"),
+        (te1_key, "c-m", "unanchored", ""),
+    ]
+
+    fresh = tmp_path / "second"
+    fresh.mkdir()
+    built2 = _build(
+        fresh,
+        monkeypatch,
+        in_cell=True,
+        join=True,
+        raise_on=frozenset({"M", "H1"}),
+    )
+    result2 = built2.run(qualify)
+
+    te1_key2 = _spec_key(built2.ledger, "TE-1")
+    te2_key2 = _spec_key(built2.ledger, "TE-2")
+
+    groups2 = [
+        (
+            g.task_key,
+            g.file,
+            [(f.finding.claim, f.finding.severity) for f in g.findings],
+        )
+        for g in result2.groups
+    ]
+    assert groups2 == [
+        (te2_key2, "src/c.py", [("j1", "concern"), ("f6", "concern")]),
+        (te2_key2, "src/b.py", [("s2", "blocker"), ("i1", "concern")]),
+        (te1_key2, "src/a.py", [("c-a", "concern")]),
+        (te1_key2, "src/c.py", [("c-c", "concern")]),
+    ]
+
+    pool2 = [(q.task_key, q.finding.claim, q.outcome, q.reason) for q in result2.pool]
+    assert pool2 == [
+        (te2_key2, "j2", "unanchored", ""),
+        (te2_key2, "j3", "unverified", "no cell at M"),
+        (te2_key2, "f1", "unverified", "no cell at H1"),
+        (te2_key2, "f2", "unverified", "no cell at H1"),
+        (te2_key2, "f3", "unverified", "no cell at H1"),
+        (te2_key2, "f4", "unverified", "no cell at H1"),
+        (te2_key2, "f5", "unanchored", ""),
+        (te2_key2, "f7", "unverified", "no cell at H1"),
+        (te2_key2, "f8", "unverified", "no cell at H1"),
+        (te2_key2, "f10", "unverified", "no cell at H1"),
+        (te2_key2, "s1", "note", ""),
+        (te2_key2, "s3", "unanchored", ""),
+        (te2_key2, "i6", "unverified", "its REVIEW probe did not survive"),
+        (te1_key2, "c-m", "unanchored", ""),
+    ]
+
+
+def test_the_joins_probes_run_on_the_stack_counted_from_the_bottom_run(
+    tmp_path, monkeypatch
+):
+    from saffron.qualify import qualify
+
+    built = _build(tmp_path, monkeypatch, join=True, raise_on=frozenset({"M"}))
+    built.run(qualify)
+
+    assert len(built.calls) == 2
+    join_call = built.calls[0]
+    assert [f.claim for f in join_call["targets"]] == ["j3"]
+    assert join_call["spec"].base_sha == built.shas["M"]
+    assert join_call["spec"].stacked_on is None
+    assert join_call["spec"].spec_id == "TE-2"
+    assert join_call["spec"].branch == "saffron/TE-2"
+    assert "+alpha_l2_new" in join_call["patch"]
+    assert "moved_main_only" not in join_call["patch"]
+    assert [r.collected for r in join_call["base_results"]] == [[], None]
+    for name in ("repo", "gates_dir", "thread_env", "gates", "created", "note"):
+        assert join_call[name] is getattr(built, name)
+    assert join_call["test_paths"] is built.test_paths
+    assert join_call["mirror"] is built.mirror
+
+    layer_call = built.calls[1]
+    assert layer_call["spec"].base_sha == built.shas["H1"]
+
+
+def test_the_joins_qualifications_come_first_under_the_top_layer(tmp_path, monkeypatch):
+    from saffron.qualify import qualify
+
+    built = _build(
+        tmp_path, monkeypatch, in_cell=True, join=True, raise_on=frozenset({"M"})
+    )
+    built.run(qualify)
+
+    def rows(spec_id: str) -> list:
+        task_key = _spec_key(built.ledger, spec_id)
+        return list(
+            built.ledger._db.execute(
+                "SELECT * FROM qualifications WHERE task_key = ? ORDER BY position",
+                (task_key,),
+            )
+        )
+
+    te2 = rows("TE-2")
+    assert len(te2) == 17
+    assert [(r["claim"], r["outcome"]) for r in te2[:3]] == [
+        ("j1", "qualified"),
+        ("j2", "unanchored"),
+        ("j3", "unverified"),
+    ]
+    assert [r["claim"] for r in te2[3:]] == [
+        "f6",
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+        "f5",
+        "f7",
+        "f8",
+        "f10",
+        "s1",
+        "s2",
+        "s3",
+        "i1",
+        "i6",
+    ]
+
+    te1 = rows("TE-1")
+    assert [r["claim"] for r in te1] == ["c-a", "c-m", "c-c"]

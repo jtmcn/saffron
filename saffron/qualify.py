@@ -3,9 +3,12 @@ of backlog item b-792ab2). `saffron/task.py:165-166` is what makes the tree
 this reads stacked. This module never writes one.
 
 The host decides, never the model. Each finding is anchored against its own
-layer's diff, probed if it carries a probe, and filed as `qualified`,
+range's diff, probed if it carries a probe, and filed as `qualified`,
 `unverified`, `unanchored`, `note` or `killed`. A `qualified` finding joins a
-`FollowUpGroup`. Everything else but `killed` joins the flat `pool`.
+`FollowUpGroup`. Everything else but `killed` joins the flat `pool`. The join
+lens's findings are walked first, over the whole stack, under the top
+layer's task. Each layer is then walked top down: its end-review findings,
+then its own in-cell REVIEW concerns.
 """
 
 from __future__ import annotations
@@ -82,6 +85,24 @@ def _reasons_by_probe(entries: list[dict]) -> dict[tuple[str, str, str], str]:
     }
 
 
+def _in_cell_concerns(ledger: Ledger, task_id: int) -> list[Finding]:
+    """A layer's own REVIEW concerns: a finding of a lens in
+    `review.LENSES`, filed as `concern`, rebuilt with no probe, in the
+    order `Ledger.findings` recorded them. The `findings` table keeps no
+    probe, so none of these reaches the probe call."""
+    return [
+        Finding(
+            lens=row["lens"],
+            severity=row["severity"],
+            file=row["file"],
+            line=row["line"],
+            claim=row["claim"],
+        )
+        for row in ledger.findings(task_id)
+        if row["lens"] in review.LENSES and row["severity"] == "concern"
+    ]
+
+
 def _qualify_range(
     ledger: Ledger,
     inputs: list[Finding],
@@ -123,21 +144,29 @@ def _qualify_range(
             body="",
         )
         base_results: Sequence[GateResult] = ledger.baseline_results(run_id)
-        entries = session.probe_findings(
-            probed,
-            spec=spec,
-            repo=repo,
-            mirror=mirror,
-            gates_dir=gates_dir,
-            thread_env=thread_env,
-            test_paths=test_paths,
-            base_results=base_results,
-            gates=gates,
-            patch=diff,
-            created=created,
-            note=note,
-        )
-        reasons = _reasons_by_probe(entries)
+        try:
+            entries = session.probe_findings(
+                probed,
+                spec=spec,
+                repo=repo,
+                mirror=mirror,
+                gates_dir=gates_dir,
+                thread_env=thread_env,
+                test_paths=test_paths,
+                base_results=base_results,
+                gates=gates,
+                patch=diff,
+                created=created,
+                note=note,
+            )
+        except RuntimeError as exc:
+            # The cell this call needed never came up (ADR 7, principle 28).
+            reasons = {}
+            for f in probed:
+                assert f.probe is not None  # this loop built `probed` from it
+                reasons[review.probe_key(f.probe)] = str(exc)
+        else:
+            reasons = _reasons_by_probe(entries)
 
     decided: list[Qualified] = []
     for f in findings:
@@ -153,6 +182,10 @@ def _decide(f: Finding, reasons: dict[tuple[str, str, str], str]) -> tuple[str, 
     if not f.anchored:
         return "unanchored", ""
     if f.probe is None:
+        if f.lens == "adequacy":
+            # A real adequacy finding always carries a probe (§5.5). One
+            # without it is an in-cell concern its probe did not survive.
+            return "unverified", "its REVIEW probe did not survive"
         return ("note", "") if f.severity == "note" else ("qualified", "")
     key = review.probe_key(f.probe)
     if f.probe_verdict == "killed":
@@ -176,44 +209,75 @@ def qualify(
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> Qualification:
-    """Every reached layer's end-review findings, anchored, probed and
-    decided, top down. `join` is not walked yet. `SA-0147` replaces this
-    guard once it is."""
-    if join is not None:
-        raise ValueError("the join lens is not walked yet (SA-0147)")
-
+    """The join's findings first, over the whole stack, then every layer's
+    end-review findings and in-cell concerns, top down. Groups and pools
+    every range's own call across the whole walk, so the join's findings
+    and the top layer's own can share one group."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
-    for layer in layers:
-        if not layer.reviews:
-            continue
-        fields = end_review.layer_fields(ledger, layer.task_key)
-        task_id, run_id = _layer_task(ledger, layer.task_key)
-        head = fields.head
-        decided = _qualify_range(
-            ledger,
-            [f for r in layer.reviews for f in r.findings],
-            base=f"{head}^",
-            head=head,
-            task_id=task_id,
-            task_key=layer.task_key,
-            run_id=run_id,
-            spec_id=fields.spec_id,
-            branch=fields.branch,
-            mirror=mirror,
-            repo=repo,
-            gates_dir=gates_dir,
-            thread_env=thread_env,
-            test_paths=test_paths,
-            gates=gates,
-            created=created,
-            note=note,
-        )
+
+    def _fold(decided: list[Qualified]) -> None:
         for q in decided:
             if q.outcome == "qualified":
                 groups.setdefault((q.task_key, q.finding.file), []).append(q)
             elif q.outcome != "killed":
                 pool.append(q)
+
+    if join is not None and layers:
+        top = end_review.layer_fields(ledger, layers[0].task_key)
+        bottom = end_review.layer_fields(ledger, layers[-1].task_key)
+        top_task_id, _ = _layer_task(ledger, layers[0].task_key)
+        _, bottom_run_id = _layer_task(ledger, layers[-1].task_key)
+        _fold(
+            _qualify_range(
+                ledger,
+                list(join.findings),
+                base=f"{bottom.head}^",
+                head=top.head,
+                task_id=top_task_id,
+                task_key=layers[0].task_key,
+                run_id=bottom_run_id,
+                spec_id=top.spec_id,
+                branch=top.branch,
+                mirror=mirror,
+                repo=repo,
+                gates_dir=gates_dir,
+                thread_env=thread_env,
+                test_paths=test_paths,
+                gates=gates,
+                created=created,
+                note=note,
+            )
+        )
+
+    for layer in layers:
+        task_id, run_id = _layer_task(ledger, layer.task_key)
+        inputs = [f for r in layer.reviews for f in r.findings]
+        inputs += _in_cell_concerns(ledger, task_id)
+        if not inputs:
+            continue
+        fields = end_review.layer_fields(ledger, layer.task_key)
+        _fold(
+            _qualify_range(
+                ledger,
+                inputs,
+                base=f"{fields.head}^",
+                head=fields.head,
+                task_id=task_id,
+                task_key=layer.task_key,
+                run_id=run_id,
+                spec_id=fields.spec_id,
+                branch=fields.branch,
+                mirror=mirror,
+                repo=repo,
+                gates_dir=gates_dir,
+                thread_env=thread_env,
+                test_paths=test_paths,
+                gates=gates,
+                created=created,
+                note=note,
+            )
+        )
 
     return Qualification(
         groups=[
