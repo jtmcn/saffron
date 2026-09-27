@@ -2229,3 +2229,439 @@ def test_a_stack_batch_waits_an_hour_when_it_cannot_read_the_reset_time(
         if line.startswith(f"{'TE-1':<10}") and "rate limited" in line
     ]
     assert len(rate_lines) == 9
+
+
+def _review_session(findings=(), *, cost=0.5, error=None, resets_at=None, fenced=True):
+    """A `SpecReviewSession` fixture for the review witnesses below. Imports
+    lazily, so a reverted `saffron/spec_review.py` fails a calling test at
+    call time rather than failing collection for the whole file."""
+    import json
+
+    from saffron.spec_review import SpecReviewSession
+
+    if fenced:
+        body = json.dumps({"findings": list(findings)})
+        text = f"```json\n{body}\n```"
+    else:
+        text = "spec review text with no fenced block"
+    return SpecReviewSession(text=text, cost_usd=cost, error=error, resets_at=resets_at)
+
+
+def _clean_review(**kwargs):
+    return _review_session([], **kwargs)
+
+
+def _blocker(fixes=None) -> dict:
+    return {
+        "severity": "blocker",
+        "claim": "c",
+        "criterion": "1",
+        "file": "f",
+        "line": 1,
+        "fixes": fixes,
+    }
+
+
+def _concern(fixes) -> dict:
+    return {
+        "severity": "concern",
+        "claim": "c",
+        "criterion": "1",
+        "file": "f",
+        "line": 1,
+        "fixes": fixes,
+    }
+
+
+def _note() -> dict:
+    return {"severity": "note", "claim": "c", "criterion": "1", "file": "f", "line": 1}
+
+
+class ReviewScript:
+    """A `review` double keyed by spec id. Each call pops the next queued
+    session for that spec id and records `(spec id, predecessor spec id or
+    None)`, in order — `run_stack_batch`'s own review witnesses' one
+    arrangement."""
+
+    def __init__(self, sessions):
+        self._sessions = {spec_id: list(queue) for spec_id, queue in sessions.items()}
+        self.calls: list[tuple[str, str | None]] = []
+
+    def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+        self.calls.append(
+            (candidate.spec.id, predecessor.spec.id if predecessor else None)
+        )
+        return self._sessions[candidate.spec.id].pop(0)
+
+
+def test_a_stack_batch_runs_a_spec_only_when_its_own_review_routes_it_to_run(
+    ledger, repo_id
+):
+    """A `blocker`, whatever its `fixes`, escalates and never reaches the
+    runner. An unreadable review raises and never reaches the runner
+    either. A `depends_on` chain that reaches either kind of miss is
+    refused before its own review runs. Every other spec runs on the last
+    layer, the same predecessor its own review was given."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-1"),
+        _candidate("TE-2"),
+        _candidate("TE-3"),
+        _candidate("TE-4"),
+        _candidate("TE-5"),
+        _candidate("TE-6"),
+        _candidate("TE-7"),
+        _candidate("TE-12", depends_on=["TE-1"]),
+        _candidate("TE-8"),
+        _candidate("TE-16", depends_on=["TE-99"]),
+        _candidate("TE-9", depends_on=["TE-6", "TE-2"]),
+        _candidate("TE-10", depends_on=["TE-9"]),
+        _candidate("TE-11", depends_on=["TE-7"]),
+        _candidate("TE-13", depends_on=["TE-3"]),
+        _candidate("TE-14", depends_on=["TE-12", "TE-1"]),
+        _candidate("TE-17"),
+        _candidate("TE-18"),
+        _candidate("TE-15"),
+    ]
+    reviews = ReviewScript(
+        {
+            "TE-1": [_clean_review()],
+            "TE-2": [_review_session([_blocker("scope"), _blocker("build"), _note()])],
+            "TE-3": [_review_session([_blocker("build")])],
+            "TE-4": [_review_session([_blocker("witness")])],
+            "TE-5": [_review_session([_blocker()])],
+            "TE-6": [_review_session([_concern("scope"), _note()])],
+            "TE-7": [_review_session([], error="review session failed")],
+            "TE-12": [_clean_review()],
+            "TE-8": [_review_session([], fenced=False)],
+            "TE-16": [_clean_review()],
+            "TE-14": [_clean_review()],
+            "TE-17": [_clean_review()],
+            "TE-18": [_clean_review()],
+            "TE-15": [_clean_review()],
+        }
+    )
+
+    # `_spend_task`, not `_spend`: two layers sharing `_outcome`'s default
+    # `task_id=1` would collide on `record_stack_layer`'s own row.
+    def _layer(state="READY_FOR_REVIEW"):
+        run_id, task_id = _spend_task(ledger, repo_id, 1.0)
+        return _outcome(state=state, run_id=run_id, task_id=task_id)
+
+    results = {
+        "TE-1": _layer(),
+        "TE-6": _layer(),
+        "TE-12": _layer(),
+        "TE-16": _layer(),
+        "TE-14": _layer(),
+        "TE-17": _layer(state="EXHAUSTED"),
+        "TE-18": _layer(),
+        "TE-15": _layer(),
+    }
+    runner = FakeStackRunner(results)
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        emit=lines.append,
+        review=reviews,
+    )
+
+    assert reason == "DRAINED"
+    assert runner.calls == [
+        ("TE-1", None),
+        ("TE-6", "TE-1"),
+        ("TE-12", "TE-6"),
+        ("TE-16", "TE-12"),
+        ("TE-14", "TE-16"),
+        ("TE-17", "TE-14"),
+        ("TE-18", "TE-14"),
+        ("TE-15", "TE-18"),
+    ]
+    assert reviews.calls == [
+        ("TE-1", None),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-1"),
+        ("TE-4", "TE-1"),
+        ("TE-5", "TE-1"),
+        ("TE-6", "TE-1"),
+        ("TE-7", "TE-6"),
+        ("TE-12", "TE-6"),
+        ("TE-8", "TE-12"),
+        ("TE-16", "TE-12"),
+        ("TE-14", "TE-16"),
+        ("TE-17", "TE-14"),
+        ("TE-18", "TE-14"),
+        ("TE-15", "TE-18"),
+    ]
+
+    escalated = {line.split()[0]: line for line in lines if " escalated  " in line}
+    assert set(escalated) == {"TE-2", "TE-3", "TE-4", "TE-5"}
+    assert escalated["TE-2"].strip().endswith("2")
+    assert escalated["TE-3"].strip().endswith("1")
+    assert escalated["TE-4"].strip().endswith("1")
+    assert escalated["TE-5"].strip().endswith("1")
+
+    unreviewed = {line.split()[0]: line for line in lines if " unreviewed  " in line}
+    assert set(unreviewed) == {"TE-7", "TE-8"}
+    assert "review session failed" in unreviewed["TE-7"]
+
+    refused = {line.split()[0]: line for line in lines if " refused  " in line}
+    assert set(refused) == {"TE-9", "TE-10", "TE-11", "TE-13"}
+    assert "TE-2" in refused["TE-9"] and "TE-2" in refused["TE-10"]
+    assert "TE-7" in refused["TE-11"]
+    assert "TE-3" in refused["TE-13"]
+
+    starting = [line for line in lines if line.startswith(f"{'TE-2':<10} starting")]
+    assert len(starting) == 1
+
+
+def test_a_spec_run_again_after_a_rate_limit_keeps_its_first_review(ledger, repo_id):
+    """A spec `run_stack_batch` runs a second time after `RATE_LIMITED` is
+    reviewed once: the cached `run` route is never re-read on a task-level
+    rerun, only on a review-level `wait`."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-41"),
+        _candidate("TE-42", depends_on=["TE-41"]),
+    ]
+    run_one, task_one = _spend_task(ledger, repo_id, 1.0)
+    run_two, task_two = _spend_task(ledger, repo_id, 1.0)
+    run_three, task_three = _spend_task(ledger, repo_id, 1.0)
+    outcomes = iter(
+        [
+            _outcome(state="RATE_LIMITED", run_id=run_one, task_id=task_one),
+            _outcome(state="READY_FOR_REVIEW", run_id=run_two, task_id=task_two),
+            _outcome(state="READY_FOR_REVIEW", run_id=run_three, task_id=task_three),
+        ]
+    )
+
+    class RerunRunner:
+        def __init__(self):
+            self.calls: list[tuple[str, str | None]] = []
+
+        def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+            self.calls.append(
+                (candidate.spec.id, predecessor.spec.id if predecessor else None)
+            )
+            outcome = next(outcomes)
+            if outcome.state == "RATE_LIMITED":
+                return dataclasses.replace(outcome, resets_at=60)
+            return outcome
+
+    runner = RerunRunner()
+    reviews = ReviewScript({"TE-41": [_clean_review()], "TE-42": [_clean_review()]})
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews,
+        sleep=lambda seconds: None,
+    )
+
+    assert reason == "DRAINED"
+    assert reviews.calls == [("TE-41", None), ("TE-42", "TE-41")]
+    assert runner.calls == [
+        ("TE-41", None),
+        ("TE-41", None),
+        ("TE-42", "TE-41"),
+    ]
+
+
+def test_a_spec_review_that_raises_or_errors_counts_toward_the_breaker(ledger, repo_id):
+    """A review that raises counts as an abort, exactly as a raising runner
+    does, and so does one that routes `error`. Two in a row fire the breaker
+    before the third spec's runner is ever called. Readiness or the budget
+    stopping the first spec calls no review at all."""
+    from saffron.batch import run_stack_batch
+
+    order = [_candidate("TE-31"), _candidate("TE-32"), _candidate("TE-33")]
+
+    class RaisingReviews:
+        def __init__(self, results):
+            self._results = list(results)
+            self.calls: list[tuple[str, str | None]] = []
+
+        def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+            self.calls.append(
+                (candidate.spec.id, predecessor.spec.id if predecessor else None)
+            )
+            result = self._results.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    runner = FakeStackRunner({})
+
+    reviews = RaisingReviews([RuntimeError("boom"), RuntimeError("boom")])
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews,
+    )
+    assert reason == "INFRASTRUCTURE"
+    assert runner.calls == []
+    assert reviews.calls == [("TE-31", None), ("TE-32", None)]
+
+    reviews2 = RaisingReviews(
+        [
+            _review_session([], error="session died"),
+            _review_session([], fenced=False),
+        ]
+    )
+    reason2 = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews2,
+    )
+    assert reason2 == "INFRASTRUCTURE"
+    assert runner.calls == []
+    assert reviews2.calls == [("TE-31", None), ("TE-32", None)]
+
+    def _failing_readiness():
+        return Readiness(ok=False)
+
+    reviews3 = RaisingReviews([_clean_review(), _clean_review(), _clean_review()])
+    reason3 = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_failing_readiness,
+        review=reviews3,
+    )
+    assert reason3 == "INFRASTRUCTURE"
+    assert reviews3.calls == []
+
+    reviews4 = RaisingReviews([_clean_review(), _clean_review(), _clean_review()])
+    reason4 = run_stack_batch(
+        [_candidate("TE-31", budget_usd=10.0)],
+        ledger,
+        budget_usd=5.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews4,
+    )
+    assert reason4 == "BUDGET"
+    assert reviews4.calls == []
+
+
+def test_a_rate_limited_spec_review_waits_and_reviews_again(
+    ledger, repo_id, monkeypatch
+):
+    """A `wait` route leaves the runner untouched and is never counted by
+    the breaker. It offers the same spec again next, on the same
+    predecessor, reviewed afresh, never after the rest of the order and
+    never past `until`."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    order = [
+        _candidate("TE-49"),
+        _candidate("TE-50"),
+        _candidate("TE-51"),
+        _candidate("TE-52", depends_on=["TE-51"]),
+    ]
+    start = datetime(2030, 1, 1, 2, 0)
+    clock = AdvancingClock(start)
+    resets_at = int(start.timestamp()) + 60
+    reviews = ReviewScript(
+        {
+            "TE-49": [_clean_review()],
+            "TE-50": [_review_session([], error="session died")],
+            "TE-51": [
+                _review_session([], fenced=False, resets_at=resets_at),
+                _clean_review(),
+            ],
+            "TE-52": [_clean_review()],
+        }
+    )
+    run_49, task_49 = _spend_task(ledger, repo_id, 1.0)
+    run_51, task_51 = _spend_task(ledger, repo_id, 1.0)
+    run_52, task_52 = _spend_task(ledger, repo_id, 1.0)
+    # `TE-51` runs only once despite two reviews, so `FakeStackRunner`'s
+    # per-spec-id lookup, never popped, is exactly the shape this needs.
+    runner = FakeStackRunner(
+        {
+            "TE-49": _outcome(state="READY_FOR_REVIEW", run_id=run_49, task_id=task_49),
+            "TE-51": _outcome(state="READY_FOR_REVIEW", run_id=run_51, task_id=task_51),
+            "TE-52": _outcome(state="READY_FOR_REVIEW", run_id=run_52, task_id=task_52),
+        }
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+        review=reviews,
+    )
+
+    assert reason == "DRAINED"
+    assert reviews.calls == [
+        ("TE-49", None),
+        ("TE-50", "TE-49"),
+        ("TE-51", "TE-49"),
+        ("TE-51", "TE-49"),
+        ("TE-52", "TE-51"),
+    ]
+    assert runner.calls == [
+        ("TE-49", None),
+        ("TE-51", "TE-49"),
+        ("TE-52", "TE-51"),
+    ]
+    assert not any(" refused " in line for line in lines)
+    starting_51 = [line for line in lines if line.startswith(f"{'TE-51':<10} starting")]
+    assert len(starting_51) == 2
+    assert clock.sleeps == [60.0]
+
+    start2 = datetime(2030, 1, 1, 2, 0)
+    clock2 = AdvancingClock(start2)
+    reviews2 = ReviewScript(
+        {"TE-51": [_review_session([], resets_at=int(start2.timestamp()) + 60)]}
+    )
+    runner2 = FakeStackRunner({})
+
+    reason2 = run_stack_batch(
+        [_candidate("TE-51")],
+        ledger,
+        budget_usd=100.0,
+        until=start2 + timedelta(seconds=30),
+        runner=runner2,
+        readiness_check=_ready,
+        clock=clock2,
+        sleep=clock2.sleep,
+        review=reviews2,
+    )
+
+    assert reason2 == "UNTIL"
+    assert clock2.sleeps == []
+    assert reviews2.calls == [("TE-51", None)]
+    assert runner2.calls == []

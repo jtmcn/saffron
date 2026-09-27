@@ -39,6 +39,7 @@ from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate
+from saffron.spec_review import SpecReviewSession, read_spec_review, spec_review_route
 from saffron.task import Refused
 
 # The loop returns `INCOMPLETE` for a night that left a task in flight — a
@@ -57,6 +58,18 @@ ABORT_STATES = frozenset({"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED"})
 # Two consecutive aborts is what fires the breaker (§4.2.1) — enough to tell
 # "the toolchain is broken" from "three flaky tasks", never fewer.
 _BREAKER_THRESHOLD = 2
+
+
+class SpecReviewWait(Exception):
+    """A stack batch's review wrapper raises this for a `wait` route.
+
+    Caught in `_drive`, before its general handler, and fed the same wait
+    `_wait_out_rate_limit` already builds for a `RATE_LIMITED` task. No run
+    exists for it, so it is never turned into a `CellOutcome`."""
+
+    def __init__(self, resets_at: int | None) -> None:
+        super().__init__("spec review met the account's rate limit")
+        self.resets_at = resets_at
 
 
 def run_batch(
@@ -226,6 +239,16 @@ def _drive(
         high_water = ledger.max_run_id()
         try:
             outcome = runner(candidate)
+        except SpecReviewWait as wait:
+            # No run exists for a review wait, so this touches neither
+            # `consecutive_aborts` nor the ledger.
+            assert sleep is not None
+            wait_stop = _wait_out_rate_limit(
+                candidate, wait.resets_at, until, clock, emit, sleep
+            )
+            if wait_stop is not None:
+                return _stop(ledger, batch_id, wait_stop, in_flight, emit)
+            started.discard(candidate.spec.id)
         except Exception as exc:
             # Driving one cell can raise from outside the block that would
             # catch it — an unreadable policy at base, a runtime that will
@@ -265,7 +288,7 @@ def _drive(
                     # A stack batch's own rule: the account's own limit
                     # closes the window for the next spec too (SA-0148).
                     wait_stop = _wait_out_rate_limit(
-                        candidate, outcome, until, clock, emit, sleep
+                        candidate, outcome.resets_at, until, clock, emit, sleep
                     )
                     if wait_stop is not None:
                         return _stop(ledger, batch_id, wait_stop, in_flight, emit)
@@ -296,22 +319,22 @@ def _drive(
 
 def _wait_out_rate_limit(
     candidate: Candidate,
-    outcome: CellOutcome,
+    resets_at: int | None,
     until: datetime | None,
     clock: Callable[[], datetime],
     emit: Callable[[str], None],
     sleep: Callable[[float], None],
 ) -> Literal["UNTIL"] | None:
-    """A `RATE_LIMITED` task's own wait, capped at six hours (SA-0148).
-    Returns `UNTIL` when one clock read shows the wait running at or past
-    `until`. Otherwise it emits one line, sleeps, and returns `None`, so
-    the caller retries the same spec.
+    """A `RATE_LIMITED` task's own wait, capped at six hours (SA-0148), and a
+    stack batch's own `SpecReviewWait`'s wait besides. Returns `UNTIL` when
+    one clock read shows the wait running at or past `until`. Otherwise it
+    emits one line, sleeps, and returns `None`, so the caller retries the
+    same spec.
 
     Bounds come before any subtraction. An untrusted cell's `resets_at`
     can be far larger than a plain subtraction can carry (measured)."""
     now = clock()
     now_ts = now.timestamp()
-    resets_at = outcome.resets_at
     readable = resets_at is not None and now_ts < resets_at <= now_ts + 21600
     wait = resets_at - now_ts if readable else 3600.0
     if until is not None and wait >= (until - now).total_seconds():
@@ -343,23 +366,29 @@ def run_stack_batch(
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
     # A real default. `SA-0144`'s caller passes none (SA-0148).
     sleep: Callable[[float], None] = time.sleep,
+    # `None` means no review runs, and nothing here changes. `SA-0156` passes
+    # the production one, and `saffron batch` passes none until then.
+    review: Callable[[Candidate, Candidate | None], SpecReviewSession] | None = None,
 ) -> StopReason:
-    """Run one stack's planned `order` once, without rescanning (`SA-0142`).
-    `runner` takes each candidate and its predecessor, the last one that
-    reached `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED`
-    task keeps this predecessor and waits, through `sleep`, rather than
-    refusing anything (SA-0148).
+    """Run one stack's planned `order` once, without rescanning (`SA-0142`). `runner`
+    takes each candidate and its predecessor, the last one that reached
+    `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED` task waits on it
+    instead of refusing (`sleep`, SA-0148). `review`, when given, runs first on it
+    and can refuse the spec, raise, or ask to wait (`SpecReviewWait`, ADR 7).
 
-    A candidate is refused before `run_batch` sees it, when `depends_on`
-    reaches a spec that ran and missed, direct or through a refused spec.
-    `reserve_usd` holds back the budget check, and `end_review` runs once,
-    with the batch id, the reserve and `order`'s own specs."""
+    A candidate is refused before `run_batch` sees it, when `depends_on` reaches a
+    spec that ran and missed, direct or through a refused spec. `reserve_usd` holds
+    back the budget check, and `end_review` runs once with the batch id, the
+    reserve and `order`'s own specs."""
     order = list(order)
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
     predecessor: Candidate | None = None
     predecessor_task_id: int | None = None
     position = 0
+    # Spec ids cleared `run`. A `wait` route is never added here, so the
+    # next call for that spec reviews it again (ADR 7).
+    reviewed: set[str] = set()
 
     # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at
     # generation 0. The predecessor is the last such task, not `candidate`.
@@ -398,6 +427,34 @@ def run_stack_batch(
     def wrapped(candidate: Candidate) -> CellOutcome | Refused:
         nonlocal predecessor
         pred = predecessor
+        if review is not None and candidate.spec.id not in reviewed:
+            # A raise from `review` itself leaves this untouched, as a raise
+            # from `runner` leaves `remaining` for the `except` below.
+            session = review(candidate, pred)
+            spec_review = read_spec_review(session)
+            route = spec_review_route(spec_review)
+            if route == "wait":
+                raise SpecReviewWait(resets_at=spec_review.resets_at)
+            if route == "escalate":
+                blockers = sum(
+                    1
+                    for finding in spec_review.findings
+                    if finding.severity == "blocker"
+                )
+                emit(f"{candidate.spec.id:<10} escalated  {blockers}")
+                missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                remaining.remove(candidate)
+                return Refused(
+                    reason=f"spec review escalated with {blockers} blocker(s)"
+                )
+            if route == "error":
+                emit(f"{candidate.spec.id:<10} unreviewed  {spec_review.error}")
+                missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                remaining.remove(candidate)
+                raise RuntimeError(
+                    f"spec review for {candidate.spec.id} could not be read"
+                )
+            reviewed.add(candidate.spec.id)
         try:
             result = runner(candidate, pred)
         except Exception:
