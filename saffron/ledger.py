@@ -829,8 +829,8 @@ class Ledger:
         recorded against on an earlier night is still the one a re-queue or a
         done-state check must find.
 
-        Every task, not the newest one per key: an unstacked
-        `cell/session.py` call still mints a fresh run and task each time.
+        Every task, not the newest one per key: a `cell/session.py` call
+        with no `task_id` still mints a fresh run and task each time.
         This repo's own ledger carries ten tasks at
         `SA-0013`/`ce08b1eb`, mixing `READY_FOR_REVIEW` with three `ORPHANED`.
         §4.2.1 asks whether *a* task at this `spec_sha` is done with the spec,
@@ -1260,20 +1260,19 @@ class Ledger:
         )
 
     def task_policy_sha(self, task_id: int) -> str | None:
-        """What this task is currently on record as having run under — the
-        base_sha declaration `create_task` recorded, or whatever PACKAGE last
-        wrote over it with `record_policy`. PACKAGE reads this back to decide
-        whether a re-verification ran under a different declaration."""
+        """The declaration this task is on record as having run under. It is
+        what `create_task` recorded, or what `record_policy` last wrote over
+        it. PACKAGE reads it to decide whether re-verification ran under a
+        different declaration, and a cell given this task reads it at start."""
         row = self._db.execute(
             "SELECT policy_sha FROM tasks WHERE task_id = ?", (task_id,)
         ).fetchone()
         return row["policy_sha"] if row is not None else None
 
     def record_policy(self, task_id: int, policy_sha: str) -> None:
-        """PACKAGE's own write-back (§5.7, backlog item 16): issued only when
-        re-verification ran under a declaration different from the one this
-        task is on record for — never unconditionally, which would satisfy
-        the letter of "rewrites when it differs" while doing it every time."""
+        """Written by PACKAGE when re-verification ran (§5.7, backlog item 16),
+        and by a cell given a task recorded under another declaration. Each
+        writes only when the declaration differs from the one on record."""
         self._commit_and_append(
             self._build_fact(task_id, "task_policy", {"policy_sha": policy_sha})
         )

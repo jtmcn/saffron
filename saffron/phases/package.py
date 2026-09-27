@@ -1101,11 +1101,8 @@ def push_unpackaged_work(
             f"a pull request from {spec.id} is awaiting review on {branch} — "
             "not ours to replace"
         )
-    own = next((row for row in task_rows if row["task_id"] == outcome.task_id), None)
-    recorded = {row["pushed_sha"] for row in others if row["pushed_sha"]}
     # A same-task rerun replaces what this task pushed earlier.
-    if own is not None and own["pushed_sha"]:
-        recorded.add(own["pushed_sha"])
+    recorded = {row["pushed_sha"] for row in task_rows if row["pushed_sha"]}
     if current and current not in recorded:
         return _refuse(
             f"{branch} already points at {current[:12]}, which this spec never "
