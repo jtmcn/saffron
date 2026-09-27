@@ -569,6 +569,7 @@ def layer_cell(
     mirror: Path,
     gates_dir: Path,
     thread_env: Mapping[str, str],
+    spec_session: bool = False,
 ) -> Iterator[str]:
     """A fresh critic cell, seeded at a layer's own head, for the end
     review to read (`review_stack`'s and `review_joins`'s `open_cell`).
@@ -590,20 +591,40 @@ def layer_cell(
 
     runtime.remove_container(container)
     try:
-        session.cell_up(
-            repo=repo,
-            mirror=mirror,
-            tree_base=fields.head,
-            branch=fields.branch,
-            network=network,
-            volume=volume,
-            state=state,
-            container=container,
-            gates_dir=gates_dir,
-            thread_env=thread_env,
-            created=created,
-            note=lambda step, detail: print(detail),
-        )
+        # A spec session's Bash runs a prior layer's code, so only its
+        # cell gets the wrapper's capabilities and the root-left check.
+        if spec_session:
+            session.cell_up(
+                repo=repo,
+                mirror=mirror,
+                tree_base=fields.head,
+                branch=fields.branch,
+                network=network,
+                volume=volume,
+                state=state,
+                container=container,
+                gates_dir=gates_dir,
+                thread_env=thread_env,
+                created=created,
+                note=lambda step, detail: print(detail),
+                cap_add=implement.UNPRIVILEGED_BASH_CAPS,
+            )
+            session.assert_bash_is_unprivileged(container)
+        else:
+            session.cell_up(
+                repo=repo,
+                mirror=mirror,
+                tree_base=fields.head,
+                branch=fields.branch,
+                network=network,
+                volume=volume,
+                state=state,
+                container=container,
+                gates_dir=gates_dir,
+                thread_env=thread_env,
+                created=created,
+                note=lambda step, detail: print(detail),
+            )
         yield container
     finally:
         session.cell_down(

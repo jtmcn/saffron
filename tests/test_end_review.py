@@ -1481,3 +1481,94 @@ def test_a_layers_critic_cell_is_seeded_at_its_head_and_always_torn_down(
         raise ValueError("body boom")
 
     assert log[-1][0] == "down"
+
+
+def test_only_a_spec_sessions_layer_cell_is_granted_capabilities_and_checked(
+    tmp_path, monkeypatch
+):
+    """`layer_cell`'s `spec_session` keyword defaults to `False`, which grants
+    no capability and runs no check. Given `True`, `cell_up` gets
+    `implement.UNPRIVILEGED_BASH_CAPS` and the check runs on its container
+    before the body, still inside the `try` so a raise still tears down."""
+    import saffron.end_review as end_review
+    from saffron.cell import runtime, session
+    from saffron.phases import implement
+
+    fields = end_review.LayerFields(
+        spec_id="TE-2",
+        branch="saffron/TE-2",
+        pr_url="https://h/pull/2",
+        base="b" * 40,
+        head="h" * 40,
+        known="",
+    )
+    repo = tmp_path / "repo"
+    mirror = tmp_path / "mirror"
+    gates_dir = tmp_path / "gates"
+    thread_env = {"X": "1"}
+
+    log: list = []
+
+    def fake_remove_container(container):
+        log.append(("remove", container))
+
+    def fake_cell_up(**kw):
+        log.append(("up", kw))
+
+    def fake_cell_down(**kw):
+        log.append(("down", kw))
+
+    def fake_check(container):
+        log.append(("check", container))
+
+    monkeypatch.setattr(runtime, "remove_container", fake_remove_container)
+    monkeypatch.setattr(session, "cell_up", fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", fake_cell_down)
+    monkeypatch.setattr(session, "assert_bash_is_unprivileged", fake_check)
+
+    def open_layer_cell(**kw):
+        return end_review.layer_cell(
+            fields,
+            repo=repo,
+            mirror=mirror,
+            gates_dir=gates_dir,
+            thread_env=thread_env,
+            **kw,
+        )
+
+    with open_layer_cell() as container:
+        log.append(("body", container))
+    assert [step for step, *_ in log] == ["remove", "up", "body", "down"]
+    assert log[1][1].get("cap_add", ()) == ()
+
+    log.clear()
+    with open_layer_cell(spec_session=False) as container:
+        log.append(("body", container))
+    assert [step for step, *_ in log] == ["remove", "up", "body", "down"]
+    assert log[1][1].get("cap_add", ()) == ()
+
+    log.clear()
+    with open_layer_cell(spec_session=True) as container:
+        log.append(("body", container))
+    assert [step for step, *_ in log] == ["remove", "up", "check", "body", "down"]
+    up_kwargs = log[1][1]
+    assert up_kwargs["cap_add"] == ("CAP_SETUID", "CAP_SETGID")
+    assert up_kwargs["cap_add"] == implement.UNPRIVILEGED_BASH_CAPS
+    check_container = log[2][1]
+    assert check_container == up_kwargs["container"]
+    assert check_container == log[3][1]
+
+    log.clear()
+
+    def fake_check_raises(container):
+        log.append(("check", container))
+        raise runtime.CellRuntimeError("did not leave root")
+
+    monkeypatch.setattr(session, "assert_bash_is_unprivileged", fake_check_raises)
+    with (
+        pytest.raises(runtime.CellRuntimeError),
+        open_layer_cell(spec_session=True),
+    ):
+        log.append(("body", "unreached"))
+
+    assert [step for step, *_ in log] == ["remove", "up", "check", "down"]
