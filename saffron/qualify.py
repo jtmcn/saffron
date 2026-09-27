@@ -160,7 +160,8 @@ def _qualify_range(
                 note=note,
             )
         except RuntimeError as exc:
-            # The cell this call needed never came up (ADR 7, principle 28).
+            # A patch that did not apply, or git failing. A cell that never came
+            # up reaches no caller: `probe_findings` reads it as `unproven`.
             reasons = {}
             for f in probed:
                 assert f.probe is not None  # this loop built `probed` from it
@@ -211,8 +212,8 @@ def qualify(
 ) -> Qualification:
     """The join's findings first, over the whole stack, then every layer's
     end-review findings and in-cell concerns, top down. Groups and pools
-    every range's own call across the whole walk, so the join's findings
-    and the top layer's own can share one group."""
+    the findings every range decides across the whole walk, so the join's
+    findings and the top layer's own can share one group."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 

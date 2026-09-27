@@ -199,12 +199,14 @@ def _spec_findings_te1() -> list[Finding]:
 
 def _in_cell_findings_te2() -> list[Finding]:
     """`TE-2`'s own REVIEW concerns, plus two decoys: `i3` and `i4` are not
-    `concern` severity, so `qualify` never reads them at all."""
+    `concern` severity, so `qualify` never takes them as inputs. `i7` sits
+    on a file no diff touches, so it is `unanchored`."""
     return [
         _finding("correctness", "concern", "src/b.py", 1, "i1"),
         _finding("adequacy", "note", "src/b.py", 2, "i3"),
         _finding("correctness", "blocker", "src/b.py", 2, "i4"),
         _finding("adequacy", "concern", "src/b.py", 1, "i6"),
+        _finding("adequacy", "concern", "src/z.py", 1, "i7"),
     ]
 
 
@@ -385,11 +387,11 @@ def _build(
         task2, position=2, predecessor_task_id=task1, generation=1
     )
 
+    if in_cell:
+        ledger.record_findings(task2, _in_cell_findings_te2())
     ledger.record_findings(task2, _join_findings())
     ledger.record_findings(task2, _spec_findings_te2() + _standards_findings_te2())
     ledger.record_findings(task1, _spec_findings_te1())
-    if in_cell:
-        ledger.record_findings(task2, _in_cell_findings_te2())
 
     calls = _install_probe_double(monkeypatch, shas, raise_on)
 
@@ -652,6 +654,7 @@ def test_a_layers_own_review_concerns_follow_its_end_review_findings(
         (te2_key, "s1", "note", ""),
         (te2_key, "s3", "unanchored", ""),
         (te2_key, "i6", "unverified", "its REVIEW probe did not survive"),
+        (te2_key, "i7", "unanchored", ""),
         (te1_key, "c-m", "unanchored", ""),
     ]
 
@@ -679,6 +682,7 @@ def test_a_layers_own_review_concerns_follow_its_end_review_findings(
         "s3",
         "i1",
         "i6",
+        "i7",
     ]
     assert [r["claim"] for r in rows("TE-1")] == ["c-a", "c-m", "c-c"]
     assert [r["claim"] for r in rows("TE-0")] == ["u1"]
@@ -737,6 +741,7 @@ def test_the_join_is_walked_first_over_the_stack_and_belongs_to_the_top_layer(
         (te2_key, "s1", "note", ""),
         (te2_key, "s3", "unanchored", ""),
         (te2_key, "i6", "unverified", "its REVIEW probe did not survive"),
+        (te2_key, "i7", "unanchored", ""),
         (te1_key, "c-m", "unanchored", ""),
     ]
 
@@ -784,6 +789,7 @@ def test_the_join_is_walked_first_over_the_stack_and_belongs_to_the_top_layer(
         (te2_key2, "s1", "note", ""),
         (te2_key2, "s3", "unanchored", ""),
         (te2_key2, "i6", "unverified", "its REVIEW probe did not survive"),
+        (te2_key2, "i7", "unanchored", ""),
         (te1_key2, "c-m", "unanchored", ""),
     ]
 
@@ -833,7 +839,7 @@ def test_the_joins_qualifications_come_first_under_the_top_layer(tmp_path, monke
         )
 
     te2 = rows("TE-2")
-    assert len(te2) == 17
+    assert len(te2) == 18
     assert [(r["claim"], r["outcome"]) for r in te2[:3]] == [
         ("j1", "qualified"),
         ("j2", "unanchored"),
@@ -854,6 +860,7 @@ def test_the_joins_qualifications_come_first_under_the_top_layer(tmp_path, monke
         "s3",
         "i1",
         "i6",
+        "i7",
     ]
 
     te1 = rows("TE-1")
