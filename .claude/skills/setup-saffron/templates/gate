@@ -21,6 +21,16 @@ FAILURE = re.compile(
 )
 
 
+def failure(m):
+    # FILL: one contract failure from one FAILURE match. `line` may be None.
+    return {
+        "file": m["file"],
+        "line": int(m["line"]),
+        "code": m["code"],
+        "message": m["message"],
+    }
+
+
 def emit(status, summary, tool=None, failures=()):
     result = {"gate": GATE, "status": status, "tool": tool, "summary": summary}
     print(json.dumps({**result, "failures": list(failures)}))
@@ -36,7 +46,7 @@ def main():
 
     done = subprocess.run(COMMAND, capture_output=True, text=True)
     failures = [
-        {**m.groupdict(), "line": int(m["line"])}
+        failure(m)
         for m in map(FAILURE.match, (done.stdout + done.stderr).splitlines())
         if m
     ]

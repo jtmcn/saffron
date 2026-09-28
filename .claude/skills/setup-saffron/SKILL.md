@@ -23,7 +23,7 @@ Read the target. Assume nothing it does not show you:
 - How the test runner lists test names and takes a subset of them. `revert` and `witness` hand it a subset. `census`, `criteria`, `revert` and `witness` read the list.
 - Anything that opens a socket in tests, such as a database or a fixture server. A cell reaches one host, `api.anthropic.com`, so a service the suite needs is baked into the image.
 - Numerical libraries that size a thread pool from the CPU count. `thread_env` caps them (§5.1).
-- `CLAUDE.md` and `AGENTS.md` at the target's root.
+- `CLAUDE.md` and `AGENTS.md` at the target's root. Look for an instruction that edits a file every time, such as a version bump. Under Saffron that file is often gate config or protected, so every task would fail `integrity` or `scope`. Raise it in step 3.
 
 **Done when** you can name a command for each repo-owned gate role in §5.4's table, or say why the target has no analogue.
 
@@ -93,13 +93,19 @@ A gate that reports `fail` is fine at this point, since the baseline subtracts f
 A tool missing on the host is an `error` here and says nothing about the image.
 Gates never see Saffron's own virtualenv. Put the target's tool directory first on `PATH`, as `PATH=<target>/.venv/bin:$PATH`, or read past it.
 
+A clean tree proves only the pass path. Make each gate fail once on purpose, in a scratch copy of the target, and read its failures back.
+A parser that misses real output turns a repairable `fail` into an `error` that aborts the attempt.
+For the domain gate, also apply the change it guards against and a correct version of that change. The first must fail and the second pass.
+
 Then build the image, which runs every tool at build time:
 
 ```
 <runtime> build -t saffron/cell:<target-dir-name> -f <target>/.saffron/Dockerfile <target>
 ```
 
-**Done when** the check exits `0` and the image builds. A problem you cannot fix goes to the operator, named.
+Run each gate inside it with no network, the target mounted at `/work` and the gates at `/gates`. A download the image missed shows up here and nowhere earlier.
+
+**Done when** the check exits `0`, every gate failed once on purpose, and each gate passes in the image offline. A problem you cannot fix goes to the operator, named.
 
 ## 6. Report
 

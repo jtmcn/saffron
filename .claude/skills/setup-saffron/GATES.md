@@ -36,11 +36,14 @@ A gate is an executable that prints one JSON object on stdout and nothing else t
 - The gate inherits no Saffron virtualenv. It calls the repo's own toolchain from the image.
 - A gate that writes a build artifact leaves it in the tree, and `committed` fails on it. Cover the artifact in `.gitignore`.
 - A Python helper beside a gate takes a name no stdlib module uses. A `types.py` shadows `types` for every import after it.
+- A gate that imports the repo's code puts the working tree's source first on `sys.path`. Otherwise it checks an installed copy and passes whatever the diff did.
 
 ## The Dockerfile
 
 - `FROM saffron/cell-base:python`. The base carries the agent runtime and git, and nothing of the repo's.
 - Bake every dependency at build time. A cell reaches one host, so a gate that downloads at run time errors.
+- Bake the data a library fetches on first use, such as a tokenizer's encoding files. Point its cache variable at a path in the image.
+- A project that reads its own version from package metadata needs the project installed. Install it editable at `/work`, where a cell mounts the worktree, then leave `/work` empty.
 - Bake a service the suite needs, such as a database, with its migrations and seed data.
 - End with one `RUN` that runs every gate's tool, as `ruff --version && pytest --version`. A path that exists but cannot execute passes `which` and fails the gate.
 - Add no credential. The cell's only credential is the agent's own token.
