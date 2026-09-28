@@ -35,7 +35,7 @@ RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
 _PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
 
 # The closed set `record_spec_text` writes: a spec review's revision, or a
-# follow-up spec neither is at `base_sha` (ADR 7).
+# follow-up spec. Neither is at `base_sha` (ADR 7).
 SPEC_TEXT_ORIGINS = ("revision", "follow_up")
 
 # A follow-up's file is named for its own spec id by the host. A revision's
@@ -1489,30 +1489,26 @@ class Ledger:
         """The task's `spec_texts` row with the highest `n`, or `None` for a
         task that holds none. Raises `ValueError` for a task id that names
         no task."""
-        row = self._db.execute(
-            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
-        ).fetchone()
-        if row is None:
+        key = self.record_key(task_id)
+        if key is None:
             raise ValueError(f"no task {task_id} to read a spec text for")
         return self._db.execute(
             "SELECT task_key, n, origin, spec_id, path, text, spec_sha "
             "FROM spec_texts WHERE task_key = ? ORDER BY n DESC LIMIT 1",
-            (row["record_key"],),
+            (key,),
         ).fetchone()
 
     def spec_texts(self, task_id: int) -> list[sqlite3.Row]:
         """Every `spec_texts` row the task holds, oldest first, or an empty
         list. Raises `ValueError` for a task id that names no task."""
-        row = self._db.execute(
-            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
-        ).fetchone()
-        if row is None:
+        key = self.record_key(task_id)
+        if key is None:
             raise ValueError(f"no task {task_id} to read spec texts for")
         return list(
             self._db.execute(
                 "SELECT task_key, n, origin, spec_id, path, text, spec_sha "
                 "FROM spec_texts WHERE task_key = ? ORDER BY n",
-                (row["record_key"],),
+                (key,),
             )
         )
 
