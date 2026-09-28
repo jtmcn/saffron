@@ -332,6 +332,69 @@ def test_the_implement_prompt_never_calls_scope_proposal_diagnose_only():
     )
 
 
+def _bullet(prompt: str, field: str) -> str:
+    """One plan-field bullet. Starts where the stripped line names the field
+    after a bullet dash, and ends before the next bullet or blank line."""
+    lines = prompt.splitlines()
+    start = next(
+        i for i, line in enumerate(lines) if line.strip().startswith(f"- `{field}`")
+    )
+    end = start + 1
+    while (
+        end < len(lines)
+        and lines[end].strip()
+        and not lines[end].strip().startswith("- ")
+    ):
+        end += 1
+    return "\n".join(lines[start:end])
+
+
+def _field_sentences(prompt: str, field: str) -> list[str]:
+    """The bullet's lines, joined, lower-cased, with the field's own
+    backticked name removed, split into sentences after each full stop."""
+    joined = " ".join(line.strip() for line in _bullet(prompt, field).splitlines())
+    text = joined.lower().replace(f"`{field}`", "")
+    return [s.strip() for s in text.split(".") if s.strip()]
+
+
+def test_the_plan_field_says_estimated_lines_counts_lines_not_tokens():
+    """`SA-0169` priced a spec's own token count as lines and paid for it four
+    times over (b-efdf1f). The bullet must name the unit and the rate."""
+    from saffron.gates.core.size import _TOKENS_PER_LINE
+
+    rate = str(_TOKENS_PER_LINE)
+    sentences = _field_sentences(_assembled_implement_prompt(), "estimated_lines")
+
+    first = sentences[0]
+    assert re.search(r"changed\s+line", first) or (
+        "added" in first and "removed" in first
+    )
+    assert "line" in first
+    assert "token" not in first
+
+    assert any(
+        "`size`" in s
+        and rate in s
+        and "token" in s
+        and "line" in s
+        and s.find("token") < s.find("line")
+        for s in sentences
+    )
+
+    assert any(
+        "divid" in s and "token" in s and re.search(rf"{rate}.*\bline", s)
+        for s in sentences
+    )
+
+    reject_sentences = [s for s in sentences if "reject" in s]
+    assert reject_sentences
+    for s in reject_sentences:
+        blocks = re.search(r"`size`\s*(?:does\s+)?not\s+block", s)
+        only_path = re.search(r"reject.*\bonly\b.*`size`.*\bblock", s) and not blocks
+        not_path = re.search(r"\bnot\s+(?:be\s+)?reject", s) and blocks
+        assert only_path or not_path, s
+
+
 def test_the_implement_prompt_leaves_running_wrong_versions_to_the_host():
     """Step 3 tells the implementer the host runs the gates. SA-0123's notes
     also asked the cell to run wrong versions of the change in its own turn.

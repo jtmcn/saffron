@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import get_args
 
+from saffron.agents import context
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
 from saffron.events import (
@@ -482,7 +483,7 @@ def run_task(
         base_sha=base.base_sha,
         touches=spec.touches,
         spec_type=spec.spec_type,
-        body=spec.body,
+        body=spec.body + context.estimate_section(spec.estimated_lines),
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,

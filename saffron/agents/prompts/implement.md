@@ -23,10 +23,13 @@ These terms have exactly one meaning here. Use them and no synonyms.
    - `risks` (array of strings) — may be empty.
    - `blocking_questions` (array of strings) — a non-empty list rejects the plan
      as underspecified, so use it only when the task genuinely cannot proceed.
-   - `estimated_lines` (integer) — your best guess at added + removed lines
-     across the whole diff. Checked against this spec type's `size` ceiling
-     before you write anything; a plan over it is rejected so you can rescope
-     before spending a turn, rather than discovering it from the gate later.
+   - `estimated_lines` (integer): your own guess at changed lines, added
+     plus removed, across the whole diff. State it in lines, and never in
+     tokens. The `size` gate counts about 4 changed tokens a line. The host
+     multiplies your estimate by 4 before it compares the total with the
+     ceiling. Divide a size stated in tokens by 4 to get lines. A plan over
+     the ceiling is rejected only where `size` blocks. Elsewhere the plan
+     stands.
 
    If, before writing any code, you determine that `touches` cannot satisfy
    the acceptance criteria — because what a criterion asks for lives in a

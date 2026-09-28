@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -1151,3 +1152,77 @@ def test_gate_zero_refuses_a_recorded_spec_text_before_its_cell(
     assert isinstance(ok, tuple)
     assert ok[0].id == "SY-1"
     assert ok[0].budget_usd == 9.5
+
+
+def test_run_task_hands_the_cell_the_specs_own_estimate_in_lines(tmp_path, monkeypatch):
+    """A spec's own `estimated_lines` is already in the plan's own unit
+    (b-43a061). It never reached IMPLEMENT, REVIEW or REBUT, because
+    `CellSpec.body` carried the spec's raw body alone (b-efdf1f). `run_task`
+    must append the author's own estimate."""
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+    body = "the spec's own body text.\n"
+
+    def _call(estimated_lines: int | None, db_name: str) -> str:
+        captured: dict = {}
+
+        def _run_one_cell(cell_spec, **_kwargs):
+            captured["body"] = cell_spec.body
+            return CellOutcome(
+                state="EXHAUSTED",
+                task_id=1,
+                run_id=1,
+                task_dir=tmp_path / "out" / "TE-1",
+            )
+
+        monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+        ledger = Ledger(tmp_path / db_name)
+        task_module.run_task(
+            Spec(
+                id="TE-1",
+                title="t",
+                type="feature",
+                touches=["src/**"],
+                acceptance_criteria=["it works"],
+                body=body,
+                estimated_lines=estimated_lines,
+            ),
+            "s" * 40,
+            ceilings=ResolvedCeilings(
+                budget_usd=12.0,
+                max_attempts=4,
+                max_turns=60,
+                budget_source="default",
+                attempts_source="default",
+                turns_source="default",
+            ),
+            base=PinnedBase(
+                mirror=tmp_path / "mirror.git",
+                url="https://github.com/o/r.git",
+                base_sha="a" * 40,
+            ),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+            token=None,
+        )
+        ledger.close()
+        return captured["body"]
+
+    assert _call(None, "unset.db") == body
+
+    for estimated_lines in (37, 1210):
+        result = _call(estimated_lines, f"{estimated_lines}.db")
+        assert result.startswith(body)
+        assert result.endswith("\n")
+        tail = result[len(body) :]
+        assert tail.startswith("\n")
+        assert re.search(
+            rf"\b{estimated_lines}\b\W+(?:changed\W+)?lines?\b", tail, re.I
+        )
+        assert not re.search(rf"\b{estimated_lines}\b\s*tokens?\b", tail, re.I)
+        sentences = re.split(r"\.|\n", tail)
+        assert any(
+            re.search(rf"\b{estimated_lines}\b", s) and "estimat" in s.lower()
+            for s in sentences
+        )
