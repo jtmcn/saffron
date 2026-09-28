@@ -1244,6 +1244,9 @@ def _drive(
     base_claude_md=None,
     # A list: each turn goes through the real `run_agent`, its request kept.
     real_run_agent=None,
+    # Seconds a modelled turn's own `num_turns` is scaled by, opt-in for the
+    # wall-scaling witness below. `None` leaves every prior caller unchanged.
+    turn_seconds=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1326,8 +1329,18 @@ def _drive(
             raise turn
         attempt = turn.attempt if cut_off else turn
 
-        def _exec_stream(_container, _command, *, stdin_data, on_line, **_kwargs):
+        def _exec_stream(
+            _container, _command, *, stdin_data, on_line, timeout_s=None, **_kwargs
+        ):
             real_run_agent.append(stdin_data)
+            # A modelled turn scaled past its own wall never reaches a result
+            # event, which models a real kill exactly (backlog item b-bf0c91).
+            if (
+                turn_seconds is not None
+                and timeout_s is not None
+                and attempt.num_turns * turn_seconds > timeout_s
+            ):
+                return runtime.Completed(124, "", "", timed_out=True, bound="wall")
             on_line(json.dumps({"type": "text", "text": attempt.text}))
             on_line(
                 json.dumps(
@@ -1345,6 +1358,11 @@ def _drive(
             )
             return runtime.Completed(0, "", "")
 
+        def _exec(*_args, **_kwargs):
+            # A wall cut removes the prompt file with `exec_`. `tests/conftest.py`
+            # refuses a real one, so this stands in for it here too.
+            return runtime.Completed(0, "", "")
+
         return _REAL_RUN_AGENT(
             container,
             prompt=prompt,
@@ -1352,6 +1370,7 @@ def _drive(
             resume=resume,
             exec_stream=_exec_stream,
             reap_cell=_no_reap,
+            exec_=_exec,
             **kwargs,
         )
 
@@ -4515,9 +4534,18 @@ def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
 ):
     """3600s is the transport's ceiling; the bound an operator actually sits
     through is set here, and a turn that inherits the default is an hour of
-    watching nothing happen."""
+    watching nothing happen. `bare` is parsed the way a real spec is, with
+    no `max_turns:` line. Its own default governs this test, not a
+    coincidence in `_spec()`."""
     cell = _stub_the_runtime(monkeypatch)
-    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
+    bare = parse_spec("---\nid: SA-9\ntitle: no turns declared\ntype: feature\n---\n")
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        spec=_spec(max_turns=bare.max_turns),
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
     assert session.TURN_TIMEOUT_S < 3600
     assert cell.timeouts == [session.TURN_TIMEOUT_S] * len(cell.turns)
     # `spec_id` is bound in the same `partial`, and nothing read its value:
@@ -4525,6 +4553,63 @@ def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
     # turn of every production run, and `spec_id=container` was equally silent.
     # It is what SA-0042's shared log will key one task's rows on.
     assert cell.spec_ids == ["SY-1"] * len(cell.turns)
+
+
+def test_every_turn_carries_a_wall_scaled_to_the_specs_max_turns(monkeypatch, tmp_path):
+    """Backlog item b-bf0c91: the wall scales with the spec's own `max_turns`.
+    It is floored and capped, so a long spec is cut by its turn ceiling and
+    not by a flat 900 seconds. Driven through a wall cut, the salvage turn it
+    buys, a repair turn and REVIEW's own lenses, all sharing one binding."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    for max_turns, wall in [(40, 900.0), (130, 1950.0), (300, 3600.0)]:
+        cell = _stub_the_runtime(
+            monkeypatch, commits=[0, 1], suites=([], _results(failing), [])
+        )
+        _drive(
+            monkeypatch,
+            tmp_path / f"case-{max_turns}",
+            cell=cell,
+            spec=_spec(max_turns=max_turns),
+            turns=[_turn(_block(_PLAN)), _wall_cut_turn(), _turn(), _turn()],
+        )
+        assert cell.turns[2] == implement.SALVAGE_PROMPT
+        assert "too long" in cell.turns[3]
+        assert len(cell.turns) > 4
+        assert cell.timeouts == [wall] * len(cell.timeouts)
+
+
+def test_a_long_session_ends_at_its_turn_ceiling_not_the_wall(monkeypatch, tmp_path):
+    """Backlog item b-bf0c91: at 10.8 seconds a turn a 130-turn spec still
+    ends on its own turn ceiling, and the wall is never named. At 16 seconds
+    a turn the same spec is cut by the wall instead, and the line names it
+    and its own 1950 seconds."""
+
+    def _cut(seconds_per_turn, name):
+        cell = _stub_the_runtime(monkeypatch)
+        raw: list[str] = []
+        _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            spec=_spec(max_turns=130),
+            turns=[
+                _turn(_block(_PLAN)),
+                implement.AgentFailed(
+                    "max turns", replace(_cut_off_turn(), num_turns=130)
+                ),
+            ],
+            real_run_agent=raw,
+            turn_seconds=seconds_per_turn,
+        )
+        return next(line for line in cell.watched if "the session failed" in line)
+
+    ceiling_line = _cut(10.8, "ceiling")
+    assert "ceiling of 130 turns" in ceiling_line
+    assert "wall" not in ceiling_line
+
+    wall_line = _cut(16.0, "wall")
+    assert "wall bound" in wall_line
+    assert "1950" in wall_line
 
 
 def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
