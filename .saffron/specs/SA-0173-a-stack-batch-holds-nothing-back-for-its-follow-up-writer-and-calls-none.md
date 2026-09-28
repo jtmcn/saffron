@@ -41,7 +41,7 @@ forbidden:
   - tests/test_spec_review.py
 budget_usd: 16
 max_attempts: 3
-max_turns: 100
+max_turns: 130
 estimated_lines: 129
 acceptance:
   - claim: >-
