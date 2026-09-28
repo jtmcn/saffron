@@ -13,7 +13,7 @@ record of what bounded it. `batch.py` names the cause in its own `runner`
 docstring — the resolvers this needs were `cli`-private, and `cli.py` was
 `forbidden` to the spec that built the loop.
 
-What stays outside, deliberately, except two refusals named below:
+What stays outside, deliberately, except the refusals named below:
 
 - **The refusals and the mirror fetch.** They run at different times on the
   two paths for good reasons — a batch refuses at scan time so a night never
@@ -25,9 +25,9 @@ What stays outside, deliberately, except two refusals named below:
   `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
   instead.
 - **The other exception.** A stack batch's recorded spec text (ADR 7) is not
-  at `base_sha`. The scan that refuses at scan time never reads it, so
-  `run_task` re-runs gate 0 against it, keyed on `task_id`, before anything
-  else.
+  at `base_sha`. The scan never reads it, so `run_task` re-runs the gate 0
+  refusals that need no GitHub against it, keyed on `task_id`. The open-PR
+  and dependency refusals are not re-run.
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -43,10 +43,19 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args
 
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
-from saffron.events import Ceilings, CeilingSource, Event, EventLog, Preflight, describe
+from saffron.events import (
+    Ceiling,
+    Ceilings,
+    CeilingSource,
+    Event,
+    EventLog,
+    Preflight,
+    describe,
+)
 from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
@@ -269,21 +278,19 @@ class Refused:
 
     A `consumes` entry did not resolve at the tree base, or the reader could
     not read it there. Or, for a task holding a stack batch's recorded spec
-    text (ADR 7), gate 0 refused that text itself. Carries only `reason`,
-    the same text `run_task` prints on the refused line. No run and no task
-    row exist for a caller to read anything else back from."""
+    text (ADR 7), a gate 0 refusal that needs no GitHub refused that text.
+    Carries only `reason`, the same text `run_task` prints on the refused
+    line. No run and no task row exist for a caller to read anything else
+    back from."""
 
     reason: str
-
-
-_CEILING_FIELDS = ("budget_usd", "max_attempts", "max_turns")
 
 
 def _recorded_spec_text(
     ledger: Ledger, task_id: int, spec: Spec, base: PinnedBase
 ) -> tuple[Spec, str] | Refused | None:
-    """Gate 0, re-run against a stack batch's recorded spec text (ADR 7),
-    keyed on `task_id` rather than `base_sha`. Checks the task's latest
+    """Gate 0's refusals that need no GitHub, re-run against a stack batch's
+    recorded spec text (ADR 7) and keyed on `task_id`. Checks the task's latest
     `spec_texts` row in order: its own hash, `parse_spec`, the id,
     `depends_on`, and each ceiling. Then a follow-up task's `touches`, a
     `revision` row's path, `protected_touch_refusal`,
@@ -317,7 +324,7 @@ def _recorded_spec_text(
             f"depends_on {text_spec.depends_on} differs from {spec.depends_on}"
         )
 
-    for field in _CEILING_FIELDS:
+    for field in get_args(Ceiling):
         theirs, ours = getattr(text_spec, field), getattr(spec, field)
         if theirs > ours:
             return _refused(f"{field} {theirs} exceeds the handed spec's {ours}")
@@ -325,7 +332,14 @@ def _recorded_spec_text(
     texts = ledger.spec_texts(task_id)
     first_row = texts[0]
     if first_row["origin"] == "follow_up":
-        first_spec = parse_spec(first_row["text"])
+        try:
+            first_spec = parse_spec(first_row["text"])
+        except SpecError as exc:
+            detail = " ".join(str(exc).split())
+            first_n = first_row["n"]
+            return _refused(
+                f"follows first text {first_n}, which does not parse: {detail}"
+            )
         widened = sorted(set(text_spec.touches) - set(first_spec.touches))
         if widened:
             return _refused(f"widens touches beyond text {first_row['n']}'s: {widened}")
@@ -422,6 +436,8 @@ def run_task(
             if log.failed and not was_failed:
                 print(f"warning: {log_path} refused a write; events may be missing")
 
+    # Emitted here, not by either caller: a ceiling printed on one path only
+    # is the defect this module ends.
     emit(
         Ceilings(
             timestamp=time.time(),

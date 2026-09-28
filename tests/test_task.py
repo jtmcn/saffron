@@ -747,12 +747,12 @@ def _recorded_mirror(tmp_path: Path) -> tuple[Path, dict[str, str]]:
 
 
 def _recorded_ledger(
-    tmp_path: Path, db_name: str = "ledger.db"
+    tmp_path: Path,
 ) -> tuple[Ledger, int, int, Path, dict[str, str]]:
     """The shared arrangement both new witnesses build: one ledger, one
     repo, one run at `base`."""
     mirror, shas = _recorded_mirror(tmp_path)
-    ledger = Ledger(tmp_path / db_name)
+    ledger = Ledger(tmp_path / "ledger.db")
     repo_id = ledger.upsert_repo(
         "recorded", str(mirror), str(mirror), policy_sha="p" * 64
     )
@@ -795,6 +795,24 @@ def _handed_spec() -> tuple[Spec, str, ResolvedCeilings]:
     )
 
 
+def _assert_text_ceilings(events: list[Event], *, max_attempts: int) -> None:
+    # The handed ceilings are 12.0, 4 and 60 from defaults, so each value
+    # and source here can only come from the recorded text.
+    ceiling_events = [e for e in events if isinstance(e, Ceilings)]
+    assert len(ceiling_events) == 1
+    event = ceiling_events[0]
+    assert (event.budget_usd, event.max_attempts, event.max_turns) == (
+        9.5,
+        max_attempts,
+        50,
+    )
+    assert (event.budget_source, event.attempts_source, event.turns_source) == (
+        "spec",
+        "spec",
+        "spec",
+    )
+
+
 def test_a_task_with_a_recorded_spec_text_runs_its_latest_text(tmp_path, monkeypatch):
     """`run_task` runs a task's latest recorded spec text (SA-0182, ADR 7)
     in place of the spec it was handed, once gate 0 passes it. It rebinds
@@ -824,15 +842,15 @@ def test_a_task_with_a_recorded_spec_text_runs_its_latest_text(tmp_path, monkeyp
             state="READY_FOR_REVIEW", pr_url="https://example.invalid/pull/1"
         )
 
-    def _push(_outcome, *, spec, **_kwargs):
+    def _recording_push(_outcome, *, spec, **_kwargs):
         push_calls.append(spec)
         return package_phase.PushResult(pushed=False, note=_NO_COMMITS)
 
     monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
     monkeypatch.setattr(package_phase, "package", _package)
-    monkeypatch.setattr(package_phase, "push_unpackaged_work", _push)
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", _recording_push)
 
-    def _run(task_id, *, base_sha=None, repo=None):
+    def _run(task_id, *, base_sha=None):
         events: list[Event] = []
         result = task_module.run_task(
             spec,
@@ -844,7 +862,7 @@ def test_a_task_with_a_recorded_spec_text_runs_its_latest_text(tmp_path, monkeyp
                 base_sha=base_sha or shas["base"],
             ),
             repo_id=repo_id,
-            repo=repo or tmp_path / "target-repo",
+            repo=tmp_path / "target-repo",
             ledger=ledger,
             out_dir=out_dir,
             token=None,
@@ -871,14 +889,7 @@ def test_a_task_with_a_recorded_spec_text_runs_its_latest_text(tmp_path, monkeyp
     assert spec_a.budget_usd == 9.5
     assert spec_a.max_turns == 50
     assert spec_a.max_attempts == 4
-    ceiling_events = [e for e in events_a if isinstance(e, Ceilings)]
-    assert len(ceiling_events) == 1
-    assert (ceiling_events[0].budget_usd, ceiling_events[0].max_attempts) == (9.5, 4)
-    assert (
-        ceiling_events[0].budget_source,
-        ceiling_events[0].attempts_source,
-        ceiling_events[0].turns_source,
-    ) == ("spec", "spec", "spec")
+    _assert_text_ceilings(events_a, max_attempts=4)
     assert package_calls[-1] == parse_spec(_REV_TEXT)
 
     # A fresh task: `older` then `REV` with `max_attempts: 3`, `EXHAUSTED`.
@@ -888,8 +899,9 @@ def test_a_task_with_a_recorded_spec_text_runs_its_latest_text(tmp_path, monkeyp
     _record(ledger, task_b, rev_max3)
     states[:] = ["EXHAUSTED"]
     built.clear()
-    result_b, _events_b = _run(task_b)
+    result_b, events_b = _run(task_b)
     assert isinstance(result_b, CellOutcome)
+    _assert_text_ceilings(events_b, max_attempts=3)
     spec_b = built[-1]
     assert spec_b.max_attempts == 3
     assert push_calls[-1] == parse_spec(rev_max3)
@@ -1076,8 +1088,8 @@ def test_gate_zero_refuses_a_recorded_spec_text_before_its_cell(
     )
     _assert_refused(task, "widens")
 
-    # widened via chain: each revision stays within its predecessor's
-    # touches, but the latest still grows past the original follow-up's.
+    # The latest revision repeats the earlier one's widened touches, so only
+    # a check against the first row refuses it.
     task = _new_task(ledger, run_id)
     _record(
         ledger,
@@ -1102,6 +1114,18 @@ def test_gate_zero_refuses_a_recorded_spec_text_before_its_cell(
     )
     _assert_refused(task, "widens")
 
+    # A follow-up first row that does not parse refuses its valid revision.
+    task = _new_task(ledger, run_id)
+    first_n = _record(
+        ledger,
+        task,
+        "revised body\n",
+        origin="follow_up",
+        path=".saffron/specs/SY-1-u.md",
+    )
+    _record(ledger, task, _REV_TEXT, origin="revision", path=".saffron/specs/SY-1-u.md")
+    _assert_refused(task, f"follows first text {first_n}, which does not parse")
+
     # An earlier row at the same path needs no read at all. Three broken
     # bases still raise, and one good base reaches the export cleanly.
     task = _new_task(ledger, run_id)
@@ -1112,27 +1136,9 @@ def test_gate_zero_refuses_a_recorded_spec_text_before_its_cell(
 
     for bad_base in ("b" * 40, shas["bare"]):
         with pytest.raises(GitError):
-            task_module._recorded_spec_text(
-                ledger,
-                task,
-                spec,
-                PinnedBase(
-                    mirror=mirror,
-                    url="https://example.invalid/o/r.git",
-                    base_sha=bad_base,
-                ),
-            )
+            _run(task, base_sha=bad_base)
     with pytest.raises(PolicyError):
-        task_module._recorded_spec_text(
-            ledger,
-            task,
-            spec,
-            PinnedBase(
-                mirror=mirror,
-                url="https://example.invalid/o/r.git",
-                base_sha=shas["broken"],
-            ),
-        )
+        _run(task, base_sha=shas["broken"])
 
     ok = task_module._recorded_spec_text(
         ledger,
