@@ -3,21 +3,23 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the fifteen kinds
+by `saffron/record/fold.py`, deletable at any time. Only the sixteen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
-`qualifications` and `spec_reviews` are a tenth, an eleventh, a twelfth, a
-thirteenth and a fourteenth table, outside that count: `DESIGN.md` §4.1 does
-not list any of them.
+`qualifications`, `spec_reviews` and `spec_texts` are a tenth, an eleventh, a
+twelfth, a thirteenth, a fourteenth and a fifteenth table, outside that
+count: `DESIGN.md` §4.1 does not list any of them.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -31,6 +33,15 @@ from saffron.record.contract import Fact, Record, new_task_key
 # The closed set `set_run_preflight` writes; the `CHECK` below is built from it.
 RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
 _PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
+
+# The closed set `record_spec_text` writes: a spec review's revision, or a
+# follow-up spec neither is at `base_sha` (ADR 7).
+SPEC_TEXT_ORIGINS = ("revision", "follow_up")
+
+# A follow-up's file is named for its own spec id by the host. A revision's
+# is the queued spec's own file, tied to no id.
+_FOLLOW_UP_PATH = r"\.saffron/specs/{}-[A-Za-z0-9._-]+\.md"
+_REVISION_PATH = r"\.saffron/specs/[A-Za-z0-9][A-Za-z0-9._-]*\.md"
 
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS repos (
@@ -224,6 +235,19 @@ CREATE TABLE IF NOT EXISTS spec_reviews (
     block        TEXT,
     block_sha256 TEXT,
     error        TEXT,
+    PRIMARY KEY (task_key, n)
+);
+
+-- One spec text a stack batch runs that is not at `base_sha`: a spec review's
+-- revision, or a follow-up spec's own text, keyed like `spec_reviews` (ADR 7).
+CREATE TABLE IF NOT EXISTS spec_texts (
+    task_key  TEXT NOT NULL,
+    n         INTEGER NOT NULL,
+    origin    TEXT NOT NULL,
+    spec_id   TEXT NOT NULL,
+    path      TEXT NOT NULL,
+    text      TEXT NOT NULL,
+    spec_sha  TEXT NOT NULL,
     PRIMARY KEY (task_key, n)
 );
 
@@ -477,12 +501,14 @@ class Ledger:
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
         `fold_task` an upsert, and a no-op on a task with no row yet.
-        `stack_layers`, `end_reviews`, `qualifications` and `spec_reviews`
-        are keyed on `key` itself, so all four deletes run first."""
+        `stack_layers`, `end_reviews`, `qualifications`, `spec_reviews` and
+        `spec_texts` are keyed on `key` itself, so all five deletes run
+        first."""
         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM spec_reviews WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM spec_texts WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -772,6 +798,23 @@ class Ledger:
                     payload["block"],
                     payload["block_sha256"],
                     payload["error"],
+                ),
+            )
+            return None
+        if fact.kind == "spec_text":
+            # `n` comes straight from the payload, `spec_review`'s shape,
+            # so `fold_task` keeps a dropped fact's numbering on what remains.
+            self._db.execute(
+                "INSERT INTO spec_texts (task_key, n, origin, spec_id, "
+                "path, text, spec_sha) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["n"],
+                    payload["origin"],
+                    payload["spec_id"],
+                    payload["path"],
+                    payload["text"],
+                    payload["spec_sha"],
                 ),
             )
             return None
@@ -1385,6 +1428,93 @@ class Ledger:
             },
         )
         self._commit_and_append(fact)
+
+    def record_spec_text(
+        self,
+        task_id: int,
+        *,
+        origin: str,
+        spec_id: str,
+        path: str,
+        text: str,
+    ) -> int:
+        """Record one spec text a stack batch runs, not at `base_sha`: a spec
+        review's revision, or a follow-up spec's own text (ADR 7). Numbered
+        one more than the task's own `spec_texts` rows, starting at 1. Raises
+        `ValueError` for an origin outside `SPEC_TEXT_ORIGINS`, a task id
+        that names no task, or a `spec_id` the task does not carry. It also
+        raises for a `path` the origin's own pattern refuses, writing no row
+        and no fact."""
+        if origin not in SPEC_TEXT_ORIGINS:
+            raise ValueError(
+                f"spec text origin {origin!r} is not one of {SPEC_TEXT_ORIGINS}"
+            )
+        row = self._db.execute(
+            "SELECT record_key, spec_id FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no task {task_id} to record a spec text against")
+        if spec_id != row["spec_id"]:
+            raise ValueError(f"task {task_id} does not carry spec id {spec_id!r}")
+        pattern = (
+            _FOLLOW_UP_PATH.format(re.escape(spec_id))
+            if origin == "follow_up"
+            else _REVISION_PATH
+        )
+        if re.fullmatch(pattern, path) is None:
+            raise ValueError(f"path {path!r} is not a valid {origin} spec path")
+        n = (
+            1
+            + self._db.execute(
+                "SELECT COUNT(*) AS n FROM spec_texts WHERE task_key = ?",
+                (row["record_key"],),
+            ).fetchone()["n"]
+        )
+        fact = self._build_fact(
+            task_id,
+            "spec_text",
+            {
+                "n": n,
+                "origin": origin,
+                "spec_id": spec_id,
+                "path": path,
+                "text": text,
+                "spec_sha": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            },
+        )
+        self._commit_and_append(fact)
+        return n
+
+    def spec_text(self, task_id: int) -> sqlite3.Row | None:
+        """The task's `spec_texts` row with the highest `n`, or `None` for a
+        task that holds none. Raises `ValueError` for a task id that names
+        no task."""
+        row = self._db.execute(
+            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no task {task_id} to read a spec text for")
+        return self._db.execute(
+            "SELECT task_key, n, origin, spec_id, path, text, spec_sha "
+            "FROM spec_texts WHERE task_key = ? ORDER BY n DESC LIMIT 1",
+            (row["record_key"],),
+        ).fetchone()
+
+    def spec_texts(self, task_id: int) -> list[sqlite3.Row]:
+        """Every `spec_texts` row the task holds, oldest first, or an empty
+        list. Raises `ValueError` for a task id that names no task."""
+        row = self._db.execute(
+            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no task {task_id} to read spec texts for")
+        return list(
+            self._db.execute(
+                "SELECT task_key, n, origin, spec_id, path, text, spec_sha "
+                "FROM spec_texts WHERE task_key = ? ORDER BY n",
+                (row["record_key"],),
+            )
+        )
 
     def record_end_review(
         self,

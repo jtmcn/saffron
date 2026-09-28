@@ -8,6 +8,7 @@ into SQLite.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sqlite3
 from dataclasses import replace
@@ -906,3 +907,290 @@ def test_every_task_write_applies_its_fact_through_apply(tmp_path, record, monke
                 call()
         monkeypatch.undo()
         ledger.close()
+
+
+_SPEC_TEXT_COLUMNS = "task_key, n, origin, spec_id, path, text, spec_sha"
+
+
+def _all_spec_texts(path: Path) -> list[dict]:
+    con = sqlite3.connect(path)
+    con.row_factory = sqlite3.Row
+    try:
+        rows = con.execute(
+            f"SELECT {_SPEC_TEXT_COLUMNS} FROM spec_texts ORDER BY task_key, n"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        con.close()
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_a_spec_text_is_numbered_on_its_task_and_read_back_latest(tmp_path, record):
+    from saffron.ledger import SPEC_TEXT_ORIGINS
+
+    assert SPEC_TEXT_ORIGINS == ("revision", "follow_up")
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
+    sy1 = _minimal(ledger, "SY-1")
+    sy2 = _minimal(ledger, "SY-2")
+    sy3 = _minimal(ledger, "SY-3")
+    first = "---\nid: SY-1\n---\nfirst é\n"
+    second = "second\n"
+    path1 = ".saffron/specs/SY-1-a.md"
+
+    assert ledger.spec_text(sy3) is None
+    assert ledger.spec_texts(sy3) == []
+
+    assert (
+        ledger.record_spec_text(
+            sy1, origin="revision", spec_id="SY-1", path=path1, text=first
+        )
+        == 1
+    )
+    row_after_first = ledger.spec_text(sy1)
+    assert row_after_first is not None
+    assert row_after_first["n"] == 1
+    assert (
+        ledger.record_spec_text(
+            sy2,
+            origin="follow_up",
+            spec_id="SY-2",
+            path=".saffron/specs/SY-2-b.md",
+            text="b",
+        )
+        == 1
+    )
+    assert (
+        ledger.record_spec_text(
+            sy1, origin="revision", spec_id="SY-1", path=path1, text=second
+        )
+        == 2
+    )
+
+    sy1b = _minimal(ledger, "SY-1")
+    assert ledger.spec_text(sy1b) is None
+    assert (
+        ledger.record_spec_text(
+            sy1b, origin="revision", spec_id="SY-1", path=path1, text="again"
+        )
+        == 1
+    )
+    assert (
+        ledger.record_spec_text(
+            sy3,
+            origin="revision",
+            spec_id="SY-3",
+            path=".saffron/specs/other.md",
+            text="o",
+        )
+        == 1
+    )
+
+    key1 = _key(ledger, sy1)
+    key1b = _key(ledger, sy1b)
+
+    latest = ledger.spec_text(sy1)
+    assert latest is not None
+    assert dict(latest) == {
+        "task_key": key1,
+        "n": 2,
+        "origin": "revision",
+        "spec_id": "SY-1",
+        "path": path1,
+        "text": second,
+        "spec_sha": _sha256(second),
+    }
+    assert [dict(r) for r in ledger.spec_texts(sy1)] == [
+        {
+            "task_key": key1,
+            "n": 1,
+            "origin": "revision",
+            "spec_id": "SY-1",
+            "path": path1,
+            "text": first,
+            "spec_sha": _sha256(first),
+        },
+        {
+            "task_key": key1,
+            "n": 2,
+            "origin": "revision",
+            "spec_id": "SY-1",
+            "path": path1,
+            "text": second,
+            "spec_sha": _sha256(second),
+        },
+    ]
+    assert [dict(r) for r in ledger.spec_texts(sy1b)] == [
+        {
+            "task_key": key1b,
+            "n": 1,
+            "origin": "revision",
+            "spec_id": "SY-1",
+            "path": path1,
+            "text": "again",
+            "spec_sha": _sha256("again"),
+        }
+    ]
+    facts = [f.payload for f in record.read(key1) if f.kind == "spec_text"]
+    assert facts == [
+        {
+            "n": 1,
+            "origin": "revision",
+            "spec_id": "SY-1",
+            "path": path1,
+            "text": first,
+            "spec_sha": _sha256(first),
+        },
+        {
+            "n": 2,
+            "origin": "revision",
+            "spec_id": "SY-1",
+            "path": path1,
+            "text": second,
+            "spec_sha": _sha256(second),
+        },
+    ]
+
+    def _row_count() -> int:
+        return ledger._db.execute("SELECT COUNT(*) AS n FROM spec_texts").fetchone()[
+            "n"
+        ]
+
+    def _fact_count() -> int:
+        return sum(len(record.read(k)) for k in record.task_keys())
+
+    rows_before, facts_before = _row_count(), _fact_count()
+
+    def _refused(**kwargs) -> None:
+        with pytest.raises(ValueError):
+            ledger.record_spec_text(**kwargs)
+        assert _row_count() == rows_before
+        assert _fact_count() == facts_before
+
+    for origin in ("Revision", "follow-up", ""):
+        _refused(task_id=sy1, origin=origin, spec_id="SY-1", path=path1, text="x")
+    _refused(task_id=sy1, origin="revision", spec_id="SY-2", path=path1, text="x")
+    _refused(task_id=999, origin="revision", spec_id="SY-1", path=path1, text="x")
+    with pytest.raises(ValueError):
+        ledger.spec_text(999)
+    with pytest.raises(ValueError):
+        ledger.spec_texts(999)
+
+    bad_either_origin = [
+        "docs/SY-1-a.md",
+        ".saffron/specs/done/SY-1-a.md",
+        ".saffron/specs/../SY-1-a.md",
+        "/r/.saffron/specs/SY-1-a.md",
+        "./.saffron/specs/SY-1-a.md",
+        ".saffron/specs/SY-1-a.txt",
+        ".saffron/specs/SY-1-a/b.md",
+        ".saffron/specs/SY-1-a.md.bak",
+    ]
+    for bad_path in bad_either_origin:
+        _refused(
+            task_id=sy1, origin="revision", spec_id="SY-1", path=bad_path, text="x"
+        )
+        _refused(
+            task_id=sy1, origin="follow_up", spec_id="SY-1", path=bad_path, text="x"
+        )
+
+    bad_follow_up_only = [
+        ".saffron/specs/SY-10-a.md",
+        ".saffron/specs/other.md",
+        ".saffron/specs/SY-1.md",
+    ]
+    for bad_path in bad_follow_up_only:
+        _refused(
+            task_id=sy1, origin="follow_up", spec_id="SY-1", path=bad_path, text="x"
+        )
+
+    ledger.close()
+
+
+def test_the_spec_texts_fold_back_from_the_record_alone(tmp_path, record):
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    sy1 = _minimal(source, "SY-1")
+    sy2 = _minimal(source, "SY-2")
+    path1 = ".saffron/specs/SY-1-a.md"
+    source.record_spec_text(
+        sy1, origin="revision", spec_id="SY-1", path=path1, text="first"
+    )
+    source.record_spec_text(
+        sy2,
+        origin="follow_up",
+        spec_id="SY-2",
+        path=".saffron/specs/SY-2-b.md",
+        text="other",
+    )
+    source.record_spec_text(
+        sy1, origin="revision", spec_id="SY-1", path=path1, text="second"
+    )
+    sy1b = _minimal(source, "SY-1")
+    source.record_spec_text(
+        sy1b, origin="revision", spec_id="SY-1", path=path1, text="again"
+    )
+    key1 = _key(source, sy1)
+    key2 = _key(source, sy2)
+    key1b = _key(source, sy1b)
+
+    into = Ledger(fold_path)
+    _seed_unrelated_task(tmp_path / "seed", into)
+    fold(record, into)
+    assert _all_spec_texts(fold_path) == _all_spec_texts(source_path)
+
+    for key in (key1, key2, key1b):
+        before = _all_spec_texts(source_path)
+        source.fold_task(key, record.read(key))
+        assert _all_spec_texts(source_path) == before
+
+    kept = [r for r in _all_spec_texts(fold_path) if r["task_key"] in (key2, key1b)]
+    into.fold_task(key1, [])
+    assert [r for r in _all_spec_texts(fold_path) if r["task_key"] == key1] == []
+    assert [
+        r for r in _all_spec_texts(fold_path) if r["task_key"] in (key2, key1b)
+    ] == kept
+
+    trimmed = [
+        f
+        for f in record.read(key1)
+        if not (f.kind == "spec_text" and f.payload["n"] == 1)
+    ]
+    into.fold_task(key1, trimmed)
+    rows1 = [r for r in _all_spec_texts(fold_path) if r["task_key"] == key1]
+    assert len(rows1) == 1
+    assert rows1[0]["n"] == 2
+
+    # `spec_text` reads the highest `n`, not the last row inserted.
+    sy4 = _minimal(source, "SY-4")
+    source.record_spec_text(
+        sy4,
+        origin="revision",
+        spec_id="SY-4",
+        path=".saffron/specs/SY-4-a.md",
+        text="x",
+    )
+    source.record_spec_text(
+        sy4,
+        origin="revision",
+        spec_id="SY-4",
+        path=".saffron/specs/SY-4-a.md",
+        text="y",
+    )
+    key4 = _key(source, sy4)
+    facts4 = record.read(key4)
+    spec_text_facts = [f for f in facts4 if f.kind == "spec_text"]
+    assert [f.payload["n"] for f in spec_text_facts] == [1, 2]
+    reordered = [f for f in facts4 if f.kind != "spec_text"] + spec_text_facts[::-1]
+    into.fold_task(key4, reordered)
+    task_id4 = _raw_rows(
+        fold_path, "SELECT task_id FROM tasks WHERE record_key = ?", key4
+    )[0]["task_id"]
+    latest4 = into.spec_text(task_id4)
+    assert latest4 is not None
+    assert (latest4["n"], latest4["text"]) == (2, "y")
+
+    source.close()
+    into.close()
