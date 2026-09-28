@@ -4,7 +4,7 @@ title: The conventions lens names no edge with the other three, and judges a rep
 type: feature
 priority: 1
 depends_on: [SA-0191]
-estimated_lines: 175
+estimated_lines: 185
 touches:
   - saffron/phases/review.py
   - saffron/agents/prompts/review-conventions.md
@@ -44,9 +44,10 @@ acceptance:
       Each of the four lens prompts names every other lens's remit as not its
       own. The correctness, contract and adequacy prompts each end their
       Not-yours list with the conventions lens's remit. The conventions
-      prompt's list names the other three lenses and the retired blast-radius
-      lens, and hands a docstring that misstates a public interface's
-      documented contract to the contract lens.
+      prompt's list sits in the section right after its remit. It names the
+      other three lenses and the retired blast-radius lens, and hands a
+      docstring that misstates a public interface's documented contract to
+      the contract lens.
     witness: tests/test_review.py::test_the_four_lenses_declare_disjoint_remits
   - claim: >-
       For a repo with no `CLAUDE.md`, or a blank one, the conventions prompt
@@ -68,16 +69,16 @@ Backlog items **b-abeb74** and **b-17d0d5**. The first cites `DESIGN.md`
 §5.5. This is the third of three specs. `SA-0191` declares the conventions
 lens and its prompt, `saffron/agents/prompts/review-conventions.md`, with
 no Not-yours list. ADR 8 records the decision. Every line number below was
-read at `a4299786`, and the code is unchanged at `5438a23c`. `SA-0187`,
+read at `a4299786`, and the code is unchanged at `40dc7f8f`. `SA-0187`,
 `SA-0190` and `SA-0191` edit `saffron/phases/review.py` and
 `tests/test_review.py` before this spec runs. Find a test by its name.
 
 **The remits are disjoint by construction.** That is why any single
 blocker routes to REBUT with no vote (§5.5). Each lens prompt carries a
 paragraph opening "Not yours." whose bullets name every other lens's
-territory. `saffron/agents/prompts/review-correctness.md:44-60`,
-`saffron/agents/prompts/review-contract.md:51-65` and
-`saffron/agents/prompts/review-adequacy.md:68-81` carry one each. Each ends with an edge sentence
+territory. `saffron/agents/prompts/review-correctness.md:44-61`,
+`saffron/agents/prompts/review-contract.md:51-66` and
+`saffron/agents/prompts/review-adequacy.md:68-83` carry one each. Each ends with an edge sentence
 opening "The test at the edge". `test_the_lenses_declare_disjoint_remits`
 reads the three lists (`tests/test_review.py:378-392`).
 
@@ -126,13 +127,18 @@ section.
 - **`context.standing_instructions`.** It keeps returning an empty string,
   so every other prompt is unchanged.
 - **The protected text.** This spec's pull request needs none.
+- **REBUT's verdict session for a conventions blocker.** For a repo with
+  no `CLAUDE.md`, its standing-instructions section stays empty
+  (`saffron/phases/rebut.py:280`). `rebut.py` is forbidden here. That
+  gap sits next to b-17d0d5's open end-review half.
 
 ## Notes for the agent
 
-**Both criteria are new text or new code**, so each declares a witness and
-no mutant, and the `witness` gate reports `skip` for both. The spec does
-not force the spelling of the `lens_prompt` edit. Criterion 3 is
-`preserves`, and names a test that passes now.
+**Neither criterion declares a mutant.** Criterion 1 is new prompt text,
+and intake refuses a mutant whose text the spec body carries. Criterion 2
+edits the existing `lens_prompt`, but the spec does not fix the spelling of
+that edit, so no mutant can name it. The `witness` gate reports `skip` for
+both. Criterion 3 is `preserves`, and names a test that passes now.
 
 **Commit as each witness passes.**
 
@@ -177,11 +183,16 @@ This repository declares no standing instructions: no `CLAUDE.md` stood at this 
 
 ### The witnesses
 
-- **Criterion 1** replaces `test_the_lenses_declare_disjoint_remits` under
-  the new name, and keeps every assertion that test makes. It reads each
-  prompt's Not-yours list, from the line opening "Not yours." to the edge
-  sentence. It splits the list into bullets, each joined on whitespace. For correctness, contract and adequacy, the last bullet
-  equals the appended bullet exactly. For conventions, the bullets equal
+- **Criterion 1** is a new test beside
+  `test_the_lenses_declare_disjoint_remits`, which stays under its name and
+  still passes. `census` fails any test collected at base and absent at
+  head (`saffron/gates/core/census.py:69-86`), so rename nothing. In the
+  conventions prompt, the new test finds the first heading after
+  `## Your remit`. It asserts that heading is `## Its edges`, and that
+  "Not yours." comes after it. It reads each prompt's Not-yours list, from the line
+  opening "Not yours." to the edge sentence. It splits the list into
+  bullets, each joined on whitespace. For correctness, contract and
+  adequacy, the last bullet equals the appended bullet exactly. For conventions, the bullets equal
   the four above, exactly and in order, and its edge sentence equals the
   one above. Table the rows by lens, and assert the table's keys equal
   `set(review.LENSES)`.
@@ -199,6 +210,8 @@ no Not-yours list, and criterion 2 fails on its empty section.
 
 - The appended bullet added to two of the three other lists.
 - The appended bullet placed first rather than last.
+- A conventions list placed after the `{spec}` slot, or anywhere but the
+  section after the remit.
 - A conventions list that keeps the public-interface docstring for itself.
 - A no-instructions block given to every lens.
 - A block given for `None` and not for a blank file.

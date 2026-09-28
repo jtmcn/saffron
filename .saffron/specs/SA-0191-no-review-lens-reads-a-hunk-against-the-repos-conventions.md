@@ -4,7 +4,7 @@ title: No REVIEW lens reads a hunk against the repo's conventions, so the Standa
 type: feature
 priority: 1
 depends_on: [SA-0189]
-estimated_lines: 320
+estimated_lines: 330
 touches:
   - saffron/phases/review.py
   - saffron/agents/prompts/review-conventions.md
@@ -48,7 +48,7 @@ forbidden:
   - tests/test_corpus.py
 budget_usd: 24
 max_attempts: 3
-max_turns: 180
+max_turns: 200
 acceptance:
   - claim: >-
       `review.LENSES` declares exactly four lenses, correctness, contract,
@@ -115,7 +115,7 @@ It cites `DESIGN.md` §5.5. ADR 8 records the decision to add this lens, and
 amends ADR 4's three-lens sentence. This is the second of three specs.
 `SA-0189` readies the scoring harness. `SA-0192` gives the lens its edges and
 its prompt for a repo with no `CLAUDE.md`. Every line number below was read
-at `a4299786`, and the code is unchanged at `5438a23c`. `SA-0190` and
+at `a4299786`, and the code is unchanged at `40dc7f8f`. `SA-0190` and
 `SA-0188` edit `tests/test_session.py`, `tests/test_review.py`,
 `tests/test_rebut.py` and `saffron/phases/review.py` before this spec runs.
 Find a test by its name, not its line.
@@ -180,7 +180,8 @@ Declare a fourth in-cell lens, `conventions`.
    word for word, and the next heading follows it. The rest follows
    `review-correctness.md`: severity in three levels, then the `<output>`
    block with `file`, `line`, `severity` and `claim`. It also carries the
-   plain-language paragraph for the pull request's findings table.
+   plain-language paragraph for the pull request's findings table, and the
+   phrase "do not manufacture one" in lower case.
 3. **The tests that pin three lenses.** Update them, as the notes list.
 
 ## Out of scope
@@ -260,13 +261,22 @@ joined on whitespace.
 ### The other witnesses
 
 - **Criterion 1.** Assert `review.LENSES` equals the four-entry dict, and
-  its key list equals the four names in order. Drive `run_review` through
-  `_review(record=...)` in `tests/test_review.py`. Its `_agent` answers a
-  clean review for every unscripted lens. Assert the four lens names in
-  order, four recorded calls, and the fourth call's `system_prompt` equal
-  to `review.lens_prompt("conventions", ...)` over the same inputs. It
-  replaces `test_the_declared_lenses_are_the_three_that_run`. Move
-  `test_the_blast_radius_lens_is_not_declared` to the four-name set.
+  its key list equals the four names in order. Give `_review` in
+  `tests/test_review.py` a `claude_md=` keyword, defaulting to `None`. It
+  passes `claude_md=None` today (`tests/test_review.py:76`). Drive `run_review` through it
+  with a one-line `CLAUDE.md` and `record=`. Its `_agent` answers a clean
+  review for every unscripted lens. Assert the four lens names in order and
+  four recorded calls. Assert the fourth call's `system_prompt` equals
+  `review.lens_prompt("conventions", ...)` over the same inputs, that
+  `CLAUDE.md` included. Add this witness beside
+  `test_the_declared_lenses_are_the_three_that_run`, and keep that test
+  under its name. Narrow it to what stays true: the first three keys of
+  `review.LENSES`, in order. Move `test_the_blast_radius_lens_is_not_declared`
+  to the four-name set under its own name.
+
+  **Every test name stays.** `census` fails any test collected at
+  base and absent at head (`saffron/gates/core/census.py:69-86`). Rename
+  nothing in the lists below. Edit each test in place.
 - **Criterion 2.** Assert both sets exactly, then their intersection empty.
 - **Criterion 4.** Drive `_run` in `tests/test_rebut.py` with two blockers
   from `_blocker`: a conventions one first, then a correctness one. Script
@@ -283,9 +293,22 @@ joined on whitespace.
 SA-0062: no result for conventions, so this run says nothing about the defects those lenses own
 ```
 
+**Two arrangements are unmeasured.** They are settled by reading, not by
+a run, so the spec loop's step 1b runs them against a prototype.
+
+- Criterion 1's lens order against a `run_review` that loops over
+  `sorted(LENSES)`. The four names sort as adequacy, contract,
+  conventions, correctness, so the witness's ordered list kills it.
+- Criterion 4's verdict order, with the conventions blocker filed as
+  finding 1 and the correctness blocker as finding 2. The arrangement is
+  meant to kill three wrong versions: verdicts run in filing order, in
+  alphabetical order, and a conventions blocker filed under another lens.
+
 **Wrong versions these witnesses must kill.**
 
 - A fourth lens keyed `standards`, or any end-review name.
+- A `run_review` that withholds the standing instructions from the
+  conventions lens alone.
 - A conventions prompt with any of the four questions left out, or one
   telling the lens to read `CLAUDE.md` from the worktree.
 - A fourth lens that runs before adequacy.
@@ -296,6 +319,12 @@ SA-0062: no result for conventions, so this run says nothing about the defects t
 A stub fourth lens broke 54 tests at `a4299786`. `SA-0189` takes the 21
 harness tests. Change each of the rest in its own terms, and copy no
 helper.
+
+This list was measured at `a4299786`, before `SA-0187`, `SA-0190` and
+`SA-0188` land. Each of those adds tests to `tests/test_session.py`,
+`tests/test_rebut.py` or `tests/test_review.py`, and some drive REVIEW's
+turns or pin its spend. Treat the list as a lower bound. Find the rest by
+running the suite once the entry is in.
 
 - **`tests/test_session.py`, 25 tests.** Eleven route through
   `_through_rebut` (`:3503-3517`) and `_adequacy_turns` (`:3626-3637`). Add
@@ -316,6 +345,9 @@ helper.
 - **`tests/test_review.py`.** Table the framing sentence by lens in
   `test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic`. The
   three existing lenses keep theirs, and conventions takes the one above.
+  That test also asserts "do not manufacture one" and the `**Lens**:`
+  vocabulary entry for every lens. The prompt's `{vocabulary}` slot brings
+  the second.
 - **`tests/test_context.py`.**
   `test_prose_bound_for_the_pr_body_is_asked_for_in_plain_language` gains
   a row for `review-conventions.md`, `claim` and `findings`.
@@ -323,11 +355,13 @@ helper.
 **The prose gate** counts every new comment, docstring and prompt line.
 Write none with an em dash, a semicolon, a contraction, the perfect tense, a
 hedge or a sentence over 25 words. The prompt measured at zero hits in the
-prototype.
+prototype. Copying `review-correctness.md`'s severity section word for word
+trips `prose`: it carries em dashes and "should".
 
 **Size.** A prototype of this prompt measured 499 tokens under
 `size_gate`'s counter, and its witnesses about 520. The test updates add
-about 260. `estimated_lines` is about 1280 over four, with no overrun added.
+about 260, and the kept three-lens test and the `claude_md=` keyword about
+40. `estimated_lines` is about 1320 over four, with no overrun added.
 
 **Queued neighbours.** `SA-0187` and `SA-0190` also edit
 `saffron/phases/review.py`. Keep this spec's edit to `LENSES`.
@@ -353,10 +387,14 @@ whole. Each fixture's recorded findings come from its cell's
 `findings.json`, which ran three lenses. `SA-0189` makes `calibrate`
 accept those.
 
-The five fixtures collide with one pin. The baseline pass's test asserts
-it scored 8 fixtures (`tests/test_corpus.py:1023`). The corpus loader reads
-every directory under `docs/evidence/fixtures/`. Keep the five in a directory of
-their own, or move that pin in the same commit.
+Keep the five fixtures in a directory of their own, outside
+`docs/evidence/fixtures/`. The corpus loader reads every directory there,
+and many tests read every fixture it finds. The baseline pass's tests pin
+what they read to eight fixtures. One asserts `scored.dropped == ()` and a
+score of `(3, 12)` (`tests/test_corpus.py:1002-1003`). Another reads each
+fixture's probe record (`tests/test_corpus.py:1016`) and counts 8 probed
+fixtures (`tests/test_corpus.py:1023`). Every
+`test_every_shipped_fixture_*` test loops over the whole directory.
 
 The pull request body reports each defect's seen and graded counts over n
 runs, before with three lenses and after with four. It also reports runs

@@ -1333,7 +1333,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | Diagnose (bugs) | $0.30–1.00 |
 | Implement (incl. plan) | $2–6 |
 | Repair × 2 | $1–4 |
-| Review × 3 lenses | $1.50–3 |
+| Review × 4 lenses | $2–4 |
 | Rebut | $0.50–1.50 |
 | **Total** | **$5–15** |
 
