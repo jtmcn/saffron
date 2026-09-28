@@ -1,4 +1,5 @@
-"""Reading a spec review's own findings block (ADR 7, `CONTEXT.md`).
+"""Reading a spec review's own findings block (ADR 7, `CONTEXT.md`). It also
+fills core's spec writer prompt and defines that writer's reply schema.
 
 A spec review is one host-invoked session, seeded at the tree a spec's own
 cell would be cut from. It answers through one fenced ```json block, never
@@ -489,16 +490,16 @@ SPEC_WRITER_EXTRACT_PROMPT = context.turn_prompt("spec-writer-extract")
 class _SpecWriterReply(BaseModel):
     """The spec writer's whole answer, one required field (ADR 7).
 
-    `extra="forbid"` keeps a stray key out. No default on `spec` refuses
-    an empty reply instead of validating it as a blank spec."""
+    `extra="forbid"` keeps a stray key out. No default on `spec` refuses a
+    reply with no `spec` key. An empty string still validates."""
 
     model_config = ConfigDict(extra="forbid")
 
     spec: str
 
 
-# Sent as `output_format`: built once per process, as `rebut._REBUTTALS_FORMAT`
-# is (§5.3, backlog b-4e0868).
+# The spec writer session sends it as `output_format`. Built once per process,
+# as `rebut._REBUTTALS_FORMAT` is (§5.3).
 SPEC_WRITER_FORMAT = {
     "type": "json_schema",
     "schema": _SpecWriterReply.model_json_schema(),
