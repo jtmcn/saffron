@@ -38,4 +38,3 @@ Each queued spec credits the spec that builds the name.
 
 - 2026-09-27: filed from the spec loop's run 19.
 - 2026-09-27: fixed by hand. Each queued spec credits `SA-0181` or `SA-0182`.
-- 2026-09-27: closed by the commit that fixed the credits.
