@@ -62,3 +62,63 @@ that already exists.
 - `SA-0175`, `SA-0160`, `SA-0176`, `SA-0151`, `SA-0161`, `SA-0162`, `SA-0164`,
   `SA-0173` and `SA-0174` still credit `SA-0169` or `SA-0150` with work
   `SA-0181` or `SA-0182` now does. Each spec's tree base holds the names.
+
+# Second chain, same day: three specs off `main` for run 19's top items
+
+The operator asked for specs for b-bf0c91, b-efdf1f and b-877e93 ahead of the
+sixteen queued specs. Each declares no `depends_on`, so all three sit on one
+branch and one pull request. Three pull requests would each have stepped the
+queue smoke test's pinned candidate list, and the second and third would have
+conflicted there.
+
+## Rounds
+
+| Step | Wall time | Result |
+|---|---|---|
+| Writers, three in parallel | 15 to 19 min | three specs, none split |
+| Review round 1, three in parallel | 3 to 5 min | no blocker, 12 concerns |
+| Writers, round 1 answered | 8 to 10 min | wrong versions measured on each prototype |
+| Review round 2, three in parallel | 3 to 4 min | no blocker, 9 concerns |
+| Writers, round 2 answered | 8 to 13 min | SA-0186 redesigned by an operator call |
+
+## Findings by class
+
+| Class | Spec | Round | Check that should have caught it |
+|---|---|---|---|
+| A claim over every turn, a witness over four kinds | SA-0184 | 1 | pre-flight 1 |
+| A witness derived from the constant its mutant changes | SA-0184 | 1 | pre-flight 1 |
+| A design argument citing a rule §4.3 does not state | SA-0184 | 1 | pre-flight 8 |
+| A value placed past a 500-character event bound | SA-0184 | 1 | pre-flight 3 |
+| A cell that its own defect would cut | SA-0184 | 1 | pre-flight 11 |
+| A keyword witness passing an inverted sentence | SA-0185 | 1, 2 | pre-flight 1 |
+| An appended section gluing a later heading | SA-0185 | 1 | pre-flight 4 |
+| Witness rules refusing correct wordings | SA-0185 | 2 | none |
+| A parent outcome no criterion names | SA-0186 | 1 | pre-flight 1 |
+| A stored state re-asked on every run | SA-0186 | 2 | pre-flight 4 |
+| A design choice labelled the operator's that was not | SA-0186 | 1, 2 | none |
+
+## What this chain adds to the skill
+
+- **A prose witness needs a correct-wording check as well as a wrong-wording
+  one.** SA-0185's round-1 fix tightened its witness until the round-2 review
+  found three correct bullets it refused. A cell writes the bullet and the
+  witness together, so an over-strict rule costs turns. The writer now runs
+  both lists. Pre-flight 1 gains that line next.
+- **Mark who decided.** In round 1 the delegate told the reviewers a design
+  arm was the operator's call. It was the delegate's. The round-2 reviewer
+  argued against §4.2.1, and the operator reversed it. A decision block names
+  whose decision each line is.
+- **Parallel writers in one tree work if each owns one file.** The smoke test
+  and the `DESIGN.md` amendment were the delegate's. Two writers still reached
+  for `git stash` in scratch worktrees and applied the shared stack's top
+  entry. No entry was lost, but the dispatch now forbids `git stash`,
+  `git init` and `git worktree` by name.
+
+## Not settled
+
+- `SA-0186`'s round-2 revision changed its design at the operator's call. No
+  third review read it. The writer's wrong-version table is the only check.
+- `SA-0186` declares 214 raw lines. At the 1.4 overrun that is about 92% of
+  the `bug` ceiling. `size` is advisory at `standard`, so it runs.
+- `SA-0185` and `SA-0186` both touch `saffron/task.py`. The operator orders
+  them.
