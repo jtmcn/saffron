@@ -734,8 +734,8 @@ def _stack_review(
             # A revision replaces the queued file for this round: the
             # sentence below is what tells the review to read it instead.
             prompt += (
-                "The queued file changed since the last round. The text "
-                "below replaces it: review that text, and treat a change "
+                "A revision replaces the queued file. The text below is "
+                "that revision: review that text, and treat a change "
                 "to what the spec is for as a scope blocker.\n"
                 f"<spec>\n{spec_text}\n</spec>\n"
             )
@@ -768,7 +768,8 @@ def _stack_revise(
     `_stack_review` is. Given a layer, it fetches that spec's branch fresh
     and seeds the cell there. Given `None`, it seeds the cell at the
     pinned `base_sha`. The prompt and gates always come from `base_sha`'s
-    own export, never a layer's head.
+    own export, never a layer's head. A `None` spec text reads the queued
+    file at `base_sha`, and a missing one raises `ValueError` before any cell.
     """
 
     def run(

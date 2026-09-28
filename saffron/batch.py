@@ -611,7 +611,7 @@ def run_stack_batch(
                     missed[candidate.spec.id] = frozenset({candidate.spec.id})
                     remaining.remove(original)
                     raise RuntimeError(
-                        f"spec writer for {candidate.spec.id} could not be read"
+                        f"spec writer for {candidate.spec.id} returned an error"
                     )
                 rounds[candidate.spec.id] = rounds.get(candidate.spec.id, 0) + 1
                 ledger.record_spec_text(

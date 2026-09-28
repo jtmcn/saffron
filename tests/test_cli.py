@@ -4901,7 +4901,7 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
     assert cell_up_calls[-1]["thread_env"] == {}
 
 
-def _spec_session_rig(tmp_path, monkeypatch):
+def _spec_session_rig(tmp_path, monkeypatch, spec_file=None):
     """The mirror, checkout and cell fakes a spec session callable runs over:
     `bare`, `base` and `head` commits, and a spy on `layer_cell`."""
     mirror = tmp_path / "mirror"
@@ -4916,6 +4916,10 @@ def _spec_session_rig(tmp_path, monkeypatch):
     (mirror / ".saffron" / "policy.yaml").write_text(
         "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
     )
+    # A named spec file differs in all three trees, so a read shows which.
+    if spec_file:
+        (mirror / spec_file).parent.mkdir(parents=True, exist_ok=True)
+        (mirror / spec_file).write_text("queued at base\n")
     _git(mirror, "add", "-A")
     _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
     base_sha = _rev_parse(mirror, "HEAD")
@@ -4923,6 +4927,8 @@ def _spec_session_rig(tmp_path, monkeypatch):
     (mirror / ".saffron" / "policy.yaml").write_text(
         "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
     )
+    if spec_file:
+        (mirror / spec_file).write_text("at head\n")
     _git(mirror, "add", "-A")
     _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
 
@@ -4931,6 +4937,9 @@ def _spec_session_rig(tmp_path, monkeypatch):
     (repo / ".saffron" / "policy.yaml").write_text(
         "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
     )
+    if spec_file:
+        (repo / spec_file).parent.mkdir(parents=True, exist_ok=True)
+        (repo / spec_file).write_text("in the checkout\n")
 
     out_dir = tmp_path / "out"
 
@@ -5358,7 +5367,7 @@ def test_a_stack_batch_passes_run_stack_batch_its_spec_revision(tmp_path, monkey
     # Case 1: readiness passes, `--stack`.
     _readiness_passes(monkeypatch)
     home1 = tmp_path / "home1"
-    assert main(["--home", str(home1), "batch", "--stack"]) == 0
+    assert main(["--home", str(home1), "batch", "--stack", "--repo", "."]) == 0
 
     assert len(revise_calls) == 1
     pinned = task.PinnedBase(
@@ -5397,66 +5406,8 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     `.saffron/specs/` at the pinned base through `git_mirror.file_at`,
     never a layer's head or the checkout. It raises `ValueError` before
     any cell for a path absent there."""
-    mirror = tmp_path / "mirror"
-    mirror.mkdir()
-    _git(mirror, "init", "-q")
-    (mirror / ".saffron" / "specs").mkdir(parents=True)
-    (mirror / ".saffron" / "specs" / "SY-1-x.md").write_text("queued at base\n")
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
-    base_sha = _rev_parse(mirror, "HEAD")
-
-    (mirror / ".saffron" / "specs" / "SY-1-x.md").write_text("at head\n")
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
-
-    repo = tmp_path / "checkout"
-    (repo / ".saffron" / "specs").mkdir(parents=True)
-    (repo / ".saffron" / "specs" / "SY-1-x.md").write_text("in the checkout\n")
-
-    out_dir = tmp_path / "out"
-
-    monkeypatch.setattr(package, "fetch_parent_branch", lambda *a, **k: "d" * 40)
-
-    def _fake_cell_up(
-        *,
-        repo,
-        mirror,
-        tree_base,
-        branch,
-        network,
-        volume,
-        state,
-        container,
-        gates_dir,
-        thread_env,
-        created,
-        note,
-        cap_add=None,
-    ):
-        created.add(container)
-        note("cell_up", "cell up")
-
-    def _fake_cell_down(*, network, volume, state, container, created, note):
-        note("cell_down", True, "cell down")
-
-    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
-    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
-    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
-    monkeypatch.setattr(session, "assert_bash_is_unprivileged", lambda _container: None)
-
-    cell_up_calls: list[dict] = []
-    real_layer_cell = end_review.layer_cell
-
-    @contextmanager
-    def _spy_layer_cell(fields, **kwargs):
-        cell_up_calls.append({"fields": fields})
-        with real_layer_cell(fields, **kwargs) as container:
-            yield container
-
-    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
-
-    agent_calls: list[dict] = []
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    prompts: list[str] = []
 
     def _fake_run_agent(
         container,
@@ -5469,7 +5420,7 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
         emit=None,
         last_cost_usd=0.0,
     ):
-        agent_calls.append({"prompt": prompt, "resume": resume, "options": options})
+        prompts.append(prompt)
         if resume is None:
             structured = None
         elif options.get("output_format") is spec_review.SPEC_REVIEW_FORMAT:
@@ -5480,7 +5431,7 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
             subtype="success",
             terminal_reason=None,
             text="",
-            session_id=f"s-{len(agent_calls)}",
+            session_id=f"s-{len(prompts)}",
             num_turns=1,
             cost_usd_est=0.1,
             is_error=False,
@@ -5493,22 +5444,14 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
 
     pinned = task.PinnedBase(
-        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+        mirror=rig.mirror, url="https://github.com/o/r.git", base_sha=rig.base_sha
     )
-    review = cli._stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
-    revise = cli._stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+    review = cli._stack_review(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
+    revise = cli._stack_revise(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
 
-    def _candidate(spec_id):
-        return Candidate(
-            path=tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md",
-            spec=intake.Spec(id=spec_id, title="t", type="chore"),
-            spec_sha="s" * 64,
-            task_id=None,
-        )
-
-    sy1 = _candidate("SY-1")
-    layer7 = _candidate("SY-7")
-    sy5 = _candidate("SY-5")
+    sy1 = rig.candidate("SY-1")
+    layer7 = rig.candidate("SY-7")
+    sy5 = rig.candidate("SY-5")
 
     review(sy1, None)
     review(sy1, None, spec_text="revised\n")
@@ -5517,42 +5460,25 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     revise(sy1, layer7, None, "rt")
     revise(sy1, None, "given\n", "rt")
 
-    first_review_prompt = agent_calls[0]["prompt"]
-    second_review_prompt = agent_calls[2]["prompt"]
+    first_review_prompt, second_review_prompt = prompts[0], prompts[2]
     assert second_review_prompt.startswith(first_review_prompt)
-    assert (
-        second_review_prompt.index("<spec>")
-        < second_review_prompt.index("revised\n")
-        < second_review_prompt.index("</spec>")
-    )
+    assert "<spec>\nrevised\n\n</spec>" in second_review_prompt
     assert "review that text" in second_review_prompt
     assert "scope blocker" in second_review_prompt
     assert "<spec>" not in first_review_prompt
     assert "review that text" not in first_review_prompt
     assert "scope blocker" not in first_review_prompt
 
-    writer_prompts = [
-        agent_calls[4]["prompt"],
-        agent_calls[6]["prompt"],
-        agent_calls[8]["prompt"],
-    ]
+    writer_prompts = [prompts[4], prompts[6], prompts[8]]
     for prompt in writer_prompts[:2]:
-        assert (
-            prompt.index("<spec>")
-            < prompt.index("queued at base\n")
-            < prompt.index("</spec>")
-        )
-    assert (
-        writer_prompts[2].index("<spec>")
-        < writer_prompts[2].index("given\n")
-        < writer_prompts[2].index("</spec>")
-    )
+        assert "<spec>\nqueued at base\n\n</spec>" in prompt
+    assert "<spec>\ngiven\n\n</spec>" in writer_prompts[2]
     for prompt in writer_prompts:
         assert "at head" not in prompt
         assert "in the checkout" not in prompt
         assert "None" not in prompt
 
-    before = len(cell_up_calls)
+    before = len(rig.cell_up_calls)
     with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
         revise(sy5, None, None, "rt")
-    assert len(cell_up_calls) == before
+    assert len(rig.cell_up_calls) == before

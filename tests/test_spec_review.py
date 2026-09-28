@@ -392,7 +392,7 @@ def test_a_build_or_witness_blocker_and_a_witness_concern_route_to_a_revision(
     monkeypatch,
 ):
     """`spec_review_route`'s new `revise` outcome: a blocker whose `fixes`
-    is every one `build` or `witness`, or a lone `concern` tagged
+    is every one `build` or `witness`, or any `concern` tagged
     `witness`. A blocker with any other tag, present anywhere, still
     escalates. A concern or a note tagged anything else still runs."""
     from saffron import spec_review as sr

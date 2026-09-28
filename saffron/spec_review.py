@@ -254,7 +254,7 @@ def spec_review_route(
     """Route one read: `wait` before any other check, then `error`. A
     `blocker` escalates unless every one of them names a tag in
     `SPEC_REVIEW_REVISABLE_TAGS`, in which case the read revises. With no
-    blocker, a lone `concern` tagged `witness` also revises. Anything else
+    blocker, any `concern` tagged `witness` also revises. Anything else
     runs. The tag check runs over the blockers alone, so a concern or a
     note beside a revisable blocker never turns it into an escalation."""
     if review.resets_at is not None:
