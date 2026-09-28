@@ -1,12 +1,12 @@
 ---
 id: b-877e93
 title: '`saffron cell` stacks a child on a merged parent''s stale branch, because it never reconciles'
-status: open
+status: done
 tier: 1
 filed: 2026-09-27
-closed:
+closed: 2026-09-28
 specs: [SA-0186]
-prs: []
+prs: [562]
 commits: []
 cites: [§4.2]
 related: [b-111c56, b-fab381]
@@ -38,3 +38,8 @@ parent the ledger reads as `READY_FOR_REVIEW` whose pull request merged.
 
 - 2026-09-27: filed from the spec loop's run 19.
 - 2026-09-27: worked around by hand. The loop driver's `snapshot` and `next` reconcile first (acd2f1f6). `SA-0186` is the fix in `saffron cell`.
+- 2026-09-28: `SA-0186` reached `READY_FOR_REVIEW` as #562 at $13.59 of $21,
+  in the spec loop's run 20. `saffron cell` reconciles the parent before it
+  stacks. The operator decided that a newest task unstacks a child only when
+  `MERGED` or `REJECTED`. Otherwise the child stacks on the newest row still
+  waiting. `SA-0186` retires to `done/`.

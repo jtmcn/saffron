@@ -168,11 +168,17 @@ the ledger still refused its child.
 gate reads a flag error in captured output as its own, so `revert` skips every
 witness for a new CLI flag.
 
-**Placed 2026-09-27**, from the spec loop's run 19: **b-bf0c91**,
-**b-efdf1f**, **b-43a061**, then **b-877e93**. The turn wall cut 6 of 14
+**Placed 2026-09-27**, from the spec loop's run 19: ~~**b-bf0c91**~~,
+~~**b-efdf1f**~~, ~~**b-43a061**~~, then ~~**b-877e93**~~. The turn wall cut 6 of 14
 IMPLEMENT sessions. Two plans were refused on a size nothing priced before the
 cell, one of them on a token count read as lines. A cell stacked on a merged
 parent's stale branch and ran the old gates.
+
+**Placed 2026-09-28**, from the spec loop's run 20: **b-7e69d0**,
+**b-ab4b33**, then **b-abeb74**. They follow ~~**b-2750d5**~~ into the cell.
+The PR seats found blockers the critic passed on six of eight pull requests.
+Most were wrong versions the spec listed and nothing applied. REBUT argued a
+real blocker away on #562, and no lens reads `CLAUDE.md`'s conventions.
 
 ### Tier 2 — the morning after
 
@@ -293,6 +299,11 @@ notes asked for that no check reads. The second is a local hook that fails
 on a stack branch. The last two are seams in the spec session's cell and
 its budget.
 
+**Placed 2026-09-28**, from the spec loop's run 20: **b-ad1285**,
+**b-b0a187**, then **b-c07b92**. The first is a repair turn that passed
+`prose` with a false sentence. The last two are the loop's tools. One blocked a
+measured estimate, and the other takes a `drop` per spec to scope a loop.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -324,8 +335,13 @@ as written, or a witness too weak at one boundary.
 
 **Placed 2026-09-27**, from the spec loop's run 19: **b-1e9a7a**,
 **b-146869**, **b-ec607a**, **b-ea3bb5**, **b-a5d4af**, **b-6d3bcf**,
-**b-36d318**, then **b-0e3528**. Each is a seam review kept as written, stale
+**b-36d318**, then ~~**b-0e3528**~~. Each is a seam review kept as written, stale
 text a split left, or a defect in the loop's own tools.
+
+**Placed 2026-09-28**, from the spec loop's run 20: **b-013138**,
+**b-30bbd7**, **b-5ec5c5**, **b-64e40c**, **b-710086**, **b-713e90**, then
+**b-74e564**. Each is a seam review kept as written, text a spec could not
+reach, or a gate hole the operator accepted once.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
