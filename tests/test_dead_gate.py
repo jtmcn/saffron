@@ -446,3 +446,46 @@ def test_prek_runs_the_hook_on_python_and_on_a_spec():
     assert re.search(hook["files"], "saffron/task.py")
     assert re.search(hook["files"], ".saffron/specs/SA-0100-x.md")
     assert not re.search(hook["files"], "DESIGN.md")
+
+
+def _git_in(tree: Path, *args: str) -> None:
+    env = {**_env(), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=tree,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def test_the_hook_defers_a_stacked_branchs_own_spec_its_tree_lacks(tmp_path):
+    """A loop branch cut from main before its spec merged holds no copy of it.
+    The host hook then failed on the spec's own pending symbol (b-468378)."""
+    tree = _tree(tmp_path)
+    (tree / "saffron" / "extra.py").write_text(ORPHAN)
+    _git_in(tree, "init", "-q", "-b", "main")
+    _git_in(tree, "add", "-A")
+    _git_in(tree, "commit", "-q", "-m", "base")
+    _git_in(tree, "checkout", "-q", "-b", "joel/spec")
+    (tree / ".saffron" / "specs" / "SA-9001-x.md").write_text(
+        SPEC.format(extra="pending_symbols:\n  - saffron/extra.py::orphan\n")
+    )
+    _git_in(tree, "add", "-A")
+    _git_in(tree, "commit", "-q", "-m", "spec")
+    _git_in(tree, "checkout", "-q", "-b", "saffron/SA-9001", "main")
+
+    hooked = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
+    assert hooked.status == "pass", hooked.summary
+    assert "1 deferred" in hooked.summary
+    # The gate a cell runs reads only its own tree, as before.
+    assert _run(tree).status == "fail"
+
+    # The prek hook is what asks for it.
+    _shell, _flag, script = shlex.split(_hook_config()["entry"])
+    assert "--hook" in shlex.split(script)
+
+    # Another spec's branch borrows nothing.
+    _git_in(tree, "checkout", "-q", "-b", "saffron/SA-9002", "main")
+    other = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
+    assert other.status == "fail", other.summary

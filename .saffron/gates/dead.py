@@ -127,6 +127,36 @@ def pending(specs_dir: Path) -> tuple[dict[str, str], list[str]]:
     return found, skipped
 
 
+_LOOP_BRANCH = re.compile(r"saffron/(SA-\d{4,})")
+
+
+def _git_out(*args: str) -> str | None:
+    try:
+        done = subprocess.run(["git", *args], capture_output=True, text=True)
+    except OSError:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def branch_spec() -> tuple[str, str] | None:
+    """A `saffron/SA-NNNN` branch's own spec when its tree lacks it: the newest
+    committed copy on any ref, as the host hands a cell (b-468378)."""
+    branch = _git_out("rev-parse", "--abbrev-ref", "HEAD") or ""
+    match = _LOOP_BRANCH.fullmatch(branch)
+    if match is None or any(SPECS.glob(f"{match.group(1)}-*.md")):
+        return None
+    glob = f":(glob).saffron/specs/{match.group(1)}-*.md"
+    sha = _git_out("log", "--all", "-1", "--format=%H", "--", glob)
+    if not sha:
+        return None
+    # `ls-tree` refuses glob pathspecs, so list the directory and match the id.
+    listed = _git_out("ls-tree", "--name-only", sha, ".saffron/specs/") or ""
+    prefix = f".saffron/specs/{match.group(1)}-"
+    names = [n for n in listed.splitlines() if n.startswith(prefix)]
+    text = _git_out("show", f"{sha}:{names[0]}") if names else None
+    return (Path(names[0]).name, text) if text else None
+
+
 def _emit(payload: dict[str, object]) -> int:
     print(json.dumps(payload))
     return 0
@@ -138,8 +168,10 @@ def _error(summary: str, tool: str | None = None) -> int:
 
 def main(argv: list[str]) -> int:
     report = argv == ["--report"]
-    if argv and not report:
-        print("usage: dead.py [--report]", file=sys.stderr)
+    # The prek hook only. A cell's gate reads the specs its own tree holds.
+    hook = argv == ["--hook"]
+    if argv and not (report or hook):
+        print("usage: dead.py [--report | --hook]", file=sys.stderr)
         return 2
     try:
         version = subprocess.run(
@@ -185,6 +217,9 @@ def main(argv: list[str]) -> int:
     try:
         found = parse(scan.stdout)
         deferred, skipped = pending(SPECS)
+        own = branch_spec() if hook else None
+        if own is not None:
+            deferred.update(dict.fromkeys(entries(own[1]), own[0]))
     except (ImportError, OSError, ValueError) as exc:
         return _error(f"{type(exc).__name__}: {exc}", tool)
 

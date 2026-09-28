@@ -23,13 +23,14 @@ repos:
   # on main unseen: subtraction spares each cell and hides it from the next.
   # The gate speaks its verdict in JSON and exits 0 either way, so read status.
   # `tests/test_dead_gate.py` holds that literal against what the gate prints.
+  # `--hook` also reads a loop branch's own spec when its tree lacks it (b-468378).
   - repo: local
     hooks:
       - id: dead
         name: dead (the dead gate's vulture scan)
         language: system
         entry: >-
-          sh -c 'uv run python .saffron/gates/dead.py
+          sh -c 'uv run python .saffron/gates/dead.py --hook
           | tee /dev/stderr
           | grep -q "\"status\": \"pass\""'
         pass_filenames: false
