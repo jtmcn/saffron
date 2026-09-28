@@ -1,12 +1,12 @@
 ---
 id: b-efdf1f
 title: PLAN read a spec's token count as lines, so the checkpoint priced `SA-0169` at four times its size
-status: open
+status: done
 tier: 1
 filed: 2026-09-27
-closed:
+closed: 2026-09-28
 specs: [SA-0185]
-prs: []
+prs: [564]
 commits: []
 cites: [§5.3]
 related: [b-408cf5, b-43a061]
@@ -36,3 +36,6 @@ the spec's own `estimated_lines` is recorded beside it in the plan record.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-28: `SA-0185` reached `READY_FOR_REVIEW` as #564 at $4.90 of $18,
+  in the spec loop's run 20. The plan prompt names the unit of
+  `estimated_lines`. `SA-0185` retires to `done/`.

@@ -33,3 +33,5 @@ words to rule them out or by rewording `intake.py:133`.
 - 2026-09-26: `terms` failed at base on all nine of the spec loop's run 18
   cells.
 - 2026-09-27: `terms` failed at base on every cell of the spec loop's run 19.
+- 2026-09-28: run 20's baseline reported `terms=fail` at base from
+  `saffron/intake.py:134` ("Never a ticket").

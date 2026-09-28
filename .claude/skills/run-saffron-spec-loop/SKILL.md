@@ -395,6 +395,13 @@ is merged. So it retires each spec to `.saffron/specs/done/`, updates the
 scheduler smoke test with `driver.py bookkeeping SA-NNNN`, and sets each origin
 item's status. An item whose origin spec is in `done/` cannot stay `open`.
 
+Step 3 linked the stack before this PR existed. Once it is open, link it on
+top, so it reads back based on the last layer and is marked ready:
+
+```bash
+uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute --top <step 5 PR>
+```
+
 Every finding you verified that the in-cell critic did not raise, and that was
 fixed or kept, is a change requested on the operator's behalf — a rejection:
 append it to `.saffron/rejections.md` as its **Adding one** paragraph says, in
@@ -427,4 +434,4 @@ with no label or an unknown value, or a missing `blocker_followed` field.
 
 **Done when** every kept finding has an item, every spec's origin item names
 its PR, every fixed or kept finding the critic missed has a rejection line, and
-`driver.py labels` exits 0.
+`driver.py labels` exits 0. This PR reads back based on the last layer.

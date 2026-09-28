@@ -1211,9 +1211,9 @@ def test_the_table_did_not_quietly_lose_a_row():
     that matters.
 
     `SA-0085`, `SA-0125` and `SA-0126` each moved this count. `SA-0133`
-    moves it again, by two."""
-    assert len(FAMILIES) == 67
-    assert len({f.prefix for f in FAMILIES}) == 67
+    and `SA-0186` each move it again, by two."""
+    assert len(FAMILIES) == 69
+    assert len({f.prefix for f in FAMILIES}) == 69
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():

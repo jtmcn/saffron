@@ -131,6 +131,24 @@ def criteria_section(acceptance: Sequence[Criterion]) -> str:
     )
 
 
+def estimate_section(estimated_lines: int | None) -> str:
+    """The spec author's own size estimate, appended to the body `run_task`
+    hands the cell (`saffron/task.py`). Empty for a spec declaring none: a
+    heading over nothing invites an invented number.
+
+    Named as an estimate the plan's own `estimated_lines` can be checked
+    against, never as a limit on the change.
+    """
+    if estimated_lines is None:
+        return ""
+    return (
+        "\n## Author's size estimate\n\n"
+        f"The spec's author estimates this change at about {estimated_lines} "
+        "changed lines, added plus removed, the same unit the plan's own "
+        "estimated_lines field takes.\n"
+    )
+
+
 def standing_instructions(claude_md: str | None) -> str:
     """The target repo's `CLAUDE.md`, as prompt text (§5.3, §8 bucket 2).
 

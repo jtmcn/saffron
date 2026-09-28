@@ -1,4 +1,5 @@
 import dataclasses
+from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -3273,3 +3274,675 @@ def test_a_rate_limited_spec_review_waits_and_reviews_again(
     assert clock2.sleeps == []
     assert reviews2.calls == [("TE-51", None)]
     assert runner2.calls == []
+
+
+def _candidate_x(spec_id: str, *, budget_usd: float = 12.0, **kw) -> Candidate:
+    """A candidate whose path is `<id>-x.md`, never the bare spec id, so a
+    text `run_stack_batch` records at the spec id's own name fails."""
+    candidate = _candidate(spec_id, budget_usd=budget_usd, **kw)
+    return dataclasses.replace(candidate, path=Path(f"{spec_id}-x.md"))
+
+
+class _RevisionReview:
+    """The `review` double for the revision-round witnesses. Each call
+    pops the spec's next scripted round of findings and records
+    `(spec id, layer's spec id or None, kw)`. Its session's text is one
+    fenced ```json block alone, its claim naming the spec and this
+    review's own number. Two rounds sharing findings never share text."""
+
+    def __init__(self, table: dict[str, list[list[dict]]]):
+        self._table = {sid: list(rounds) for sid, rounds in table.items()}
+        self.calls: list[tuple[str, str | None, dict]] = []
+        self.sessions: dict[str, list] = {}
+
+    def __call__(self, candidate: Candidate, layer: Candidate | None, **kw):
+        spec_id = candidate.spec.id
+        self.calls.append((spec_id, layer.spec.id if layer else None, kw))
+        n = len(self.sessions.setdefault(spec_id, [])) + 1
+        findings = self._table[spec_id].pop(0)
+        session = _review_session(
+            [{**f, "claim": f"{spec_id} review {n}"} for f in findings]
+        )
+        self.sessions[spec_id].append(session)
+        return session
+
+
+class _Rejected:
+    """A writer turn scripted to meet the account's own rate limit, at the
+    clock's own time when `_RevisionWrite` is called for it. Never a
+    figure fixed when the table is built."""
+
+    def __init__(self, cost: float = 0.25):
+        self.cost = cost
+
+
+def _written(text: str, *, session_id: str = "w-1", turns: int = 9, cost: float = 1.0):
+    from saffron.spec_review import SpecWriterSession
+
+    return SpecWriterSession(
+        text=text,
+        cost_usd=cost,
+        error=None,
+        resets_at=None,
+        session_id=session_id,
+        num_turns=turns,
+        spec_sha=hash_artifact(text),
+    )
+
+
+def _writer_error(message: str, *, cost: float = 0.125):
+    from saffron.spec_review import SpecWriterSession
+
+    return SpecWriterSession(
+        text="",
+        cost_usd=cost,
+        error=message,
+        resets_at=None,
+        session_id=None,
+        num_turns=0,
+        spec_sha=None,
+    )
+
+
+class _RevisionWrite:
+    """The `revise` double for the revision-round witnesses. Each call
+    records `(spec id, layer's spec id or None, spec text, review text,
+    the spec's task state at the call)`, then pops the spec's next
+    scripted turn or exception, raising `AssertionError` when none is
+    left."""
+
+    def __init__(self, ledger: Ledger, clock, table: dict[str, list]):
+        from saffron.spec_review import SpecWriterSession
+
+        self._ledger = ledger
+        self._clock = clock
+        self._table = {sid: list(turns) for sid, turns in table.items()}
+        self.calls: list[tuple] = []
+        self._SpecWriterSession = SpecWriterSession
+
+    def __call__(
+        self,
+        candidate: Candidate,
+        layer: Candidate | None,
+        spec_text: str | None,
+        review_text: str,
+    ):
+        assert candidate.task_id is not None
+        self.calls.append(
+            (
+                candidate.spec.id,
+                layer.spec.id if layer else None,
+                spec_text,
+                review_text,
+                _task_state(self._ledger, candidate.task_id),
+            )
+        )
+        queue = self._table.get(candidate.spec.id)
+        if not queue:
+            raise AssertionError(f"no writer turn scripted for {candidate.spec.id}")
+        entry = queue.pop(0)
+        if isinstance(entry, _Rejected):
+            return self._SpecWriterSession(
+                text="",
+                cost_usd=entry.cost,
+                error=None,
+                resets_at=int(self._clock().timestamp()) + 60,
+                session_id=None,
+                num_turns=0,
+                spec_sha=None,
+            )
+        if isinstance(entry, Exception):
+            raise entry
+        return entry
+
+
+class _RevisionMint(MintDouble):
+    """`MintDouble`, except `TE-5` alone gets three `revision` texts
+    recorded on its new task first. A round count read from those rows
+    would start it at three, which rounds never do (D1): they come from
+    this call alone."""
+
+    def __call__(self, candidate: Candidate) -> int:
+        task_id = super().__call__(candidate)
+        if candidate.spec.id == "TE-5":
+            for text in ("s1\n", "s2\n", "s3\n"):
+                self._ledger.record_spec_text(
+                    task_id,
+                    origin="revision",
+                    spec_id="TE-5",
+                    path=".saffron/specs/TE-5-x.md",
+                    text=text,
+                )
+        return task_id
+
+
+class _RevisionRunner(RunnerDouble):
+    """`RunnerDouble`, always returning `READY_FOR_REVIEW`. It also keeps
+    in `texts` the text of `ledger.spec_text` of `candidate.task_id`, or
+    `None`, as each call saw it."""
+
+    def __init__(self, ledger: Ledger, repo_id: int):
+        super().__init__(ledger, repo_id, {})
+        self._table = defaultdict(lambda: ["READY_FOR_REVIEW"])
+        self.texts: list[str | None] = []
+
+    def __call__(self, candidate: Candidate, predecessor: Candidate | None):
+        assert candidate.task_id is not None
+        row = self._ledger.spec_text(candidate.task_id)
+        self.texts.append(row["text"] if row else None)
+        return super().__call__(candidate, predecessor)
+
+
+def _task_state(ledger: Ledger, task_id: int) -> str:
+    row = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    return row["state"]
+
+
+def _task_routes(ledger: Ledger, task_id: int) -> list[str]:
+    rows = ledger._db.execute(
+        "SELECT route FROM spec_reviews WHERE task_key = ? ORDER BY n",
+        (ledger.record_key(task_id),),
+    ).fetchall()
+    return [row["route"] for row in rows]
+
+
+def _last_line(lines: list[str], spec_id: str, word: str) -> str:
+    """The last of `lines` that starts with `spec_id`'s own column and
+    holds `word`, for the revision-round witnesses' own emitted lines."""
+    matches = [
+        line for line in lines if line.startswith(f"{spec_id:<10}") and word in line
+    ]
+    assert matches, f"no {word!r} line for {spec_id}"
+    return matches[-1]
+
+
+def _revision_round_order() -> list[Candidate]:
+    return [
+        _candidate_x("TE-1"),
+        _candidate_x("TE-2"),
+        _candidate_x("TE-3", depends_on=["TE-2"]),
+        _candidate_x("TE-4"),
+        _candidate_x("TE-5"),
+        _candidate_x("TE-10"),
+        _candidate_x("TE-7"),
+        _candidate_x("TE-9", budget_usd=37.625),
+        _candidate_x("TE-6"),
+        _candidate_x("TE-8"),
+        _candidate_x("TE-11"),
+    ]
+
+
+def _revision_round_arrangement(ledger: Ledger, repo_id: int, clock):
+    """The one arrangement shared by every revision-round witness (SA-0164).
+    Returns `(order, mint, reviews, revise, runner)`, freshly built so each
+    witness runs it on its own ledger and its own clock."""
+    mint = _RevisionMint(ledger, repo_id)
+    reviews = _RevisionReview(
+        {
+            "TE-1": [[_blocker("build")], [_blocker("witness")], []],
+            "TE-2": [
+                [_blocker("witness")],
+                [_blocker("witness")],
+                [_blocker("build")],
+                [_blocker("witness")],
+            ],
+            "TE-4": [[_concern("witness")]] * 4,
+            "TE-5": [[_blocker("build")], [_concern("witness")], []],
+            "TE-10": [
+                [_blocker("build")],
+                [_blocker("build")],
+                [_blocker("build")],
+                [_concern("witness")],
+            ],
+            "TE-7": [[]],
+            "TE-9": [[_blocker("witness")], [_blocker("witness")]],
+            "TE-6": [[_blocker("build")]],
+            "TE-8": [[_blocker("build")]],
+        }
+    )
+    revise = _RevisionWrite(
+        ledger,
+        clock,
+        {
+            "TE-1": [_written("r1a\n"), _written("r1b\n")],
+            "TE-2": [
+                _Rejected(0.25),
+                _written("r2a\n"),
+                _written("r2b\n"),
+                _written("r2c\n"),
+            ],
+            "TE-4": [_written("r4a\n"), _written("r4b\n"), _written("r4c\n")],
+            "TE-5": [_written("r5a\n"), _written("r5b\n")],
+            "TE-10": [_written("t1\n"), _written("t2\n"), _written("t3\n")],
+            "TE-9": [_written("r9\n"), _Rejected(0.25)],
+            "TE-6": [_writer_error("api_error", cost=0.125)],
+            "TE-8": [RuntimeError("writer cell would not start")],
+        },
+    )
+    runner = _RevisionRunner(ledger, repo_id)
+    return _revision_round_order(), mint, reviews, revise, runner
+
+
+def test_a_revisable_blocker_is_revised_and_reviewed_again_for_at_most_three_rounds(
+    ledger, repo_id, tmp_path
+):
+    """A `build` or `witness` blocker, or any `concern` tagged
+    `witness`, is revised for up to three rounds before it escalates. A
+    clean read after fewer rounds runs instead. Rounds reset for a fresh
+    call of `run_stack_batch`, never carried by the ledger, and `revise`
+    left unset keeps the old escalate-or-run behavior with no suffix."""
+    from saffron.batch import run_stack_batch
+
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    order, mint, reviews, revise, runner = _revision_round_arrangement(
+        ledger, repo_id, clock
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+        review=reviews,
+        mint=mint,
+        revise=revise,
+        reserve_usd=8.0,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+
+    assert reviews.calls[:19] == [
+        ("TE-1", None, {}),
+        ("TE-1", None, {"spec_text": "r1a\n"}),
+        ("TE-1", None, {"spec_text": "r1b\n"}),
+        ("TE-2", "TE-1", {}),
+        ("TE-2", "TE-1", {"spec_text": "r2a\n"}),
+        ("TE-2", "TE-1", {"spec_text": "r2b\n"}),
+        ("TE-2", "TE-1", {"spec_text": "r2c\n"}),
+        ("TE-4", "TE-1", {}),
+        ("TE-4", "TE-1", {"spec_text": "r4a\n"}),
+        ("TE-4", "TE-1", {"spec_text": "r4b\n"}),
+        ("TE-4", "TE-1", {"spec_text": "r4c\n"}),
+        ("TE-5", "TE-1", {"spec_text": "s3\n"}),
+        ("TE-5", "TE-1", {"spec_text": "r5a\n"}),
+        ("TE-5", "TE-1", {"spec_text": "r5b\n"}),
+        ("TE-10", "TE-5", {}),
+        ("TE-10", "TE-5", {"spec_text": "t1\n"}),
+        ("TE-10", "TE-5", {"spec_text": "t2\n"}),
+        ("TE-10", "TE-5", {"spec_text": "t3\n"}),
+        ("TE-7", "TE-5", {}),
+    ]
+
+    def _writer_texts(spec_id: str) -> list[tuple[str | None, str | None, str]]:
+        return [(c[1], c[2], c[3]) for c in revise.calls if c[0] == spec_id]
+
+    te1_sessions = reviews.sessions["TE-1"]
+    assert _writer_texts("TE-1") == [
+        (None, None, te1_sessions[0].text),
+        (None, "r1a\n", te1_sessions[1].text),
+    ]
+    te2_sessions = reviews.sessions["TE-2"]
+    assert _writer_texts("TE-2") == [
+        ("TE-1", None, te2_sessions[0].text),
+        ("TE-1", None, te2_sessions[0].text),
+        ("TE-1", "r2a\n", te2_sessions[1].text),
+        ("TE-1", "r2b\n", te2_sessions[2].text),
+    ]
+    te4_sessions = reviews.sessions["TE-4"]
+    assert _writer_texts("TE-4") == [
+        ("TE-1", None, te4_sessions[0].text),
+        ("TE-1", "r4a\n", te4_sessions[1].text),
+        ("TE-1", "r4b\n", te4_sessions[2].text),
+    ]
+    te5_sessions = reviews.sessions["TE-5"]
+    assert _writer_texts("TE-5") == [
+        ("TE-1", "s3\n", te5_sessions[0].text),
+        ("TE-1", "r5a\n", te5_sessions[1].text),
+    ]
+    te10_sessions = reviews.sessions["TE-10"]
+    assert _writer_texts("TE-10") == [
+        ("TE-5", None, te10_sessions[0].text),
+        ("TE-5", "t1\n", te10_sessions[1].text),
+        ("TE-5", "t2\n", te10_sessions[2].text),
+    ]
+
+    assert runner.calls == [
+        ("TE-1", mint.tasks["TE-1"]),
+        ("TE-5", mint.tasks["TE-5"]),
+        ("TE-7", mint.tasks["TE-7"]),
+    ]
+    assert runner.texts[0] == "r1b\n"
+    assert runner.texts[1] == "r5b\n"
+    assert runner.texts[2] is None
+
+    assert _last_line(lines, "TE-1", "revised").strip().endswith("revised  2")
+    assert _last_line(lines, "TE-5", "revised").strip().endswith("revised  2")
+    assert _last_line(lines, "TE-2", "revised").strip().endswith("revised  3")
+    assert _last_line(lines, "TE-4", "revised").strip().endswith("revised  3")
+    assert _last_line(lines, "TE-10", "revised").strip().endswith("revised  3")
+    assert (
+        _last_line(lines, "TE-2", "escalated")
+        .strip()
+        .endswith("escalated  1 after 3 revisions")
+    )
+    assert (
+        _last_line(lines, "TE-4", "escalated")
+        .strip()
+        .endswith("escalated  0 after 3 revisions")
+    )
+    assert (
+        _last_line(lines, "TE-10", "escalated")
+        .strip()
+        .endswith("escalated  0 after 3 revisions")
+    )
+    assert any(
+        line.startswith(f"{'TE-3':<10}") and " refused " in line for line in lines
+    )
+
+    # A second batch in the same process, on a fresh ledger: rounds reset,
+    # so a store of rounds kept at module scope would carry over and fail.
+    ledger2 = Ledger(tmp_path / "second.db")
+    repo_id2 = ledger2.upsert_repo(
+        "thermal-edge-2", "/o2", "/m2.git", policy_sha="p" * 64
+    )
+    clock2 = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    mint2 = _RevisionMint(ledger2, repo_id2)
+    reviews2 = _RevisionReview(
+        {
+            "TE-2": [[_blocker("build")], []],
+            "TE-9": [[_blocker("build")], []],
+        }
+    )
+    revise2 = _RevisionWrite(
+        ledger2, clock2, {"TE-2": [_written("v2\n")], "TE-9": [_written("v9\n")]}
+    )
+    runner2 = _RevisionRunner(ledger2, repo_id2)
+    lines2: list[str] = []
+
+    reason2 = run_stack_batch(
+        [_candidate_x("TE-2"), _candidate_x("TE-9")],
+        ledger2,
+        budget_usd=100.0,
+        until=None,
+        runner=runner2,
+        readiness_check=_ready,
+        clock=clock2,
+        sleep=clock2.sleep,
+        emit=lines2.append,
+        review=reviews2,
+        mint=mint2,
+        revise=revise2,
+        reserve_usd=8.0,
+    )
+
+    assert reason2 == "DRAINED"
+    assert _last_line(lines2, "TE-2", "revised").strip().endswith("revised  1")
+    assert _last_line(lines2, "TE-9", "revised").strip().endswith("revised  1")
+
+    # A third batch on a fresh ledger, `revise` left unset: the old
+    # escalate-or-run behavior, with no suffix on the escalated line.
+    ledger3 = Ledger(tmp_path / "third.db")
+    repo_id3 = ledger3.upsert_repo(
+        "thermal-edge-3", "/o3", "/m3.git", policy_sha="p" * 64
+    )
+    mint3 = _RevisionMint(ledger3, repo_id3)
+    reviews3 = _RevisionReview(
+        {
+            "TE-11": [[_blocker("build")]],
+            "TE-12": [[_concern("witness")]],
+        }
+    )
+    runner3 = _RevisionRunner(ledger3, repo_id3)
+    lines3: list[str] = []
+
+    reason3 = run_stack_batch(
+        [_candidate_x("TE-11"), _candidate_x("TE-12")],
+        ledger3,
+        budget_usd=100.0,
+        until=None,
+        runner=runner3,
+        readiness_check=_ready,
+        emit=lines3.append,
+        review=reviews3,
+        mint=mint3,
+    )
+
+    assert reason3 == "DRAINED"
+    assert runner3.calls[0][0] == "TE-12"
+    assert len(runner3.calls) == 1
+    te11_escalated = _last_line(lines3, "TE-11", "escalated")
+    assert te11_escalated.strip().endswith("escalated  1")
+    assert "after" not in te11_escalated
+    assert _task_routes(ledger3, mint3.tasks["TE-11"]) == ["escalate"]
+    assert _task_state(ledger3, mint3.tasks["TE-11"]) == "SPEC_WITHHELD"
+    assert _task_routes(ledger3, mint3.tasks["TE-12"]) == ["run"]
+
+
+def test_a_revision_waits_on_a_rate_limit_and_stops_on_an_error_a_raise_or_the_budget(
+    ledger, repo_id
+):
+    """A writer session with `resets_at` set waits like a rate-limited
+    review does, and the retry hands the same review text back with no
+    fresh review. `revise` is not called once the budget left falls
+    short of both session ceilings and the spec's own `budget_usd`. The
+    spec is refused instead, its task's state untouched. An errored
+    writer session ends `GATE_ERROR` and is charged as an abort, and so
+    does a writer callable that raises outright."""
+    from saffron.batch import run_stack_batch
+
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    order, mint, reviews, revise, runner = _revision_round_arrangement(
+        ledger, repo_id, clock
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+        review=reviews,
+        mint=mint,
+        revise=revise,
+        reserve_usd=8.0,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert clock.sleeps == [60.0, 60.0]
+
+    te2_states = [c[4] for c in revise.calls if c[0] == "TE-2"][:2]
+    assert te2_states == ["QUEUED", "RATE_LIMITED"]
+
+    last_writers = [c[:2] for c in revise.calls][-4:]
+    assert last_writers == [
+        ("TE-9", "TE-7"),
+        ("TE-9", "TE-7"),
+        ("TE-6", "TE-7"),
+        ("TE-8", "TE-7"),
+    ]
+
+    te9_reviews = [c for c in reviews.calls if c[0] == "TE-9"]
+    assert te9_reviews == [
+        ("TE-9", "TE-7", {}),
+        ("TE-9", "TE-7", {"spec_text": "r9\n"}),
+    ]
+
+    te9_lines = [line for line in lines if line.startswith(f"{'TE-9':<10}")]
+    assert any(line.strip().endswith("revised  1") for line in te9_lines)
+    assert sum("unrevised" in line for line in te9_lines) == 1
+
+    te6_lines = [
+        line
+        for line in lines
+        if line.startswith(f"{'TE-6':<10}") and "unrevised" in line
+    ]
+    assert len(te6_lines) == 1
+    assert te6_lines[0].strip().endswith("unrevised  api_error")
+
+    raised_te8 = [
+        line
+        for line in lines
+        if line.startswith(f"{'TE-8':<10}") and "raised RuntimeError" in line
+    ]
+    assert len(raised_te8) == 1
+
+    assert not any(line.startswith(f"{'TE-11':<10}") for line in lines)
+
+
+def test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task(ledger, repo_id):
+    """Each writer session that returns adds one attempt on the spec's
+    task in phase `SPEC_WRITING`, charged whether it wrote or errored.
+    A raise adds none. Each written text is one `spec_text` fact,
+    numbered on from the task's own earlier rows. `batch_spend` counts
+    every attempt this round exactly once."""
+    from saffron.batch import run_stack_batch
+    from saffron.spec_review import WRITING_PHASE
+
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    order, mint, reviews, revise, runner = _revision_round_arrangement(
+        ledger, repo_id, clock
+    )
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        review=reviews,
+        mint=mint,
+        revise=revise,
+        reserve_usd=8.0,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+
+    def _attempts(spec_id: str) -> list[tuple[str, float, str]]:
+        task_id = mint.tasks[spec_id]
+        return [
+            (a["phase"], a["cost_usd_est"], a["subtype"])
+            for a in ledger.attempts(task_id)
+        ]
+
+    assert _attempts("TE-1") == [
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+    ]
+    te1_attempts = ledger.attempts(mint.tasks["TE-1"])
+    assert te1_attempts[1]["session_id"] == "w-1"
+    assert te1_attempts[1]["num_turns"] == 9
+
+    assert _attempts("TE-2") == [
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 0.25, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+    ]
+
+    assert _attempts("TE-4") == [
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+    ]
+
+    assert _attempts("TE-9") == [
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 1.0, "success"),
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 0.25, "success"),
+    ]
+
+    assert _attempts("TE-6") == [
+        ("SPEC_REVIEW", 0.5, "success"),
+        (WRITING_PHASE, 0.125, "error"),
+    ]
+
+    assert _attempts("TE-8") == [("SPEC_REVIEW", 0.5, "success")]
+
+    def _state(spec_id: str) -> str:
+        return _task_state(ledger, mint.tasks[spec_id])
+
+    assert _state("TE-1") == "QUEUED"
+    assert _state("TE-2") == "SPEC_WITHHELD"
+    assert _state("TE-4") == "SPEC_WITHHELD"
+    assert _state("TE-9") == "RATE_LIMITED"
+    assert _state("TE-6") == "GATE_ERROR"
+    assert _state("TE-8") == "GATE_ERROR"
+
+    def _texts(spec_id: str) -> list[tuple[int, str, str, str]]:
+        task_id = mint.tasks[spec_id]
+        return [
+            (row["n"], row["origin"], row["path"], row["text"])
+            for row in ledger.spec_texts(task_id)
+        ]
+
+    assert _texts("TE-1") == [
+        (1, "revision", ".saffron/specs/TE-1-x.md", "r1a\n"),
+        (2, "revision", ".saffron/specs/TE-1-x.md", "r1b\n"),
+    ]
+    assert _texts("TE-2") == [
+        (1, "revision", ".saffron/specs/TE-2-x.md", "r2a\n"),
+        (2, "revision", ".saffron/specs/TE-2-x.md", "r2b\n"),
+        (3, "revision", ".saffron/specs/TE-2-x.md", "r2c\n"),
+    ]
+    assert _texts("TE-4") == [
+        (1, "revision", ".saffron/specs/TE-4-x.md", "r4a\n"),
+        (2, "revision", ".saffron/specs/TE-4-x.md", "r4b\n"),
+        (3, "revision", ".saffron/specs/TE-4-x.md", "r4c\n"),
+    ]
+    te5_texts = _texts("TE-5")
+    assert te5_texts[:3] == [
+        (1, "revision", ".saffron/specs/TE-5-x.md", "s1\n"),
+        (2, "revision", ".saffron/specs/TE-5-x.md", "s2\n"),
+        (3, "revision", ".saffron/specs/TE-5-x.md", "s3\n"),
+    ]
+    assert te5_texts[3:] == [
+        (4, "revision", ".saffron/specs/TE-5-x.md", "r5a\n"),
+        (5, "revision", ".saffron/specs/TE-5-x.md", "r5b\n"),
+    ]
+    assert _texts("TE-9") == [(1, "revision", ".saffron/specs/TE-9-x.md", "r9\n")]
+    assert _texts("TE-6") == []
+    assert _texts("TE-8") == []
+
+    def _routes(spec_id: str) -> list[str]:
+        return _task_routes(ledger, mint.tasks[spec_id])
+
+    routes = {
+        spec_id: _routes(spec_id)
+        for spec_id in ("TE-1", "TE-2", "TE-4", "TE-5", "TE-10", "TE-9")
+    }
+    assert routes["TE-1"] == ["revise", "revise", "run"]
+    assert routes["TE-2"] == ["revise", "revise", "revise", "escalate"]
+    assert routes["TE-4"] == ["revise", "revise", "revise", "escalate"]
+    assert routes["TE-5"] == ["revise", "revise", "run"]
+    assert routes["TE-10"] == ["revise", "revise", "revise", "escalate"]
+    assert routes["TE-9"] == ["revise", "revise"]
+
+    assert ledger.batch_spend(ledger.latest_batch_id()) == pytest.approx(29.125)

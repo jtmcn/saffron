@@ -901,6 +901,8 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("preflight: (claude_md digest, or CLAUDE.md: none found)", _S, Preflight),
     _Family("cell:", _S, Preflight),
     _Family("unstacked:", _TASK, Preflight),
+    _Family("preflight: GitHub could not be asked", _TASK, Preflight),
+    _Family("preflight: newest task is CHANGES_REQUESTED for", _TASK, Preflight),
     _Family("ceilings:", _RT, Ceilings),
     _Family("baseline: (joined gate=status)", _S, Baseline),
     _Family("baseline errored in", _S, Baseline),

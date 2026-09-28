@@ -331,10 +331,12 @@ def run_agent(
             exec_(container, ["rm", "-f", prompt_path], timeout_s=60)
 
     detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
-    # One phrasing for both failure paths, so "why did this turn end" reads the
-    # same whether or not a result event arrived first.
+    # One phrasing for both failure paths, so "why did this turn end" reads
+    # the same way. The wall names its own seconds ahead of detail below.
     how = (
-        f"was cut by the {done.bound} bound"
+        f"was cut by the wall bound, given {timeout_s:.0f}s"
+        if done.bound == "wall"
+        else f"was cut by the {done.bound} bound"
         if done.bound
         else "timed out"
         if done.timed_out

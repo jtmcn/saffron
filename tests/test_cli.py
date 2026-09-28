@@ -20,7 +20,14 @@ from saffron.agents import context
 from saffron.cell import session
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
-from saffron.events import Ceilings, PhaseStart, Preflight, describe, read_log
+from saffron.events import (
+    FAMILIES,
+    Ceilings,
+    PhaseStart,
+    Preflight,
+    describe,
+    read_log,
+)
 from saffron.ledger import Ledger
 from saffron.phases import implement, package
 from saffron.reconcile import HeadMoved, ReconcileResult
@@ -701,6 +708,253 @@ def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
 
     assert cell_spec.stacked_on is None
     assert "unstacked: parent branch saffron/SY-9000 is gone" in printed
+
+
+def _gh_by_url(urls_asked, answers):
+    """A `gh` double keyed by the exact pull request url in `argv`, the shape
+    `b-877e93`'s three witnesses share: each records every url it is asked
+    about and answers only the ones a caller declared."""
+
+    def fake_gh(argv):
+        url = argv[3]
+        urls_asked.append(url)
+        answer = answers.get(url, {"state": "OPEN", "reviewDecision": None})
+        return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
+
+    return fake_gh
+
+
+def _new_parent_preflights(out_dir, spec_id, parent_id, before):
+    """The `Preflight` events one `_capture_cell_spec` call added, naming
+    `parent_id`. Never the ones an earlier call in the same test already
+    wrote to the same `events.jsonl`."""
+    events = read_log(out_dir / spec_id)[before:]
+    return [
+        event
+        for event in events
+        if isinstance(event, Preflight) and parent_id in event.detail
+    ]
+
+
+def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_merged_or_closed(
+    tmp_path, monkeypatch, capsys
+):
+    """`b-877e93`: `saffron cell` reconciles the parent it stacks on, so a
+    merge or a close nobody scanned for yet still cuts the child loose.
+    The newest task decides, even over an older row still waiting. Only
+    the parent's own tasks are ever asked about."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    older_pr = "https://github.com/o/r/pull/1"
+    newer_pr = "https://github.com/o/r/pull/2"
+    sibling_pr = "https://github.com/o/r/pull/3"
+    older = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="ORPHANED", pr_url=older_pr
+    )
+    ledger.record_push(older, "1" * 40)
+    newer = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
+    )
+    # A different spec whose id starts with the parent's: the filter must
+    # match `SY-9000` exactly, never by prefix.
+    sibling = _seed_task(
+        ledger, repo_id, spec_id="SY-90001", state="READY_FOR_REVIEW", pr_url=sibling_pr
+    )
+
+    urls_asked: list[str] = []
+    answers: dict[str, dict] = {}
+    monkeypatch.setattr("saffron.cli.run_gh", _gh_by_url(urls_asked, answers))
+
+    def state_of(task_id):
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["state"]
+
+    def run_and_check(expected_state, expected_urls):
+        urls_asked.clear()
+        before = len(read_log(tmp_path / "out" / "SY-2"))
+        cell_spec, _printed = _capture_cell_spec(
+            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+        )
+        assert cell_spec.stacked_on is None
+        assert urls_asked == expected_urls
+        assert state_of(newer) == expected_state
+        lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+        assert len(lines) == 1
+        assert lines[0].step == "unstacked"
+        assert expected_state in lines[0].detail
+        for other in {"MERGED", "REJECTED", "CHANGES_REQUESTED"} - {expected_state}:
+            assert other not in lines[0].detail
+
+    # 1. The newer task is READY_FOR_REVIEW, and gh answers merged.
+    answers[newer_pr] = {"state": "MERGED", "reviewDecision": None}
+    run_and_check("MERGED", [newer_pr])
+
+    # 2. Nothing is reset, so the newer task is already MERGED, not asked.
+    run_and_check("MERGED", [])
+
+    # 3. The newer task is APPROVED, and gh answers merged.
+    ledger.set_task_state(newer, "APPROVED")
+    run_and_check("MERGED", [newer_pr])
+
+    # 4. The newer task is READY_FOR_REVIEW, and gh answers CLOSED.
+    ledger.set_task_state(newer, "READY_FOR_REVIEW")
+    answers[newer_pr] = {"state": "CLOSED", "reviewDecision": None}
+    run_and_check("REJECTED", [newer_pr])
+
+    # 5. Both tasks are READY_FOR_REVIEW. gh answers open for the older
+    # one and merged for the newer one.
+    ledger.set_task_state(older, "READY_FOR_REVIEW")
+    ledger.set_task_state(newer, "READY_FOR_REVIEW")
+    answers[older_pr] = {"state": "OPEN", "reviewDecision": None}
+    answers[newer_pr] = {"state": "MERGED", "reviewDecision": None}
+    run_and_check("MERGED", [older_pr, newer_pr])
+
+    assert state_of(older) == "READY_FOR_REVIEW"
+    assert state_of(sibling) == "READY_FOR_REVIEW"
+
+    # 6. A dead newest task does not decide. The older waiting task stacks.
+    ledger.set_task_state(newer, "ORPHANED")
+    urls_asked.clear()
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    cell_spec, _printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+    assert cell_spec.stacked_on == head
+    assert urls_asked == [older_pr]
+    assert state_of(older) == "READY_FOR_REVIEW"
+    lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+    assert all(line.step != "unstacked" for line in lines)
+    ledger.close()
+
+
+def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once(
+    tmp_path, monkeypatch, capsys
+):
+    """`b-877e93`: a `gh` that cannot answer must not refuse an attended run.
+    It leaves the parent's task exactly as it was, and says, once, that
+    GitHub could not be asked, whatever state that row keeps."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    older_pr = "https://github.com/o/r/pull/1"
+    newer_pr = "https://github.com/o/r/pull/2"
+    older = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=older_pr
+    )
+    newer = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
+    )
+    ledger.record_push(older, "1" * 40)
+    ledger.record_push(newer, "2" * 40)
+
+    def run_once(before):
+        cell_spec, _printed = _capture_cell_spec(
+            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+        )
+        assert cell_spec.stacked_on == head
+        return _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+
+    def assert_gh_line(line):
+        assert line.step == "gh_unreachable"
+        assert "GitHub could not be asked" in line.detail
+        assert "SY-9000" in line.detail
+        assert any(describe(line).startswith(f.prefix) for f in FAMILIES)
+
+    def exit_one(_argv):
+        return subprocess.CompletedProcess(_argv, 1, "", "boom")
+
+    def cannot_start(_argv):
+        raise FileNotFoundError("gh")
+
+    def answers_undecided(_argv):
+        return subprocess.CompletedProcess(
+            _argv, 0, '{"state": "OPEN", "reviewDecision": "REVIEW_REQUIRED"}', ""
+        )
+
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", exit_one)
+    lines = run_once(before)
+    assert len(lines) == 1
+    assert lines[0].step != "unstacked"
+    assert_gh_line(lines[0])
+
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", cannot_start)
+    lines = run_once(before)
+    assert len(lines) == 1
+    assert lines[0].step != "unstacked"
+    assert_gh_line(lines[0])
+
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", answers_undecided)
+    lines = run_once(before)
+    assert lines == []
+
+    ledger.set_task_state(newer, "CHANGES_REQUESTED")
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", exit_one)
+    lines = run_once(before)
+    assert len(lines) == 2
+    assert all(line.step != "unstacked" for line in lines)
+    assert sum("CHANGES_REQUESTED" in line.detail for line in lines) == 1
+    assert_gh_line(lines[0])
+    ledger.close()
+
+
+def test_saffron_cell_stacks_on_a_changes_requested_parent_and_names_the_state(
+    tmp_path, monkeypatch, capsys
+):
+    """`b-877e93`: a `CHANGES_REQUESTED` parent still keeps its child
+    stacked on the parent's branch, where the review fixes land. It says so
+    once, whether this reconcile moved the task there or the ledger
+    already held it there."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent_pr = "https://github.com/o/r/pull/1"
+    parent = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=parent_pr
+    )
+    ledger.record_push(parent, "1" * 40)
+
+    def fake_gh(_argv):
+        return subprocess.CompletedProcess(
+            _argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
+        )
+
+    monkeypatch.setattr("saffron.cli.run_gh", fake_gh)
+
+    for _ in range(2):
+        before = len(read_log(tmp_path / "out" / "SY-2"))
+        cell_spec, _printed = _capture_cell_spec(
+            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+        )
+        assert cell_spec.stacked_on == head
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (parent,)
+        ).fetchone()
+        assert row["state"] == "CHANGES_REQUESTED"
+        lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+        assert len(lines) == 1
+        assert lines[0].step != "unstacked"
+        assert "CHANGES_REQUESTED" in lines[0].detail
+
+    ledger.close()
 
 
 def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
@@ -4759,106 +5013,12 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
     the pinned `base_sha` with no layer. It always reads its prompt and
     gates from the pinned `base_sha`'s own export, never a layer's head,
     the operator's checkout, or the mirror's `HEAD`."""
-    mirror = tmp_path / "mirror"
-    mirror.mkdir()
-    _git(mirror, "init", "-q")
-    (mirror / ".saffron").mkdir()
-    (mirror / ".saffron" / "README").write_text("bare\n")
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "bare")
-    bare_sha = _rev_parse(mirror, "HEAD")
-
-    (mirror / ".saffron" / "policy.yaml").write_text(
-        "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
-    )
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
-    base_sha = _rev_parse(mirror, "HEAD")
-
-    (mirror / ".saffron" / "policy.yaml").write_text(
-        "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
-    )
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
-
-    repo = tmp_path / "checkout"
-    (repo / ".saffron").mkdir(parents=True)
-    (repo / ".saffron" / "policy.yaml").write_text(
-        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
-    )
-
-    out_dir = tmp_path / "out"
-
-    fetch_calls: list[tuple] = []
-
-    def _fake_fetch(mirror_arg, url_arg, branch):
-        fetch_calls.append((mirror_arg, url_arg, branch))
-        if branch == "saffron/SY-8":
-            raise package.ParentGone("gone")
-        return "d" * 40
-
-    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
-
-    cell_up_calls: list[dict] = []
-
-    def _fake_cell_up(
-        *,
-        repo,
-        mirror,
-        tree_base,
-        branch,
-        network,
-        volume,
-        state,
-        container,
-        gates_dir,
-        thread_env,
-        created,
-        note,
-        cap_add=None,
-    ):
-        cell_up_calls.append(
-            {
-                "repo": repo,
-                "mirror": mirror,
-                "tree_base": tree_base,
-                "branch": branch,
-                "gates_dir": gates_dir,
-                "thread_env": dict(thread_env),
-                "container": container,
-                "cap_add": cap_add,
-            }
-        )
-        created.add(container)
-        note("cell_up", "cell up")
-
-    cell_down_calls: list[dict] = []
-
-    def _fake_cell_down(*, network, volume, state, container, created, note):
-        cell_down_calls.append({"container": container})
-        note("cell_down", True, "cell down")
-
-    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
-    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
-    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
-
-    unpriv_calls: list[str] = []
-    monkeypatch.setattr(
-        session,
-        "assert_bash_is_unprivileged",
-        lambda container: unpriv_calls.append(container),
-    )
-
-    real_layer_cell = end_review.layer_cell
-    layer_cell_calls: list[dict] = []
-
-    @contextmanager
-    def _spy_layer_cell(fields, **kwargs):
-        layer_cell_calls.append({"fields": fields, "kwargs": kwargs})
-        with real_layer_cell(fields, **kwargs) as container:
-            yield container
-
-    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    mirror, bare_sha, base_sha = rig.mirror, rig.bare_sha, rig.base_sha
+    repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+    cell_down_calls, unpriv_calls = rig.cell_down_calls, rig.unpriv_calls
+    layer_cell_calls = rig.layer_cell_calls
 
     agent_calls: list[dict] = []
 
@@ -4898,19 +5058,6 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
         return sentinel
 
     monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
-
-    def _spec_path(spec_id):
-        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
-
-    def _candidate(spec_id, *, depends_on=None):
-        return Candidate(
-            path=_spec_path(spec_id),
-            spec=intake.Spec(
-                id=spec_id, title="t", type="chore", depends_on=depends_on or []
-            ),
-            spec_sha="s" * 64,
-            task_id=None,
-        )
 
     pinned = task.PinnedBase(
         mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
@@ -5005,6 +5152,334 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
         Policy(), prompts_dir=context.PROMPTS_DIR
     )
     assert review_calls[-1]["system_prompt"] == expected_bare_prompt
+    assert cell_up_calls[-1]["thread_env"] == {}
+
+
+def _spec_session_rig(tmp_path, monkeypatch, spec_file=None):
+    """The mirror, checkout and cell fakes a spec session callable runs over:
+    `bare`, `base` and `head` commits, and a spy on `layer_cell`."""
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron").mkdir()
+    (mirror / ".saffron" / "README").write_text("bare\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "bare")
+    bare_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
+    )
+    # A named spec file differs in all three trees, so a read shows which.
+    if spec_file:
+        (mirror / spec_file).parent.mkdir(parents=True, exist_ok=True)
+        (mirror / spec_file).write_text("queued at base\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
+    )
+    if spec_file:
+        (mirror / spec_file).write_text("at head\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
+
+    repo = tmp_path / "checkout"
+    (repo / ".saffron").mkdir(parents=True)
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
+    )
+    if spec_file:
+        (repo / spec_file).parent.mkdir(parents=True, exist_ok=True)
+        (repo / spec_file).write_text("in the checkout\n")
+
+    out_dir = tmp_path / "out"
+
+    fetch_calls: list[tuple] = []
+
+    def _fake_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append((mirror_arg, url_arg, branch))
+        if branch == "saffron/SY-8":
+            raise package.ParentGone("gone")
+        return "d" * 40
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
+
+    cell_up_calls: list[dict] = []
+
+    def _fake_cell_up(
+        *,
+        repo,
+        mirror,
+        tree_base,
+        branch,
+        network,
+        volume,
+        state,
+        container,
+        gates_dir,
+        thread_env,
+        created,
+        note,
+        cap_add=None,
+    ):
+        cell_up_calls.append(
+            {
+                "repo": repo,
+                "mirror": mirror,
+                "tree_base": tree_base,
+                "branch": branch,
+                "gates_dir": gates_dir,
+                "thread_env": dict(thread_env),
+                "container": container,
+                "cap_add": cap_add,
+            }
+        )
+        created.add(container)
+        note("cell_up", "cell up")
+
+    cell_down_calls: list[dict] = []
+
+    def _fake_cell_down(*, network, volume, state, container, created, note):
+        cell_down_calls.append({"container": container})
+        note("cell_down", True, "cell down")
+
+    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+
+    unpriv_calls: list[str] = []
+    monkeypatch.setattr(
+        session,
+        "assert_bash_is_unprivileged",
+        lambda container: unpriv_calls.append(container),
+    )
+
+    real_layer_cell = end_review.layer_cell
+    layer_cell_calls: list[dict] = []
+
+    @contextmanager
+    def _spy_layer_cell(fields, **kwargs):
+        layer_cell_calls.append({"fields": fields, "kwargs": kwargs})
+        with real_layer_cell(fields, **kwargs) as container:
+            yield container
+
+    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
+
+    def _spec_path(spec_id):
+        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
+
+    def _candidate(spec_id, *, depends_on=None):
+        return Candidate(
+            path=_spec_path(spec_id),
+            spec=intake.Spec(
+                id=spec_id, title="t", type="chore", depends_on=depends_on or []
+            ),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    return SimpleNamespace(
+        mirror=mirror,
+        bare_sha=bare_sha,
+        base_sha=base_sha,
+        repo=repo,
+        out_dir=out_dir,
+        fetch_calls=fetch_calls,
+        cell_up_calls=cell_up_calls,
+        cell_down_calls=cell_down_calls,
+        unpriv_calls=unpriv_calls,
+        layer_cell_calls=layer_cell_calls,
+        candidate=_candidate,
+    )
+
+
+def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_revise` seeds its cell at a layer's fetched head, or at
+    the pinned `base_sha` with no layer. It always reads its prompt and
+    gates from the pinned `base_sha`'s own export, never a layer's head,
+    the operator's checkout, or the mirror's `HEAD`."""
+    from saffron.agents.artifacts import hash_artifact
+
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    mirror, bare_sha, base_sha = rig.mirror, rig.bare_sha, rig.base_sha
+    repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+    cell_down_calls, unpriv_calls = rig.cell_down_calls, rig.unpriv_calls
+    layer_cell_calls = rig.layer_cell_calls
+
+    def _turn(text="t", **fields):
+        # Unannotated like test_spec_review's `_attempt`, so a str reset type-checks.
+        return implement.AttemptResult(
+            subtype="success", terminal_reason=None, text=text, **fields
+        )
+
+    agent_calls: list[dict] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        agent_calls.append(
+            {
+                "container": container,
+                "prompt": prompt,
+                "options": options,
+                "spec_id": spec_id,
+                "timeout_s": timeout_s,
+                "resume": resume,
+                "last_cost_usd": last_cost_usd,
+            }
+        )
+        if spec_id == "SY-2":
+            return _turn(
+                session_id="s-2",
+                num_turns=1,
+                cost_usd_est=0.25,
+                rate_limit_status="rejected",
+                rate_limit_resets_at="soon",
+            )
+        if resume is not None:
+            return _turn(
+                session_id="s-1",
+                num_turns=1,
+                cost_usd_est=0.25,
+                structured_output={"spec": "---\nid: SY-1\n---\nrevised"},
+            )
+        return _turn(session_id="s-1", num_turns=7, cost_usd_est=0.5, text="report")
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+    revise = cli._stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+
+    assert not (out_dir / "spec-write").exists()
+
+    sy1 = _candidate("SY-1")
+    sy2 = _candidate("SY-2", depends_on=["SY-9"])
+    layer7 = _candidate("SY-7")
+    layer8 = _candidate("SY-8")
+
+    result1 = revise(sy1, None, "spec one\n", "review one")
+    result2 = revise(sy2, layer7, "spec two\n", "review two")
+    with pytest.raises(package.ParentGone):
+        revise(_candidate("SY-3"), layer8, "spec three\n", "review three")
+
+    revised_text = "---\nid: SY-1\n---\nrevised\n"
+    assert result1 == spec_review.SpecWriterSession(
+        text=revised_text,
+        cost_usd=0.75,
+        error=None,
+        resets_at=None,
+        session_id="s-1",
+        num_turns=8,
+        spec_sha=hash_artifact(revised_text),
+    )
+    assert result2.text == ""
+    assert result2.error is None
+    assert result2.resets_at == 1
+    assert result2.cost_usd == 0.25
+
+    assert fetch_calls == [
+        (mirror, pinned.url, "saffron/SY-7"),
+        (mirror, pinned.url, "saffron/SY-8"),
+    ]
+
+    assert len(cell_up_calls) == 2
+    assert len(cell_down_calls) == 2
+    assert [c["tree_base"] for c in cell_up_calls] == [base_sha, "d" * 40]
+    for c in cell_up_calls:
+        assert c["repo"] == repo
+        assert c["mirror"] == mirror
+        assert c["thread_env"] == {"X": "base"}
+    assert cell_up_calls[0]["gates_dir"] == out_dir / "spec-write" / "SY-1"
+    assert cell_up_calls[1]["gates_dir"] == out_dir / "spec-write" / "SY-2"
+    for c in cell_up_calls:
+        policy_text = (c["gates_dir"] / ".saffron" / "policy.yaml").read_text()
+        assert "X: base" in policy_text
+
+    assert len(unpriv_calls) == 2
+    assert unpriv_calls == [c["container"] for c in cell_up_calls]
+
+    assert len(layer_cell_calls) == 2
+    assert all(call["kwargs"]["spec_session"] is True for call in layer_cell_calls)
+    assert [call["fields"].branch for call in layer_cell_calls] == [
+        "saffron/SY-1",
+        "saffron/SY-2",
+    ]
+
+    assert len(agent_calls) == 3
+    assert [c["spec_id"] for c in agent_calls] == ["SY-1", "SY-1", "SY-2"]
+    assert spec_review.SPEC_WRITER_TIMEOUT_S == 3600
+    assert all(c["timeout_s"] == spec_review.SPEC_WRITER_TIMEOUT_S for c in agent_calls)
+    assert agent_calls[0]["container"] == cell_up_calls[0]["container"]
+    assert agent_calls[1]["container"] == cell_up_calls[0]["container"]
+    assert agent_calls[2]["container"] == cell_up_calls[1]["container"]
+
+    assert agent_calls[1]["resume"] == "s-1"
+    assert agent_calls[1]["last_cost_usd"] == 0.5
+    assert agent_calls[1]["prompt"] == spec_review.SPEC_WRITER_EXTRACT_PROMPT
+    assert agent_calls[1]["options"]["output_format"] == spec_review.SPEC_WRITER_FORMAT
+    assert agent_calls[0]["resume"] is None
+    assert agent_calls[2]["resume"] is None
+
+    for spec_id in ("SY-1", "SY-2"):
+        exported = out_dir / "spec-write" / spec_id
+        policy, _ = load_policy(exported)
+        expected_prompt = spec_review.spec_writer_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        first_call = agent_calls[0] if spec_id == "SY-1" else agent_calls[2]
+        assert first_call["options"]["system_prompt"] == expected_prompt
+        assert "`base/**`" in expected_prompt
+        assert "head/**" not in expected_prompt
+        assert "checkout/**" not in expected_prompt
+        prompt = first_call["prompt"]
+        review_text = "review one" if spec_id == "SY-1" else "review two"
+        spec_text = "spec one\n" if spec_id == "SY-1" else "spec two\n"
+        tree = base_sha if spec_id == "SY-1" else "d" * 40
+        expected_lines = [
+            "review: the spec review between the review tags below.",
+            f"spec: .saffron/specs/{spec_id}-x.md",
+            f"base: {tree}",
+            "The checkout is a snapshot of the base.",
+            "The text between the spec tags below is the spec's current "
+            "text, and it replaces the file at that path.",
+            "Keep the spec's id and its exact depends_on.",
+            "Raise no budget_usd, max_turns or max_attempts.",
+            "A follow-up's revision keeps its touches within its first text's touches.",
+        ]
+        assert prompt.splitlines()[:8] == expected_lines
+        assert prompt.index("<review>") < prompt.index(review_text)
+        assert prompt.index(review_text) < prompt.index("</review>")
+        assert prompt.index("</review>") < prompt.index("<spec>")
+        assert prompt.index("<spec>") < prompt.index(spec_text)
+        assert prompt.index(spec_text) < prompt.index("</spec>")
+        assert str(tmp_path) not in prompt
+
+    pinned_bare = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=bare_sha
+    )
+    revise_bare = cli._stack_revise(pinned=pinned_bare, repo=repo, out_dir=out_dir)
+    revise_bare(_candidate("SY-4"), None, "spec four\n", "review four")
+
+    expected_bare_prompt = spec_review.spec_writer_system_prompt(
+        Policy(), prompts_dir=context.PROMPTS_DIR
+    )
+    assert agent_calls[-1]["options"]["system_prompt"] == expected_bare_prompt
     assert cell_up_calls[-1]["thread_env"] == {}
 
 
@@ -5113,3 +5588,151 @@ def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
     assert review_calls == []
     assert mint_calls == []
     assert len(plain_batch_calls) == 1
+
+
+def test_a_stack_batch_passes_run_stack_batch_its_spec_revision(tmp_path, monkeypatch):
+    """`saffron batch --stack` builds `cli._stack_revise` once, with the
+    pinned base, the resolved `--repo` and `main`'s `out_dir`, and passes
+    it to `run_stack_batch` as `revise`. Readiness failing builds none and
+    passes `revise=None`, the way `_stack_review` and `_stack_mint` do."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    revise_calls: list[dict] = []
+    revise_sentinel = object()
+
+    def _fake_stack_revise(**kwargs):
+        revise_calls.append(kwargs)
+        return revise_sentinel
+
+    monkeypatch.setattr(cli, "_stack_revise", _fake_stack_revise)
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        stack_batch_calls.append({"ledger": ledger, **kwargs})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    # Case 1: readiness passes, `--stack`.
+    _readiness_passes(monkeypatch)
+    home1 = tmp_path / "home1"
+    assert main(["--home", str(home1), "batch", "--stack", "--repo", "."]) == 0
+
+    assert len(revise_calls) == 1
+    pinned = task.PinnedBase(
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+    assert revise_calls[0]["pinned"] == pinned
+    assert revise_calls[0]["repo"] == tmp_path.resolve()
+    assert revise_calls[0]["out_dir"] == home1 / "batches" / "v0"
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["revise"] is revise_sentinel
+
+    # Case 2: readiness fails.
+    revise_calls.clear()
+    stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home2 = tmp_path / "home2"
+    main(["--home", str(home2), "batch", "--stack"])
+
+    assert revise_calls == []
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["revise"] is None
+
+
+def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_file(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_review`'s callable takes an optional keyword
+    `spec_text`, adding it in `<spec>` tags beside a sentence naming a
+    scope blocker. `cli._stack_revise`, handed `None`, reads
+    `.saffron/specs/` at the pinned base through `git_mirror.file_at`,
+    never a layer's head or the checkout. It raises `ValueError` before
+    any cell for a path absent there."""
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    prompts: list[str] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        prompts.append(prompt)
+        if resume is None:
+            structured = None
+        elif options.get("output_format") is spec_review.SPEC_REVIEW_FORMAT:
+            structured = {"findings": []}
+        else:
+            structured = {"spec": "ignored"}
+        return implement.AttemptResult(
+            subtype="success",
+            terminal_reason=None,
+            text="",
+            session_id=f"s-{len(prompts)}",
+            num_turns=1,
+            cost_usd_est=0.1,
+            is_error=False,
+            bound="",
+            rate_limit_status=None,
+            rate_limit_resets_at=None,
+            structured_output=structured,
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    pinned = task.PinnedBase(
+        mirror=rig.mirror, url="https://github.com/o/r.git", base_sha=rig.base_sha
+    )
+    review = cli._stack_review(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
+    revise = cli._stack_revise(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
+
+    sy1 = rig.candidate("SY-1")
+    layer7 = rig.candidate("SY-7")
+    sy5 = rig.candidate("SY-5")
+
+    review(sy1, None)
+    review(sy1, None, spec_text="revised\n")
+
+    revise(sy1, None, None, "rt")
+    revise(sy1, layer7, None, "rt")
+    revise(sy1, None, "given\n", "rt")
+
+    first_review_prompt, second_review_prompt = prompts[0], prompts[2]
+    assert second_review_prompt.startswith(first_review_prompt)
+    assert "<spec>\nrevised\n\n</spec>" in second_review_prompt
+    assert "review that text" in second_review_prompt
+    assert "scope blocker" in second_review_prompt
+    assert "<spec>" not in first_review_prompt
+    assert "review that text" not in first_review_prompt
+    assert "scope blocker" not in first_review_prompt
+
+    writer_prompts = [prompts[4], prompts[6], prompts[8]]
+    for prompt in writer_prompts[:2]:
+        assert "<spec>\nqueued at base\n\n</spec>" in prompt
+    assert "<spec>\ngiven\n\n</spec>" in writer_prompts[2]
+    for prompt in writer_prompts:
+        assert "at head" not in prompt
+        assert "in the checkout" not in prompt
+        assert "None" not in prompt
+
+    before = len(rig.cell_up_calls)
+    with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
+        revise(sy5, None, None, "rt")
+    assert len(rig.cell_up_calls) == before

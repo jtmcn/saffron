@@ -830,6 +830,38 @@ def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
         )
 
 
+def test_a_wall_cut_names_the_seconds_it_was_given_and_an_idle_cut_does_not():
+    """Backlog item b-bf0c91: the wall now scales with a spec's own max_turns.
+    Its own cut names the seconds `run_agent` was handed, ahead of the
+    stderr `detail` it quotes. The idle bound keeps its old wording and
+    never names seconds at all."""
+    stderr = "e" * 800
+
+    def _cut(bound):
+        with pytest.raises(implement.AgentFailed) as raised:
+            implement.run_agent(
+                "cell",
+                prompt="p",
+                options={},
+                spec_id="SY-1",
+                timeout_s=1950.0,
+                exec_stream=_stream(
+                    returncode=124, timed_out=True, bound=bound, stderr=stderr
+                ),
+                reap_cell=_no_reap,
+            )
+        return str(raised.value)
+
+    wall_message = _cut("wall")
+    assert "wall bound" in wall_message
+    assert "1950" in wall_message
+    assert wall_message.index("1950") < wall_message.index(stderr[:10])
+
+    idle_message = _cut("idle")
+    assert "idle bound" in idle_message
+    assert "1950" not in idle_message
+
+
 def test_a_turn_killed_before_its_result_event_still_reports_what_it_spent():
     """The costliest failure of all: an idle or wall kill takes the runner
     mid-stream, so no result event ever carries the cost fields. Charging it

@@ -1703,6 +1703,41 @@ def test_a_linked_stack_is_marked_ready_only_once_every_base_reads_back(
     assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]
 
 
+def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeypatch):
+    """Step 5's pull request opens after the stack is linked. `--top` links it
+    above the last layer, reads its base back, and marks it ready."""
+    rows = [
+        loop.row(0, state="READY_FOR_REVIEW", pr=10),
+        loop.row(1, state="READY_FOR_REVIEW", pr=11),
+    ]
+    ran = []
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
+    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
+    monkeypatch.setattr(
+        driver.subprocess,
+        "run",
+        lambda cmd, **_k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0),
+    )
+    fields = {
+        (10, "baseRefName"): "main",
+        (11, "baseRefName"): rows[0].branch,
+        (12, "baseRefName"): rows[1].branch,
+        (12, "headRefName"): "joel/spec-loop-run-9",
+    }
+    monkeypatch.setattr(driver, "_gh_pr_field", lambda n, name: fields[(n, name)])
+
+    assert driver.cmd_stack(argparse.Namespace(execute=True, top=12)) == 0
+    assert ["gh", "stack", "link", "10", "11", "12"] in ran
+    assert [c[3] for c in ran if c[:3] == ["gh", "pr", "ready"]] == ["10", "11", "12"]
+
+    ran.clear()
+    fields[(12, "baseRefName")] = "main"
+    assert driver.cmd_stack(argparse.Namespace(execute=True, top=12)) == 1
+    assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]
+
+
 def test_a_held_spec_is_passed_over_until_released(loop):
     # Run 7: `next` named SA-0100 while its edit sat in an open pull request,
     # and a cell started then would have run the old text.

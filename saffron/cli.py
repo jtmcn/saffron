@@ -455,6 +455,9 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # one whose stdout is the night's only record — says it too.
     ceilings = _ceilings(args, spec)
 
+    # No scan reconciles ahead of one attended cell. Guarded so a `gh` that
+    # cannot start reads as unasked, which the resolver's own line reports.
+    gh_failures: list[str] = []
     outcome = run_task(
         spec,
         spec_sha,
@@ -465,6 +468,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         ledger=ledger,
         out_dir=out_dir,
         token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        gh=_guarded_gh(gh_failures),
     )
     if isinstance(outcome, Refused):
         # `run_task` already printed the refused line, and no task exists
@@ -687,7 +691,7 @@ def _spec_review_policy(exported: Path) -> Policy:
 
 def _stack_review(
     *, pinned: PinnedBase, repo: Path, out_dir: Path
-) -> Callable[[Candidate, Candidate | None], spec_review.SpecReviewSession]:
+) -> Callable[..., spec_review.SpecReviewSession]:
     """`run_stack_batch`'s `review` adapter (ADR 7). Given a layer, it
     fetches that spec's branch fresh and seeds the cell there. Given
     `None`, it seeds the cell at the pinned `base_sha`. The system prompt and
@@ -695,7 +699,10 @@ def _stack_review(
     """
 
     def run(
-        candidate: Candidate, layer: Candidate | None
+        candidate: Candidate,
+        layer: Candidate | None,
+        *,
+        spec_text: str | None = None,
     ) -> spec_review.SpecReviewSession:
         if layer is None:
             head = pinned.base_sha
@@ -727,6 +734,15 @@ def _stack_review(
             "against.\n"
             f"{_SPEC_SESSION_ACCOUNT_LINES}"
         )
+        if spec_text is not None:
+            # A revision replaces the queued file for this round: the
+            # sentence below is what tells the review to read it instead.
+            prompt += (
+                "A revision replaces the queued file. The text below is "
+                "that revision: review that text, and treat a change "
+                "to what the spec is for as a scope blocker.\n"
+                f"<spec>\n{spec_text}\n</spec>\n"
+            )
         agent = partial(
             implement.run_agent,
             spec_id=candidate.spec.id,
@@ -741,6 +757,90 @@ def _stack_review(
             spec_session=True,
         ) as container:
             return spec_review.run_spec_review(
+                container, system_prompt=system_prompt, prompt=prompt, agent=agent
+            )
+
+    return run
+
+
+def _stack_revise(
+    *, pinned: PinnedBase, repo: Path, out_dir: Path
+) -> Callable[
+    [Candidate, Candidate | None, str | None, str], spec_review.SpecWriterSession
+]:
+    """`SA-0164`'s revision adapter (ADR 7), built the way
+    `_stack_review` is. Given a layer, it fetches that spec's branch fresh
+    and seeds the cell there. Given `None`, it seeds the cell at the
+    pinned `base_sha`. The prompt and gates always come from `base_sha`'s
+    own export, never a layer's head. A `None` spec text reads the queued
+    file at `base_sha`, and a missing one raises `ValueError` before any cell.
+    """
+
+    def run(
+        candidate: Candidate,
+        layer: Candidate | None,
+        spec_text: str | None,
+        review_text: str,
+    ) -> spec_review.SpecWriterSession:
+        if spec_text is None:
+            # The queued file at the pinned base, read before any fetch or
+            # cell: a spec with no revision yet has no other current text.
+            path = f".saffron/specs/{candidate.path.name}"
+            queued = git_mirror.file_at(pinned.mirror, pinned.base_sha, path)
+            if queued is None:
+                raise ValueError(f"{path} not found at {pinned.base_sha}")
+            spec_text = queued
+        if layer is None:
+            head = pinned.base_sha
+        else:
+            branch = _branch(layer.spec.id)
+            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+
+        # The export always reads `base_sha`, never a layer's head (ADR 7).
+        exported = git_mirror.export_saffron_dir(
+            pinned.mirror, pinned.base_sha, out_dir / "spec-write" / candidate.spec.id
+        )
+        policy = _spec_review_policy(exported)
+
+        fields = end_review.LayerFields(
+            spec_id=candidate.spec.id,
+            branch=_branch(candidate.spec.id),
+            pr_url="",
+            base=head,
+            head=head,
+            known="",
+        )
+        system_prompt = spec_review.spec_writer_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        prompt = (
+            "review: the spec review between the review tags below.\n"
+            f"spec: .saffron/specs/{candidate.path.name}\n"
+            f"base: {head}\n"
+            "The checkout is a snapshot of the base.\n"
+            "The text between the spec tags below is the spec's current "
+            "text, and it replaces the file at that path.\n"
+            "Keep the spec's id and its exact depends_on.\n"
+            "Raise no budget_usd, max_turns or max_attempts.\n"
+            "A follow-up's revision keeps its touches within its first "
+            "text's touches.\n"
+            f"<review>\n{review_text}\n</review>\n"
+            f"<spec>\n{spec_text}\n</spec>\n"
+        )
+        agent = partial(
+            implement.run_agent,
+            spec_id=candidate.spec.id,
+            timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+        )
+        with end_review.layer_cell(
+            fields,
+            repo=repo,
+            mirror=pinned.mirror,
+            gates_dir=exported,
+            thread_env=policy.thread_env,
+            spec_session=True,
+        ) as container:
+            return spec_review.run_spec_writer(
                 container, system_prompt=system_prompt, prompt=prompt, agent=agent
             )
 
@@ -1121,10 +1221,16 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # or scan fails runs no end review at all.
     stack_end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None
     # Same: neither runs a spec review nor mints a task for one until then.
-    stack_review: (
-        Callable[[Candidate, Candidate | None], spec_review.SpecReviewSession] | None
-    ) = None
+    stack_review: Callable[..., spec_review.SpecReviewSession] | None = None
     stack_mint: Callable[[Candidate], int] | None = None
+    # Same: no reviewed spec is revised until then.
+    stack_revise: (
+        Callable[
+            [Candidate, Candidate | None, str | None, str],
+            spec_review.SpecWriterSession,
+        ]
+        | None
+    ) = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1180,6 +1286,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                     pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
                 )
                 stack_review = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
+                stack_revise = _stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
                 stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`
@@ -1226,6 +1333,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 end_review=stack_end_review,
                 review=stack_review,
                 mint=stack_mint,
+                revise=stack_revise,
             )
         else:
             stop = run_batch(

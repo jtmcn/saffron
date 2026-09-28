@@ -1200,3 +1200,86 @@ taken by hand, so no critic ran on it and it has no lines here.
 - `SA-0156` (#553): the spec session's account lines sit in a `cli.py`
   constant, not in core's prompts.
   **Bucket 2**, one source. **Open:** item b-146869.
+
+## 2026-09-28, `SA-0182` to `SA-0164` (the spec loop's run 20, #559 to #566)
+
+- `SA-0182` (#559): `spec_text` and `spec_texts` restated `Ledger.record_key`'s
+  query.
+  **Bucket 2**, one source. **Landed:** a review commit on #559.
+- `SA-0182` (#559): the origins comment did not parse.
+  **Bucket 3**, contract. **Landed:** a review commit on #559.
+- `SA-0182` (#559): the next row is numbered by count, so a fold of a trimmed
+  fact list collides on the key.
+  **No bucket**, it names a rule the spec set. **Open:** item b-013138.
+- `SA-0184` (#560): criterion 3's witness never checked that a cut names its
+  bound, so a message naming neither bound survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #560.
+- `SA-0184` (#560): the wall's rate lost its measured source and the floor
+  lost its reason.
+  **Bucket 2**, measured beats reasoned. **Landed:** a review commit on #560.
+- `SA-0184` (#560): the library's hour and the `max_turns` default are each
+  spelled in two places.
+  **Bucket 2**, one source. **Open:** item b-30bbd7.
+- `SA-0150` (#561): criterion 2's witness drove the bad bases through the
+  helper, so a `run_task` that swallowed the read error survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #561.
+- `SA-0150` (#561): criterion 1's witness never read two of the event's
+  ceilings, so the caller's values survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #561.
+- `SA-0150` (#561): an unparseable first text raised out of `run_task`
+  instead of refusing.
+  **Bucket 3**, correctness. **Landed:** a review commit on #561.
+- `SA-0150` (#561): `_CEILING_FIELDS` restated `events.Ceiling`, and a trimmed
+  docstring lost why the event is emitted in `run_task`.
+  **Bucket 2**, one source. **Landed:** a review commit on #561.
+- `SA-0186` (#562): the resolver let any dead newest task unstack a child over
+  an older pushed row. REBUT argued it from the spec and the lens withdrew.
+  **No bucket**, a rebuttal from a spec contradiction wins. **Landed:** a
+  review commit on #562, on the operator's rule. **Open:** item b-ab4b33.
+- `SA-0186` (#562): criterion 2's witness never read its own line's text or
+  step.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #562.
+- `SA-0186` (#562): two comments cited `DESIGN.md` §4.2.1 for rules it does not
+  state, and a docstring described only one path.
+  **Bucket 3**, contract. **Landed:** a review commit on #562.
+- `SA-0186` (#562): the scheduler's comment and §4.2.1 no longer match the
+  resolver.
+  **Bucket 2**, the design documents. **Open:** item b-710086.
+- `SA-0176` (#563): the writer prompt named one gate where two block, and left
+  out `risk: elevated`.
+  **Bucket 3**, contract. **Landed:** a review commit on #563. The review
+  prompt keeps the same wording. **Open:** item b-5ec5c5.
+- `SA-0176` (#563): three docstrings said more than the code does.
+  **Bucket 3**, contract. **Landed:** a review commit on #563.
+- `SA-0185` (#564): the witnesses read the rate as a substring, missed
+  "changed tokens", took a field name for an estimate, and let a later
+  sentence count in tokens.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #564.
+- `SA-0160` (#565): the re-ask witness checked its prompt by prefix and
+  suffix, so a re-ask that dropped the error survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #565. The review's
+  own re-ask witness has the same hole. **Open:** item b-64e40c.
+- `SA-0160` (#565): a repair split a sentence to pass `prose` and left a false
+  comment on the writer's timeout.
+  **Bucket 1**, `prose`. **Landed:** a review commit on #565.
+  **Open:** item b-ad1285.
+- `SA-0160` (#565): the tests copied their setup and did not table their
+  rows, as the spec asked.
+  **Bucket 2**, one source. **Landed:** a review commit on #565, on the
+  operator's call.
+- `SA-0160` (#565): an unannotated helper hid a type mismatch from `types`.
+  **Bucket 1**, `types`. **Landed:** one helper pattern, on the operator's
+  call. **Open:** item b-713e90.
+- `SA-0164` (#566): four witnesses left the writer's layer, a no-writer route,
+  the tagged text and `--repo` unasserted.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #566.
+- `SA-0164` (#566): the review prompt said the queued file changed, and three
+  docstrings called a `witness` concern lone.
+  **Bucket 3**, contract. **Landed:** a review commit on #566.
+- `SA-0164` (#566): the tests restated the rig and doubles the file already
+  holds.
+  **Bucket 2**, one source. **Landed:** a review commit on #566, on the
+  operator's call.
+- `SA-0164` (#566): the `revise` type, the budget sum and a phase name are each
+  restated.
+  **Bucket 2**, one source. **Open:** item b-74e564.

@@ -13,7 +13,7 @@ record of what bounded it. `batch.py` names the cause in its own `runner`
 docstring — the resolvers this needs were `cli`-private, and `cli.py` was
 `forbidden` to the spec that built the loop.
 
-What stays outside, deliberately, except one refusal named below:
+What stays outside, deliberately, except the refusals named below:
 
 - **The refusals and the mirror fetch.** They run at different times on the
   two paths for good reasons — a batch refuses at scan time so a night never
@@ -24,6 +24,10 @@ What stays outside, deliberately, except one refusal named below:
   it must resolve against. Neither caller knows that base until
   `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
   instead.
+- **The other exception.** A stack batch's recorded spec text (ADR 7) is not
+  at `base_sha`. The scan never reads it, so `run_task` re-runs the gate 0
+  refusals that need no GitHub against it, keyed on `task_id`. The open-PR
+  and dependency refusals are not re-run.
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -33,28 +37,55 @@ What stays outside, deliberately, except one refusal named below:
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import get_args
 
+from saffron.agents import context
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
-from saffron.events import Ceilings, CeilingSource, Event, EventLog, Preflight, describe
-from saffron.intake import Spec
+from saffron.events import (
+    Ceiling,
+    Ceilings,
+    CeilingSource,
+    Event,
+    EventLog,
+    Preflight,
+    describe,
+)
+from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
+from saffron.reconcile import GhRunner, reconcile
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
 from saffron.repos.mirror import (
     GitError,
     UnreadablePath,
+    export_saffron_dir,
+    file_at,
     has_commit,
+    retirement_markers,
     unresolved_consumes,
 )
-from saffron.scheduler import DEPENDENCY_WAITING_STATES, _branch
+from saffron.repos.policy import load_policy
+from saffron.scheduler import (
+    DEPENDENCY_WAITING_STATES,
+    _branch,
+    _unmatched_criterion_path,
+    protected_touch_refusal,
+    retirement_refusal,
+)
+
+# `_resolve_stacked_on`'s accepted states once a `gh` reconciles the parent.
+# `CHANGES_REQUESTED` joins only on that path. Its review fixes land on its branch.
+_STACKABLE_ON_RECONCILE = DEPENDENCY_WAITING_STATES | frozenset({"CHANGES_REQUESTED"})
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -155,6 +186,7 @@ def _resolve_stacked_on(
     url: str,
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
+    gh: GhRunner | None = None,
 ) -> tuple[str | None, str | None]:
     """The tree sha `CellSpec.stacked_on` should carry and the branch name
     `package()`'s stacking parameter should carry, or `(None, None)`
@@ -167,22 +199,22 @@ def _resolve_stacked_on(
     batch's tasks against each other yet, so a grandchild (or a second
     unmerged parent) is out of reach by design, not by oversight.
 
-    Among that one parent's task rows in this repo, across every `spec_sha`
-    it has ever carried (`Ledger.tasks_by_spec_id` — this path never reads
-    the parent's spec file, so it has no current sha to filter on, the
-    same reach `scheduler.build_queue`'s `merged_anywhere` already takes),
-    the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the
-    parent's task": the same waiting-outranks-dead precedence
-    `scheduler._dependency_refusal` gives it. Not the *same* row, though —
-    that function reads only the parent's current `spec_sha`, and a parent
-    whose spec text moved after its pull request opened has a waiting row
-    here and none there. The branch is real either way; it is the gate, not
-    this resolver, that decides whether the dependent runs at all.
-    A parent merged, retired, dead, unrun, or never in the
-    ledger at all has no such row, and this function does not distinguish
-    why — every one of those needs no stacking (its work, if any, is already
-    on the default branch) or was never a candidate the gate should have
-    admitted, which is not this resolver's check to make.
+    Given no `GhRunner`, the next rule holds. Among that one parent's task rows in this
+    repo, across every `spec_sha` it has ever carried (`Ledger.tasks_by_spec_id` — this
+    path never reads the parent's spec file, so it has no current sha to filter on, the
+    same reach `scheduler.build_queue`'s `merged_anywhere` already takes), the newest
+    row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the parent's task": the
+    same waiting-outranks-dead precedence `scheduler._dependency_refusal` gives it. Not
+    the *same* row, though — that function reads only the parent's current `spec_sha`,
+    and a parent whose spec text moved after its pull request opened has a waiting row
+    here and none there. The branch is real either way; it is the gate, not this
+    resolver, that decides whether the dependent runs at all. A parent merged, retired,
+    dead, unrun, or never in the ledger at all has no such row, and this function does
+    not distinguish why — every one of those needs no stacking (its work, if any, is
+    already on the default branch) or was never a candidate the gate should have
+    admitted, which is not this resolver's check to make. Given a `GhRunner`, it
+    reconciles that parent first. A merged or closed newest task unstacks the cell.
+    Otherwise the newest row in `_STACKABLE_ON_RECONCILE` supplies the branch.
 
     **The ledger supplies the branch; the branch supplies the sha.** A row's
     `pushed_sha` is written by PACKAGE — or, since `SA-0069`, by a push of
@@ -211,11 +243,55 @@ def _resolve_stacked_on(
     if repo_id is None or not depends_on:
         return None, None
     parent_id = depends_on[0]
-    rows = ledger.tasks_by_spec_id(repo_id, parent_id)
-    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
-    if not waiting:
-        return None, None
-    newest = waiting[-1]
+    if gh is None:
+        rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+        waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
+        if not waiting:
+            return None, None
+        newest = waiting[-1]
+    else:
+        # Narrowed to this one spec, and read only after it comes back
+        # (`b-877e93`), so a stale merge is never stacked on by accident.
+        reconciled = reconcile(ledger, repo_id, gh=gh, spec_id=parent_id)
+        rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+        if not rows:
+            return None, None
+        # A merged or closed newest task unstacks. Else the newest stackable row stacks.
+        # An older pending row shares that branch, so it would restack on the merge.
+        newest_task = rows[-1]
+        stackable = [row for row in rows if row["state"] in _STACKABLE_ON_RECONCILE]
+        if newest_task["state"] in {"MERGED", "REJECTED"} or not stackable:
+            emit(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="unstacked",
+                    detail=f"{parent_id}'s newest task is {newest_task['state']}",
+                )
+            )
+            return None, None
+        newest = stackable[-1]
+        if newest["task_id"] in reconciled.unasked:
+            emit(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="gh_unreachable",
+                    detail=(
+                        f"GitHub could not be asked whether {parent_id}'s "
+                        "pull request merged"
+                    ),
+                )
+            )
+        if newest["state"] == "CHANGES_REQUESTED":
+            emit(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="changes_requested",
+                    detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
+                )
+            )
     branch = newest["branch"]
     # Refused here rather than left to the fetch: a row that evidences no push
     # has no branch worth fetching, and "branch None is gone" would send an
@@ -252,11 +328,107 @@ class Refused:
     """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**).
 
     A `consumes` entry did not resolve at the tree base, or the reader could
-    not read it there. Carries only `reason`, the same text `run_task`
-    prints on the refused line. No run and no task row exist for a caller
-    to read anything else back from."""
+    not read it there. Or, for a task holding a stack batch's recorded spec
+    text (ADR 7), a gate 0 refusal that needs no GitHub refused that text.
+    Carries only `reason`, the same text `run_task` prints on the refused
+    line. No run and no task row exist for a caller to read anything else
+    back from."""
 
     reason: str
+
+
+def _recorded_spec_text(
+    ledger: Ledger, task_id: int, spec: Spec, base: PinnedBase
+) -> tuple[Spec, str] | Refused | None:
+    """Gate 0's refusals that need no GitHub, re-run against a stack batch's
+    recorded spec text (ADR 7) and keyed on `task_id`. Checks the task's latest
+    `spec_texts` row in order: its own hash, `parse_spec`, the id,
+    `depends_on`, and each ceiling. Then a follow-up task's `touches`, a
+    `revision` row's path, `protected_touch_refusal`,
+    `_unmatched_criterion_path` and `retirement_refusal` against
+    `.saffron/` exported at `base`. Returns the parsed text and its
+    `spec_sha`, a `Refused`, or `None` for a task with no text. A
+    `GitError` or `PolicyError` from a read below is left to propagate."""
+    row = ledger.spec_text(task_id)
+    if row is None:
+        return None
+    n = row["n"]
+
+    def _refused(detail: str) -> Refused:
+        return Refused(reason=f"task {task_id}'s text {n} {detail}")
+
+    if hashlib.sha256(row["text"].encode()).hexdigest() != row["spec_sha"]:
+        return _refused("does not hash to its spec_sha")
+
+    try:
+        text_spec = parse_spec(row["text"])
+    except SpecError as exc:
+        # A YAML error's own message can span lines with runs of spaces
+        # after each break. The refused line collapses to one line.
+        return _refused(f"does not parse: {' '.join(str(exc).split())}")
+
+    if text_spec.id != spec.id:
+        return _refused(f"declares {text_spec.id}, not {spec.id}")
+
+    if text_spec.depends_on != spec.depends_on:
+        return _refused(
+            f"depends_on {text_spec.depends_on} differs from {spec.depends_on}"
+        )
+
+    for field in get_args(Ceiling):
+        theirs, ours = getattr(text_spec, field), getattr(spec, field)
+        if theirs > ours:
+            return _refused(f"{field} {theirs} exceeds the handed spec's {ours}")
+
+    texts = ledger.spec_texts(task_id)
+    first_row = texts[0]
+    if first_row["origin"] == "follow_up":
+        try:
+            first_spec = parse_spec(first_row["text"])
+        except SpecError as exc:
+            detail = " ".join(str(exc).split())
+            first_n = first_row["n"]
+            return _refused(
+                f"follows first text {first_n}, which does not parse: {detail}"
+            )
+        widened = sorted(set(text_spec.touches) - set(first_spec.touches))
+        if widened:
+            return _refused(f"widens touches beyond text {first_row['n']}'s: {widened}")
+
+    if row["origin"] == "revision":
+        earlier_same_path = any(t["path"] == row["path"] for t in texts if t["n"] < n)
+        if not earlier_same_path:
+            is_own_file = False
+            file_text = file_at(base.mirror, base.base_sha, row["path"])
+            if file_text is not None:
+                try:
+                    is_own_file = parse_spec(file_text).id == spec.id
+                except SpecError:
+                    is_own_file = False
+            if not is_own_file:
+                return _refused(f"is at {row['path']!r}, not the task's spec file")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        exported = export_saffron_dir(base.mirror, base.base_sha, Path(scratch))
+        policy, _policy_sha = load_policy(exported)
+
+    if (
+        reason := protected_touch_refusal(
+            text_spec.touches, policy.protected, text_spec.forbidden
+        )
+    ) is not None:
+        return _refused(reason)
+
+    if (escaped := _unmatched_criterion_path(text_spec)) is not None:
+        return _refused(
+            f"acceptance criteria name {escaped!r}, which no touches pattern matches"
+        )
+
+    markers = retirement_markers(base.mirror, base.base_sha)
+    if (reason := retirement_refusal(text_spec, markers)) is not None:
+        return _refused(reason)
+
+    return text_spec, row["spec_sha"]
 
 
 def run_task(
@@ -275,31 +447,29 @@ def run_task(
     # that task instead of minting a fresh one (§4.2.1).
     task_id: int | None = None,
     emit: Callable[[Event], None] | None = None,
+    # `cli._run_cell`'s reason for a `gh`: it reaches `_resolve_stacked_on`,
+    # which reconciles the parent before it stacks on one (`b-877e93`).
+    gh: GhRunner | None = None,
 ) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package the result if the cell came back reviewable.
 
     A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
+    Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
+    `spec_sha` and `ceilings` to the task's recorded text (ADR 7). `state`
+    on the outcome is PACKAGE's own, not the pre-packaging
+    `READY_FOR_REVIEW`. Returns `Refused` before any cell exists when
+    `spec.consumes` fails to resolve or gate 0 refuses a recorded text. A
+    base the mirror lacks raises `GitError`."""
+    if task_id is not None:
+        recorded = _recorded_spec_text(ledger, task_id, spec, base)
+        if isinstance(recorded, Refused):
+            print(f"{spec.id:<10} refused  {recorded.reason}")
+            return recorded
+        if recorded is not None:
+            spec, spec_sha = recorded
+            ceilings = spec_ceilings(spec)
 
-    `ceilings` arrives resolved, because only the attended path has flags to
-    arbitrate against the spec (`cli._ceilings`); a batch has none, so there is
-    nothing to arbitrate and no reason for `argparse` to reach this far. It
-    carries each value's provenance with it, which is the whole of what makes
-    the record worth keeping: a number with no source sends an operator to
-    grep a spec file for a line that may not be in it.
-
-    Emitted here rather than by either caller, because being printed on one
-    path and not the other is the defect this module exists to end.
-
-    `state` on the returned outcome is the *packaging* result's where
-    packaging ran, so a caller reads what actually happened to the task —
-    `MERGE_FAILED` included — rather than the pre-packaging
-    `READY_FOR_REVIEW` every packaged task would otherwise report.
-
-    Returns `Refused` instead, before any cell exists, when `spec.consumes`
-    names something the tree base does not resolve. A tree base the mirror
-    does not hold as a commit raises `GitError`.
-    """
     if emit is None:
         # Print plus the task's own log, the shape `session._default_emit` and
         # `package()` both default to: a caller that passes nothing must still
@@ -320,6 +490,8 @@ def run_task(
             if log.failed and not was_failed:
                 print(f"warning: {log_path} refused a write; events may be missing")
 
+    # Emitted here, not by either caller: a ceiling printed on one path only
+    # is the defect this module ends.
     emit(
         Ceilings(
             timestamp=time.time(),
@@ -348,6 +520,7 @@ def run_task(
             url=base.url,
             spec_id=spec.id,
             emit=emit,
+            gh=gh,
         )
     # Which tree a run was cut from is not recoverable from the exit code, and
     # a stacked run that surprises an operator is one they cannot diagnose.
@@ -364,7 +537,7 @@ def run_task(
         base_sha=base.base_sha,
         touches=spec.touches,
         spec_type=spec.spec_type,
-        body=spec.body,
+        body=spec.body + context.estimate_section(spec.estimated_lines),
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,

@@ -228,7 +228,7 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
                     }
                 )
             ),
-            "run",
+            "revise",
         ),
         (
             _session(
@@ -386,6 +386,72 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
         _block({"findings": [{**finding, "severity": "blocker", "fixes": "rewrite"}]})
     )
     assert sr.spec_review_route(sr.read_spec_review(patched)) == "escalate"
+
+
+def test_a_build_or_witness_blocker_and_a_witness_concern_route_to_a_revision(
+    monkeypatch,
+):
+    """`spec_review_route`'s new `revise` outcome: a blocker whose `fixes`
+    is every one `build` or `witness`, or any `concern` tagged
+    `witness`. A blocker with any other tag, present anywhere, still
+    escalates. A concern or a note tagged anything else still runs."""
+    from saffron import spec_review as sr
+
+    def _finding(severity: str, fixes, **over) -> dict:
+        finding = {
+            "severity": severity,
+            "claim": "x",
+            "criterion": 1,
+            "file": "a.py",
+            "line": 1,
+        }
+        if fixes != "__none__":
+            finding["fixes"] = fixes
+        finding.update(over)
+        return finding
+
+    def _b(fixes="__none__", **over) -> dict:
+        return _finding("blocker", fixes, **over)
+
+    def _c(fixes, **over) -> dict:
+        return _finding("concern", fixes, **over)
+
+    def _route(findings, **session_kwargs):
+        session = _session(_block({"findings": findings}), **session_kwargs)
+        return sr.spec_review_route(sr.read_spec_review(session))
+
+    assert _route([_b("build")]) == "revise"
+    assert _route([_b("witness")]) == "revise"
+    assert _route([_b("build"), _b("witness")]) == "revise"
+    assert _route([_b("build"), _b("scope")]) == "escalate"
+    assert _route([_b("scope"), _b("witness")]) == "escalate"
+    assert _route([_b("witness"), _b(None)]) == "escalate"
+    assert _route([_b("build"), _b()]) == "escalate"
+
+    monkeypatch.setattr(sr, "SPEC_REVIEW_TAGS", (*sr.SPEC_REVIEW_TAGS, "rewrite"))
+    assert _route([_b("rewrite")]) == "escalate"
+
+    assert _route([_c("witness")]) == "revise"
+    assert _route([_c("build")]) == "run"
+    assert _route([_c("scope")]) == "run"
+    assert _route([_c(None)]) == "run"
+    assert _route([_c(None, claim="Unmeasured: criterion 2's arrangement")]) == "run"
+    assert _route([_finding("note", "witness")]) == "run"
+
+    assert _route([_c("witness"), _b("build")]) == "revise"
+    assert _route([_c("witness"), _b("scope")]) == "escalate"
+    assert _route([_b(None), _c("witness")]) == "escalate"
+    assert _route([_b("build"), _c(None), _finding("note", "__none__")]) == "revise"
+    assert _route([_b("witness"), _c("scope")]) == "revise"
+    assert (
+        _route([_c("witness"), _c("scope"), _finding("note", "__none__")]) == "revise"
+    )
+    assert _route([_c("witness"), _c("__none__")]) == "revise"
+
+    assert _route([_b("build")], resets_at=1893456000) == "wait"
+    assert _route([_c("witness")], resets_at=1893456000) == "wait"
+    assert _route([_b("build")], error="boom") == "error"
+    assert _route([_c("witness")], error="boom") == "error"
 
 
 def test_a_spec_review_carries_its_last_json_block_and_its_hash():
@@ -1177,4 +1243,527 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     double = _Agent([_first(), _second_null(), RuntimeError("boom")])
     with pytest.raises(RuntimeError):
         _run(double)
+    assert len(double.calls) == 3
+
+
+def test_the_spec_writer_system_prompt_fills_the_same_declarations_as_the_reviews(
+    tmp_path, monkeypatch
+):
+    import saffron.spec_review as sr
+    from saffron.gates.core import size
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    shared_template = "G\n{gates}\nP\n{protected}\nE\n{elevate_on}\nC\n{ceilings}\n"
+    (tmp_path / "spec-review.md").write_text(shared_template)
+    writer_path = tmp_path / "spec-writer.md"
+    writer_path.write_text(shared_template)
+
+    policy = Policy(
+        gates={
+            "tests": GateDeclaration(blocking=True),
+            "lint": GateDeclaration(blocking=False),
+        },
+        protected=["uv.lock", "docs/{a,b}.md"],
+        elevate_on=["saffron/ledger.py"],
+    )
+    monkeypatch.setitem(size._CEILINGS, "feature", 2999)
+
+    assert sr.SPEC_WRITER_PROMPT == "spec-writer.md"
+
+    for one_policy in (policy, Policy()):
+        assert sr.spec_writer_system_prompt(
+            one_policy, prompts_dir=tmp_path
+        ) == sr.spec_review_system_prompt(one_policy, prompts_dir=tmp_path)
+
+    filled = sr.spec_writer_system_prompt(policy, prompts_dir=tmp_path).splitlines()
+    for line in (
+        "- `lint` (advisory)",
+        "- `docs/{a,b}.md`",
+        "- `feature`: 2999 changed tokens",
+    ):
+        assert line in filled
+
+    writer_path.write_text("W\n{gates}\n")
+    assert sr.spec_writer_system_prompt(policy, prompts_dir=tmp_path) == (
+        "W\n- `tests`\n- `lint` (advisory)\n"
+    )
+
+
+def test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool():
+    import re
+
+    from saffron.agents import artifacts, context
+    from saffron.repos.policy import GateDeclaration, Policy
+    from saffron.spec_review import (
+        SPEC_WRITER_EXTRACT_PROMPT,
+        spec_writer_system_prompt,
+    )
+
+    policy = Policy(
+        gates={
+            "tests": GateDeclaration(blocking=True),
+            "lint": GateDeclaration(blocking=False),
+        },
+        protected=["uv.lock", "docs/{a,b}.md"],
+        elevate_on=["saffron/ledger.py"],
+    )
+    rendered = spec_writer_system_prompt(policy, prompts_dir=context.PROMPTS_DIR)
+    for slot in ("{gates}", "{protected}", "{elevate_on}", "{ceilings}"):
+        assert slot not in rendered
+    for block in (
+        "- `tests`\n- `lint` (advisory)",
+        "- `uv.lock`\n- `docs/{a,b}.md`",
+        "- `saffron/ledger.py`",
+        "- `feature`: 3000 changed tokens",
+    ):
+        assert block in rendered
+
+    raw_writer = (context.PROMPTS_DIR / "spec-writer.md").read_text()
+    writer_lines = raw_writer.splitlines()
+    for line in (
+        "Your Bash runs as an account that can read /work but cannot write it.",
+        "To run anything that writes, clone the tree first: "
+        "git clone -q /work /tmp/w && cd /tmp/w",
+        "Call a tool by its full path when its name does not resolve.",
+        "Measure any list of wrong builds you add with a throwaway script.",
+    ):
+        assert line in writer_lines
+    assert sorted(re.findall(r"\{[^{}]*\}", raw_writer)) == [
+        "{ceilings}",
+        "{elevate_on}",
+        "{gates}",
+        "{protected}",
+    ]
+
+    raw_extract = (context.TURNS_DIR / "spec-writer-extract.md").read_text()
+    extract_lines = raw_extract.splitlines()
+    for line in (
+        "Put the whole spec file in the `spec` field, frontmatter first.",
+        "Do not wrap the file in a code fence.",
+    ):
+        assert line in extract_lines
+    nonblank = [line for line in extract_lines if line.strip()]
+    assert nonblank[-3:] == [
+        "Answer now in the required structured format.",
+        "Do not change files.",
+        "Do not run commands.",
+    ]
+    assert re.findall(r"\{[^{}]*\}", raw_extract) == []
+
+    assert context.turn_prompt("spec-writer-extract") == SPEC_WRITER_EXTRACT_PROMPT
+    assert artifacts.EXTRACTION_PROMPT not in SPEC_WRITER_EXTRACT_PROMPT
+
+    forbidden = [
+        ".claude",
+        "CLAUDE.md",
+        "DESIGN.md",
+        "CONTEXT.md",
+        "driver.py",
+        "pytest",
+        "uv run",
+        "make check",
+        "ruff",
+        "prek",
+        "saffron/",
+        "docs/",
+        "/opt/",
+        "://",
+        "the reviewer",
+        "<output>",
+        "output block",
+    ]
+    writer_lower = raw_writer.lower()
+    extract_lower = raw_extract.lower()
+    for word in forbidden:
+        assert word.lower() not in writer_lower
+        assert word.lower() not in extract_lower
+
+
+def test_the_spec_writer_format_is_the_schema_of_one_string_field():
+    import json
+
+    import pydantic
+
+    from saffron.spec_review import SPEC_WRITER_FORMAT, _SpecWriterReply
+
+    root = _SpecWriterReply.model_json_schema()
+    assert {"type": "json_schema", "schema": root} == SPEC_WRITER_FORMAT
+    assert root["type"] == "object"
+    assert root["required"] == ["spec"]
+    assert set(root["properties"]) == {"spec"}
+    assert root["properties"]["spec"]["type"] == "string"
+    assert root["additionalProperties"] is False
+
+    value = "---\nid: X\n---\n  body  \n"
+    reply = _SpecWriterReply.model_validate({"spec": value})
+    assert reply.spec == value
+
+    refused = [
+        {},
+        {"spec": 3},
+        {"spec": None},
+        {"spec": "x", "extra": 1},
+        json.dumps({"spec": "x"}),
+    ]
+    for bad in refused:
+        with pytest.raises(pydantic.ValidationError):
+            _SpecWriterReply.model_validate(bad)
+
+
+# An `<output>` block sits inside the spec text, so a reader that parses
+# text instead of the schema's value would still look right.
+_WRITE_SPEC = "---\nid: SY-1\n---\nbody quotes <output>a</output> here\n"
+_WRITE_V = {"spec": _WRITE_SPEC}
+_WRITE_B = "<output>\n" + _WRITE_SPEC + "</output>"
+
+
+def _write_options():
+    from saffron.spec_review import (
+        SPEC_SESSION_TOOLS,
+        SPEC_WRITER_BUDGET_USD,
+        SPEC_WRITER_MAX_TURNS,
+    )
+
+    return implement.agent_options(
+        system_prompt=_SYSTEM_PROMPT,
+        max_turns=SPEC_WRITER_MAX_TURNS,
+        budget_usd=SPEC_WRITER_BUDGET_USD,
+        tools=SPEC_SESSION_TOOLS,
+    )
+
+
+def _write_extract_options():
+    from saffron.spec_review import SPEC_WRITER_EXTRACT_BUDGET_USD, SPEC_WRITER_FORMAT
+
+    return _write_options() | {
+        "max_budget_usd": SPEC_WRITER_EXTRACT_BUDGET_USD,
+        "output_format": SPEC_WRITER_FORMAT,
+    }
+
+
+def _run_writer(double):
+    from saffron.spec_review import run_spec_writer
+
+    return run_spec_writer(
+        _CONTAINER, system_prompt=_SYSTEM_PROMPT, prompt=_PROMPT, agent=double
+    )
+
+
+def _draft(**overrides):
+    return _attempt(
+        **{"text": "t", "cost": 0.5, "session_id": "s-1", "num_turns": 7} | overrides
+    )
+
+
+def _write_extract(session_id="s-2", **overrides):
+    base = {
+        "text": "t",
+        "cost": 0.25,
+        "session_id": session_id,
+        "num_turns": 7,
+        "structured_output": _WRITE_V,
+    }
+    return _attempt(**base | overrides)
+
+
+def _assert_write_first_call(double):
+    args, kwargs = double.calls[0]
+    assert args == (_CONTAINER,)
+    assert kwargs == {"prompt": _PROMPT, "options": _write_options()}
+    assert "output_format" not in kwargs["options"]
+
+
+def _assert_write_second_call(double, *, last_cost_usd=0.5, resume="s-1"):
+    from saffron.spec_review import SPEC_WRITER_EXTRACT_PROMPT
+
+    args, kwargs = double.calls[1]
+    assert args == (_CONTAINER,)
+    assert kwargs == {
+        "prompt": SPEC_WRITER_EXTRACT_PROMPT,
+        "options": _write_extract_options(),
+        "resume": resume,
+        "last_cost_usd": last_cost_usd,
+    }
+
+
+def _write_expected(text, cost, error, resets_at, session_id, turns):
+    from saffron.agents.artifacts import hash_artifact
+    from saffron.spec_review import SpecWriterSession
+
+    return SpecWriterSession(
+        text=text,
+        cost_usd=cost,
+        error=error,
+        resets_at=resets_at,
+        session_id=session_id,
+        num_turns=turns,
+        spec_sha=hash_artifact(text) if text else None,
+    )
+
+
+def _write_row(script, want, last_cost_usd=0.5):
+    """Runs one row: one call per scripted turn, the first and second calls
+    exact, and the session `want` describes, with an `int` reset."""
+    double = _Agent(script)
+    result = _run_writer(double)
+    assert len(double.calls) == len(script)
+    _assert_write_first_call(double)
+    if len(script) > 1:
+        _assert_write_second_call(double, last_cost_usd=last_cost_usd)
+    assert result == _write_expected(*want)
+    assert result.resets_at is None or type(result.resets_at) is int
+    return double
+
+
+_WRITE_KILLED = "the agent produced no result event"
+
+
+def test_a_spec_writer_session_returns_the_extraction_turns_spec():
+    from saffron.spec_review import (
+        SPEC_WRITER_BUDGET_USD,
+        SPEC_WRITER_EXTRACT_BUDGET_USD,
+        SPEC_WRITER_MAX_TURNS,
+        SPEC_WRITER_SESSION_USD,
+        SPEC_WRITER_TIMEOUT_S,
+    )
+
+    assert SPEC_WRITER_MAX_TURNS == 120
+    assert type(SPEC_WRITER_MAX_TURNS) is int
+    assert SPEC_WRITER_BUDGET_USD == 17.0
+    assert SPEC_WRITER_EXTRACT_BUDGET_USD == 1.5
+    assert SPEC_WRITER_SESSION_USD == 18.5
+    assert SPEC_WRITER_TIMEOUT_S == 3600
+
+    final = _write_extract()
+    padded = _write_extract(structured_output={"spec": "\n  " + _WRITE_SPEC + "\n\n"})
+    conflicting = _write_extract(text="<output>\n---\nid: SY-9\n---\nwrong\n</output>")
+    dear = _draft(cost=4.0)
+    clean = (_WRITE_SPEC, 0.75, None, None, "s-2", 14)
+    failed = implement.AgentFailed
+
+    rows = [
+        ([_draft(), final], clean),
+        ([_draft(), padded], clean),
+        ([_draft(), conflicting], clean),
+        ([_draft(status="allowed", resets_at=9), final], clean),
+        ([_draft(), _KILLED], ("", 1.0, _WRITE_KILLED, None, "s-1", 7)),
+        # `last_cost_usd` caps at the extraction budget, 1.5.
+        ([dear, _KILLED], ("", 5.5, _WRITE_KILLED, None, "s-1", 7)),
+        (
+            [_draft(), failed("api_error", _attempt(cost=0.5, num_turns=7))],
+            ("", 1.0, "api_error", None, "s-1", 14),
+        ),
+        (
+            [
+                _draft(),
+                _write_extract(
+                    None, cost=0.0625, status="rejected", resets_at=1755800000
+                ),
+            ],
+            ("", 0.5625, None, 1755800000, "s-1", 14),
+        ),
+        (
+            [
+                _draft(),
+                _write_extract(None, cost=0.0625, status="rejected", resets_at=-5),
+            ],
+            ("", 0.5625, None, 1, "s-1", 14),
+        ),
+        (
+            [
+                _draft(),
+                failed(
+                    "api_error",
+                    _attempt(status="rejected", cost=0.0625, num_turns=7),
+                ),
+            ],
+            ("", 0.5625, None, 1, "s-1", 14),
+        ),
+        (
+            [
+                failed(
+                    "idle bound",
+                    _attempt(
+                        cost=0.0625,
+                        session_id="s-1",
+                        num_turns=7,
+                        structured_output=_WRITE_V,
+                    ),
+                )
+            ],
+            ("", 0.0625, "idle bound", None, "s-1", 7),
+        ),
+        ([failed("no result")], ("", 0.0, "no result", None, None, 0)),
+        (
+            [
+                _draft(),
+                failed(
+                    "api_error",
+                    _attempt(cost=0.125, num_turns=7, structured_output=_WRITE_V),
+                ),
+            ],
+            ("", 0.625, "api_error", None, "s-1", 14),
+        ),
+        (
+            [_draft(), failed("idle bound", _attempt(cost=0.125, num_turns=7))],
+            ("", 0.625, "idle bound", None, "s-1", 14),
+        ),
+        ([_draft(), failed("no result")], ("", 0.5, "no result", None, "s-1", 7)),
+        (
+            [_draft(session_id=None)],
+            ("", 0.5, "no session to extract from", None, None, 7),
+        ),
+    ]
+    # A rejected first turn, returned then raised, for each reset value.
+    for reset, given in (
+        (1755800000, 1755800000),
+        (10**20, 10**20),
+        (None, 1),
+        ("soon", 1),
+        (True, 1),
+        (1755800000.0, 1),
+        (0, 1),
+        (-5, 1),
+    ):
+        rows.append(
+            (
+                [_draft(cost=0.25, status="rejected", resets_at=reset)],
+                ("", 0.25, None, given, "s-1", 7),
+            )
+        )
+        rejected = _attempt(
+            status="rejected",
+            resets_at=reset,
+            cost=0.125,
+            session_id="s-1",
+            num_turns=7,
+        )
+        rows.append(
+            ([failed("api_error", rejected)], ("", 0.125, None, given, "s-1", 7))
+        )
+
+    for script, want in rows:
+        _write_row(script, want, 1.5 if script[0] is dear else 0.5)
+
+    # Any other exception propagates, from either turn.
+    for script in ([RuntimeError("runner died")], [_draft(), RuntimeError("boom")]):
+        double = _Agent(script)
+        with pytest.raises(RuntimeError):
+            _run_writer(double)
+        assert len(double.calls) == len(script)
+
+
+def test_a_spec_writer_re_asks_once_when_its_extraction_is_not_the_schema():
+    from dataclasses import replace
+
+    import pydantic
+
+    from saffron.spec_review import SPEC_WRITER_EXTRACT_PROMPT, _SpecWriterReply
+
+    m_null = "not the schema: the turn returned no structured output"
+
+    def _validation_message(value):
+        try:
+            _SpecWriterReply.model_validate(value)
+        except pydantic.ValidationError as exc:
+            return f"not the schema: {exc}"
+        raise AssertionError("value unexpectedly validated")
+
+    k_value = {"spec": "x", "extra": 1}
+    second_n = _write_extract(structured_output=None, text=_WRITE_B)
+    second_k = _write_extract(structured_output=k_value, text=_WRITE_B)
+    second_z = _write_extract(structured_output={"spec": 3}, text=_WRITE_B)
+    second_j = _write_extract(structured_output=json.dumps(_WRITE_V), text=_WRITE_B)
+    second_o = _write_extract(structured_output={}, text=_WRITE_B)
+    dear = replace(second_n, cost_usd_est=3.0)
+    failed = implement.AgentFailed
+
+    fixed = (_WRITE_SPEC, 1.0, None, None, "s-3", 21)
+    # The last refused second turn carries no session_id: the re-ask resumes s-1.
+    rows = [
+        (second, _write_extract("s-3"), fixed)
+        for second in (
+            second_n,
+            second_k,
+            second_z,
+            second_j,
+            second_o,
+            replace(second_n, session_id=None),
+        )
+    ]
+    rows += [
+        (second_n, _write_extract(None), (_WRITE_SPEC, 1.0, None, None, "s-2", 21)),
+        (
+            second_n,
+            _write_extract("s-3", structured_output=None),
+            ("", 1.0, m_null, None, "s-3", 21),
+        ),
+        # The third turn's own message is kept, never the second's.
+        (
+            second_n,
+            _write_extract("s-3", structured_output=k_value),
+            ("", 1.0, _validation_message(k_value), None, "s-3", 21),
+        ),
+        (
+            second_k,
+            _write_extract("s-3", structured_output=None),
+            ("", 1.0, m_null, None, "s-3", 21),
+        ),
+        (
+            second_n,
+            _write_extract("s-3", status="rejected", resets_at=9),
+            ("", 1.0, None, 9, "s-3", 21),
+        ),
+        (
+            second_n,
+            _write_extract("s-3", status="rejected", resets_at=0),
+            ("", 1.0, None, 1, "s-3", 21),
+        ),
+        (
+            second_n,
+            failed(
+                "api_error",
+                _attempt(
+                    status="rejected",
+                    resets_at="soon",
+                    cost=0.25,
+                    session_id="s-3",
+                    num_turns=7,
+                ),
+            ),
+            ("", 1.0, None, 1, "s-3", 21),
+        ),
+        (
+            second_n,
+            failed(
+                "cut",
+                _attempt(
+                    cost=0.25, session_id="s-3", num_turns=7, structured_output=_WRITE_V
+                ),
+            ),
+            ("", 1.0, "cut", None, "s-3", 21),
+        ),
+        (second_n, _KILLED, ("", 1.0, _WRITE_KILLED, None, "s-2", 14)),
+        # `last_cost_usd` caps at the extraction budget, 1.5.
+        (dear, _KILLED, ("", 5.0, _WRITE_KILLED, None, "s-2", 14)),
+        (second_n, failed("gone"), ("", 0.75, "gone", None, "s-2", 14)),
+    ]
+
+    for second, third, want in rows:
+        double = _write_row([_draft(), second, third], want)
+        v = second.structured_output
+        m = m_null if v is None else _validation_message(v)
+        args, kwargs = double.calls[2]
+        assert args == (_CONTAINER,)
+        assert kwargs == {
+            "prompt": m + "\n\n" + SPEC_WRITER_EXTRACT_PROMPT,
+            "options": _write_extract_options(),
+            "resume": second.session_id or "s-1",
+            "last_cost_usd": 1.5 if second is dear else 0.25,
+        }
+
+    # Third raises an exception the module does not know about.
+    double = _Agent([_draft(), second_n, RuntimeError("boom")])
+    with pytest.raises(RuntimeError):
+        _run_writer(double)
     assert len(double.calls) == 3

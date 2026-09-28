@@ -58,9 +58,14 @@ _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
 # §4.3's wall clock, per turn, set here rather than inherited: this is the bound
 # the operator sits through, so it belongs where the task is driven. Fifteen
 # minutes is long enough for a turn that runs a real gate suite between tool
-# calls and short enough to watch; the idle bound (runtime.IDLE_TIMEOUT_S) is
-# what catches a stall sooner, and this only catches a turn that never stops.
+# calls and short enough to watch. It is the floor for a spec of sixty turns or
+# fewer, and the idle bound (runtime.IDLE_TIMEOUT_S) still catches a stall sooner.
 TURN_TIMEOUT_S = 900.0
+
+# Measured: about 1.4 times the slowest finished long session, SA-0168 at 10.8
+# seconds a turn. Capped at the library's hour.
+WALL_SECONDS_PER_TURN = 15.0
+WALL_CAP_S = 3600.0
 
 # REVIEW is deliberately not gated on the spend ceiling — a green diff nobody
 # reviewed is not a product — so its sessions are capped at what is left rather
@@ -1951,6 +1956,12 @@ def _drive_cell(
         )
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
+        # Scaled to this spec's own turn ceiling, floored and capped by the
+        # constants above.
+        turn_wall_s = min(
+            WALL_CAP_S, max(TURN_TIMEOUT_S, WALL_SECONDS_PER_TURN * spec.max_turns)
+        )
+
         # Bound once, here, so no turn — plan, implement, repair, review or
         # rebuttal — can quietly inherit the library's hour (§4.3), or run on
         # against a window the provider already closed. `spec_id` is bound
@@ -1960,7 +1971,7 @@ def _drive_cell(
             record_attempts(
                 partial(
                     implement.run_agent,
-                    timeout_s=TURN_TIMEOUT_S,
+                    timeout_s=turn_wall_s,
                     spec_id=spec.spec_id,
                 ),
                 ledger=ledger,
