@@ -23,7 +23,6 @@ repos:
   # on main unseen: subtraction spares each cell and hides it from the next.
   # The gate speaks its verdict in JSON and exits 0 either way, so read status.
   # `tests/test_dead_gate.py` holds that literal against what the gate prints.
-  # `--hook` also reads a loop branch's own spec when its tree lacks it (b-468378).
   - repo: local
     hooks:
       - id: dead

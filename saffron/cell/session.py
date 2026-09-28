@@ -1453,8 +1453,8 @@ def probe_findings(
             executor=runner.CellExecutor(container),
         )
 
-    # Entered through a stack so a cell that never comes up is one more
-    # infrastructure failure, not an exception that discards paid findings.
+    # A cell that never comes up is an infrastructure failure. It must not
+    # discard the findings REVIEW or `qualify` paid for.
     stack = contextlib.ExitStack()
     try:
         container = stack.enter_context(

@@ -1996,8 +1996,10 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
 _OVERRUN_FALLBACK = 1.4
 _OVERRUN_MIN_SPECS = 3
 _LANDED_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGED"})
-# Estimates before this id already carried the 1.4, so counting them measures 1.0.
-_RAW_ESTIMATES_FROM = "SA-0184"
+# Retired specs whose estimate already carried a 1.4, so counting them reads 1.16.
+_PRE_RAW_ESTIMATES = frozenset(
+    f"SA-{n:04d}" for n in (133, 134, 136, 138, 147, 156, 169, 178, 179, 180, 181)
+)
 
 
 def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
@@ -2007,14 +2009,17 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     from statistics import median
 
     lines = {row["task_id"]: row for row in ledger.queue_lines()}
-    newest: dict[str, float] = {}
+    landed_rows: dict[str, list] = {}
     for (spec_id, _sha), rows in ledger.tasks_by_spec(repo_id).items():
+        landed_rows.setdefault(spec_id, []).extend(rows)
+    newest: dict[str, float] = {}
+    for spec_id, rows in landed_rows.items():
         spec = specs.get(spec_id)
         if spec is None or spec.estimated_lines is None:
             continue
-        if spec_id < _RAW_ESTIMATES_FROM:
+        if spec_id in _PRE_RAW_ESTIMATES:
             continue
-        for row in rows:
+        for row in sorted(rows, key=lambda r: r["task_id"]):
             landed = lines.get(row["task_id"])
             if (
                 row["state"] in _LANDED_STATES

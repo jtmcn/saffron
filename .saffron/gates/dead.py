@@ -140,7 +140,8 @@ def _git_out(*args: str) -> str | None:
 
 def branch_spec() -> tuple[str, str] | None:
     """A `saffron/SA-NNNN` branch's own spec when its tree lacks it: the newest
-    committed copy on any ref, as the host hands a cell (b-468378)."""
+    committed copy on any ref, as the host hands a cell (b-468378). A newest
+    commit that retired it to `done/` lists no copy, so it defers nothing."""
     branch = _git_out("rev-parse", "--abbrev-ref", "HEAD") or ""
     match = _LOOP_BRANCH.fullmatch(branch)
     if match is None or any(SPECS.glob(f"{match.group(1)}-*.md")):

@@ -489,3 +489,16 @@ def test_the_hook_defers_a_stacked_branchs_own_spec_its_tree_lacks(tmp_path):
     _git_in(tree, "checkout", "-q", "-b", "saffron/SA-9002", "main")
     other = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
     assert other.status == "fail", other.summary
+
+    # Once a commit retires the spec to `done/`, it defers nothing, as at the gate.
+    _git_in(tree, "checkout", "-q", "joel/spec")
+    _git_in(
+        tree,
+        "mv",
+        ".saffron/specs/SA-9001-x.md",
+        ".saffron/specs/done/SA-9001-x.md",
+    )
+    _git_in(tree, "commit", "-q", "-m", "retire")
+    _git_in(tree, "checkout", "-q", "saffron/SA-9001")
+    retired = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
+    assert retired.status == "fail", retired.summary

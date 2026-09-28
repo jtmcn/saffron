@@ -248,20 +248,20 @@ def _declaring(estimates):
 def test_the_overrun_is_the_median_landed_ratio_once_three_specs_declare_one():
     specs = _declaring(
         {
-            "SA-0183": 100,  # declared before estimates were raw
+            "SA-0147": 100,  # declared its estimate already times 1.4
+            "SA-0150": 100,  # queued below SA-0184, and raw since #557
             "SA-0201": 100,
             "SA-0202": 100,
-            "SA-0203": 100,
             "SA-0204": None,
         }
     )
     landed = [
-        ("SA-0201", "MERGED", 110, 10),  # 1.2
-        ("SA-0202", "READY_FOR_REVIEW", 200, 0),  # 2.0
-        ("SA-0203", "APPROVED", 150, 0),  # 1.5
-        ("SA-0203", "PLAN_REJECTED", 0, 0),  # the newest row, but never landed
+        ("SA-0150", "MERGED", 110, 10),  # 1.2
+        ("SA-0201", "READY_FOR_REVIEW", 200, 0),  # 2.0
+        ("SA-0202", "APPROVED", 150, 0),  # 1.5
+        ("SA-0202", "PLAN_REJECTED", 0, 0),  # the newest row, but never landed
         ("SA-0204", "MERGED", 900, 0),  # declares no estimate
-        ("SA-0183", "MERGED", 900, 0),  # 9.0, and not counted
+        ("SA-0147", "MERGED", 900, 0),  # 9.0, and not counted
     ]
     ratio, basis = driver._overrun(_LandedLedger(landed), 1, specs)
     assert ratio == 1.5
@@ -271,3 +271,27 @@ def test_the_overrun_is_the_median_landed_ratio_once_three_specs_declare_one():
     ratio, basis = driver._overrun(_LandedLedger(landed[:2]), 1, specs)
     assert ratio == 1.4
     assert "run 19" in basis
+
+
+class _TwoShaLedger(_LandedLedger):
+    """One spec landed twice, at two spec shas. `tasks_by_spec` lists the
+    newer sha's group first, as a dict keyed by first sight need not."""
+
+    def tasks_by_spec(self, repo_id):
+        return {
+            ("SA-0201", "new"): [
+                {"task_id": 2, "spec_id": "SA-0201", "state": "MERGED"}
+            ],
+            ("SA-0201", "old"): [
+                {"task_id": 1, "spec_id": "SA-0201", "state": "MERGED"}
+            ],
+        }
+
+
+def test_the_overrun_reads_each_specs_newest_landed_task_across_its_shas():
+    specs = _declaring({"SA-0201": 100})
+    landed = [("SA-0201", "MERGED", 900, 0), ("SA-0201", "MERGED", 150, 0)]
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(driver, "_OVERRUN_MIN_SPECS", 1)
+        ratio, _basis = driver._overrun(_TwoShaLedger(landed), 1, specs)
+    assert ratio == 1.5  # task 2's 150 lines, not task 1's 900
