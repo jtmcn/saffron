@@ -41,7 +41,7 @@ forbidden:
   - tests/test_session.py
   - tests/test_context.py
   - tests/test_package.py
-budget_usd: 25
+budget_usd: 26
 max_attempts: 3
 max_turns: 180
 acceptance:
@@ -305,7 +305,8 @@ place of the space after `MERGED`, and a trailing newline.
 
 3. Blockers 1 and 2 are correctness blockers, both argued, and their lens
    withdraws both. Blocker 3 is an adequacy blocker answered `fixed`, and
-   its lens answers `contradicted` with the same quotes. HEAD moved. So K is
+   its lens answers `contradicted` with run 1's rebuttal quote and finding
+   quote. HEAD moved. So K is
    1 and A is 2, and the contradicted blocker was never argued. The line is
    exactly this.
 
@@ -326,8 +327,8 @@ word. Eight rows, one per case.
 
 - (a) The rebuttal quote is not in the spec text. The reason is the
   rebuttal's.
-- (b) The finding quote is the first line with `merged` and `rejected` in
-  lower case. The reason is the finding's.
+- (b) The rebuttal quote is valid. The finding quote is the first line with
+  `merged` and `rejected` in lower case. The reason is the finding's.
 - (c) Both quotes are the second line, one with a newline where the other
   has a space. The reason names the same spec text.
 - (d) The rebuttal quote is a space, a newline and a tab. The reason is the
@@ -473,7 +474,8 @@ the prototype's source reverted to the base.
 they are the first properties any `output_format` schema here leaves
 unrequired. The prototype ran on doubles only. No live verdict session
 answered this schema before this spec, so this cell's own REBUT is the
-first live run.
+first live run. The repo's other `output_format` schema makes its optional
+fields required and nullable instead (`saffron/spec_review.py:85-89`).
 
 **The `prose` gate** reads the prompts and every new comment. The pinned
 prompt text above passes it. Write no new comment or docstring with an em
@@ -485,5 +487,5 @@ the spec is `standard`. A prototype with all six new witnesses, counted by
 `size_gate`, came to 1705 tokens against the `feature` ceiling of 3000.
 The review's added rows moved it from 1505. `estimated_lines` is those
 measured 1705 tokens over four, with no overrun added. `driver.py check` applies its hand-estimate overrun on top and prices
-it at 81%. That counts the overrun twice (item b-b0a187). About a third of
+it at 92%. That counts the overrun twice (item b-b0a187). About a third of
 the prototype is `saffron/` and the prompts, and the rest is tests.
