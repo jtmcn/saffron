@@ -445,8 +445,9 @@ checkpoint. An attempt that ends in a scope proposal writes neither.
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data
-semantics, contract & schema, test adequacy. Lenses are disjoint by construction,
-which is why any single blocker routes to REBUT and why there is no vote.
+semantics, contract & schema, test adequacy, conventions. Lenses are disjoint by construction,
+which is why any single blocker routes to REBUT and why there is no vote. The end
+review's Standards lens is not one of them (ADR 7).
 _Avoid_: "reviewer", "pass", "check", "critic #2".
 
 **Finding**: Anything a critic reports, pointing at one file and line. Whether
@@ -671,7 +672,7 @@ to a gate. The direction that should always be travelled.
 
 _Avoid_: "automate", "harden", "codify", "promote up", "promote down".
 
-**Scoring run**: One execution of all three lenses over one fixture, in the
+**Scoring run**: One execution of every declared lens over one fixture, in the
 harness (`harness/lens_scoring.py`). The qualifier is not optional: bare **run**
 is one task's pin (§2), and the harness measures REVIEW rather than
 running a night.

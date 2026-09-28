@@ -1060,11 +1060,12 @@ Dropped findings are recorded with `anchored = false`, not deleted — a lens th
 
 **Severity is two levels that count and one that doesn't.** `blocker` routes to REBUT. `concern` reaches the operator's judgement and is the number in a queue line. `note` appears in the PR body and is excluded from every count — because without a third level, every true-but-trivial observation inflates the concern count that drives queue sort order, and you learn to ignore the number. The critic is told the distinction explicitly; a lens that files everything as `concern` is as much a prompting defect as one that hallucinates.
 
-Three lenses — **different lenses, not repeated ones**:
+Four lenses, **different lenses, not repeated ones**:
 
 1. **Correctness & data semantics** — timezones, chunk boundaries, null/gap propagation, unit errors, market-hours assumptions.
 2. **Contract & schema** — public API compatibility, migration reversibility, serialization and schema conformance, anything downstream consumers depend on.
 3. **Test adequacy** — whether the tests in the diff would notice the code being wrong: an assertion on a value the exercised path never reads, a test that constructs the value it then asserts, a structural check over source text a rename defeats, a witness whose setup is the only input the change is correct for.
+4. **Conventions**: each hunk read against the repo's standing instructions at `base_sha`, and against the code or text it describes. It catches a term used against its meaning, a stated rule broken, and a constant or helper restated rather than imported. It also catches a comment, docstring or citation that says what the code or cited text does not (ADR 8).
 
 #3 was **blast radius** until 2026-09-02 and is not any more; §5.5.1 records the amendment and the evidence behind it. Only the *content* of #3 changed — the numbering is an API and this section is cited by it.
 
@@ -1093,7 +1094,7 @@ This section argued until 2026-09-02 that lens #3 in a naive design would be "te
 
 **Blast radius is retired, not deferred.** It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands — but it was never built, because it was gated on a risk tier nothing wires, and the gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering: all three prompts still route callers-and-downstream findings away to "the blast-radius lens", so that class is now owned by nobody and is suppressed at three seats rather than merely uncovered at one. Left as-is on purpose — a `Not yours` list edited to release the remit would scatter it across three lenses, which is the overlap §5.5 spends its no-voting rule on.
 
-**Ungated, and that half is open.** The lens runs at every risk tier, not at `elevated` only — measured against this repo's own specs, 28 of 34 declare `elevated`, so gating would exclude six tasks to save one lens session ($0.76–$0.91 on the two it was priced against). REVIEW is not gated on the spend ceiling (§5.5), so the third session cannot fail a task for money; it does raise the worst-case REVIEW overrun from two remainders to three, because the per-lens cap is not decremented between lenses. Whether `adequacy` is what a tier should gate, once a tier exists, is backlog item 6's remaining half.
+**Ungated, and that half is open.** The lens runs at every risk tier, not at `elevated` only — measured against this repo's own specs, 28 of 34 declare `elevated`, so gating would exclude six tasks to save one lens session ($0.76–$0.91 on the two it was priced against). REVIEW is not gated on the spend ceiling (§5.5), so the third session cannot fail a task for money; it does raise the worst-case REVIEW overrun from two remainders to three, because the per-lens cap is not decremented between lenses. The fourth lens, `conventions` (ADR 8), raises it again, from three remainders to four. Whether `adequacy` is what a tier should gate, once a tier exists, is backlog item 6's remaining half.
 
 ### 5.6 Phase 4b — REBUT
 
@@ -1712,3 +1713,4 @@ the ADR records, so a hand edit here is discarded.
 | 5 | The ontology describes the run record and never controls execution | accepted | 10, 11, 23, 24, 25, 29, 30, 34, 36, 56, 57, 61, 62 |
 | 6 | Work larger than one cell is a composite spec, reviewed once at the joins | accepted | 2, 4, 12, 15, 17, 25, 26, 28, 29, 34, 38, 40, 45, 48, 49, 50 |
 | 7 | A stack batch runs the spec DAG into one stack and writes its own follow-ups | accepted | 2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62 |
+| 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 9, 15, 17, 29, 30, 41, 43, 48, 50, 51, 59 |

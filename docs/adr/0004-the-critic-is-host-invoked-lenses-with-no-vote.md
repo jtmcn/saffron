@@ -32,8 +32,8 @@ live only in code. `saffron/cell/session.py` holds REBUT's budget check, and
 
 REVIEW is a set of lenses. Each lens is a fresh, read-only session with its own
 remit. Its prompt asks for the reason not to merge the change, and forbids
-inventing one. The three lenses are correctness, contract and adequacy. ADR 3
-records what adequacy is.
+inventing one. The four lenses are correctness, contract, adequacy and conventions.
+ADR 3 records what adequacy is, and ADR 8 records conventions.
 
 The host starts every lens itself. A lens is never a subagent, because the
 model decides when to spawn a subagent. A lens that runs only when the model
