@@ -476,3 +476,46 @@ def spec_review_system_prompt(policy: Policy, *, prompts_dir: Path) -> str:
         ceilings=_ceiling_lines(),
         tags=_tag_lines(),
     )
+
+
+# A file name, not a loaded template: `spec_writer_system_prompt` reads it
+# fresh from `prompts_dir` on every call, as `spec_review_system_prompt` does.
+SPEC_WRITER_PROMPT = "spec-writer.md"
+
+# Loaded once at import, as `rebut.EXTRACT_PROMPT` is.
+SPEC_WRITER_EXTRACT_PROMPT = context.turn_prompt("spec-writer-extract")
+
+
+class _SpecWriterReply(BaseModel):
+    """The spec writer's whole answer, one required field (ADR 7).
+
+    `extra="forbid"` keeps a stray key out. No default on `spec` refuses
+    an empty reply instead of validating it as a blank spec."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    spec: str
+
+
+# Sent as `output_format`: built once per process, as `rebut._REBUTTALS_FORMAT`
+# is (§5.3, backlog b-4e0868).
+SPEC_WRITER_FORMAT = {
+    "type": "json_schema",
+    "schema": _SpecWriterReply.model_json_schema(),
+}
+
+
+def spec_writer_system_prompt(policy: Policy, *, prompts_dir: Path) -> str:
+    """Core's own spec-writer prompt, filled the way `spec_review_system_prompt`
+    fills its own template (ADR 7).
+
+    The template is read fresh on every call, not cached at import, for the
+    same reason as the review's.
+    """
+    template = (prompts_dir / SPEC_WRITER_PROMPT).read_text()
+    return template.format(
+        gates=_gate_lines(policy),
+        protected=_path_lines(policy.protected),
+        elevate_on=_path_lines(policy.elevate_on),
+        ceilings=_ceiling_lines(),
+    )

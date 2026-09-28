@@ -423,6 +423,7 @@ TURN_PROMPTS = {
     "extraction": artifacts.EXTRACTION_PROMPT,
     "criterion-probe": review.CRITERION_PROBE_PROMPT,
     "spec-review-extract": spec_review.SPEC_REVIEW_EXTRACT_PROMPT,
+    "spec-writer-extract": spec_review.SPEC_WRITER_EXTRACT_PROMPT,
 }
 
 

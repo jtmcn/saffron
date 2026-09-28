@@ -1178,3 +1178,167 @@ def test_a_spec_review_re_asks_once_when_its_extraction_is_not_the_schema():
     with pytest.raises(RuntimeError):
         _run(double)
     assert len(double.calls) == 3
+
+
+def test_the_spec_writer_system_prompt_fills_the_same_declarations_as_the_reviews(
+    tmp_path, monkeypatch
+):
+    import saffron.spec_review as sr
+    from saffron.gates.core import size
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    shared_template = "G\n{gates}\nP\n{protected}\nE\n{elevate_on}\nC\n{ceilings}\n"
+    (tmp_path / "spec-review.md").write_text(shared_template)
+    writer_path = tmp_path / "spec-writer.md"
+    writer_path.write_text(shared_template)
+
+    policy = Policy(
+        gates={
+            "tests": GateDeclaration(blocking=True),
+            "lint": GateDeclaration(blocking=False),
+        },
+        protected=["uv.lock", "docs/{a,b}.md"],
+        elevate_on=["saffron/ledger.py"],
+    )
+    monkeypatch.setitem(size._CEILINGS, "feature", 2999)
+
+    assert sr.SPEC_WRITER_PROMPT == "spec-writer.md"
+
+    for one_policy in (policy, Policy()):
+        assert sr.spec_writer_system_prompt(
+            one_policy, prompts_dir=tmp_path
+        ) == sr.spec_review_system_prompt(one_policy, prompts_dir=tmp_path)
+
+    filled = sr.spec_writer_system_prompt(policy, prompts_dir=tmp_path).splitlines()
+    for line in (
+        "- `lint` (advisory)",
+        "- `docs/{a,b}.md`",
+        "- `feature`: 2999 changed tokens",
+    ):
+        assert line in filled
+
+    writer_path.write_text("W\n{gates}\n")
+    assert sr.spec_writer_system_prompt(policy, prompts_dir=tmp_path) == (
+        "W\n- `tests`\n- `lint` (advisory)\n"
+    )
+
+
+def test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool():
+    import re
+
+    from saffron.agents import artifacts, context
+    from saffron.repos.policy import GateDeclaration, Policy
+    from saffron.spec_review import (
+        SPEC_WRITER_EXTRACT_PROMPT,
+        spec_writer_system_prompt,
+    )
+
+    policy = Policy(
+        gates={
+            "tests": GateDeclaration(blocking=True),
+            "lint": GateDeclaration(blocking=False),
+        },
+        protected=["uv.lock", "docs/{a,b}.md"],
+        elevate_on=["saffron/ledger.py"],
+    )
+    rendered = spec_writer_system_prompt(policy, prompts_dir=context.PROMPTS_DIR)
+    for slot in ("{gates}", "{protected}", "{elevate_on}", "{ceilings}"):
+        assert slot not in rendered
+    for block in (
+        "- `tests`\n- `lint` (advisory)",
+        "- `uv.lock`\n- `docs/{a,b}.md`",
+        "- `saffron/ledger.py`",
+        "- `feature`: 3000 changed tokens",
+    ):
+        assert block in rendered
+
+    raw_writer = (context.PROMPTS_DIR / "spec-writer.md").read_text()
+    writer_lines = raw_writer.splitlines()
+    for line in (
+        "Your Bash runs as an account that can read /work but cannot write it.",
+        "To run anything that writes, clone the tree first: "
+        "git clone -q /work /tmp/w && cd /tmp/w",
+        "Call a tool by its full path when its name does not resolve.",
+        "Measure any list of wrong builds you add with a throwaway script.",
+    ):
+        assert line in writer_lines
+    assert sorted(re.findall(r"\{[^{}]*\}", raw_writer)) == [
+        "{ceilings}",
+        "{elevate_on}",
+        "{gates}",
+        "{protected}",
+    ]
+
+    raw_extract = (context.TURNS_DIR / "spec-writer-extract.md").read_text()
+    extract_lines = raw_extract.splitlines()
+    for line in (
+        "Put the whole spec file in the `spec` field, frontmatter first.",
+        "Do not wrap the file in a code fence.",
+    ):
+        assert line in extract_lines
+    nonblank = [line for line in extract_lines if line.strip()]
+    assert nonblank[-3:] == [
+        "Answer now in the required structured format.",
+        "Do not change files.",
+        "Do not run commands.",
+    ]
+    assert re.findall(r"\{[^{}]*\}", raw_extract) == []
+
+    assert context.turn_prompt("spec-writer-extract") == SPEC_WRITER_EXTRACT_PROMPT
+    assert artifacts.EXTRACTION_PROMPT not in SPEC_WRITER_EXTRACT_PROMPT
+
+    forbidden = [
+        ".claude",
+        "CLAUDE.md",
+        "DESIGN.md",
+        "CONTEXT.md",
+        "driver.py",
+        "pytest",
+        "uv run",
+        "make check",
+        "ruff",
+        "prek",
+        "saffron/",
+        "docs/",
+        "/opt/",
+        "://",
+        "the reviewer",
+        "<output>",
+        "output block",
+    ]
+    writer_lower = raw_writer.lower()
+    extract_lower = raw_extract.lower()
+    for word in forbidden:
+        assert word.lower() not in writer_lower
+        assert word.lower() not in extract_lower
+
+
+def test_the_spec_writer_format_is_the_schema_of_one_string_field():
+    import json
+
+    import pydantic
+
+    from saffron.spec_review import SPEC_WRITER_FORMAT, _SpecWriterReply
+
+    root = _SpecWriterReply.model_json_schema()
+    assert {"type": "json_schema", "schema": root} == SPEC_WRITER_FORMAT
+    assert root["type"] == "object"
+    assert root["required"] == ["spec"]
+    assert set(root["properties"]) == {"spec"}
+    assert root["properties"]["spec"]["type"] == "string"
+    assert root["additionalProperties"] is False
+
+    value = "---\nid: X\n---\n  body  \n"
+    reply = _SpecWriterReply.model_validate({"spec": value})
+    assert reply.spec == value
+
+    refused = [
+        {},
+        {"spec": 3},
+        {"spec": None},
+        {"spec": "x", "extra": 1},
+        json.dumps({"spec": "x"}),
+    ]
+    for bad in refused:
+        with pytest.raises(pydantic.ValidationError):
+            _SpecWriterReply.model_validate(bad)
