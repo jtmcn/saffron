@@ -20,7 +20,14 @@ from saffron.agents import context
 from saffron.cell import session
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
-from saffron.events import Ceilings, PhaseStart, Preflight, describe, read_log
+from saffron.events import (
+    FAMILIES,
+    Ceilings,
+    PhaseStart,
+    Preflight,
+    describe,
+    read_log,
+)
 from saffron.ledger import Ledger
 from saffron.phases import implement, package
 from saffron.reconcile import HeadMoved, ReconcileResult
@@ -711,7 +718,8 @@ def _gh_by_url(urls_asked, answers):
     def fake_gh(argv):
         url = argv[3]
         urls_asked.append(url)
-        return subprocess.CompletedProcess(argv, 0, json.dumps(answers[url]), "")
+        answer = answers.get(url, {"state": "OPEN", "reviewDecision": None})
+        return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
 
     return fake_gh
 
@@ -736,7 +744,7 @@ def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_
     The newest task decides, even over an older row still waiting. Only
     the parent's own tasks are ever asked about."""
     repo = _local_origin(tmp_path)
-    _push_parent_branch(repo, "saffron/SY-9000")
+    head = _push_parent_branch(repo, "saffron/SY-9000")
     args = _namespace(repo, tmp_path)
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
@@ -748,6 +756,7 @@ def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_
     older = _seed_task(
         ledger, repo_id, spec_id="SY-9000", state="ORPHANED", pr_url=older_pr
     )
+    ledger.record_push(older, "1" * 40)
     newer = _seed_task(
         ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
     )
@@ -809,6 +818,19 @@ def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_
 
     assert state_of(older) == "READY_FOR_REVIEW"
     assert state_of(sibling) == "READY_FOR_REVIEW"
+
+    # 6. A dead newest task does not decide. The older waiting task stacks.
+    ledger.set_task_state(newer, "ORPHANED")
+    urls_asked.clear()
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    cell_spec, _printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+    assert cell_spec.stacked_on == head
+    assert urls_asked == [older_pr]
+    assert state_of(older) == "READY_FOR_REVIEW"
+    lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+    assert all(line.step != "unstacked" for line in lines)
     ledger.close()
 
 
@@ -843,6 +865,12 @@ def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once
         assert cell_spec.stacked_on == head
         return _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
 
+    def assert_gh_line(line):
+        assert line.step == "gh_unreachable"
+        assert "GitHub could not be asked" in line.detail
+        assert "SY-9000" in line.detail
+        assert any(describe(line).startswith(f.prefix) for f in FAMILIES)
+
     def exit_one(_argv):
         return subprocess.CompletedProcess(_argv, 1, "", "boom")
 
@@ -859,12 +887,14 @@ def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once
     lines = run_once(before)
     assert len(lines) == 1
     assert lines[0].step != "unstacked"
+    assert_gh_line(lines[0])
 
     before = len(read_log(tmp_path / "out" / "SY-2"))
     monkeypatch.setattr("saffron.cli.run_gh", cannot_start)
     lines = run_once(before)
     assert len(lines) == 1
     assert lines[0].step != "unstacked"
+    assert_gh_line(lines[0])
 
     before = len(read_log(tmp_path / "out" / "SY-2"))
     monkeypatch.setattr("saffron.cli.run_gh", answers_undecided)
@@ -878,6 +908,7 @@ def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once
     assert len(lines) == 2
     assert all(line.step != "unstacked" for line in lines)
     assert sum("CHANGES_REQUESTED" in line.detail for line in lines) == 1
+    assert_gh_line(lines[0])
     ledger.close()
 
 

@@ -455,8 +455,8 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # one whose stdout is the night's only record — says it too.
     ceilings = _ceilings(args, spec)
 
-    # No scan reconciles ahead of one attended cell (b-877e93). Guarded the
-    # way `_resolve_queue` guards its own `reconcile` call.
+    # No scan reconciles ahead of one attended cell. Guarded so a `gh` that
+    # cannot start reads as unasked, which the resolver's own line reports.
     gh_failures: list[str] = []
     outcome = run_task(
         spec,

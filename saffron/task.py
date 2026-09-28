@@ -84,7 +84,7 @@ from saffron.scheduler import (
 )
 
 # `_resolve_stacked_on`'s accepted states once a `gh` reconciles the parent.
-# `CHANGES_REQUESTED` joins only on that path (`DESIGN.md` §4.2.1).
+# `CHANGES_REQUESTED` joins only on that path. Its review fixes land on its branch.
 _STACKABLE_ON_RECONCILE = DEPENDENCY_WAITING_STATES | frozenset({"CHANGES_REQUESTED"})
 
 
@@ -199,22 +199,22 @@ def _resolve_stacked_on(
     batch's tasks against each other yet, so a grandchild (or a second
     unmerged parent) is out of reach by design, not by oversight.
 
-    Among that one parent's task rows in this repo, across every `spec_sha`
-    it has ever carried (`Ledger.tasks_by_spec_id` — this path never reads
-    the parent's spec file, so it has no current sha to filter on, the
-    same reach `scheduler.build_queue`'s `merged_anywhere` already takes),
-    the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the
-    parent's task": the same waiting-outranks-dead precedence
-    `scheduler._dependency_refusal` gives it. Not the *same* row, though —
-    that function reads only the parent's current `spec_sha`, and a parent
-    whose spec text moved after its pull request opened has a waiting row
-    here and none there. The branch is real either way; it is the gate, not
-    this resolver, that decides whether the dependent runs at all.
-    A parent merged, retired, dead, unrun, or never in the
-    ledger at all has no such row, and this function does not distinguish
-    why — every one of those needs no stacking (its work, if any, is already
-    on the default branch) or was never a candidate the gate should have
-    admitted, which is not this resolver's check to make.
+    Given no `GhRunner`, the next rule holds. Among that one parent's task rows in this
+    repo, across every `spec_sha` it has ever carried (`Ledger.tasks_by_spec_id` — this
+    path never reads the parent's spec file, so it has no current sha to filter on, the
+    same reach `scheduler.build_queue`'s `merged_anywhere` already takes), the newest
+    row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the parent's task": the
+    same waiting-outranks-dead precedence `scheduler._dependency_refusal` gives it. Not
+    the *same* row, though — that function reads only the parent's current `spec_sha`,
+    and a parent whose spec text moved after its pull request opened has a waiting row
+    here and none there. The branch is real either way; it is the gate, not this
+    resolver, that decides whether the dependent runs at all. A parent merged, retired,
+    dead, unrun, or never in the ledger at all has no such row, and this function does
+    not distinguish why — every one of those needs no stacking (its work, if any, is
+    already on the default branch) or was never a candidate the gate should have
+    admitted, which is not this resolver's check to make. Given a `GhRunner`, it
+    reconciles that parent first. A merged or closed newest task unstacks the cell.
+    Otherwise the newest row in `_STACKABLE_ON_RECONCILE` supplies the branch.
 
     **The ledger supplies the branch; the branch supplies the sha.** A row's
     `pushed_sha` is written by PACKAGE — or, since `SA-0069`, by a push of
@@ -256,10 +256,11 @@ def _resolve_stacked_on(
         rows = ledger.tasks_by_spec_id(repo_id, parent_id)
         if not rows:
             return None, None
-        # The absolute newest task decides, whatever its state. No fallback
-        # to an older waiting row, ever (`DESIGN.md` §4.2.1).
+        # A merged or closed newest task unstacks. Else the newest stackable row stacks.
+        # An older pending row shares that branch, so it would restack on the merge.
         newest_task = rows[-1]
-        if newest_task["state"] not in _STACKABLE_ON_RECONCILE:
+        stackable = [row for row in rows if row["state"] in _STACKABLE_ON_RECONCILE]
+        if newest_task["state"] in {"MERGED", "REJECTED"} or not stackable:
             emit(
                 Preflight(
                     timestamp=time.time(),
@@ -269,7 +270,8 @@ def _resolve_stacked_on(
                 )
             )
             return None, None
-        if newest_task["task_id"] in reconciled.unasked:
+        newest = stackable[-1]
+        if newest["task_id"] in reconciled.unasked:
             emit(
                 Preflight(
                     timestamp=time.time(),
@@ -281,7 +283,7 @@ def _resolve_stacked_on(
                     ),
                 )
             )
-        if newest_task["state"] == "CHANGES_REQUESTED":
+        if newest["state"] == "CHANGES_REQUESTED":
             emit(
                 Preflight(
                     timestamp=time.time(),
@@ -290,7 +292,6 @@ def _resolve_stacked_on(
                     detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
                 )
             )
-        newest = newest_task
     branch = newest["branch"]
     # Refused here rather than left to the fetch: a row that evidences no push
     # has no branch worth fetching, and "branch None is gone" would send an
