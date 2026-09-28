@@ -38,9 +38,10 @@ acceptance:
       names, and against today's lenses when the caller names none.
     witness: tests/test_lens_scoring.py::test_calibrate_scores_a_recorded_run_against_the_lenses_it_ran
   - claim: >-
-      The baseline, `CLAUDE.md` and spread passes each re-derive their
-      published numbers from their own three-lens runs when every harness
-      default names a fourth lens.
+      The four tests that re-derive a recorded number, the `SA-0062`
+      calibration case and the baseline, `CLAUDE.md` and spread passes, each
+      hand the harness the three lenses their run carried, on every scoring
+      call they make.
     witness: tests/test_corpus.py::test_the_published_passes_re_derive_under_a_fourth_lens
   - claim: >-
       Every shipped fixture still reproduces its own recorded answer.
@@ -94,8 +95,7 @@ back `None`, the totals string is empty, and its membership assert passes
 on an empty string (`tests/test_corpus.py:1158-1159`).
 
 A default argument is evaluated once, when its `def` runs. So patching
-`review.LENSES` in a test moves none of these defaults. Patching a
-function's own `__defaults__` does.
+`review.LENSES` in a test moves none of these defaults.
 
 A stub fourth lens at `a4299786` failed 21 harness tests this way: 18 in
 `tests/test_corpus.py` and 3 in `tests/test_lens_scoring.py`.
@@ -106,8 +106,10 @@ Make the harness ready for a lens added after a run was recorded.
 
 1. `calibrate` passes `score_run` the set of lens names its fixture's
    recorded run carries. The errored-lens refusal stays.
-2. `graded_per_run` gains an `expect` keyword, defaulting to
-   `tuple(LENSES)`, and passes it to `score_corpus`.
+2. `graded_per_run` gains an `expect` parameter, defaulting to
+   `tuple(LENSES)`, and passes it to `score_corpus`. It is
+   positional-or-keyword, the third parameter, as on `score_corpus`
+   (`harness/corpus.py:82-86`).
 3. The four tests listed above name the three lenses their pass ran.
    Declare that tuple once in `tests/test_corpus.py`, and reuse
    `PASS_2026_09_07_LENSES` in `tests/test_lens_scoring.py`. The spread
@@ -153,21 +155,31 @@ Table its rows.
 4. The same call with no `expect`. The result is exactly `[None]`.
 5. A recorded run holding `correctness` alone, with one finding that sees
    the declared defect. Build it with `_finding`
-   (`tests/test_lens_scoring.py:29-47`), anchored, at a
-   line inside `PR_BODY`'s range, with a claim holding the phrase
-   `neutraliz`. `calibrate` raises `CalibrationError`, since the fixture
+   (`tests/test_lens_scoring.py:29-47`), anchored, with
+   `file="saffron/report/pr_body.py"` and a line inside `PR_BODY`'s range,
+   and a claim holding the phrase `neutraliz`. `calibrate` raises `CalibrationError`, since the fixture
    declares `recorded_seen = 0`.
+
+`_one_defect` writes only `fixture.toml`. Rows 1, 2 and 5 each write the
+fixture's `recorded-findings.json` too, from `LensReview.as_dict`.
 
 At the tree base rows 1 and 5 raise `LensErrored`, and row 3 is a
 `TypeError`. Row 5 kills a `calibrate` that returns early on an absent
 lens.
 
-**Criterion 2's witness.** Keep it small. Set `__defaults__` to a
-four-lens tuple on `lens_scoring.score_run`, `lens_scoring.score_pass`,
-`corpus.score_corpus` and `corpus.graded_per_run`, through `monkeypatch`.
-Then call the three corpus tests from item 3 in turn, as plain functions.
-At the tree base the baseline test raises `LensErrored`, since every
-fixture drops.
+**Criterion 2's witness.** Keep it small. It spies on three functions
+through `monkeypatch.setattr`: `corpus.score_corpus`,
+`corpus.graded_per_run` and `lens_scoring.score_run`. Each spy records the
+`expect` its call received, positional or keyword, or a marker when the
+call left it out. Then it calls the real function. The witness calls the
+four tests from item 3 as plain functions. It imports the calibration test
+inside its own body, so pytest collects no second copy, and hands it the
+`SA-0062` fixture. It asserts every recorded `expect` equals the pinned
+three-lens tuple exactly, and that each spy recorded at least one call.
+
+At the tree base every one of those tests leaves `expect` out, so each spy
+records the marker and the witness fails. The same holds for any one of
+the four left undone.
 
 **Wrong versions this witness must kill.**
 
@@ -176,7 +188,9 @@ fixture drops.
 - A `graded_per_run` that takes `expect` and never passes it on.
 - A `graded_per_run` whose default is no lens at all.
 - A `calibrate` that returns as soon as a lens is absent.
-- An item 3 left undone, or done for two of the three corpus tests.
+- An item 3 left undone, or done for three of the four tests.
+- A spread test left on the default, which passes on an empty totals
+  string.
 
 **Commit as each witness passes.** Criterion 2 turns green once item 3
 lands.
@@ -187,5 +201,5 @@ sentence over 25 words.
 
 **Size.** A prototype of the first witness and the edits measured about
 180 tokens under `size_gate`'s counter. The second witness, row 5 and the
-spread pin add about 120. `estimated_lines` is that over four, with no overrun
+spread pin add about 140. `estimated_lines` is that over four, with no overrun
 added. `harness/**` is in `elevate_on`, so `size` blocks here.

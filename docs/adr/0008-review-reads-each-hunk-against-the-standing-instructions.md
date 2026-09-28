@@ -94,9 +94,12 @@ the two lens sets share no key.
 
 ## Principles
 
-- **4, 18 and 34** carry over from ADR 4. The lens runs outside the
-  implementer's container. It emits its block in the turn that does the work.
-  A lens that errors stops the task at `REVIEWING`.
+- **4** upholds. The lens runs outside the implementer's container, as ADR 4's
+  lenses do.
+- **18** departs. The lens emits its block in the turn that does the work,
+  as ADR 4's lenses do.
+- **34** upholds. A conventions lens that errors stops the task at
+  `REVIEWING`, so an absent review never reads as a clean one.
 - **6** upholds. A repair turn that rewrites a comment to pass `prose` now
   meets a reader that asks whether the comment is still true.
 - **9** upholds. Any one blocker still routes to REBUT, and a fourth lens adds
@@ -121,10 +124,11 @@ the two lens sets share no key.
   `base_sha`. The lens can still Read the head's `CLAUDE.md`, which a patch can
   edit, and it reads any cited text at head. The fourth question depends on
   that head copy.
-- **47 and 61** depart. The prompt's four questions were written from run 20's
+- **47** departs. The prompt's four questions were written from run 20's
   defects, and the first measured pass scores the lens on those same defects.
-  That pass shows the prompt can raise them. It does not show the lens finds
-  defects nobody wrote into it.
+  A prompt tuned to its grader passes in exactly that direction.
+- **61** departs. That pass shows the prompt can raise run 20's defects. It
+  does not show the lens finds defects nobody wrote into it.
 - **50** departs. The Standards seat is a reviewer outside the critic, and this
   ADR moves toward retiring it. The seat and the lens fail differently. Once
   the seat leaves, the operator is the one reviewer outside the critic.

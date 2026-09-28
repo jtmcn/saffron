@@ -72,8 +72,8 @@ acceptance:
       replace: '"standards": "review-conventions.md",'
   - claim: >-
       The conventions prompt asks four questions of every hunk against the
-      standing instructions the host read at the base commit, never a
-      worktree file. It names a comment or docstring that contradicts its
+      standing instructions the host read at the base commit, never a copy
+      of them in the worktree. It names a comment or docstring that contradicts its
       code, a constant restated rather than imported, and a citation that
       does not say what the text claims. It leaves format, lint, types,
       structure and sentence form to their gates.
@@ -234,7 +234,7 @@ there too.
 ```text
 Yours is each hunk read against the standing instructions below, and against
 the code and text it describes. Judge against the standing instructions in
-this prompt, never a file in the worktree. The host read them at this task's
+this prompt, never a copy of them in the worktree. The host read them at this task's
 base commit, before the implementer could touch them.
 
 Ask four questions of every hunk:
@@ -275,8 +275,10 @@ joined on whitespace.
   to the four-name set under its own name.
 
   **Every test name stays.** `census` fails any test collected at
-  base and absent at head (`saffron/gates/core/census.py:69-86`). Rename
-  nothing in the lists below. Edit each test in place.
+  base and absent at head (`saffron/gates/core/census.py:72-87`). It
+  compares parametrised ids too, such as `[correctness]`. Rename nothing
+  in the lists below, and change no parametrisation. Edit each test in
+  place.
 - **Criterion 2.** Assert both sets exactly, then their intersection empty.
 - **Criterion 4.** Drive `_run` in `tests/test_rebut.py` with two blockers
   from `_blocker`: a conventions one first, then a correctness one. Script
@@ -303,6 +305,14 @@ a run, so the spec loop's step 1b runs them against a prototype.
   finding 1 and the correctness blocker as finding 2. The arrangement is
   meant to kill three wrong versions: verdicts run in filing order, in
   alphabetical order, and a conventions blocker filed under another lens.
+- The suite at `SA-0189`'s head with a stub fourth lens, to show `SA-0189`
+  clears every harness failure the stub caused. `SA-0188` also adds tests
+  to `tests/test_report.py`, outside this spec's touches.
+- The `revert` subset. The new `[conventions]` ids that
+  `sorted(review.LENSES)` adds vanish when `saffron/phases/review.py` is
+  reverted. pytest then exits 4 on them, the `tests` gate reports `error`,
+  and `revert` reports `skip`. Whether `revert` then checks any witness
+  here is unmeasured. The design stays as it is.
 
 **Wrong versions these witnesses must kill.**
 
@@ -337,20 +347,31 @@ running the suite once the entry is in.
   among them. Name the `_EMPTY` constant (`:3623`) for each added turn.
 - **`tests/test_events.py`, 3 tests, and `tests/fixtures/watch-golden.txt`.**
   The golden file gains one `REVIEW: conventions:` line after adequacy's.
-  The spend moves from $0.50 to $0.60. The table of joined lines
-  (`tests/test_events.py:1824`) reads the same lines.
+  Script the golden run's conventions turn at `cost=0.0`, so its spend
+  stays $0.50. Edit no row of the joined-lines table
+  (`tests/test_events.py:1824`). Its rows are parametrised ids, and a
+  changed or inserted row renames ids that `census` then fails. Join the
+  new line inline in `test_the_join_covers_every_captured_line_a_kind_renders`
+  instead.
 - **`tests/test_rebut.py`.**
   `test_each_verdict_session_asks_for_the_schema_and_records_its_structured_output`
   takes four blockers, four fixes and four verdict sessions.
-- **`tests/test_review.py`.** Table the framing sentence by lens in
-  `test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic`. The
-  three existing lenses keep theirs, and conventions takes the one above.
+- **`tests/test_review.py`.** In
+  `test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic`, keep
+  `parametrize("lens", sorted(review.LENSES))` as it is. Look the framing
+  sentence up from a dict keyed by lens in the test's body. The three
+  existing lenses keep theirs, and conventions takes the one above.
   That test also asserts "do not manufacture one" and the `**Lens**:`
   vocabulary entry for every lens. The prompt's `{vocabulary}` slot brings
   the second.
 - **`tests/test_context.py`.**
   `test_prose_bound_for_the_pr_body_is_asked_for_in_plain_language` gains
   a row for `review-conventions.md`, `claim` and `findings`.
+
+**Comments that go stale.** Update each comment that counts three lenses
+or calls a fourth an open question:
+`tests/test_events.py:2252-2254`, and `tests/test_session.py:1694`,
+`:3504`, `:3627`, `:6359`, `:7174`, `:7228`, `:7858` and `:8043`.
 
 **The prose gate** counts every new comment, docstring and prompt line.
 Write none with an em dash, a semicolon, a contraction, the perfect tense, a

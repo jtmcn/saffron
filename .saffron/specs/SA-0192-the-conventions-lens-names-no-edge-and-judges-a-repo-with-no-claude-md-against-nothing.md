@@ -36,7 +36,7 @@ forbidden:
   - saffron/agents/prompts/end-review-spec.md
   - saffron/agents/prompts/rebut-verdict.md
   - tests/test_end_review.py
-budget_usd: 24
+budget_usd: 26
 max_attempts: 3
 max_turns: 150
 acceptance:
@@ -186,10 +186,14 @@ This repository declares no standing instructions: no `CLAUDE.md` stood at this 
 - **Criterion 1** is a new test beside
   `test_the_lenses_declare_disjoint_remits`, which stays under its name and
   still passes. `census` fails any test collected at base and absent at
-  head (`saffron/gates/core/census.py:69-86`), so rename nothing. In the
-  conventions prompt, the new test finds the first heading after
-  `## Your remit`. It asserts that heading is `## Its edges`, and that
-  "Not yours." comes after it. It reads each prompt's Not-yours list, from the line
+  head, so rename nothing. The set difference is at
+  `saffron/gates/core/census.py:72` and the failure message at `:87`. The
+  new test reads the conventions template file,
+  `PROMPTS / review.LENSES["conventions"]`, not the rendered prompt. It
+  finds the first heading after `## Your remit` and asserts it is
+  `## Its edges`. It asserts the text between `## Its edges` and the next
+  line opening `## `, joined on whitespace, equals the conventions list
+  above joined the same way. It reads each prompt's Not-yours list, from the line
   opening "Not yours." to the edge sentence. It splits the list into
   bullets, each joined on whitespace. For correctness, contract and
   adequacy, the last bullet equals the appended bullet exactly. For conventions, the bullets equal

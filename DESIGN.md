@@ -1713,4 +1713,4 @@ the ADR records, so a hand edit here is discarded.
 | 5 | The ontology describes the run record and never controls execution | accepted | 10, 11, 23, 24, 25, 29, 30, 34, 36, 56, 57, 61, 62 |
 | 6 | Work larger than one cell is a composite spec, reviewed once at the joins | accepted | 2, 4, 12, 15, 17, 25, 26, 28, 29, 34, 38, 40, 45, 48, 49, 50 |
 | 7 | A stack batch runs the spec DAG into one stack and writes its own follow-ups | accepted | 2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62 |
-| 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 9, 15, 17, 29, 30, 41, 43, 48, 50, 51, 59 |
+| 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 4, 6, 9, 15, 17, 18, 28, 29, 30, 34, 41, 43, 47, 50, 51, 61 |
