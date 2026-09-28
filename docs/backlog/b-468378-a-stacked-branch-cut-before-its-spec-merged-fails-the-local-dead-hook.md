@@ -1,14 +1,14 @@
 ---
 id: b-468378
 title: A stacked branch cut before its own spec merged lacks the spec, so the local `dead` hook fails
-status: open
+status: done
 tier: 2
 filed: 2026-09-27
-closed:
+closed: 2026-09-27
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [d5ab8aa2]
 cites: []
 related: [b-6518ba]
 ---
@@ -34,3 +34,4 @@ pending symbol.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-27: fixed by hand. The prek hook reads a loop branch's own spec from git when its tree lacks it.

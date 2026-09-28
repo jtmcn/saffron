@@ -1,14 +1,14 @@
 ---
 id: b-a5d4af
 title: Three texts still tie a probe to REVIEW's adequacy lens after `probe_findings` went general
-status: open
+status: done
 tier: 3
 filed: 2026-09-27
-closed:
+closed: 2026-09-27
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [6a6c4e3d]
 cites: []
 related: [b-37924b, b-792ab2]
 ---
@@ -38,3 +38,4 @@ every caller.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-27: fixed by hand. The entry and both comments name end-review findings too.

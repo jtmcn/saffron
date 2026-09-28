@@ -1,14 +1,14 @@
 ---
 id: b-ea3bb5
 title: Queued specs credit `SA-0169` or `SA-0150` with work `SA-0181` or `SA-0182` now builds
-status: open
+status: done
 tier: 3
 filed: 2026-09-27
-closed:
+closed: 2026-09-27
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [78ab6179]
 cites: []
 related: [b-792ab2]
 ---
@@ -38,3 +38,4 @@ Each queued spec credits the spec that builds the name.
 
 - 2026-09-27: filed from the spec loop's run 19.
 - 2026-09-27: fixed by hand. Each queued spec credits `SA-0181` or `SA-0182`.
+- 2026-09-27: closed by the commit that fixed the credits.

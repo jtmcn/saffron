@@ -1,14 +1,14 @@
 ---
 id: b-ec607a
 title: '`prose` keys a docstring-length hit on its line count, so a grow or a shrink reads as a new hit'
-status: open
+status: partial
 tier: 3
 filed: 2026-09-27
 closed:
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [b3cd37fd]
 cites: [§8]
 related: [b-044ae7, b-43061c]
 ---
@@ -37,3 +37,4 @@ edited sentence stays old. A test holds each case.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-27: two of three fixed by hand. A wrapped code span hides no later hit, and a word hit keys on the words near it. A shrinking docstring still reads as new, because baseline subtraction compares identities and cannot see that a block grew.
