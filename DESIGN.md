@@ -998,8 +998,10 @@ anchors to the diff is a blocker for REBUT (`SA-0120`, ADR 3).
 
 **An edit a spec lists in prose.** A criterion also lists its known **wrong
 versions** (`CONTEXT.md` §4), one sentence each (`SA-0187`). The implementer
-reads them. The lenses and the criterion-probe session do not, because an edit
-steered by the author's list is no evidence about what the list missed. During
+reads them. The lenses' criteria and the criterion-probe session omit the
+field. An edit steered by the author's list is no evidence about what the
+list missed. A list left in a spec's notes still
+reaches the lenses with the body. During
 REVIEW a fresh session per such criterion turns each version into an edit. It
 sees the claim, the list and the diff, and never the witness. The host applies
 each edit in the gate-only cell the criterion probes use, and runs that

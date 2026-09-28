@@ -11,8 +11,10 @@ consumes:
 touches:
   - saffron/cell/session.py
   - saffron/phases/review.py
+  - saffron/intake.py
   - tests/test_session.py
   - tests/test_review.py
+  - tests/test_intake.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -30,7 +32,6 @@ forbidden:
   - records/**
   - saffron/gates/**
   - saffron/probe.py
-  - saffron/intake.py
   - saffron/task.py
   - saffron/cli.py
   - saffron/batch.py
@@ -44,7 +45,6 @@ forbidden:
   - saffron/cell/worktree.py
   - saffron/cell/runtime.py
   - saffron/cell/proxy.py
-  - tests/test_intake.py
   - tests/test_context.py
   - tests/test_worktree.py
   - tests/test_witness_gate.py
@@ -53,9 +53,9 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 26
 max_attempts: 3
-max_turns: 150
+max_turns: 200
 risk: elevated
-estimated_lines: 275
+estimated_lines: 368
 acceptance:
   - claim: >-
       `review.survivor_finding` takes an optional keyword `version`. Given
@@ -66,23 +66,28 @@ acceptance:
     witness: tests/test_review.py::test_a_wrong_versions_survivor_names_the_version_it_came_from
   - claim: >-
       A wrong version whose criterion's witness stays green under its edit
-      is filed as an `adequacy` `blocker` with that version in its claim.
+      is filed as an `adequacy` `blocker` whose claim names that version.
       Its probe is the edit, its `probe_verdict` is `survived`, and its line
       is where the edit's `find` begins at head. It anchors, so the task
       stops at `REBUTTING` and it is the one blocker in `rebuttal.json`. The
-      host ran that criterion's own witness node id alone.
-      `wrong-versions.json` records `survived` for the version.
+      witness drives two versions of one criterion, the first killed and
+      the second surviving. The host ran that criterion's own witness node
+      id alone for each. `wrong-versions.json` records `killed` and
+      `survived`.
     witness: tests/test_session.py::test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker
   - claim: >-
       After REVIEW applies every edit, `wrong-versions.json` holds each entry
       `review.run_wrong_versions` returned, in the spec's order. Every
       version there carries an `outcome` and a `summary`. The witness drives
-      four versions in order. They are an edit under which the `tests` gate
-      answers `error`, then an edit the witness kills. Then comes a version
-      the session could not express, then an edit on a declared test path.
-      Their outcomes are `error`, `killed`, `unproven` and `unproven`, and
-      each summary is compared whole. REVIEW emits `wrong versions: 4
-      declared, 3 expressed`, and the task ends `READY_FOR_REVIEW`. A spec
+      six versions over three criteria, with a criterion that declares none
+      between the first two. The first criterion's versions are one the
+      session could not express and an edit on a declared test path. The
+      second's are an edit under which the `tests` gate answers `error`,
+      then an edit the witness kills. The third's session fails, so both its
+      versions are `unproven` with the entry's `error` as their summary.
+      Each summary is compared whole, and each witness run's subset too.
+      REVIEW emits `wrong versions: 6 declared, 3 expressed` right after the
+      criterion-probe line, and the task ends `READY_FOR_REVIEW`. A spec
       whose criteria declare no wrong version buys no such session, writes
       no such file and emits no such line.
     witness: tests/test_session.py::test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes
@@ -96,6 +101,16 @@ acceptance:
       the wrong versions with one, and neither. The sessions' cost is added
       to the task's spend.
     witness: tests/test_session.py::test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend
+  - claim: >-
+      Parse refuses a mutant whose `find` text appears inside any wrong
+      version of any criterion, its own or another's, as a
+      `DisclosedMutantError` that carries the parsed spec. The message is
+      the one a disclosing claim gets, with `the wrong versions of` and the
+      holding criterion's witness in place of where the text sits. The
+      witness drives two specs, one where the mutant's own criterion holds
+      the text and one where a sibling does, and compares each message
+      whole.
+    witness: tests/test_intake.py::test_a_mutant_a_wrong_version_discloses_is_refused_too
   - claim: >-
       A criterion probe its criterion's witness survives is still filed as a
       host-filed `adequacy` blocker and rebutted.
@@ -181,7 +196,11 @@ every outcome, and file a survivor as a blocker for REBUT.
    `[c for c in spec.acceptance if c.wrong_versions]`, strictly. Pass the
    version dicts themselves, so the outcome and summary written on each
    land in the record. Everything the function does to a pair stays as it
-   is: the refusals, the one cell, the stop on a raise.
+   is: the refusals, the one cell, the stop on a raise. A wrong-version
+   entry whose `error` is set is not paired. Record each of its versions
+   `unproven` at the call site, with that `error` as its summary. The
+   summary "this session named no edit" is then left for a version its
+   session answered with no edit.
 3. **The survivor's claim.** Add a keyword `version: str | None = None` to
    `survivor_finding`. The call in `_apply_criterion_probes` passes
    `entry.get("version")`. A criterion-probe entry holds no such key, so its
@@ -193,6 +212,17 @@ every outcome, and file a survivor as a blocker for REBUT.
    criterion-probe line.
 5. **The spend.** Add every wrong-version entry's `cost_usd` to `spent`,
    beside the criterion-probe sessions' cost.
+6. **The disclosure check.** `parse_spec` refuses a mutant whose `find`
+   appears in the body or in any claim (`saffron/intake.py:281-303`).
+   `context.witnesses_block` now hands the implementer every wrong version
+   too, so a `find` spelled there is disclosed the same way. After the
+   claims, scan each criterion's `wrong_versions` in the spec's order. The
+   first criterion holding a version that contains the `find` sets `where`
+   to `the wrong versions of {witness}`, with that criterion's witness. The
+   refusal and its message are otherwise unchanged. Between `SA-0187`'s
+   merge and this one, no spec declares `wrong_versions`. The tracker rule
+   that tells authors to use the field lands with this spec, so the gap
+   never opens.
 
 ## Out of scope
 
@@ -211,12 +241,12 @@ every outcome, and file a survivor as a blocker for REBUT.
 ## Notes for the agent
 
 **This change is new behaviour, so no criterion declares a mutant**
-(§5.4.1). The call, the pairing and the record have no spelling at the
-tree base to pin. The `witness` gate reports `skip` for this spec.
+(§5.4.1). The call, the pairing, the record and the new scan have no
+spelling at the tree base to pin. The `witness` gate reports `skip` for this spec.
 
 **Each witness fails at the tree base without a collection error.** The
 `version` keyword raises a `TypeError` there, and no `wrong-versions.json`
-is written. Import any name this change adds inside the test body.
+is written. A wrong version holding a mutant's text parses there too. Import any name this change adds inside the test body.
 
 **Assert exact values.** Compare whole strings, whole dicts and whole
 lists. Never assert a substring, a prefix or an `index()` order. Assert
@@ -252,18 +282,23 @@ answer beside `_probe_answer`. It returns the text of one `<output>` block
 holding `{"versions": [...]}`. Table the rows a witness drives and loop
 over them in one plain `def`.
 
-**Criterion 2's witness.** One criterion, witness `t.py::a`, one wrong
-version. Its criterion-probe session names no edit. Its wrong-version
-session names an edit that anchors by the token rule, as
+**Criterion 2's witness.** One criterion, witness `t.py::a`, two wrong
+versions. Its criterion-probe session names no edit. Its wrong-version
+session names two edits. The probe cell's `tests` runs answer `fail` for
+the first and `pass` for the second. The second edit anchors by the token
+rule, as
 `test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker`
 places one (`tests/test_session.py:7363-7478`). That is `find` on line 3 of
 `src/x.py`, outside `_ANCHORING_DIFF`'s hunk. Reuse that test's
 `_read_at_head` override and `_rebuttable`. Script REBUT as it does, with
-`rebut_commits=0` and `_CLAIMED_FIX`. The probe cell's one `tests`
-run passes. Assert `subsets == [["t.py::a"]]`, the state, the whole blocker
-in `rebuttal.json`, and the version's whole record. These fail it:
+`rebut_commits=0` and `_CLAIMED_FIX`. Assert
+`subsets == [["t.py::a"], ["t.py::a"]]`, the state, and the whole blocker
+in `rebuttal.json`, its claim built from criterion 1's literal. Assert the
+whole entry in `wrong-versions.json`. These fail it:
 
 - the survivor filed with the criterion probe's wording
+- a claim that quotes the criterion's first wrong version, not the one
+  that survived
 - the survivor filed under a lens other than `adequacy`, or as a `concern`
 - the whole suite run in place of the one witness
 - the survivor left unanchored, or anchored with the critic cell's reader
@@ -272,21 +307,27 @@ in `rebuttal.json`, and the version's whole record. These fail it:
 
 | criterion | witness | wrong versions | the wrong-version session answers |
 |---|---|---|---|
-| A | `t.py::a` | two | an edit on `src/x.py`, then another on `src/x.py` |
+| A | `t.py::a` | two | null with a reason, then an edit on `spec/t.py` |
 | B | `t.py::b` | none | no session |
-| C | `t.py::c` | two | null with a reason, then an edit on `spec/t.py` |
+| C | `t.py::c` | two | an edit on `src/x.py`, then another on `src/x.py` |
+| D | `t.py::d` | two | `"not a block at all"` |
 
 Every criterion-probe session names no edit. The probe cell's `tests` runs
-answer, in order, `error` and then `fail` on `t.py::a`. Assert the whole
-list read from `wrong-versions.json`. Build each expected summary at your
-base as the code builds it, from these sources:
+answer, in order, `error` and then `fail` on `t.py::c`. Assert
+`subsets == [["t.py::c"], ["t.py::c"]]`. Assert the whole list read from
+`wrong-versions.json`. Build each expected summary at your base as the code
+builds it, from these sources:
 
-- the error summary, built at saffron/gates/core/witness.py:228-239
-- the killed summary, built at saffron/gates/core/witness.py:284-293
 - the unexpressed summary, "this session named no edit"
 - the refusal, built at saffron/probe.py:165-166
+- the error summary, built at saffron/gates/core/witness.py:228-239
+- the killed summary, built at saffron/gates/core/witness.py:284-293
+- D's two summaries, each "not the schema: no <output> block in the
+  response", the entry's own `error`
 
-Assert the whole REVIEW line from `cell.watched`. Then drive a spec whose
+Take every line of `cell.watched` that starts with `REVIEW: criterion
+probes:` or `REVIEW: wrong versions:`. Assert that list whole, the
+criterion-probe line first. Then drive a spec whose
 criteria declare no wrong version. Assert no such file, no such line, and
 a system prompt count of five plus one per criterion. These fail it:
 
@@ -295,13 +336,24 @@ a system prompt count of five plus one per criterion. These fail it:
 - a version the session could not express dropped from the record
 - an edit on a declared test path applied
 - the versions flattened into one list in the file
+- a zip of `spec.acceptance` with the wrong-version entries, which pairs
+  C's versions with B's witness
+- a failed session's versions summarised as "this session named no edit"
+- the wrong-versions line emitted before the criterion-probe line
 - an empty file written for a spec with no wrong versions
 
 **Criterion 4's witness.** Wrap `session.critic_cell` in a spy that
 records each call's `network` and then calls the real one. The precedent
-is `tests/test_session.py:3793-3803`. The lens gate table's own cell is the first entry
-(`saffron/cell/session.py:1350-1362`), and REVIEW's critic cell the second.
-For each of the three cases, assert the whole list. With either list holding an edit it is
+is `tests/test_session.py:3793-3803`. The list below was derived by
+reading, not by a run. The lens gate table's cell is the first entry
+(`saffron/cell/session.py:1350-1353`). REVIEW's critic cell is the second,
+on the network bound at `saffron/cell/session.py:1748`.
+The adequacy probe path enters no cell here. With no probe left it
+returns first (`saffron/cell/session.py:1440-1441`). The apply cell is the
+third (`saffron/cell/session.py:1629-1640`). Every `tests` run in the probe
+cell answers `fail`, so every edit is killed. No survivor routes the task
+to REBUT, so no verdict cell joins the list. For each of the three cases,
+assert the whole list. With either list holding an edit it is
 `[None, "saffron-cells", None]`, and with neither it is
 `[None, "saffron-cells"]`. In the first case the criterion probe and the
 wrong version each name an edit, and `cell.mutated` lists the criterion
@@ -318,7 +370,24 @@ of every turn's cost. These fail it:
 - the lens's own budget in place of `probe_budget`
 - the sessions' cost left out of `spent`
 
-**The existing witnesses stay green.** Criteria 5 and 6 name
+**Criterion 5's witness** goes in `tests/test_intake.py`, beside
+`test_a_mutant_a_sibling_claim_discloses_is_refused_too`
+(`tests/test_intake.py:492-513`). Table the two specs and loop over them
+in one plain `def`. In each, one criterion declares a mutant whose `find`
+is `CEILING = 60`. In the first, that criterion's own `wrong_versions`
+holds `"a CEILING = 60 that stays at 60"`. In the second, a sibling
+criterion holds it, and the mutant's own criterion declares a version
+without it. Neither body nor claim holds the text. Catch the error, and
+assert its type is `DisclosedMutantError`, its `spec.id`, and `str()` of
+it whole. Build the expected message from the literal at
+`saffron/intake.py:298-302`. These fail it:
+
+- a scan of the mutant's own criterion alone
+- a version compared with `==` in place of containment
+- a plain `SpecError`, which loses the spec `scheduler._retired_ids` reads
+- `the wrong versions of` naming the mutant's witness for a sibling's text
+
+**The existing witnesses stay green.** Criteria 6 and 7 name
 `SA-0120`'s witnesses. The ten `acceptance=` drives declare no wrong
 version, so they buy no new session and write no new file.
 
@@ -342,10 +411,22 @@ a sentence over 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/cell/**` is in `.saffron/policy.yaml`'s `elevate_on`, so
 `size` blocks at the `feature` ceiling of 3000 tokens
-(`saffron/gates/core/size.py:26`). `SA-0120` built the application path,
-and its cell commit `c8615d8b` measured 1928 changed tokens. This change
-reuses that path, so expect about 1100. Share one helper across the three
-session witnesses, table their rows, and keep comments to one or two lines.
+(`saffron/gates/core/size.py:26`). `SA-0120` built the application path.
+Its cell commit `c8615d8b` measured 1928 changed tokens with `size_gate`'s
+own count on 2026-09-28, run as below. `size._token_counts` splits that as
+569 in `session.py`, 325 in `review.py` and 1034 in `tests/test_session.py`.
+
+```
+git show --format= c8615d8b | uv run python -c "import sys; from saffron.gates.core import size; print(size._changed_lines(sys.stdin.read()))"
+```
+
+This change adds about 55 lines to `session.py` and `review.py` and about
+275 to the tests. The disclosure scan adds about 7 lines to `intake.py` and
+31 to `tests/test_intake.py`. Sibling cells landed at 1.4 to 1.7 times
+their estimates, so expect 2050 to 2500 tokens. Keep the intake test to
+its two tabled rows. Share one helper across
+the three session witnesses, table their rows, and keep comments to one or
+two lines.
 
 **Commit as each witness passes**, before the full suite runs.
 Uncommitted work dies with the cell.

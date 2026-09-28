@@ -56,7 +56,7 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 22
 max_attempts: 3
-max_turns: 180
+max_turns: 200
 estimated_lines: 360
 pending_symbols:
   - saffron/phases/review.py::run_wrong_versions
@@ -65,18 +65,19 @@ acceptance:
   - claim: >-
       A criterion may declare `wrong_versions`, a list of strings that parse
       keeps in declared order. A criterion that omits it reads as an empty
-      list. Parse refuses four shapes as a `SpecError`. They are an explicit
-      empty list, an empty string, a string of whitespace alone, and two
-      entries with the same text in one criterion. The same text in two
-      different criteria parses. The witness drives each refusal in its own
-      spec and the three parsing criteria in one.
+      list. Parse refuses four lists as a `SpecError`. They are `[]`, `[""]`,
+      `["   "]`, and a list holding one text twice in one criterion. The
+      same text in two different criteria parses. The witness drives each
+      refusal in its own spec and the three parsing criteria in one. One
+      parsing list is declared out of sorted order and must come back as
+      declared.
     witness: tests/test_intake.py::test_a_criterion_declares_its_wrong_versions_and_parse_refuses_an_empty_or_repeated_one
   - claim: >-
       `context.witnesses_block` follows each criterion's line with its wrong
       versions, and a criterion that declares none gets no added line. The
       witness compares the whole block with an exact string, for a
-      `preserves` criterion with two wrong versions and a plain criterion
-      with none. `context.criteria_section`, the lenses' view, shows no wrong
+      `preserves` criterion with two wrong versions out of sorted order and
+      a plain criterion with none. `context.criteria_section`, the lenses' view, shows no wrong
       version. The witness compares its output with an exact string too.
     witness: tests/test_context.py::test_the_implementer_reads_each_criterions_wrong_versions_under_its_line
   - claim: >-
@@ -93,7 +94,8 @@ acceptance:
       or null, and the reason. A version the session could not express keeps
       its place with a null edit and its reason. The criterion-probe prompt
       for the same criteria holds no wrong version. `describe_wrong_versions`
-      over the entries reads `wrong versions: 3 declared, 2 expressed`.
+      over the entries reads `wrong versions: 4 declared, 3 expressed`. The
+      witness declares one list out of sorted order.
     witness: tests/test_review.py::test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_into_an_edit
   - claim: >-
       A wrong-version session that raises `AgentFailed`, one whose reply
@@ -102,9 +104,10 @@ acceptance:
       declared version keeps its text there, with a null edit and an empty
       reason. The `error` is the failure's own text, `not the schema: no
       <output> block in the response`, `not the schema: 1 answers for 2 wrong
-      versions` and `not the schema: 3 answers for 2 wrong versions`. Each
-      entry carries its session's cost, and every later criterion is still
-      asked.
+      versions` and `not the schema: 3 answers for 2 wrong versions`. The
+      one-answer and three-answer replies each name an edit and a reason for
+      every answer, and none of those reaches the entry. Each entry carries
+      its session's cost, and every later criterion is still asked.
     witness: tests/test_review.py::test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
 ---
 
@@ -170,14 +173,15 @@ session that turns each into an edit.
 
 1. **The field.** Add `wrong_versions` to `Criterion`, a list of strings
    whose default is an empty list. An omitted field parses exactly as today.
-   Refuse an explicit empty list, an empty or whitespace-only string, and
-   two entries with the same text in one criterion. A validator on the field
+   Refuse an explicit empty list, an entry that is empty or whitespace
+   alone, and two entries with the same text in one criterion. A validator on the field
    does all four, because pydantic runs it only on a declared value. The
    same text in two different criteria is not a duplicate.
 2. **The implementer's view.** `witnesses_block` follows a criterion's line
    with one lead line and then one line per wrong version, in declared
    order. The lead line is two spaces and then
-   `Wrong versions the host runs after GATE. This witness must fail on each:`.
+   `Wrong versions this witness must fail on:`. It names no runner,
+   because nothing runs a wrong version until `SA-0190` merges.
    Each version line is two spaces, `- `, and the version's text. A
    criterion that declares none renders exactly as today.
 3. **The lenses' view stays as it is.** `criteria_section` shows no wrong
@@ -186,7 +190,8 @@ session that turns each into an edit.
    lens names vacuity probes of its own (§5.5.1). Shown the author's list,
    it would name the edits the host already runs, and its probes would stop
    adding coverage. The criterion-probe session keeps its view for the same
-   reason: it sees one claim and the diff.
+   reason: it sees one claim and the diff. A list a spec still writes in its
+   notes reaches the lenses through the body, as it does today.
 4. **The session.** `review.run_wrong_versions` takes the arguments
    `run_criterion_probes` takes, with the same keywords. For each criterion
    whose `wrong_versions` is non-empty, in the spec's order, it runs one
@@ -233,9 +238,9 @@ session that turns each into an edit.
   host runs wrong versions and the implementer does not.
 - This spec's own wrong versions. The parser refuses the field until this
   spec merges, so the lists below stay in the notes.
-- The glossary and the design record. `CONTEXT.md`, `DESIGN.md` and
-  `docs/agents/issue-tracker.md` are edited by hand in this spec's pull
-  request.
+- The glossary and the design record. `CONTEXT.md` and `DESIGN.md` are
+  edited by hand in this spec's pull request. The rule in
+  `docs/agents/issue-tracker.md` changes with `SA-0190`.
 
 ## Notes for the agent
 
@@ -251,42 +256,50 @@ new name makes `revert`'s reverted run a collection error, which it reads
 as `skip`.
 
 **Assert exact values.** Compare whole strings, whole lists and whole
-dicts. Never assert a substring, a prefix or an `index()` order. A slice is right in one place, the tail of a system prompt.
-There, compare the whole tail with `endswith` on a string you build in full.
+dicts. Never assert a substring, a prefix or an `index()` order. A slice
+is right in one place, the tail of a system prompt. There, compare the whole
+tail with `endswith` on a string you build in full.
 
 **Criterion 1's witness.** Build each spec text with `parse_spec`, as
 `test_a_criterion_may_declare_the_edit_that_falsifies_it` does
 (`tests/test_intake.py:381-402`). Table the four refused specs and loop
-over them in one plain `def`, asserting `SpecError` for each. The parsing
-spec has three criteria. The first declares `["v one", "v two"]`, the
-second `["v one"]`, and the third omits the field. Assert each criterion's
-`wrong_versions` list exactly. These fail it:
+over them in one plain `def`, asserting `SpecError` for each. The four
+declare `[]`, `[""]`, `["   "]` and `["v one", "v one"]`. The parsing
+spec has three criteria. The first declares `["v two", "v one"]`, out of
+sorted order. The second declares `["v one"]`, and the third omits the
+field. Assert each criterion's `wrong_versions` list exactly. These fail
+it:
 
 - a default of `None` for an omitted field
 - a refusal of `""` that lets `"   "` through
+- a validator that returns the list sorted
 - a duplicate check across the whole spec, which refuses the second
   criterion
 - a set in place of a list, which loses the declared order
 - an explicit `[]` read as omitted
 
 **Criterion 2's witness.** Two criteria: a `preserves` one with
-`["a first wrong version", "a second wrong version"]`, then a plain one with
-none. Write the expected block in full as a string literal, every line of
+`["a second wrong version", "a first wrong version"]`, out of sorted order,
+then a plain one with none. Write the expected block in full as a string literal, every line of
 it, and compare with `==`. Compare `criteria_section` over the same list
 with its own exact literal. These fail it:
 
 - the versions rendered under the wrong criterion, or under every criterion
 - the lead line printed for a criterion that declares none
-- one version rendered, or the versions reversed
+- one version rendered, the versions reversed, or the versions sorted
 - the versions added to `criteria_section`
 
 **Criterion 3's witness.** Reuse `_probe_agent` and `_turn`
-(`tests/test_review.py:30-38` and `tests/test_review.py:544-558`). Give each turn its own cost.
-Three criteria, in order:
+(`tests/test_review.py:30-38` and `tests/test_review.py:544-558`).
+`_probe_agent` wraps every scripted text in `_turn` at the default cost.
+Extend it so a scripted `implement.AttemptResult` passes through as it is,
+with its own cost. Its existing callers script text and exceptions, so
+they stay unchanged. Give each turn its own cost. Three criteria, in
+order:
 
 | criterion | witness | wrong versions | the session answers |
 |---|---|---|---|
-| A, claim "the guard rejects a negative amount" | `t.py::test_a` | "the guard accepts zero", "the guard is removed" | an edit, then null with a reason |
+| A, claim "the guard rejects a negative amount" | `t.py::test_a` | "the guard is removed", "the guard accepts zero", "the guard logs nothing" | an edit, null with a reason, an edit |
 | B, claim "the total is logged" | `t.py::test_b` | none | no session |
 | C, `preserves`, claim "the total stays unchanged" | `t.py::test_c` | "the total is doubled" | an edit |
 
@@ -310,16 +323,20 @@ system prompts holds any of the three wrong versions. Last, assert the
 - the versions added to `criterion_probe_prompt`
 - the lens ceiling in place of the one passed
 - one cost shared by every entry, or the sum of the costs on each
-- a line that counts entries in place of versions
+- a line that counts entries, or entries holding any edit, in place of
+  versions
+- a list stored sorted
 
 **Criterion 4's witness.** Four criteria, each declaring two wrong
 versions, in the order the claim lists them. Script an `AgentFailed`
 carrying a turn with its own cost, then `"not a block at all"`, then a block
-with one answer, then a block with three. Assert every entry whole. These
-fail it:
+with one answer, then a block with three. Every answer in those two
+blocks names an edit on `src/gap.py` and a non-empty reason. Assert every
+entry whole. These fail it:
 
 - a failed session that returns `versions: []`
 - a count check that passes three answers for two versions by truncating
+- a count error set while the answers are still paired into `versions`
 - a stop after the first failure
 - a re-prompt on a bad reply
 - a failed session charged nothing
@@ -348,15 +365,26 @@ change. Its task is to turn each into the smallest source edit that makes
 the code behave that way. A version it cannot express as one edit gets a
 null edit and a reason. End the file with the diff, the numbered wrong
 versions and the claim, in that order, under the three headings criterion 3
-names.
+names. The template's parts outside `{spec}` go through `str.format`
+(`saffron/agents/context.py:211-215`). So describe the reply's JSON in
+words, as `criterion-probe.md` does, and write no literal brace.
 
 **Size.** No path this spec touches is in `elevate_on`, so `size` is
 advisory at the `feature` ceiling of 3000 tokens
 (`saffron/gates/core/size.py:26`). `SA-0113` built the criterion-probe
-session, and its cell commit `b9d8f39b` measured 1923 changed tokens. Of
-those, 990 were its prompt, `review.py` and `tests/test_review.py`. The
-parser, the renderer and their tests add about 450. So expect about 1440,
-and keep the tests to shared helpers and tabled rows.
+session. Its cell commit `b9d8f39b` holds 475 insertions and 4 deletions.
+`size_gate`'s own count gives 1923 changed tokens, measured on 2026-09-28
+with this command:
+
+```
+git show --format= b9d8f39b | uv run python -c "import sys; from saffron.gates.core import size; print(size._changed_lines(sys.stdin.read()))"
+```
+
+`size._token_counts` splits that by file. The two prompt files hold 379,
+`review.py` 393 and `tests/test_review.py` 217, so 989 in all. The
+parser, the renderer, the helper extension and their tests add about 450.
+So expect about 1440, and keep the tests to shared helpers and tabled
+rows.
 
 **Commit as each witness passes**, before the full suite runs.
 Uncommitted work dies with the cell.
