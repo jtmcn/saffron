@@ -853,10 +853,12 @@ def test_a_wall_cut_names_the_seconds_it_was_given_and_an_idle_cut_does_not():
         return str(raised.value)
 
     wall_message = _cut("wall")
+    assert "wall bound" in wall_message
     assert "1950" in wall_message
     assert wall_message.index("1950") < wall_message.index(stderr[:10])
 
     idle_message = _cut("idle")
+    assert "idle bound" in idle_message
     assert "1950" not in idle_message
 
 

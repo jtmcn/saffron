@@ -56,14 +56,14 @@ if TYPE_CHECKING:
 _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
 
 # §4.3's wall clock, per turn, set here rather than inherited: this is the bound
-# the operator sits through, so it belongs where the task is driven. The floor
-# below is what a spec of sixty turns or fewer still gets. WALL_SECONDS_PER_TURN
-# and WALL_CAP_S scale it upward for a longer one, and the idle bound
-# (runtime.IDLE_TIMEOUT_S) still catches a stall sooner regardless.
+# the operator sits through, so it belongs where the task is driven. Fifteen
+# minutes is long enough for a turn that runs a real gate suite between tool
+# calls and short enough to watch. It is the floor for a spec of sixty turns or
+# fewer, and the idle bound (runtime.IDLE_TIMEOUT_S) still catches a stall sooner.
 TURN_TIMEOUT_S = 900.0
 
-# Named separately since `cli.py` and `spec_review.py` read TURN_TIMEOUT_S by
-# name (backlog item b-bf0c91): 15 seconds a turn, capped at the library's hour.
+# Measured: about 1.4 times the slowest finished long session, SA-0168 at 10.8
+# seconds a turn. Capped at the library's hour.
 WALL_SECONDS_PER_TURN = 15.0
 WALL_CAP_S = 3600.0
 
@@ -1956,8 +1956,8 @@ def _drive_cell(
         )
         ledger.set_task_state(task_id, "IMPLEMENTING")
 
-        # Scaled to this spec's own turn ceiling (backlog item b-bf0c91),
-        # floored and capped by the two constants above.
+        # Scaled to this spec's own turn ceiling, floored and capped by the
+        # constants above.
         turn_wall_s = min(
             WALL_CAP_S, max(TURN_TIMEOUT_S, WALL_SECONDS_PER_TURN * spec.max_turns)
         )
