@@ -1996,6 +1996,8 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
 _OVERRUN_FALLBACK = 1.4
 _OVERRUN_MIN_SPECS = 3
 _LANDED_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGED"})
+# Estimates before this id already carried the 1.4, so counting them measures 1.0.
+_RAW_ESTIMATES_FROM = "SA-0184"
 
 
 def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
@@ -2009,6 +2011,8 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     for (spec_id, _sha), rows in ledger.tasks_by_spec(repo_id).items():
         spec = specs.get(spec_id)
         if spec is None or spec.estimated_lines is None:
+            continue
+        if spec_id < _RAW_ESTIMATES_FROM:
             continue
         for row in rows:
             landed = lines.get(row["task_id"])

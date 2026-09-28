@@ -247,14 +247,21 @@ def _declaring(estimates):
 
 def test_the_overrun_is_the_median_landed_ratio_once_three_specs_declare_one():
     specs = _declaring(
-        {"SA-0001": 100, "SA-0002": 100, "SA-0003": 100, "SA-0004": None}
+        {
+            "SA-0183": 100,  # declared before estimates were raw
+            "SA-0201": 100,
+            "SA-0202": 100,
+            "SA-0203": 100,
+            "SA-0204": None,
+        }
     )
     landed = [
-        ("SA-0001", "MERGED", 110, 10),  # 1.2
-        ("SA-0002", "READY_FOR_REVIEW", 200, 0),  # 2.0
-        ("SA-0003", "APPROVED", 150, 0),  # 1.5
-        ("SA-0003", "PLAN_REJECTED", 0, 0),  # the newest row, but never landed
-        ("SA-0004", "MERGED", 900, 0),  # declares no estimate
+        ("SA-0201", "MERGED", 110, 10),  # 1.2
+        ("SA-0202", "READY_FOR_REVIEW", 200, 0),  # 2.0
+        ("SA-0203", "APPROVED", 150, 0),  # 1.5
+        ("SA-0203", "PLAN_REJECTED", 0, 0),  # the newest row, but never landed
+        ("SA-0204", "MERGED", 900, 0),  # declares no estimate
+        ("SA-0183", "MERGED", 900, 0),  # 9.0, and not counted
     ]
     ratio, basis = driver._overrun(_LandedLedger(landed), 1, specs)
     assert ratio == 1.5
