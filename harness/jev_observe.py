@@ -50,8 +50,11 @@ def _finding(item: Any, n: int) -> Finding:
         raise BlockError(f"finding {n} needs a severity in {SEVERITIES}")
     if not isinstance(item.get("claim"), str):
         raise BlockError(f"finding {n} needs a claim")
-    for name in ("criterion", "line"):
-        value = item.get(name)
+    criterion = item.get("criterion")
+    # Seats write a criterion as `"1"` often enough to lose a round's score (b-0e3528).
+    if isinstance(criterion, str) and criterion.isdigit():
+        criterion = int(criterion)
+    for name, value in (("criterion", criterion), ("line", item.get("line"))):
         # bool is an int subclass, and `true` is no criterion number.
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int)
@@ -61,7 +64,7 @@ def _finding(item: Any, n: int) -> Finding:
         raise BlockError(f"finding {n}'s file is not a string or null")
     return Finding(
         item["severity"],
-        item.get("criterion"),
+        criterion,
         item.get("file"),
         item.get("line"),
         item["claim"],
@@ -176,13 +179,20 @@ def build_asks(r: ReviewRound) -> dict[str, dict]:
     return asks
 
 
+# Measured over run 19's 42 saved rounds: every state of 87,259 characters or
+# fewer was scored, and every one of 109,855 or more was refused `max_tokens_exceeded`.
+STATE_LIMIT = 85_000
+DIFF_CUT_NOTE = "\n[diff cut here to fit Jev's input bound; it held {total} characters]"
+
+
 def state(r: ReviewRound) -> dict[str, Any]:
-    """What Jev reads: the spec, this review round's findings, the earlier ones, and the diff."""
+    """What Jev reads: the spec, this review round's findings, the earlier ones,
+    and the diff. The diff is cut from its end to keep the whole under `STATE_LIMIT`."""
 
     def rows(pairs: list[tuple[str, Finding]]) -> list[dict]:
         return [{"id": fid, **asdict(f)} for fid, f in pairs]
 
-    return {
+    body = {
         "kind": r.kind,
         "round": r.number,
         "spec": r.spec_text,
@@ -191,6 +201,19 @@ def state(r: ReviewRound) -> dict[str, Any]:
         "earlier_findings": rows(r.prior),
         "diff": r.diff,
     }
+    over = len(json.dumps(body)) - STATE_LIMIT
+    if over > 0:
+        note = DIFF_CUT_NOTE.format(total=len(r.diff))
+        # JSON escapes can grow a character, so cut on the encoded length.
+        keep = len(r.diff) - over - len(json.dumps(note))
+        while keep > 0:
+            body["diff"] = r.diff[:keep] + note
+            if len(json.dumps(body)) <= STATE_LIMIT:
+                break
+            keep -= max(1, len(json.dumps(body)) - STATE_LIMIT)
+        else:
+            body["diff"] = note
+    return body
 
 
 # models.list() on 2026-09-21 offered only aliases (jev-latest, jev-preview), no dated name.

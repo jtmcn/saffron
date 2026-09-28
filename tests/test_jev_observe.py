@@ -39,6 +39,13 @@ def test_the_last_json_block_is_the_findings():
     assert jo.parse_block(text) == [jo.Finding("blocker", 1, "a.py", 3, "wrong")]
 
 
+def test_a_criterion_written_as_a_digit_string_is_its_number():
+    """#544's Standards seat wrote `"1"`, and the round went unscored (b-0e3528)."""
+    assert jo.parse_block(_report([_finding(criterion="1")]))[0].criterion == 1
+    with pytest.raises(jo.BlockError):
+        jo.parse_block(_report([_finding(criterion="one")]))
+
+
 def test_an_empty_list_is_a_report_with_no_findings():
     assert jo.parse_block(_report([])) == []
 
@@ -174,6 +181,21 @@ def test_a_cell_asks_nothing_about_earlier_rounds():
 
 def test_the_first_round_asks_nothing_about_newness():
     assert "Q4" not in _codes(jo.build_asks(_round("pr-review", prior=0)))
+
+
+def test_a_state_over_the_measured_bound_cuts_its_diff_and_says_so():
+    """Every run-19 round over 109,855 characters of state was refused with
+    `max_tokens_exceeded`, and none under 87,259 was (b-0e3528)."""
+    from dataclasses import replace
+
+    small = _round()
+    assert jo.state(small)["diff"] == small.diff
+
+    huge = replace(small, diff="+x\n" * 60_000)
+    cut = jo.state(huge)
+    assert len(json.dumps(cut)) <= jo.STATE_LIMIT
+    assert cut["diff"].startswith("+x\n")
+    assert cut["diff"].endswith(jo.DIFF_CUT_NOTE.format(total=len(huge.diff)))
 
 
 def test_q1_chooses_among_the_criteria_and_nomatch():
