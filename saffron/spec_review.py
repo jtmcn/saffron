@@ -520,3 +520,220 @@ def spec_writer_system_prompt(policy: Policy, *, prompts_dir: Path) -> str:
         elevate_on=_path_lines(policy.elevate_on),
         ceilings=_ceiling_lines(),
     )
+
+
+# The p90 of 74 hand `spec-writer` sessions, $16.92, rounded up (SA-0161).
+SPEC_WRITER_BUDGET_USD = 17.0
+
+# Reasoned from the spike's own extraction turns, $0.40 and $0.41, with
+# room: a real writer resumes a longer context than the spike's did.
+SPEC_WRITER_EXTRACT_BUDGET_USD = 1.5
+
+# What one session records at most, best effort: the writer turn plus one
+# extraction turn (the re-ask's cap sits above this, in the docstring).
+SPEC_WRITER_SESSION_USD = SPEC_WRITER_BUDGET_USD + SPEC_WRITER_EXTRACT_BUDGET_USD
+
+# A third above SPEC_REVIEW_MAX_TURNS: a writer session can run longer.
+SPEC_WRITER_MAX_TURNS = 120
+
+# Clears the spike's own extraction turns, 130 to 150 seconds, many times
+# over. Twice the idle bound of 300 seconds.
+SPEC_WRITER_TIMEOUT_S = 3600.0
+
+
+@dataclass(frozen=True)
+class SpecWriterSession:
+    """What `run_spec_writer` returns for one draft or revision.
+
+    `text` is the extraction turn's validated `spec` field, stripped, plus
+    one newline. Neither turn's own `text` feeds it. `spec_sha` is
+    `hash_artifact` of it, or `None` beside empty text."""
+
+    text: str
+    cost_usd: float
+    error: str | None
+    resets_at: int | None
+    session_id: str | None
+    num_turns: int
+    spec_sha: str | None
+
+
+def _writer_session(
+    *,
+    text: str,
+    cost: float,
+    error: str | None,
+    resets_at: int | None,
+    session_id: str | None,
+    turns: int,
+) -> SpecWriterSession:
+    return SpecWriterSession(
+        text=text,
+        cost_usd=cost,
+        error=error,
+        resets_at=resets_at,
+        session_id=session_id,
+        num_turns=turns,
+        spec_sha=hash_artifact(text) if text else None,
+    )
+
+
+def run_spec_writer(
+    container: str,
+    *,
+    system_prompt: str,
+    prompt: str,
+    agent: Callable[..., implement.AttemptResult],
+) -> SpecWriterSession:
+    """One host-invoked, tool-using session that drafts or revises a whole
+    spec file (ADR 7). A second turn then extracts the file through
+    `output_format`, resumed on the same session, never read from either
+    turn's own text.
+
+    Calls `agent` directly, never through `session.stop_on_rejected`, for
+    the reason `run_spec_review` does: a rejected session must still be
+    charged for what it spent (§4.1).
+    """
+    options = implement.agent_options(
+        system_prompt=system_prompt,
+        max_turns=SPEC_WRITER_MAX_TURNS,
+        budget_usd=SPEC_WRITER_BUDGET_USD,
+        tools=SPEC_SESSION_TOOLS,
+    )
+    cost = 0.0
+    turns = 0
+    sid: str | None = None
+
+    def _measure(attempt: implement.AttemptResult | None) -> None:
+        nonlocal cost, turns, sid
+        if attempt is None:
+            return
+        cost += attempt.cost_usd_est
+        turns += attempt.num_turns
+        sid = attempt.session_id or sid
+
+    def _rejected(attempt: implement.AttemptResult) -> SpecWriterSession:
+        return _writer_session(
+            text="",
+            cost=cost,
+            error=None,
+            resets_at=_reset(attempt.rate_limit_resets_at),
+            session_id=sid,
+            turns=turns,
+        )
+
+    try:
+        first = agent(container, prompt=prompt, options=options)
+    except implement.AgentFailed as failed:
+        _measure(failed.attempt)
+        if failed.attempt and session.terminal_for_rate_limit(
+            failed.attempt.rate_limit_status
+        ):
+            return _rejected(failed.attempt)
+        return _writer_session(
+            text="",
+            cost=cost,
+            error=str(failed),
+            resets_at=None,
+            session_id=sid,
+            turns=turns,
+        )
+
+    if session.terminal_for_rate_limit(first.rate_limit_status):
+        _measure(first)
+        return _rejected(first)
+    _measure(first)
+    if first.session_id is None:
+        return _writer_session(
+            text="",
+            cost=cost,
+            error="no session to extract from",
+            resets_at=None,
+            session_id=None,
+            turns=turns,
+        )
+
+    extract_options = options | {
+        "max_budget_usd": SPEC_WRITER_EXTRACT_BUDGET_USD,
+        "output_format": SPEC_WRITER_FORMAT,
+    }
+
+    def _extraction_turn(
+        *, turn_prompt: str, resume: str | None, last_cost_usd: float
+    ) -> SpecWriterSession | implement.AttemptResult:
+        """One extraction attempt: a rejected or failed `SpecWriterSession`,
+        or the clean `AttemptResult` for the caller to validate."""
+        try:
+            got = agent(
+                container,
+                prompt=turn_prompt,
+                options=extract_options,
+                resume=resume,
+                last_cost_usd=last_cost_usd,
+            )
+        except implement.AgentFailed as failed:
+            _measure(failed.attempt)
+            if failed.attempt and session.terminal_for_rate_limit(
+                failed.attempt.rate_limit_status
+            ):
+                return _rejected(failed.attempt)
+            return _writer_session(
+                text="",
+                cost=cost,
+                error=str(failed),
+                resets_at=None,
+                session_id=sid,
+                turns=turns,
+            )
+        if session.terminal_for_rate_limit(got.rate_limit_status):
+            _measure(got)
+            return _rejected(got)
+        _measure(got)
+        return got
+
+    def _read(attempt: implement.AttemptResult) -> tuple[str | None, str | None]:
+        report, error = rebut._validate(_SpecWriterReply, attempt.structured_output)
+        if report is None:
+            return None, error
+        return report.spec.strip() + "\n", None
+
+    extracted = _extraction_turn(
+        turn_prompt=SPEC_WRITER_EXTRACT_PROMPT,
+        resume=first.session_id,
+        last_cost_usd=min(first.cost_usd_est, SPEC_WRITER_EXTRACT_BUDGET_USD),
+    )
+    if isinstance(extracted, SpecWriterSession):
+        return extracted
+    text, error = _read(extracted)
+    if text is not None:
+        return _writer_session(
+            text=text,
+            cost=cost,
+            error=None,
+            resets_at=None,
+            session_id=sid,
+            turns=turns,
+        )
+
+    # One re-ask, as run_spec_review makes (§5.3 says two). The CLI already
+    # retries the shape inside a turn.
+    reasked = _extraction_turn(
+        turn_prompt=f"{error}\n\n{SPEC_WRITER_EXTRACT_PROMPT}",
+        resume=sid,
+        last_cost_usd=min(extracted.cost_usd_est, SPEC_WRITER_EXTRACT_BUDGET_USD),
+    )
+    if isinstance(reasked, SpecWriterSession):
+        return reasked
+    text, error = _read(reasked)
+    if text is not None:
+        return _writer_session(
+            text=text,
+            cost=cost,
+            error=None,
+            resets_at=None,
+            session_id=sid,
+            turns=turns,
+        )
+    return _writer_session(
+        text="", cost=cost, error=error, resets_at=None, session_id=sid, turns=turns
+    )

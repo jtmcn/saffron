@@ -1342,3 +1342,513 @@ def test_the_spec_writer_format_is_the_schema_of_one_string_field():
     for bad in refused:
         with pytest.raises(pydantic.ValidationError):
             _SpecWriterReply.model_validate(bad)
+
+
+# An `<output>` block sits inside the spec text, so a reader that parses
+# text instead of the schema's value would still look right.
+_WRITE_SPEC = "---\nid: SY-1\n---\nbody quotes <output>a</output> here\n"
+_WRITE_V = {"spec": _WRITE_SPEC}
+_WRITE_B = "<output>\n" + _WRITE_SPEC + "</output>"
+
+
+def _write_options():
+    from saffron.spec_review import (
+        SPEC_SESSION_TOOLS,
+        SPEC_WRITER_BUDGET_USD,
+        SPEC_WRITER_MAX_TURNS,
+    )
+
+    return implement.agent_options(
+        system_prompt=_SYSTEM_PROMPT,
+        max_turns=SPEC_WRITER_MAX_TURNS,
+        budget_usd=SPEC_WRITER_BUDGET_USD,
+        tools=SPEC_SESSION_TOOLS,
+    )
+
+
+def _write_extract_options():
+    from saffron.spec_review import SPEC_WRITER_EXTRACT_BUDGET_USD, SPEC_WRITER_FORMAT
+
+    return _write_options() | {
+        "max_budget_usd": SPEC_WRITER_EXTRACT_BUDGET_USD,
+        "output_format": SPEC_WRITER_FORMAT,
+    }
+
+
+def _run_writer(double):
+    from saffron.spec_review import run_spec_writer
+
+    return run_spec_writer(
+        _CONTAINER, system_prompt=_SYSTEM_PROMPT, prompt=_PROMPT, agent=double
+    )
+
+
+def _draft(**overrides):
+    return _attempt(
+        **{"text": "t", "cost": 0.5, "session_id": "s-1", "num_turns": 7} | overrides
+    )
+
+
+def _write_extract(**overrides):
+    base = {
+        "text": "t",
+        "cost": 0.25,
+        "session_id": "s-2",
+        "num_turns": 7,
+        "structured_output": _WRITE_V,
+    }
+    return _attempt(**base | overrides)
+
+
+def _write_third(**overrides):
+    base = {
+        "text": "t",
+        "cost": 0.25,
+        "session_id": "s-3",
+        "num_turns": 7,
+        "structured_output": _WRITE_V,
+    }
+    return _attempt(**base | overrides)
+
+
+def _assert_write_first_call(double):
+    args, kwargs = double.calls[0]
+    assert args == (_CONTAINER,)
+    assert kwargs == {"prompt": _PROMPT, "options": _write_options()}
+    assert "output_format" not in kwargs["options"]
+
+
+def _assert_write_second_call(double, *, last_cost_usd=0.5, resume="s-1"):
+    from saffron.spec_review import SPEC_WRITER_EXTRACT_PROMPT
+
+    args, kwargs = double.calls[1]
+    assert args == (_CONTAINER,)
+    assert kwargs == {
+        "prompt": SPEC_WRITER_EXTRACT_PROMPT,
+        "options": _write_extract_options(),
+        "resume": resume,
+        "last_cost_usd": last_cost_usd,
+    }
+
+
+def _write_expected(text, cost, error, resets_at, session_id, turns):
+    from saffron.agents.artifacts import hash_artifact
+    from saffron.spec_review import SpecWriterSession
+
+    return SpecWriterSession(
+        text=text,
+        cost_usd=cost,
+        error=error,
+        resets_at=resets_at,
+        session_id=session_id,
+        num_turns=turns,
+        spec_sha=hash_artifact(text) if text else None,
+    )
+
+
+def test_a_spec_writer_session_returns_the_extraction_turns_spec():
+    from saffron.spec_review import (
+        SPEC_WRITER_BUDGET_USD,
+        SPEC_WRITER_EXTRACT_BUDGET_USD,
+        SPEC_WRITER_MAX_TURNS,
+        SPEC_WRITER_SESSION_USD,
+        SPEC_WRITER_TIMEOUT_S,
+    )
+
+    assert SPEC_WRITER_MAX_TURNS == 120
+    assert type(SPEC_WRITER_MAX_TURNS) is int
+    assert SPEC_WRITER_BUDGET_USD == 17.0
+    assert SPEC_WRITER_EXTRACT_BUDGET_USD == 1.5
+    assert SPEC_WRITER_SESSION_USD == 18.5
+    assert SPEC_WRITER_TIMEOUT_S == 3600
+
+    final = _write_extract()
+    padded = _write_extract(structured_output={"spec": "\n  " + _WRITE_SPEC + "\n\n"})
+    conflicting = _write_extract(text="<output>\n---\nid: SY-9\n---\nwrong\n</output>")
+
+    # A clean extraction turn, and its equal-text variants.
+    for second in (final, padded, conflicting):
+        double = _Agent([_draft(), second])
+        result = _run_writer(double)
+        assert len(double.calls) == 2
+        _assert_write_first_call(double)
+        _assert_write_second_call(double)
+        assert result == _write_expected(_WRITE_SPEC, 0.75, None, None, "s-2", 14)
+
+    # First status allowed, reset 9, the same clean second turn.
+    double = _Agent([_draft(status="allowed", resets_at=9), final])
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    _assert_write_second_call(double)
+    assert result == _write_expected(_WRITE_SPEC, 0.75, None, None, "s-2", 14)
+
+    # Second is the killed turn.
+    double = _Agent([_draft(), _KILLED])
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    _assert_write_second_call(double)
+    assert result == _write_expected(
+        "", 1.0, "the agent produced no result event", None, "s-1", 7
+    )
+
+    # First at cost 4.0, second the killed turn: `last_cost_usd` caps at 1.5.
+    double = _Agent([_draft(cost=4.0), _KILLED])
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    _assert_write_second_call(double, last_cost_usd=1.5)
+    assert result == _write_expected(
+        "", 5.5, "the agent produced no result event", None, "s-1", 7
+    )
+
+    # Second raises AgentFailed("api_error") with its own turns and cost.
+    double = _Agent(
+        [_draft(), implement.AgentFailed("api_error", _attempt(cost=0.5, num_turns=7))]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 1.0, "api_error", None, "s-1", 14)
+
+    # First returned, rejected, reset R.
+    for reset, given in (
+        (1755800000, 1755800000),
+        (10**20, 10**20),
+        (None, 1),
+        ("soon", 1),
+        (True, 1),
+        (1755800000.0, 1),
+        (0, 1),
+        (-5, 1),
+    ):
+        double = _Agent(
+            [
+                _attempt(
+                    text="t",
+                    cost=0.25,
+                    status="rejected",
+                    resets_at=reset,
+                    session_id="s-1",
+                    num_turns=7,
+                )
+            ]
+        )
+        result = _run_writer(double)
+        assert len(double.calls) == 1
+        _assert_write_first_call(double)
+        assert result == _write_expected("", 0.25, None, given, "s-1", 7)
+        assert type(result.resets_at) is int
+
+        # Raised, rejected, the same reset.
+        double = _Agent(
+            [
+                implement.AgentFailed(
+                    "api_error",
+                    _attempt(
+                        status="rejected",
+                        resets_at=reset,
+                        cost=0.125,
+                        session_id="s-1",
+                        num_turns=7,
+                    ),
+                )
+            ]
+        )
+        result = _run_writer(double)
+        assert len(double.calls) == 1
+        assert result == _write_expected("", 0.125, None, given, "s-1", 7)
+        assert type(result.resets_at) is int
+
+    # Second returned, rejected.
+    double = _Agent(
+        [
+            _draft(),
+            _attempt(
+                text="t",
+                cost=0.0625,
+                status="rejected",
+                resets_at=1755800000,
+                num_turns=7,
+                structured_output=_WRITE_V,
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 0.5625, None, 1755800000, "s-1", 14)
+    assert type(result.resets_at) is int
+
+    double = _Agent(
+        [
+            _draft(),
+            _attempt(
+                text="t",
+                cost=0.0625,
+                status="rejected",
+                resets_at=-5,
+                num_turns=7,
+                structured_output=_WRITE_V,
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 0.5625, None, 1, "s-1", 14)
+
+    # Second raises AgentFailed, rejected, no reset.
+    double = _Agent(
+        [
+            _draft(),
+            implement.AgentFailed(
+                "api_error",
+                _attempt(status="rejected", resets_at=None, cost=0.0625, num_turns=7),
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 0.5625, None, 1, "s-1", 14)
+    assert type(result.resets_at) is int
+
+    # First raises, not rejected, with an attempt.
+    double = _Agent(
+        [
+            implement.AgentFailed(
+                "idle bound",
+                _attempt(
+                    cost=0.0625,
+                    session_id="s-1",
+                    num_turns=7,
+                    structured_output=_WRITE_V,
+                ),
+            )
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 1
+    assert result == _write_expected("", 0.0625, "idle bound", None, "s-1", 7)
+
+    # First raises, with no attempt at all.
+    double = _Agent([implement.AgentFailed("no result")])
+    result = _run_writer(double)
+    assert len(double.calls) == 1
+    assert result == _write_expected("", 0.0, "no result", None, None, 0)
+
+    # Second raises AgentFailed, not rejected, with an attempt.
+    double = _Agent(
+        [
+            _draft(),
+            implement.AgentFailed(
+                "api_error",
+                _attempt(cost=0.125, num_turns=7, structured_output=_WRITE_V),
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 0.625, "api_error", None, "s-1", 14)
+
+    double = _Agent(
+        [
+            _draft(),
+            implement.AgentFailed(
+                "idle bound", _attempt(cost=0.125, num_turns=7, session_id=None)
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 0.625, "idle bound", None, "s-1", 14)
+
+    # Second raises AgentFailed, with no attempt at all.
+    double = _Agent([_draft(), implement.AgentFailed("no result")])
+    result = _run_writer(double)
+    assert len(double.calls) == 2
+    assert result == _write_expected("", 0.5, "no result", None, "s-1", 7)
+
+    # First returned, with no session_id: no second call.
+    double = _Agent([_draft(session_id=None)])
+    result = _run_writer(double)
+    assert len(double.calls) == 1
+    _assert_write_first_call(double)
+    assert result == _write_expected(
+        "", 0.5, "no session to extract from", None, None, 7
+    )
+
+    # Any other exception propagates, from either turn.
+    double = _Agent([RuntimeError("runner died")])
+    with pytest.raises(RuntimeError):
+        _run_writer(double)
+    assert len(double.calls) == 1
+
+    double = _Agent([_draft(), RuntimeError("boom")])
+    with pytest.raises(RuntimeError):
+        _run_writer(double)
+    assert len(double.calls) == 2
+
+
+def test_a_spec_writer_re_asks_once_when_its_extraction_is_not_the_schema():
+    from dataclasses import replace
+
+    from saffron.spec_review import SPEC_WRITER_EXTRACT_PROMPT, _SpecWriterReply
+
+    def _validation_message(value):
+        try:
+            _SpecWriterReply.model_validate(value)
+        except Exception as exc:  # pydantic.ValidationError
+            return f"not the schema: {exc}"
+        raise AssertionError("value unexpectedly validated")
+
+    m_null = "not the schema: the turn returned no structured output"
+    reask_prompt_null = m_null + "\n\n" + SPEC_WRITER_EXTRACT_PROMPT
+
+    second_n = _write_extract(structured_output=None, text=_WRITE_B)
+    second_k = _write_extract(
+        structured_output={"spec": "x", "extra": 1}, text=_WRITE_B
+    )
+    second_z = _write_extract(structured_output={"spec": 3}, text=_WRITE_B)
+    second_j = _write_extract(structured_output=json.dumps(_WRITE_V), text=_WRITE_B)
+    second_o = _write_extract(structured_output={}, text=_WRITE_B)
+
+    def _assert_third_call(double, *, resume, last_cost_usd, prompt_text=None):
+        args, kwargs = double.calls[2]
+        assert args == (_CONTAINER,)
+        assert set(kwargs) == {"prompt", "options", "resume", "last_cost_usd"}
+        assert kwargs["options"] == _write_extract_options()
+        assert kwargs["resume"] == resume
+        assert kwargs["last_cost_usd"] == last_cost_usd
+        if prompt_text is None:
+            assert kwargs["prompt"].startswith("not the schema: ")
+            assert kwargs["prompt"].endswith("\n\n" + SPEC_WRITER_EXTRACT_PROMPT)
+        else:
+            assert kwargs["prompt"] == prompt_text
+
+    # Every refused second-value row: a clean third turn that returns V.
+    for second in (second_n, second_k, second_z, second_j, second_o):
+        double = _Agent([_draft(), second, _write_third()])
+        result = _run_writer(double)
+        assert len(double.calls) == 3
+        _assert_third_call(double, resume="s-2", last_cost_usd=0.25)
+        assert result == _write_expected(_WRITE_SPEC, 1.0, None, None, "s-3", 21)
+
+    # A null second value, second carries no session_id: the re-ask resumes
+    # the first turn's.
+    double = _Agent([_draft(), replace(second_n, session_id=None), _write_third()])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    _assert_third_call(
+        double, prompt_text=reask_prompt_null, resume="s-1", last_cost_usd=0.25
+    )
+    assert result == _write_expected(_WRITE_SPEC, 1.0, None, None, "s-3", 21)
+
+    # Third returns, with no session_id.
+    double = _Agent([_draft(), second_n, _write_third(session_id=None)])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected(_WRITE_SPEC, 1.0, None, None, "s-2", 21)
+
+    # Second N, third N: both refused.
+    double = _Agent([_draft(), second_n, _write_third(structured_output=None)])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    _assert_third_call(
+        double, prompt_text=reask_prompt_null, resume="s-2", last_cost_usd=0.25
+    )
+    assert result == _write_expected("", 1.0, m_null, None, "s-3", 21)
+
+    # Second N, third K: the third's own message is kept.
+    k_value = {"spec": "x", "extra": 1}
+    double = _Agent([_draft(), second_n, _write_third(structured_output=k_value)])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected(
+        "", 1.0, _validation_message(k_value), None, "s-3", 21
+    )
+
+    # Second K, third N: the re-ask's own message is kept.
+    double = _Agent([_draft(), second_k, _write_third(structured_output=None)])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected("", 1.0, m_null, None, "s-3", 21)
+
+    # Third returns rejected.
+    double = _Agent([_draft(), second_n, _write_third(status="rejected", resets_at=9)])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected("", 1.0, None, 9, "s-3", 21)
+    assert type(result.resets_at) is int
+
+    double = _Agent([_draft(), second_n, _write_third(status="rejected", resets_at=0)])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected("", 1.0, None, 1, "s-3", 21)
+
+    # Third raises AgentFailed, rejected, reset "soon".
+    double = _Agent(
+        [
+            _draft(),
+            second_n,
+            implement.AgentFailed(
+                "api_error",
+                _attempt(
+                    status="rejected",
+                    resets_at="soon",
+                    cost=0.25,
+                    session_id="s-3",
+                    num_turns=7,
+                ),
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected("", 1.0, None, 1, "s-3", 21)
+
+    # Third raises AgentFailed("cut") with an attempt of value V.
+    double = _Agent(
+        [
+            _draft(),
+            second_n,
+            implement.AgentFailed(
+                "cut",
+                _attempt(
+                    cost=0.25, session_id="s-3", num_turns=7, structured_output=_WRITE_V
+                ),
+            ),
+        ]
+    )
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected("", 1.0, "cut", None, "s-3", 21)
+
+    # Third is the killed turn.
+    double = _Agent([_draft(), second_n, _KILLED])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    _assert_third_call(
+        double, prompt_text=reask_prompt_null, resume="s-2", last_cost_usd=0.25
+    )
+    assert result == _write_expected(
+        "", 1.0, "the agent produced no result event", None, "s-2", 14
+    )
+
+    # Second at cost 3.0, third the killed turn: `last_cost_usd` caps at 1.5.
+    double = _Agent([_draft(), replace(second_n, cost_usd_est=3.0), _KILLED])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    _assert_third_call(
+        double, prompt_text=reask_prompt_null, resume="s-2", last_cost_usd=1.5
+    )
+    assert result == _write_expected(
+        "", 5.0, "the agent produced no result event", None, "s-2", 14
+    )
+
+    # Third raises AgentFailed("gone") with no attempt.
+    double = _Agent([_draft(), second_n, implement.AgentFailed("gone")])
+    result = _run_writer(double)
+    assert len(double.calls) == 3
+    assert result == _write_expected("", 0.75, "gone", None, "s-2", 14)
+
+    # Third raises an exception the module does not know about.
+    double = _Agent([_draft(), second_n, RuntimeError("boom")])
+    with pytest.raises(RuntimeError):
+        _run_writer(double)
+    assert len(double.calls) == 3

@@ -747,6 +747,81 @@ def _stack_review(
     return run
 
 
+def _stack_revise(
+    *, pinned: PinnedBase, repo: Path, out_dir: Path
+) -> Callable[
+    [Candidate, Candidate | None, str | None, str], spec_review.SpecWriterSession
+]:
+    """`SA-0164`'s revision round adapter (ADR 7), built the way
+    `_stack_review` is. Given a layer, it fetches that spec's branch fresh
+    and seeds the cell there. Given `None`, it seeds the cell at the
+    pinned `base_sha`. The prompt and gates always come from `base_sha`'s
+    own export, never a layer's head.
+    """
+
+    def run(
+        candidate: Candidate,
+        layer: Candidate | None,
+        spec_text: str | None,
+        review_text: str,
+    ) -> spec_review.SpecWriterSession:
+        if layer is None:
+            head = pinned.base_sha
+        else:
+            branch = _branch(layer.spec.id)
+            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+
+        # The export always reads `base_sha`, never a layer's head (ADR 7).
+        exported = git_mirror.export_saffron_dir(
+            pinned.mirror, pinned.base_sha, out_dir / "spec-write" / candidate.spec.id
+        )
+        policy = _spec_review_policy(exported)
+
+        fields = end_review.LayerFields(
+            spec_id=candidate.spec.id,
+            branch=_branch(candidate.spec.id),
+            pr_url="",
+            base=head,
+            head=head,
+            known="",
+        )
+        system_prompt = spec_review.spec_writer_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        prompt = (
+            "review: the spec review between the review tags below.\n"
+            f"spec: .saffron/specs/{candidate.path.name}\n"
+            f"base: {head}\n"
+            "The checkout is a snapshot of the base.\n"
+            "The text between the spec tags below is the spec's current "
+            "text, and it replaces the file at that path.\n"
+            "Keep the spec's id and its exact depends_on.\n"
+            "Raise no budget_usd, max_turns or max_attempts.\n"
+            "A follow-up's revision keeps its touches within its first "
+            "text's touches.\n"
+            f"<review>\n{review_text}\n</review>\n"
+            f"<spec>\n{spec_text}\n</spec>\n"
+        )
+        agent = partial(
+            implement.run_agent,
+            spec_id=candidate.spec.id,
+            timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+        )
+        with end_review.layer_cell(
+            fields,
+            repo=repo,
+            mirror=pinned.mirror,
+            gates_dir=exported,
+            thread_env=policy.thread_env,
+            spec_session=True,
+        ) as container:
+            return spec_review.run_spec_writer(
+                container, system_prompt=system_prompt, prompt=prompt, agent=agent
+            )
+
+    return run
+
+
 def _stack_mint(
     *, pinned: PinnedBase, repo: Path, ledger: Ledger
 ) -> Callable[[Candidate], int]:

@@ -5008,6 +5008,312 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
     assert cell_up_calls[-1]["thread_env"] == {}
 
 
+def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_revise` seeds its cell at a layer's fetched head, or at
+    the pinned `base_sha` with no layer. It always reads its prompt and
+    gates from the pinned `base_sha`'s own export, never a layer's head,
+    the operator's checkout, or the mirror's `HEAD`."""
+    from saffron.agents.artifacts import hash_artifact
+
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron").mkdir()
+    (mirror / ".saffron" / "README").write_text("bare\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "bare")
+    bare_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
+    )
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
+    )
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
+
+    repo = tmp_path / "checkout"
+    (repo / ".saffron").mkdir(parents=True)
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
+    )
+
+    out_dir = tmp_path / "out"
+
+    fetch_calls: list[tuple] = []
+
+    def _fake_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append((mirror_arg, url_arg, branch))
+        if branch == "saffron/SY-8":
+            raise package.ParentGone("gone")
+        return "d" * 40
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
+
+    cell_up_calls: list[dict] = []
+
+    def _fake_cell_up(
+        *,
+        repo,
+        mirror,
+        tree_base,
+        branch,
+        network,
+        volume,
+        state,
+        container,
+        gates_dir,
+        thread_env,
+        created,
+        note,
+        cap_add=None,
+    ):
+        cell_up_calls.append(
+            {
+                "repo": repo,
+                "mirror": mirror,
+                "tree_base": tree_base,
+                "branch": branch,
+                "gates_dir": gates_dir,
+                "thread_env": dict(thread_env),
+                "container": container,
+                "cap_add": cap_add,
+            }
+        )
+        created.add(container)
+        note("cell_up", "cell up")
+
+    cell_down_calls: list[dict] = []
+
+    def _fake_cell_down(*, network, volume, state, container, created, note):
+        cell_down_calls.append({"container": container})
+        note("cell_down", True, "cell down")
+
+    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+
+    unpriv_calls: list[str] = []
+    monkeypatch.setattr(
+        session,
+        "assert_bash_is_unprivileged",
+        lambda container: unpriv_calls.append(container),
+    )
+
+    real_layer_cell = end_review.layer_cell
+    layer_cell_calls: list[dict] = []
+
+    @contextmanager
+    def _spy_layer_cell(fields, **kwargs):
+        layer_cell_calls.append({"fields": fields, "kwargs": kwargs})
+        with real_layer_cell(fields, **kwargs) as container:
+            yield container
+
+    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
+
+    def _unreadable_reset(value):
+        """An unannotated pass-through, so `types` reads `value` as the
+        `int | None` `AttemptResult` declares rather than its literal."""
+        return value
+
+    agent_calls: list[dict] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        agent_calls.append(
+            {
+                "container": container,
+                "prompt": prompt,
+                "options": options,
+                "spec_id": spec_id,
+                "timeout_s": timeout_s,
+                "resume": resume,
+                "last_cost_usd": last_cost_usd,
+            }
+        )
+        if spec_id == "SY-2":
+            return implement.AttemptResult(
+                session_id="s-2",
+                subtype="success",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=0.25,
+                text="t",
+                rate_limit_status="rejected",
+                rate_limit_resets_at=_unreadable_reset("soon"),
+            )
+        if resume is not None:
+            return implement.AttemptResult(
+                session_id="s-1",
+                subtype="success",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=0.25,
+                text="t",
+                structured_output={"spec": "---\nid: SY-1\n---\nrevised"},
+            )
+        return implement.AttemptResult(
+            session_id="s-1",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=7,
+            cost_usd_est=0.5,
+            text="report",
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    def _spec_path(spec_id):
+        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
+
+    def _candidate(spec_id, *, depends_on=None):
+        return Candidate(
+            path=_spec_path(spec_id),
+            spec=intake.Spec(
+                id=spec_id, title="t", type="chore", depends_on=depends_on or []
+            ),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+    revise = cli._stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+
+    assert not (out_dir / "spec-write").exists()
+
+    sy1 = _candidate("SY-1")
+    sy2 = _candidate("SY-2", depends_on=["SY-9"])
+    layer7 = _candidate("SY-7")
+    layer8 = _candidate("SY-8")
+
+    result1 = revise(sy1, None, "spec one\n", "review one")
+    result2 = revise(sy2, layer7, "spec two\n", "review two")
+    with pytest.raises(package.ParentGone):
+        revise(_candidate("SY-3"), layer8, "spec three\n", "review three")
+
+    revised_text = "---\nid: SY-1\n---\nrevised\n"
+    assert result1 == spec_review.SpecWriterSession(
+        text=revised_text,
+        cost_usd=0.75,
+        error=None,
+        resets_at=None,
+        session_id="s-1",
+        num_turns=8,
+        spec_sha=hash_artifact(revised_text),
+    )
+    assert result2.text == ""
+    assert result2.error is None
+    assert result2.resets_at == 1
+    assert result2.cost_usd == 0.25
+
+    assert fetch_calls == [
+        (mirror, pinned.url, "saffron/SY-7"),
+        (mirror, pinned.url, "saffron/SY-8"),
+    ]
+
+    assert len(cell_up_calls) == 2
+    assert len(cell_down_calls) == 2
+    assert [c["tree_base"] for c in cell_up_calls] == [base_sha, "d" * 40]
+    for c in cell_up_calls:
+        assert c["repo"] == repo
+        assert c["mirror"] == mirror
+        assert c["thread_env"] == {"X": "base"}
+    assert cell_up_calls[0]["gates_dir"] == out_dir / "spec-write" / "SY-1"
+    assert cell_up_calls[1]["gates_dir"] == out_dir / "spec-write" / "SY-2"
+    for c in cell_up_calls:
+        policy_text = (c["gates_dir"] / ".saffron" / "policy.yaml").read_text()
+        assert "X: base" in policy_text
+
+    assert len(unpriv_calls) == 2
+    assert unpriv_calls == [c["container"] for c in cell_up_calls]
+
+    assert len(layer_cell_calls) == 2
+    assert all(call["kwargs"]["spec_session"] is True for call in layer_cell_calls)
+    assert [call["fields"].branch for call in layer_cell_calls] == [
+        "saffron/SY-1",
+        "saffron/SY-2",
+    ]
+
+    assert len(agent_calls) == 3
+    assert [c["spec_id"] for c in agent_calls] == ["SY-1", "SY-1", "SY-2"]
+    assert spec_review.SPEC_WRITER_TIMEOUT_S == 3600
+    assert all(c["timeout_s"] == spec_review.SPEC_WRITER_TIMEOUT_S for c in agent_calls)
+    assert agent_calls[0]["container"] == cell_up_calls[0]["container"]
+    assert agent_calls[1]["container"] == cell_up_calls[0]["container"]
+    assert agent_calls[2]["container"] == cell_up_calls[1]["container"]
+
+    assert agent_calls[1]["resume"] == "s-1"
+    assert agent_calls[1]["last_cost_usd"] == 0.5
+    assert agent_calls[1]["prompt"] == spec_review.SPEC_WRITER_EXTRACT_PROMPT
+    assert agent_calls[1]["options"]["output_format"] == spec_review.SPEC_WRITER_FORMAT
+    assert agent_calls[0]["resume"] is None
+    assert agent_calls[2]["resume"] is None
+
+    for spec_id in ("SY-1", "SY-2"):
+        exported = out_dir / "spec-write" / spec_id
+        policy, _ = load_policy(exported)
+        expected_prompt = spec_review.spec_writer_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        first_call = agent_calls[0] if spec_id == "SY-1" else agent_calls[2]
+        assert first_call["options"]["system_prompt"] == expected_prompt
+        assert "`base/**`" in expected_prompt
+        assert "head/**" not in expected_prompt
+        assert "checkout/**" not in expected_prompt
+        prompt = first_call["prompt"]
+        review_text = "review one" if spec_id == "SY-1" else "review two"
+        spec_text = "spec one\n" if spec_id == "SY-1" else "spec two\n"
+        tree = base_sha if spec_id == "SY-1" else "d" * 40
+        expected_lines = [
+            "review: the spec review between the review tags below.",
+            f"spec: .saffron/specs/{spec_id}-x.md",
+            f"base: {tree}",
+            "The checkout is a snapshot of the base.",
+            "The text between the spec tags below is the spec's current "
+            "text, and it replaces the file at that path.",
+            "Keep the spec's id and its exact depends_on.",
+            "Raise no budget_usd, max_turns or max_attempts.",
+            "A follow-up's revision keeps its touches within its first text's touches.",
+        ]
+        assert prompt.splitlines()[:8] == expected_lines
+        assert prompt.index("<review>") < prompt.index(review_text)
+        assert prompt.index(review_text) < prompt.index("</review>")
+        assert prompt.index("</review>") < prompt.index("<spec>")
+        assert prompt.index("<spec>") < prompt.index(spec_text)
+        assert prompt.index(spec_text) < prompt.index("</spec>")
+        assert str(tmp_path) not in prompt
+
+    pinned_bare = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=bare_sha
+    )
+    revise_bare = cli._stack_revise(pinned=pinned_bare, repo=repo, out_dir=out_dir)
+    revise_bare(_candidate("SY-4"), None, "spec four\n", "review four")
+
+    expected_bare_prompt = spec_review.spec_writer_system_prompt(
+        Policy(), prompts_dir=context.PROMPTS_DIR
+    )
+    assert agent_calls[-1]["options"]["system_prompt"] == expected_bare_prompt
+    assert cell_up_calls[-1]["thread_env"] == {}
+
+
 def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
     tmp_path, monkeypatch
 ):
