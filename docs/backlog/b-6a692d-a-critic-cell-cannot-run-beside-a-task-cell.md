@@ -36,3 +36,7 @@ current cell runs.
 ## Record
 
 - 2026-09-23: filed from `SA-0149`'s round-1 review.
+- 2026-09-27: the spec loop's run 19 ran twelve cells one after another. The
+  one shared proxy (`PROXY_NAME`, `saffron/cell/proxy.py:15`, removed first at
+  `:54`) is also what blocks two independent layers of the spec DAG from
+  running at once. `DESIGN.md` §4 holds K at 1, and N4 wants 3.

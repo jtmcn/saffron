@@ -51,6 +51,8 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
+pending_symbols:
+  - saffron/qualify.py::qualify
 acceptance:
   - claim: >-
       `cli._stack_follow_ups(*, pinned, repo, ledger, out_dir, cap_usd,

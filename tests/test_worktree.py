@@ -560,6 +560,65 @@ def test_the_container_is_recorded_before_the_run_that_creates_it(
     assert created == {"st", "saffron-cell-SY-1"}
 
 
+def test_a_worktree_cell_carries_exactly_the_capabilities_it_is_given(
+    monkeypatch, tmp_path
+):
+    """`cap_add` reaches `--cap-add` flags right after `--cap-drop ALL`, and a
+    caller naming none gets none (§5.1)."""
+    monkeypatch.setattr(runtime, "_admit", lambda: None)
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+    monkeypatch.setattr(
+        runtime, "run_ephemeral", lambda *a, **k: runtime.Completed(0, "", "")
+    )
+
+    recorded: list[list[str]] = []
+
+    def _record(argv, timeout_s=120):
+        recorded.append(list(argv))
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "_must", _record)
+
+    def _up(container, **cap_add):
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="vol",
+            base_sha="a" * 40,
+            branch="saffron/SY-1",
+            image="img",
+            container=container,
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+            state_volume="st",
+            created=set(),
+            **cap_add,
+        )
+
+    from saffron.phases.implement import UNPRIVILEGED_BASH_CAPS
+
+    _up("saffron-cell-cap", cap_add=UNPRIVILEGED_BASH_CAPS)
+    _up("saffron-cell-nocap")
+    runtime.run_detached("saffron-proxy-nocap", "img")
+
+    with_caps, without_caps, detached = recorded
+    assert "--cap-add" not in detached
+    start = with_caps.index("--cap-drop")
+    assert with_caps[start : start + 6] == [
+        "--cap-drop",
+        "ALL",
+        "--cap-add",
+        "CAP_SETUID",
+        "--cap-add",
+        "CAP_SETGID",
+    ]
+    assert with_caps.count("--cap-add") == 2
+
+    start = without_caps.index("--cap-drop")
+    assert without_caps[start : start + 2] == ["--cap-drop", "ALL"]
+    assert "--cap-add" not in without_caps
+
+
 # --------------------------------------------------------- stacked_on: no cell
 
 

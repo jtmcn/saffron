@@ -99,6 +99,49 @@ def _rows(out_dir: Path) -> list[dict]:
     return json.loads(store.read_text()) if store.is_file() else []
 
 
+def test_run_task_hands_its_cell_the_task_it_was_given(tmp_path, monkeypatch):
+    """`run_task` takes a keyword `task_id`, forwarded onto the `CellSpec` it
+    builds. A caller that passes none still gets the old shape: no task
+    named, so `_drive_cell` mints its own."""
+    import functools
+
+    built: list[int | None] = []
+    real_cell_spec = task_module.CellSpec
+
+    def _recording_cell_spec(**kwargs):
+        built.append(kwargs.get("task_id"))
+        return real_cell_spec(**kwargs)
+
+    monkeypatch.setattr(task_module, "CellSpec", _recording_cell_spec)
+    real_run_task = task_module.run_task
+    out_dir = tmp_path / "out"
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    monkeypatch.setattr(
+        task_module, "run_task", functools.partial(real_run_task, task_id=9)
+    )
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-1",
+        state="EXHAUSTED",
+        task_id=1,
+        out_dir=out_dir,
+    )
+
+    monkeypatch.setattr(task_module, "run_task", real_run_task)
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-2",
+        state="EXHAUSTED",
+        task_id=2,
+        out_dir=out_dir,
+    )
+
+    assert built == [9, None]
+
+
 def test_a_task_that_never_packaged_still_reaches_the_index(tmp_path, monkeypatch):
     """Two unpackaged states, for two specs, each land their own row."""
     out_dir = tmp_path / "out"

@@ -271,6 +271,9 @@ def run_task(
     out_dir: Path,
     token: str | None,
     handoff: Handoff | None = None,
+    # `_stack_runner` passes the candidate's own task, so its cell runs on
+    # that task instead of minting a fresh one (§4.2.1).
+    task_id: int | None = None,
     emit: Callable[[Event], None] | None = None,
 ) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
@@ -369,6 +372,7 @@ def run_task(
         budget_usd=ceilings.budget_usd,
         max_attempts=ceilings.max_attempts,
         max_turns=ceilings.max_turns,
+        task_id=task_id,
     )
     # A `consumes` entry resolves against the tree base `CellSpec` names.
     # An entry the reader cannot read joins the unresolved ones by name.

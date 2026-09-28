@@ -91,3 +91,7 @@ The **Refusal** entry names the stack order's refusal. This lands after
   adequacy. Lens statuses `reviewed`, `error` and `not_reached` have no entry.
   An end-review `error` is charged to the reserve, against `CLAUDE.md`'s
   charged to nobody.
+- 2026-09-27: the spec loop's run 19. #545 labels an attempt with the phase
+  `SPEC_REVIEW`, which the glossary lacks. #546's `tasks_by_spec` docstring
+  said "unstacked", against the **Stacked branch** entry, and review
+  reworded it.

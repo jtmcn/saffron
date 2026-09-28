@@ -277,6 +277,9 @@ class CellSpec:
     # `task._resolve_stacked_on` (`SA-0026`) puts the parent's fetched branch
     # head here, and `None` when there is no parent to stack on.
     stacked_on: str | None = None
+    # A stack batch's own task, minted by its spec review before this cell
+    # runs. `_drive_cell` reads its run and reuses it, rather than minting one.
+    task_id: int | None = None
 
     def __post_init__(self) -> None:
         # A resolver that could not find the parent must say `None`. An empty
@@ -342,6 +345,9 @@ class CellOutcome:
     # notes turn runs, and on one that ran it but had nothing to say.
     notes: str = ""
     notes_sha256: str = ""
+    # The reset time a closed window reported, the same value the `RATE_LIMITED`
+    # `TaskOutcome` carries. `None` on every path that never raised `RateLimited`.
+    resets_at: int | None = None
 
 
 def repair_decision(
@@ -388,15 +394,15 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
 def previous_cut_orphan(
     ledger: Ledger, repo_id: int, spec: CellSpec, task_id: int
 ) -> int | None:
-    """The re-queue cap (SA-0126, backlog item b-36b551). Only the first
-    zero-commit cut at one `spec_sha` earns `ORPHANED`, and the next settles
-    as `NOT_IMPLEMENTED`. No fact says "orphaned by a cut" apart from the
-    other three paths that write it, so this reads `ledger._db` directly, as
-    `chain_walk._task_rows` does. A cut task's run finished `COMPLETE` while
-    every attempt it holds stayed phase `IMPLEMENTING`, the state
-    `_drive_cell` never leaves before its zero-commit return. Scoped to this
-    repo, spec id and `spec_sha`, excluding `task_id` itself. Call only when
-    a bound cut this task and nothing survived the salvage.
+    """The re-queue cap (SA-0126, backlog item b-36b551). Only the first zero-commit cut at
+    one `spec_sha` earns `ORPHANED`, and the next settles as `NOT_IMPLEMENTED`. No fact
+    says "orphaned by a cut" apart from the other three paths that write it, so this
+    reads `ledger._db` directly, as `chain_walk._task_rows` does. A cut task's run
+    finished `COMPLETE` while every attempt it holds stayed phase `IMPLEMENTING`,
+    `SPEC_REVIEW` or `SPEC_WRITING`. Scoped to this repo and spec id, its `spec_sha`
+    checked against `task_id`'s own row, never `CellSpec.spec_sha` (SA-0150). Excludes
+    `task_id` itself. Call only when a bound cut this task and nothing survived the
+    salvage.
     """
     row = ledger._db.execute(
         """
@@ -405,18 +411,19 @@ def previous_cut_orphan(
           JOIN runs rn ON rn.run_id = t.run_id
          WHERE rn.repo_id = ?
            AND t.spec_id = ?
-           AND t.spec_sha = ?
+           AND t.spec_sha = (SELECT spec_sha FROM tasks WHERE task_id = ?)
            AND t.task_id != ?
            AND t.state = 'ORPHANED'
            AND rn.status = 'COMPLETE'
            AND NOT EXISTS (
                SELECT 1 FROM attempts a
-                WHERE a.task_id = t.task_id AND a.phase != 'IMPLEMENTING'
+                WHERE a.task_id = t.task_id
+                  AND a.phase NOT IN ('IMPLEMENTING', 'SPEC_REVIEW', 'SPEC_WRITING')
            )
          ORDER BY t.task_id
          LIMIT 1
         """,
-        (repo_id, spec.spec_id, spec.spec_sha, task_id),
+        (repo_id, spec.spec_id, task_id, task_id),
     ).fetchone()
     return int(row["task_id"]) if row is not None else None
 
@@ -877,6 +884,7 @@ def cell_up(
     thread_env: Mapping[str, str],
     created: set[str],
     note: Callable[[str, str], None],
+    cap_add: Sequence[str] = (),
 ) -> None:
     """Bring a cell up: network, proxy, image, isolation asserts, worktree.
 
@@ -968,6 +976,7 @@ def cell_up(
         env=cell_env(proxy_ip, thread_env),
         gates_dir=gates_dir,
         state_volume=state,
+        cap_add=cap_add,
     )
     note("cell_up", f"{container} up, worktree at {tree_base[:8]}")
 
@@ -1023,6 +1032,67 @@ def cell_down(
                 False,
                 f"{kind} {name} survived — {done.stderr.strip()[:160]}",
             )
+
+
+# Prints a uid, then a `refused`/`wrote`/`missing` line per fixed path and
+# a `refused`/`wrote`/`skipped` line per `PATH` entry and its parent (§5.5).
+_BASH_PROBE_SCRIPT = f"""\
+id -u
+_fixed() {{
+  if [ ! -e "$1" ]; then echo "missing $1"
+  elif [ -w "$1" ]; then echo "wrote $1"
+  else echo "refused $1"
+  fi
+}}
+_onpath() {{
+  if [ ! -e "$1" ]; then echo "skipped $1"
+  elif [ -w "$1" ]; then echo "wrote $1"
+  else echo "refused $1"
+  fi
+}}
+_fixed /opt/saffron
+_fixed {implement.RUNNER}
+_fixed {implement.UNPRIVILEGED_BASH}
+_cli=$(readlink -f /opt/saffron/claude-code)
+_fixed "$_cli"
+_sdk=$({implement.PYTHON} -c 'import claude_agent_sdk, pathlib; print(pathlib.Path(claude_agent_sdk.__file__).parent)' 2>/dev/null)
+_fixed "$_sdk"
+_fixed "${{_sdk:+$(dirname "$_sdk")}}"
+_saved_ifs=$IFS
+IFS=:
+set -- $PATH
+IFS=$_saved_ifs
+for _dir in "$@"; do
+  _onpath "$_dir"
+  _onpath "$(dirname "$_dir")"
+done
+"""
+
+
+def assert_bash_is_unprivileged(container: str) -> None:
+    """Refuse a cell whose wrapper did not leave root, before any spec
+    session's Bash tool ever runs there (§5.5).
+
+    Raises `runtime.CellRuntimeError` unless the probe exits 0 and its first
+    line is a nonzero uid. Every later line must be `refused` or `skipped`,
+    at least six of them `refused`.
+    """
+    done = runtime.exec_(container, [implement.UNPRIVILEGED_BASH, _BASH_PROBE_SCRIPT])
+    lines = done.stdout.splitlines()
+    refusals = sum(1 for line in lines[1:] if line.startswith("refused "))
+    ok = (
+        done.returncode == 0
+        and bool(lines)
+        and lines[0].strip().isdigit()
+        and lines[0].strip() != "0"
+        and all(line.startswith(("refused ", "skipped ")) for line in lines[1:])
+        and refusals >= 6
+    )
+    if not ok:
+        raise runtime.CellRuntimeError(
+            "the unprivileged bash self-check did not leave root: "
+            f"exit {done.returncode}, {done.stdout!r}"
+        )
 
 
 class CriticPatchRejected(RuntimeError):
@@ -1288,7 +1358,8 @@ def _gate_cell_suite(
         return suite.against(CellTree(container, cwd=repo), baseline)
 
 
-def _probe_adequacy(
+def probe_findings(
+    targets: list[Finding],
     *,
     spec: CellSpec,
     repo: Path,
@@ -1299,32 +1370,30 @@ def _probe_adequacy(
     base_results: Sequence[GateResult],
     gates: dict[str, Path],
     patch: str,
-    reviews: list[review.LensReview],
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> list[dict]:
-    """Every anchored adequacy finding's vacuity probe, asked once each
-    (backlog item 117), in a Gate-only cell entered *after* REVIEW's own
-    critic cell is torn down — never inside it, the hole `SA-0087` closed.
-    `base_results` is the task's pre-turn baseline (b-19b255), and a kill
-    counts only against names `added_tests` reads from it and this run.
+    """Each finding in `targets` carries a probe, asked once per distinct
+    edit (backlog item 117) in a Gate-only cell, never a critic cell
+    (`SA-0087`). `base_results` is the task's pre-turn baseline (b-19b255),
+    and a kill counts only against names `added_tests` reads from it and
+    this run.
 
-    Decides each finding's `severity`/`probe_verdict` in place before
+    Decides each finding's `severity` and `probe_verdict` in place before
     returning, so the caller's later `ledger.record_findings` sees the
-    decided findings. Returns `probes.json`'s own list; writes nothing.
+    decided findings. Returns `probes.json`'s own list and writes nothing.
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
 
-    targets = review.adequacy_probes(reviews)
     if not targets:
         return []
     # Captured before anything is decided, or a promotion loses it.
     filed = {id(f): f.severity for f in targets}
     by_probe: dict[tuple[str, str, str], list[Finding]] = {}
     for f in targets:
-        assert f.probe is not None  # adequacy_probes already filtered this
+        assert f.probe is not None  # every caller filters to probed findings first
         by_probe.setdefault(review.probe_key(f.probe), []).append(f)
 
     entries: list[dict] = []
@@ -1447,6 +1516,41 @@ def _probe_adequacy(
                 break
             decide(p, result)
     return entries
+
+
+def _probe_adequacy(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    test_paths: Sequence[str],
+    base_results: Sequence[GateResult],
+    gates: dict[str, Path],
+    patch: str,
+    reviews: list[review.LensReview],
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> list[dict]:
+    """REVIEW's own caller of `probe_findings`, over its anchored adequacy
+    findings alone. Kept so REVIEW's call site, `tests/test_probe_cell.py`
+    and the stack-name checks in `tests/test_session.py` need no change.
+    """
+    return probe_findings(
+        review.adequacy_probes(reviews),
+        spec=spec,
+        repo=repo,
+        mirror=mirror,
+        gates_dir=gates_dir,
+        thread_env=thread_env,
+        test_paths=test_paths,
+        base_results=base_results,
+        gates=gates,
+        patch=patch,
+        created=created,
+        note=note,
+    )
 
 
 def _apply_criterion_probes(
@@ -1699,25 +1803,38 @@ def _drive_cell(
     except package.PackageError:
         origin_url = str(repo)
     repo_id = ledger.upsert_repo(repo.name, origin_url, str(mirror), policy_sha)
-    run_id = ledger.create_run(repo_id, spec.base_sha)
-    task_id = ledger.create_task(
-        run_id,
-        spec.spec_id,
-        spec.spec_sha,
-        branch=spec.branch,
-        budget_usd=spec.budget_usd,
-        # The spec-declared tier only: no diff exists yet for an `elevate_on`
-        # path to have matched, and there is no later write to correct it
-        # against (§5.6). `_suite` below computes the real, per-attempt
-        # effective tier from the diff it already has.
-        risk=spec.risk,
-        # The declaration these gates actually ran under, read above from the
-        # export at base_sha — never the working copy (§5.4, backlog item 16).
-        policy_sha=policy_sha,
-        # The prompt tree the cell was given, digested as authored — the
-        # third input beside spec_sha and policy_sha (§4.1).
-        prompt_sha=context.prompt_sha(),
-    )
+    if spec.task_id is not None:
+        # A stack batch's own task: read its run rather than minting one, and
+        # a task_id naming nothing raises before any cell comes up.
+        task_id = spec.task_id
+        run_id = ledger.task_run(task_id)
+        start_spend = ledger.task_spend(task_id)
+    else:
+        run_id = ledger.create_run(repo_id, spec.base_sha)
+        task_id = ledger.create_task(
+            run_id,
+            spec.spec_id,
+            spec.spec_sha,
+            branch=spec.branch,
+            budget_usd=spec.budget_usd,
+            # The spec-declared tier only: no diff exists yet for an `elevate_on`
+            # path to have matched, and there is no later write to correct it
+            # against (§5.6). `_suite` below computes the real, per-attempt
+            # effective tier from the diff it already has.
+            risk=spec.risk,
+            # The declaration these gates actually ran under, read above from the
+            # export at base_sha — never the working copy (§5.4, backlog item 16).
+            policy_sha=policy_sha,
+            # The prompt tree the cell was given, digested as authored — the
+            # third input beside spec_sha and policy_sha (§4.1).
+            prompt_sha=context.prompt_sha(),
+        )
+        start_spend = 0.0
+
+    # Recorded only where this cell's declaration differs from what the task
+    # is already on record for, a given task with an older one included.
+    if ledger.task_policy_sha(task_id) != policy_sha:
+        ledger.record_policy(task_id, policy_sha)
 
     # Only what this run reached the creation of can leak. `volume rm` on a
     # name that never existed also exits non-zero, so reporting every failure
@@ -2823,9 +2940,9 @@ def _drive_cell(
         # Read back, not reported: `spent` loses the walled turn — the raise
         # comes from outside it, past the `spent +=` — and loses the whole
         # tally when the window closed inside plan_checkpoint's frame. Every
-        # turn recorded its own attempt before the rate limit was raised, so
-        # the roll-up here is the figure that survived both.
-        spent_read_back = ledger.task_spend(task_id)
+        # turn recorded its own attempt before the rate limit fired, and the
+        # figure here also subtracts what this task already spent before this cell.
+        spent_read_back = ledger.task_spend(task_id) - start_spend
         resets_at, resets_at_unreadable = _resets_at_fields(stopped.resets_at)
         emit(
             TaskOutcome(
@@ -2847,6 +2964,7 @@ def _drive_cell(
             spent_usd=spent_read_back,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),
+            resets_at=resets_at,
         )
     except BaseException:
         # A run row left open is a run that reads as still going. Preflight

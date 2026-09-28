@@ -3,14 +3,15 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the thirteen kinds
+by `saffron/record/fold.py`, deletable at any time. Only the fifteen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
-to put in it. `stack_layers`, `end_reviews` and `baseline_names` are a tenth,
-an eleventh and a twelfth table, outside that count: `DESIGN.md` §4.1 does
+to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
+`qualifications` and `spec_reviews` are a tenth, an eleventh, a twelfth, a
+thirteenth and a fourteenth table, outside that count: `DESIGN.md` §4.1 does
 not list any of them.
 """
 
@@ -23,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from saffron.agents.findings import Finding
+from saffron.agents.findings import Finding, Severity
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, new_task_key
 
@@ -196,6 +197,34 @@ CREATE TABLE IF NOT EXISTS end_reviews (
     cost_usd REAL NOT NULL,
     error    TEXT,
     PRIMARY KEY (task_key, lens)
+);
+
+-- What the host decided of one review finding (`SA-0180`). Keyed on record
+-- keys, like `stack_layers`, so a fold into a fresh ledger places it.
+CREATE TABLE IF NOT EXISTS qualifications (
+    task_key      TEXT NOT NULL,
+    position      INTEGER NOT NULL,
+    lens          TEXT NOT NULL,
+    severity      TEXT NOT NULL,
+    file          TEXT NOT NULL,
+    line          INTEGER,
+    claim         TEXT NOT NULL,
+    probe_verdict TEXT,
+    outcome       TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    PRIMARY KEY (task_key, position)
+);
+
+-- One review of one spec inside a stack batch (`run_stack_batch`, ADR 7).
+-- Keyed on record keys, so a fold into a fresh ledger places it alone.
+CREATE TABLE IF NOT EXISTS spec_reviews (
+    task_key     TEXT NOT NULL,
+    n            INTEGER NOT NULL,
+    route        TEXT NOT NULL,
+    block        TEXT,
+    block_sha256 TEXT,
+    error        TEXT,
+    PRIMARY KEY (task_key, n)
 );
 
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
@@ -448,10 +477,12 @@ class Ledger:
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
         `fold_task` an upsert, and a no-op on a task with no row yet.
-        `stack_layers` and `end_reviews` are keyed on `key` itself, so both
-        deletes run first."""
+        `stack_layers`, `end_reviews`, `qualifications` and `spec_reviews`
+        are keyed on `key` itself, so all four deletes run first."""
         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM spec_reviews WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -532,6 +563,12 @@ class Ledger:
     def _finding_count(self, task_id: int) -> int:
         return self._db.execute(
             "SELECT COUNT(*) AS n FROM findings WHERE task_id = ?", (task_id,)
+        ).fetchone()["n"]
+
+    def _qualification_count(self, task_id: int) -> int:
+        key = self.record_key(task_id)
+        return self._db.execute(
+            "SELECT COUNT(*) AS n FROM qualifications WHERE task_key = ?", (key,)
         ).fetchone()["n"]
 
     def _finding_at(self, task_id: int, position: int) -> int | None:
@@ -703,6 +740,41 @@ class Ledger:
                 ),
             )
             return _inserted_id(cursor)
+        if fact.kind == "qualification":
+            self._db.execute(
+                "INSERT INTO qualifications (task_key, position, lens, severity, "
+                "file, line, claim, probe_verdict, outcome, reason) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["position"],
+                    payload["lens"],
+                    payload["severity"],
+                    payload["file"],
+                    payload["line"],
+                    payload["claim"],
+                    payload["probe_verdict"],
+                    payload["outcome"],
+                    payload["reason"],
+                ),
+            )
+            return None
+        if fact.kind == "spec_review":
+            # `n` comes straight from the payload, not recounted here, so
+            # `fold_task` keeps a dropped fact's numbering on the one that remains.
+            self._db.execute(
+                "INSERT INTO spec_reviews (task_key, n, route, block, "
+                "block_sha256, error) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["n"],
+                    payload["route"],
+                    payload["block"],
+                    payload["block_sha256"],
+                    payload["error"],
+                ),
+            )
+            return None
         if fact.kind == "rebuttal":
             finding_id = self._finding_at(task_id, payload["position"])
             if finding_id is None:
@@ -757,9 +829,9 @@ class Ledger:
         recorded against on an earlier night is still the one a re-queue or a
         done-state check must find.
 
-        Every task, not the newest one per key: `cell/session.py` mints a run
-        and a task on each invocation without consulting what exists, so one
-        key routinely holds many. This repo's own ledger carries ten tasks at
+        Every task, not the newest one per key: a `cell/session.py` call
+        with no `task_id` still mints a fresh run and task each time.
+        This repo's own ledger carries ten tasks at
         `SA-0013`/`ce08b1eb`, mixing `READY_FOR_REVIEW` with three `ORPHANED`.
         §4.2.1 asks whether *a* task at this `spec_sha` is done with the spec,
         and folding to the highest `task_id` answers a different question —
@@ -934,6 +1006,17 @@ class Ledger:
             if cursor.rowcount != 1:
                 raise ValueError(f"no run {run_id} to attach to batch {batch_id}")
 
+    def task_run(self, task_id: int) -> int:
+        """The `run_id` a task hangs from. Raises for a task that does not
+        exist, the same shape `attach_run_to_batch` refuses a bad `run_id`.
+        A caller's typo never reads back a spend of zero."""
+        row = self._db.execute(
+            "SELECT run_id FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no task {task_id} to read a run for")
+        return int(row["run_id"])
+
     def max_run_id(self) -> int:
         """The high-water mark on `runs.run_id`.
 
@@ -1088,8 +1171,9 @@ class Ledger:
     def open_attempt(self, task_id: int, phase: str | None = None) -> int:
         """One agent turn. The phase defaults to the state the task is in — the
         caller sets that at each phase boundary and would otherwise have to
-        track it again at every turn (§4.1). Only `replay`, which has no agent
-        and no phase to be in, passes one."""
+        track it again at every turn (§4.1). Only `replay` and the stack
+        batch's spec review pass one. `replay` has no agent or phase to be
+        in, and the review opens a phase the task's own state is not."""
         resolved = self._db.execute(
             """SELECT t.state AS state,
                       1 + COALESCE((SELECT MAX(a.n) FROM attempts a
@@ -1176,20 +1260,19 @@ class Ledger:
         )
 
     def task_policy_sha(self, task_id: int) -> str | None:
-        """What this task is currently on record as having run under — the
-        base_sha declaration `create_task` recorded, or whatever PACKAGE last
-        wrote over it with `record_policy`. PACKAGE reads this back to decide
-        whether a re-verification ran under a different declaration."""
+        """The declaration this task is on record as having run under. It is
+        what `create_task` recorded, or what `record_policy` last wrote over
+        it. PACKAGE reads it to decide whether re-verification ran under a
+        different declaration, and a cell given this task reads it at start."""
         row = self._db.execute(
             "SELECT policy_sha FROM tasks WHERE task_id = ?", (task_id,)
         ).fetchone()
         return row["policy_sha"] if row is not None else None
 
     def record_policy(self, task_id: int, policy_sha: str) -> None:
-        """PACKAGE's own write-back (§5.7, backlog item 16): issued only when
-        re-verification ran under a declaration different from the one this
-        task is on record for — never unconditionally, which would satisfy
-        the letter of "rewrites when it differs" while doing it every time."""
+        """Written by PACKAGE when re-verification ran (§5.7, backlog item 16),
+        and by a cell given a task recorded under another declaration. Each
+        writes only when the declaration differs from the one on record."""
         self._commit_and_append(
             self._build_fact(task_id, "task_policy", {"policy_sha": policy_sha})
         )
@@ -1270,6 +1353,39 @@ class Ledger:
         )
         self._commit_and_append(fact)
 
+    def record_spec_review(
+        self,
+        task_id: int,
+        *,
+        route: str,
+        block: str | None,
+        block_sha256: str | None,
+        error: str | None,
+    ) -> None:
+        """One review of one spec inside a stack batch (ADR 7). Numbered one
+        more than the task's own `spec_reviews` rows, from 1, and filed under
+        the task's own key like `record_stack_layer`'s row."""
+        n = (
+            1
+            + self._db.execute(
+                "SELECT COUNT(*) AS n FROM spec_reviews sr "
+                "JOIN tasks t ON t.record_key = sr.task_key WHERE t.task_id = ?",
+                (task_id,),
+            ).fetchone()["n"]
+        )
+        fact = self._build_fact(
+            task_id,
+            "spec_review",
+            {
+                "n": n,
+                "route": route,
+                "block": block,
+                "block_sha256": block_sha256,
+                "error": error,
+            },
+        )
+        self._commit_and_append(fact)
+
     def record_end_review(
         self,
         task_id: int,
@@ -1287,6 +1403,36 @@ class Ledger:
             task_id,
             "end_review",
             {"lens": lens, "status": status, "cost_usd": cost_usd, "error": error},
+        )
+        self._commit_and_append(fact)
+
+    def record_qualification(
+        self,
+        task_id: int,
+        *,
+        finding: Finding,
+        filed: Severity,
+        outcome: str,
+        reason: str,
+    ) -> None:
+        """One host decision on one review finding (`SA-0180`,
+        `saffron/qualify.py`). `filed` is the severity recorded here, the
+        finding's own left untouched. Position counts within the task, one
+        more than its qualifications so far."""
+        fact = self._build_fact(
+            task_id,
+            "qualification",
+            {
+                "position": self._qualification_count(task_id) + 1,
+                "lens": finding.lens,
+                "severity": filed,
+                "file": finding.file,
+                "line": finding.line,
+                "claim": finding.claim,
+                "probe_verdict": finding.probe_verdict,
+                "outcome": outcome,
+                "reason": reason,
+            },
         )
         self._commit_and_append(fact)
 

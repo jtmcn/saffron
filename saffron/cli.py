@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
-from saffron import end_review, preflight
+from saffron import end_review, preflight, spec_review
 from saffron.agents import context
 from saffron.batch import run_batch, run_stack_batch
 from saffron.cell import runtime
@@ -33,7 +33,7 @@ from saffron.record.fold import UnreadableTask, fold
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
 from saffron.repos import mirror as git_mirror
-from saffron.repos.policy import PolicyError, load_policy
+from saffron.repos.policy import Policy, PolicyError, load_policy
 from saffron.scheduler import (
     Candidate,
     GhRunner,
@@ -529,7 +529,8 @@ def _stack_runner(
     built from the fetch, never from `_resolve_stacked_on`. A predecessor
     branch the origin no longer has raises `package_phase.ParentGone`, and
     this never catches it: an unstacked cell is not this function's call to
-    make."""
+    make. It hands `run_task` the candidate's own `task_id`, never the
+    predecessor's, so a review's task is the one this cell runs on."""
 
     def run(
         candidate: Candidate, predecessor: Candidate | None
@@ -553,6 +554,7 @@ def _stack_runner(
             out_dir=out_dir,
             token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
             handoff=handoff,
+            task_id=candidate.task_id,
         )
 
     return run
@@ -657,6 +659,118 @@ def _stack_end_review(
             message = f"{type(exc).__name__}: {exc}"
             print(f"end review: {message}")
             return _end_review_error_reviews(ledger, batch_key, message)
+
+    return run
+
+
+# `SA-0181`'s three account lines, verbatim, with no tool path: ADR 7
+# keeps a repo's own tools out of core's spec prompts.
+_SPEC_SESSION_ACCOUNT_LINES = (
+    "Your Bash runs as an account that can read /work but cannot write it.\n"
+    "To run anything that writes, clone the tree first: "
+    "git clone -q /work /tmp/w && cd /tmp/w\n"
+    "Call a tool by its full path when its name does not resolve.\n"
+)
+
+
+def _spec_review_policy(exported: Path) -> Policy:
+    """`load_policy` at a spec review's export, or an empty `Policy` when
+    the export holds no `policy.yaml`. The same absence `_protected_paths`
+    reads for a repo that declares nothing (§5.6). A `policy.yaml` present
+    but broken still raises, so the review is recorded as errored.
+    """
+    if not (exported / ".saffron" / "policy.yaml").is_file():
+        return Policy()
+    policy, _policy_sha = load_policy(exported)
+    return policy
+
+
+def _stack_review(
+    *, pinned: PinnedBase, repo: Path, out_dir: Path
+) -> Callable[[Candidate, Candidate | None], spec_review.SpecReviewSession]:
+    """`run_stack_batch`'s `review` adapter (ADR 7). Given a layer, it
+    fetches that spec's branch fresh and seeds the cell there. Given
+    `None`, it seeds the cell at the pinned `base_sha`. The system prompt and
+    gates always come from `base_sha`'s own export, never a layer's head.
+    """
+
+    def run(
+        candidate: Candidate, layer: Candidate | None
+    ) -> spec_review.SpecReviewSession:
+        if layer is None:
+            head = pinned.base_sha
+        else:
+            branch = _branch(layer.spec.id)
+            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+
+        # The export always reads `base_sha`, never a layer's head (ADR 7).
+        exported = git_mirror.export_saffron_dir(
+            pinned.mirror, pinned.base_sha, out_dir / "spec-review" / candidate.spec.id
+        )
+        policy = _spec_review_policy(exported)
+
+        fields = end_review.LayerFields(
+            spec_id=candidate.spec.id,
+            branch=_branch(candidate.spec.id),
+            pr_url="",
+            base=head,
+            head=head,
+            known="",
+        )
+        system_prompt = spec_review.spec_review_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        prompt = (
+            f"spec: .saffron/specs/{candidate.path.name}\n"
+            f"base: {head}\n"
+            "This tree is a snapshot of the base your criteria will run "
+            "against.\n"
+            f"{_SPEC_SESSION_ACCOUNT_LINES}"
+        )
+        agent = partial(
+            implement.run_agent,
+            spec_id=candidate.spec.id,
+            timeout_s=spec_review.SPEC_REVIEW_TIMEOUT_S,
+        )
+        with end_review.layer_cell(
+            fields,
+            repo=repo,
+            mirror=pinned.mirror,
+            gates_dir=exported,
+            thread_env=policy.thread_env,
+            spec_session=True,
+        ) as container:
+            return spec_review.run_spec_review(
+                container, system_prompt=system_prompt, prompt=prompt, agent=agent
+            )
+
+    return run
+
+
+def _stack_mint(
+    *, pinned: PinnedBase, repo: Path, ledger: Ledger
+) -> Callable[[Candidate], int]:
+    """`run_stack_batch`'s `mint` adapter (ADR 7, `SA-0155`). Every call
+    opens a fresh run at the pinned `base_sha` and a fresh task on it,
+    whatever `task_id` the candidate already carries. The repo row is
+    upserted at the pinned url, never looked up, so a repo's first night
+    still gets one.
+    """
+
+    def run(candidate: Candidate) -> int:
+        repo_id = ledger.upsert_repo(
+            repo.name, pinned.url, str(pinned.mirror), policy_sha=None
+        )
+        run_id = ledger.create_run(repo_id, pinned.base_sha)
+        return ledger.create_task(
+            run_id,
+            candidate.spec.id,
+            candidate.spec_sha,
+            _branch(candidate.spec.id),
+            risk=candidate.spec.risk,
+            budget_usd=candidate.spec.budget_usd,
+            prompt_sha=context.prompt_sha(),
+        )
 
     return run
 
@@ -1006,6 +1120,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # `None` until the scan resolves under `--stack`: a night whose readiness
     # or scan fails runs no end review at all.
     stack_end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None
+    # Same: neither runs a spec review nor mints a task for one until then.
+    stack_review: (
+        Callable[[Candidate, Candidate | None], spec_review.SpecReviewSession] | None
+    ) = None
+    stack_mint: Callable[[Candidate], int] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1060,6 +1179,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 stack_end_review = _stack_end_review(
                     pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
                 )
+                stack_review = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
+                stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`
                 # callable reads the latest answer, not the opening one.
@@ -1103,6 +1224,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 readiness_check=_readiness_or_raise,
                 reserve_usd=reserve_usd or 0.0,
                 end_review=stack_end_review,
+                review=stack_review,
+                mint=stack_mint,
             )
         else:
             stop = run_batch(

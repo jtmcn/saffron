@@ -51,6 +51,8 @@ forbidden:
 budget_usd: 25
 max_attempts: 3
 max_turns: 190
+pending_symbols:
+  - saffron/spec_review.py::SPEC_REVIEW_SESSION_USD
 acceptance:
   - claim: >-
       `spec_review_route` routes a read `revise` when it holds a `blocker`

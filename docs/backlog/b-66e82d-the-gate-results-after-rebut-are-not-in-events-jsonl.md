@@ -35,3 +35,7 @@ Each gate result after REBUT is an event in `events.jsonl`, and the
   `events.jsonl` carries a status and no summary. `revert` has nine skip paths,
   and nothing said which one `SA-0144`'s head took (b-76f08d). Repair turns
   read `prose.py` and `integrity.py` to learn what failed.
+- 2026-09-27: recurred in the spec loop's run 19. `SA-0147`'s attempt 1 read
+  `2 new failures -> repair`. The log named only `prose` and `terms` as
+  failing, and both failed at base too. So the log never said which new hits
+  the repair was sent to fix. The repair went green on attempt 2.

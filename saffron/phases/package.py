@@ -1022,11 +1022,11 @@ def push_unpackaged_work(
     recreated the loss it exists to prevent.
 
     **The branch is `saffron/<SPEC-ID>`**, the same name `package()` uses,
-    pushed with the same force-with-lease `push_with_lease` gives PACKAGE —
-    but only when the remote branch is absent or already holds a sha another
-    of this spec's ledger rows recorded as pushed (`Ledger.tasks_by_spec_id`),
-    and never while one of those rows is `READY_FOR_REVIEW`: its draft pull
-    request's head is not ours to replace. Otherwise nothing is pushed.
+    pushed with the same force-with-lease `push_with_lease` gives PACKAGE. It
+    pushes only when the remote branch is absent or already holds a sha this
+    spec recorded as pushed, this outcome's own task included
+    (`Ledger.tasks_by_spec_id`). It never pushes while another of those rows
+    is `READY_FOR_REVIEW`. Otherwise nothing is pushed.
 
     **Only a diff `scope` passes**, judged by the policy at `tree_base` — the
     one bound PACKAGE's own gates enforce before anything leaves the host.
@@ -1094,21 +1094,15 @@ def push_unpackaged_work(
     except (PackageError, OSError, ValueError, KeyError) as exc:
         return _refuse(str(exc))
 
-    others = (
-        [
-            row
-            for row in ledger.tasks_by_spec_id(repo_id, spec.id)
-            if row["task_id"] != outcome.task_id
-        ]
-        if repo_id is not None
-        else []
-    )
+    task_rows = ledger.tasks_by_spec_id(repo_id, spec.id) if repo_id is not None else []
+    others = [row for row in task_rows if row["task_id"] != outcome.task_id]
     if any(row["state"] == "READY_FOR_REVIEW" for row in others):
         return _refuse(
             f"a pull request from {spec.id} is awaiting review on {branch} — "
             "not ours to replace"
         )
-    recorded = {row["pushed_sha"] for row in others if row["pushed_sha"]}
+    # A same-task rerun replaces what this task pushed earlier.
+    recorded = {row["pushed_sha"] for row in task_rows if row["pushed_sha"]}
     if current and current not in recorded:
         return _refuse(
             f"{branch} already points at {current[:12]}, which this spec never "

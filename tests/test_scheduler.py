@@ -267,6 +267,30 @@ def test_a_spec_done_at_this_sha_is_not_queued(tmp_path, ledger, state):
     assert refusals == []
 
 
+def test_a_spec_withheld_at_this_sha_is_not_queued_until_it_is_edited(tmp_path, ledger):
+    """`SPEC_WITHHELD` learned something about the spec's text, so it is not
+    queued again at the same `spec_sha` (`DONE_STATES`). An edit changes the
+    `spec_sha`, and the spec is queued fresh, with no task to resume."""
+    directory = _spec_dir(tmp_path)
+    _write(directory, "a.md", id="TE-1")
+    repo_id = _repo(ledger)
+    _, spec_sha = load_spec(directory / "a.md")
+    _task_at(ledger, repo_id, spec_id="TE-1", spec_sha=spec_sha, state="SPEC_WITHHELD")
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert candidates == []
+    assert refusals == []
+
+    _write(directory, "a.md", id="TE-1", sha_salt="edited")
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert len(candidates) == 1
+    assert candidates[0].spec.id == "TE-1"
+    assert candidates[0].task_id is None
+
+
 @pytest.mark.parametrize("state", sorted(REQUEUE_STATES))
 def test_a_spec_that_should_requeue_resumes_its_task_id(tmp_path, ledger, state):
     directory = _spec_dir(tmp_path)
@@ -2201,10 +2225,10 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-27, a hundred-and-fourth time: `SA-0169` split off
-    `SA-0181`, `SA-0150` split off `SA-0182`, and `SA-0152` split off `SA-0183`,
-    each on size. `SA-0178` is still the one candidate, and every new spec is
-    refused on its parent, as the rest of b-792ab2's chain is.
+    """Re-measured 2026-09-27, a hundred-and-fifth time: the spec loop's run 19
+    retired twelve specs, `SA-0178` through `SA-0156` (#539 to #553), to
+    `done/`. `SA-0182`'s parent `SA-0156` is among them, so `SA-0182` is the
+    one candidate. The rest of b-792ab2's chain is still refused on a parent.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -2803,34 +2827,22 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0178"]
+    assert [c.spec.id for c in candidates] == ["SA-0182"]
     assert [r.path.name[:7] for r in refusals] == [
-        "SA-0147",
-        "SA-0148",
-        "SA-0149",
         "SA-0150",
         "SA-0151",
         "SA-0152",
-        "SA-0155",
-        "SA-0156",
         "SA-0160",
         "SA-0161",
         "SA-0162",
         "SA-0164",
         "SA-0165",
         "SA-0167",
-        "SA-0168",
-        "SA-0169",
         "SA-0170",
         "SA-0173",
         "SA-0174",
-        "SA-0175",
         "SA-0176",
         "SA-0177",
-        "SA-0179",
-        "SA-0180",
-        "SA-0181",
-        "SA-0182",
         "SA-0183",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the

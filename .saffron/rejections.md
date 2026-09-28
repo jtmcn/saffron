@@ -1111,3 +1111,92 @@ taken by hand, so no critic ran on it and it has no lines here.
   result and a false cause for a `None` read.
   **Bucket 1**, `prose`. **Open:** item b-43061c. **Landed:** a review commit
   on #530.
+
+## 2026-09-27, `SA-0178` to `SA-0156` (the spec loop's run 19, #539 to #553)
+
+- `SA-0178` (#539): a test restated `_tests_result` from `test_session.py`.
+  **Bucket 2**, one source. **Landed:** a review commit on #539.
+- `SA-0178` (#539): `probe_findings`'s docstring kept REVIEW's order for a
+  function any caller now uses.
+  **Bucket 3**, contract. **Landed:** a review commit on #539.
+- `SA-0179` (#540): `filed` was typed `str` beside the `Severity` type the
+  module already imports.
+  **Bucket 2**, one source. **Landed:** a review commit on #540.
+- `SA-0179` (#540): a schema comment gave a reason that did not follow.
+  **Bucket 3**, contract. **Landed:** a review commit on #540.
+- `SA-0180` (#541): the pool assertion left out `task_key`, so a blank-layer
+  probe survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #541.
+- `SA-0180` (#541): `_qualify_range` took a prebuilt diff and anchored
+  findings, not the base and head the spec's seam named. No witness sees a
+  helper's shape.
+  **Bucket 3**, contract. **Landed:** a review commit on #541.
+- `SA-0180` (#541): `probe_key` was restated twice, and a docstring gave the
+  spec's scope as its reason.
+  **Bucket 2**, one source. **Landed:** a review commit on #541.
+- `SA-0147` (#542): the fixture recorded in-cell rows after the copies,
+  against the spec's arrangement, so a read after the last copy survived.
+  Nothing drove an unanchored in-cell adequacy finding either.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #542.
+- `SA-0147` (#542): two docstrings misstated what `qualify` reads and groups.
+  **Bucket 3**, contract. **Landed:** a review commit on #542.
+- `SA-0148` (#543): the `started` comment still said a spec starts once a
+  night, and a witness docstring called an abort a miss.
+  **Bucket 2**, `CONTEXT.md`'s vocabulary. **Landed:** a review commit on
+  #543.
+- `SA-0149` (#544): a spec review that raised left its spec out of `missed`,
+  so the dependents of a raised spec still ran.
+  **Bucket 3**, correctness. **Landed:** a review commit on #544.
+- `SA-0149` (#544): four witness gaps. Cost was asserted on two rows, one row
+  errored on its first element, a string was iterated per character, and
+  padding went unasserted.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #544.
+- `SA-0149` (#544): the read restated `Severity`'s members as a tuple literal.
+  **Bucket 2**, one source. **Landed:** a review commit on #544.
+- `SA-0149` (#544): an em dash in a docstring passed `prose`, hidden by a code
+  span wrapped across a line break.
+  **Bucket 1**, `prose`. **Open:** item b-ec607a. **Landed:** a review commit.
+- `SA-0155` (#545): four witness gaps. The breaker tripped before a raising
+  mint, a turn count survived, two blocks went unpinned, and the fold
+  compared rows through the same `_apply`. The spec's stripped block was also
+  kept padded.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #545.
+- `SA-0155` (#545): `block` and `block_sha256` were repeated at eleven `_error`
+  calls.
+  **Bucket 2**, one source. **Landed:** a review commit on #545.
+- `SA-0168` (#546): `tasks_by_spec`'s docstring called a minting call
+  "unstacked", against the **Stacked branch** entry.
+  **Bucket 2**, `CONTEXT.md`'s vocabulary. **Landed:** a review commit on
+  #546.
+- `SA-0168` (#546): the pushed-sha set was restated by a lookup and a
+  conditional add.
+  **Bucket 2**, one source. **Landed:** a review commit on #546.
+- `SA-0181` (#549): three witness blockers and four concerns. The prefix was
+  compared to its own constant, a capability default survived, and seven
+  mutants in all survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #549.
+- `SA-0181` (#549): three comments cited §5.5 for a §5.1 rule or misnamed who
+  reads the shell prefix.
+  **Bucket 3**, contract. **Landed:** a review commit on #549.
+- `SA-0169` (#550): the cell-marked test the spec's notes asked for was never
+  written, and no gate or lens noticed.
+  **Bucket 1**, a size floor. **Open:** item b-20043f. **Landed:** a review
+  commit on #550.
+- `SA-0169` (#550): a comment called the self-check "the root-left check".
+  **Bucket 2**, `CONTEXT.md`'s vocabulary. **Landed:** a review commit on
+  #550.
+- `SA-0175` (#551): the criterion 4 witness never asserted the `{ceilings}`
+  block, and its removal survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #551.
+- `SA-0175` (#551): `_validate` restated `rebut._validate`, and test setup was
+  repeated across three witnesses.
+  **Bucket 2**, one source. **Landed:** a review commit on #551.
+- `SA-0175` (#551): two comments gave false reasons, one of them REBUT's
+  `HEAD` reason copied into a spec review.
+  **Bucket 3**, contract. **Landed:** a review commit on #551.
+- `SA-0156` (#553): the mint witness never asserted a run's repo, so a
+  hardcoded repo id passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #553.
+- `SA-0156` (#553): the spec session's account lines sit in a `cli.py`
+  constant, not in core's prompts.
+  **Bucket 2**, one source. **Open:** item b-146869.

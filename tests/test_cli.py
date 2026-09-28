@@ -8,13 +8,15 @@ import inspect
 import json
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from saffron import cli, end_review, intake, preflight, task
+from saffron import cli, end_review, intake, preflight, spec_review, task
+from saffron.agents import context
 from saffron.cell import session
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
@@ -24,6 +26,7 @@ from saffron.phases import implement, package
 from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.record.memory import MemoryRecord
 from saffron.repos.mirror import GitError
+from saffron.repos.policy import Policy, load_policy
 from saffron.scheduler import Candidate, Refusal
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
@@ -3971,6 +3974,74 @@ def test_the_stack_runner_hands_each_task_its_predecessors_fetched_branch(
     ledger.close()
 
 
+def test_only_the_stack_runner_hands_run_task_the_candidates_task(
+    tmp_path, monkeypatch
+):
+    """`_stack_runner` forwards each candidate's own `task_id`, never a
+    predecessor's, so its cell runs on the task its own review opened.
+    `_batch_runner` forwards none: that departure is its own backlog item."""
+    monkeypatch.setattr(package, "fetch_parent_branch", lambda *_a, **_k: "d" * 40)
+
+    recorded: list[int | None] = []
+
+    def _recording_run_task(
+        spec,
+        spec_sha,
+        *,
+        ceilings,
+        base,
+        repo_id,
+        repo,
+        ledger,
+        out_dir,
+        token,
+        handoff=None,
+        task_id=None,
+        emit=None,
+    ):
+        recorded.append(task_id)
+        return CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    monkeypatch.setattr(cli, "run_task", _recording_run_task)
+
+    def _candidate(spec_id, task_id):
+        return Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.Spec(id=spec_id, title="t", type="chore"),
+            spec_sha="s" * 64,
+            task_id=task_id,
+        )
+
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    ledger = Ledger(tmp_path / "l.db")
+
+    stack_runner = cli._stack_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+    stack_runner(_candidate("SY-1", 7), None)
+    stack_runner(_candidate("SY-2", 8), _candidate("SY-1", 3))
+
+    batch_runner = cli._batch_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+    batch_runner(_candidate("SY-5", 5))
+    ledger.close()
+
+    assert recorded == [7, 8, None]
+
+
 def test_the_night_cannot_start_without_a_readiness_gate():
     """The loop used to bind a permissive stub, so a caller who simply forgot
     the argument got a vacuous §4.4 step 1 and a night that could start on an
@@ -4583,3 +4654,462 @@ def test_a_budget_that_can_buy_nothing_is_refused(value):
     reported success."""
     with pytest.raises(SystemExit):
         main(["batch", "--budget", value])
+
+
+def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_path):
+    """`cli._stack_mint` mints a fresh run and task on every call, at the
+    pinned base, whatever `task_id` the candidate already carries. The
+    repo row is upserted at the pinned url, and an older task's run and
+    state are left alone."""
+    ledger = Ledger(tmp_path / "l.db")
+    # Another repo first, so the upserted one's id is not 1.
+    ledger.upsert_repo("other", "https://github.com/o/other.git", "/other.git", None)
+    repo_id = ledger.upsert_repo(
+        "old", "https://github.com/o/r.git", "/old.git", policy_sha="p" * 64
+    )
+    older_run = ledger.create_run(repo_id, "e" * 40)
+    older_task = ledger.create_task(older_run, "SY-1", "s" * 64, "saffron/SY-1")
+    ledger.set_task_state(older_task, "RATE_LIMITED")
+
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    mint = cli._stack_mint(pinned=pinned, repo=tmp_path / "checkout", ledger=ledger)
+
+    sy1 = intake.Spec(
+        id="SY-1", title="t", type="chore", budget_usd=7.5, risk="elevated"
+    )
+    sy2 = intake.Spec(id="SY-2", title="t", type="chore")
+
+    def _candidate(spec, task_id):
+        return Candidate(
+            path=Path(f"{spec.id}.md"), spec=spec, spec_sha="c" * 64, task_id=task_id
+        )
+
+    minted_1 = mint(_candidate(sy1, older_task))
+    minted_2 = mint(_candidate(sy1, None))
+    minted_3 = mint(_candidate(sy2, None))
+
+    assert len({minted_1, minted_2, minted_3}) == 3
+    assert older_task not in {minted_1, minted_2, minted_3}
+
+    def _row(task_id):
+        return ledger._db.execute(
+            "SELECT t.spec_id, t.spec_sha, t.branch, t.state, t.risk, "
+            "t.budget_usd, t.policy_sha, t.prompt_sha, t.run_id, "
+            "r.base_sha, r.batch_id, r.repo_id FROM tasks t "
+            "JOIN runs r ON r.run_id = t.run_id WHERE t.task_id = ?",
+            (task_id,),
+        ).fetchone()
+
+    row1, row2, row3 = _row(minted_1), _row(minted_2), _row(minted_3)
+    for row, spec_id in ((row1, "SY-1"), (row2, "SY-1"), (row3, "SY-2")):
+        assert row["spec_id"] == spec_id
+        assert row["spec_sha"] == "c" * 64
+        assert row["branch"] == f"saffron/{spec_id}"
+        assert row["state"] == "QUEUED"
+        assert row["policy_sha"] is None
+        assert row["prompt_sha"] == context.prompt_sha()
+        assert row["base_sha"] == "a" * 40
+        assert row["batch_id"] is None
+        assert row["repo_id"] == repo_id
+    assert row1["budget_usd"] == 7.5 and row1["risk"] == "elevated"
+    assert row2["budget_usd"] == 7.5 and row2["risk"] == "elevated"
+    assert row3["budget_usd"] == 12.0 and row3["risk"] == "standard"
+    assert row1["run_id"] != row2["run_id"]
+
+    older_row = ledger._db.execute(
+        "SELECT state, run_id FROM tasks WHERE task_id = ?", (older_task,)
+    ).fetchone()
+    assert older_row["state"] == "RATE_LIMITED"
+    assert older_row["run_id"] == older_run
+
+    repo_row = ledger._db.execute(
+        "SELECT name, mirror_path, policy_sha FROM repos WHERE repo_id = ?",
+        (repo_id,),
+    ).fetchone()
+    assert repo_row["name"] == "checkout"
+    assert repo_row["mirror_path"] == str(pinned.mirror)
+    assert repo_row["policy_sha"] == "p" * 64
+    ledger.close()
+
+    fresh_ledger = Ledger(tmp_path / "l2.db")
+    fresh_mint = cli._stack_mint(
+        pinned=pinned, repo=tmp_path / "checkout2", ledger=fresh_ledger
+    )
+    fresh_task = fresh_mint(_candidate(sy1, None))
+    fresh_row = fresh_ledger._db.execute(
+        "SELECT r.repo_id FROM tasks t JOIN runs r ON r.run_id = t.run_id "
+        "WHERE t.task_id = ?",
+        (fresh_task,),
+    ).fetchone()
+    fresh_repo = fresh_ledger._db.execute(
+        "SELECT origin, policy_sha FROM repos WHERE repo_id = ?",
+        (fresh_row["repo_id"],),
+    ).fetchone()
+    assert fresh_repo["origin"] == pinned.url
+    assert fresh_repo["policy_sha"] is None
+    fresh_ledger.close()
+
+
+def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_review` seeds its cell at a layer's fetched head, or at
+    the pinned `base_sha` with no layer. It always reads its prompt and
+    gates from the pinned `base_sha`'s own export, never a layer's head,
+    the operator's checkout, or the mirror's `HEAD`."""
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron").mkdir()
+    (mirror / ".saffron" / "README").write_text("bare\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "bare")
+    bare_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
+    )
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
+    )
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
+
+    repo = tmp_path / "checkout"
+    (repo / ".saffron").mkdir(parents=True)
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
+    )
+
+    out_dir = tmp_path / "out"
+
+    fetch_calls: list[tuple] = []
+
+    def _fake_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append((mirror_arg, url_arg, branch))
+        if branch == "saffron/SY-8":
+            raise package.ParentGone("gone")
+        return "d" * 40
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
+
+    cell_up_calls: list[dict] = []
+
+    def _fake_cell_up(
+        *,
+        repo,
+        mirror,
+        tree_base,
+        branch,
+        network,
+        volume,
+        state,
+        container,
+        gates_dir,
+        thread_env,
+        created,
+        note,
+        cap_add=None,
+    ):
+        cell_up_calls.append(
+            {
+                "repo": repo,
+                "mirror": mirror,
+                "tree_base": tree_base,
+                "branch": branch,
+                "gates_dir": gates_dir,
+                "thread_env": dict(thread_env),
+                "container": container,
+                "cap_add": cap_add,
+            }
+        )
+        created.add(container)
+        note("cell_up", "cell up")
+
+    cell_down_calls: list[dict] = []
+
+    def _fake_cell_down(*, network, volume, state, container, created, note):
+        cell_down_calls.append({"container": container})
+        note("cell_down", True, "cell down")
+
+    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+
+    unpriv_calls: list[str] = []
+    monkeypatch.setattr(
+        session,
+        "assert_bash_is_unprivileged",
+        lambda container: unpriv_calls.append(container),
+    )
+
+    real_layer_cell = end_review.layer_cell
+    layer_cell_calls: list[dict] = []
+
+    @contextmanager
+    def _spy_layer_cell(fields, **kwargs):
+        layer_cell_calls.append({"fields": fields, "kwargs": kwargs})
+        with real_layer_cell(fields, **kwargs) as container:
+            yield container
+
+    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
+
+    agent_calls: list[dict] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        agent_calls.append({"spec_id": spec_id, "timeout_s": timeout_s})
+        return implement.AttemptResult(
+            session_id="sid",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.0,
+            rate_limit_status="rejected",
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    review_calls: list[dict] = []
+    sentinels: list[object] = []
+
+    def _fake_run_spec_review(container, *, system_prompt, prompt, agent):
+        agent(container, prompt="x", options={})
+        sentinel = object()
+        sentinels.append(sentinel)
+        review_calls.append(
+            {"container": container, "system_prompt": system_prompt, "prompt": prompt}
+        )
+        return sentinel
+
+    monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
+
+    def _spec_path(spec_id):
+        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
+
+    def _candidate(spec_id, *, depends_on=None):
+        return Candidate(
+            path=_spec_path(spec_id),
+            spec=intake.Spec(
+                id=spec_id, title="t", type="chore", depends_on=depends_on or []
+            ),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+    review = cli._stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
+
+    assert not (out_dir / "spec-review").exists()
+
+    sy1 = _candidate("SY-1")
+    sy2 = _candidate("SY-2", depends_on=["SY-9"])
+    layer7 = _candidate("SY-7")
+    layer8 = _candidate("SY-8")
+
+    result1 = review(sy1, None)
+    result2 = review(sy2, layer7)
+    with pytest.raises(package.ParentGone):
+        review(_candidate("SY-3"), layer8)
+
+    assert result1 is sentinels[0]
+    assert result2 is sentinels[1]
+
+    assert fetch_calls == [
+        (mirror, pinned.url, "saffron/SY-7"),
+        (mirror, pinned.url, "saffron/SY-8"),
+    ]
+
+    assert len(cell_up_calls) == 2
+    assert len(cell_down_calls) == 2
+    assert [c["tree_base"] for c in cell_up_calls] == [base_sha, "d" * 40]
+    for c in cell_up_calls:
+        assert c["repo"] == repo
+        assert c["mirror"] == mirror
+        assert c["thread_env"] == {"X": "base"}
+        assert c["cap_add"] == implement.UNPRIVILEGED_BASH_CAPS
+    assert cell_up_calls[0]["gates_dir"] == out_dir / "spec-review" / "SY-1"
+    assert cell_up_calls[1]["gates_dir"] == out_dir / "spec-review" / "SY-2"
+    for c in cell_up_calls:
+        policy_text = (c["gates_dir"] / ".saffron" / "policy.yaml").read_text()
+        assert "X: base" in policy_text
+
+    assert len(unpriv_calls) == 2
+    assert unpriv_calls == [c["container"] for c in cell_up_calls]
+
+    assert len(layer_cell_calls) == 2
+    assert all(call["kwargs"]["spec_session"] is True for call in layer_cell_calls)
+    assert [call["fields"].branch for call in layer_cell_calls] == [
+        "saffron/SY-1",
+        "saffron/SY-2",
+    ]
+
+    assert len(review_calls) == 2
+    for i, spec_id in enumerate(("SY-1", "SY-2")):
+        exported = out_dir / "spec-review" / spec_id
+        policy, _ = load_policy(exported)
+        expected_prompt = spec_review.spec_review_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        assert review_calls[i]["system_prompt"] == expected_prompt
+        assert "`base/**`" in expected_prompt
+        assert "head/**" not in expected_prompt
+        assert "checkout/**" not in expected_prompt
+        prompt = review_calls[i]["prompt"]
+        assert f".saffron/specs/{spec_id}-x.md" in prompt
+        # The seeded tree, not the pinned `base_sha`. The two differ for
+        # SY-2, whose layer's fetched head is `"d" * 40`.
+        assert f"base: {cell_up_calls[i]['tree_base']}" in prompt
+        assert "is a snapshot of the base" in prompt
+        assert str(tmp_path) not in prompt
+        for banned in ("/opt/", "pytest", "uv run", "make check", ".claude", "://"):
+            assert banned not in prompt
+        for line in (
+            "Your Bash runs as an account that can read /work but cannot write it.",
+            "To run anything that writes, clone the tree first: "
+            "git clone -q /work /tmp/w && cd /tmp/w",
+            "Call a tool by its full path when its name does not resolve.",
+        ):
+            assert line in prompt.splitlines()
+        assert review_calls[i]["container"] == cell_up_calls[i]["container"]
+
+    assert len(agent_calls) == 2
+    assert [c["spec_id"] for c in agent_calls] == ["SY-1", "SY-2"]
+    assert spec_review.SPEC_REVIEW_TIMEOUT_S == 1800
+    assert all(c["timeout_s"] == spec_review.SPEC_REVIEW_TIMEOUT_S for c in agent_calls)
+
+    pinned_bare = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=bare_sha
+    )
+    review_bare = cli._stack_review(pinned=pinned_bare, repo=repo, out_dir=out_dir)
+    review_bare(_candidate("SY-4"), None)
+
+    expected_bare_prompt = spec_review.spec_review_system_prompt(
+        Policy(), prompts_dir=context.PROMPTS_DIR
+    )
+    assert review_calls[-1]["system_prompt"] == expected_bare_prompt
+    assert cell_up_calls[-1]["thread_env"] == {}
+
+
+def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
+    tmp_path, monkeypatch
+):
+    """`saffron batch --stack` builds `cli._stack_review` and
+    `cli._stack_mint` once each, only after readiness pins a base, and
+    passes them to `run_stack_batch` as `review` and `mint`. Neither is
+    built when readiness fails or `--stack` is absent."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    review_calls: list[dict] = []
+    mint_calls: list[dict] = []
+    review_sentinel = object()
+    mint_sentinel = object()
+
+    def _fake_stack_review(**kwargs):
+        review_calls.append(kwargs)
+        return review_sentinel
+
+    def _fake_stack_mint(**kwargs):
+        mint_calls.append(kwargs)
+        return mint_sentinel
+
+    monkeypatch.setattr(cli, "_stack_review", _fake_stack_review)
+    monkeypatch.setattr(cli, "_stack_mint", _fake_stack_mint)
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    export_calls: list[tuple] = []
+
+    def _fake_export(mirror, sha, dest):
+        export_calls.append((mirror, sha, dest))
+        return dest
+
+    monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _fake_export)
+
+    stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        stack_batch_calls.append({"ledger": ledger, **kwargs})
+        return "DRAINED"
+
+    plain_batch_calls: list[dict] = []
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        plain_batch_calls.append({"ledger": ledger, **kwargs})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+
+    # Case 1: readiness passes, `--stack`.
+    _readiness_passes(monkeypatch)
+    home1 = tmp_path / "home1"
+    assert main(["--home", str(home1), "batch", "--stack"]) == 0
+
+    assert len(review_calls) == 1
+    assert len(mint_calls) == 1
+    pinned = task.PinnedBase(
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+    assert review_calls[0]["pinned"] == pinned
+    assert mint_calls[0]["pinned"] == pinned
+    assert review_calls[0]["repo"] == tmp_path.resolve()
+    assert mint_calls[0]["repo"] == tmp_path.resolve()
+    assert review_calls[0]["out_dir"] == home1 / "batches" / "v0"
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["ledger"] is mint_calls[0]["ledger"]
+    assert stack_batch_calls[0]["review"] is review_sentinel
+    assert stack_batch_calls[0]["mint"] is mint_sentinel
+    assert export_calls == []
+    assert plain_batch_calls == []
+
+    # Case 2: readiness fails.
+    review_calls.clear()
+    mint_calls.clear()
+    stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home2 = tmp_path / "home2"
+    main(["--home", str(home2), "batch", "--stack"])
+
+    assert review_calls == []
+    assert mint_calls == []
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["review"] is None
+    assert stack_batch_calls[0]["mint"] is None
+
+    # Case 3: `batch` without `--stack`.
+    review_calls.clear()
+    mint_calls.clear()
+    plain_batch_calls.clear()
+    _readiness_passes(monkeypatch)
+    home3 = tmp_path / "home3"
+    assert main(["--home", str(home3), "batch"]) == 0
+
+    assert review_calls == []
+    assert mint_calls == []
+    assert len(plain_batch_calls) == 1

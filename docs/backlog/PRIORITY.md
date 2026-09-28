@@ -168,6 +168,12 @@ the ledger still refused its child.
 gate reads a flag error in captured output as its own, so `revert` skips every
 witness for a new CLI flag.
 
+**Placed 2026-09-27**, from the spec loop's run 19: **b-bf0c91**,
+**b-efdf1f**, **b-43a061**, then **b-877e93**. The turn wall cut 6 of 14
+IMPLEMENT sessions. Two plans were refused on a size nothing priced before the
+cell, one of them on a token count read as lines. A cell stacked on a merged
+parent's stale branch and ran the old gates.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -281,6 +287,12 @@ and not processes. The last two are the loop's tools reading stale state.
 **b-fab381**. The first is text in a string literal that no `prose` rule reads.
 The second is `snapshot` stranding a chain behind a merged parent.
 
+**Placed 2026-09-27**, from the spec loop's run 19: **b-20043f**,
+**b-468378**, **b-4acb0e**, then **b-e202e6**. The first is work a spec's
+notes asked for that no check reads. The second is a local hook that fails
+on a stack branch. The last two are seams in the spec session's cell and
+its budget.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -309,6 +321,11 @@ compares the index to the records in that direction. It ranks here, beside
 **Placed 2026-09-26**, from the spec loop's run 18: **b-615466**, **b-50a704**,
 **b-17d0d5**, then **b-830357**. Each is a stack batch seam that review kept
 as written, or a witness too weak at one boundary.
+
+**Placed 2026-09-27**, from the spec loop's run 19: **b-1e9a7a**,
+**b-146869**, **b-ec607a**, **b-ea3bb5**, **b-a5d4af**, **b-6d3bcf**,
+**b-36d318**, then **b-0e3528**. Each is a seam review kept as written, stale
+text a split left, or a defect in the loop's own tools.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",

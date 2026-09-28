@@ -69,6 +69,30 @@ RUN echo 'not json' | /opt/saffron/python /opt/saffron/agent_runner.py \
       | grep -q '"type": "error"' \
       || { echo "agent_runner.py did not emit a Saffron event" >&2; exit 1; }
 
+# A spec session's Bash runs as this account, never as root (§5.5). Its
+# global git config trusts /work so a clone owned by it is not "dubious".
+RUN groupadd --system unprivileged \
+    && useradd --system --gid unprivileged --create-home \
+         --home-dir /home/unprivileged --shell /usr/sbin/nologin unprivileged \
+    && printf '[safe]\n\tdirectory = /work\n\tdirectory = /work/.git\n' \
+         > /home/unprivileged/.gitconfig \
+    && chown unprivileged:unprivileged /home/unprivileged/.gitconfig
+
+COPY images/unprivileged.sh /opt/saffron/unprivileged
+RUN chmod 0755 /opt/saffron/unprivileged
+
+# Asserts the wrapper drops root, the account cannot write the runner, and
+# the CLI still names the env var that routes Bash through the wrapper (§5.5).
+RUN set -eu; \
+    uid=$(/opt/saffron/unprivileged 'id -u'); \
+    want=$(id -u unprivileged); \
+    [ "$uid" = "$want" ] && [ "$uid" != "0" ] \
+      || { echo "the wrapper did not drop to the unprivileged account" >&2; exit 1; }; \
+    /opt/saffron/unprivileged 'test -w /opt/saffron/agent_runner.py' \
+      && { echo "the unprivileged account can write the runner" >&2; exit 1; }; \
+    grep -aqF CLAUDE_CODE_SHELL_PREFIX /opt/saffron/claude-code \
+      || { echo "the CLI binary lost CLAUDE_CODE_SHELL_PREFIX" >&2; exit 1; }
+
 WORKDIR /work
 
 # Every line a version the tool printed about itself (§5.1.2). One substitution per
