@@ -31,3 +31,5 @@ The `spec_review` fact records the text's `n` and `spec_sha` it read.
 - 2026-09-26: the operator skipped the loop's step 1b in run 18, since the
   spec chain in #508 reviewed all nine specs. No fact says so, and the loop's
   driver cannot tell a reviewed spec from an unreviewed one.
+- 2026-09-27: the loop skipped step 1b again in run 19, since the spec chain
+  reviewed every queued spec before the loop. No fact records the skip.
