@@ -62,6 +62,7 @@ from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
 from saffron.phases.review import anchored_concerns
+from saffron.reconcile import GhRunner, reconcile
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
 from saffron.repos.mirror import (
@@ -81,6 +82,10 @@ from saffron.scheduler import (
     protected_touch_refusal,
     retirement_refusal,
 )
+
+# `_resolve_stacked_on`'s accepted states once a `gh` reconciles the parent.
+# `CHANGES_REQUESTED` joins only on that path (`DESIGN.md` §4.2.1).
+_STACKABLE_ON_RECONCILE = DEPENDENCY_WAITING_STATES | frozenset({"CHANGES_REQUESTED"})
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -181,6 +186,7 @@ def _resolve_stacked_on(
     url: str,
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
+    gh: GhRunner | None = None,
 ) -> tuple[str | None, str | None]:
     """The tree sha `CellSpec.stacked_on` should carry and the branch name
     `package()`'s stacking parameter should carry, or `(None, None)`
@@ -237,11 +243,54 @@ def _resolve_stacked_on(
     if repo_id is None or not depends_on:
         return None, None
     parent_id = depends_on[0]
-    rows = ledger.tasks_by_spec_id(repo_id, parent_id)
-    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
-    if not waiting:
-        return None, None
-    newest = waiting[-1]
+    if gh is None:
+        rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+        waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
+        if not waiting:
+            return None, None
+        newest = waiting[-1]
+    else:
+        # Narrowed to this one spec, and read only after it comes back
+        # (`b-877e93`), so a stale merge is never stacked on by accident.
+        reconciled = reconcile(ledger, repo_id, gh=gh, spec_id=parent_id)
+        rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+        if not rows:
+            return None, None
+        # The absolute newest task decides, whatever its state. No fallback
+        # to an older waiting row, ever (`DESIGN.md` §4.2.1).
+        newest_task = rows[-1]
+        if newest_task["state"] not in _STACKABLE_ON_RECONCILE:
+            emit(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="unstacked",
+                    detail=f"{parent_id}'s newest task is {newest_task['state']}",
+                )
+            )
+            return None, None
+        if newest_task["task_id"] in reconciled.unasked:
+            emit(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="gh_unreachable",
+                    detail=(
+                        f"GitHub could not be asked whether {parent_id}'s "
+                        "pull request merged"
+                    ),
+                )
+            )
+        if newest_task["state"] == "CHANGES_REQUESTED":
+            emit(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="changes_requested",
+                    detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
+                )
+            )
+        newest = newest_task
     branch = newest["branch"]
     # Refused here rather than left to the fetch: a row that evidences no push
     # has no branch worth fetching, and "branch None is gone" would send an
@@ -397,6 +446,9 @@ def run_task(
     # that task instead of minting a fresh one (§4.2.1).
     task_id: int | None = None,
     emit: Callable[[Event], None] | None = None,
+    # `cli._run_cell`'s reason for a `gh`: it reaches `_resolve_stacked_on`,
+    # which reconciles the parent before it stacks on one (`b-877e93`).
+    gh: GhRunner | None = None,
 ) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package the result if the cell came back reviewable.
@@ -467,6 +519,7 @@ def run_task(
             url=base.url,
             spec_id=spec.id,
             emit=emit,
+            gh=gh,
         )
     # Which tree a run was cut from is not recoverable from the exit code, and
     # a stacked run that surprises an operator is one they cannot diagnose.

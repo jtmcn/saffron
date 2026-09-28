@@ -703,6 +703,229 @@ def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
     assert "unstacked: parent branch saffron/SY-9000 is gone" in printed
 
 
+def _gh_by_url(urls_asked, answers):
+    """A `gh` double keyed by the exact pull request url in `argv`, the shape
+    `b-877e93`'s three witnesses share: each records every url it is asked
+    about and answers only the ones a caller declared."""
+
+    def fake_gh(argv):
+        url = argv[3]
+        urls_asked.append(url)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(answers[url]), "")
+
+    return fake_gh
+
+
+def _new_parent_preflights(out_dir, spec_id, parent_id, before):
+    """The `Preflight` events one `_capture_cell_spec` call added, naming
+    `parent_id`. Never the ones an earlier call in the same test already
+    wrote to the same `events.jsonl`."""
+    events = read_log(out_dir / spec_id)[before:]
+    return [
+        event
+        for event in events
+        if isinstance(event, Preflight) and parent_id in event.detail
+    ]
+
+
+def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_merged_or_closed(
+    tmp_path, monkeypatch, capsys
+):
+    """`b-877e93`: `saffron cell` reconciles the parent it stacks on, so a
+    merge or a close nobody scanned for yet still cuts the child loose.
+    The newest task decides, even over an older row still waiting. Only
+    the parent's own tasks are ever asked about."""
+    repo = _local_origin(tmp_path)
+    _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    older_pr = "https://github.com/o/r/pull/1"
+    newer_pr = "https://github.com/o/r/pull/2"
+    sibling_pr = "https://github.com/o/r/pull/3"
+    older = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="ORPHANED", pr_url=older_pr
+    )
+    newer = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
+    )
+    # A different spec whose id starts with the parent's: the filter must
+    # match `SY-9000` exactly, never by prefix.
+    sibling = _seed_task(
+        ledger, repo_id, spec_id="SY-90001", state="READY_FOR_REVIEW", pr_url=sibling_pr
+    )
+
+    urls_asked: list[str] = []
+    answers: dict[str, dict] = {}
+    monkeypatch.setattr("saffron.cli.run_gh", _gh_by_url(urls_asked, answers))
+
+    def state_of(task_id):
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["state"]
+
+    def run_and_check(expected_state, expected_urls):
+        urls_asked.clear()
+        before = len(read_log(tmp_path / "out" / "SY-2"))
+        cell_spec, _printed = _capture_cell_spec(
+            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+        )
+        assert cell_spec.stacked_on is None
+        assert urls_asked == expected_urls
+        assert state_of(newer) == expected_state
+        lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+        assert len(lines) == 1
+        assert lines[0].step == "unstacked"
+        assert expected_state in lines[0].detail
+        for other in {"MERGED", "REJECTED", "CHANGES_REQUESTED"} - {expected_state}:
+            assert other not in lines[0].detail
+
+    # 1. The newer task is READY_FOR_REVIEW, and gh answers merged.
+    answers[newer_pr] = {"state": "MERGED", "reviewDecision": None}
+    run_and_check("MERGED", [newer_pr])
+
+    # 2. Nothing is reset, so the newer task is already MERGED, not asked.
+    run_and_check("MERGED", [])
+
+    # 3. The newer task is APPROVED, and gh answers merged.
+    ledger.set_task_state(newer, "APPROVED")
+    run_and_check("MERGED", [newer_pr])
+
+    # 4. The newer task is READY_FOR_REVIEW, and gh answers CLOSED.
+    ledger.set_task_state(newer, "READY_FOR_REVIEW")
+    answers[newer_pr] = {"state": "CLOSED", "reviewDecision": None}
+    run_and_check("REJECTED", [newer_pr])
+
+    # 5. Both tasks are READY_FOR_REVIEW. gh answers open for the older
+    # one and merged for the newer one.
+    ledger.set_task_state(older, "READY_FOR_REVIEW")
+    ledger.set_task_state(newer, "READY_FOR_REVIEW")
+    answers[older_pr] = {"state": "OPEN", "reviewDecision": None}
+    answers[newer_pr] = {"state": "MERGED", "reviewDecision": None}
+    run_and_check("MERGED", [older_pr, newer_pr])
+
+    assert state_of(older) == "READY_FOR_REVIEW"
+    assert state_of(sibling) == "READY_FOR_REVIEW"
+    ledger.close()
+
+
+def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once(
+    tmp_path, monkeypatch, capsys
+):
+    """`b-877e93`: a `gh` that cannot answer must not refuse an attended run.
+    It leaves the parent's task exactly as it was, and says, once, that
+    GitHub could not be asked, whatever state that row keeps."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    older_pr = "https://github.com/o/r/pull/1"
+    newer_pr = "https://github.com/o/r/pull/2"
+    older = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=older_pr
+    )
+    newer = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
+    )
+    ledger.record_push(older, "1" * 40)
+    ledger.record_push(newer, "2" * 40)
+
+    def run_once(before):
+        cell_spec, _printed = _capture_cell_spec(
+            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+        )
+        assert cell_spec.stacked_on == head
+        return _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+
+    def exit_one(_argv):
+        return subprocess.CompletedProcess(_argv, 1, "", "boom")
+
+    def cannot_start(_argv):
+        raise FileNotFoundError("gh")
+
+    def answers_undecided(_argv):
+        return subprocess.CompletedProcess(
+            _argv, 0, '{"state": "OPEN", "reviewDecision": "REVIEW_REQUIRED"}', ""
+        )
+
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", exit_one)
+    lines = run_once(before)
+    assert len(lines) == 1
+    assert lines[0].step != "unstacked"
+
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", cannot_start)
+    lines = run_once(before)
+    assert len(lines) == 1
+    assert lines[0].step != "unstacked"
+
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", answers_undecided)
+    lines = run_once(before)
+    assert lines == []
+
+    ledger.set_task_state(newer, "CHANGES_REQUESTED")
+    before = len(read_log(tmp_path / "out" / "SY-2"))
+    monkeypatch.setattr("saffron.cli.run_gh", exit_one)
+    lines = run_once(before)
+    assert len(lines) == 2
+    assert all(line.step != "unstacked" for line in lines)
+    assert sum("CHANGES_REQUESTED" in line.detail for line in lines) == 1
+    ledger.close()
+
+
+def test_saffron_cell_stacks_on_a_changes_requested_parent_and_names_the_state(
+    tmp_path, monkeypatch, capsys
+):
+    """`b-877e93`: a `CHANGES_REQUESTED` parent still keeps its child
+    stacked on the parent's branch, where the review fixes land. It says so
+    once, whether this reconcile moved the task there or the ledger
+    already held it there."""
+    repo = _local_origin(tmp_path)
+    head = _push_parent_branch(repo, "saffron/SY-9000")
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "seeded.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    parent_pr = "https://github.com/o/r/pull/1"
+    parent = _seed_task(
+        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=parent_pr
+    )
+    ledger.record_push(parent, "1" * 40)
+
+    def fake_gh(_argv):
+        return subprocess.CompletedProcess(
+            _argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
+        )
+
+    monkeypatch.setattr("saffron.cli.run_gh", fake_gh)
+
+    for _ in range(2):
+        before = len(read_log(tmp_path / "out" / "SY-2"))
+        cell_spec, _printed = _capture_cell_spec(
+            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+        )
+        assert cell_spec.stacked_on == head
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (parent,)
+        ).fetchone()
+        assert row["state"] == "CHANGES_REQUESTED"
+        lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
+        assert len(lines) == 1
+        assert lines[0].step != "unstacked"
+        assert "CHANGES_REQUESTED" in lines[0].detail
+
+    ledger.close()
+
+
 def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
     tmp_path, monkeypatch, capsys
 ):

@@ -455,6 +455,9 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # one whose stdout is the night's only record — says it too.
     ceilings = _ceilings(args, spec)
 
+    # No scan reconciles ahead of one attended cell (b-877e93). Guarded the
+    # way `_resolve_queue` guards its own `reconcile` call.
+    gh_failures: list[str] = []
     outcome = run_task(
         spec,
         spec_sha,
@@ -465,6 +468,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         ledger=ledger,
         out_dir=out_dir,
         token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        gh=_guarded_gh(gh_failures),
     )
     if isinstance(outcome, Refused):
         # `run_task` already printed the refused line, and no task exists
