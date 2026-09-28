@@ -484,8 +484,8 @@ read a diff, and are sessions the host starts).
 
 **Verdict**: The critic's own answer on a finding at REBUT: `confirmed`, `withdrawn` or
 `contradicted`. `contradicted` means the rebuttal and the finding each rest on a line of the
-spec, and the two lines disagree. The host reads one whose quotes it cannot find in that
-spec as `confirmed`.
+spec, and the two lines disagree. The host reads one as `confirmed` when a quote is missing, is not in that spec,
+or equals the other.
 
 **Adjudication**: The operator's agree-or-disagree with a finding. Distinct from
 the critic's verdict, and the basis of the critic-ROI question.

@@ -4,7 +4,7 @@ title: A rebuttal that quotes one spec line against another wins, so the lens wi
 type: feature
 priority: 1
 depends_on: [SA-0190]
-estimated_lines: 376
+estimated_lines: 426
 touches:
   - saffron/phases/rebut.py
   - saffron/report/pr_body.py
@@ -52,25 +52,27 @@ acceptance:
       text the session was shown once every run of whitespace in both is
       collapsed to one space, and the two quotes differ. The verdict keeps both
       quotes as the lens gave them. `rebut_state`'s line counts it apart from
-      the confirmed blockers, and never as withdrawn. The line carries the
-      unkept-fix suffix beside that count when a fix was claimed and no commit
-      was made.
+      the confirmed blockers, and never as withdrawn. That count takes every
+      `contradicted` verdict, whether the implementer argued the blocker or
+      claimed a fix. The line carries the unkept-fix suffix beside that count
+      when a fix was claimed and no commit was made.
     witness: tests/test_rebut.py::test_a_blocker_argued_from_one_spec_line_against_another_is_contradicted_and_counted_apart
   - claim: >-
       A `contradicted` verdict fails the host's check in each of four ways. Its
       rebuttal quote is not in the spec text the session was shown, even where
       the rebuttal's own argument holds it. Its finding quote matches a spec
-      line only when case is ignored. A quote is whitespace alone. The two
-      quotes are the same text once whitespace is collapsed. Each is read as
-      `confirmed`, never `withdrawn`. `rebuttal.json` records the failure
-      against the lens that gave it, with the finding number, the reason and
-      both quotes. The rebuttal quote is checked first.
+      line only when case is ignored. A quote on either side is whitespace
+      alone. The two quotes are the same text once whitespace is collapsed.
+      Each is read as `confirmed`, never `withdrawn`, whether the first lens
+      or a later one gave it. `rebuttal.json` records the failure against the
+      lens that gave it, with the finding number, the check's reason and both
+      quotes. The rebuttal quote is checked first, and equality last.
     witness: tests/test_rebut.py::test_a_contradicted_verdict_whose_quotes_fail_the_check_is_read_as_confirmed_and_recorded
   - claim: >-
       A `contradicted` verdict missing a quote fails the host's check like a
       quote not found, so the task still reaches `READY_FOR_REVIEW`. That holds
       for an absent `rebuttal_quote`, an absent `finding_quote`, a null
-      `finding_quote` and an empty `rebuttal_quote`. Each is read as
+      `finding_quote`, an empty `rebuttal_quote` and an empty `finding_quote`. Each is read as
       `confirmed`, and `rebuttal.json` records the failure, with the reason
       naming the missing side. The lens records no error. A verdict value
       outside `confirmed`, `withdrawn` and `contradicted` is still not the
@@ -183,10 +185,11 @@ Give the verdict session a third answer, and have the host check it.
    - The two collapsed quotes are equal. The reason is
      `the two quotes are the same spec text`.
 3. **A failed check.** Replace the verdict with a `confirmed` one carrying
-   the same `finding` and `reason`, and both quote fields `None`.
-   `LensVerdicts` gains `quote_failures`, a list defaulting to empty. Append
-   one entry per failed verdict: a dict with keys `finding`, `reason`,
-   `rebuttal_quote` and `finding_quote`, the quotes as the lens gave them.
+   the same `finding` and the lens's own `reason`, and both quote fields
+   `None`. `LensVerdicts` gains `quote_failures`, a list defaulting to empty.
+   Append one entry per failed verdict: a dict with keys `finding`, `reason`,
+   `rebuttal_quote` and `finding_quote`. Its `reason` is the check's reason
+   from step 2, never the lens's. Its quotes are as the lens gave them.
    An absent quote is recorded as `None`.
    `as_dict` writes it under the lens's entry as `quote_failures`. A passed
    check leaves the verdict as the lens gave it, quotes included.
@@ -278,7 +281,7 @@ The resolver stacks on no row when the newest task
   is outside the waiting states.
 ```
 
-**Criterion 1's witness** runs twice over that spec text. Its rebuttal
+**Criterion 1's witness** runs three times over that spec text. Its rebuttal
 quote is the second line on one line, with a single space where the text
 wraps. Its finding quote is the first line with a leading space, a tab in
 place of the space after `MERGED`, and a trailing newline.
@@ -300,12 +303,26 @@ place of the space after `MERGED`, and a trailing newline.
    1 blocker(s) confirmed after the rebuttal, 1 on spec lines that contradict each other, 1 argued — recorded disagreement, yours to adjudicate (a fix was claimed for some of them and no commit was made)
    ```
 
-**Criterion 2's witness** has two argued blockers. Blocker 1 is a
-correctness blocker its lens withdraws. Blocker 2 is a contract blocker, and
-its lens answers `contradicted`. The contract lens runs after the
-correctness one, so a check that reads only the first lens fails. Blocker
-2's argument text holds the case (a) rebuttal quote word for word. Five
-rows, one per case.
+3. Blockers 1 and 2 are correctness blockers, both argued, and their lens
+   withdraws both. Blocker 3 is an adequacy blocker answered `fixed`, and
+   its lens answers `contradicted` with the same quotes. HEAD moved. So K is
+   1 and A is 2, and the contradicted blocker was never argued. The line is
+   exactly this.
+
+   ```
+   0 blocker(s) confirmed after the rebuttal, 1 on spec lines that contradict each other, 2 argued — recorded disagreement, yours to adjudicate
+   ```
+
+Every run asserts `quote_failures` empty for every lens in `as_dict`.
+
+**Criterion 2's witness** has two argued blockers, a correctness one
+numbered 1 and a contract one numbered 2. The correctness lens runs first.
+In every row but (f), the correctness lens withdraws blocker 1, and the
+contract lens answers `contradicted` on blocker 2. In row (f) the two
+swap, so the correctness lens gives the failing verdict and the contract
+lens withdraws. A check that reads only the first lens, or only the last,
+fails a row. Both arguments hold the case (a) rebuttal quote word for
+word. Eight rows, one per case.
 
 - (a) The rebuttal quote is not in the spec text. The reason is the
   rebuttal's.
@@ -316,26 +333,33 @@ rows, one per case.
 - (d) The rebuttal quote is a space, a newline and a tab. The reason is the
   rebuttal's.
 - (e) Neither quote is in the spec text. The reason is the rebuttal's.
+- (f) Row (a)'s quotes, on the correctness lens. The reason is the
+  rebuttal's.
+- (g) Both quotes are the same text, and it is not in the spec. The reason
+  is the rebuttal's, so equality is checked last.
+- (h) The rebuttal quote is valid, and the finding quote is a space and a
+  tab. The reason is the finding's.
 
-Each row asserts four things. The state is `READY_FOR_REVIEW`. The contract
+Each row asserts four things. The state is `READY_FOR_REVIEW`. The failing
 lens's verdicts equal one `confirmed` `Verdict` with the lens's reason and
-no quotes. The correctness lens's verdicts are unchanged. In `as_dict`, the
-correctness entry's `quote_failures` is empty. The contract entry's equals
-one dict with that row's finding, reason and quotes. The line is exactly
-this.
+no quotes. The other lens's verdicts are unchanged. In `as_dict`, keyed by
+lens, the other entry's `quote_failures` is empty. The failing entry's
+equals one dict with that row's finding, the check's reason and the quotes.
+The line is exactly this.
 
 ```
 1 blocker(s) confirmed after the rebuttal, 2 argued — recorded disagreement, yours to adjudicate
 ```
 
-**Criterion 3's witness** runs five rows through `_run` over the shared
-spec text, each with one argued correctness blocker. The first four give a
+**Criterion 3's witness** runs six rows through `_run` over the shared
+spec text, each with one argued correctness blocker. The first five give a
 `contradicted` verdict whose other quote is valid.
 
 - (a) No `rebuttal_quote` key. The reason is the rebuttal's.
 - (b) No `finding_quote` key. The reason is the finding's.
 - (c) `finding_quote` is `None`. The reason is the finding's.
 - (d) `rebuttal_quote` is the empty string. The reason is the rebuttal's.
+- (e) `finding_quote` is the empty string. The reason is the finding's.
 
 Each of these asserts five things. The state is `READY_FOR_REVIEW`. The
 lens's error is `None`. Its verdicts equal one `confirmed` `Verdict` with
@@ -347,16 +371,22 @@ one dict with the finding, the reason and both quotes, an absent one as
 1 blocker(s) confirmed after the rebuttal, 1 argued — recorded disagreement, yours to adjudicate
 ```
 
-The fifth row gives the verdict value `overruled`. It asserts the state
+The sixth row gives the verdict value `overruled`. It asserts the state
 `REBUTTING`, the lens's verdicts empty, its error set, and `why` exactly
 `['correctness'] produced no verdict — the rebuttal is unjudged`.
 
 **Criterion 4's witness** gives blocker 1 an argued rebuttal and a
-`contradicted` verdict with reason `the two lines disagree`. Its rebuttal
-quote is `The resolver stacks on no row outside the waiting states.` Its
-finding quote is ``Only a `MERGED` | `REJECTED` newest task unstacks a
-child.`` That pipe proves the quote passes through `_cell`. Blocker 2 is
-argued and `confirmed`, with reason `still wrong`. The witness asserts that
+`contradicted` verdict. Its reason, rebuttal quote and finding quote are
+these three lines, in order.
+
+```
+the two lines disagree | both hold
+The resolver stacks on no row outside the waiting states.
+Only a `MERGED` | `REJECTED` newest task unstacks a child.
+```
+
+The pipes in the reason and the quote prove the whole cell passes through
+`_cell`. Blocker 2 is argued and `confirmed`, with reason `still wrong`. The witness asserts that
 the rows starting `| 1 ` and `| 2 ` equal a list of two whole lines, built
 by hand in the test. Both rows name the `correctness` lens, because
 `_finding` defaults it (`tests/test_report.py:702-713`).
@@ -410,27 +440,40 @@ bullets and the `reason` bullet as they stand. Their text is the base's.
 both prompts for an output block. Both files are forbidden, so keep those
 phrases, and add no output block.
 
-**Wrong versions these witnesses must kill.** Each one below failed a
-prototype's witnesses on 2026-09-28. Each witness also failed with the
-prototype's source reverted to the base.
+**Wrong versions these witnesses must kill.** On 2026-09-28 each version
+below marked (ran) was applied to a prototype, and the prototype's
+witnesses failed it. The rest were not run. Each witness also failed with
+the prototype's source reverted to the base.
 
-- A check that compares text without collapsing whitespace.
-- A check that ignores case.
-- A check against the whole system prompt, or the rebuttal, not `spec_body`.
-- An empty quote accepted because the empty string is in every text.
-- Two equal quotes accepted.
-- The finding quote checked before the rebuttal quote.
-- A failed check read as `withdrawn`, or left `contradicted`.
-- A failed check that records nothing, or records it on the wrong lens.
-- A check that reads only the first lens's verdicts.
-- A `contradicted` verdict with a missing or null quote that errors the lens.
-- A missing quote recorded under the other side's reason.
-- A verdict value outside the three accepted.
-- A line that folds the contradicted count into the confirmed one.
-- A contradicted-only set whose line says every blocker was withdrawn.
-- A line that drops the unkept-fix suffix.
-- A table cell built outside `_cell`.
-- `_confirmed_with` left counting `confirmed` alone.
+- (ran) A check that compares text without collapsing whitespace.
+- (ran) A check that ignores case.
+- (ran) A check against `spec_body` joined with the rebuttal.
+- A check against the whole system prompt.
+- (ran) An empty rebuttal quote accepted, and apart from it an empty
+  finding quote accepted.
+- (ran) Two equal quotes accepted.
+- (ran) The finding quote checked before the rebuttal quote.
+- (ran) Equality checked before either quote is found.
+- (ran) A failed check read as `withdrawn`, or left `contradicted`.
+- (ran) A failed check that records nothing.
+- A failed check recorded on the wrong lens.
+- (ran) A check that reads only the first lens's verdicts, or only the last.
+- (ran) A `contradicted` verdict missing a quote that errors the lens.
+- (ran) A missing quote recorded under the other side's reason.
+- (ran) A verdict value outside the three accepted.
+- (ran) A line that drops the contradicted count, so a contradicted-only set
+  says every blocker was withdrawn.
+- (ran) A line whose contradicted count is the argued count.
+- A line that counts only contradicted blockers the implementer argued.
+- (ran) A line that drops the unkept-fix suffix.
+- (ran) A table cell built outside `_cell`, or a reason appended after it.
+- (ran) `_confirmed_with` left counting `confirmed` alone.
+
+**The schema is unmeasured live.** The two quote fields are optional, so
+they are the first properties any `output_format` schema here leaves
+unrequired. The prototype ran on doubles only. No live verdict session
+answered this schema before this spec, so this cell's own REBUT is the
+first live run.
 
 **The `prose` gate** reads the prompts and every new comment. The pinned
 prompt text above passes it. Write no new comment or docstring with an em
@@ -439,8 +482,8 @@ words.
 
 **Size.** `size` is advisory here: no touched path is in `elevate_on`, and
 the spec is `standard`. A prototype with all six new witnesses, counted by
-`size_gate`, came to 1505 tokens against the `feature` ceiling of 3000.
-`estimated_lines` is those measured 1505 tokens over four, with no overrun
-added. `driver.py check` applies its hand-estimate overrun on top and prices
+`size_gate`, came to 1705 tokens against the `feature` ceiling of 3000.
+The review's added rows moved it from 1505. `estimated_lines` is those
+measured 1705 tokens over four, with no overrun added. `driver.py check` applies its hand-estimate overrun on top and prices
 it at 81%. That counts the overrun twice (item b-b0a187). About a third of
 the prototype is `saffron/` and the prompts, and the rest is tests.
