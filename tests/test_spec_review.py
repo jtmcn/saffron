@@ -228,7 +228,7 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
                     }
                 )
             ),
-            "run",
+            "revise",
         ),
         (
             _session(
@@ -386,6 +386,72 @@ def test_a_spec_review_routes_on_the_severities_in_its_last_json_block(monkeypat
         _block({"findings": [{**finding, "severity": "blocker", "fixes": "rewrite"}]})
     )
     assert sr.spec_review_route(sr.read_spec_review(patched)) == "escalate"
+
+
+def test_a_build_or_witness_blocker_and_a_witness_concern_route_to_a_revision(
+    monkeypatch,
+):
+    """`spec_review_route`'s new `revise` outcome: a blocker whose `fixes`
+    is every one `build` or `witness`, or a lone `concern` tagged
+    `witness`. A blocker with any other tag, present anywhere, still
+    escalates. A concern or a note tagged anything else still runs."""
+    from saffron import spec_review as sr
+
+    def _finding(severity: str, fixes, **over) -> dict:
+        finding = {
+            "severity": severity,
+            "claim": "x",
+            "criterion": 1,
+            "file": "a.py",
+            "line": 1,
+        }
+        if fixes != "__none__":
+            finding["fixes"] = fixes
+        finding.update(over)
+        return finding
+
+    def _b(fixes="__none__", **over) -> dict:
+        return _finding("blocker", fixes, **over)
+
+    def _c(fixes, **over) -> dict:
+        return _finding("concern", fixes, **over)
+
+    def _route(findings, **session_kwargs):
+        session = _session(_block({"findings": findings}), **session_kwargs)
+        return sr.spec_review_route(sr.read_spec_review(session))
+
+    assert _route([_b("build")]) == "revise"
+    assert _route([_b("witness")]) == "revise"
+    assert _route([_b("build"), _b("witness")]) == "revise"
+    assert _route([_b("build"), _b("scope")]) == "escalate"
+    assert _route([_b("scope"), _b("witness")]) == "escalate"
+    assert _route([_b("witness"), _b(None)]) == "escalate"
+    assert _route([_b("build"), _b()]) == "escalate"
+
+    monkeypatch.setattr(sr, "SPEC_REVIEW_TAGS", (*sr.SPEC_REVIEW_TAGS, "rewrite"))
+    assert _route([_b("rewrite")]) == "escalate"
+
+    assert _route([_c("witness")]) == "revise"
+    assert _route([_c("build")]) == "run"
+    assert _route([_c("scope")]) == "run"
+    assert _route([_c(None)]) == "run"
+    assert _route([_c(None, claim="Unmeasured: criterion 2's arrangement")]) == "run"
+    assert _route([_finding("note", "witness")]) == "run"
+
+    assert _route([_c("witness"), _b("build")]) == "revise"
+    assert _route([_c("witness"), _b("scope")]) == "escalate"
+    assert _route([_b(None), _c("witness")]) == "escalate"
+    assert _route([_b("build"), _c(None), _finding("note", "__none__")]) == "revise"
+    assert _route([_b("witness"), _c("scope")]) == "revise"
+    assert (
+        _route([_c("witness"), _c("scope"), _finding("note", "__none__")]) == "revise"
+    )
+    assert _route([_c("witness"), _c("__none__")]) == "revise"
+
+    assert _route([_b("build")], resets_at=1893456000) == "wait"
+    assert _route([_c("witness")], resets_at=1893456000) == "wait"
+    assert _route([_b("build")], error="boom") == "error"
+    assert _route([_c("witness")], error="boom") == "error"
 
 
 def test_a_spec_review_carries_its_last_json_block_and_its_hash():

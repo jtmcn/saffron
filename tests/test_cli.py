@@ -5325,3 +5325,234 @@ def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
     assert review_calls == []
     assert mint_calls == []
     assert len(plain_batch_calls) == 1
+
+
+def test_a_stack_batch_passes_run_stack_batch_its_spec_revision(tmp_path, monkeypatch):
+    """`saffron batch --stack` builds `cli._stack_revise` once, with the
+    pinned base, the resolved `--repo` and `main`'s `out_dir`, and passes
+    it to `run_stack_batch` as `revise`. Readiness failing builds none and
+    passes `revise=None`, the way `_stack_review` and `_stack_mint` do."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    revise_calls: list[dict] = []
+    revise_sentinel = object()
+
+    def _fake_stack_revise(**kwargs):
+        revise_calls.append(kwargs)
+        return revise_sentinel
+
+    monkeypatch.setattr(cli, "_stack_revise", _fake_stack_revise)
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        stack_batch_calls.append({"ledger": ledger, **kwargs})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    # Case 1: readiness passes, `--stack`.
+    _readiness_passes(monkeypatch)
+    home1 = tmp_path / "home1"
+    assert main(["--home", str(home1), "batch", "--stack"]) == 0
+
+    assert len(revise_calls) == 1
+    pinned = task.PinnedBase(
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+    assert revise_calls[0]["pinned"] == pinned
+    assert revise_calls[0]["repo"] == tmp_path.resolve()
+    assert revise_calls[0]["out_dir"] == home1 / "batches" / "v0"
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["revise"] is revise_sentinel
+
+    # Case 2: readiness fails.
+    revise_calls.clear()
+    stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home2 = tmp_path / "home2"
+    main(["--home", str(home2), "batch", "--stack"])
+
+    assert revise_calls == []
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["revise"] is None
+
+
+def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_file(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_review`'s callable takes an optional keyword
+    `spec_text`, adding it in `<spec>` tags beside a sentence naming a
+    scope blocker. `cli._stack_revise`, handed `None`, reads
+    `.saffron/specs/` at the pinned base through `git_mirror.file_at`,
+    never a layer's head or the checkout. It raises `ValueError` before
+    any cell for a path absent there."""
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron" / "specs").mkdir(parents=True)
+    (mirror / ".saffron" / "specs" / "SY-1-x.md").write_text("queued at base\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / ".saffron" / "specs" / "SY-1-x.md").write_text("at head\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
+
+    repo = tmp_path / "checkout"
+    (repo / ".saffron" / "specs").mkdir(parents=True)
+    (repo / ".saffron" / "specs" / "SY-1-x.md").write_text("in the checkout\n")
+
+    out_dir = tmp_path / "out"
+
+    monkeypatch.setattr(package, "fetch_parent_branch", lambda *a, **k: "d" * 40)
+
+    def _fake_cell_up(
+        *,
+        repo,
+        mirror,
+        tree_base,
+        branch,
+        network,
+        volume,
+        state,
+        container,
+        gates_dir,
+        thread_env,
+        created,
+        note,
+        cap_add=None,
+    ):
+        created.add(container)
+        note("cell_up", "cell up")
+
+    def _fake_cell_down(*, network, volume, state, container, created, note):
+        note("cell_down", True, "cell down")
+
+    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+    monkeypatch.setattr(session, "assert_bash_is_unprivileged", lambda _container: None)
+
+    cell_up_calls: list[dict] = []
+    real_layer_cell = end_review.layer_cell
+
+    @contextmanager
+    def _spy_layer_cell(fields, **kwargs):
+        cell_up_calls.append({"fields": fields})
+        with real_layer_cell(fields, **kwargs) as container:
+            yield container
+
+    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
+
+    agent_calls: list[dict] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        agent_calls.append({"prompt": prompt, "resume": resume, "options": options})
+        if resume is None:
+            structured = None
+        elif options.get("output_format") is spec_review.SPEC_REVIEW_FORMAT:
+            structured = {"findings": []}
+        else:
+            structured = {"spec": "ignored"}
+        return implement.AttemptResult(
+            subtype="success",
+            terminal_reason=None,
+            text="",
+            session_id=f"s-{len(agent_calls)}",
+            num_turns=1,
+            cost_usd_est=0.1,
+            is_error=False,
+            bound="",
+            rate_limit_status=None,
+            rate_limit_resets_at=None,
+            structured_output=structured,
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+    review = cli._stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
+    revise = cli._stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+
+    def _candidate(spec_id):
+        return Candidate(
+            path=tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md",
+            spec=intake.Spec(id=spec_id, title="t", type="chore"),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    sy1 = _candidate("SY-1")
+    layer7 = _candidate("SY-7")
+    sy5 = _candidate("SY-5")
+
+    review(sy1, None)
+    review(sy1, None, spec_text="revised\n")
+
+    revise(sy1, None, None, "rt")
+    revise(sy1, layer7, None, "rt")
+    revise(sy1, None, "given\n", "rt")
+
+    first_review_prompt = agent_calls[0]["prompt"]
+    second_review_prompt = agent_calls[2]["prompt"]
+    assert second_review_prompt.startswith(first_review_prompt)
+    assert (
+        second_review_prompt.index("<spec>")
+        < second_review_prompt.index("revised\n")
+        < second_review_prompt.index("</spec>")
+    )
+    assert "review that text" in second_review_prompt
+    assert "scope blocker" in second_review_prompt
+    assert "<spec>" not in first_review_prompt
+    assert "review that text" not in first_review_prompt
+    assert "scope blocker" not in first_review_prompt
+
+    writer_prompts = [
+        agent_calls[4]["prompt"],
+        agent_calls[6]["prompt"],
+        agent_calls[8]["prompt"],
+    ]
+    for prompt in writer_prompts[:2]:
+        assert (
+            prompt.index("<spec>")
+            < prompt.index("queued at base\n")
+            < prompt.index("</spec>")
+        )
+    assert (
+        writer_prompts[2].index("<spec>")
+        < writer_prompts[2].index("given\n")
+        < writer_prompts[2].index("</spec>")
+    )
+    for prompt in writer_prompts:
+        assert "at head" not in prompt
+        assert "in the checkout" not in prompt
+        assert "None" not in prompt
+
+    before = len(cell_up_calls)
+    with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
+        revise(sy5, None, None, "rt")
+    assert len(cell_up_calls) == before

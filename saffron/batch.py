@@ -34,13 +34,13 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+from saffron import spec_review
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate
-from saffron.spec_review import SpecReviewSession, read_spec_review, spec_review_route
 from saffron.task import Refused
 
 # The loop returns `INCOMPLETE` for a night that left a task in flight — a
@@ -59,6 +59,10 @@ ABORT_STATES = frozenset({"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED"})
 # Two consecutive aborts is what fires the breaker (§4.2.1) — enough to tell
 # "the toolchain is broken" from "three flaky tasks", never fewer.
 _BREAKER_THRESHOLD = 2
+
+# A spec still unclean after this many revisions in one call escalates
+# instead (ADR 7). Never read from the ledger: each call starts at zero (D1).
+MAX_REVISE_ROUNDS = 3
 
 
 class SpecReviewWait(Exception):
@@ -369,21 +373,30 @@ def run_stack_batch(
     sleep: Callable[[float], None] = time.sleep,
     # `None` means no review runs, and nothing here changes. `SA-0156` passes
     # the production one, and `saffron batch` passes none until then.
-    review: Callable[[Candidate, Candidate | None], SpecReviewSession] | None = None,
+    review: Callable[..., spec_review.SpecReviewSession] | None = None,
     # Required whenever `review` is given (checked below). Mints the task a
     # review's own facts are recorded against. `SA-0156` passes the real one.
     mint: Callable[[Candidate], int] | None = None,
+    # `None` means a `revise` route is escalated (a blocker) or run (none),
+    # as it always was. `SA-0164` passes the production writer callable.
+    revise: (
+        Callable[
+            [Candidate, Candidate | None, str | None, str],
+            spec_review.SpecWriterSession,
+        ]
+        | None
+    ) = None,
 ) -> StopReason:
-    """Run one stack's planned `order` once, without rescanning (`SA-0142`). `runner`
-    takes each candidate and its predecessor, the last one that reached
-    `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED` task waits on it
-    instead of refusing (`sleep`, SA-0148). `review`, when given, runs first on it
-    and can refuse the spec, raise, or ask to wait (`SpecReviewWait`, ADR 7).
+    """Run one stack's planned `order` once, without rescanning (`SA-0142`). `runner` takes
+    each candidate and its predecessor, the last one that reached `READY_FOR_REVIEW`, or
+    `None` before any has. A `RATE_LIMITED` task waits on it instead of refusing (`sleep`,
+    SA-0148). `review`, when given, runs first and can refuse the spec, raise, or wait
+    (`SpecReviewWait`, ADR 7). A `revise` route calls `revise` for up to
+    `MAX_REVISE_ROUNDS` rounds.
 
-    A candidate is refused before `run_batch` sees it, when `depends_on` reaches a
-    spec that ran and missed, direct or through a refused spec. `reserve_usd` holds
-    back the budget check, and `end_review` runs once with the batch id, the
-    reserve and `order`'s own specs."""
+    A candidate is refused before `run_batch` sees it, when `depends_on` reaches a spec
+    that ran and missed, direct or through a refused spec. `reserve_usd` holds back the
+    budget check, and `end_review` runs once, given the batch id, reserve and specs."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     order = list(order)
@@ -398,6 +411,12 @@ def run_stack_batch(
     # Spec id -> the task `mint` gave it, kept for one call only. A rerun
     # after `wait` or `RATE_LIMITED` reuses it rather than minting again.
     task_ids: dict[str, int] = {}
+    # Spec id -> revisions run this call, never the ledger's own count (D1):
+    # every call of `run_stack_batch` starts every spec at zero.
+    rounds: dict[str, int] = {}
+    # Spec id -> the pair a rate-limited writer call was given. A retry
+    # after the wait hands `revise` the same one, with no review between.
+    pending_revision: dict[str, tuple[str | None, str]] = {}
 
     # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at
     # generation 0. The predecessor is the last such task, not `candidate`.
@@ -459,65 +478,150 @@ def run_stack_batch(
             )
         if review is not None and candidate.spec.id not in reviewed:
             task_id = task_ids[candidate.spec.id]
-            # A raise from `review` is a miss, as one from `runner` is below.
-            # No session opened, so it gets a `spec_review` fact and no attempt.
-            try:
-                session = review(candidate, pred)
-            except Exception as exc:
-                ledger.record_spec_review(
+            while True:
+                pending = pending_revision.pop(candidate.spec.id, None)
+                if pending is None:
+                    text_row = ledger.spec_text(task_id)
+                    spec_text = text_row["text"] if text_row is not None else None
+                    kwargs = {} if spec_text is None else {"spec_text": spec_text}
+                    # A raise from `review` is a miss, as one from `runner`
+                    # is below, with no attempt for the session it never opened.
+                    try:
+                        session = review(candidate, pred, **kwargs)
+                    except Exception as exc:
+                        ledger.record_spec_review(
+                            task_id,
+                            route="error",
+                            block=None,
+                            block_sha256=None,
+                            error=f"{type(exc).__name__}: {exc}",
+                        )
+                        ledger.set_task_state(task_id, "GATE_ERROR")
+                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                        remaining.remove(original)
+                        raise
+                    read = spec_review.read_spec_review(session)
+                    route = spec_review.spec_review_route(read)
+                    capped = False
+                    if route == "revise":
+                        has_blocker = any(
+                            f.severity == "blocker" for f in read.findings
+                        )
+                        if revise is None:
+                            route = "escalate" if has_blocker else "run"
+                        elif rounds.get(candidate.spec.id, 0) >= MAX_REVISE_ROUNDS:
+                            route = "escalate"
+                            capped = True
+                    attempt_id = ledger.open_attempt(task_id, phase="SPEC_REVIEW")
+                    ledger.close_attempt(
+                        attempt_id,
+                        session_id=session.session_id,
+                        subtype="error" if session.error is not None else "success",
+                        terminal_reason=None,
+                        num_turns=session.num_turns,
+                        cost_usd_est=session.cost_usd,
+                    )
+                    ledger.record_spec_review(
+                        task_id,
+                        route=route,
+                        block=read.block,
+                        block_sha256=read.block_sha256,
+                        error=read.error,
+                    )
+                    if route == "wait":
+                        ledger.set_task_state(task_id, "RATE_LIMITED")
+                        raise SpecReviewWait(resets_at=read.resets_at)
+                    if route == "escalate":
+                        blockers = sum(
+                            1 for f in read.findings if f.severity == "blocker"
+                        )
+                        suffix = (
+                            f" after {MAX_REVISE_ROUNDS} revisions" if capped else ""
+                        )
+                        emit(f"{candidate.spec.id:<10} escalated  {blockers}{suffix}")
+                        ledger.set_task_state(task_id, "SPEC_WITHHELD")
+                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                        remaining.remove(original)
+                        return Refused(
+                            reason=f"spec review escalated with {blockers} blocker(s)"
+                        )
+                    if route == "error":
+                        emit(f"{candidate.spec.id:<10} unreviewed  {read.error}")
+                        ledger.set_task_state(task_id, "GATE_ERROR")
+                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                        remaining.remove(original)
+                        raise RuntimeError(
+                            f"spec review for {candidate.spec.id} could not be read"
+                        )
+                    if route == "run":
+                        reviewed.add(candidate.spec.id)
+                        break
+                    # route == "revise": a fresh round starts from this read.
+                    review_text = session.text
+                else:
+                    spec_text, review_text = pending
+
+                assert revise is not None
+                needed = (
+                    spec_review.SPEC_WRITER_SESSION_USD
+                    + spec_review.SPEC_REVIEW_SESSION_USD
+                    + candidate.spec.budget_usd
+                )
+                budget_left = (
+                    budget_usd
+                    - reserve_usd
+                    - ledger.batch_spend(ledger.latest_batch_id())
+                )
+                if budget_left < needed:
+                    emit(
+                        f"{candidate.spec.id:<10} unrevised  "
+                        f"needs {needed:.3f}, {budget_left:.3f} left"
+                    )
+                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                    remaining.remove(original)
+                    return Refused(
+                        reason=f"revision for {candidate.spec.id} needs more budget "
+                        "than remains"
+                    )
+                try:
+                    turn = revise(candidate, pred, spec_text, review_text)
+                except Exception:
+                    ledger.set_task_state(task_id, "GATE_ERROR")
+                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                    remaining.remove(original)
+                    raise
+                attempt_id = ledger.open_attempt(
+                    task_id, phase=spec_review.WRITING_PHASE
+                )
+                ledger.close_attempt(
+                    attempt_id,
+                    session_id=turn.session_id,
+                    subtype="error" if turn.error is not None else "success",
+                    terminal_reason=None,
+                    num_turns=turn.num_turns,
+                    cost_usd_est=turn.cost_usd,
+                )
+                if turn.resets_at is not None:
+                    ledger.set_task_state(task_id, "RATE_LIMITED")
+                    pending_revision[candidate.spec.id] = (spec_text, review_text)
+                    raise SpecReviewWait(resets_at=turn.resets_at)
+                if turn.error is not None:
+                    emit(f"{candidate.spec.id:<10} unrevised  {turn.error}")
+                    ledger.set_task_state(task_id, "GATE_ERROR")
+                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                    remaining.remove(original)
+                    raise RuntimeError(
+                        f"spec writer for {candidate.spec.id} could not be read"
+                    )
+                rounds[candidate.spec.id] = rounds.get(candidate.spec.id, 0) + 1
+                ledger.record_spec_text(
                     task_id,
-                    route="error",
-                    block=None,
-                    block_sha256=None,
-                    error=f"{type(exc).__name__}: {exc}",
+                    origin="revision",
+                    spec_id=candidate.spec.id,
+                    path=f".saffron/specs/{candidate.path.name}",
+                    text=turn.text,
                 )
-                ledger.set_task_state(task_id, "GATE_ERROR")
-                missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(original)
-                raise
-            spec_review = read_spec_review(session)
-            route = spec_review_route(spec_review)
-            attempt_id = ledger.open_attempt(task_id, phase="SPEC_REVIEW")
-            ledger.close_attempt(
-                attempt_id,
-                session_id=session.session_id,
-                subtype="error" if session.error is not None else "success",
-                terminal_reason=None,
-                num_turns=session.num_turns,
-                cost_usd_est=session.cost_usd,
-            )
-            ledger.record_spec_review(
-                task_id,
-                route=route,
-                block=spec_review.block,
-                block_sha256=spec_review.block_sha256,
-                error=spec_review.error,
-            )
-            if route == "wait":
-                ledger.set_task_state(task_id, "RATE_LIMITED")
-                raise SpecReviewWait(resets_at=spec_review.resets_at)
-            if route == "escalate":
-                blockers = sum(
-                    1
-                    for finding in spec_review.findings
-                    if finding.severity == "blocker"
-                )
-                emit(f"{candidate.spec.id:<10} escalated  {blockers}")
-                ledger.set_task_state(task_id, "SPEC_WITHHELD")
-                missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(original)
-                return Refused(
-                    reason=f"spec review escalated with {blockers} blocker(s)"
-                )
-            if route == "error":
-                emit(f"{candidate.spec.id:<10} unreviewed  {spec_review.error}")
-                ledger.set_task_state(task_id, "GATE_ERROR")
-                missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(original)
-                raise RuntimeError(
-                    f"spec review for {candidate.spec.id} could not be read"
-                )
-            reviewed.add(candidate.spec.id)
+                emit(f"{candidate.spec.id:<10} revised  {rounds[candidate.spec.id]}")
         try:
             result = runner(candidate, pred)
         except Exception:

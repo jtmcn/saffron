@@ -29,6 +29,14 @@ from saffron.repos.policy import Policy
 # name at call time, never bound to a local, so a patched tuple is honored.
 SPEC_REVIEW_TAGS: tuple[str, ...] = ("scope", "build", "witness")
 
+# The two tags `spec_review_route` revises rather than escalates (ADR 7).
+# Named once here, never derived from `SPEC_REVIEW_TAGS`.
+SPEC_REVIEW_REVISABLE_TAGS: tuple[str, ...] = ("build", "witness")
+
+# The phase a spec writer session's attempt is opened in (`run_stack_batch`,
+# SA-0161's follow-up writer).
+WRITING_PHASE = "SPEC_WRITING"
+
 # One host-invoked session's tools (ADR 7): read-only plus `Bash`, with
 # neither `Write` nor `Edit`, so `Bash` runs unprivileged (SA-0169).
 SPEC_SESSION_TOOLS = ["Read", "Glob", "Grep", "Bash"]
@@ -242,15 +250,24 @@ def read_spec_review(session: SpecReviewSession) -> SpecReview:
 
 def spec_review_route(
     review: SpecReview,
-) -> Literal["wait", "run", "escalate", "error"]:
-    """Route one read: `wait` before any other check, then `error`, then
-    `escalate` for any `blocker`, whatever its `fixes`, else `run`."""
+) -> Literal["wait", "run", "escalate", "revise", "error"]:
+    """Route one read: `wait` before any other check, then `error`. A
+    `blocker` escalates unless every one of them names a tag in
+    `SPEC_REVIEW_REVISABLE_TAGS`, in which case the read revises. With no
+    blocker, a lone `concern` tagged `witness` also revises. Anything else
+    runs. The tag check runs over the blockers alone, so a concern or a
+    note beside a revisable blocker never turns it into an escalation."""
     if review.resets_at is not None:
         return "wait"
     if review.error is not None:
         return "error"
-    if any(finding.severity == "blocker" for finding in review.findings):
+    blockers = [f for f in review.findings if f.severity == "blocker"]
+    if blockers:
+        if all(b.fixes in SPEC_REVIEW_REVISABLE_TAGS for b in blockers):
+            return "revise"
         return "escalate"
+    if any(f.severity == "concern" and f.fixes == "witness" for f in review.findings):
+        return "revise"
     return "run"
 
 
