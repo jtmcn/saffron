@@ -526,18 +526,19 @@ def spec_writer_system_prompt(policy: Policy, *, prompts_dir: Path) -> str:
 SPEC_WRITER_BUDGET_USD = 17.0
 
 # Reasoned from the spike's own extraction turns, $0.40 and $0.41, with
-# room: a real writer resumes a longer context than the spike's did.
+# room: a real spec writer session resumes a longer context than the spike's did.
 SPEC_WRITER_EXTRACT_BUDGET_USD = 1.5
 
-# What one session records at most, best effort: the writer turn plus one
-# extraction turn (the re-ask's cap sits above this, in the docstring).
+# What one session records at most, best effort: the spec writer session's
+# first turn plus one extraction turn.
 SPEC_WRITER_SESSION_USD = SPEC_WRITER_BUDGET_USD + SPEC_WRITER_EXTRACT_BUDGET_USD
 
-# A third above SPEC_REVIEW_MAX_TURNS: a writer session can run longer.
+# Reasoned, unmeasured: a third above SPEC_REVIEW_MAX_TURNS, since a spec
+# writer session can run longer.
 SPEC_WRITER_MAX_TURNS = 120
 
-# Clears the spike's own extraction turns, 130 to 150 seconds, many times
-# over. Twice the idle bound of 300 seconds.
+# Measured: 79 hand `spec-writer` transcripts had a median of 1396 s, and 21 ran
+# past 2700 s.
 SPEC_WRITER_TIMEOUT_S = 3600.0
 
 

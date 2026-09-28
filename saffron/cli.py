@@ -752,7 +752,7 @@ def _stack_revise(
 ) -> Callable[
     [Candidate, Candidate | None, str | None, str], spec_review.SpecWriterSession
 ]:
-    """`SA-0164`'s revision round adapter (ADR 7), built the way
+    """`SA-0164`'s revision adapter (ADR 7), built the way
     `_stack_review` is. Given a layer, it fetches that spec's branch fresh
     and seeds the cell there. Given `None`, it seeds the cell at the
     pinned `base_sha`. The prompt and gates always come from `base_sha`'s

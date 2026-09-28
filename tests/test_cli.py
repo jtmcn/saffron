@@ -4759,106 +4759,12 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
     the pinned `base_sha` with no layer. It always reads its prompt and
     gates from the pinned `base_sha`'s own export, never a layer's head,
     the operator's checkout, or the mirror's `HEAD`."""
-    mirror = tmp_path / "mirror"
-    mirror.mkdir()
-    _git(mirror, "init", "-q")
-    (mirror / ".saffron").mkdir()
-    (mirror / ".saffron" / "README").write_text("bare\n")
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "bare")
-    bare_sha = _rev_parse(mirror, "HEAD")
-
-    (mirror / ".saffron" / "policy.yaml").write_text(
-        "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
-    )
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
-    base_sha = _rev_parse(mirror, "HEAD")
-
-    (mirror / ".saffron" / "policy.yaml").write_text(
-        "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
-    )
-    _git(mirror, "add", "-A")
-    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
-
-    repo = tmp_path / "checkout"
-    (repo / ".saffron").mkdir(parents=True)
-    (repo / ".saffron" / "policy.yaml").write_text(
-        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
-    )
-
-    out_dir = tmp_path / "out"
-
-    fetch_calls: list[tuple] = []
-
-    def _fake_fetch(mirror_arg, url_arg, branch):
-        fetch_calls.append((mirror_arg, url_arg, branch))
-        if branch == "saffron/SY-8":
-            raise package.ParentGone("gone")
-        return "d" * 40
-
-    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
-
-    cell_up_calls: list[dict] = []
-
-    def _fake_cell_up(
-        *,
-        repo,
-        mirror,
-        tree_base,
-        branch,
-        network,
-        volume,
-        state,
-        container,
-        gates_dir,
-        thread_env,
-        created,
-        note,
-        cap_add=None,
-    ):
-        cell_up_calls.append(
-            {
-                "repo": repo,
-                "mirror": mirror,
-                "tree_base": tree_base,
-                "branch": branch,
-                "gates_dir": gates_dir,
-                "thread_env": dict(thread_env),
-                "container": container,
-                "cap_add": cap_add,
-            }
-        )
-        created.add(container)
-        note("cell_up", "cell up")
-
-    cell_down_calls: list[dict] = []
-
-    def _fake_cell_down(*, network, volume, state, container, created, note):
-        cell_down_calls.append({"container": container})
-        note("cell_down", True, "cell down")
-
-    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
-    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
-    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
-
-    unpriv_calls: list[str] = []
-    monkeypatch.setattr(
-        session,
-        "assert_bash_is_unprivileged",
-        lambda container: unpriv_calls.append(container),
-    )
-
-    real_layer_cell = end_review.layer_cell
-    layer_cell_calls: list[dict] = []
-
-    @contextmanager
-    def _spy_layer_cell(fields, **kwargs):
-        layer_cell_calls.append({"fields": fields, "kwargs": kwargs})
-        with real_layer_cell(fields, **kwargs) as container:
-            yield container
-
-    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    mirror, bare_sha, base_sha = rig.mirror, rig.bare_sha, rig.base_sha
+    repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+    cell_down_calls, unpriv_calls = rig.cell_down_calls, rig.unpriv_calls
+    layer_cell_calls = rig.layer_cell_calls
 
     agent_calls: list[dict] = []
 
@@ -4898,19 +4804,6 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
         return sentinel
 
     monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
-
-    def _spec_path(spec_id):
-        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
-
-    def _candidate(spec_id, *, depends_on=None):
-        return Candidate(
-            path=_spec_path(spec_id),
-            spec=intake.Spec(
-                id=spec_id, title="t", type="chore", depends_on=depends_on or []
-            ),
-            spec_sha="s" * 64,
-            task_id=None,
-        )
 
     pinned = task.PinnedBase(
         mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
@@ -5008,15 +4901,9 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
     assert cell_up_calls[-1]["thread_env"] == {}
 
 
-def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
-    tmp_path, monkeypatch
-):
-    """`cli._stack_revise` seeds its cell at a layer's fetched head, or at
-    the pinned `base_sha` with no layer. It always reads its prompt and
-    gates from the pinned `base_sha`'s own export, never a layer's head,
-    the operator's checkout, or the mirror's `HEAD`."""
-    from saffron.agents.artifacts import hash_artifact
-
+def _spec_session_rig(tmp_path, monkeypatch):
+    """The mirror, checkout and cell fakes a spec session callable runs over:
+    `bare`, `base` and `head` commits, and a spy on `layer_cell`."""
     mirror = tmp_path / "mirror"
     mirror.mkdir()
     _git(mirror, "init", "-q")
@@ -5118,10 +5005,55 @@ def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cel
 
     monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
 
-    def _unreadable_reset(value):
-        """An unannotated pass-through, so `types` reads `value` as the
-        `int | None` `AttemptResult` declares rather than its literal."""
-        return value
+    def _spec_path(spec_id):
+        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
+
+    def _candidate(spec_id, *, depends_on=None):
+        return Candidate(
+            path=_spec_path(spec_id),
+            spec=intake.Spec(
+                id=spec_id, title="t", type="chore", depends_on=depends_on or []
+            ),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    return SimpleNamespace(
+        mirror=mirror,
+        bare_sha=bare_sha,
+        base_sha=base_sha,
+        repo=repo,
+        out_dir=out_dir,
+        fetch_calls=fetch_calls,
+        cell_up_calls=cell_up_calls,
+        cell_down_calls=cell_down_calls,
+        unpriv_calls=unpriv_calls,
+        layer_cell_calls=layer_cell_calls,
+        candidate=_candidate,
+    )
+
+
+def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_revise` seeds its cell at a layer's fetched head, or at
+    the pinned `base_sha` with no layer. It always reads its prompt and
+    gates from the pinned `base_sha`'s own export, never a layer's head,
+    the operator's checkout, or the mirror's `HEAD`."""
+    from saffron.agents.artifacts import hash_artifact
+
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    mirror, bare_sha, base_sha = rig.mirror, rig.bare_sha, rig.base_sha
+    repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+    cell_down_calls, unpriv_calls = rig.cell_down_calls, rig.unpriv_calls
+    layer_cell_calls = rig.layer_cell_calls
+
+    def _turn(text="t", **fields):
+        # Unannotated like test_spec_review's `_attempt`, so a str reset type-checks.
+        return implement.AttemptResult(
+            subtype="success", terminal_reason=None, text=text, **fields
+        )
 
     agent_calls: list[dict] = []
 
@@ -5148,49 +5080,23 @@ def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cel
             }
         )
         if spec_id == "SY-2":
-            return implement.AttemptResult(
+            return _turn(
                 session_id="s-2",
-                subtype="success",
-                terminal_reason=None,
                 num_turns=1,
                 cost_usd_est=0.25,
-                text="t",
                 rate_limit_status="rejected",
-                rate_limit_resets_at=_unreadable_reset("soon"),
+                rate_limit_resets_at="soon",
             )
         if resume is not None:
-            return implement.AttemptResult(
+            return _turn(
                 session_id="s-1",
-                subtype="success",
-                terminal_reason=None,
                 num_turns=1,
                 cost_usd_est=0.25,
-                text="t",
                 structured_output={"spec": "---\nid: SY-1\n---\nrevised"},
             )
-        return implement.AttemptResult(
-            session_id="s-1",
-            subtype="success",
-            terminal_reason=None,
-            num_turns=7,
-            cost_usd_est=0.5,
-            text="report",
-        )
+        return _turn(session_id="s-1", num_turns=7, cost_usd_est=0.5, text="report")
 
     monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
-
-    def _spec_path(spec_id):
-        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
-
-    def _candidate(spec_id, *, depends_on=None):
-        return Candidate(
-            path=_spec_path(spec_id),
-            spec=intake.Spec(
-                id=spec_id, title="t", type="chore", depends_on=depends_on or []
-            ),
-            spec_sha="s" * 64,
-            task_id=None,
-        )
 
     pinned = task.PinnedBase(
         mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
