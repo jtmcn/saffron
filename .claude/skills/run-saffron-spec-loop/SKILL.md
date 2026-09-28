@@ -37,6 +37,10 @@ loop's order once, to
 including a spec refused only for an unmet `depends_on` on a parent in the
 order — and every later command reads that file.
 
+`snapshot` and `next` each run `saffron reconcile` first and print what moved
+on stderr. `saffron cell` does not reconcile, and without this it stacked two
+children on a merged parent's stale branch (b-877e93).
+
 An existing order is kept until `snapshot --force`, which rescans and keeps
 every recorded outcome still true — a reviewable PR, a drop, an undecided cell.
 A spec edited while its PR is open is held out of the new order and named. A
@@ -67,8 +71,11 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py check SA-NNNN
 It applies three blocker rules and exits 1 on any of them. Two are check 4's
 turns and budget rules, applied to the rows `history` prints. The third
 prices a declared `estimated_lines` against the `size` ceiling of the spec's
-type. At or above 80% of that ceiling it blocks, and the remedy is a split
-into a parent and children, not a raised ceiling. A blocker here is
+type. It first multiplies the estimate by the overrun landed specs measured,
+and prints the ratio and where it came from. At or above 80% of the ceiling
+it blocks where `size` blocks in the cell, which is `elevated`. The remedy is
+a split into a parent and children, not a raised ceiling. At `standard` it
+prints a concern instead. A spec with no estimate says so. A blocker here is
 arithmetic rather than judgement, so it goes to the operator before the
 review rather than after it. For turns or budget, raise the ceiling, run the
 spec as written, or drop it. A concern it prints is advisory and exits 0,

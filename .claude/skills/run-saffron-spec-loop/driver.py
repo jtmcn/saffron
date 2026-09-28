@@ -162,6 +162,40 @@ def _protected() -> list[str]:
     return list(getattr(policy, "protected", []) or [])
 
 
+def _reconcile_first(gh=None) -> None:
+    """Ask GitHub what happened to the ledger's open pull requests before the
+    order is read. `saffron cell` does not, so it stacked on a merged
+    parent's stale branch (b-877e93). Reported on stderr, beside `next`'s id."""
+    import contextlib
+
+    from saffron.cli import _guarded_gh, _print_reconcile_summary
+    from saffron.reconcile import reconcile
+
+    ledger, repo_id, _url = _ledger_and_repo()
+    failures: list[str] = []
+    try:
+        if repo_id is None:
+            return
+        result = reconcile(ledger, repo_id, gh=gh or _guarded_gh(failures))
+    finally:
+        ledger.close()
+    with contextlib.redirect_stdout(sys.stderr):
+        _print_reconcile_summary(result)
+    if failures:
+        print(f"reconcile: gh could not be run ({failures[0]})", file=sys.stderr)
+
+
+def _elevate_on() -> list[str]:
+    """`policy.yaml`'s `elevate_on`, which decides where `size` blocks."""
+    from saffron.repos.policy import PolicyError, load_policy
+
+    try:
+        policy, _sha = load_policy(REPO)
+    except PolicyError:
+        return []
+    return list(policy.elevate_on)
+
+
 def _hiding(gh, branches: frozenset[str]):
     """`gh`, with every pull request from `branches` left out of what it lists."""
 
@@ -848,6 +882,7 @@ def cmd_snapshot(args) -> int:
         carried, held_out = _carried(previous)
     for p in carried:
         p.held = None  # the edit a hold waited on has merged, or will be held again
+    _reconcile_first()
     candidates, refusals = _scan(loop_branches=frozenset(p.branch for p in previous))
     ordered, stranded = _order(candidates, refusals, carried, frozenset(held_out))
     # A spec whose parent became reviewable joins a re-snapshot unasked, with no
@@ -993,6 +1028,7 @@ def _next_spec(
 def cmd_next(args) -> int:
     """`--again` hands back a spec a cell stopped on without deciding — the
     case is a reopened rate-limit window."""
+    _reconcile_first()
     rows = _load()
     if reasons := _stale(rows):
         print("the order is stale:", file=sys.stderr)
@@ -1955,31 +1991,87 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
     return None
 
 
-def _size_blocker(target: Spec) -> str | None:
-    """Prints how `estimated_lines` prices against the `size` ceiling of the
-    spec's type. Returns a blocker at or above 80% of that ceiling."""
+# Landed lines over each spec's own estimate in run 19, median of nine
+# (docs/evidence/2026-09-27-spec-loop-skill-feedback-run-19.md).
+_OVERRUN_FALLBACK = 1.4
+_OVERRUN_MIN_SPECS = 3
+_LANDED_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGED"})
+
+
+def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
+    """The ratio `check` prices an estimate at, and where it came from: the
+    median of landed lines over `estimated_lines` across specs that declared
+    one, each at its newest landed task, or run 19's figure until three have."""
+    from statistics import median
+
+    lines = {row["task_id"]: row for row in ledger.queue_lines()}
+    newest: dict[str, float] = {}
+    for (spec_id, _sha), rows in ledger.tasks_by_spec(repo_id).items():
+        spec = specs.get(spec_id)
+        if spec is None or spec.estimated_lines is None:
+            continue
+        for row in rows:
+            landed = lines.get(row["task_id"])
+            if (
+                row["state"] in _LANDED_STATES
+                and landed
+                and landed["added"] is not None
+            ):
+                size = landed["added"] + (landed["removed"] or 0)
+                newest[spec_id] = size / spec.estimated_lines
+    if len(newest) < _OVERRUN_MIN_SPECS:
+        return _OVERRUN_FALLBACK, (
+            f"run 19's measured overrun, until {_OVERRUN_MIN_SPECS} landed specs "
+            f"declare an estimate ({len(newest)} do)"
+        )
+    ratio = round(median(newest.values()), 2)
+    return ratio, f"the median over {len(newest)} landed specs that declared one"
+
+
+def _size_verdict(
+    target: Spec, ratio: float, basis: str, elevate_on: list[str]
+) -> tuple[str | None, str | None]:
+    """How `estimated_lines`, times the overrun, prices against the `size`
+    ceiling of the spec's type. At or above 80% it is a blocker where `size`
+    blocks in the cell, `elevated`, and a concern elsewhere."""
+    from math import ceil
+
     from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
+    from saffron.gates.suite import size_blocks
+    from saffron.repos.policy import effective_risk
 
     lines = target.estimated_lines
     if lines is None:
         print("size: no estimated_lines declared")
-        return None
+        return None, None
     ceiling = _CEILINGS.get(target.type, _DEFAULT_CEILING)
-    price = lines * _TOKENS_PER_LINE
-    head = f"estimated_lines={lines} ({price} tokens at {_TOKENS_PER_LINE} a line) is"
+    priced = ceil(round(lines * ratio, 6))
+    price = priced * _TOKENS_PER_LINE
+    head = (
+        f"estimated_lines={lines} × {ratio} ({basis}) = {priced} lines "
+        f"({price} tokens at {_TOKENS_PER_LINE} a line) is"
+    )
     tail = f"80% of the {target.type} ceiling of {ceiling} tokens"
     # Integers only, so no float rounding moves the boundary.
-    if 5 * price >= 4 * ceiling:
-        return f"{head} at or above {tail}, split into a parent and children"
-    print(f"size: {head} under {tail}")
-    return None
+    if 5 * price < 4 * ceiling:
+        print(f"size: {head} under {tail}")
+        return None, None
+    # Touches stand in for the plan's files. A glob entry is matched as text.
+    tier = effective_risk(target.risk, target.touches, elevate_on)
+    if size_blocks(tier):
+        return f"{head} at or above {tail}, split into a parent and children", None
+    return None, (
+        f"{head} at or above {tail}; `size` is advisory at {tier}, so a cell "
+        "can land it, but it uses the review's headroom"
+    )
 
 
 def cmd_check(args) -> int:
     """Judge a spec's ceilings against cells of its own shape, before a cell
     runs — the arithmetic `_ceilings_line` renders, turned into an exit
-    status. A declared `estimated_lines` priced at or above 80% of its type's
-    `size` ceiling blocks too, with or without past cells."""
+    status. A declared `estimated_lines` is priced at the measured overrun.
+    At or above 80% of its type's `size` ceiling it blocks where `size`
+    blocks, with or without past cells, and is a concern elsewhere."""
     specs = _known_specs()
     target = specs.get(args.spec_id)
     if target is None:
@@ -1989,11 +2081,14 @@ def cmd_check(args) -> int:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
         cells = _past_cells(ledger, repo_id, specs)
+        ratio, basis = _overrun(ledger, repo_id, specs)
     finally:
         ledger.close()
     rows = _select_rows(target, cells)
     print(_ceilings_line(target, rows))
-    size_blocker = _size_blocker(target)
+    size_blocker, size_concern = _size_verdict(target, ratio, basis, _elevate_on())
+    if size_concern:
+        print(f"concern: {size_concern}")
     if not rows:
         if size_blocker:
             print(f"blocker: {size_blocker}")

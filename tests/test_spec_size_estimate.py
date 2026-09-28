@@ -29,11 +29,15 @@ def test_a_spec_declares_its_estimate_as_a_positive_integer_or_not_at_all():
             parse_spec(_frontmatter(f"estimated_lines: {bad}\n"))
 
 
-def _run(monkeypatch, capsys, target, rows):
+def _run(monkeypatch, capsys, target, rows, *, ratio=1, elevate_on=()):
+    """`check` over `target`, the overrun pinned. The ratio defaults to 1 so
+    the boundary tests read the ceiling arithmetic alone."""
     with monkeypatch.context() as m:  # undone, so the file-read run sees the real one
         m.setattr(driver, "_known_specs", lambda: {target.id: target})
         m.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
         m.setattr(driver, "_past_cells", lambda *a, **k: rows)
+        m.setattr(driver, "_overrun", lambda *a, **k: (ratio, "a pinned ratio"))
+        m.setattr(driver, "_elevate_on", lambda: list(elevate_on))
         rc = driver.cmd_check(argparse.Namespace(spec_id=target.id))
     return rc, capsys.readouterr().out.splitlines()
 
@@ -66,6 +70,7 @@ def _drive(monkeypatch, capsys, spec_type: str, *, row: bool) -> None:
         target.max_turns = 100
         target.budget_usd = 100.0
         target.estimated_lines = estimate
+        target.risk = "elevated"  # where `size` blocks, so the estimate does
         rc, out = _run(monkeypatch, capsys, target, rows)
         price = int(estimate * rate)  # a float rate would print `2400.0`
         blockers = [x for x in out if x.startswith("blocker: ")]
@@ -118,11 +123,14 @@ def test_check_blocks_an_estimate_at_80_percent_of_its_types_size_ceiling(
     specs_dir = tmp_path / ".saffron" / "specs"
     specs_dir.mkdir(parents=True)
     (specs_dir / "SA-0009-x.md").write_text(
-        _frontmatter(f"estimated_lines: {boundary}\n").replace("SA-0001", "SA-0009")
+        _frontmatter(f"estimated_lines: {boundary}\nrisk: elevated\n").replace(
+            "SA-0001", "SA-0009"
+        )
     )
     monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+    monkeypatch.setattr(driver, "_overrun", lambda *a, **k: (1, "a pinned ratio"))
     assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 1
     assert any(x.startswith("blocker: ") for x in capsys.readouterr().out.splitlines())
 
@@ -151,8 +159,108 @@ def test_check_prints_a_size_blocker_beside_a_ceilings_blocker(monkeypatch, caps
         target.max_turns = 10
         target.budget_usd = 100.0
         target.estimated_lines = estimate
+        target.risk = "elevated"
         rc, out = _run(monkeypatch, capsys, target, rows)
         assert rc == 1, out
         assert any(x.startswith("blocker: max_turns=10") for x in out), out
         size_blockers = [x for x in out if x.startswith("blocker: estimated_lines=")]
         assert len(size_blockers) == (1 if sized else 0), out
+
+
+def _priced(monkeypatch, capsys, *, lines, ratio, risk="standard", touches=()):
+    """`check` over one spec with no past cell, the overrun ratio pinned."""
+    target = _spec("SA-0009", spec_type="feature")
+    target.max_turns = 100
+    target.budget_usd = 100.0
+    target.estimated_lines = lines
+    target.risk = risk
+    target.touches = list(touches)
+    return _run(
+        monkeypatch, capsys, target, [], ratio=ratio, elevate_on=["saffron/ledger.py"]
+    )
+
+
+def test_check_prices_the_estimate_at_the_overrun_ratio_and_names_it(
+    monkeypatch, capsys
+):
+    # 500 raw lines is 2000 tokens, 67% of 3000. At 1.4 it is 700 lines,
+    # 2800 tokens, 93%: over the line only once the ratio is applied.
+    rc, out = _priced(monkeypatch, capsys, lines=500, ratio=1.4, risk="elevated")
+    blockers = [x for x in out if x.startswith("blocker: ")]
+    assert rc == 1, out
+    assert len(blockers) == 1, out
+    assert "1.4" in blockers[0] and "700" in blockers[0] and "2800" in blockers[0]
+    assert "a pinned ratio" in blockers[0], out
+
+    rc, out = _priced(monkeypatch, capsys, lines=500, ratio=1.0, risk="elevated")
+    assert rc == 0, out
+    assert not any(x.startswith("blocker: ") for x in out), out
+
+
+def test_check_blocks_a_priced_estimate_only_where_size_blocks(monkeypatch, capsys):
+    # Standard risk and no elevating touch: `size` is advisory in the cell,
+    # so `check` prints a concern and exits 0.
+    rc, out = _priced(monkeypatch, capsys, lines=700, ratio=1.4)
+    assert rc == 0, out
+    assert not any(x.startswith("blocker: ") for x in out), out
+    concerns = [x for x in out if x.startswith("concern: estimated_lines=")]
+    assert len(concerns) == 1, out
+    assert "standard" in concerns[0], out
+
+    # A touch `elevate_on` matches elevates it, and there it blocks.
+    rc, out = _priced(
+        monkeypatch, capsys, lines=700, ratio=1.4, touches=["saffron/ledger.py"]
+    )
+    assert rc == 1, out
+    assert any(x.startswith("blocker: estimated_lines=") for x in out), out
+
+
+class _LandedLedger:
+    """`tasks_by_spec` and `queue_lines` rows for `_overrun`."""
+
+    def __init__(self, landed):
+        self._landed = landed  # (spec_id, state, added, removed), oldest first
+
+    def tasks_by_spec(self, repo_id):
+        grouped = {}
+        for task_id, (spec_id, state, _a, _r) in enumerate(self._landed, 1):
+            grouped.setdefault((spec_id, "sha"), []).append(
+                {"task_id": task_id, "spec_id": spec_id, "state": state}
+            )
+        return grouped
+
+    def queue_lines(self):
+        return [
+            {"task_id": task_id, "spec_id": s, "state": st, "added": a, "removed": r}
+            for task_id, (s, st, a, r) in enumerate(self._landed, 1)
+        ]
+
+
+def _declaring(estimates):
+    specs = {}
+    for spec_id, lines in estimates.items():
+        spec = _spec(spec_id)
+        spec.estimated_lines = lines
+        specs[spec_id] = spec
+    return specs
+
+
+def test_the_overrun_is_the_median_landed_ratio_once_three_specs_declare_one():
+    specs = _declaring(
+        {"SA-0001": 100, "SA-0002": 100, "SA-0003": 100, "SA-0004": None}
+    )
+    landed = [
+        ("SA-0001", "MERGED", 110, 10),  # 1.2
+        ("SA-0002", "READY_FOR_REVIEW", 200, 0),  # 2.0
+        ("SA-0003", "APPROVED", 150, 0),  # 1.5
+        ("SA-0003", "PLAN_REJECTED", 0, 0),  # the newest row, but never landed
+        ("SA-0004", "MERGED", 900, 0),  # declares no estimate
+    ]
+    ratio, basis = driver._overrun(_LandedLedger(landed), 1, specs)
+    assert ratio == 1.5
+    assert "3" in basis and "median" in basis
+
+    # Two landed specs is too few to measure, so run 19's 1.4 stands.
+    ratio, basis = driver._overrun(_LandedLedger(landed[:2]), 1, specs)
+    assert ratio == 1.4
+    assert "run 19" in basis

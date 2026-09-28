@@ -602,6 +602,13 @@ def test_next_holds_back_a_child_whose_parent_has_no_reviewable_branch(parent, w
     assert chosen is None
 
 
+@pytest.fixture(autouse=True)
+def _no_reconcile(monkeypatch):
+    """`next` and `snapshot` reconcile the host's own ledger first, which a
+    unit test must never read or write."""
+    monkeypatch.setattr(driver, "_reconcile_first", lambda: None)
+
+
 @pytest.fixture
 def loop(tmp_path, monkeypatch):
     """Four real specs in a scratch repo root, the driver pointed at it, and
@@ -1359,10 +1366,17 @@ def test_the_ceilings_line_calls_a_cut_off_rows_peak_a_floor():
 
 class _StubLedger:
     """A ledger `check` never queries directly — `_past_cells` is
-    monkeypatched — but must still be able to `close()`."""
+    monkeypatched — but must still be able to `close()`. It holds no landed
+    task, so `_overrun` falls back to run 19's ratio."""
 
     def close(self):
         pass
+
+    def queue_lines(self):
+        return []
+
+    def tasks_by_spec(self, repo_id):
+        return {}
 
 
 def test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others(
