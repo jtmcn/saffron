@@ -137,14 +137,21 @@ def reconcile(
     *,
     gh: GhRunner = run_gh,
     stamp_orphaned: bool = False,
+    spec_id: str | None = None,
 ) -> ReconcileResult:
     """Bring one repo's `tasks.state` into line with what GitHub decided,
     and — only when `stamp_orphaned=True` asserts §4.2.1's batch-scan
     premise — stamp any corpse a dead scan left behind. Defaults to `False`,
     which is what `saffron queue` and `saffron reconcile` want; `saffron
-    batch` is the one caller that passes `True`."""
+    batch` is the one caller that passes `True`.
+
+    `spec_id` narrows the rows read to one spec, matched exactly rather
+    than by prefix. `None`, the default, reads every task in the repo, the
+    shape every caller before `task._resolve_stacked_on` still wants."""
     result = ReconcileResult()
     rows = ledger.tasks_by_repo(repo_id)
+    if spec_id is not None:
+        rows = [row for row in rows if row["spec_id"] == spec_id]
 
     for row in rows:
         state, pr_url = row["state"], row["pr_url"]
