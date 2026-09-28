@@ -66,6 +66,10 @@ from 3277 and `SA-0164` from 3931 when review trimmed their tests.
     and `make check` passed on the rebased top.
 13. **The auto mode classifier gave no verdict four times** on a `git commit`.
     The loop waited about ten minutes and the fifth try went through.
+14. **Step 5's pull request was left out of the GitHub stack again.** Step 3
+    links the layers before step 5's PR exists, and nothing linked it after.
+    The operator reports this happens every run. `driver.py stack` now takes
+    `--top`, and step 5 runs it once its PR is open.
 
 ## Run 19's items, checked
 

@@ -1566,10 +1566,23 @@ def cmd_stack(args) -> int:
             print(f"\n{lower.branch} and {upper.branch} do not merge cleanly:")
             for line in conflicts:
                 print(f"  {line}")
+    # Step 5's pull request opens after the layers are linked, so it joins here.
+    top = getattr(args, "top", None)
+    prs = [p.pr for p in order] + ([top] if top else [])
+    wants = [p.branch for p in order]
+    if top:
+        head = _gh_pr_field(top, "headRefName")
+        conflicts = _merge_conflicts(f"origin/{order[-1].branch}", f"origin/{head}")
+        if conflicts:
+            clean = False
+            print(f"\n{order[-1].branch} and {head} do not merge cleanly:")
+            for line in conflicts:
+                print(f"  {line}")
+        print(f"  #{top}  step 5  ({head})")
     if clean:
         print("\nevery adjacent pair merges cleanly (git merge-tree)")
 
-    command = ["gh", "stack", "link", *(str(p.pr) for p in order)]
+    command = ["gh", "stack", "link", *(str(n) for n in prs)]
     print(f"\n  {' '.join(command)}")
     print(
         "\nPACKAGE opens drafts (§5.7); --execute marks each ready once its base reads back."
@@ -1584,24 +1597,22 @@ def cmd_stack(args) -> int:
     trunk = _trunk().removeprefix("origin/")
     mismatched = 0
     print("\nbases, read back:")
-    for i, p in enumerate(order):
-        want = trunk if i == 0 else order[i - 1].branch
-        got = _gh_pr_field(p.pr, "baseRefName") if p.pr else None
+    for i, n in enumerate(prs):
+        want = trunk if i == 0 else wants[i - 1]
+        got = _gh_pr_field(n, "baseRefName") if n else None
         mismatched += got != want
-        print(
-            f"  #{p.pr}  base={got}" + ("" if got == want else f"  — expected {want}")
-        )
+        print(f"  #{n}  base={got}" + ("" if got == want else f"  — expected {want}"))
     if mismatched:
         return 1
     # A reviewed stack is ready for the operator; the draft was the cell's.
     unready = [
-        p.pr
-        for p in order
-        if subprocess.run(["gh", "pr", "ready", str(p.pr)], cwd=REPO).returncode
+        n
+        for n in prs
+        if subprocess.run(["gh", "pr", "ready", str(n)], cwd=REPO).returncode
     ]
     if unready:
         return _fail(f"gh pr ready failed for {', '.join(f'#{n}' for n in unready)}")
-    print(f"\nmarked ready: {' '.join(f'#{p.pr}' for p in order)}")
+    print(f"\nmarked ready: {' '.join(f'#{n}' for n in prs)}")
     return 0
 
 
@@ -2866,6 +2877,9 @@ def main() -> int:
 
     p = sub.add_parser("stack", help="link the reviewable PRs into one GitHub stack")
     p.add_argument("--execute", action="store_true", help="run gh stack link")
+    p.add_argument(
+        "--top", type=int, help="step 5's pull request, linked above the last layer"
+    )
     p.set_defaults(func=cmd_stack)
 
     p = sub.add_parser(
