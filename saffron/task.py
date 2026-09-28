@@ -13,7 +13,7 @@ record of what bounded it. `batch.py` names the cause in its own `runner`
 docstring — the resolvers this needs were `cli`-private, and `cli.py` was
 `forbidden` to the spec that built the loop.
 
-What stays outside, deliberately, except one refusal named below:
+What stays outside, deliberately, except two refusals named below:
 
 - **The refusals and the mirror fetch.** They run at different times on the
   two paths for good reasons — a batch refuses at scan time so a night never
@@ -24,6 +24,10 @@ What stays outside, deliberately, except one refusal named below:
   it must resolve against. Neither caller knows that base until
   `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
   instead.
+- **The other exception.** A stack batch's recorded spec text (ADR 7) is not
+  at `base_sha`. The scan that refuses at scan time never reads it, so
+  `run_task` re-runs gate 0 against it, keyed on `task_id`, before anything
+  else.
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -33,6 +37,8 @@ What stays outside, deliberately, except one refusal named below:
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -41,7 +47,7 @@ from pathlib import Path
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
 from saffron.events import Ceilings, CeilingSource, Event, EventLog, Preflight, describe
-from saffron.intake import Spec
+from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
@@ -51,10 +57,20 @@ from saffron.repos import image as repo_image
 from saffron.repos.mirror import (
     GitError,
     UnreadablePath,
+    export_saffron_dir,
+    file_at,
     has_commit,
+    retirement_markers,
     unresolved_consumes,
 )
-from saffron.scheduler import DEPENDENCY_WAITING_STATES, _branch
+from saffron.repos.policy import load_policy
+from saffron.scheduler import (
+    DEPENDENCY_WAITING_STATES,
+    _branch,
+    _unmatched_criterion_path,
+    protected_touch_refusal,
+    retirement_refusal,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -252,11 +268,102 @@ class Refused:
     """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**).
 
     A `consumes` entry did not resolve at the tree base, or the reader could
-    not read it there. Carries only `reason`, the same text `run_task`
-    prints on the refused line. No run and no task row exist for a caller
-    to read anything else back from."""
+    not read it there. Or, for a task holding a stack batch's recorded spec
+    text (ADR 7), gate 0 refused that text itself. Carries only `reason`,
+    the same text `run_task` prints on the refused line. No run and no task
+    row exist for a caller to read anything else back from."""
 
     reason: str
+
+
+_CEILING_FIELDS = ("budget_usd", "max_attempts", "max_turns")
+
+
+def _recorded_spec_text(
+    ledger: Ledger, task_id: int, spec: Spec, base: PinnedBase
+) -> tuple[Spec, str] | Refused | None:
+    """Gate 0, re-run against a stack batch's recorded spec text (ADR 7),
+    keyed on `task_id` rather than `base_sha`. Checks the task's latest
+    `spec_texts` row in order: its own hash, `parse_spec`, the id,
+    `depends_on`, and each ceiling. Then a follow-up task's `touches`, a
+    `revision` row's path, `protected_touch_refusal`,
+    `_unmatched_criterion_path` and `retirement_refusal` against
+    `.saffron/` exported at `base`. Returns the parsed text and its
+    `spec_sha`, a `Refused`, or `None` for a task with no text. A
+    `GitError` or `PolicyError` from a read below is left to propagate."""
+    row = ledger.spec_text(task_id)
+    if row is None:
+        return None
+    n = row["n"]
+
+    def _refused(detail: str) -> Refused:
+        return Refused(reason=f"task {task_id}'s text {n} {detail}")
+
+    if hashlib.sha256(row["text"].encode()).hexdigest() != row["spec_sha"]:
+        return _refused("does not hash to its spec_sha")
+
+    try:
+        text_spec = parse_spec(row["text"])
+    except SpecError as exc:
+        # A YAML error's own message can span lines with runs of spaces
+        # after each break. The refused line collapses to one line.
+        return _refused(f"does not parse: {' '.join(str(exc).split())}")
+
+    if text_spec.id != spec.id:
+        return _refused(f"declares {text_spec.id}, not {spec.id}")
+
+    if text_spec.depends_on != spec.depends_on:
+        return _refused(
+            f"depends_on {text_spec.depends_on} differs from {spec.depends_on}"
+        )
+
+    for field in _CEILING_FIELDS:
+        theirs, ours = getattr(text_spec, field), getattr(spec, field)
+        if theirs > ours:
+            return _refused(f"{field} {theirs} exceeds the handed spec's {ours}")
+
+    texts = ledger.spec_texts(task_id)
+    first_row = texts[0]
+    if first_row["origin"] == "follow_up":
+        first_spec = parse_spec(first_row["text"])
+        widened = sorted(set(text_spec.touches) - set(first_spec.touches))
+        if widened:
+            return _refused(f"widens touches beyond text {first_row['n']}'s: {widened}")
+
+    if row["origin"] == "revision":
+        earlier_same_path = any(t["path"] == row["path"] for t in texts if t["n"] < n)
+        if not earlier_same_path:
+            is_own_file = False
+            file_text = file_at(base.mirror, base.base_sha, row["path"])
+            if file_text is not None:
+                try:
+                    is_own_file = parse_spec(file_text).id == spec.id
+                except SpecError:
+                    is_own_file = False
+            if not is_own_file:
+                return _refused(f"is at {row['path']!r}, not the task's spec file")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        exported = export_saffron_dir(base.mirror, base.base_sha, Path(scratch))
+        policy, _policy_sha = load_policy(exported)
+
+    if (
+        reason := protected_touch_refusal(
+            text_spec.touches, policy.protected, text_spec.forbidden
+        )
+    ) is not None:
+        return _refused(reason)
+
+    if (escaped := _unmatched_criterion_path(text_spec)) is not None:
+        return _refused(
+            f"acceptance criteria name {escaped!r}, which no touches pattern matches"
+        )
+
+    markers = retirement_markers(base.mirror, base.base_sha)
+    if (reason := retirement_refusal(text_spec, markers)) is not None:
+        return _refused(reason)
+
+    return text_spec, row["spec_sha"]
 
 
 def run_task(
@@ -280,26 +387,21 @@ def run_task(
     and package the result if the cell came back reviewable.
 
     A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
+    Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
+    `spec_sha` and `ceilings` to the task's recorded text (ADR 7). `state`
+    on the outcome is PACKAGE's own, not the pre-packaging
+    `READY_FOR_REVIEW`. Returns `Refused` before any cell exists when
+    `spec.consumes` fails to resolve or gate 0 refuses a recorded text. A
+    base the mirror lacks raises `GitError`."""
+    if task_id is not None:
+        recorded = _recorded_spec_text(ledger, task_id, spec, base)
+        if isinstance(recorded, Refused):
+            print(f"{spec.id:<10} refused  {recorded.reason}")
+            return recorded
+        if recorded is not None:
+            spec, spec_sha = recorded
+            ceilings = spec_ceilings(spec)
 
-    `ceilings` arrives resolved, because only the attended path has flags to
-    arbitrate against the spec (`cli._ceilings`); a batch has none, so there is
-    nothing to arbitrate and no reason for `argparse` to reach this far. It
-    carries each value's provenance with it, which is the whole of what makes
-    the record worth keeping: a number with no source sends an operator to
-    grep a spec file for a line that may not be in it.
-
-    Emitted here rather than by either caller, because being printed on one
-    path and not the other is the defect this module exists to end.
-
-    `state` on the returned outcome is the *packaging* result's where
-    packaging ran, so a caller reads what actually happened to the task —
-    `MERGE_FAILED` included — rather than the pre-packaging
-    `READY_FOR_REVIEW` every packaged task would otherwise report.
-
-    Returns `Refused` instead, before any cell exists, when `spec.consumes`
-    names something the tree base does not resolve. A tree base the mirror
-    does not hold as a commit raises `GitError`.
-    """
     if emit is None:
         # Print plus the task's own log, the shape `session._default_emit` and
         # `package()` both default to: a caller that passes nothing must still

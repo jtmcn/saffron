@@ -4,7 +4,9 @@ packaged (`DESIGN.md` §6). `run_one_cell`, `push_unpackaged_work` and
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -12,11 +14,13 @@ import pytest
 
 from saffron import task as task_module
 from saffron.cell.session import CellOutcome
-from saffron.events import Event, Teardown, read_log
-from saffron.intake import Spec
+from saffron.events import Ceilings, Event, Teardown, read_log
+from saffron.intake import Spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
-from saffron.task import PinnedBase, ResolvedCeilings
+from saffron.repos.mirror import GitError
+from saffron.repos.policy import PolicyError
+from saffron.task import PinnedBase, Refused, ResolvedCeilings
 
 _NO_COMMITS = "no commits, nothing to push"
 
@@ -117,6 +121,9 @@ def test_run_task_hands_its_cell_the_task_it_was_given(tmp_path, monkeypatch):
     out_dir = tmp_path / "out"
     _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
 
+    # `task_id=9` names no task here, and SA-0182's `spec_text` raises
+    # `ValueError` for one. A stand-in returning `None` covers that case.
+    monkeypatch.setattr(Ledger, "spec_text", lambda self, task_id: None)
     monkeypatch.setattr(
         task_module, "run_task", functools.partial(real_run_task, task_id=9)
     )
@@ -600,3 +607,541 @@ def test_a_handoff_replaces_the_stacking_resolver(tmp_path, monkeypatch):
     assert calls == 1
     assert stacked_on == "c" * 40
     assert parent_branch == "saffron/TE-9"
+
+
+# --- SA-0150: run_task on a stack batch's recorded spec text -------------
+
+_SY1_TEXT = (
+    "---\n"
+    "id: SY-1\n"
+    "title: File\n"
+    "type: feature\n"
+    "depends_on: [SY-8, SY-9]\n"
+    "touches: ['src/**']\n"
+    "max_turns: 55\n"
+    "---\n"
+    "file body\n"
+)
+_SY5_TEXT = _SY1_TEXT.replace("id: SY-1", "id: SY-5", 1)
+_DEFAULT_PATH = ".saffron/specs/SY-1-x.md"
+_OTHER_PATH = ".saffron/specs/SY-5-other.md"
+_LATE_PATH = ".saffron/specs/SY-1-late.md"
+
+
+def _rev_text(
+    *,
+    id="SY-1",
+    title="Rev",
+    type="bug",
+    depends_on="[SY-8, SY-9]",
+    touches="['src/**', 'tests/**']",
+    forbidden="['docs/**']",
+    risk="elevated",
+    budget_usd="9.5",
+    max_attempts="4",
+    max_turns="50",
+    claim="`src/a.py` returns 2",
+    witness="tests/test_a.py::test_two",
+    mutant_find=None,
+    body="revised body\n",
+    extra_frontmatter="",
+):
+    """One revised spec text, built field by field. A case holds every
+    field at the spec's own defaults and overrides only the one it drives."""
+    fields = {
+        "id": id,
+        "title": title,
+        "type": type,
+        "depends_on": depends_on,
+        "touches": touches,
+        "forbidden": forbidden,
+        "risk": risk,
+        "budget_usd": budget_usd,
+        "max_attempts": max_attempts,
+        "max_turns": max_turns,
+    }
+    lines = ["---"]
+    for key, value in fields.items():
+        if value is not None:
+            lines.append(f"{key}: {value}")
+    if claim is not None:
+        lines.append("acceptance:")
+        lines.append(f"  - claim: '{claim}'")
+        lines.append(f"    witness: {witness}")
+        if mutant_find is not None:
+            lines.append("    mutant:")
+            lines.append("      file: src/a.py")
+            lines.append(f"      find: '{mutant_find}'")
+    if extra_frontmatter:
+        lines.append(extra_frontmatter.rstrip("\n"))
+    lines.append("---")
+    return "\n".join(lines) + "\n" + body
+
+
+_REV_TEXT = _rev_text()
+_OLDER_TEXT = _rev_text(budget_usd="5.0", touches="['src/**']")
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+    )
+
+
+def _commit(repo: Path, message: str) -> str:
+    _git(repo, "add", "-A")
+    _git(
+        repo,
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=T",
+        "commit",
+        "-qm",
+        message,
+    )
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _marker_line(spec_id: str) -> str:
+    # Built apart from "SY-1" so the literal marker never sits in this
+    # file's own source, which a real scan would read as a dangling one.
+    return f"# saffron:retired-by {spec_id}\n"
+
+
+def _recorded_mirror(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """The mirror both new witnesses share: four commits shaped as the
+    spec's own table, named `bare`, `base`, `broken` and `HEAD`."""
+    repo = tmp_path / "recorded-mirror"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "src").mkdir()
+    (repo / "src" / "old.py").write_text("x = 1\n")
+    bare = _commit(repo, "bare")
+
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nprotected: [DESIGN.md]\n"
+    )
+    (repo / "src" / "old.py").write_text(_marker_line("SY-1") + "x = 1\n")
+    specs = repo / ".saffron" / "specs"
+    specs.mkdir()
+    (specs / "SY-1-x.md").write_text(_SY1_TEXT)
+    (specs / "SY-5-other.md").write_text(_SY5_TEXT)
+    base = _commit(repo, "base")
+
+    (repo / ".saffron" / "policy.yaml").write_text("gates: [\n")
+    (repo / "src" / "old.py").write_text("x = 1\n")
+    broken = _commit(repo, "broken")
+
+    (repo / ".saffron" / "policy.yaml").write_text("gates: {}\nprotected: []\n")
+    (specs / "SY-1-late.md").write_text(_SY1_TEXT)
+    head = _commit(repo, "HEAD")
+
+    return repo, {"bare": bare, "base": base, "broken": broken, "HEAD": head}
+
+
+def _recorded_ledger(
+    tmp_path: Path, db_name: str = "ledger.db"
+) -> tuple[Ledger, int, int, Path, dict[str, str]]:
+    """The shared arrangement both new witnesses build: one ledger, one
+    repo, one run at `base`."""
+    mirror, shas = _recorded_mirror(tmp_path)
+    ledger = Ledger(tmp_path / db_name)
+    repo_id = ledger.upsert_repo(
+        "recorded", str(mirror), str(mirror), policy_sha="p" * 64
+    )
+    run_id = ledger.create_run(repo_id, base_sha=shas["base"])
+    return ledger, run_id, repo_id, mirror, shas
+
+
+def _new_task(ledger: Ledger, run_id: int) -> int:
+    return ledger.create_task(
+        run_id, spec_id="SY-1", spec_sha="f" * 64, branch="saffron/SY-1"
+    )
+
+
+def _record(
+    ledger: Ledger,
+    task_id: int,
+    text: str,
+    *,
+    origin: str = "revision",
+    path: str = _DEFAULT_PATH,
+) -> int:
+    return ledger.record_spec_text(
+        task_id, origin=origin, spec_id="SY-1", path=path, text=text
+    )
+
+
+def _handed_spec() -> tuple[Spec, str, ResolvedCeilings]:
+    ceilings = ResolvedCeilings(
+        budget_usd=12.0,
+        max_attempts=4,
+        max_turns=60,
+        budget_source="default",
+        attempts_source="default",
+        turns_source="default",
+    )
+    return (
+        parse_spec(_SY1_TEXT),
+        hashlib.sha256(_SY1_TEXT.encode()).hexdigest(),
+        ceilings,
+    )
+
+
+def test_a_task_with_a_recorded_spec_text_runs_its_latest_text(tmp_path, monkeypatch):
+    """`run_task` runs a task's latest recorded spec text (SA-0182, ADR 7)
+    in place of the spec it was handed, once gate 0 passes it. It rebinds
+    every ceiling and downstream read to that text."""
+    ledger, run_id, repo_id, mirror, shas = _recorded_ledger(tmp_path)
+    spec, spec_sha, ceilings = _handed_spec()
+    out_dir = tmp_path / "out"
+
+    built: list = []
+    states = ["READY_FOR_REVIEW"]
+
+    def _run_one_cell(cell_spec, **_kwargs):
+        built.append(cell_spec)
+        return CellOutcome(
+            state=states[-1],
+            task_id=cell_spec.task_id,
+            run_id=cell_spec.task_id,
+            task_dir=out_dir / cell_spec.spec_id,
+        )
+
+    package_calls: list = []
+    push_calls: list = []
+
+    def _package(_outcome, *, spec, **_kwargs):
+        package_calls.append(spec)
+        return package_phase.PackageResult(
+            state="READY_FOR_REVIEW", pr_url="https://example.invalid/pull/1"
+        )
+
+    def _push(_outcome, *, spec, **_kwargs):
+        push_calls.append(spec)
+        return package_phase.PushResult(pushed=False, note=_NO_COMMITS)
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+    monkeypatch.setattr(package_phase, "package", _package)
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", _push)
+
+    def _run(task_id, *, base_sha=None, repo=None):
+        events: list[Event] = []
+        result = task_module.run_task(
+            spec,
+            spec_sha,
+            ceilings=ceilings,
+            base=PinnedBase(
+                mirror=mirror,
+                url="https://example.invalid/o/r.git",
+                base_sha=base_sha or shas["base"],
+            ),
+            repo_id=repo_id,
+            repo=repo or tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+            task_id=task_id,
+            emit=events.append,
+        )
+        return result, events
+
+    # `older` then `REV`, a task whose cell reports `READY_FOR_REVIEW`.
+    task_a = _new_task(ledger, run_id)
+    _record(ledger, task_a, _OLDER_TEXT)
+    _record(ledger, task_a, _REV_TEXT)
+    states[:] = ["READY_FOR_REVIEW"]
+    result_a, events_a = _run(task_a)
+    assert isinstance(result_a, CellOutcome)
+    spec_a = built[-1]
+    assert spec_a.spec_sha == hashlib.sha256(_REV_TEXT.encode()).hexdigest()
+    assert spec_a.body == "revised body\n"
+    assert spec_a.touches == ["src/**", "tests/**"]
+    assert spec_a.forbidden == ["docs/**"]
+    assert len(spec_a.acceptance) == 1
+    assert spec_a.risk == "elevated"
+    assert spec_a.spec_type == "bug"
+    assert spec_a.budget_usd == 9.5
+    assert spec_a.max_turns == 50
+    assert spec_a.max_attempts == 4
+    ceiling_events = [e for e in events_a if isinstance(e, Ceilings)]
+    assert len(ceiling_events) == 1
+    assert (ceiling_events[0].budget_usd, ceiling_events[0].max_attempts) == (9.5, 4)
+    assert (
+        ceiling_events[0].budget_source,
+        ceiling_events[0].attempts_source,
+        ceiling_events[0].turns_source,
+    ) == ("spec", "spec", "spec")
+    assert package_calls[-1] == parse_spec(_REV_TEXT)
+
+    # A fresh task: `older` then `REV` with `max_attempts: 3`, `EXHAUSTED`.
+    task_b = _new_task(ledger, run_id)
+    _record(ledger, task_b, _OLDER_TEXT)
+    rev_max3 = _rev_text(max_attempts="3")
+    _record(ledger, task_b, rev_max3)
+    states[:] = ["EXHAUSTED"]
+    built.clear()
+    result_b, _events_b = _run(task_b)
+    assert isinstance(result_b, CellOutcome)
+    spec_b = built[-1]
+    assert spec_b.max_attempts == 3
+    assert push_calls[-1] == parse_spec(rev_max3)
+    assert push_calls[-1].max_attempts == 3
+
+    # A follow-up task holding `REV` alone, at its own follow-up path.
+    task_c = _new_task(ledger, run_id)
+    _record(
+        ledger, task_c, _REV_TEXT, origin="follow_up", path=".saffron/specs/SY-1-g.md"
+    )
+    built.clear()
+    states[:] = ["EXHAUSTED"]
+    result_c, _ = _run(task_c)
+    assert isinstance(result_c, CellOutcome)
+    assert len(built) == 1
+    assert built[0].spec_sha == hashlib.sha256(_REV_TEXT.encode()).hexdigest()
+
+    # A follow-up task later revised, both at the same follow-up path.
+    task_d = _new_task(ledger, run_id)
+    _record(
+        ledger, task_d, _REV_TEXT, origin="follow_up", path=".saffron/specs/SY-1-f.md"
+    )
+    _record(
+        ledger, task_d, _REV_TEXT, origin="revision", path=".saffron/specs/SY-1-f.md"
+    )
+    built.clear()
+    result_d, _ = _run(task_d)
+    assert isinstance(result_d, CellOutcome)
+    assert len(built) == 1
+    assert built[0].spec_sha == hashlib.sha256(_REV_TEXT.encode()).hexdigest()
+
+    # A task with no recorded text, at a sha the mirror does not hold.
+    task_e = _new_task(ledger, run_id)
+    built.clear()
+    result_e, _ = _run(task_e, base_sha="a" * 40)
+    assert isinstance(result_e, CellOutcome)
+    assert built[-1].body == "file body\n"
+
+    # `Ledger.spec_text` must never be read when no `task_id` is given.
+    def _fails(self, task_id):
+        raise AssertionError("spec_text read with no task_id")
+
+    monkeypatch.setattr(Ledger, "spec_text", _fails)
+    built.clear()
+    events_f: list[Event] = []
+    result_f = task_module.run_task(
+        spec,
+        spec_sha,
+        ceilings=ceilings,
+        base=PinnedBase(
+            mirror=mirror, url="https://example.invalid/o/r.git", base_sha=shas["base"]
+        ),
+        repo_id=repo_id,
+        repo=tmp_path / "target-repo",
+        ledger=ledger,
+        out_dir=out_dir,
+        token=None,
+        emit=events_f.append,
+    )
+    assert isinstance(result_f, CellOutcome)
+    assert built[-1].spec_sha == hashlib.sha256(_SY1_TEXT.encode()).hexdigest()
+
+
+def test_gate_zero_refuses_a_recorded_spec_text_before_its_cell(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task` re-runs gate 0 against a task's latest recorded spec text
+    before any cell starts. A refused text is refused the same way a queued
+    spec at `base_sha` would be, and nothing else is read once it is."""
+    ledger, run_id, repo_id, mirror, shas = _recorded_ledger(tmp_path)
+    spec, spec_sha, ceilings = _handed_spec()
+    out_dir = tmp_path / "out"
+
+    def _run_one_cell(*_a, **_k):
+        raise AssertionError("run_one_cell must not run for a refused task")
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+
+    def _run(task_id, *, base_sha=None):
+        return task_module.run_task(
+            spec,
+            spec_sha,
+            ceilings=ceilings,
+            base=PinnedBase(
+                mirror=mirror,
+                url="https://example.invalid/o/r.git",
+                base_sha=base_sha or shas["base"],
+            ),
+            repo_id=repo_id,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+            task_id=task_id,
+            emit=lambda _event: None,
+        )
+
+    def _assert_refused(task_id: int, phrase: str) -> None:
+        result = _run(task_id)
+        assert isinstance(result, Refused), phrase
+        assert phrase in result.reason, result.reason
+        assert "  " not in result.reason, result.reason
+        out = capsys.readouterr().out
+        assert out == f"{'SY-1':<10} refused  {result.reason}\n"
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        assert row["state"] == "QUEUED"
+        assert ledger.attempts(task_id) == []
+
+    single_row_cases = [
+        ("no frontmatter", "revised body\n", "does not parse"),
+        ("yaml", "---\n: [\n---\n\nbody\n", "does not parse"),
+        ("list", "---\n- a\n---\n\nbody\n", "does not parse"),
+        ("reserved", _rev_text(extra_frontmatter="body: x"), "does not parse"),
+        ("invalid", _rev_text(type="nope"), "does not parse"),
+        (
+            "both",
+            _rev_text(body="revised body\n\n## Acceptance criteria\n- [ ] it works\n"),
+            "does not parse",
+        ),
+        (
+            "mutant",
+            _rev_text(mutant_find="return 2", body="it does return 2\n"),
+            "does not parse",
+        ),
+        ("id", _rev_text(id="SY-2"), "declares SY-2"),
+        ("added", _rev_text(depends_on="[SY-8, SY-9, SY-7]"), "depends_on"),
+        ("dropped", _rev_text(depends_on="[SY-8]"), "depends_on"),
+        ("reordered", _rev_text(depends_on="[SY-9, SY-8]"), "depends_on"),
+        ("budget", _rev_text(budget_usd="12.5"), "budget_usd"),
+        ("attempts", _rev_text(max_attempts="5"), "max_attempts"),
+        ("turns", _rev_text(max_turns="56"), "max_turns"),
+        ("undeclared", _rev_text(max_turns=None), "max_turns"),
+        (
+            "protected",
+            _rev_text(touches="['src/**', 'tests/**', 'DESIGN.md']"),
+            "protected",
+        ),
+        ("criterion", _rev_text(claim="`lib/a.py` returns 2"), "lib/a.py"),
+        ("marker", _rev_text(touches="['src/a.py', 'tests/**']"), "src/old.py"),
+        (
+            "consumes",
+            _rev_text(extra_frontmatter="consumes: [src/missing.py]"),
+            "src/missing.py",
+        ),
+    ]
+    for _name, text, phrase in single_row_cases:
+        task = _new_task(ledger, run_id)
+        _record(ledger, task, text)
+        _assert_refused(task, phrase)
+
+    # tampered: a row whose stored hash disagrees with its own text.
+    task = _new_task(ledger, run_id)
+    n = _record(ledger, task, _REV_TEXT)
+    ledger._db.execute(
+        "UPDATE spec_texts SET spec_sha = ? WHERE task_key = ? AND n = ?",
+        ("0" * 64, ledger.record_key(task), n),
+    )
+    ledger._db.commit()
+    _assert_refused(task, "does not hash to its spec_sha")
+
+    # other spec / late: a revision's path names a file at `base_sha` that
+    # is not the task's own spec, or one that only exists past `base_sha`.
+    task = _new_task(ledger, run_id)
+    _record(ledger, task, _REV_TEXT, path=_OTHER_PATH)
+    _assert_refused(task, "not the task's spec file")
+
+    task = _new_task(ledger, run_id)
+    _record(ledger, task, _REV_TEXT, path=_LATE_PATH)
+    _assert_refused(task, "not the task's spec file")
+
+    # widened: a follow-up task's later revision cannot grow its touches.
+    task = _new_task(ledger, run_id)
+    _record(
+        ledger, task, _REV_TEXT, origin="follow_up", path=".saffron/specs/SY-1-w.md"
+    )
+    _record(
+        ledger,
+        task,
+        _rev_text(touches="['src/**', 'tests/**', 'lib/**']"),
+        origin="revision",
+        path=".saffron/specs/SY-1-w.md",
+    )
+    _assert_refused(task, "widens")
+
+    # widened via chain: each revision stays within its predecessor's
+    # touches, but the latest still grows past the original follow-up's.
+    task = _new_task(ledger, run_id)
+    _record(
+        ledger,
+        task,
+        _rev_text(touches="['src/**']"),
+        origin="follow_up",
+        path=".saffron/specs/SY-1-wc.md",
+    )
+    _record(
+        ledger,
+        task,
+        _rev_text(touches="['src/**', 'lib/**']"),
+        origin="revision",
+        path=".saffron/specs/SY-1-wc.md",
+    )
+    _record(
+        ledger,
+        task,
+        _rev_text(touches="['src/**', 'lib/**']"),
+        origin="revision",
+        path=".saffron/specs/SY-1-wc.md",
+    )
+    _assert_refused(task, "widens")
+
+    # An earlier row at the same path needs no read at all. Three broken
+    # bases still raise, and one good base reaches the export cleanly.
+    task = _new_task(ledger, run_id)
+    _record(
+        ledger, task, _REV_TEXT, origin="follow_up", path=".saffron/specs/SY-1-z.md"
+    )
+    _record(ledger, task, _REV_TEXT, origin="revision", path=".saffron/specs/SY-1-z.md")
+
+    for bad_base in ("b" * 40, shas["bare"]):
+        with pytest.raises(GitError):
+            task_module._recorded_spec_text(
+                ledger,
+                task,
+                spec,
+                PinnedBase(
+                    mirror=mirror,
+                    url="https://example.invalid/o/r.git",
+                    base_sha=bad_base,
+                ),
+            )
+    with pytest.raises(PolicyError):
+        task_module._recorded_spec_text(
+            ledger,
+            task,
+            spec,
+            PinnedBase(
+                mirror=mirror,
+                url="https://example.invalid/o/r.git",
+                base_sha=shas["broken"],
+            ),
+        )
+
+    ok = task_module._recorded_spec_text(
+        ledger,
+        task,
+        spec,
+        PinnedBase(
+            mirror=mirror, url="https://example.invalid/o/r.git", base_sha=shas["base"]
+        ),
+    )
+    assert isinstance(ok, tuple)
+    assert ok[0].id == "SY-1"
+    assert ok[0].budget_usd == 9.5
