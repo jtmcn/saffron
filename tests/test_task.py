@@ -1220,9 +1220,12 @@ def test_run_task_hands_the_cell_the_specs_own_estimate_in_lines(tmp_path, monke
         assert re.search(
             rf"\b{estimated_lines}\b\W+(?:changed\W+)?lines?\b", tail, re.I
         )
-        assert not re.search(rf"\b{estimated_lines}\b\s*tokens?\b", tail, re.I)
+        assert not re.search(
+            rf"\b{estimated_lines}\b\W+(?:changed\W+)?tokens?\b", tail, re.I
+        )
         sentences = re.split(r"\.|\n", tail)
         assert any(
-            re.search(rf"\b{estimated_lines}\b", s) and "estimat" in s.lower()
+            re.search(rf"\b{estimated_lines}\b", s)
+            and "estimat" in s.lower().replace("estimated_lines", "")
             for s in sentences
         )

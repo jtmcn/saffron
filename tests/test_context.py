@@ -374,7 +374,7 @@ def test_the_plan_field_says_estimated_lines_counts_lines_not_tokens():
 
     assert any(
         "`size`" in s
-        and rate in s
+        and re.search(rf"\b{rate}\b", s)
         and "token" in s
         and "line" in s
         and s.find("token") < s.find("line")
@@ -382,9 +382,18 @@ def test_the_plan_field_says_estimated_lines_counts_lines_not_tokens():
     )
 
     assert any(
-        "divid" in s and "token" in s and re.search(rf"{rate}.*\bline", s)
+        "divid" in s and "token" in s and re.search(rf"\b{rate}\b.*\bline", s)
         for s in sentences
     )
+
+    # A token only in the rate, the division, or a "never" sentence, so no
+    # later sentence can tell the plan to count in tokens.
+    assert any(re.search(r"\bnever\b.*\btoken", s) for s in sentences)
+    for s in sentences:
+        if "token" in s:
+            assert (
+                "`size`" in s or "divid" in s or re.search(r"\bnever\b.*\btoken", s)
+            ), s
 
     reject_sentences = [s for s in sentences if "reject" in s]
     assert reject_sentences
