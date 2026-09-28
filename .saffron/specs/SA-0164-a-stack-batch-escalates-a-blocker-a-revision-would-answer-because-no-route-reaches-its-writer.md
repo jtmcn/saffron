@@ -51,6 +51,7 @@ forbidden:
 budget_usd: 25
 max_attempts: 3
 max_turns: 190
+estimated_lines: 648
 pending_symbols:
   - saffron/spec_review.py::SPEC_REVIEW_SESSION_USD
 acceptance:
@@ -211,7 +212,7 @@ by symbol where the chain edits them. This spec consumes these names.
   `_batch`'s `--stack` path builds `_stack_review` and `_stack_mint` where
   readiness passed and `pinned` is bound, and passes `None` for both when
   readiness fails.
-- From `SA-0150`: `Ledger.record_spec_text(task_id, *, origin, spec_id,
+- From `SA-0182` and `SA-0150`: `Ledger.record_spec_text(task_id, *, origin, spec_id,
   path, text)` and `Ledger.spec_text(task_id)`, the task's latest row or
   `None`. `record_spec_text` takes a `spec_id` equal to the task's. A
   `revision` row's path is any one file name in `.saffron/specs/`.
@@ -288,7 +289,7 @@ Build four things.
 4. **The wiring.** In `_batch`'s `--stack` path, build `_stack_revise` where
    `_stack_review` is built, as criterion 6 states. `_stack_revise` then has
    a caller, and `SA-0160`'s `pending_symbols` entry for it is spent.
-   `record_spec_text`, which `SA-0150` lists, gains its caller here too.
+   `record_spec_text`, which `SA-0182` and `SA-0150` list, gains its caller here too.
 
 A round, in order:
 
@@ -681,7 +682,7 @@ Its tree was `SA-0160`'s prototype, with stand-ins for `SA-0149`'s read
 and route and for `run_stack_batch` as `SA-0143` to `SA-0157` leave it.
 The stand-ins held `SA-0149`'s wrapper, `SA-0155`'s mint, attempts and
 facts, and `SA-0148`'s wait with a fixed 60 seconds. A `Ledger` subclass
-stood in for `SA-0150`'s and `SA-0155`'s tables and methods. The mint ran
+stood in for `SA-0182`'s and `SA-0155`'s tables and methods. The mint ran
 for every spec, as D1 decides. It built
 criteria 1 to 5 and their witnesses. The right build passed all of them.
 Each wrong build listed as measured was applied as a text edit, and each

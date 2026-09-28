@@ -50,6 +50,7 @@ forbidden:
 budget_usd: 25
 max_attempts: 3
 max_turns: 200
+estimated_lines: 478
 acceptance:
   - claim: >-
       `finish.commit_finish(ledger, batch_id, unrun, *, mirror, workdir,
@@ -154,7 +155,7 @@ read. So chain names are cited by symbol. This spec consumes these.
   `batch_key` (the batch id as text), `position`, `spec_id`,
   `predecessor_key`, `predecessor_head` and `generation`, and
   `Ledger.record_stack_layer`.
-- From `SA-0150`: the `spec_texts` table, `Ledger.record_spec_text`,
+- From `SA-0182` and `SA-0150`: the `spec_texts` table, `Ledger.record_spec_text`,
   `Ledger.spec_text(task_id)`, which returns a task's latest row or `None`,
   and `Ledger.spec_texts(task_id)`. A row's `spec_sha` is the SHA-256 of its
   text. A task's kind is its first row's origin, `revision` or
@@ -268,7 +269,7 @@ the repo's gate suite reads it (items 40 and 97). `SA-0167` runs that
 suite, then pushes this sha to the finishing layer's own branch. So the
 top layer's branch keeps one writer, PACKAGE.
 
-**Why the path and hash checks repeat `SA-0150`'s.** `record_spec_text`
+**Why the path and hash checks repeat `SA-0182`'s.** `record_spec_text`
 refuses a path outside the spec directory and hashes the text itself. A
 fold writes each row from its fact alone, with neither check. This is the
 one host write to a protected path, so it checks again at the write.
@@ -394,9 +395,9 @@ fail it:
 - the checks made inside the worktree, as each text is written
 
 **How the list was measured.** A throwaway run on 2026-09-24 at
-`68892367` stood in for `SA-0145`'s and `SA-0150`'s tables and writers.
+`68892367` stood in for `SA-0145`'s and `SA-0182`'s tables and writers.
 The stand-in `record_spec_text` refused a path by its origin, as
-`SA-0150` does. It loaded a prototype of the read and of
+`SA-0182` does. It loaded a prototype of the read and of
 `saffron/finish.py`. It ran prototypes of criteria 1 and 2's witnesses on
 the host's git, 2.54.0. The right build passed both. Each wrong build
 above was applied as a text edit to the prototype, and each failed its

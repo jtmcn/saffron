@@ -52,6 +52,7 @@ forbidden:
 budget_usd: 24
 max_attempts: 3
 max_turns: 130
+estimated_lines: 586
 pending_symbols:
   - saffron/follow_up.py::write_follow_ups
   - saffron/follow_up.py::WRITER_SHARE
@@ -165,7 +166,7 @@ Every line number below was read at `642a26c3`, where none of them exist.
   `Qualification` of `groups` and `pool`. Each `FollowUpGroup` holds a
   `task_key`, a `file` and a tuple of `findings`. A survived probe makes its
   finding a `blocker` and sets its `probe_verdict`.
-- `SA-0150`: `Ledger.record_spec_text(task_id, *, origin, spec_id, path,
+- `SA-0182`: `Ledger.record_spec_text(task_id, *, origin, spec_id, path,
   text)`, and `Ledger.spec_text(task_id)`, the latest row or `None`. A row's
   `spec_sha` is the SHA-256 of its text, as `load_spec` hashes a file
   (`saffron/intake.py:308-319`). Its fact's `batch_key` is the task's run's

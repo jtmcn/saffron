@@ -49,6 +49,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
+estimated_lines: 323
 acceptance:
   - claim: >-
       `finish.link_stack(ledger, batch_id, *, mirror, url, gh, ready)` links

@@ -50,6 +50,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
+estimated_lines: 335
 acceptance:
   - claim: >-
       `finish.write_findings(ledger, batch_id, unrun, dest, *, pooled=())`
@@ -157,7 +158,7 @@ read. So chain names are cited by symbol. This spec consumes these.
   `unanchored` and `note`. A killed probe drops its finding.
   `Ledger.record_qualification` writes it. `qualify.FollowUpGroup` holds a
   `task_key`, a `file` and a tuple of `Finding`s.
-- From `SA-0150`: the `spec_texts` table, `Ledger.record_spec_text` and
+- From `SA-0182`: the `spec_texts` table, `Ledger.record_spec_text` and
   `Ledger.spec_text`. A task's kind is its first row's origin.
 - From `SA-0161` and `SA-0165`: `follow_up.Pooled`, of `group` and
   `reason`. `write_follow_ups` appends one to a caller-owned list as each
@@ -359,7 +360,7 @@ writes both lists empty. These fail it:
 - no file written for a batch with no layer
 
 **How the list was measured.** A throwaway run on 2026-09-25 at
-`68892367` stood in for `SA-0145`'s, `SA-0147`'s and `SA-0150`'s tables
+`68892367` stood in for `SA-0145`'s, `SA-0147`'s and `SA-0182`'s tables
 and writers. It stood in for `SA-0161`'s `Pooled` and `FollowUpGroup`
 too. It loaded a prototype of the two reads and of `write_findings`, and
 ran a prototype of criterion 1's witness. The right build passed. Each

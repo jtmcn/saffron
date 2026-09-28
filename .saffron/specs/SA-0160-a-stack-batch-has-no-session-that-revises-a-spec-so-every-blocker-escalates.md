@@ -56,6 +56,7 @@ forbidden:
 budget_usd: 24
 max_attempts: 3
 max_turns: 180
+estimated_lines: 575
 pending_symbols:
   - saffron/cli.py::_stack_revise
   - saffron/spec_review.py::SPEC_WRITER_SESSION_USD
@@ -185,8 +186,8 @@ never from either turn's text or from `/work`.
 **The session holds Bash.** The operator decided that the spec writer
 session runs commands in its critic cell, as a hand draft does. It
 measures any wrong-build list it adds with a throwaway script. The cell is
-torn down after the session. `SA-0169` runs that Bash as an unprivileged
-user. `SA-0156` measured three account lines that tell a session so, and
+torn down after the session. `SA-0169` runs that Bash as the unprivileged
+user `SA-0181` builds. `SA-0156` measured three account lines that tell a session so, and
 quotes them in its Problem. `SA-0176`'s writer prompt carries those same
 three lines.
 
@@ -202,8 +203,8 @@ follow-up specs. They run the same session with `SA-0176`'s prompt and a
 user prompt of their own.
 
 **What the tree base holds.** This spec's tree base is `SA-0176`'s head.
-Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156`,
-`SA-0150` and `SA-0176`. Every line number below was read at `71140772`, where no chain
+Below it the chain runs through `SA-0181`, `SA-0169`, `SA-0175`, `SA-0156`,
+`SA-0182`, `SA-0150` and `SA-0176`. Every line number below was read at `71140772`, where no chain
 code from `SA-0142` on exists. So `cli.py` and `spec_review.py` are cited
 by symbol where the chain edits them. This spec consumes these names.
 
@@ -233,7 +234,7 @@ by symbol where the chain edits them. This spec consumes these names.
   `policy.yaml` as `Policy()`, and runs its review in a `layer_cell` with
   `spec_session=True`. This spec's callable follows its shape. Its
   Problem quotes the three account lines, verbatim.
-- From `SA-0150`: the `spec_text` fact, and
+- From `SA-0182`: the `spec_text` fact, and
   `Ledger.record_spec_text(task_id, *, origin, spec_id, path, text)`. A
   row's `spec_sha` is the SHA-256 of its text. This spec calls neither.
 
@@ -372,7 +373,7 @@ are `pending_symbols` entries.
   per spec, and passes it from `saffron batch --stack`. Every blocker still
   routes `escalate` here.
 - **The record and the spend.** `SA-0164` records each session's attempt,
-  as `SA-0155` records a review's. It records the text with `SA-0150`'s
+  as `SA-0155` records a review's. It records the text with `SA-0182`'s
   `record_spec_text`, whose `spec_sha` matches the session's. So
   `_stack_revise` takes no ledger, and `run_spec_writer` records nothing.
 - **Parsing the revised text.** `SA-0150` runs `parse_spec`'s refusals and

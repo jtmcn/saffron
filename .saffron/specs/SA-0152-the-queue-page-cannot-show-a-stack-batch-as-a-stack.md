@@ -47,6 +47,7 @@ forbidden:
 budget_usd: 27
 max_attempts: 3
 max_turns: 200
+estimated_lines: 578
 acceptance:
   - claim: >-
       `stack_view(ledger, batch_id, specs)` returns `None` for a batch with
@@ -251,7 +252,7 @@ Build four things.
 - **Spec review's detail.** A spec its review withheld shows in the order
   by its state, such as `SPEC_WITHHELD`. The view shows no revision count
   and no blocker list, though `spec_reviews` (`SA-0155`) and `spec_texts`
-  (`SA-0150`) hold both.
+  (`SA-0182`) hold both.
 - **Findings and their outcomes.** The view shows each layer's end-review
   status alone. The findings, their `qualifications` rows (`SA-0147`) and
   the follow-up each fed are not on the page. `SA-0174` writes them to
@@ -267,7 +268,7 @@ Build four things.
   revision round at all, though `spec_texts` holds each one.
 - **Follow-up titles.** A follow-up's spec is not in the order `_batch`
   resolved, so its layer shows no title and no `max_turns`. Its text is a
-  recorded spec text (`SA-0150`), which a later spec can parse for both.
+  recorded spec text (`SA-0182`), which a later spec can parse for both.
 - **Keeping the view across a later write.** `append_queue_line`
   re-renders `index.html` from `queue.json` alone
   (`saffron/report/index.py:213-238`). So a `saffron cell` after the
