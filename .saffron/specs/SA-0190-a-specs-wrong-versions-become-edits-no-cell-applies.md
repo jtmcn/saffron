@@ -79,14 +79,14 @@ acceptance:
       After REVIEW applies every edit, `wrong-versions.json` holds each entry
       `review.run_wrong_versions` returned, in the spec's order. Every
       version there carries an `outcome` and a `summary`. The witness drives
-      six versions over three criteria, with a criterion that declares none
-      between the first two. The first criterion's versions are one the
+      six versions over three of four criteria, with a criterion that
+      declares none between the first two. The first criterion's versions are one the
       session could not express and an edit on a declared test path. The
       second's are an edit under which the `tests` gate answers `error`,
       then an edit the witness kills. The third's session fails, so both its
       versions are `unproven` with the entry's `error` as their summary.
       Each summary is compared whole, and each witness run's subset too.
-      REVIEW emits `wrong versions: 6 declared, 3 expressed` right after the
+      REVIEW emits `wrong versions: 6 declared, 3 expressed` after the
       criterion-probe line, and the task ends `READY_FOR_REVIEW`. A spec
       whose criteria declare no wrong version buys no such session, writes
       no such file and emits no such line.
@@ -108,8 +108,8 @@ acceptance:
       the one a disclosing claim gets, with `the wrong versions of` and the
       holding criterion's witness in place of where the text sits. The
       witness drives two specs, one where the mutant's own criterion holds
-      the text and one where a sibling does, and compares each message
-      whole.
+      the text and one where a sibling does. In each, the holder comes
+      before a later criterion. The witness compares each message whole.
     witness: tests/test_intake.py::test_a_mutant_a_wrong_version_discloses_is_refused_too
   - claim: >-
       A criterion probe its criterion's witness survives is still filed as a
@@ -264,7 +264,7 @@ f"wrong version {version!r} applied to {edit.file} as an edit. The claim "
 f"was {criterion.claim!r}, and only that witness ran under the edit."
 ```
 
-The claim without one is the sentence at `saffron/phases/review.py:518-522`,
+The claim without one is the sentence at `saffron/phases/review.py:520-524`,
 unchanged. These fail it:
 
 - the version appended to today's sentence
@@ -303,7 +303,7 @@ whole entry in `wrong-versions.json`. These fail it:
 - the whole suite run in place of the one witness
 - the survivor left unanchored, or anchored with the critic cell's reader
 
-**Criterion 3's witness.** Three criteria, in order:
+**Criterion 3's witness.** Four criteria, in order:
 
 | criterion | witness | wrong versions | the wrong-version session answers |
 |---|---|---|---|
@@ -375,9 +375,10 @@ of every turn's cost. These fail it:
 (`tests/test_intake.py:492-513`). Table the two specs and loop over them
 in one plain `def`. In each, one criterion declares a mutant whose `find`
 is `CEILING = 60`. In the first, that criterion's own `wrong_versions`
-holds `"a CEILING = 60 that stays at 60"`. In the second, a sibling
-criterion holds it, and the mutant's own criterion declares a version
-without it. Neither body nor claim holds the text. Catch the error, and
+holds `"a CEILING = 60 that stays at 60"`, and a trailing criterion holds
+no version. In the second, the holding sibling comes first and the
+mutant's own criterion last, declaring a version without the text. So
+naming the last criterion's witness fails both rows. Neither body nor claim holds the text. Catch the error, and
 assert its type is `DisclosedMutantError`, its `spec.id`, and `str()` of
 it whole. Build the expected message from the literal at
 `saffron/intake.py:298-302`. These fail it:
@@ -388,7 +389,7 @@ it whole. Build the expected message from the literal at
 - `the wrong versions of` naming the mutant's witness for a sibling's text
 
 **The existing witnesses stay green.** Criteria 6 and 7 name
-`SA-0120`'s witnesses. The ten `acceptance=` drives declare no wrong
+`SA-0120`'s witnesses. The nine `_spec(acceptance=` calls declare no wrong
 version, so they buy no new session and write no new file.
 
 **What the witnesses leave undriven.** A raise that stops later edits,

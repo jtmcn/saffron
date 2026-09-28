@@ -265,8 +265,8 @@ tail with `endswith` on a string you build in full.
 (`tests/test_intake.py:381-402`). Table the four refused specs and loop
 over them in one plain `def`, asserting `SpecError` for each. The four
 declare `[]`, `[""]`, `["   "]` and `["v one", "v one"]`. The parsing
-spec has three criteria. The first declares `["v two", "v one"]`, out of
-sorted order. The second declares `["v one"]`, and the third omits the
+spec has three criteria. The first declares
+`["v four", "v two", "v five", "v one", "v three"]`, out of sorted order. The second declares `["v one"]`, and the third omits the
 field. Assert each criterion's `wrong_versions` list exactly. These fail
 it:
 
@@ -299,7 +299,7 @@ order:
 
 | criterion | witness | wrong versions | the session answers |
 |---|---|---|---|
-| A, claim "the guard rejects a negative amount" | `t.py::test_a` | "the guard is removed", "the guard accepts zero", "the guard logs nothing" | an edit, null with a reason, an edit |
+| A, claim "the guard rejects a negative amount" | `t.py::test_a` | "the guard is removed", "the guard accepts zero", "the guard logs nothing" | an edit, null with a reason, an edit, each with its own reason, the two edits differing in `find` and `replace` |
 | B, claim "the total is logged" | `t.py::test_b` | none | no session |
 | C, `preserves`, claim "the total stays unchanged" | `t.py::test_c` | "the total is doubled" | an edit |
 
@@ -312,7 +312,7 @@ neither B's nor C's claim, and C's holds neither A's nor B's. Assert each
 options dict's `tools`, `max_turns` and `max_budget_usd` exactly. Assert the
 two entries as whole dicts. Then run `review.run_criterion_probes` over the
 same three criteria with a scripted agent. Assert that none of its three
-system prompts holds any of the three wrong versions. Last, assert the
+system prompts holds any of the four wrong versions. Last, assert the
 `describe_wrong_versions` line. These fail it:
 
 - a session bought for criterion B
