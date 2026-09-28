@@ -56,7 +56,15 @@ from 3277 and `SA-0164` from 3931 when review trimmed their tests.
 10. **The operator stopped the loop at a capability boundary.** `SA-0164` wires
    `SA-0160`'s revision session. The follow-up specs from `SA-0161` on go to
    run 21.
-11. **The auto mode classifier gave no verdict four times** on a `git commit`.
+11. **Step 5's commit failed the `dead` hook until step 4 ran.** The three
+    siblings were cut from `main`, so the branch on top lacked the chain's
+    code. The operator had the siblings rebased onto `SA-0164`.
+12. **That rebase hit a conflict `stack` had not seen.** `SA-0185` and
+    `SA-0150` both add tests to `tests/test_task.py`. `stack` runs
+    `merge-tree` on adjacent pairs, and each pair merged cleanly off `main`.
+    The bottom-up merge of #564 would have conflicted. Both sides were kept,
+    and `make check` passed on the rebased top.
+13. **The auto mode classifier gave no verdict four times** on a `git commit`.
     The loop waited about ten minutes and the fifth try went through.
 
 ## Run 19's items, checked
@@ -106,6 +114,10 @@ part of the seats' work into the cell.
 7. **A loop can be scoped without `drop`** (b-c07b92). Stopping after `SA-0164` took
    eleven `drop` calls. A drop reads as permanent, and item 172 carries drops
    across `--force`.
+8. **`stack` checks the merge the operator will make** (not yet filed). Its dry run merges
+   adjacent pairs, so a sibling cut from `main` hides a conflict with the
+   chain below it. Merging each layer onto the one below, in order, would
+   have named #564's conflict before linking.
 
 ## Filed from the reviews
 
