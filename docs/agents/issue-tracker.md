@@ -15,9 +15,11 @@ GitHub issues remain in use only for research/evidence records under
   `max_attempts` 4, `max_turns` 60 and `risk` `standard`. An unknown key is
   refused, not ignored.
 - **`estimated_lines`** is optional and absent by default. When declared it is
-  a strict positive integer, the author's size estimate. `driver.py check`
-  prices it against the type's `size` ceiling and blocks at 80% of it. No
-  cell gate reads it.
+  a strict positive integer, the author's own estimate in changed lines, with
+  no overrun added. `driver.py check` multiplies it by the overrun measured
+  from landed specs and prices that against the type's `size` ceiling. At 80%
+  of it `check` blocks where `size` blocks, `elevated`, and prints a concern
+  elsewhere. No cell gate reads it.
 - **`consumes`** is optional and empty by default. Each entry is a
   repo-relative `path` or `path:name` that `depends_on[0]` produces. A spec
   that declares it needs a `depends_on`. `run_task` resolves each entry at

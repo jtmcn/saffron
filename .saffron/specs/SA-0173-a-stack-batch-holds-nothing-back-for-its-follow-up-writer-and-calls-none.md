@@ -42,6 +42,7 @@ forbidden:
 budget_usd: 16
 max_attempts: 3
 max_turns: 100
+estimated_lines: 129
 acceptance:
   - claim: >-
       `run_stack_batch` takes `writer_usd`, 0 by default, and holds it back
@@ -100,7 +101,7 @@ among the sessions that read it. The implement prompt carries the revision. So
 the Spec lens judges a revised layer rightly only against it. `SA-0153` and `SA-0154`
 read each layer's body and criteria from the `specs` mapping
 `run_stack_batch` hands `end_review`. That mapping holds the order's
-queued `Spec`s, read at `base_sha`. `SA-0150` builds `Ledger.spec_text`
+queued `Spec`s, read at `base_sha`. `SA-0182` builds `Ledger.spec_text`
 above both of them in the chain, so neither can read it. This is the
 first spec above `SA-0164`, which records the revisions, to edit that
 `end_review` call.
@@ -127,8 +128,8 @@ number below was read at `642a26c3`, where none of them exist.
   is not called. `SA-0155`'s wrapper calls `mint` once for each spec it
   reviews, and keeps that task for the spec within the call. `SA-0164`
   records each revision on it with `record_spec_text`.
-- `SA-0150`: `Ledger.spec_text(task_id)`, the task's latest row or `None`.
-  `run_task` refuses a latest text `parse_spec` refuses, so that spec adds
+- `SA-0182`: `Ledger.spec_text(task_id)`, the task's latest row or `None`.
+- `SA-0150`: `run_task` refuses a latest text `parse_spec` refuses, so that spec adds
   no layer.
 
 **What the base holds.** `run_batch` compares each candidate's

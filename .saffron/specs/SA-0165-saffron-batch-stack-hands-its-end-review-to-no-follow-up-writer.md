@@ -51,6 +51,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
+estimated_lines: 445
 pending_symbols:
   - saffron/qualify.py::qualify
 acceptance:

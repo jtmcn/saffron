@@ -51,7 +51,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 130
-estimated_lines: 505
+estimated_lines: 361
 pending_symbols:
   - saffron/ledger.py::record_spec_text
 acceptance:

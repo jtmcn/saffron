@@ -123,13 +123,16 @@ MESSAGES = {
     " fix the definition or the principle index at its source:",
 }
 
+_NEAR_WORDS = 3
+
 _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 _FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[^\n]*$", re.S | re.M)
 _COMMENT = re.compile(r"<!--.*?-->", re.S)
 _HEADING = re.compile(r"^#{1,6}\s.*$", re.M)
 _TABLE_RULE = re.compile(r"^\s*\|[\s:|-]+\|\s*$", re.M)
 _TABLE_ROW = re.compile(r"^[ \t]*\|(.*)\|[ \t]*$", re.M)
-_CODE_SPAN = re.compile(r"`[^`\n]+`")
+# A span can wrap once. Otherwise its closing tick pairs with the next span's opening one.
+_CODE_SPAN = re.compile(r"`[^`\n]+(?:\n[^`\n]+)?`")
 _URL = re.compile(r"https?://\S+")
 # At most one line break, so a quote can wrap but a stray `"` cannot hide a paragraph.
 _QUOTED = re.compile(r'"[^"\n]*(?:\n[^"\n]*)?"|“[^”\n]*(?:\n[^”\n]*)?”')
@@ -185,12 +188,6 @@ class _Text:
 
     def line(self, offset: int) -> int:
         return bisect.bisect_right(self._newlines, offset) + 1
-
-    def line_text(self, offset: int) -> str:
-        n = bisect.bisect_right(self._newlines, offset)
-        start = self._newlines[n - 1] + 1 if n else 0
-        end = self._newlines[n] if n < len(self._newlines) else len(self.body)
-        return self.body[start:end]
 
 
 def in_scope(path: str) -> bool:
@@ -378,7 +375,7 @@ def _prepare(text: str) -> str:
         text = pattern.sub(_blank, text)
     text = _TABLE_ROW.sub(_cells, text)
     # One word per span, with no padding, so "`a`, `b`" is not read as four words.
-    text = _CODE_SPAN.sub("CODESPAN", text)
+    text = _CODE_SPAN.sub(lambda m: "CODESPAN" + "\n" * m.group().count("\n"), text)
     return _URL.sub(" URL ", text)
 
 
@@ -494,12 +491,17 @@ def _style(text: _Text, path: str, root: Path) -> list[Hit]:
     sentences = list(_sentences(text.body))
     starts = [sentence.start for sentence in sentences]
 
-    def around(offset: int) -> str:
-        # The sentence holding `offset`, so a reflow keeps a hit's identity.
-        i = bisect.bisect_right(starts, offset) - 1
-        if i >= 0 and offset < sentences[i].start + len(sentences[i].text):
-            return sentences[i].text
-        return text.line_text(offset)
+    def near(match: re.Match[str]) -> str:
+        # The match and a few words each side within its sentence, so an edit
+        # elsewhere in the sentence keeps the hit's identity (b-ec607a).
+        i = bisect.bisect_right(starts, match.start()) - 1
+        start = sentences[i].start if i >= 0 else 0
+        end = start + len(sentences[i].text) if i >= 0 else len(text.body)
+        if match.start() >= end:
+            start, end = match.start(), match.end()
+        before = text.body[start : match.start()].split()[-_NEAR_WORDS:]
+        after = text.body[match.end() : max(end, match.end())].split()[:_NEAR_WORDS]
+        return " ".join([*before, " ".join(match.group().split()), *after])
 
     for sentence in sentences:
         if len(sentence.text.split()) > SENTENCE_LIMIT:
@@ -534,8 +536,8 @@ def _style(text: _Text, path: str, root: Path) -> list[Hit]:
     for code, pattern in rules:
         for match in pattern.finditer(unquoted):
             line = text.line(match.start())
-            held = around(match.start())
-            found.append(Hit(line, code, _excerpt(held), _flat(held)))
+            held = near(match)
+            found.append(Hit(line, code, _excerpt(held), held))
     return found
 
 

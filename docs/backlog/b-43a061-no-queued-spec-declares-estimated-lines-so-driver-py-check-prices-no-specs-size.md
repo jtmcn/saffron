@@ -1,14 +1,14 @@
 ---
 id: b-43a061
 title: No queued spec declares `estimated_lines`, so `driver.py check` prices no spec's size
-status: open
+status: done
 tier: 1
 filed: 2026-09-27
-closed:
+closed: 2026-09-27
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [acd2f1f6, 419bcd79, 78ab6179, 36cdfe25]
 cites: []
 related: [b-db95e1, b-efdf1f, 56]
 ---
@@ -36,3 +36,4 @@ spec's own prose estimate. The spread ran from 0.91 to 2.2 times.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-27: fixed by hand. Every queued spec declares a raw `estimated_lines`, and `check` prices it at the measured overrun.

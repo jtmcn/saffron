@@ -54,6 +54,7 @@ forbidden:
 budget_usd: 22
 max_attempts: 3
 max_turns: 140
+estimated_lines: 338
 pending_symbols:
   - saffron/spec_review.py::spec_writer_system_prompt
   - saffron/spec_review.py::SPEC_WRITER_EXTRACT_PROMPT
@@ -149,14 +150,14 @@ lands, hence `pending_symbols`. `SPEC_WRITER_FORMAT` reads
 `_SpecWriterReply` at import, so the model needs no entry.
 
 **The session holds Bash.** A spec writer session runs commands in its
-critic cell, as a hand draft does. `SA-0169` runs that Bash as an
-unprivileged user. `SA-0156` measured three account lines that tell a
+critic cell, as a hand draft does. `SA-0169` runs that Bash as the
+unprivileged user `SA-0181` builds. `SA-0156` measured three account lines that tell a
 session so, and quotes them in its Problem. Core's writer prompt carries
 those same three lines, so a revision and a follow-up both read them.
 
 **What the tree base holds.** This spec's tree base is `SA-0150`'s head.
-Below it the chain runs through `SA-0169`, `SA-0175`, `SA-0156` and
-`SA-0150`. Every line number below was read at `71140772`, where no chain
+Below it the chain runs through `SA-0181`, `SA-0169`, `SA-0175`, `SA-0156`,
+`SA-0182` and `SA-0150`. Every line number below was read at `71140772`, where no chain
 code from `SA-0142` on exists. This spec consumes these names.
 
 - From `SA-0175`, in `saffron/spec_review.py`:

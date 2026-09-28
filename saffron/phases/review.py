@@ -577,7 +577,7 @@ def distinct_probes(findings: Sequence[Finding]) -> list[Mutant]:
     findings named is asked once."""
     seen: dict[tuple[str, str, str], Mutant] = {}
     for f in findings:
-        assert f.probe is not None  # adequacy_probes already filtered this
+        assert f.probe is not None  # REVIEW and `qualify` pass probed findings
         seen.setdefault(probe_key(f.probe), f.probe)
     return list(seen.values())
 

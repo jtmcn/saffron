@@ -337,6 +337,22 @@ def test_an_added_hit_is_new_though_the_diff_removes_another():
     assert _new_at_head("saffron/x.py", base, head) == [(4, "em-dash")]
 
 
+def test_a_code_span_wrapped_across_a_line_hides_no_later_hit():
+    """#544 shipped an em dash after a span that wrapped, found by a seat (b-ec607a)."""
+    text = "Read `saffron/cell/\nsession.py` first — then `x` runs.\n"
+    hits = _prose().check(text, "README.md", "prose", root=REPO)
+    assert [(h.line, h.code) for h in hits] == [(2, "em-dash")]
+
+
+def test_an_old_hit_in_an_edited_sentence_stays_old():
+    """#546 edited a sentence holding an older hedge, and the hedge read as new."""
+    base = "The gate should pass once the cell runs every check it declares today.\n"
+    edited = base.replace("declares today", "declares in its policy file")
+    assert _new_at_head("README.md", base, edited) == []
+    added = edited.replace("once the cell", "once the cell might")
+    assert _new_at_head("README.md", base, added) == [(1, "hedge")]
+
+
 def test_a_long_docstring_that_grows_is_new_and_one_edited_in_place_is_not():
     """`22855a4` grew `run_batch`'s docstring from 33 lines to 53 unseen."""
 

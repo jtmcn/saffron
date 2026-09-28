@@ -29,7 +29,7 @@ repos:
         name: dead (the dead gate's vulture scan)
         language: system
         entry: >-
-          sh -c 'uv run python .saffron/gates/dead.py
+          sh -c 'uv run python .saffron/gates/dead.py --hook
           | tee /dev/stderr
           | grep -q "\"status\": \"pass\""'
         pass_filenames: false

@@ -49,6 +49,7 @@ forbidden:
 budget_usd: 37
 max_attempts: 3
 max_turns: 130
+estimated_lines: 665
 acceptance:
   - claim: >-
       Given `follow_ups`, `run_stack_batch` runs the candidates it returns,
@@ -234,7 +235,7 @@ below was read at `a5d52c29`, where no chain code from `SA-0142` on exists.
   comparison. `end_review` runs once after the loop, with the batch's id as
   text, the reserve and each spec of the order by its id. `batch_spend`
   adds the cost of the batch's `end_reviews` rows.
-- From `SA-0150`, `SA-0160` and `SA-0164`: `spec_texts`,
+- From `SA-0182`, `SA-0150`, `SA-0160` and `SA-0164`: `spec_texts`,
   `Ledger.record_spec_text`, `Ledger.spec_text`, and the `revise` keyword
   and route with its rounds. A task with a `spec_texts` row runs that
   text, and its review reads it. `run_task` runs gate 0's other refusals

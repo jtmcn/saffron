@@ -1,14 +1,14 @@
 ---
 id: b-0e3528
 title: Jev scoring refuses a report over about 9000 characters and a finding whose criterion is a string
-status: open
+status: partial
 tier: 3
 filed: 2026-09-27
 closed:
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [16cac558]
 cites: []
 related: []
 ---
@@ -34,3 +34,4 @@ written as a digit string, or the review prompts say integer.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-27: fixed by hand, unverified live. A digit-string criterion is read as its number. The state is cut to 85,000 characters, measured over run 19's 42 saved rounds. No live call has re-scored a refused round yet.

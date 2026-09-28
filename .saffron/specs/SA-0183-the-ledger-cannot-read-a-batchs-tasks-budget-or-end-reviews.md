@@ -41,7 +41,7 @@ forbidden:
 budget_usd: 20
 max_attempts: 3
 max_turns: 130
-estimated_lines: 146
+estimated_lines: 105
 pending_symbols:
   - saffron/ledger.py::batch_tasks
   - saffron/ledger.py::batch_budget

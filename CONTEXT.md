@@ -375,7 +375,8 @@ edit a lens names in a review finding; that is a vacuity probe.
 
 **Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
 notice the behaviour it describes breaking. After REVIEW the host applies each anchored adequacy
-finding's probe in a gate-only cell, unless the probe edits a declared test path. The corpus harness applies one inside a
+finding's probe in a gate-only cell, unless the probe edits a declared test path. An end review's
+anchored findings that carry a probe are applied the same way. The corpus harness applies one inside a
 fixture's cell. No gate applies one. Its outcome is inverted from a mutant's: a
 vacuity probe that *survives* the suite is the finding confirmed, where a mutant that
 survives its witness is the finding.

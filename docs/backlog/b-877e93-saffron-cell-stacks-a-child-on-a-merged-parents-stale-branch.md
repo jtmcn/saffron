@@ -37,3 +37,4 @@ parent the ledger reads as `READY_FOR_REVIEW` whose pull request merged.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-09-27: worked around by hand. The loop driver's `snapshot` and `next` reconcile first (acd2f1f6). `SA-0186` is the fix in `saffron cell`.

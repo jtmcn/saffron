@@ -42,6 +42,7 @@ forbidden:
 budget_usd: 16
 max_attempts: 3
 max_turns: 130
+estimated_lines: 68
 pending_symbols:
   - saffron/ledger.py::record_stack_finish
   - saffron/ledger.py::stack_finish
