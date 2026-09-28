@@ -45,27 +45,32 @@ forbidden:
 budget_usd: 18
 max_attempts: 3
 max_turns: 140
-estimated_lines: 140
+estimated_lines: 152
 acceptance:
   - claim: >-
       In the IMPLEMENT system prompt that `build_system_prompt` assembles from
       the real `implement.md` and `CONTEXT.md`, the bullet defining the plan's
-      `estimated_lines` field says four things, sentence by sentence. Its
-      first sentence names lines and never tokens. One sentence names tokens,
-      lines, the `size` gate and the number `_TOKENS_PER_LINE` holds, as
-      digits. One sentence says a size in tokens is divided by that number to
-      give lines, with tokens before the division and lines after it. Every
-      sentence that says a plan is rejected says it happens only where `size`
-      blocks, and none carries "not" or "never". The bullet runs from its own
-      first line to the line before the next bullet or blank line.
+      `estimated_lines` field says four things. It is read case-insensitively,
+      sentence by sentence, with the field's own name removed. The first
+      sentence holds "changed lines", or both "added" and "removed", and
+      holds "line" and never "token". One sentence holds the `size` gate, the
+      number `_TOKENS_PER_LINE` holds as digits, and "token" before its first
+      "line". One sentence holds "divid" and "token", and "line" after that
+      number. At least one sentence holds "reject". Each such sentence either
+      puts "only" after "reject" and before a `size` that blocks, or pairs
+      "not" before "reject" with a `size` that does not block. The bullet runs
+      from its own first line to the line before the next bullet or blank
+      line.
     witness: tests/test_context.py::test_the_plan_field_says_estimated_lines_counts_lines_not_tokens
   - claim: >-
       `run_task` hands the cell a spec body made of the spec's own body,
       unchanged, followed by a section that starts and ends with a newline.
-      The section holds the spec's declared `estimated_lines` followed by
-      "lines", "line" or "changed lines", and never followed by "tokens". A spec declaring no
-      `estimated_lines` reaches the cell with its own body alone. The witness
-      drives the declared values 37 and 1210, and one spec declaring none.
+      Read case-insensitively, the section holds the spec's declared
+      `estimated_lines` followed by "lines", "line" or "changed lines", and
+      never followed by "tokens". The sentence holding that number also
+      holds "estimat". A spec declaring no `estimated_lines` reaches the cell
+      with its own body alone. The witness drives the declared values 37 and
+      1210, and one spec declaring none.
     witness: tests/test_task.py::test_run_task_hands_the_cell_the_specs_own_estimate_in_lines
 ---
 
@@ -173,16 +178,16 @@ report `skip` for both criteria, and that is expected.
 
 **The bullet.** Rewrite the `estimated_lines` bullet in
 `saffron/agents/prompts/implement.md`, in place, inside the list of plan
-fields. It says four things. The unit is changed lines, added plus
-removed, never tokens. The `size` gate counts about 4 changed tokens a
-line, and the host multiplies the estimate by that rate before it compares
-with the ceiling. A size a spec states in tokens is divided by 4 to give
-lines. A plan over the ceiling is rejected only where `size` blocks
+fields. Its first sentence defines the field as changed lines, added plus
+removed, and names no tokens. A later sentence says the unit is never
+tokens. The `size` gate counts about 4 changed tokens a line, and the host
+multiplies the estimate by that rate before it compares with the ceiling.
+A size a spec states in tokens is divided by 4 to give lines. A plan over
+the ceiling is rejected only where `size` blocks
 (`saffron/agents/artifacts.py:319-336`). The existing sentence says it is
 rejected with no such limit. Write the rate as the digit, since the
 witness reads `_TOKENS_PER_LINE`. Keep every added line inside the bullet,
 indented like its first line, with no blank line before the next bullet.
-Keep tokens out of its first sentence.
 
 **Prose rules bind `implement.md`.** The `prose` gate reaches it
 (`tests/test_prose_gate.py:381-389`). Rewriting the bullet replaces its
@@ -197,7 +202,8 @@ beside `criteria_section` (`saffron/agents/context.py:120-131`). It takes
 the spec's `estimated_lines`, `int | None`. It returns an empty string for
 `None`. Otherwise it returns a short section naming that number as the
 author's estimate in changed lines, the unit the plan's `estimated_lines`
-takes. Start and end that section with a newline. REVIEW and REBUT append
+takes. Call the number an estimate in the sentence that holds it, so it
+never reads as a cap. Start and end that section with a newline. REVIEW and REBUT append
 `criteria_section` straight after the body
 (`saffron/cell/session.py:2656`, `saffron/cell/session.py:2850`). That
 section opens with its heading and no newline
@@ -212,15 +218,22 @@ glues that heading onto its last line. In `run_task`, append its result to the s
 `_assembled_implement_prompt` (`tests/test_context.py:258-275`). Find the
 line whose stripped text starts with the backticked field name after a
 bullet dash. Take it and each following line up to the next bullet or
-blank line. Join the stripped lines with spaces and split the text into
-sentences after each full stop. Match
-`saffron.gates.core.size._TOKENS_PER_LINE`'s value as a whole number. Then
-assert four things. The first sentence, with the backticked field name
-removed, holds `line` and holds no `token`. Some sentence holds `token`,
-`line`, the backticked `size` and the value. Some sentence holding `divid`
-holds the value, holds `token` before `divid` and holds `line` after it.
-At least one sentence holds `reject`. Each such sentence holds `only`, the
-backticked `size` and `block`, and no whole-word `not` or `never`.
+blank line. Join the stripped lines with spaces, lower-case the text,
+remove the backticked field name, and split it into sentences after each
+full stop. Match `saffron.gates.core.size._TOKENS_PER_LINE`'s value as a
+whole number. Then assert four things.
+
+- The first sentence matches `changed` then whitespace then `line`, or
+  holds both `added` and `removed`. It holds `line` and no `token`.
+- Some sentence holds the backticked `size` and the value, and its first
+  `token` comes before its first `line`.
+- Some sentence holds `divid` and `token`, and matches the value followed
+  later by a whole-word `line`.
+- At least one sentence holds `reject`. Each one matches `reject`, later a
+  whole-word `only`, later the backticked `size`, later `block`, and has no
+  backticked `size` followed by `not block` or `does not block`. Or it
+  matches `not` then whitespace, an optional `be`, then `reject`, and has a
+  backticked `size` followed by `not block` or `does not block`.
 
 Put the second in `tests/test_task.py`, after
 `test_a_handoff_replaces_the_stacking_resolver`. Replace `run_one_cell`
@@ -233,20 +246,42 @@ assert the body starts with the one you passed and ends with a newline.
 Take the text after the one you passed. Assert it starts with a newline.
 Assert it matches the value as a whole number, then non-word characters,
 then an optional `changed`, then `line` or `lines` as a whole word. Assert
-it has no match for the value followed by optional spaces and `tokens`. Import nothing the change adds at module scope in
+it has no match for the value followed by optional spaces and `tokens`.
+Match both case-insensitively. Split that text into sentences after each
+full stop and at each newline. Assert some sentence holds the value as a
+whole number and holds `estimat`. Import nothing the change adds at module scope in
 either test file. A missing name at collection makes the reverted run an
 error, and `revert` reads that as `skip`.
 
-**Wrong versions the witnesses must kill.** The author ran each against a
-prototype, and each failed its witness. You need not run them.
+**Wrong and right versions, measured.** The author ran each against a
+prototype of both witnesses, the first built on
+`_assembled_implement_prompt`. You need not run them. These bullets must
+pass, and each did:
+
+- The prototype's bullet, and the same bullet capitalising "Changed Lines"
+  and "Tokens".
+- A bullet reading "your best guess at changed lines, added plus removed,
+  across the whole diff". It goes on to say `size` counts about 4 changed
+  tokens a line and the host multiplies the estimate by 4. It says a size
+  in tokens is divided by 4 to give lines. It ends that a plan over the
+  ceiling is rejected only where `size` blocks, and elsewhere stands.
+- The division sentence as "Divide a size stated in tokens by 4 to get
+  lines."
+- The rejection sentence as "Where `size` does not block, a plan over the
+  ceiling is not rejected."
+
+Each of these failed its witness:
 
 - `implement.md` unchanged.
-- A bullet asking for the size in tokens, the unit `size` counts, which
-  the host divides by 4 to get lines.
+- A bullet asking for the size in tokens, which the host divides by 4.
 - A division sentence turning lines into tokens.
-- The rejected sentence left as it stands, or saying a plan is rejected
+- The rejection sentence left as it stands, or saying a plan is rejected
   even where `size` does not block.
-- A first sentence that defines the field in tokens.
+- A first sentence defining the field in tokens.
+- A first sentence reading "the number of lines in the files you change".
+- A first sentence reading "changed lines, added plus removed, never
+  tokens".
+- The rate given as "4 lines per token".
 - The guidance added to `turns/plan.md` alone.
 - The guidance moved to its own paragraph, or to a new bullet after the
   field's.
@@ -263,10 +298,12 @@ prototype, and each failed its witness. You need not run them.
 - The section put before the spec body, or in place of it.
 - A section appended only above some threshold.
 - A fixed number in place of the declared one.
+- A section saying "The plan must stay within 37 lines", with "estimate"
+  only in its heading or in another sentence.
 
 **Size.** A `bug` gets 1300 changed tokens. The author's prototype
-measured 560 with `size`'s own counter over the five files, at base
-`63d53946`. That is 140 lines at 4 tokens a line, the figure
+measured 607 with `size`'s own counter over the five files, at base
+`853d3012`. That is about 152 lines at 4 tokens a line, the figure
 `estimated_lines` declares, with no allowance added.
 
 **Another spec edits `saffron/task.py`.** `SA-0186` touches it too. This

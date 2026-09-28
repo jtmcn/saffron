@@ -69,7 +69,8 @@ acceptance:
       replace: "timeout_s=900.0,"
   - claim: >-
       A turn the wall bound cuts fails with a message naming the wall bound
-      and the seconds that turn was given. A turn the idle bound cuts, given
+      and the seconds that turn was given, ahead of the stderr it quotes. A
+      turn the idle bound cuts, given
       the same seconds, names the idle bound and not those seconds.
     witness: tests/test_implement.py::test_a_wall_cut_names_the_seconds_it_was_given_and_an_idle_cut_does_not
   - claim: >-
