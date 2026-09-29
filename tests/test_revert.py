@@ -879,3 +879,64 @@ def test_each_verdict_names_the_tests_the_reverted_run_could_not_collect():
     )
     assert mixed.status == "fail" and new in mixed.summary
     assert [f.file for f in mixed.failures] == [kept]
+
+
+def _real_tests_gate(tmp_path):
+    """This repo's own `tests` gate, run in `tmp_path` on whatever subset
+    `revert` hands it."""
+    import subprocess
+    from pathlib import Path
+
+    from saffron.gates.contract import parse_gate_json
+
+    gate = Path(__file__).resolve().parent.parent / ".saffron" / "gates" / "tests"
+
+    def run_tests(subset):
+        done = subprocess.run(
+            [str(gate), *subset],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return parse_gate_json(done.stdout, expected_gate="tests")
+
+    return run_tests
+
+
+def _one_absent_id_beside(tmp_path, witness_body):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_new.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('lens', ['correctness'])\n"
+        "def test_lens(lens):\n    assert lens\n"
+        f"def test_witness():\n    {witness_body}\n"
+    )
+    absent = "tests/test_new.py::test_lens[conventions]"
+    witness = "tests/test_new.py::test_witness"
+    return revert_gate(
+        prior=[_tests("tests/test_a.py::test_a")],
+        results=[_tests("tests/test_a.py::test_a", absent, witness)],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=_real_tests_gate(tmp_path),
+    )
+
+
+def test_one_uncollectable_new_id_leaves_a_verdict_on_the_witness_beside_it(tmp_path):
+    """b-cf832a: one id absent at base skipped the whole subset. The witness
+    beside it failing without its source is now a `pass`."""
+    result = _one_absent_id_beside(tmp_path, "assert False")
+    assert result.status == "pass", result.summary
+    assert "tests/test_new.py::test_lens[conventions]" in result.summary
+
+
+def test_one_uncollectable_new_id_no_longer_hides_a_witness_that_passes(tmp_path):
+    """The same subset with a witness that passes without its source is
+    theater, and `revert` names it."""
+    result = _one_absent_id_beside(tmp_path, "assert True")
+    assert result.status == "fail", result.summary
+    assert [f.file for f in result.failures] == ["tests/test_new.py::test_witness"]
