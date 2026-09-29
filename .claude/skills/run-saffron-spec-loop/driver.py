@@ -2888,7 +2888,7 @@ def main() -> int:
     p.add_argument("--execute", action="store_true", help="rebase the local branches")
     p.set_defaults(func=cmd_rebase)
 
-    p = sub.add_parser("size", help="a branch's changed lines against its ceiling")
+    p = sub.add_parser("size", help="a branch's changed tokens against its ceiling")
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_size)
 

@@ -61,7 +61,7 @@ And optionally:
    Declare it as `estimated_lines`: changed lines, measured tokens over four,
    with no overrun added, since `driver.py check` applies the measured one.
    **Done when** `check` prices it under 80% of that ceiling. `SA-0117` and
-   `SA-0123` both landed within 25 lines of 1000. An estimate at or above
+   `SA-0123` both landed within 25 lines of the old 1000-line ceiling. An estimate at or above
    that line splits into a parent and children with
    `depends_on`, and you write the parent. A split leads your report, ahead of
    the files you wrote, and names each child you would write next: the caller

@@ -120,8 +120,9 @@ trivial.
    similar cell. A row of a different `type` is not printed at all: if the
    nearest comparable cell is one, say so and read its row yourself.
 5. **Size vs ceiling.** Estimate the changed lines the criteria, `touches`,
-   and the tests they demand imply. Compare with the `size:` summaries in
-   similar `history` rows and the ceiling those summaries name. It is a
+   and the tests they demand imply. Multiply by four to price it in tokens.
+   Compare that with the `size:` summaries in similar `history` rows and the
+   ceiling those summaries name. It is a
    blocker when the estimate clearly exceeds the ceiling. Show the estimate.
 6. **Claims about current code.** Check every sentence that says what the
    code does now ("Today …", "X returns …", "only when …") against `base`.
