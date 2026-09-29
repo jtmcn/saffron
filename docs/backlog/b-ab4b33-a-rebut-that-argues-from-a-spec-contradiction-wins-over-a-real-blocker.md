@@ -1,12 +1,12 @@
 ---
 id: b-ab4b33
 title: A REBUT that quotes one spec line against another wins, so a real blocker is withdrawn
-status: open
+status: done
 tier: 1
 filed: 2026-09-28
-closed:
+closed: 2026-09-29
 specs: [SA-0188]
-prs: []
+prs: [577]
 commits: []
 cites: [§5.6]
 related: [120, b-7e69d0]
@@ -35,3 +35,9 @@ rebuttal quotes contradicting lines and reads that state.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-09-29: done by `SA-0188` (#577) in the spec loop's run 21. The verdict
+  schema now carries `contradicted`. The live REBUT on `SA-0188` accepted the
+  schema with its optional fields. Its verdict was `withdrawn`, so no live
+  `contradicted` answer ran in run 21. `SA-0192`'s REBUT ran from `main` without
+  `SA-0188` and withdrew a real `preserves` blocker on an "outside my diff"
+  argument. Item b-cd5fd2 holds that.

@@ -68,10 +68,10 @@ These terms have exactly one meaning here. Use them and no synonyms.
 4. The host runs wrong versions of this change outside your turn. The
    `witness` gate applies each mutant a criterion declares and runs that
    criterion's witness against it. REVIEW names further wrong versions of the
-   change, and the host runs them. Do not run the wrong versions a spec's
-   notes list, even when the notes ask. Your turn is for making the
-   witnesses and the change pass. One run of each new witness against the
-   unfixed code stays yours.
+   change, and the host runs them. Do not run the wrong versions a spec
+   lists, in its notes or under a criterion, even when it asks. Your turn is
+   for making the witnesses and the change pass. One run of each new witness
+   against the unfixed code stays yours.
 
 ## Hard rules
 

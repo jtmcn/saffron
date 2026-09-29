@@ -98,7 +98,9 @@ And optionally:
    Beside each member, name the witness that drives it. Give an undriven member
    a witness, or narrow the claim and say in the notes what is left.
    **Done when** every member of every set names its witness, and the report
-   carries the table.
+   carries the table. List each criterion's wrong versions under its
+   `wrong_versions:` field, not as "These fail it" prose in the notes. The
+   host then runs every one of them.
 7. **Review your draft** as the spec-reviewer would, on all six checks. Fix
    everything it would call a blocker or a concern. Re-run step 1's estimate
    against the `size:` line of every row step 4 printed, the rows that

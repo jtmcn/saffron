@@ -116,11 +116,12 @@ GitHub issues remain in use only for research/evidence records under
   in `forbidden` instead, as `SA-0079` and `SA-0097` do.
 
 - **A spec names the wrong versions its witnesses must kill, and never asks
-  the cell to run them.** Each name is one sentence in `## Notes for the
-  agent`, such as "a fold that defaults a missing key to 0". They are for
-  the readers who run them. The `witness` gate applies a criterion's declared
-  mutant, REVIEW's criterion probes run the wrong versions REVIEW names, and
-  the spec loop's Spec seat probes the rest with `driver.py probe`. A cell
+  the cell to run them.** Each is one sentence under its criterion's
+  `wrong_versions:`, such as "a fold that defaults a missing key to 0". The
+  implementer reads them under that criterion's witness. REVIEW turns each
+  into an edit, and the host runs that criterion's witness over it. The
+  `witness` gate applies a criterion's declared mutant, and the spec loop's
+  Spec seat probes the rest with `driver.py probe`. A cell
   told to run twenty of them spends its turns there. `SA-0123`'s IMPLEMENT and first REPAIR each hit the
   fifteen-minute turn bound that way (backlog item b-2dea1c).
 

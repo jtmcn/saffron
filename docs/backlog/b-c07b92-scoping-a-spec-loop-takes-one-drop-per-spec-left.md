@@ -30,3 +30,5 @@ next loop. No drop is recorded for them, and `snapshot --new` picks them up.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-09-29: hit again in the spec loop's run 21. Scoping it to `SA-0187`'s
+  chain of six took eleven `drop` calls.
