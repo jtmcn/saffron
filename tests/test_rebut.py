@@ -851,7 +851,7 @@ def test_the_rebuttal_extraction_turn_asks_for_the_schema_and_records_its_struct
 
 def test_each_verdict_session_asks_for_the_schema_and_records_its_structured_output():
     blockers = [_blocker(lens=lens) for lens in review.LENSES]
-    fixes = [_fixed(n) for n in (1, 2, 3)]
+    fixes = [_fixed(n) for n in (1, 2, 3, 4)]
     # Each verdict session's text confirms its finding, and its
     # structured_output withdraws it instead. Only the value must be read.
     verdict_turns = [
@@ -859,19 +859,19 @@ def test_each_verdict_session_asks_for_the_schema_and_records_its_structured_out
             text=_block({"verdicts": [_verdict(n, verdict="confirmed")]}),
             structured_output={"verdicts": [_verdict(n, verdict="withdrawn")]},
         )
-        for n in (1, 2, 3)
+        for n in (1, 2, 3, 4)
     ]
     record: list[dict] = []
     result = _run(
-        "Fixed all three.",
+        "Fixed all four.",
         _rebuttals(*fixes),
         *verdict_turns,
         blockers=blockers,
         record=record,
     )
     assert result.state == "READY_FOR_REVIEW"
-    assert len(record) == 5  # rebuttal, extraction, three verdict sessions
-    assert len(result.verdicts) == 3
+    assert len(record) == 6  # rebuttal, extraction, four verdict sessions
+    assert len(result.verdicts) == 4
     for lens_verdicts in result.verdicts:
         assert [v.verdict for v in lens_verdicts.verdicts] == ["withdrawn"]
     for call in record[2:]:
@@ -888,6 +888,42 @@ def test_each_verdict_session_asks_for_the_schema_and_records_its_structured_out
             tools=review.REVIEW_TOOLS,
         )
         assert options == expected
+
+
+def test_a_conventions_blocker_is_verdicted_by_a_session_of_its_own():
+    """A conventions blocker gets a verdict at REBUT from a fresh session of
+    its own. It sees only its own blocker, after the correctness lens's
+    verdict session runs. `run_rebut` walks `review.LENSES` order, not
+    filing order, so a conventions blocker filed first still runs after
+    correctness's."""
+    conventions_blocker = _blocker(lens="conventions", claim="a comment lies")
+    correctness_blocker = _blocker(lens="correctness")
+    record: list[dict] = []
+    result = _run(
+        "Fixed both.",
+        _rebuttals(_fixed(1), _fixed(2)),
+        _verdicts(_verdict(2, verdict="withdrawn")),
+        _verdicts(_verdict(1, verdict="withdrawn")),
+        blockers=[conventions_blocker, correctness_blocker],
+        record=record,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert [v.lens for v in result.verdicts] == ["correctness", "conventions"]
+    assert [v.finding for v in result.verdicts[0].verdicts] == [2]
+    assert [v.finding for v in result.verdicts[1].verdicts] == [1]
+    conventions_call = record[-1]
+    expected = rebut.verdict_prompt(
+        "conventions",
+        blockers=[(1, conventions_blocker)],
+        rebuttal=result.rebuttal,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        reviewed_diff=DIFF,
+        diff=DIFF,
+    )
+    assert conventions_call["options"]["system_prompt"] == expected
 
 
 def test_a_rebuttal_turn_without_a_valid_structured_output_is_not_the_schema():

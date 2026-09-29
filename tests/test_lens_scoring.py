@@ -123,6 +123,22 @@ def test_the_calibration_case_reproduces_the_run_it_was_built_from(sa0062):
     assert [s.graded for s in scores.values()] == [False, False]
 
 
+def test_a_live_run_without_a_conventions_result_is_refused_by_name(sa0062):
+    """`expect` defaults to today's lens set, so a run missing a lens added
+    after it was scripted is refused rather than scored as a miss. The
+    refusal names the lens, so it reads as "run again", not "the lens
+    found nothing"."""
+    reviews = [
+        LensReview(lens=lens, findings=[]) for lens in LENSES if lens != "conventions"
+    ]
+    with pytest.raises(lens_scoring.LensErrored) as excinfo:
+        lens_scoring.score_run(sa0062, reviews)
+    assert str(excinfo.value) == (
+        "SA-0062: no result for conventions, so this run says nothing about "
+        "the defects those lenses own"
+    )
+
+
 def _recorded(root: Path, reviews: list[LensReview]) -> lens_scoring.Fixture:
     """A one-defect fixture whose recorded run is exactly `reviews`.
     Written the way `LensReview.as_dict` writes it, so `calibrate` reads a

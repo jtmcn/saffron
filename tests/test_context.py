@@ -506,6 +506,7 @@ _PROMPTS = context.PROMPTS_DIR
         ("review-correctness.md", "claim", "findings"),
         ("review-contract.md", "claim", "findings"),
         ("review-adequacy.md", "claim", "findings"),
+        ("review-conventions.md", "claim", "findings"),
         ("rebut-verdict.md", "reason", "disagreements"),
         ("turns/rebut-extract.md", "argument", "disagreements"),
     ],

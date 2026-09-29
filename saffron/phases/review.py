@@ -41,6 +41,7 @@ LENSES = {
     "correctness": "review-correctness.md",
     "contract": "review-contract.md",
     "adequacy": "review-adequacy.md",
+    "conventions": "review-conventions.md",
 }
 # BACKLOG item 6, settled by #34: the third lens is not blast radius (that plan
 # is retired) and it is not `revert`, which is unbuilt and asks a different

@@ -1690,9 +1690,9 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
     # (§4.3). Without this the whole salvage path can measure from the wrong
     # base and 159 tests stay green.
     assert cell.measured_from == "c" * 40
-    # Charged like any other turn — plan + the cut-off implement turn + the
-    # salvage turn + REVIEW's three lenses at their default cost each.
-    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.3)
+    # Charged like any other turn: plan, the cut-off implement turn, the
+    # salvage turn, and REVIEW's four lenses at their default cost each.
+    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.4)
     assert any("recovered 1 commit" in line for line in cell.watched)
 
 
@@ -3188,10 +3188,9 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     assert outcome.state == "READY_FOR_REVIEW"
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
     assert run_row["status"] == "COMPLETE"
-    # Plan, implement, the failed repair turn's $0.40, and REVIEW's three
-    # lenses: the critic is spend too, and a total that omits it stops being
-    # a total.
-    assert any("$0.90 spent" in line for line in cell.watched)
+    # Plan, implement, the repair turn's $0.40, and REVIEW's four lenses:
+    # the critic spends too, and a total that omits it stops being a total.
+    assert any("$1.00 spent" in line for line in cell.watched)
     # A clean tree has nothing to checkpoint — the host must not commit an
     # empty no-op just because a turn was cut.
     assert cell.checkpointed == []
@@ -3501,7 +3500,7 @@ def _rebuttable(monkeypatch, cell, *, rebut_commits):
 
 
 def _through_rebut(*rebut_turns):
-    """Plan, implement, one lens filing a blocker, the other two filing
+    """Plan, implement, one lens filing a blocker, the other three filing
     nothing, then the rebuttal's own turns. No notes turn: none of these
     specs declares `forbidden`, and the default test policy declares no
     `protected` either, so there is nothing this channel would be asked
@@ -3510,6 +3509,7 @@ def _through_rebut(*rebut_turns):
         _turn(_block(_PLAN)),
         _turn(),
         _turn(_block(_BLOCKER)),
+        _turn(_block({"findings": []})),
         _turn(_block({"findings": []})),
         _turn(_block({"findings": []})),
         *rebut_turns,
@@ -3623,8 +3623,10 @@ _TASK_HEAD = [
 _EMPTY = _block({"findings": []})
 
 
-def _adequacy_turns(adequacy, *, correctness=_EMPTY, contract=_EMPTY, rebut=()):
-    """Plan, implement, then the three lenses in `LENSES` order, plus any
+def _adequacy_turns(
+    adequacy, *, correctness=_EMPTY, contract=_EMPTY, conventions=_EMPTY, rebut=()
+):
+    """Plan, implement, then the four lenses in `LENSES` order, plus any
     REBUT turns — the shape every probe witness drives `_drive` with."""
     return [
         _turn(_block(_PLAN)),
@@ -3632,6 +3634,7 @@ def _adequacy_turns(adequacy, *, correctness=_EMPTY, contract=_EMPTY, rebut=()):
         _turn(correctness),
         _turn(contract),
         _turn(_block(adequacy)),
+        _turn(conventions),
         *rebut,
     ]
 
@@ -4066,7 +4069,7 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
 
     # The REBUT prompt's line for the survivor shows its probe and does not
     # say the tests stayed green.
-    rebut_prompt = cell.turns[5]
+    rebut_prompt = cell.turns[6]
     assert "src/a.py" in rebut_prompt
     assert "`a` -> `A`" in rebut_prompt
     assert "tests stayed green" not in rebut_prompt
@@ -4363,6 +4366,7 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
             _turn(),
             _turn(),  # the repair turn after attempt 1
             _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
             _turn(_block({"findings": []})),
             _turn(_block({"findings": []})),
             _turn("Fixed it."),
@@ -4879,9 +4883,10 @@ def test_the_outcome_event_round_trips_and_describes_as_its_old_line(
     )
     assert outcome.state == "READY_FOR_REVIEW"
     logged = _task_outcome(tmp_path)
-    assert (logged.outcome, logged.spent_usd_est) == ("READY_FOR_REVIEW", 0.5)
+    assert logged.outcome == "READY_FOR_REVIEW"
+    assert logged.spent_usd_est == pytest.approx(0.6)
     assert logged.session_id == "sess-1"
-    assert describe(logged) == "READY_FOR_REVIEW: $0.50 spent, session sess-1"
+    assert describe(logged) == "READY_FOR_REVIEW: $0.60 spent, session sess-1"
 
 
 def test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_reported(
@@ -6356,7 +6361,7 @@ def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
 def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_path):
     """The equality is the point: `spent_usd_est` is derived from `attempts`, so
     a turn that spends without opening a row makes the two disagree. Every
-    phase's turns are counted here — plan, implement, all three lenses,
+    phase's turns are counted here: plan, implement, all four lenses, and the
     rebuttal."""
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=0)
@@ -6375,6 +6380,7 @@ def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_pat
     assert [row["phase"] for row in ledger.attempts(outcome.task_id)] == [
         "IMPLEMENTING",
         "IMPLEMENTING",
+        "REVIEWING",
         "REVIEWING",
         "REVIEWING",
         "REVIEWING",
@@ -7178,12 +7184,13 @@ def _section(prompt, heading, next_heading=None):
 
 
 def _probe_turns(*probes):
-    """Plan, implement, the three lenses clean, then one criterion-probe turn
+    """Plan, implement, the four lenses clean, then one criterion-probe turn
     per entry in `probes`, in the spec's own declared order. Both
     criterion-probe witnesses below drive with this shape."""
     return [
         _turn(_block(_PLAN)),
         _turn(),
+        _turn(_EMPTY),
         _turn(_EMPTY),
         _turn(_EMPTY),
         _turn(_EMPTY),
@@ -7231,10 +7238,10 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     )
     assert outcome.state == "READY_FOR_REVIEW"
 
-    # Five calls precede the criterion probes: the plan, the implement turn,
-    # and the three lenses (correctness, contract, adequacy).
-    probe_prompts = cell.system_prompts[5:]
-    probe_options = cell.turn_options[5:]
+    # Six calls precede the criterion probes: the plan, the implement turn,
+    # and the four lenses (correctness, contract, adequacy, conventions).
+    probe_prompts = cell.system_prompts[6:]
+    probe_options = cell.turn_options[6:]
     assert len(probe_prompts) == 2
 
     # Positional, not `in`: the claim must land under its own heading, never
@@ -7260,12 +7267,12 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     assert "tests/test_x.py::test_total" not in probe_prompts[1]
 
     # The turn prompt is a prompt the host builds too.
-    for turn in cell.turns[5:]:
+    for turn in cell.turns[6:]:
         assert "tests/test_x.py::test_guard" not in turn
         assert "tests/test_x.py::test_total" not in turn
 
     # Asked inside the critic cell the lenses ran in, never a cell of its own.
-    assert cell.turn_containers[5:] == [_CRITIC_CONTAINER] * 2
+    assert cell.turn_containers[6:] == [_CRITIC_CONTAINER] * 2
 
     # The same read-only tools and the same per-session ceiling a lens holds.
     lens_options = cell.turn_options[2]
@@ -7275,7 +7282,7 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
         assert options["max_budget_usd"] == lens_options["max_budget_usd"]
 
     # Charged to the task beside the lenses' own cost.
-    assert outcome.spent_usd == pytest.approx(0.1 * 5 + 0.05 + 0.07)
+    assert outcome.spent_usd == pytest.approx(0.1 * 6 + 0.05 + 0.07)
 
 
 def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
@@ -7344,6 +7351,7 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
             _turn(_EMPTY),
             _turn(_EMPTY),
             _turn(_EMPTY),
+            _turn(_EMPTY),
         ],
         spec=_spec(),
     )
@@ -7351,7 +7359,7 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
     assert not (
         tmp_path / "no-criteria" / "out" / "SY-1" / "criterion-probes.json"
     ).exists()
-    assert len(empty_cell.system_prompts) == 5
+    assert len(empty_cell.system_prompts) == 6
     assert not [
         w for w in empty_cell.watched if w.startswith("REVIEW: criterion probes:")
     ]
@@ -7903,7 +7911,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     assert not (
         tmp_path / "no-wrong-versions" / "out" / "SY-1" / "wrong-versions.json"
     ).exists()
-    assert len(empty_cell.system_prompts) == 6  # five plus one per criterion
+    assert len(empty_cell.system_prompts) == 7  # six plus one per criterion
     assert not [
         w for w in empty_cell.watched if w.startswith("REVIEW: wrong versions:")
     ]
@@ -7988,7 +7996,7 @@ def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_sp
         ]
         assert critic == [
             f"removed:container:{_CRITIC_CONTAINER}",
-            *[f"turn:{_CRITIC_CONTAINER}"] * 5,
+            *[f"turn:{_CRITIC_CONTAINER}"] * 6,
             f"removed:container:{_CRITIC_CONTAINER}",
         ]
 
@@ -7998,12 +8006,12 @@ def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_sp
                 Mutant.model_validate(edit_wrong),
             ]
 
-        probe_options = cell.turn_options[5]
-        wrong_options = cell.turn_options[6]
+        probe_options = cell.turn_options[6]
+        wrong_options = cell.turn_options[7]
         assert wrong_options["tools"] == probe_options["tools"]
         assert wrong_options["max_turns"] == probe_options["max_turns"]
         assert wrong_options["max_budget_usd"] == probe_options["max_budget_usd"]
-        assert cell.turn_containers[6] == _CRITIC_CONTAINER
+        assert cell.turn_containers[7] == _CRITIC_CONTAINER
 
         total_cost = sum(turn.cost_usd_est for turn in turns_list)
         assert outcome.spent_usd == pytest.approx(total_cost)
@@ -8256,9 +8264,9 @@ def test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied(
         turns=[_turn(_block(_PLAN)), _turn()],
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Plan, implement, and REVIEW's three lenses — no extra turn spent asking
+    # Plan, implement, and REVIEW's four lenses: no extra turn spent asking
     # for notes nothing declared a `forbidden`/`protected` path against.
-    assert len(cell.turns) == 5
+    assert len(cell.turns) == 6
     assert outcome.notes == ""
     assert outcome.notes_sha256 == ""
     assert not (outcome.task_dir / "notes.json").exists()
@@ -8441,7 +8449,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
 ):
     """AC2: every session kind leaves the SHA-256 of its own request among
     the task's events, in order. Four cells between them reach the plan,
-    IMPLEMENT, a repair, a salvage, the three lenses, a criterion probe,
+    IMPLEMENT, a repair, a salvage, the four lenses, a criterion probe,
     the rebuttal, its extraction and a verdict.
 
     Not driven: a plan re-prompt, a lens re-prompt, the notes turn. Each
@@ -8464,6 +8472,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
     assert [_request_kind(r) for r in probe_raw] == [
         "plan",
         "implement",
+        "lens",
         "lens",
         "lens",
         "lens",
@@ -8490,6 +8499,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
         "lens",
         "lens",
         "lens",
+        "lens",
     ]
     _assert_digests_match_requests(repair_raw, repair_capture)
 
@@ -8512,6 +8522,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
         "plan",
         "implement",
         "salvage",
+        "lens",
         "lens",
         "lens",
         "lens",
@@ -8549,6 +8560,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
     assert [_request_kind(r) for r in rebut_raw] == [
         "plan",
         "implement",
+        "lens",
         "lens",
         "lens",
         "lens",
@@ -8660,6 +8672,6 @@ def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_p
     claude_c, digests_c = _run("c", "an unrelated set of rules entirely\n")
 
     assert claude_a == claude_b != claude_c
-    assert len(digests_a) == 5
+    assert len(digests_a) == 6
     assert digests_a == digests_b
     assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))

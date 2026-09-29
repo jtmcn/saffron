@@ -65,7 +65,7 @@ def _agent(*texts, record=None):
     return run
 
 
-def _review(*texts, read_head=lambda _p: None, record=None):
+def _review(*texts, read_head=lambda _p: None, record=None, claude_md=None):
     return review.run_review(
         "cell",
         diff=DIFF,
@@ -73,7 +73,7 @@ def _review(*texts, read_head=lambda _p: None, record=None):
         spec_body="fix the gap",
         gates="- tests: pass (pytest 8.0)",
         context_md=CONTEXT_MD,
-        claude_md=None,
+        claude_md=claude_md,
         prompts_dir=PROMPTS,
         max_turns=20,
         budget_usd=2.0,
@@ -328,7 +328,17 @@ def test_the_blast_radius_lens_is_not_declared():
     """BACKLOG item 6, settled by #34: the third lens is test adequacy, not
     blast radius — that plan is retired, not merely deferred, and a lens
     wired here would run on every task with no risk tier to gate it."""
-    assert set(review.LENSES) == {"correctness", "contract", "adequacy"}
+    assert set(review.LENSES) == {"correctness", "contract", "adequacy", "conventions"}
+
+
+# Each lens's own framing sentence. The fourth one says "must", never
+# "should", so the hedge the `prose` gate refuses stays out of the file.
+_FRAMING = {
+    "correctness": "Find the reason this change should not be merged",
+    "contract": "Find the reason this change should not be merged",
+    "adequacy": "Find the reason this change should not be merged",
+    "conventions": "Find the reason this change must not be merged",
+}
 
 
 @pytest.mark.parametrize("lens", sorted(review.LENSES))
@@ -344,7 +354,7 @@ def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
     )
     # Normalized: the prompt file is wrapped, and the clause spans two lines.
     flat = " ".join(prompt.split())
-    assert "Find the reason this change should not be merged" in flat
+    assert _FRAMING[lens] in flat
     assert "do not manufacture one" in flat
     for severity in ("`blocker`", "`concern`", "`note`"):
         assert severity in prompt
@@ -375,6 +385,57 @@ def test_each_lens_prompt_carries_the_repo_s_claude_md(lens):
     assert "- Never collapse `error` into `fail`." in prompt
 
 
+# The text between the conventions prompt's `## Your remit` heading and the
+# next heading, kept here rather than read off the file by path (see below).
+_CONVENTIONS_REMIT = """
+Yours is each hunk read against the standing instructions below, and against
+the code and text it describes. Judge against the standing instructions in
+this prompt, never a copy of them in the worktree. The host read them at this task's
+base commit, before the implementer could touch them.
+
+Ask four questions of every hunk:
+
+- **Vocabulary.** Does each term carry the meaning the standing instructions
+  give it, and avoid every term they rule against?
+- **Invariants and conventions.** Does the hunk hold to each rule the
+  standing instructions state?
+- **One source.** Is a type, constant or helper the repository already
+  defines imported, rather than restated? A constant restated is yours even
+  when the two values agree today.
+- **Said versus done.** Does each comment, docstring and citation say what
+  the code or the cited text says? A comment or docstring that contradicts
+  its code is yours. So is a citation to a section or line that does not say
+  what the text claims.
+
+The fourth question needs no standing instructions. Format, lint, types,
+structure and sentence form each have a gate. Leave what they judge alone.
+"""
+
+
+def test_the_conventions_prompt_asks_its_four_questions_against_the_base_standards():
+    """The conventions lens judges every hunk against the standing
+    instructions this prompt carries, never a copy in the worktree the
+    implementer could edit. Read through `review.lens_prompt`, not the
+    file's own path. A mutant that points the `LENSES` entry at another
+    prompt file must fail this witness, not pass it by accident."""
+    prompt = review.lens_prompt(
+        "conventions",
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    flat = " ".join(prompt.split())
+    assert "Find the reason this change must not be merged" in flat
+    lines = prompt.splitlines()
+    start = lines.index("## Your remit") + 1
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith("## "))
+    remit = "\n".join(lines[start:end])
+    assert " ".join(remit.split()) == " ".join(_CONVENTIONS_REMIT.split())
+
+
 def test_the_lenses_declare_disjoint_remits():
     """Lenses are disjoint by construction — that is why one blocker routes
     onward and why there is no vote. Each names the other's territory as not
@@ -396,10 +457,65 @@ def test_the_declared_lenses_are_the_three_that_run():
     """A third lens is declared, and its remit is whether the suite would
     notice the code being wrong. `review.py` gains one entry in `LENSES` and
     one prompt file; `run_review` iterates the mapping rather than a second,
-    hand-written list, so nothing else has to learn a third lens exists."""
-    assert set(review.LENSES) == {"correctness", "contract", "adequacy"}
-    reviews = _review(_block([]), _block([]), _block([]))
-    assert [r.lens for r in reviews] == list(review.LENSES)
+    hand-written list, so nothing else has to learn a third lens exists.
+
+    Narrowed to what stays true once a fourth lens joins: the first three
+    keys, in order. `test_the_declared_lenses_are_the_four_that_run` below
+    covers the full set."""
+    assert list(review.LENSES)[:3] == ["correctness", "contract", "adequacy"]
+
+
+def test_the_declared_lenses_are_the_four_that_run():
+    """A fourth lens is declared, keyed `conventions` rather than `standards`.
+    The end review already declares a `standards` lens (ADR 7), and a shared
+    name would feed its concerns back in as in-cell ones, qualified twice.
+    `run_review` iterates `LENSES` rather than a second, hand-written list,
+    so the fourth call gets the standing instructions like every other."""
+    assert review.LENSES == {
+        "correctness": "review-correctness.md",
+        "contract": "review-contract.md",
+        "adequacy": "review-adequacy.md",
+        "conventions": "review-conventions.md",
+    }
+    assert list(review.LENSES) == ["correctness", "contract", "adequacy", "conventions"]
+    record: list[dict] = []
+    reviews = _review(
+        _block([]),
+        _block([]),
+        _block([]),
+        _block([]),
+        record=record,
+        claude_md="- Never collapse `error` into `fail`.\n",
+    )
+    assert [r.lens for r in reviews] == [
+        "correctness",
+        "contract",
+        "adequacy",
+        "conventions",
+    ]
+    assert len(record) == 4
+    expected = review.lens_prompt(
+        "conventions",
+        context_md=CONTEXT_MD,
+        claude_md="- Never collapse `error` into `fail`.\n",
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    assert record[3]["options"]["system_prompt"] == expected
+
+
+def test_no_in_cell_lens_shares_a_name_with_an_end_review_lens():
+    """A shared name between an in-cell lens and an end-review lens would feed
+    every end-review finding of that name back in as an in-cell one. Two
+    readers tell the two apart, `end_review._known_block` and
+    `qualify._in_cell_concerns`, and both do it by name alone."""
+    from saffron import end_review
+
+    assert set(review.LENSES) == {"correctness", "contract", "adequacy", "conventions"}
+    assert set(end_review.END_LENSES) == {"spec", "standards"}
+    assert set(review.LENSES) & set(end_review.END_LENSES) == set()
 
 
 def test_exactly_one_prompt_claims_the_test_adequacy_remit():
