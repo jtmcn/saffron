@@ -318,7 +318,7 @@ merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 session transcript, so a strange PR shows what the agent did but not what it read.
 
 **Placed 2026-09-29**, from the spec loop's run 21: **b-66d1c3**, **b-78ccc7**,
-**b-47659f**, then **b-38d45f**. The first is REVIEW running from `main`, so a
+~~**b-47659f**~~, then **b-38d45f**. The first is REVIEW running from `main`, so a
 stack's new lens runs in none of its cells. The second is what the conventions
 prompt misses. The last two are a witness and an anchor that pass too much.
 
