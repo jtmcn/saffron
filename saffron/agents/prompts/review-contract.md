@@ -60,6 +60,9 @@ them, and do not mention them in your findings:
   test itself constructed rather than one the code produced. That is the
   test-adequacy lens, even when what the test fails to catch is a broken
   contract.
+- A comment, docstring or citation that misstates its own code or the text
+  it cites, or a constant or helper restated rather than imported. That is
+  the conventions lens.
 
 The test at the edge: if fixing the defect means holding an interface or a
 stored format stable, it is yours; if it means changing what the code computes,

@@ -42,6 +42,24 @@ Ask four questions of every hunk:
 The fourth question needs no standing instructions. Format, lint, types,
 structure and sentence form each have a gate. Leave what they judge alone.
 
+## Its edges
+
+Not yours. Another lens reports these, so leave them alone even when you see
+them, and do not mention them in your findings:
+
+- Whether the computation is right: timezones, boundaries, null handling,
+  units, ordering. That is the correctness & data-semantics lens.
+- A docstring that misstates a public interface's documented contract, and
+  every other promise to something outside the change. That is the contract
+  & schema lens.
+- Whether a test would notice this code being wrong. That is the
+  test-adequacy lens.
+- What else in the repository calls the changed code, and what breaks
+  downstream of it. That is the blast-radius lens.
+
+The test at the edge: if fixing the defect means changing the comment, the
+citation or the import rather than what the code does, it is yours.
+
 ## Severity, three levels and the third one matters
 
 - `blocker`: this change must not merge as it stands.

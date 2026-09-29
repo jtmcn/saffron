@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from harness import lens_scoring
 from saffron import end_review
+from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -458,6 +459,158 @@ def test_the_lenses_declare_disjoint_remits():
         assert "blast-radius lens" in text.split("Not yours.")[1]
         assert "test-adequacy lens" in text.split("Not yours.")[1]
     assert "blast-radius lens" in adequacy.split("Not yours.")[1]
+
+
+_APPENDED_BULLET = (
+    "A comment, docstring or citation that misstates its own code or the "
+    "text it cites, or a constant or helper restated rather than imported. "
+    "That is the conventions lens."
+)
+
+_CONVENTIONS_BULLETS = [
+    "Whether the computation is right: timezones, boundaries, null "
+    "handling, units, ordering. That is the correctness & data-semantics "
+    "lens.",
+    "A docstring that misstates a public interface's documented contract, "
+    "and every other promise to something outside the change. That is the "
+    "contract & schema lens.",
+    "Whether a test would notice this code being wrong. That is the "
+    "test-adequacy lens.",
+    "What else in the repository calls the changed code, and what breaks "
+    "downstream of it. That is the blast-radius lens.",
+]
+
+_CONVENTIONS_EDGE = (
+    "The test at the edge: if fixing the defect means changing the "
+    "comment, the citation or the import rather than what the code does, "
+    "it is yours."
+)
+
+# The whole `## Its edges` body, kept here rather than read off the file by
+# path, the way `_CONVENTIONS_REMIT` above keeps the remit.
+_CONVENTIONS_LIST = """
+Not yours. Another lens reports these, so leave them alone even when you see
+them, and do not mention them in your findings:
+
+- Whether the computation is right: timezones, boundaries, null handling,
+  units, ordering. That is the correctness & data-semantics lens.
+- A docstring that misstates a public interface's documented contract, and
+  every other promise to something outside the change. That is the contract
+  & schema lens.
+- Whether a test would notice this code being wrong. That is the
+  test-adequacy lens.
+- What else in the repository calls the changed code, and what breaks
+  downstream of it. That is the blast-radius lens.
+
+The test at the edge: if fixing the defect means changing the comment, the
+citation or the import rather than what the code does, it is yours.
+"""
+
+
+def _section_after(text, heading):
+    """The heading right after `heading`, and that next section's own body,
+    up to the line opening `## ` after that."""
+    lines = text.splitlines()
+    start = lines.index(heading) + 1
+    next_heading = next(
+        i for i in range(start, len(lines)) if lines[i].startswith("## ")
+    )
+    end = next(
+        i for i in range(next_heading + 1, len(lines)) if lines[i].startswith("## ")
+    )
+    return lines[next_heading], "\n".join(lines[next_heading + 1 : end])
+
+
+def _not_yours_bullets_and_edge(text):
+    """One lens template's `Not yours.` list and its edge sentence, each
+    joined on whitespace. Shared across all four templates: each carries
+    exactly one `Not yours.` paragraph and one edge sentence that opens
+    `The test at the edge`."""
+    start = text.index("Not yours.")
+    edge_start = text.index("The test at the edge", start)
+    block_lines = text[start:edge_start].splitlines()
+    first_bullet = next(
+        i for i, line in enumerate(block_lines) if line.startswith("- ")
+    )
+    bullets: list[str] = []
+    current: list[str] = []
+    for line in block_lines[first_bullet:]:
+        if not line.strip():
+            continue
+        if line.startswith("- "):
+            if current:
+                bullets.append(" ".join(" ".join(current).split()))
+            current = [line[2:]]
+        else:
+            current.append(line)
+    if current:
+        bullets.append(" ".join(" ".join(current).split()))
+    edge_paragraph = text[edge_start:].split("\n\n")[0]
+    return bullets, " ".join(edge_paragraph.split())
+
+
+def test_the_four_lenses_declare_disjoint_remits():
+    """Each of the four lens prompts names every other lens's remit as not
+    its own. The conventions lens carries a `## Its edges` section after
+    its remit. The other three each end their own `Not yours.` list with
+    the same territory."""
+    conventions_template = (PROMPTS / review.LENSES["conventions"]).read_text()
+    heading, its_edges = _section_after(conventions_template, "## Your remit")
+    assert heading == "## Its edges"
+    assert " ".join(its_edges.split()) == " ".join(_CONVENTIONS_LIST.split())
+
+    table = {
+        lens: _not_yours_bullets_and_edge((PROMPTS / path).read_text())
+        for lens, path in review.LENSES.items()
+    }
+    assert set(table) == set(review.LENSES)
+
+    for lens in ("correctness", "contract", "adequacy"):
+        bullets, _edge = table[lens]
+        assert bullets[-1] == _APPENDED_BULLET
+
+    bullets, edge = table["conventions"]
+    assert bullets == _CONVENTIONS_BULLETS
+    assert edge == _CONVENTIONS_EDGE
+
+
+def test_the_conventions_lens_says_a_repo_without_claude_md_declares_none():
+    """A repo with no `CLAUDE.md`, or a blank one, gets a fixed block in the
+    conventions prompt's standing-instructions slot. It still asks the lens
+    to judge each comment, docstring and citation. A real `CLAUDE.md` still
+    reaches the conventions prompt as before, and the other three lenses
+    keep the empty slot for a repo declaring none."""
+    one_liner = "- Never collapse `error` into `fail`.\n"
+    cases = [
+        ("conventions", None, review.NO_STANDING_INSTRUCTIONS),
+        ("conventions", "", review.NO_STANDING_INSTRUCTIONS),
+        ("conventions", " \n\t\n", review.NO_STANDING_INSTRUCTIONS),
+        ("conventions", one_liner, context.standing_instructions(one_liner)),
+        ("correctness", None, ""),
+        ("contract", None, ""),
+        ("adequacy", None, ""),
+    ]
+    for lens, claude_md, standing in cases:
+        template = (PROMPTS / review.LENSES[lens]).read_text()
+        expected = context.build_system_prompt(
+            "REVIEW",
+            CONTEXT_MD,
+            template=template,
+            spec="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+            standing_instructions=standing,
+        )
+        actual = review.lens_prompt(
+            lens,
+            context_md=CONTEXT_MD,
+            claude_md=claude_md,
+            prompts_dir=PROMPTS,
+            spec_body="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+        )
+        assert actual == expected, (lens, claude_md)
 
 
 def test_the_declared_lenses_are_the_three_that_run():

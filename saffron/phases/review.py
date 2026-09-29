@@ -54,6 +54,15 @@ LENSES = {
 # from `drop_rate` and stripped by `_from_report` so a lens cannot forge one.
 HOST_FILED = "[host-filed criterion probe] "
 
+# The conventions lens judges against standing instructions, so an empty
+# section reads as none declared rather than none to judge (item b-17d0d5).
+NO_STANDING_INSTRUCTIONS = (
+    "## This repository's standing instructions\n\n"
+    "This repository declares no standing instructions: no `CLAUDE.md` "
+    "stood at this task's base commit. Judge each comment, docstring and "
+    "citation against the code or text it describes."
+)
+
 REVIEW_PROMPT = context.turn_prompt("review")
 
 
@@ -190,6 +199,9 @@ def lens_prompt(
 ) -> str:
     """The lens's system prompt: its own file, plus what a fresh session lacks."""
     template = (prompts_dir / LENSES[lens]).read_text()
+    standing = context.standing_instructions(claude_md)
+    if lens == "conventions" and not standing:
+        standing = NO_STANDING_INSTRUCTIONS
     return context.build_system_prompt(
         "REVIEW",
         context_md,
@@ -197,7 +209,7 @@ def lens_prompt(
         spec=spec_body,
         diff=diff,
         gates=gates,
-        standing_instructions=context.standing_instructions(claude_md),
+        standing_instructions=standing,
     )
 
 
