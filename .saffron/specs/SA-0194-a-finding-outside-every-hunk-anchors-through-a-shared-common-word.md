@@ -4,7 +4,7 @@ title: A finding outside every hunk anchors through a shared common word, so a l
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 121
+estimated_lines: 123
 touches:
   - saffron/agents/findings.py
   - tests/test_findings.py
@@ -61,7 +61,8 @@ acceptance:
       anchor, and neither does a line sharing `is`, `other`, `the` or `what`
       alone. A line whose only shared word off the list is a capitalised
       identifier, `DiffFacts`, anchors in a Markdown file and in a Python
-      file alike.
+      file alike. A line naming `Difffacts` instead, which matches it only
+      when case is ignored, does not anchor in either.
     witness: tests/test_findings.py::test_sa_0192s_probe_line_anchors_through_its_content_words_alone
     wrong_versions:
       - Identifier-shaped tokens only, meaning a token with an underscore, a digit beside a letter, or a lower-case letter before a capital.
@@ -69,6 +70,7 @@ acceptance:
       - A list that also holds the word code.
       - A list missing the word other.
       - The cited line's tokens folded to lower case before the intersection, so a capitalised identifier no longer matches.
+      - Both the diff's tokens and the cited line's folded to lower case before the intersection, so a word matching only by case anchors.
   - claim: >-
       An adequacy finding on an untouched line of a Python test file anchors
       when the line calls a function the diff changed, even when that
@@ -178,11 +180,10 @@ code. So `SA-0192`'s line still anchors, through `changed`, `code` and
 
 ## Out of scope
 
-- **`DESIGN.md` §5.5 and `CONTEXT.md`.** §5.5 describes the second test as
-  tokenise, intersect, "no language knowledge anywhere". The operator edits
-  that sentence by hand in this spec's pull request to name the list.
-  `CONTEXT.md`'s **Anchored** entry already says "naming an identifier", and
-  needs no edit.
+- **`DESIGN.md` §5.5 and `CONTEXT.md`.** §5.5 names the list since
+  `ed9325fd`, edited by hand in this spec's pull request. `CONTEXT.md`'s
+  **Anchored** entry already says "naming an identifier", and needs no
+  edit.
 - **Unanchored probe survivors.** A surviving criterion probe goes through
   `anchor` too (`saffron/cell/session.py:1704`), so one on a line sharing
   only listed words now drops. Item b-e40d09 owns the question of such a
@@ -255,7 +256,9 @@ Then build a second diff, editing `changed.md` to add `The DiffFacts row`
 against a removed `yak`. Cite line 1 of `cited.md`, and line 1 of
 `cited.py`, each with the content `the DiffFacts owl`. The only shared
 token is `DiffFacts`, and both findings read `anchored` true, compared with
-`is`.
+`is`. Over the same diff, cite line 1 of each file again with the content
+`the Difffacts owl`. No token matches exactly, and both findings read
+`anchored` false, compared with `is`.
 
 At base the four `False` rows read `True`.
 
@@ -288,13 +291,15 @@ passed on the prototype, and no existing test needed an edit. The review
 of this spec added four more, rerun on the revised witnesses on
 2026-09-29. A superset constant and the filter in `parse_diff` failed
 criterion 1. A cited-side case fold failed criterion 2. A Markdown-only
-filter failed criterion 1's witness alone.
+filter failed criterion 1's witness alone. The second review's version
+folds both sides before the intersection. It passed all three witnesses
+until the `Difffacts` rows were added, and then failed criterion 2.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** No touched path is in `elevate_on`, so `size` is advisory. The
-prototype counted 482 changed tokens by `size_gate`, against the `bug`
-ceiling of 1300. `estimated_lines` is those 482 tokens over four, with no
+prototype counted 492 changed tokens by `size_gate`, against the `bug`
+ceiling of 1300. `estimated_lines` is those 492 tokens over four, with no
 overrun added. About a quarter is `saffron/`, the rest tests.
