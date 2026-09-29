@@ -39,23 +39,32 @@ acceptance:
   - claim: >-
       `driver.py check` prints one `review:` line for each spec the target
       reaches through `depends_on`, every entry and every depth, whose file
-      is not retired to `done/` and whose `touches` names a REVIEW or REBUT
-      source. Those are `saffron/phases/review.py`, `saffron/phases/rebut.py`,
-      the turn prompts `review.md`, `rebut.md`, `verdict.md` and
-      `rebut-extract.md` under `saffron/agents/prompts/turns/`, and any path
+      is not retired to `done/` and whose `touches` has an entry in exactly
+      this set. It holds `saffron/phases/review.py`,
+      `saffron/phases/rebut.py`, `saffron/agents/findings.py`, the turn
+      prompts `review.md`, `extraction.md`, `rebut.md`, `verdict.md` and
+      `rebut-extract.md` under `saffron/agents/prompts/turns/`, and any entry
       matching `saffron/agents/prompts/review-*.md`. The line names that spec
       and its matching entries in `touches` order, and says the target's
       REVIEW is main's and will not run that change. It prints whether or not
       past cells match the target's shape. It prints nothing for the target
-      itself, for a retired ancestor, for an ancestor that touches no such
-      source, or for an id no spec file declares. A target with no
-      `depends_on` parses no spec for the walk. It is not a concern, so the
-      exit status stays 0 and the clear line still prints.
+      itself, even through a cycle, for a retired ancestor, for an ancestor
+      with no entry in the set, or for an id no spec file declares. A target
+      with no `depends_on` lists no live spec for the walk. It is not a
+      concern, so the exit status stays 0 and the clear line still prints.
     witness: tests/test_spec_loop_driver.py::test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_review
     wrong_versions:
-      - A trigger set without the four turn prompts, so an ancestor editing REBUT's verdict turn prints nothing.
+      - A trigger set without `saffron/phases/review.py`.
+      - A trigger set without `saffron/phases/rebut.py`.
+      - A trigger set without `saffron/agents/findings.py`.
+      - A trigger set without `turns/review.md`.
+      - A trigger set without `turns/extraction.md`.
+      - A trigger set without `turns/rebut.md`.
+      - A trigger set without `turns/verdict.md`.
+      - A trigger set without `turns/rebut-extract.md`.
       - A trigger that matches any path under `saffron/agents/prompts/turns/`.
       - A walk that starts at the target itself, so a target touching `review.py` names itself.
+      - A seen set not seeded with the target, so a cycle back to it names the target.
       - A walk that lists the live specs even when the target declares no `depends_on`.
       - A walk that follows only `depends_on[0]`, as `_depends_on_chain` does, so an ancestor reached through a second entry prints nothing.
       - A walk over the target's own `depends_on` entries only, so a grandparent prints nothing.
@@ -71,8 +80,8 @@ acceptance:
       spec's latest REVIEW ran, for a reviewable task, a task that ended
       `EXHAUSTED` and a task halted at `REBUTTING` alike. It reads
       `findings.json` in the spec's directory under `JEV_ROOT / "v0"`. The
-      names keep that file's order, and a lens whose `error` is set carries
-      ` (error)`. The file counts as the latest run's when no `gates/`
+      names keep that file's order, and a lens whose `error` is a non-empty
+      string carries ` (error)`. The file counts as the latest run's when no `gates/`
       directory sits beside it, or when its mtime is not older than that
       directory's, a tie included. A `baseline.json` beside it plays no
       part. A file that is missing, older than `gates/`, not JSON, empty,
@@ -87,6 +96,7 @@ acceptance:
       - An entry with no `lens` skipped, so the line names the rest.
       - Lens names read from the ledger's findings rows, so a lens that filed no finding goes unnamed.
       - An errored lens dropped from the line, or printed without its marker.
+      - An empty-string `error` read as set, so that lens gets the marker.
       - The lens names sorted rather than kept in the file's order.
       - A file older than `gates/` read as the latest run's REVIEW.
       - A file with no `gates/` beside it read as no REVIEW.
@@ -99,7 +109,7 @@ acceptance:
 Backlog item **b-66d1c3**, from the spec loop's run 21
 (`docs/evidence/2026-09-29-spec-loop-skill-feedback-run-21.md`, point 7).
 It cites `DESIGN.md` §5.5 and §5.6. Every line number below was read at
-`791d9a88`.
+`3552295c`.
 
 **The operator's decision.** A stacked child's REVIEW is main's REVIEW,
 said aloud. The control plane never executes model-authored code
@@ -134,11 +144,13 @@ set. So this spec adds no core field and reads that file.
 (`saffron/cell/session.py:1758`), so a re-run of the spec overwrites it.
 Each run removes and recreates `gates/` in that directory
 (`saffron/cell/session.py:1768-1769`, `saffron/repos/mirror.py:182-197`).
-That happens before the run creates its task row
-(`saffron/cell/session.py:1817-1822`). Nothing later writes to `gates/`,
-which the cell mounts read-only (`saffron/cell/worktree.py:37`). So a
-`findings.json` older than `gates/` is an earlier run's REVIEW. One not
-older belongs to the run that made the spec's newest task row.
+A run that mints its task row does so after that
+(`saffron/cell/session.py:1817-1822`). A stack batch's own task has its
+row before the run starts (`saffron/cell/session.py:1812-1816`), and its
+run still recreates `gates/` before REVIEW. Nothing later writes to
+`gates/`, which the cell mounts read-only (`saffron/cell/worktree.py:37`).
+So a `findings.json` older than `gates/` is an earlier run's REVIEW. One
+not older belongs to the latest run in that directory.
 
 `baseline.json` is a weaker anchor. It is written after the task row
 (`saffron/cell/session.py:1914-1916`). A run that dies between the two
@@ -160,8 +172,10 @@ size concern, then returns early when no past cell matches
 (`saffron/phases/review.py:40-45`) and the turn prompt `review.md`
 (`saffron/phases/review.py:66`). REBUT loads the turns `rebut.md`,
 `verdict.md` and `rebut-extract.md` (`saffron/phases/rebut.py:30-36`).
-`context.turn_prompt` reads each from `prompts/turns/`
-(`saffron/agents/context.py:177-178`).
+`context.turn_prompt` reads each from `prompts/turns/` and splices
+`extraction.md` into it (`saffron/agents/context.py:177-192`). The
+`anchor` rule in `saffron/agents/findings.py:128` decides which findings
+stand as anchored blockers. `SA-0194`, queued beside this spec, changes it.
 
 **What `record` prints today.** One stdout line, the spec, its state, its
 pull request and its spend
@@ -174,20 +188,25 @@ fixture leaves `JEV_ROOT` at the host's `~/.saffron/batches`
 ## Problem
 
 1. **`check`.** Walk every spec the target reaches through `depends_on`.
-   Follow every entry, at any depth. The target itself is not on the walk.
-   Print one line for each spec that meets both tests.
+   Follow every entry, at any depth. Seed the seen set with the target, so
+   neither the start nor a cycle back puts it on the walk. Print one line
+   for each spec that meets both tests.
    - Its file is in `SPECS_DIR` itself, not in `done/`.
-   - Its `touches` has an entry equal to one of six paths, or one matching
-     `saffron/agents/prompts/review-*.md` under `fnmatch.fnmatchcase`. The
-     glob entry itself matches. The six are `saffron/phases/review.py`,
-     `saffron/phases/rebut.py` and these four turn prompts.
+   - Its `touches` has an entry equal to one of eight paths, or one
+     matching `saffron/agents/prompts/review-*.md` under
+     `fnmatch.fnmatchcase`. The glob entry itself matches. The eight are
+     below.
+     - `saffron/phases/review.py`
+     - `saffron/phases/rebut.py`
+     - `saffron/agents/findings.py`
      - `saffron/agents/prompts/turns/review.md`
+     - `saffron/agents/prompts/turns/extraction.md`
      - `saffron/agents/prompts/turns/rebut.md`
      - `saffron/agents/prompts/turns/verdict.md`
      - `saffron/agents/prompts/turns/rebut-extract.md`
 
-   A target with no `depends_on` has nothing to walk. Then list no live
-   specs and parse nothing for it.
+   A target with no `depends_on` has nothing to walk. Then call no
+   `discover_specs` for it.
 
    The line reads as below, with the matching entries joined by `, ` in
    `touches` order. Print it after the size concern and before the early
@@ -199,8 +218,9 @@ fixture leaves `JEV_ROOT` at the host's `~/.saffron/batches`
 
 2. **`record`.** After the existing stdout line, print one more. For a
    `findings.json` that counts as the latest run's, it names each entry's
-   `lens` in file order, joined by `, `. An entry with a non-null `error`
-   gets ` (error)` after its name. Otherwise it prints the none-recorded
+   `lens` in file order, joined by `, `. An entry whose `error` is a
+   non-empty string gets ` (error)` after its name. A `null` or `""`
+   `error` is not set. Otherwise it prints the none-recorded
    line. Both forms are below.
 
    ```text
@@ -235,8 +255,11 @@ fixture leaves `JEV_ROOT` at the host's `~/.saffron/batches`
 - **`rebut-verdict.md`.** It is the system prompt of REBUT's verdict
   session (`saffron/phases/rebut.py:30`). The operator's trigger set of
   2026-09-29 leaves it out, and this spec keeps that call.
+- **`saffron/agents/artifacts.py`.** It holds the extraction turn and
+  output parsing every phase shares. A change there is not a REVIEW change
+  in particular, so it is not in the set.
 - **A broader glob in a parent's `touches`,** such as `saffron/phases/**`.
-  It equals none of the six paths and prints nothing.
+  It equals none of the eight paths and prints nothing.
 - **Pricing.** `check`'s arithmetic is unchanged. Its history rows already
   price main's REVIEW, since every past cell ran it.
 - **`_jev_cell`.** It keeps its `baseline.json` rule, the weaker anchor
@@ -252,13 +275,14 @@ fixture leaves `JEV_ROOT` at the host's `~/.saffron/batches`
 line and the `lenses:` line do not exist at base, so no text there fixes
 their spelling. The `witness` gate reports `skip` for both.
 
-**Where the code goes.** Put the six trigger paths and the glob in
-module-scope constants in `driver.py`. Walk ancestors with a seen set. When
-the target declares a `depends_on`, take the specs from `_known_specs()`
-and the unretired ids from `intake.discover_specs(SPECS_DIR)`, both read
-through `SPECS_DIR`. Call neither for a target with none. Read the batch
-directory through the module's `JEV_ROOT`, never `Path.home()`. Import
-inside the functions, as the driver does now.
+**Where the code goes.** Put the eight trigger paths and the glob in
+module-scope constants in `driver.py`. Reuse the `specs` that `cmd_check`
+already reads with `_known_specs()`
+(`.claude/skills/run-saffron-spec-loop/driver.py:2095`). Call
+`intake.discover_specs(SPECS_DIR)` for the unretired ids only when
+`target.depends_on` is non-empty. Read the batch directory through the
+module's `JEV_ROOT`, never `Path.home()`. Import inside the functions, as
+the driver does now.
 
 **The `loop` fixture.** Point `JEV_ROOT` at `tmp_path / "batches"` there,
 so no test reads the host's batch tree. Then
@@ -273,10 +297,10 @@ it. Each has `title: x` and `type: feature`.
 | id | where | `depends_on` | `touches` |
 |---|---|---|---|
 | `SA-0910` | live | `[SA-0906, SA-0903, SA-0999]` | `[saffron/phases/review.py]` |
-| `SA-0906` | live | `[SA-0901, SA-0903]` | `[saffron/phases/implement.py, saffron/agents/prompts/turns/implement.md]` |
-| `SA-0903` | live | `[SA-0904]` | `[saffron/phases/rebut.py, saffron/agents/prompts/turns/verdict.md]` |
-| `SA-0901` | live | `[SA-0905]` | `[saffron/phases/review.py, tests/test_review.py, saffron/agents/prompts/review-conventions.md]` |
-| `SA-0904` | live | `[]` | `[saffron/agents/prompts/review-*.md, saffron/agents/prompts/review-security.md]` |
+| `SA-0906` | live | `[SA-0901, SA-0903]` | `[saffron/phases/implement.py, saffron/agents/prompts/turns/implement.md, saffron/agents/artifacts.py]` |
+| `SA-0903` | live | `[SA-0904]` | `[saffron/phases/rebut.py, saffron/agents/prompts/turns/verdict.md, saffron/agents/prompts/turns/rebut.md, saffron/agents/prompts/turns/rebut-extract.md]` |
+| `SA-0901` | live | `[SA-0905]` | `[saffron/phases/review.py, tests/test_review.py, saffron/agents/prompts/turns/review.md, saffron/agents/findings.py, saffron/agents/prompts/review-conventions.md]` |
+| `SA-0904` | live | `[SA-0910]` | `[saffron/agents/prompts/review-*.md, saffron/agents/prompts/turns/extraction.md, saffron/agents/prompts/review-security.md]` |
 | `SA-0905` | `done/` | `[]` | `[saffron/phases/review.py]` |
 | `SA-0911` | live | `[SA-0905]` | `[f.py]` |
 
@@ -297,13 +321,16 @@ No file declares `SA-0999`. Stub `_ledger_and_repo` with `_StubLedger`,
   Assert it returns 0 and no line opens `review:`.
 
 `SA-0910` touches `review.py` itself, so a walk that includes the target
-names it. `SA-0906`'s `turns/implement.md` is a turn prompt outside the
-four. None of the three lines below names either.
+names it. `SA-0904` depends back on `SA-0910`, so a seen set not seeded
+with the target reaches it through that cycle. `SA-0906`'s
+`turns/implement.md` is a turn prompt outside the set, and
+`artifacts.py` is out of scope. None of the three lines below names
+either. Each of the eight paths and the glob appears in one line.
 
 ```text
-review: SA-0903 is not retired and touches saffron/phases/rebut.py, saffron/agents/prompts/turns/verdict.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
-review: SA-0901 is not retired and touches saffron/phases/review.py, saffron/agents/prompts/review-conventions.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
-review: SA-0904 is not retired and touches saffron/agents/prompts/review-*.md, saffron/agents/prompts/review-security.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
+review: SA-0903 is not retired and touches saffron/phases/rebut.py, saffron/agents/prompts/turns/verdict.md, saffron/agents/prompts/turns/rebut.md, saffron/agents/prompts/turns/rebut-extract.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
+review: SA-0901 is not retired and touches saffron/phases/review.py, saffron/agents/prompts/turns/review.md, saffron/agents/findings.py, saffron/agents/prompts/review-conventions.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
+review: SA-0904 is not retired and touches saffron/agents/prompts/review-*.md, saffron/agents/prompts/turns/extraction.md, saffron/agents/prompts/review-security.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
 ```
 
 **Criterion 2's witness.** One plain `def`, beside the existing `record`
@@ -320,8 +347,9 @@ assert `record` returns 0 and its whole stdout is the first line plus the
 lens line named.
 
 1. `findings.json` lists `correctness`, `contract`, `adequacy` and
-   `conventions` in that order, each with `"findings": []`. Only
-   `contract` has `"error": "boom"`, and the rest `null`. Its mtime is
+   `conventions` in that order, each with `"findings": []`. `contract`
+   has `"error": "boom"`, `adequacy` has `"error": ""`, and the other two
+   have `null`. Its mtime is
    `T`. There is no `gates/`. Expect
    `lenses: correctness, contract (error), adequacy, conventions`.
 2. Make a `gates/` directory with mtime `T + 100`. Expect the
@@ -346,16 +374,16 @@ lens line named.
     is step 1's line.
 
 **Measured on a prototype, 2026-09-29.** Both witnesses above passed on a
-prototype of this change and failed on the driver at `791d9a88`. Every
-wrong version under both criteria was then applied to the prototype. Each
-one failed its criterion's witness.
+prototype of this change and failed on the driver at `3552295c`. Every
+wrong version under both criteria was then applied to the prototype, as
+35 edits for 34 entries. Each one failed its criterion's witness.
 
 **Every test you add must fail with this diff's source reverted.** At base,
 `check` prints no `review:` line. `record` prints one stdout line. So each
 witness fails on an assertion. Neither fails to collect. Import
 nothing new at module scope.
 
-**Size.** The prototype's driver change and both witnesses measured 828
+**Size.** The prototype's driver change and both witnesses measured 842
 tokens under `size_gate`'s counter, with no docstring and no `SKILL.md`
 edit. Those add about 200 more. `estimated_lines` is 260, that total over
 four, with no overrun added.
