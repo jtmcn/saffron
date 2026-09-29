@@ -187,6 +187,12 @@ def test_the_dockerfile_template_starts_from_cores_base() -> None:
     )
 
 
+@pytest.mark.parametrize("name", sorted(p.name for p in TEMPLATES.iterdir()))
+def test_a_template_cites_no_saffron_design_section(name: str) -> None:
+    # A target repo has no DESIGN.md, so a citation copied into it dangles.
+    assert not re.search(r"DESIGN\.md|§", (TEMPLATES / name).read_text())
+
+
 def test_gates_md_names_every_contract_field() -> None:
     text = (SKILL / "GATES.md").read_text()
     fields = (set(GateResult.model_fields) - {"duration_ms"}) | set(

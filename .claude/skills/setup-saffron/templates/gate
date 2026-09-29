@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One tool's output -> the gate contract (DESIGN.md §5.4).
+"""One tool's output -> the gate contract.
 
 Copied to `.saffron/gates/<name>`. Fill the three FILL constants for the tool.
 """

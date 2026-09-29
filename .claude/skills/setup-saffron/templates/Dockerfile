@@ -1,4 +1,4 @@
-# The toolchain a cell of this repo runs (DESIGN.md §5.1.2).
+# The toolchain a cell of this repo runs.
 FROM saffron/cell-base:python
 
 # FILL: the language runtime and each gate's tool, pinned.

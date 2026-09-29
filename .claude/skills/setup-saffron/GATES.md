@@ -30,6 +30,12 @@ A gate is an executable that prints one JSON object on stdout and nothing else t
 - A failed test's `code` is its collected name, so `criteria` can tell which witness failed.
 - A handed name the runner cannot find goes in `uncollected`. A subset run that accounts for every name is `pass` or `fail`, never `error` (SA-0127). Only `revert` reads the field.
 
+## A domain gate
+
+- It compares the code under test against a frozen record of history, such as the SQL each shipped migration ran. Built from today's code, it passes an edit to that history.
+- It checks the data a change carries, not only the shape it leaves. A migration that moves a value passes a columns-only check while losing the value.
+- Its rule goes into the `## Saffron` block, so the agent knows what keeps it green.
+
 ## Where a gate executes
 
 - In a cell, gates run from a read-only copy at `/gates` with the worktree at `/work` as the working directory. Reach a helper beside the gate through `$(dirname "$0")`.

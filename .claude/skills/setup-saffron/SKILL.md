@@ -38,7 +38,7 @@ Omit a role with no analogue. Every other declared gate is blocking unless the o
 
 **B. The domain gate.** Ask the owner one question, from §5.4: *what is expensive to fake here?*
 A migration round-trip, a schema check, an invariant only this repo states. Propose one when the code suggests it. Accept "none yet".
-Declare it without `when`. The field is parsed and not read yet, so a conditional gate executes on every task.
+[GATES.md](GATES.md) says what makes one hard to fake. Declare it without `when`. The field is parsed and not read yet, so a conditional gate executes on every task.
 
 **C. `elevate_on`.** This is most of what onboarding means, so ask even when you have a guess. Offer the guess as the recommendation.
 The question is §5.6's: *where in here does a plausible-looking wrong change hurt most?*
