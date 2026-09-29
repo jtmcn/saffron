@@ -424,6 +424,52 @@ def test_a_mutant_with_nothing_to_find_is_refused_at_parse():
         )
 
 
+def test_a_criterion_declares_its_wrong_versions_and_parse_refuses_an_empty_or_repeated_one():
+    """`wrong_versions` (backlog item b-7e69d0) parses in declared order, and
+    an omitted field reads as an empty list, exactly as `mutant` does."""
+    refused = [
+        "    wrong_versions: []\n",
+        '    wrong_versions:\n      - ""\n',
+        '    wrong_versions:\n      - "   "\n',
+        "    wrong_versions:\n      - v one\n      - v one\n",
+    ]
+    for wrong_versions_yaml in refused:
+        text = (
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n"
+            "    witness: t.py::test_x\n"
+            f"{wrong_versions_yaml}"
+            "---\n\nbody\n"
+        )
+        with pytest.raises(SpecError):
+            parse_spec(text)
+
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: first\n"
+        "    witness: t.py::test_a\n"
+        "    wrong_versions:\n"
+        "      - v four\n"
+        "      - v two\n"
+        "      - v five\n"
+        "      - v one\n"
+        "      - v three\n"
+        "  - claim: second\n"
+        "    witness: t.py::test_b\n"
+        "    wrong_versions:\n"
+        "      - v one\n"
+        "  - claim: third\n"
+        "    witness: t.py::test_c\n"
+        "---\n\nbody\n"
+    )
+    first, second, third = spec.acceptance
+    assert first.wrong_versions == ["v four", "v two", "v five", "v one", "v three"]
+    assert second.wrong_versions == ["v one"]
+    assert third.wrong_versions == []
+
+
 def test_a_criterion_stops_at_a_subsection_of_its_own_section():
     """`_CRITERIA_SECTION` ends only at `##`, so an `###` subsection and its
     table sit inside the criteria span. Measured on SA-0001, whose last

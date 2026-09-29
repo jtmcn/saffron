@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -485,6 +486,159 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     precedent for a line counted over the record it summarises."""
     named = sum(1 for e in entries if e["edit"] is not None)
     return f"criterion probes: {named} named, {len(entries) - named} unnamed"
+
+
+WRONG_VERSION_PROMPT = context.turn_prompt("wrong-version")
+
+
+def wrong_version_prompt(
+    *,
+    claim: str,
+    wrong_versions: Sequence[str],
+    diff: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+) -> str:
+    """The system prompt for one criterion's wrong-version session: the claim
+    substituted for `{spec}`, the versions numbered from 1 in declared order
+    for `{wrong_versions}`, and never the witness or the spec body."""
+    template = (prompts_dir / "wrong-version.md").read_text()
+    numbered = "\n".join(
+        f"{index}. {version}" for index, version in enumerate(wrong_versions, start=1)
+    )
+    return context.build_system_prompt(
+        "REVIEW",
+        context_md,
+        template=template,
+        spec=claim,
+        diff=diff,
+        wrong_versions=numbered,
+        standing_instructions=context.standing_instructions(claude_md),
+    )
+
+
+class _WrongVersionReport(BaseModel):
+    """One wrong-version session's own answer: one `_ProbeAnswer` per version
+    it was shown, paired back to those versions by position."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    versions: list[_ProbeAnswer]
+
+
+def _unresolved_wrong_versions(criterion: Criterion, cost: float, error: str) -> dict:
+    """The entry filed for a criterion whose session gave nothing usable: every
+    declared version kept, with a null edit and an empty reason."""
+    return {
+        "witness": criterion.witness,
+        "claim": criterion.claim,
+        "cost_usd": cost,
+        "error": error,
+        "versions": [
+            {"version": version, "edit": None, "reason": ""}
+            for version in criterion.wrong_versions
+        ],
+    }
+
+
+def run_wrong_versions(
+    container: str,
+    *,
+    acceptance: Sequence[Criterion],
+    diff: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> list[dict]:
+    """One fresh session per criterion that declares wrong versions, in the
+    spec's own declared order (backlog item b-7e69d0). A criterion declaring
+    none buys no session, exactly like `run_criterion_probes`."""
+    entries = []
+    for criterion in acceptance:
+        if not criterion.wrong_versions:
+            continue
+        system_prompt = wrong_version_prompt(
+            claim=criterion.claim,
+            wrong_versions=criterion.wrong_versions,
+            diff=diff,
+            context_md=context_md,
+            claude_md=claude_md,
+            prompts_dir=prompts_dir,
+        )
+        options = implement.agent_options(
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            budget_usd=budget_usd,
+            tools=REVIEW_TOOLS,
+        )
+        declared = len(criterion.wrong_versions)
+        try:
+            attempt = agent(
+                container, prompt=WRONG_VERSION_PROMPT, options=options, emit=emit
+            )
+        except implement.AgentFailed as failed:
+            cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            entries.append(_unresolved_wrong_versions(criterion, cost, str(failed)))
+            continue
+        try:
+            report = _WrongVersionReport.model_validate(
+                json.loads(parse_output_block(attempt.text))
+            )
+        except (ValueError, ValidationError) as exc:
+            entries.append(
+                _unresolved_wrong_versions(
+                    criterion, attempt.cost_usd_est, f"not the schema: {exc}"
+                )
+            )
+            continue
+        if len(report.versions) != declared:
+            entries.append(
+                _unresolved_wrong_versions(
+                    criterion,
+                    attempt.cost_usd_est,
+                    f"not the schema: {len(report.versions)} answers for "
+                    f"{declared} wrong versions",
+                )
+            )
+            continue
+        entries.append(
+            {
+                "witness": criterion.witness,
+                "claim": criterion.claim,
+                "cost_usd": attempt.cost_usd_est,
+                "error": None,
+                "versions": [
+                    {
+                        "version": version,
+                        "edit": None
+                        if answer.edit is None
+                        else answer.edit.model_dump(),
+                        "reason": answer.reason,
+                    }
+                    for version, answer in zip(
+                        criterion.wrong_versions, report.versions, strict=True
+                    )
+                ],
+            }
+        )
+    return entries
+
+
+def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
+    """The one REVIEW line wrong-versioning adds, counted over
+    `wrong-versions.json`'s own entries: every version across every entry,
+    and how many of those an edit was named for."""
+    versions = [
+        v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])
+    ]
+    expressed = sum(1 for v in versions if v["edit"] is not None)
+    return f"wrong versions: {len(versions)} declared, {expressed} expressed"
 
 
 # `witness_gate`'s own status, over one criterion, in this record's words

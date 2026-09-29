@@ -543,8 +543,9 @@ def _probe_text(edit, reason):
 
 def _probe_agent(*turns, record=None):
     """Like `_lens_agent`, scripting one turn per `run_criterion_probes` call
-    rather than per lens: an exception is raised, anything else is the
-    session's raw text."""
+    rather than per lens. An exception is raised. A scripted
+    `implement.AttemptResult` passes through with its own cost. Anything else
+    is wrapped as the session's raw text at the default cost."""
     scripted = iter(turns)
 
     def run(container, *, prompt, options, **kwargs):
@@ -553,6 +554,8 @@ def _probe_agent(*turns, record=None):
         turn = next(scripted)
         if isinstance(turn, BaseException):
             raise turn
+        if isinstance(turn, implement.AttemptResult):
+            return turn
         return _turn(turn)
 
     return run
@@ -596,3 +599,308 @@ def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still
     assert "not the schema" in entries[1]["error"]
     # A refused session still spent its turn, and the task is charged for it.
     assert entries[1]["cost_usd"] == pytest.approx(0.1)
+
+
+# --- wrong versions: one session per criterion that declares any (backlog item b-7e69d0) ---
+
+
+def _wrong_version_block(versions):
+    return f"Here it is.\n<output>\n{json.dumps({'versions': versions})}\n</output>"
+
+
+def _expected_wrong_version_tail(numbered: str, claim: str) -> str:
+    return (
+        "## The diff\n\n"
+        + DIFF
+        + "\n\n## The wrong versions\n\n"
+        + numbered
+        + "\n\n## The claim\n\n"
+        + claim
+        + "\n"
+    )
+
+
+def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_into_an_edit():
+    """Criterion 3: `run_wrong_versions` buys one fresh session per criterion
+    that declares wrong versions, in the spec's order, and none for one that
+    declares none. Its prompt shows one claim and the diff, never a witness
+    or another criterion's claim."""
+    edit_a1 = {"file": "src/gap.py", "find": "amount < 0", "replace": "amount <= 0"}
+    edit_a2 = {"file": "src/gap.py", "find": "log.info(total)", "replace": "pass"}
+    edit_c = {
+        "file": "src/gap.py",
+        "find": "total = total",
+        "replace": "total = total * 2",
+    }
+
+    a = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="t.py::test_a",
+        wrong_versions=[
+            "the guard is removed",
+            "the guard accepts zero",
+            "the guard logs nothing",
+        ],
+    )
+    b = Criterion(claim="the total is logged", witness="t.py::test_b")
+    c = Criterion(
+        claim="the total stays unchanged",
+        witness="t.py::test_c",
+        preserves=True,
+        wrong_versions=["the total is doubled"],
+    )
+
+    record: list[dict] = []
+    agent = _probe_agent(
+        _turn(
+            _wrong_version_block(
+                [
+                    {
+                        "edit": edit_a1,
+                        "reason": "removing the guard lets negatives through",
+                    },
+                    {"edit": None, "reason": "zero cannot be isolated as one edit"},
+                    {"edit": edit_a2, "reason": "logging nothing still runs the guard"},
+                ]
+            ),
+            cost=0.35,
+        ),
+        _turn(
+            _wrong_version_block(
+                [{"edit": edit_c, "reason": "doubling changes the preserved value"}]
+            ),
+            cost=0.15,
+        ),
+        record=record,
+    )
+
+    entries = review.run_wrong_versions(
+        "cell",
+        acceptance=[a, b, c],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 2  # b buys no session
+
+    numbered_a = (
+        "1. the guard is removed\n2. the guard accepts zero\n3. the guard logs nothing"
+    )
+    numbered_c = "1. the total is doubled"
+    tail_a = _expected_wrong_version_tail(numbered_a, a.claim)
+    tail_c = _expected_wrong_version_tail(numbered_c, c.claim)
+    assert record[0]["options"]["system_prompt"].endswith(tail_a)
+    assert record[1]["options"]["system_prompt"].endswith(tail_c)
+
+    for call, other_witnesses in (
+        (record[0], ["t.py::test_a", "t.py::test_b", "t.py::test_c"]),
+        (record[1], ["t.py::test_a", "t.py::test_b", "t.py::test_c"]),
+    ):
+        prompt = call["options"]["system_prompt"]
+        turn_prompt = call["prompt"]
+        for witness in other_witnesses:
+            assert witness not in prompt
+            assert witness not in turn_prompt
+    assert b.claim not in record[0]["options"]["system_prompt"]
+    assert c.claim not in record[0]["options"]["system_prompt"]
+    assert a.claim not in record[1]["options"]["system_prompt"]
+    assert b.claim not in record[1]["options"]["system_prompt"]
+
+    assert record[0]["options"]["tools"] == review.REVIEW_TOOLS
+    assert record[0]["options"]["max_turns"] == 20
+    assert record[0]["options"]["max_budget_usd"] == 2.0
+    assert record[1]["options"]["tools"] == review.REVIEW_TOOLS
+    assert record[1]["options"]["max_turns"] == 20
+    assert record[1]["options"]["max_budget_usd"] == 2.0
+
+    assert entries == [
+        {
+            "witness": "t.py::test_a",
+            "claim": "the guard rejects a negative amount",
+            "cost_usd": pytest.approx(0.35),
+            "error": None,
+            "versions": [
+                {
+                    "version": "the guard is removed",
+                    "edit": edit_a1,
+                    "reason": "removing the guard lets negatives through",
+                },
+                {
+                    "version": "the guard accepts zero",
+                    "edit": None,
+                    "reason": "zero cannot be isolated as one edit",
+                },
+                {
+                    "version": "the guard logs nothing",
+                    "edit": edit_a2,
+                    "reason": "logging nothing still runs the guard",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::test_c",
+            "claim": "the total stays unchanged",
+            "cost_usd": pytest.approx(0.15),
+            "error": None,
+            "versions": [
+                {
+                    "version": "the total is doubled",
+                    "edit": edit_c,
+                    "reason": "doubling changes the preserved value",
+                },
+            ],
+        },
+    ]
+
+    # The criterion-probe session keeps its own view: one claim and the diff,
+    # never the wrong versions a spec's author listed for it.
+    probe_record: list[dict] = []
+    probe_agent = _probe_agent(
+        _probe_text(None, "no edit found"),
+        _probe_text(None, "no edit found"),
+        _probe_text(None, "no edit found"),
+        record=probe_record,
+    )
+    review.run_criterion_probes(
+        "cell",
+        acceptance=[a, b, c],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=probe_agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+    assert len(probe_record) == 3
+    for call in probe_record:
+        prompt = call["options"]["system_prompt"]
+        for version in (
+            "the guard is removed",
+            "the guard accepts zero",
+            "the guard logs nothing",
+            "the total is doubled",
+        ):
+            assert version not in prompt
+
+    assert (
+        review.describe_wrong_versions(entries)
+        == "wrong versions: 4 declared, 3 expressed"
+    )
+
+
+def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version():
+    """Criterion 4: a failed session, a bad reply, and a mismatched count each
+    keep every version, with a null edit and an empty reason. None of the
+    four truncates, stops the loop, or re-prompts. Every later criterion is
+    still asked."""
+    c1 = Criterion(
+        claim="claim one", witness="t.py::test_1", wrong_versions=["c1 v1", "c1 v2"]
+    )
+    c2 = Criterion(
+        claim="claim two", witness="t.py::test_2", wrong_versions=["c2 v1", "c2 v2"]
+    )
+    c3 = Criterion(
+        claim="claim three", witness="t.py::test_3", wrong_versions=["c3 v1", "c3 v2"]
+    )
+    c4 = Criterion(
+        claim="claim four", witness="t.py::test_4", wrong_versions=["c4 v1", "c4 v2"]
+    )
+
+    failed = implement.AgentFailed("turn cut short", _turn("", cost=0.42))
+    one_answer = _wrong_version_block(
+        [
+            {
+                "edit": {"file": "src/gap.py", "find": "x", "replace": "y"},
+                "reason": "one answer",
+            }
+        ]
+    )
+    three_answers = _wrong_version_block(
+        [
+            {
+                "edit": {"file": "src/gap.py", "find": "p", "replace": "q"},
+                "reason": "first",
+            },
+            {
+                "edit": {"file": "src/gap.py", "find": "r", "replace": "s"},
+                "reason": "second",
+            },
+            {
+                "edit": {"file": "src/gap.py", "find": "t", "replace": "u"},
+                "reason": "third",
+            },
+        ]
+    )
+
+    record: list[dict] = []
+    agent = _probe_agent(
+        failed, "not a block at all", one_answer, three_answers, record=record
+    )
+
+    entries = review.run_wrong_versions(
+        "cell",
+        acceptance=[c1, c2, c3, c4],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 4, "every criterion is asked, whatever the previous answer"
+    assert entries == [
+        {
+            "witness": "t.py::test_1",
+            "claim": "claim one",
+            "cost_usd": pytest.approx(0.42),
+            "error": "turn cut short",
+            "versions": [
+                {"version": "c1 v1", "edit": None, "reason": ""},
+                {"version": "c1 v2", "edit": None, "reason": ""},
+            ],
+        },
+        {
+            "witness": "t.py::test_2",
+            "claim": "claim two",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: no <output> block in the response",
+            "versions": [
+                {"version": "c2 v1", "edit": None, "reason": ""},
+                {"version": "c2 v2", "edit": None, "reason": ""},
+            ],
+        },
+        {
+            "witness": "t.py::test_3",
+            "claim": "claim three",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: 1 answers for 2 wrong versions",
+            "versions": [
+                {"version": "c3 v1", "edit": None, "reason": ""},
+                {"version": "c3 v2", "edit": None, "reason": ""},
+            ],
+        },
+        {
+            "witness": "t.py::test_4",
+            "claim": "claim four",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: 3 answers for 2 wrong versions",
+            "versions": [
+                {"version": "c4 v1", "edit": None, "reason": ""},
+                {"version": "c4 v2", "edit": None, "reason": ""},
+            ],
+        },
+    ]

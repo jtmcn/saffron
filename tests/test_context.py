@@ -227,6 +227,46 @@ def test_a_spec_declaring_no_witnesses_gets_no_witness_heading():
     assert context.witnesses_block([]) == ""
 
 
+def test_the_implementer_reads_each_criterions_wrong_versions_under_its_line():
+    """`wrong_versions` (backlog item b-7e69d0) follows each criterion's own
+    witness line, in declared order, never sorted. It is never shown to the
+    lenses. `criteria_section` stays the claims alone."""
+    from saffron.intake import Criterion
+
+    acceptance = [
+        Criterion(
+            claim="nothing broke",
+            witness="tests/test_intake.py::test_b",
+            preserves=True,
+            wrong_versions=["a second wrong version", "a first wrong version"],
+        ),
+        Criterion(claim="the box ticks", witness="tests/test_criteria.py::test_a"),
+    ]
+    block = context.witnesses_block(acceptance)
+    assert block == (
+        "## The witnesses you are judged against\n"
+        "\n"
+        "Each criterion names a test node id the host checks after you finish, "
+        "by reading what the suite collected and what it failed — at the base "
+        "commit and at head. Name your tests exactly these strings.\n"
+        "\n"
+        "A witness marked `preserves` must already pass at the base commit and "
+        "still pass. Every other witness must **not** pass at the base commit "
+        "and must pass when you are done: a test that was already green proves "
+        "nothing about this change.\n"
+        "\n"
+        "- `tests/test_intake.py::test_b` *(preserves)* — nothing broke\n"
+        "  Wrong versions this witness must fail on:\n"
+        "  - a second wrong version\n"
+        "  - a first wrong version\n"
+        "- `tests/test_criteria.py::test_a` — the box ticks"
+    )
+    section = context.criteria_section(acceptance)
+    assert section == (
+        "## Acceptance criteria\n\n- [ ] nothing broke\n- [ ] the box ticks"
+    )
+
+
 def test_criteria_section_round_trips_through_intakes_own_parser():
     """Finding 1, PR #48 review: intake requires the markdown `## Acceptance
     criteria` section absent when `acceptance:` is declared, so a witnessed
@@ -494,6 +534,7 @@ TURN_PROMPTS = {
     "notes": artifacts.NOTES_PROMPT,
     "extraction": artifacts.EXTRACTION_PROMPT,
     "criterion-probe": review.CRITERION_PROBE_PROMPT,
+    "wrong-version": review.WRONG_VERSION_PROMPT,
     "spec-review-extract": spec_review.SPEC_REVIEW_EXTRACT_PROMPT,
     "spec-writer-extract": spec_review.SPEC_WRITER_EXTRACT_PROMPT,
 }
