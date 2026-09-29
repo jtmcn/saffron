@@ -186,8 +186,8 @@ withdrawal.
 - **A `contradicted` or `confirmed` verdict on a guarded blocker.** Both
   stand as the check leaves them now.
 - **`DESIGN.md` and `CONTEXT.md`.** §5.6 and the **Verdict** entry list
-  the cases the host reads as `confirmed`, and this adds one. The operator edits both by
-  hand in this spec's pull request.
+  the cases the host reads as `confirmed`, and this adds one. The operator
+  edited both, and §4.1, by hand at e1bb7578.
 - **`saffron/agents/findings.py`.** Backlog item b-38d45f changes
   `_is_anchored` there. This spec reads a blocker only after it anchored.
 - **The ledger and the pull request body.** The ledger stores the verdict
@@ -226,7 +226,7 @@ the test body. The first is `preserves`, with witness `t.py::test_a`. The
 second is not, with witness `t.py::test_a_b`, which extends the first. A
 host-filed blocker is `_blocker(lens="adequacy", ...)` whose claim is
 `review.HOST_FILED`, the witness, then ` stayed green with ` and either
-form's tail. Every argument below is the same text,
+form's tail. Every `argued` answer's argument below is the same text,
 `the line sits outside my diff, so it is not mine to answer`. Each verdict's
 reason is `r` followed by its finding number, as `_verdict(n, reason=str(n))`
 builds it.
