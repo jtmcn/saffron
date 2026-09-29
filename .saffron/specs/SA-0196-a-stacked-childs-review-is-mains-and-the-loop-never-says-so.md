@@ -189,7 +189,8 @@ fixture leaves `JEV_ROOT` at the host's `~/.saffron/batches`
 ## Problem
 
 1. **`check`.** Walk every spec the target reaches through `depends_on`.
-   Follow every entry, at any depth. Seed the seen set with the target, so
+   Follow every entry, at any depth. A retired spec prints no line, but the
+   walk goes on through its `depends_on`. Seed the seen set with the target, so
    neither the start nor a cycle back puts it on the walk. Print one line
    for each spec that meets both tests.
    - Its file is in `SPECS_DIR` itself, not in `done/`.
@@ -383,7 +384,9 @@ lens line named.
 **Measured on a prototype, 2026-09-29.** Both witnesses above passed on a
 prototype of this change and failed on the driver at `3552295c`. Every
 wrong version under both criteria was then applied to the prototype, as
-35 edits for 34 entries. Each one failed its criterion's witness.
+35 edits for 34 entries. Each one failed its criterion's witness. That
+measurement predates the `SA-0907` and `SA-0908` rows, the fourth line
+and the retired-walk entry. Those were worked by hand, not run.
 
 **Every test you add must fail with this diff's source reverted.** At base,
 `check` prints no `review:` line. `record` prints one stdout line. So each
