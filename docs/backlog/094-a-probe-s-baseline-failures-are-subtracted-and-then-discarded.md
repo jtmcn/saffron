@@ -1,14 +1,15 @@
 ---
 id: 94
 title: A probe's baseline failures are subtracted and then discarded
-status: partial
+status: done
+closed: 2026-09-29
 tier: 1
 by_hand: true
 specs: [SA-0054, SA-0063]
 prs: []
 commits: [f76931df]
 cites: []
-related: [93]
+related: [93, 106, 173]
 filed: 2026-09-09
 ---
 
@@ -80,3 +81,20 @@ hand against one read and green. Every path records the baseline it had,
 refusals and a raise out of `check_probe` included, and both spellings are
 pinned, because collapsing them reads the baseline pass's ten silent verdicts
 as ten green baselines.
+
+- 2026-09-29: the explanation half is done, by hand. `f76931df` ran in
+  `saffron/cell:saffron` and printed the pass's own line, `1 failed, 1499
+  passed, 2 skipped, 21 deselected`.
+- The failure is
+  `test_structure_errors_when_its_tool_is_present_but_not_runnable`. Items 106
+  and 173 found its cause, a cell image with no `/usr/bin/python3`.
+- The two skips are `tests/test_intake.py:153` and `tests/test_policy.py:109`.
+  Each tests an unreadable file and skips under uid 0. The cell sets no `USER`,
+  so it runs as root. The host runs as a user and skips neither.
+- Both `SA-0063` probes mutate the notes turn in `saffron/cell/session.py`.
+  The failing test covers the `structure` gate, and the skipped ones cover spec
+  and policy loading. None reaches the mutated code, so the subtraction masked
+  no kill. The two survivals are vacuities, and the pass's `8` stands.
+- Current `main` reads `2948 passed, 2 skipped` in the same image. The two root
+  skips stay in every cell. A probe that mutates the unreadable-file error in
+  `load_spec` or `load_policy` would survive there and die on the host.
