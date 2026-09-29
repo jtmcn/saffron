@@ -64,8 +64,8 @@ do; the measurement behind it follows.
 - **A cell that halts at a ceiling goes to the operator.** SA-0087 hit two
   shapes on 2026-09-14:
   - `NOT_IMPLEMENTED` after `budget: … no room left to salvage`. The plan
-    checkpoint had spent 45% of the budget. Since SA-0126 a first cut ends
-    `ORPHANED` and re-queues, and only a second one ends here.
+    checkpoint had spent 45% of the budget. Since SA-0126 only a second cut
+    at one `spec_sha` ends here (`DESIGN.md` §4.5).
   - `REBUTTING` after the process exited. REBUT gets only what the budget has
     left (backlog item 120), and a rebuttal that runs out halts there by design
     (§5.6), with its branch pushed and no PR.

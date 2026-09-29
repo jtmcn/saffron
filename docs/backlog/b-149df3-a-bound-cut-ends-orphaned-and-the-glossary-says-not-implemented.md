@@ -66,6 +66,6 @@ land after `SA-0126` merges, not before.
 - 2026-09-28: done by hand, after `SA-0126` merged (`917afe6b`). `CONTEXT.md`
   §6 and `DESIGN.md` §4.5 name the bound cut and its one retry. §4.5 says a
   resumed task row must re-key the cap. `GOTCHAS.md` says a first cut ends
-  `ORPHANED` and a second `NOT_IMPLEMENTED`. The cap's phase rule now admits
-  `SPEC_REVIEW` and `SPEC_WRITING` besides `IMPLEMENTING`. The resumption change
-  must still revisit it for a row that went through REBUT.
+  `ORPHANED` and a second `NOT_IMPLEMENTED`. `SA-0168` (`6e3df6d8`) widened the
+  cap's phase rule to `SPEC_REVIEW` and `SPEC_WRITING`. §4.5 says the resumption
+  change must still widen it to a row that went through REBUT.
