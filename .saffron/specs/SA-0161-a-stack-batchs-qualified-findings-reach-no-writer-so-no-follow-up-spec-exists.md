@@ -96,7 +96,7 @@ acceptance:
     wrong_versions:
       - The origin spec read from the task's first spec text, so group 1's budget of 10 is refused against the draft's 9.
       - A probe's file text counted with no check for `None`, which raises on `src/gone.py`.
-      - The remainder read as `cap_usd` less `batch_spend`, which pools group 17.
+      - The remainder read as `cap_usd` less `batch_spend`, which pools group 13 and every group after it.
       - The origin task found by spec id, taking the first or the last `SA-0102` task.
       - A whole group pooled for one failing probe, or a failing probe's group pooled unnarrowed.
   - claim: >-
@@ -221,7 +221,7 @@ and `mirror.file_at` read a range's paths and a file at a sha
 (`saffron/repos/mirror.py:136-158`, `saffron/repos/mirror.py:241-270`). `worktree.git_argv` and
 `DIFF_FLAGS` pin a diff's shape (`saffron/cell/worktree.py:132-205`). A
 spec file's name starts with its id and a hyphen
-(`saffron/cell/session.py:459-466`), and ids are numbered from the highest
+(`saffron/cell/session.py:473-478`), and ids are numbered from the highest
 existing one (`docs/agents/issue-tracker.md:10-11`). `RETIRED_DIRNAME` is
 `done` (`saffron/scheduler.py:505`).
 
@@ -295,7 +295,8 @@ findings still reach a follow-up.
 
 **Why the host checks the mutant.** ADR 3 forbids a follow-up that declares
 a named probe as its own mutant. `parse_spec` catches that only when the
-body or a claim spells the `find`. A writer can leave it out of both.
+body, a claim or a wrong version spells the `find`. A writer can leave
+it out of all three.
 
 **The sub-cap.** `SA-0165` passes `--budget` times `WRITER_SHARE` as
 `cap_usd`, and `SA-0173` holds the same amount back from generation 0. A
@@ -404,7 +405,7 @@ holds.
 | 10 | the same | the concern | `touches` `src/b.py` and `src/c.py` | touches |
 | 11 | the same | the concern | `touches` `src/b.py` and `tests/test_c.py` | touches |
 | 12 | the same | the concern | a text with no frontmatter | parse |
-| 13 | the same | the concern | a session with error `idle bound` | error |
+| 13 | the same | the concern | a session with error `idle bound`, at 0.25 | error |
 | 14 | the same | the concern | `write` raises `RuntimeError("cell gone")` | raise |
 | 15 | `SA-0101`, `src/b.py` | `gone`, `lost` | none | probe, no match at `H2` |
 | 16 | `SA-0102`, `src/c.py` | a probe on `gamma` | none | probe, two matches |
@@ -425,7 +426,8 @@ The first holds `gone` alone. Group 9's two entries hold `gone`, then
 alone, and the two other `SA-0102` tasks hold none. The layer task of
 `SA-0102` holds eleven `WRITING_PHASE` attempts, and the batch's spend is
 4.0. Then it runs
-three calls on the same arrangement.
+three more calls, each on the ledger the main call left. `SA-0110` is
+the highest id there, so the next free one is `SA-0111`.
 
 - Three groups of the concern, `cap_usd` 50, and one turn with a reset
   time. One `write` call, and three entries pooled for the rate limit.
@@ -444,7 +446,8 @@ These fail it, each measured:
 - `touches` matched as globs, or an empty `touches` accepted
 - any path a `test_paths` glob matches accepted in `touches`
 - every test file at the top head allowed
-- the remainder read as `cap_usd` less `batch_spend`, which pools group 17
+- the remainder read as `cap_usd` less `batch_spend`, which pools group 13
+  onward, since `batch_spend` also counts `SA-0101`'s 0.5 attempt
 - a refused group pooled with a finding already pooled
 - a budget equal to the origin's, refused
 - the origin budget read from the file, past a revision
