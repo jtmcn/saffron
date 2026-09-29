@@ -1,0 +1,33 @@
+# What Saffron reads from this repo. Drop a gate with no analogue here.
+gates:
+  format:     { blocking: true }
+  lint:       { blocking: true }
+  types:      { blocking: true }
+  tests:      { blocking: true }
+  no-network: { blocking: true }
+  # Advisory at every tier: its cheapest satisfaction is a test that asserts nothing.
+  coverage:   { blocking: false }
+  # FILL: the domain gate, what is expensive to fake here. `when` is parsed and not read yet.
+
+# FILL: where a plausible-looking wrong change hurts most.
+elevate_on: []
+
+# FILL: files no task edits, such as a lockfile.
+protected:
+  - .saffron/**
+
+# Parsed and not read yet.
+envelope_default: []
+
+integrity:
+  # FILL: where the tests live.
+  test_paths: []
+  # FILL: each language's skip, expected-failure and ignore-comment tokens.
+  suppressions: []
+  # FILL: every file that changes what a gate measures, such as each tool's config.
+  gate_config:
+    - .saffron/**
+    - "**/.gitignore"
+
+# FILL: caps for a thread pool sized from the CPU count.
+thread_env: {}
