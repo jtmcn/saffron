@@ -511,7 +511,7 @@ The ledger is a good state store and a poor analytical surface. §8's flywheel i
 
 `SA-0001` defines a vocabulary for the run record so those joins become expressible. Three rules keep it from becoming a liability:
 
-**1. Derived and one-way.** SQLite remains the system of record. The graph is a projection with no write path back. If it is stale, wrong, or absent, the factory still runs — which is the property (§4.1) that lets Saffron recover from Saffron. An authoritative graph store would trade that away for query convenience, and a dual-write arrangement would trade it away for nothing at all: divergence in an audit trail is worse than either store alone.
+**1. Derived and one-way.** SQLite remains the system of record. The graph is a projection with no write path back. If it is stale, wrong, or absent, the factory still runs — which is the property (§4.1) that lets Saffron recover from Saffron. An authoritative graph store would trade that away for query convenience, and a dual-write arrangement would trade it away for nothing at all: divergence in an audit trail is worse than either store alone. Item 170 reverses this rule's first sentence. The record on `refs/saffron/*` becomes the system of record, and the ledger an index folded from it (`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`). No caller constructs a `Ledger` with a record yet, so the rule holds as written until that wiring lands.
 
 **2. PROV-O and EARL, not a bespoke schema.** Batches, runs, tasks, attempts, phases, gate suites and a contested finding's rebuttal are `prov:Activity` — one activity per suite and not one per gate, because a gate's own execution is already fully described by the assertion it produces: `gate_results` carries its status and its `duration_ms`, and a separate activity node would restate them; specs, `plan.json`, `scope.json`, diffs, gate output and PRs are `prov:Entity`; the implementer session, each critic lens, every gate, the human and the human's delegates (`CONTEXT.md` §1) are `prov:Agent` — a gate is one because an assertion needs an assertor. `wasGeneratedBy`, `used`, `wasDerivedFrom`, `wasRevisionOf` and `wasInvalidatedBy` (which is exactly what `spec_sha` invalidation is, §4.1) carry the backbone. Gate results and critic findings are both `earl:Assertion`s over an `earl:TestSubject`. The genuinely Saffron-specific terms — the only part that justifies a new namespace — are the gate taxonomy with its blocking/advisory split, `envelope` versus ratified `touches`, lens disjointness, and the terminal-versus-internal state distinction of §3.3.
 
@@ -1249,7 +1249,7 @@ Sort order, designed so you can dismiss in 10 seconds and accept in two minutes:
 
 > Three judgements, three words (`CONTEXT.md` §5): the critic **verdicts**, the implementer **rebuts**, the operator **adjudicates**. This level ranks on the first two. Nothing writes an adjudication yet — `findings.adjudication` is `NULL` on every row in the ledger — which is the same missing record the trailing accept rate needs.
 
-**The queue reads `queue.json`, not the ledger, and that is currently undecided rather than chosen.** PACKAGE appends a `QueueLine` per task to a store in the batch tree, and the page renders from it. The ledger cannot reproduce that store: `tasks.risk` was never written for tasks that ran before `SA-0007` closed item 18's fifth instance, and the diff stat this section's own mock shows (`+180/−22`) is stored in no column at all. So there are two records of a night and the authoritative one is the file, not the database. Either the ledger gains what it is missing, or this section stops implying the ledger is the source.
+**The queue reads `queue.json`, not the ledger, and item 170 moves its source to the record**. PACKAGE appends a `QueueLine` per task to a store in the batch tree, and the page renders from it. The ledger cannot reproduce that store. `tasks.risk` holds the tier the spec declared, and a `QueueLine` holds the effective tier the diff earned. Since `SA-0124` the diff stat this section's mock shows (`+180/−22`) also lands in `tasks.added` and `tasks.removed`. The decision makes the record on `refs/saffron/*` authoritative and the ledger an index folded from it. `queue.json` becomes a render of the record, and then goes (`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`). None of that is wired yet, so today the file is still the store this page reads.
 
 **Sort by state, not by repo.** The temptation with multiple repos is to group them, and it is worth resisting: the most urgent item across all repos should be the top line, and grouping buries a skipped repo under another repo's routine PRs. Repo is a column you scan, not a heading you navigate.
 
@@ -1471,6 +1471,8 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
   saffron/
     cli.py                 # batch, run, queue, ratify, gc
     ledger.py              # SQLite schema + DAO
+    record/
+      contract.py  refs.py  memory.py  fold.py         # the append-only record of facts, and the fold that rebuilds a ledger from it (item 170)
     intake.py              # spec discovery, parse, validate (Pydantic)
     scheduler.py           # dep DAG, stacking, conflict sets, budget
     supervisor.py          # per-task lifecycle

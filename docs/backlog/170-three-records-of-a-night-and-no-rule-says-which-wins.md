@@ -152,3 +152,11 @@ so this item's rewrite of that paragraph must cover it.
 `SA-0124`: "we want the db to be derived, not the source of truth". The record
 on `refs/saffron/*` is authoritative, and the ledger is folded from it. The
 `DESIGN.md` and `CONTEXT.md` rewrite is still to do by hand.
+
+**2026-09-29.** The true-now half of the rewrite landed by hand. §6 names the
+decision and drops its two stale claims. §4.6 rule 1, `CONTEXT.md` §8's
+**Ledger** entry and the 2026-09-02 design each say the reversal is decided and
+waits on the wiring. §10 lists `saffron/record/`. The full restatement lands
+with the first caller that constructs a `Ledger` with a record, as
+`saffron/ledger.py`'s docstring asks. The **Ledger** entry is hand-written, and
+the record design's claim that `factory.ttl` generates it is wrong.

@@ -691,6 +691,8 @@ A baseline that aborts inside the task's cell ends the task in
 ## 8. Artifacts
 
 **Ledger**: The SQLite database at `~/.saffron/ledger.db`. Authoritative for state.
+Item 170 makes it an index that `saffron fold` rebuilds from the record on
+`refs/saffron/*`. It stays authoritative until a caller constructs it with a record.
 _Avoid_: "the DB" (ambiguous with fixture services inside a cell), "the store".
 
 **Batch tree**: The plain directory tree of artifacts under
