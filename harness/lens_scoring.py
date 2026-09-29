@@ -444,7 +444,9 @@ def calibrate(fixture: Fixture) -> None:
     fixture whose defects are all missed by the run it was built from can only
     be calibrated where that run happened to look.
     """
-    scored = score_run(fixture, fixture.recorded_reviews())
+    reviews = fixture.recorded_reviews()
+    # Score against the lenses this recorded run carried, not today's.
+    scored = score_run(fixture, reviews, expect={r.lens for r in reviews})
     seen = sum(m.seen for m in scored.values())
     graded = sum(m.graded for m in scored.values())
     if (seen, graded) != (fixture.recorded_seen, fixture.recorded_graded):

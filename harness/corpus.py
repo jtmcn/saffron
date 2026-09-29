@@ -111,16 +111,20 @@ def score_corpus(
 def graded_per_run(
     fixtures: Sequence[Fixture],
     runs: Mapping[str, Sequence[Sequence[LensReview]]],
+    expect: Collection[str] = tuple(LENSES),
 ) -> list[CorpusScore | None]:
     """Run index k across every fixture, scored alone as one corpus pass —
     one sample of the aggregate per run, which is the spread item 93 asks for.
-    `None` where no fixture's run k survived: unscored, never zero."""
+    `None` where no fixture's run k survived: unscored, never zero.
+    `expect` defaults to the current lens set and passes through to
+    `score_corpus`.
+    """
     depth = max((len(r) for r in runs.values()), default=0)
     out: list[CorpusScore | None] = []
     for k in range(depth):
         sliced = {sid: list(r[k : k + 1]) for sid, r in runs.items() if len(r) > k}
         try:
-            out.append(score_corpus(fixtures, sliced))
+            out.append(score_corpus(fixtures, sliced, expect))
         except LensErrored:
             out.append(None)
     return out
