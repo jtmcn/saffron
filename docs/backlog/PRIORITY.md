@@ -307,6 +307,9 @@ measured estimate, and the other takes a `drop` per spec to scope a loop.
 **Placed 2026-09-28**, after run 20: **b-2e7c4d**. The loop's `stack` check
 merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 
+**Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
+session transcript, so a strange PR shows what the agent did but not what it read.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,

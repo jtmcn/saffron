@@ -2,6 +2,7 @@
 id: b-12ffc3
 title: A cell's session transcript is deleted with its state volume, so no record shows what the agent saw
 status: open
+tier: 2
 filed: 2026-09-28
 specs: []
 prs: []
