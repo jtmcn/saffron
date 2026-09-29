@@ -58,9 +58,9 @@ HOST_FILED = "[host-filed criterion probe] "
 # section reads as none declared rather than none to judge (item b-17d0d5).
 NO_STANDING_INSTRUCTIONS = (
     "## This repository's standing instructions\n\n"
-    "This repository declares no standing instructions: no `CLAUDE.md` "
-    "stood at this task's base commit. Judge each comment, docstring and "
-    "citation against the code or text it describes."
+    "This repository declares no standing instructions: no `CLAUDE.md`, "
+    "or a blank one, stood at this task's base commit. Judge each comment, "
+    "docstring and citation against the code or text it describes."
 )
 
 REVIEW_PROMPT = context.turn_prompt("review")

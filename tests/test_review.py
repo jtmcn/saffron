@@ -486,8 +486,7 @@ _CONVENTIONS_EDGE = (
     "it is yours."
 )
 
-# The whole `## Its edges` body, kept here rather than read off the file by
-# path, the way `_CONVENTIONS_REMIT` above keeps the remit.
+# The whole `## Its edges` body, compared against the raw template file.
 _CONVENTIONS_LIST = """
 Not yours. Another lens reports these, so leave them alone even when you see
 them, and do not mention them in your findings:
@@ -574,6 +573,15 @@ def test_the_four_lenses_declare_disjoint_remits():
     assert edge == _CONVENTIONS_EDGE
 
 
+# The spec's block, restated so the witness cannot agree with any wording.
+_NO_STANDING_INSTRUCTIONS = (
+    "## This repository's standing instructions\n\n"
+    "This repository declares no standing instructions: no `CLAUDE.md`, "
+    "or a blank one, stood at this task's base commit. Judge each comment, "
+    "docstring and citation against the code or text it describes."
+)
+
+
 def test_the_conventions_lens_says_a_repo_without_claude_md_declares_none():
     """A repo with no `CLAUDE.md`, or a blank one, gets a fixed block in the
     conventions prompt's standing-instructions slot. It still asks the lens
@@ -582,9 +590,9 @@ def test_the_conventions_lens_says_a_repo_without_claude_md_declares_none():
     keep the empty slot for a repo declaring none."""
     one_liner = "- Never collapse `error` into `fail`.\n"
     cases = [
-        ("conventions", None, review.NO_STANDING_INSTRUCTIONS),
-        ("conventions", "", review.NO_STANDING_INSTRUCTIONS),
-        ("conventions", " \n\t\n", review.NO_STANDING_INSTRUCTIONS),
+        ("conventions", None, _NO_STANDING_INSTRUCTIONS),
+        ("conventions", "", _NO_STANDING_INSTRUCTIONS),
+        ("conventions", " \n\t\n", _NO_STANDING_INSTRUCTIONS),
         ("conventions", one_liner, context.standing_instructions(one_liner)),
         ("correctness", None, ""),
         ("contract", None, ""),
@@ -708,6 +716,13 @@ def test_exactly_one_prompt_claims_the_test_adequacy_remit():
     # And it left the correctness lens's own remit, not just its Not-yours list.
     correctness_remit = texts["correctness"].split("Not yours.")[0]
     assert "pass identically before this change" not in correctness_remit.lower()
+    # A reworded claim still says a test would notice, and only adequacy's remit does.
+    remit_carriers = [
+        lens
+        for lens, text in texts.items()
+        if "notice" in text.split("Not yours.")[0].lower()
+    ]
+    assert remit_carriers == ["adequacy"], remit_carriers
 
 
 def test_the_adequacy_prompt_demands_a_checkable_mutation():
