@@ -106,3 +106,9 @@ The **Refusal** entry names the stack order's refusal. This lands after
   `SA-0161`, `SA-0162`, `SA-0167`, `SA-0170`, `SA-0174` and `SA-0177`.
   Qualification, follow-up group and backlog pool wait on a caller of
   `qualify()`.
+- 2026-09-29: #584's review found two more open terms. **Escalation** has no
+  entry, though `SA-0149` merged. An errored end-review lens is still charged
+  to the reserve (`end_review.py:352`), and no entry says so. ADR 7's
+  Consequences still route the entries through `ontology/factory.ttl`.
+  A lens headword naming a session the Lens entry excludes stays
+  open, and so do the headwords "Revision" and "Mint".

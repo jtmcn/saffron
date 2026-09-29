@@ -146,43 +146,42 @@ _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished"
 "timeout" for `UNTIL`.
 
 **Stack batch**: A batch started with `saffron batch --stack` (ADR 7). It fixes its
-stack order once, at batch start, and never rescans. Each task is cut from its
-predecessor's head, and its pull request targets the predecessor's branch. One end
-review reads the stack once the batch stops taking tasks.
+stack order once, at batch start, and never rescans. Each task stacks on its
+predecessor. One end review reads the stack once the batch stops taking tasks.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
 
-**Stack order**: A stack batch's fixed order over its queued specs. A spec joins it once
-every `depends_on` entry is already in the order or on the default branch. Among ready
-specs the lowest `priority` goes first, then the lowest id. A spec the order never takes
-is refused before any cell starts.
+**Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
+once every `depends_on` entry is already in the order or on the default branch. Among
+ready specs the lowest `priority` goes first, then the lowest id. A spec the order
+never takes is refused before any cell starts.
 
 **Predecessor**: The last task below a task in its stack order to reach
-`READY_FOR_REVIEW`. The task is cut from the predecessor's head and targets its branch.
-A task with no predecessor is cut from `base_sha`.
+`READY_FOR_REVIEW`. The task is cut from the predecessor's head and targets its
+branch. A task with no predecessor is cut from `base_sha`.
 _Avoid_: "parent" (that is `depends_on[0]`, and a predecessor need not be one).
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
-`stack_layers` row, with its position and its predecessor. The next task is cut from its
-head. A task that misses adds no layer, and every spec whose `depends_on` reaches it is
-refused.
+`stack_layers` row, with its position and its predecessor. A task that misses adds no
+layer.
 
-**Mint**: What a stack batch does to open a spec's run and task before its spec review.
-The review's attempts and facts are recorded against that task, and its cell runs on it.
-A spec offered again after a wait keeps the task it was minted.
+**Mint**: What a stack batch does to open a spec's run and task before its spec
+review. The review's attempts and facts are recorded against that task, and its cell
+runs on it. A spec offered again after a wait keeps the task it was minted.
 
 **Spec writer session**: A host-invoked session that revises one spec after its spec
-review routes it to `revise`. It runs in a critic cell at the predecessor's head, and
-its attempt is labelled `SPEC_WRITING`. Its reply becomes a recorded spec text, which
-the spec review then reads.
+review routes it to `revise`. It runs in a critic cell at the predecessor's head, or
+at `base_sha` with no predecessor. Its attempt is labelled SPEC_WRITING. Its reply
+becomes a recorded spec text, which the spec review then reads.
 
 **Revision**: One spec writer session and the spec review of the text it returned. A
-stack batch runs at most three per spec, then escalates the spec. A revision starts only
-while the budget left, less the reserve, covers a writer, a review and the spec's budget.
+stack batch runs at most three per spec, then escalates the spec. A revision starts
+only while the budget left, less the reserve, covers a writer, a review and the spec's
+budget.
 
 **Recorded spec text**: A spec's text that a stack batch runs and that is not at
 `base_sha`. It is a `spec_texts` row and a `spec_text` fact, hashed when recorded.
-Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against the
-latest one. Only a revision writes one.
+Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against
+the latest one. Only a revision writes one.
 
 **Spec loop**: A delegate's pass over the queued specs, each through an attended
 `saffron cell`, into one stack. Each step it does by hand is one the factory does
@@ -213,7 +212,7 @@ NULL means is open (backlog item b-eac388).
 
 **Phase**: A named stage in the cell pipeline — DIAGNOSE, IMPLEMENT, GATE ⇄ REPAIR,
 REVIEW, REBUT, PACKAGE. Written in bare caps. A stack batch also labels attempts
-`SPEC_REVIEW` and `SPEC_WRITING`. Each is a host-invoked session before the cell, and
+SPEC_REVIEW and SPEC_WRITING. Each is a host-invoked session before the cell, and
 neither is a stage of the cell pipeline.
 The event log alone splits GATE ⇄ REPAIR into GATE and REPAIR, because a gate
 attempt and a repair turn print different lines. Everywhere else it is one phase.
@@ -242,21 +241,21 @@ _Avoid_: "the JSON step", "parsing the output".
 `/work`. A control artifact left in the workspace is a claim, not a record.
 
 **Refusal**: A task rejected before any cell starts — a duplicate open PR, an
-overlapping in-flight change, a malformed or moved spec, a repo that failed
-preflight. The refusal itself costs nothing. A refusal the queue scan makes reaches the queue as
-one line. `run_task` also refuses a task whose `consumes` entry does not
-resolve, or cannot be read, at the tree base. That refusal prints one line
-and writes no queue row. A stack batch also refuses a spec its stack order
-never takes, and every spec whose `depends_on` reaches a missed task. It
-refuses a revision the budget left cannot cover.
+overlapping in-flight change, a malformed or moved spec, a repo that failed preflight.
+The refusal itself costs nothing. A refusal the queue scan makes reaches the queue as
+one line. `run_task` also refuses a task whose `consumes` entry does not resolve, or
+cannot be read, at the tree base. That refusal prints one line and writes no queue
+row. A stack batch also refuses a spec its stack order never takes, and every spec
+whose `depends_on` reaches a missed task. It refuses a revision the budget left cannot
+cover.
 _Avoid_: "skip" (that is a gate status), "blocked", "reject" (that is what the
 operator does to a PR).
 
 **Consumed name**: An entry in a spec's `consumes` list, naming something its
-`depends_on` parent built. It is a repo-relative path, or `path:name` for a name
-that file holds as a whole word. `run_task` resolves each entry at the task's
-tree base before any cell starts. An unresolved entry refuses the task. A spec
-that declares one with no `depends_on` does not parse.
+`depends_on` parent built. It is a repo-relative path, or `path:name` for a name that
+file holds as a whole word. `run_task` resolves each entry at the task's tree base
+before any cell starts. An unresolved entry refuses the task. A spec that declares one
+with no `depends_on` does not parse.
 _Avoid_: "import", "dependency" (that is a `depends_on` entry).
 
 ---
@@ -294,13 +293,13 @@ _Avoid_: using either name for the other, or "the denylist" for either.
 agent must leave alone. Not machine-enforced; it reduces sprawl by being read.
 _Avoid_: conflating with `forbidden`, which is enforced.
 
-**Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically
-when the diff touches a path in the repo's `elevate_on`. At the plan checkpoint the
-same rule reads the plan's `files_to_change` instead, as a forecast. Elevated makes `size`
-and `witness` blocking — the only two gates a tier moves (`DESIGN.md` §5.4.1) —
-and marks the queue entry; it adds no lens, because every declared lens runs at
-every tier (`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking —
-`coverage` is advisory at every tier (`DESIGN.md` §5.4).
+**Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically when
+the diff touches a path in the repo's `elevate_on`. At the plan checkpoint the same
+rule reads the plan's `files_to_change` instead, as a forecast. Elevated makes `size`
+and `witness` blocking — the only two gates a tier moves (`DESIGN.md` §5.4.1) — and
+marks the queue entry; it adds no lens, because every declared lens runs at every tier
+(`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking — `coverage` is
+advisory at every tier (`DESIGN.md` §5.4).
 _Avoid_: "priority" (a separate field), "severity" (that is a finding property),
 "critical", "high-risk".
 
@@ -477,7 +476,7 @@ runner that container could have rewritten, and reads the tree through a `.git`
 the implementer wrote (Appendix Q, `DESIGN.md` §5.5). REVIEW's lenses and
 REBUT's verdict sessions both run in one (`SA-0087`, `SA-0088`). The end review
 and a stack batch's spec sessions use one with no implementer behind it. It is
-seeded at a pushed head with no patch applied (ADR 7).
+seeded at a head, or at `base_sha`, with no patch applied (ADR 7).
 _Avoid_: "review cell", "clean cell", "second cell", "the critic's container"
 when you mean the whole cell.
 
@@ -503,25 +502,27 @@ which is why any single blocker routes to REBUT and why there is no vote. The en
 review's Spec, Standards and join lenses are not among them (ADR 7).
 _Avoid_: "reviewer", "pass", "check", "critic #2".
 
-**End review**: The one read of a stack batch's stack, once the batch stops taking tasks
-(ADR 7). The join lens reads first. The end-review lenses then read each layer from the
-top down. It spends only the end-review reserve, and it runs after an `UNTIL` stop too.
+**End review**: The one read of a stack batch's stack, once the batch stops taking
+tasks (ADR 7). The join lens reads first. The end-review lenses then read each layer
+from the top down. It spends only the end-review reserve, and it runs after an `UNTIL`
+stop too.
 
 **End-review lens**: The Spec or the Standards session that reads one layer in the end
 review. Each runs in a fresh critic cell at the layer's pushed head, with no patch
 applied. Neither is one of ADR 4's declared lenses.
 
-**Join lens**: The session that reads a whole stack's diff once, from the bottom layer's
-base to the top layer's head (ADR 6). It reads the seams between layers. A stack of
-fewer than two layers gets none. Its outcome is filed under the top layer's task.
+**Join lens**: The session that reads a whole stack's diff once, from the bottom
+layer's base to the top layer's head (ADR 6). It reads the seams between layers. A
+stack of fewer than two layers gets none. Its outcome is filed under the top layer's
+task.
 
 **End-review reserve**: A quarter of a stack batch's `--budget`, held back from every
-task's budget check for the end review. The join lens spends first. A layer starts only
-while what remains covers both of its lenses' ceilings.
+task's budget check for the end review. A layer starts only while what remains covers
+both of its lenses' ceilings.
 
 **End-review status**: One lens's outcome against one layer: `reviewed`, `error` or
-`not_reached`. `not_reached` is a layer the reserve did not cover, and no cell opens for
-it. `error` is the lens breaking, never a verdict on the layer.
+`not_reached`. `not_reached` is a layer the reserve did not cover, and no cell opens
+for it. `error` is the lens breaking, never a verdict on the layer.
 
 **Finding**: Anything a critic reports, pointing at one file and line. Whether
 that line is one the change reaches is **anchored** below, a separate property
@@ -553,7 +554,8 @@ severities. Outside a stack batch, no task exists yet for a `blocker` to route t
 REBUT, so it becomes a question to the operator. There it is the delegate's, and
 advisory. In a stack batch the host starts one session per spec in a critic cell
 at the predecessor's head, or at `base_sha` with no predecessor. Its route runs
-the spec, revises it, or withholds it (`SPEC_WITHHELD`).
+the spec, revises it, or withholds it (`SPEC_WITHHELD`). A provider limit routes
+it to `wait`, and an unreadable read to `error`.
 `spec-reviewer` is the file and id of the agent definition that performs it, not
 a role.
 _Avoid_: "the reviewer" (that's the operator), "the critic" or "a lens" (both
@@ -604,10 +606,10 @@ _Avoid_: "exhausted", "out of budget".
 _Avoid_: "failed", "gave up", "errored". Reserve "failed" for gates and
 infrastructure, and "errored" for gate status `error`.
 
-**`SPEC_WITHHELD`**: A task whose spec review in a stack batch escalated, so no cell ran
-its spec. It escalates a `blocker` it could not revise, or a spec still unclean after three
-revisions. Every spec whose `depends_on` reaches it is refused. The review is a fact on the task. The spec is not queued again until it
-is edited.
+**`SPEC_WITHHELD`**: A task whose spec review in a stack batch escalated, so no cell
+ran its spec. It escalates a `blocker` it could not revise, or a spec still unclean
+after three revisions. The review is a fact on the task. The spec is not queued again
+until it is edited.
 _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
@@ -635,7 +637,8 @@ _Avoid_: "merge queue" (GitHub's feature, which this is not).
 **Stacked branch**: A dependent task's branch, cut from its parent's branch rather
 than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. In a stack
 batch a task is cut from its predecessor's head instead, which need not be its parent.
-A dependency there is met by a layer below it in the same stack, or by the default branch.
+A dependency there is met by a layer below it in the same stack, or by the default
+branch.
 
 **Retired spec**: A spec the operator has moved to `.saffron/specs/done/`, asserting
 that its work is in the default branch. Not offered to the scan, and admits a
