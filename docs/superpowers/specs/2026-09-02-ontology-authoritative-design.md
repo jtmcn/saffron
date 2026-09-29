@@ -125,6 +125,11 @@ spike is *for*, not whether it runs.
 
 ## 2. Two authorities, not one
 
+> **Amended 2026-09-29.** Item 170 reverses the second bullet. The record on
+> `refs/saffron/*` becomes authoritative for facts, and the ledger an index folded
+> from it (`2026-09-20-the-record-on-git-refs-design.md`). The ledger stays
+> authoritative until that design's wiring lands.
+
 - **The ontology is authoritative for vocabulary** — what the words mean.
 - **The ledger is authoritative for facts** — what happened in a run.
 
@@ -147,6 +152,9 @@ cells ──▶ ledger.db  (SQL, write path, unchanged)
               └─ emitter ──▶ run-record graph (N-Triples) ──▶ SPARQL ──▶ report
 ontology/factory.ttl (vocabulary) ──▶ generator ──▶ CONTEXT.md (+ drift gate)
 ```
+
+> **Amended 2026-09-29.** Item 170 reverses the next paragraph's first sentence.
+> Section 2's note says what replaces it.
 
 **The ledger stays the system of record.** RATIONALE's case was that SQL serves
 the write path, and nothing here disputes it: a read model is additive, so
