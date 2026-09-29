@@ -55,15 +55,17 @@ do; the measurement behind it follows.
   exit. Two of stack #251's eight cells hit it and both reached review. Keep
   it for step 5: the spec's `max_turns` may be too low for it. The exception
   is when the next line is `budget: … no room left to salvage`. Then nothing
-  was committed and nothing can be, and the cell ends `NOT_IMPLEMENTED`
-  because it hit a ceiling, not because the work failed (SA-0087, 2026-09-14).
+  was committed and nothing can be. The first such cut at a `spec_sha` ends
+  `ORPHANED`, and the next scan re-queues the spec. A second cut at the same
+  `spec_sha` ends `NOT_IMPLEMENTED` (SA-0126).
 - **A cell can overrun its `budget_usd` by up to one whole attempt** (§3),
   measured at 67% on SA-0059. `record` prints spend against budget; SA-0080
   closed at $7.55 of $6. An overrun past one attempt's cost is a bug: file it.
 - **A cell that halts at a ceiling goes to the operator.** SA-0087 hit two
   shapes on 2026-09-14:
   - `NOT_IMPLEMENTED` after `budget: … no room left to salvage`. The plan
-    checkpoint had spent 45% of the budget.
+    checkpoint had spent 45% of the budget. Since SA-0126 only a second cut
+    at one `spec_sha` ends here (`DESIGN.md` §4.5).
   - `REBUTTING` after the process exited. REBUT gets only what the budget has
     left (backlog item 120), and a rebuttal that runs out halts there by design
     (§5.6), with its branch pushed and no PR.
