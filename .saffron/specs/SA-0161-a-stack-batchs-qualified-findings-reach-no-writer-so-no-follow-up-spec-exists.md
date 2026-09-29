@@ -79,8 +79,8 @@ acceptance:
       group's written findings name. The allowed paths are the group's file
       and each path `test_paths` match that the stack's range changes. The
       origin task is the task whose record key is the group's. The origin
-      spec is that task's latest spec text, and its file in `specs_dir`
-      when it has none. The sub-cap left is `cap_usd` less the sessions'
+      spec is that task's latest spec text, and the file in `specs_dir`
+      whose frontmatter id is its spec id when it has none. The sub-cap left is `cap_usd` less the sessions'
       own costs, and no other spend. A pooled session's cost is one
       `spec_review.WRITING_PHASE` attempt on the origin task. A group
       pooled after its probe check holds only the findings not already
@@ -99,6 +99,7 @@ acceptance:
       - The remainder read as `cap_usd` less `batch_spend`, which pools group 13 and every group after it.
       - The origin task found by spec id, taking the first or the last `SA-0102` task.
       - A whole group pooled for one failing probe, or a failing probe's group pooled unnarrowed.
+      - The origin file found by the id prefix of its name, which finds no file for `SA-0101`.
   - claim: >-
       Every other group becomes one `Candidate`, in the groups' order, and
       the call returns the list. Its id is `next_spec_id` of the origin
@@ -213,15 +214,17 @@ the batch's runs, plus the end-review cost of its layers
 (`:1032`). `open_attempt` takes a phase (`:1214`). `tasks_by_repo` lists a
 repo's tasks with their spec ids and no record key (`:896-911`).
 `record_key` gives a task's key (`:453-457`). `parse_spec` refuses a
-mutant whose `find` the body or a claim spells (`saffron/intake.py:283-333`). It
+mutant whose `find` the body, a claim or a wrong version spells
+(`saffron/intake.py:283-333`). It
 does not refuse one a finding named. The `scope` gate's glob match is
 `matches` (`saffron/gates/core/scope.py:31-36`), and `touches` is judged
 by it. `mirror.changed_files`
 and `mirror.file_at` read a range's paths and a file at a sha
 (`saffron/repos/mirror.py:136-158`, `saffron/repos/mirror.py:241-270`). `worktree.git_argv` and
-`DIFF_FLAGS` pin a diff's shape (`saffron/cell/worktree.py:132-205`). A
-spec file's name starts with its id and a hyphen
-(`saffron/cell/session.py:473-478`), and ids are numbered from the highest
+`DIFF_FLAGS` pin a diff's shape (`saffron/cell/worktree.py:132-205`). Nothing
+ties a spec file's name to its id. `_spec_path` finds a spec by its
+frontmatter through `intake.discover_specs`
+(`saffron/cell/session.py:452-478`), and ids are numbered from the highest
 existing one (`docs/agents/issue-tracker.md:10-11`). `RETIRED_DIRNAME` is
 `done` (`saffron/scheduler.py:505`).
 
@@ -271,8 +274,8 @@ Build two things in `saffron/follow_up.py`.
    - The origin task: the row of `tasks_by_repo` whose
      `ledger.record_key(task_id)` is the group's key. Its head
      is `layer_fields` of the group's key. Its text, and its parse. With no
-     spec text, the file is the one in `specs_dir` whose name starts with
-     the layer's spec id and a hyphen. The id, from `next_spec_id`.
+     spec text, the file is the one `intake.discover_specs(specs_dir)`
+     parses with the layer's spec id, never one matched by its name. The id, from `next_spec_id`.
    - The prompt, then `write` with the group narrowed to its written
      findings. A pooled session is charged to the origin task.
    - An accepted group: `mint`, then the attempt, then
@@ -365,8 +368,9 @@ each commit.
 | `H1` | `src/a.py` becomes `alpha_new`, and `tests/test_a.py` changes |
 | `H2` | `src/b.py` line 2 becomes `beta_rate`, `src/c.py` becomes `gamma gamma`, and `tests/test_b.py` is added |
 
-`specs_dir` holds `SA-0101-one.md` and `SA-0102-two.md` at a budget of 12,
-`SB-0400-other.md`, and `done/SA-0105-old.md`. Open a `Ledger` in
+`specs_dir` holds `one.md`, whose id is `SA-0101`, and `SA-0102-two.md`,
+both at a budget of 12. It also holds `SB-0400-other.md` and
+`done/SA-0105-old.md`. Open a `Ledger` in
 `tmp_path` with a `MemoryRecord`, and open a batch. Create these tasks,
 each on its own run, in order:
 
@@ -537,9 +541,10 @@ on the host's git. It stood in for `StackReview`, `LayerReview`,
 ran the real `parse_spec`, `matches`, `changed_files`, `file_at`,
 `git_argv`, `Ledger` and `MemoryRecord`. The right build passed every
 witness above. Each wrong version listed was applied as a text edit, and
-each failed its own witness. Three were added on 2026-09-29 and are
-reasoned, not measured: the first spec text, the unchecked `None`, and an
-accepted group's own `emit` line.
+each failed its own witness. Four were added on 2026-09-29 and are
+reasoned, not measured: the first spec text, the unchecked `None`, an
+accepted group's own `emit` line, and the origin file found by its name.
+The `batch_spend` entry's outcome was re-derived then by hand, not run.
 
 **Where the real symbols differ from the stand-ins.** The eleven names are
 real at base, and the lists were not re-run against them. Real
