@@ -366,6 +366,9 @@ reach, or a gate hole the operator accepted once.
 **b-6d43da**. One is vocabulary in summaries a cell wrote under `gates/**`. The
 other is a fixture field under `docs/**` that no cell could add.
 
+**Placed 2026-09-29**, from closing item 94: **b-bf970a**. Two tests skip on
+uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
+
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
 `records/`, "index" and "projection". One was caught before code. The `terms`
