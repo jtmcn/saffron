@@ -1923,19 +1923,6 @@ def test_a_contradicted_row_says_the_spec_contradicts_itself_and_shows_both_quot
     reason = "the two lines disagree | both hold"
     rebuttal_quote = "The resolver stacks on no row outside the waiting states."
     finding_quote = "Only a `MERGED` | `REJECTED` newest task unstacks a child."
-
-    # Both findings default to the `correctness` lens (`_finding`'s own
-    # default), proving the row names the lens rather than assuming it.
-    reviews = [
-        LensReview(
-            lens="correctness",
-            findings=[_finding(claim="blocker one claim", file="a.py", line=1)],
-        ),
-        LensReview(
-            lens="correctness",
-            findings=[_finding(claim="blocker two claim", file="b.py", line=2)],
-        ),
-    ]
     rebut_result = RebutResult(
         state="READY_FOR_REVIEW",
         why="test",
@@ -1963,18 +1950,9 @@ def test_a_contradicted_row_says_the_spec_contradicts_itself_and_shows_both_quot
         moved=True,
         cost_usd=0.0,
     )
-    body = render_pr_body(
-        SPEC,
-        RESULTS,
-        [],
-        base_sha="a" * 40,
-        head_sha="b" * 40,
-        added=1,
-        removed=0,
-        transcript_path="/t",
-        reviews=reviews,
-        rebut_result=rebut_result,
-    )
+    # Both findings default to the `correctness` lens (`_finding`'s own
+    # default), proving the row names the lens rather than assuming it.
+    body = _rebut_body(rebut_result)
     rows = [
         line
         for line in body.splitlines()

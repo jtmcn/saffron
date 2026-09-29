@@ -964,7 +964,6 @@ def test_unkept_fixes_does_not_count_an_argued_first_answer_stray_fixed_later():
 
 
 def test_a_blocker_argued_from_one_spec_line_against_another_is_contradicted_and_counted_apart():
-    # (texts after the rebuttal turn's own free text, blockers, moved, expected why)
     correctness = _blocker()
     adequacy = _blocker(lens="adequacy", line=2)
     second_correctness = _blocker(line=3)
@@ -1075,7 +1074,7 @@ _ANOTHER_INVALID_QUOTE = "another quote that never appears in the shared spec te
 _LOWERCASED_FINDING_QUOTE = (
     "Only a `merged` or `rejected` newest task unstacks a child."
 )
-_UNWRAPPED_REBUTTAL_QUOTE = "The resolver stacks on no row when the newest task\n  is outside the waiting states."
+_WRAPPED_REBUTTAL_QUOTE = "The resolver stacks on no row when the newest task\n  is outside the waiting states."
 
 # label, rebuttal_quote, finding_quote, the check's reason.
 _QUOTE_FAILURE_CASES = [
@@ -1094,7 +1093,7 @@ _QUOTE_FAILURE_CASES = [
     (
         "c",
         _VALID_REBUTTAL_QUOTE,
-        _UNWRAPPED_REBUTTAL_QUOTE,
+        _WRAPPED_REBUTTAL_QUOTE,
         "the two quotes are the same spec text",
     ),
     (
@@ -1183,6 +1182,20 @@ def test_a_contradicted_verdict_whose_quotes_fail_the_check_is_read_as_confirmed
                 "finding_quote": finding_quote,
             }
         ], label
+
+    # Two spec lines that differ only in case are two quotes, not one.
+    result = _run(
+        "Two arguments filed.",
+        _rebuttals(_argued(1, argument=argument_1), _argued(2, argument=argument_2)),
+        _verdicts(_verdict(1, verdict="withdrawn")),
+        _verdicts(_contradicted(2, _LOWERCASED_FINDING_QUOTE, _VALID_FINDING_QUOTE)),
+        blockers=[blocker1, blocker2],
+        moved=False,
+        spec_body=_CONTRADICTION_SPEC + _LOWERCASED_FINDING_QUOTE,
+    )
+    contract = next(v for v in result.verdicts if v.lens == "contract")
+    assert [v.verdict for v in contract.verdicts] == ["contradicted"]
+    assert contract.quote_failures == []
 
 
 def test_a_contradicted_verdict_missing_a_quote_is_read_as_confirmed_and_recorded():

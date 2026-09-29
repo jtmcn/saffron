@@ -51,8 +51,8 @@ class _Rebuttals(BaseModel):
 
 
 class Verdict(BaseModel):
-    """The critic's confirm-or-withdraw — §4.1's `findings.verdict`, and never
-    the operator's `adjudication`, which happens in GitHub against a PR."""
+    """The critic's confirmed, withdrawn or contradicted, as §4.1's `findings.verdict`.
+    Never the operator's `adjudication`, which happens in GitHub against a PR."""
 
     finding: int
     verdict: Literal["confirmed", "withdrawn", "contradicted"]
@@ -455,7 +455,7 @@ def rebut_state(
         else ""
     )
     if contradicted:
-        # The check already confirmed a failing quote pair. What remains
+        # The check demoted a failing quote pair to `confirmed`. What remains
         # here is a real disagreement between two lines of the same spec.
         return "READY_FOR_REVIEW", (
             f"{len(confirmed)} blocker(s) confirmed after the rebuttal, "
@@ -491,7 +491,7 @@ def first_answers(rebuttal: RebuttalTurn) -> dict[int, Rebuttal]:
 
 
 def _confirmed_with(rebut_result: RebutResult, action: str) -> int:
-    """Blockers whose first answer was `action` and whose verdict confirmed it.
+    """Blockers whose first answer was `action` and whose verdict kept it standing.
 
     One body for both counts below, which differ only in the action they pair.
     Copied, they would be two rules for one queue row the first time somebody
@@ -516,19 +516,13 @@ def _confirmed_with(rebut_result: RebutResult, action: str) -> int:
 def sustained_blockers(rebut_result: RebutResult | None) -> int:
     """§6 level 3: how many blockers the rebuttal did **not** dispose of.
 
-    A blocker is sustained when the same finding number carries both an
-    `argued` rebuttal and a `confirmed` verdict. `confirmed` alone is not
-    enough — it also covers a blocker the implementer *fixed and committed*,
-    and counting that would rank a task by work already done, the mirror of
-    the defect this level exists to fix (`anchored_concerns` stays the count
-    below this one, not a component of it).
+    A blocker is sustained when one finding number carries an `argued` rebuttal
+    and a `confirmed` or `contradicted` verdict. The verdict alone would count a
+    blocker fixed and committed, and rank a task by work already done.
 
-    Zero for every shape that is not a settled disagreement: no `RebutResult`
-    (REBUT never ran), a rebuttal turn that errored (nothing to pair a
-    verdict against), and a blocker that was verdicted but never rebutted —
-    the last is not special-cased, it simply never enters the answered set
-    in `_confirmed_with`. An unanchored blocker never reaches REBUT at all (§5.5) and so
-    never carries a finding number to collide with.
+    Zero with no `RebutResult`, with a rebuttal turn that errored, and for a
+    blocker verdicted but never rebutted, which never enters `_confirmed_with`'s
+    answered set. An unanchored blocker never reaches REBUT at all (§5.5).
     """
     if rebut_result is None or rebut_result.rebuttal.error:
         return 0
