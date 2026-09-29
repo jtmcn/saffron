@@ -78,6 +78,10 @@ acceptance:
       does not say what the text claims. It leaves format, lint, types,
       structure and sentence form to their gates.
     witness: tests/test_review.py::test_the_conventions_prompt_asks_its_four_questions_against_the_base_standards
+    mutant:
+      file: saffron/phases/review.py
+      find: '"conventions": "review-conventions.md",'
+      replace: '"conventions": "review-adequacy.md",'
   - claim: >-
       A blocker the conventions lens files gets a verdict at REBUT from a
       fresh session of its own, shown only its own blocker, after the
@@ -207,9 +211,11 @@ specs land in one stack.
 
 **Which criteria edit code, and which are new.** Criteria 1, 2, 4 and 5
 rest on the new `LENSES` entry. Each declares a mutant on it. Criterion 3
-is a new file, so it declares a witness and no mutant, and the `witness`
-gate reports `skip` for it. Criteria 6 and 7 are `preserves`, and name
-tests that pass now. Criterion 6 holds the reason the key is
+is a new file, and the body spells its text, so a mutant cut from it would
+be refused as disclosed. Its mutant points the entry at the adequacy prompt
+instead. So its witness reads the prompt through
+`review.lens_prompt("conventions", ...)`, never by the file's path.
+Criteria 6 and 7 are `preserves`, and name tests that pass now. Criterion 6 holds the reason the key is
 `conventions`.
 
 **Commit as each witness passes.** Five new witnesses, then the test
@@ -311,8 +317,9 @@ a run, so the spec loop's step 1b runs them against a prototype.
 - The `revert` subset. The new `[conventions]` ids that
   `sorted(review.LENSES)` adds vanish when `saffron/phases/review.py` is
   reverted. pytest then exits 4 on them, the `tests` gate reports `error`,
-  and `revert` reports `skip`. Whether `revert` then checks any witness
-  here is unmeasured. The design stays as it is.
+  and `revert` reports `skip`. Run 21 measured it at `095e9fef`: pytest
+  exits 4 even with an existing id beside the new one, so `revert` checks
+  no witness here. Criterion 3's mutant is what gates its witness.
 
 **Wrong versions these witnesses must kill.**
 
