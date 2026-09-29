@@ -69,6 +69,7 @@ acceptance:
       - A walk that follows only `depends_on[0]`, as `_depends_on_chain` does, so an ancestor reached through a second entry prints nothing.
       - A walk over the target's own `depends_on` entries only, so a grandparent prints nothing.
       - A line printed for an ancestor whose spec file sits in `done/`.
+      - A walk that stops at a retired spec, so a live spec reached only through it prints nothing.
       - A prompt match against the four prompt files the tree holds, so a new prompt path or the glob entry itself prints nothing.
       - A line printed only after the history rows exist, so a target with no past cells gets none.
       - A line printed as a `concern:`, or counted as one, so the clear line vanishes or the exit status moves.
@@ -188,7 +189,8 @@ fixture leaves `JEV_ROOT` at the host's `~/.saffron/batches`
 ## Problem
 
 1. **`check`.** Walk every spec the target reaches through `depends_on`.
-   Follow every entry, at any depth. Seed the seen set with the target, so
+   Follow every entry, at any depth. A retired spec prints no line, but the
+   walk goes on through its `depends_on`. Seed the seen set with the target, so
    neither the start nor a cycle back puts it on the walk. Print one line
    for each spec that meets both tests.
    - Its file is in `SPECS_DIR` itself, not in `done/`.
@@ -301,17 +303,19 @@ it. Each has `title: x` and `type: feature`.
 | `SA-0903` | live | `[SA-0904]` | `[saffron/phases/rebut.py, saffron/agents/prompts/turns/verdict.md, saffron/agents/prompts/turns/rebut.md, saffron/agents/prompts/turns/rebut-extract.md]` |
 | `SA-0901` | live | `[SA-0905]` | `[saffron/phases/review.py, tests/test_review.py, saffron/agents/prompts/turns/review.md, saffron/agents/findings.py, saffron/agents/prompts/review-conventions.md]` |
 | `SA-0904` | live | `[SA-0910]` | `[saffron/agents/prompts/review-*.md, saffron/agents/prompts/turns/extraction.md, saffron/agents/prompts/review-security.md]` |
-| `SA-0905` | `done/` | `[]` | `[saffron/phases/review.py]` |
-| `SA-0911` | live | `[SA-0905]` | `[f.py]` |
+| `SA-0905` | `done/` | `[SA-0907]` | `[saffron/phases/review.py]` |
+| `SA-0907` | live | `[]` | `[saffron/agents/prompts/review-correctness.md]` |
+| `SA-0908` | `done/` | `[]` | `[saffron/phases/review.py]` |
+| `SA-0911` | live | `[SA-0908]` | `[f.py]` |
 
 No file declares `SA-0999`. Stub `_ledger_and_repo` with `_StubLedger`,
 `_overrun` with a ratio of 1, and `_elevate_on` with an empty list.
 
 - Stub `_past_cells` to return nothing. Run `check SA-0910`. Assert it
   returns 0. Assert the sorted lines opening `review:` equal the sorted
-  three below, exactly.
+  four below, exactly.
 - Stub `_past_cells` to return one `_cell("SA-2000", "feature", 1, 0)`
-  row. Run it again. Assert it returns 0, the same three lines, and the
+  row. Run it again. Assert it returns 0, the same four lines, and the
   line `check: ceilings clear this shape's history`.
 - Run `check SA-0911`. Assert no line opens `review:`.
 - Last, inside `monkeypatch.context()`, stub `_known_specs` to return one
@@ -324,13 +328,17 @@ No file declares `SA-0999`. Stub `_ledger_and_repo` with `_StubLedger`,
 names it. `SA-0904` depends back on `SA-0910`, so a seen set not seeded
 with the target reaches it through that cycle. `SA-0906`'s
 `turns/implement.md` is a turn prompt outside the set, and
-`artifacts.py` is out of scope. None of the three lines below names
+`artifacts.py` is out of scope. None of the four lines below names
 either. Each of the eight paths and the glob appears in one line.
+`SA-0907` is live and reached only through the retired `SA-0905`, so a
+walk that stops at a retired spec misses its line. `SA-0911` reaches
+only the retired `SA-0908`.
 
 ```text
 review: SA-0903 is not retired and touches saffron/phases/rebut.py, saffron/agents/prompts/turns/verdict.md, saffron/agents/prompts/turns/rebut.md, saffron/agents/prompts/turns/rebut-extract.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
 review: SA-0901 is not retired and touches saffron/phases/review.py, saffron/agents/prompts/turns/review.md, saffron/agents/findings.py, saffron/agents/prompts/review-conventions.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
 review: SA-0904 is not retired and touches saffron/agents/prompts/review-*.md, saffron/agents/prompts/turns/extraction.md, saffron/agents/prompts/review-security.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
+review: SA-0907 is not retired and touches saffron/agents/prompts/review-correctness.md. This spec's REVIEW is main's and will not run that change, so budget_usd should not assume it.
 ```
 
 **Criterion 2's witness.** One plain `def`, beside the existing `record`
@@ -376,7 +384,9 @@ lens line named.
 **Measured on a prototype, 2026-09-29.** Both witnesses above passed on a
 prototype of this change and failed on the driver at `3552295c`. Every
 wrong version under both criteria was then applied to the prototype, as
-35 edits for 34 entries. Each one failed its criterion's witness.
+35 edits for 34 entries. Each one failed its criterion's witness. That
+measurement predates the `SA-0907` and `SA-0908` rows, the fourth line
+and the retired-walk entry. Those were worked by hand, not run.
 
 **Every test you add must fail with this diff's source reverted.** At base,
 `check` prints no `review:` line. `record` prints one stdout line. So each
