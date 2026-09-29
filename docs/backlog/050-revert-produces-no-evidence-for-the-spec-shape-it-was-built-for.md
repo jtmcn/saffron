@@ -1,11 +1,13 @@
 ---
 id: 50
 title: '`revert` produces no evidence for the spec shape it was built for'
-status: partial
+status: done
 tier: 1
+closed: 2026-09-29
+by_hand: true
 specs: [SA-0127]
 prs: [476]
-commits: []
+commits: [166d467f]
 cites: [§5.4]
 related: [49]
 ---
@@ -49,3 +51,6 @@ this item asks for. **Tier 1** with 51.
   in the spec loop's run 15. `GateResult` carries `uncollected` and `revert`
   reads it. This closes in full when the operator fills the field in
   `.saffron/gates/tests.py` by hand. `SA-0127` retires to `done/`.
+- 2026-09-29: closed by hand in 166d467f, since `.saffron/**` is protected.
+  The `tests` gate fills `uncollected` for a handed subset whose collection
+  failed. SA-0187's reverted run now reads 3 witnesses failing and 3 uncollected.

@@ -1,13 +1,14 @@
 ---
 id: b-47659f
 title: The criterion-probe witness reads a container name that outlives teardown, so a probe asked after it passes unverified
-status: open
+status: done
 tier: 2
 filed: 2026-09-29
-closed:
+closed: 2026-09-29
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [529b1518]
 cites: [§5.5]
 related: [b-7e69d0, b-2750d5, b-76953a]
 ---
@@ -37,3 +38,6 @@ does.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-29: verified and fixed by hand in 529b1518. With the probes moved
+  past teardown the witness passed. It now asserts the critic timeline, and
+  both mutants fail it.

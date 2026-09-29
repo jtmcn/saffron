@@ -71,7 +71,7 @@ def _argv_safe(name: str) -> bool:
     backlog item 51 rather than papered over here, and the drop is
     reported in the summary so the attempt is at least visible. A runner
     that fills `GateResult.uncollected` reads such an id as uncollected, so
-    the `skip` is gone. This repo's `tests` gate does not fill it yet (item 50).
+    the `skip` is gone. This repo's `tests` gate fills it (item 50).
     """
     return not name.startswith("-")
 
@@ -283,7 +283,7 @@ def revert_gate(
         # says that exact case must report green. A runner that instead
         # reports `fail` or `pass` with the failed-to-import names in
         # `uncollected` (backlog item 50) skips this branch and is judged
-        # below. This repo's own gate does not do that yet.
+        # below. This repo's own gate does that for a handed subset.
         #
         # `skip` rather than `pass`, for the reason the three nothings above
         # are skips: a run that produced no trustworthy result is not evidence

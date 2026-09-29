@@ -7271,6 +7271,19 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
 
     # Asked inside the critic cell the lenses ran in, never a cell of its own.
     assert cell.turn_containers[6:] == [_CRITIC_CONTAINER] * 2
+    # The name outlives teardown, so only the timeline shows the probes asked
+    # before the critic cell was removed (b-47659f).
+    critic = [
+        e
+        for e in cell.order
+        if e.endswith(f":{_CRITIC_CONTAINER}")
+        and e.split(":")[0] in ("turn", "removed")
+    ]
+    assert critic == [
+        f"removed:container:{_CRITIC_CONTAINER}",
+        *[f"turn:{_CRITIC_CONTAINER}"] * 6,
+        f"removed:container:{_CRITIC_CONTAINER}",
+    ]
 
     # The same read-only tools and the same per-session ceiling a lens holds.
     lens_options = cell.turn_options[2]

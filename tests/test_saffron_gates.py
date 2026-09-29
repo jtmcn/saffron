@@ -335,6 +335,98 @@ def test_a_pytest_internal_error_is_an_error(tmp_path):
     assert result.summary == "pytest failed to run"
 
 
+def _run_tests_gate(tmp_path, *subset):
+    done = subprocess.run(
+        [str(GATES / "tests"), *subset],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return parse_gate_json(done.stdout, expected_gate="tests")
+
+
+def _write_uncollectable_shapes(tmp_path):
+    """Run 21's two shapes. An id absent from its parametrise list exits 4, and
+    a module reading a missing name at import cannot be collected (b-cf832a)."""
+    (tmp_path / "test_param.py").write_text(
+        "import pytest\n"
+        "@pytest.mark.parametrize('lens', ['correctness'])\n"
+        "def test_lens(lens):\n    assert lens == 'correctness'\n"
+        "def test_real():\n    assert False\n"
+    )
+    (tmp_path / "test_broken.py").write_text(
+        "from missing_module import NAME\ndef test_uses():\n    assert NAME\n"
+    )
+    (tmp_path / "test_ok.py").write_text("def test_pass():\n    assert True\n")
+
+
+def test_a_handed_id_absent_from_its_parametrise_list_is_uncollected(tmp_path):
+    """One absent id no longer turns the whole subset into `error`. The other
+    name runs, and each failure is keyed on its node id (item 50)."""
+    _write_uncollectable_shapes(tmp_path)
+    result = _run_tests_gate(
+        tmp_path, "test_param.py::test_lens[conventions]", "test_param.py::test_real"
+    )
+    assert result.status == "fail", result.summary
+    assert result.collected == ["test_param.py::test_real"]
+    assert result.uncollected == ["test_param.py::test_lens[conventions]"]
+    assert sorted(f.code for f in result.failures) == [
+        "test_param.py::test_lens[conventions]",
+        "test_param.py::test_real",
+    ]
+
+
+def test_a_module_that_cannot_import_leaves_only_its_own_ids_uncollected(tmp_path):
+    """The passing name in another file stays collected and unfailed."""
+    _write_uncollectable_shapes(tmp_path)
+    result = _run_tests_gate(
+        tmp_path, "test_broken.py::test_uses", "test_ok.py::test_pass"
+    )
+    assert result.status == "fail", result.summary
+    assert result.collected == ["test_ok.py::test_pass"]
+    assert result.uncollected == ["test_broken.py::test_uses"]
+    assert [f.code for f in result.failures] == ["test_broken.py::test_uses"]
+
+
+def test_a_lone_handed_name_that_cannot_import_is_a_failure_not_an_error(tmp_path):
+    """`witness` hands one name. A mutant that breaks its import killed it, and
+    `error` here ended the attempt."""
+    _write_uncollectable_shapes(tmp_path)
+    result = _run_tests_gate(tmp_path, "test_broken.py::test_uses")
+    assert result.status == "fail", result.summary
+    assert result.collected == []
+    assert result.uncollected == ["test_broken.py::test_uses"]
+    assert [f.code for f in result.failures] == ["test_broken.py::test_uses"]
+
+
+def test_a_printed_name_is_uncollected_even_when_its_line_leaks_into_collection(
+    tmp_path,
+):
+    """Item 51's shape. An `atexit` print reaches `--collect-only`'s stdout, so a
+    bogus name is new at head. It must read as uncollected and never as
+    collected, or `revert` skips or errors."""
+    (tmp_path / "test_leak.py").write_text(
+        "import atexit\n"
+        "atexit.register(lambda: print('zzz::bogus'))\n"
+        "def test_real():\n    assert True\n"
+    )
+    result = _run_tests_gate(tmp_path, "test_leak.py::test_real", "zzz::bogus")
+    assert result.status == "fail", result.summary
+    assert result.collected == ["test_leak.py::test_real"]
+    assert result.uncollected == ["zzz::bogus"]
+    assert [f.code for f in result.failures] == ["zzz::bogus"]
+
+
+def test_a_subset_that_collects_reports_no_uncollected_list(tmp_path):
+    """`revert` then judges it exactly as before this field was filled."""
+    _write_uncollectable_shapes(tmp_path)
+    result = _run_tests_gate(tmp_path, "test_ok.py::test_pass")
+    assert result.status == "pass", result.summary
+    assert result.collected == ["test_ok.py::test_pass"]
+    assert result.uncollected is None
+
+
 def test_shacl_names_its_tool_and_passes_on_this_repos_graphs():
     """pyshacl prints its version on stderr, so reading stdout alone produced a
     passing gate with `tool: ""` — a gate that ran and a gate that did not,
