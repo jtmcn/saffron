@@ -1,0 +1,422 @@
+diff --git a/saffron/cli.py b/saffron/cli.py
+index 2c59b70..4d70178 100644
+--- a/saffron/cli.py
++++ b/saffron/cli.py
+@@ -455,6 +455,9 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+     # one whose stdout is the night's only record — says it too.
+     ceilings = _ceilings(args, spec)
+ 
++    # No scan reconciles ahead of one attended cell (b-877e93). Guarded the
++    # way `_resolve_queue` guards its own `reconcile` call.
++    gh_failures: list[str] = []
+     outcome = run_task(
+         spec,
+         spec_sha,
+@@ -465,6 +468,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+         ledger=ledger,
+         out_dir=out_dir,
+         token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
++        gh=_guarded_gh(gh_failures),
+     )
+     if isinstance(outcome, Refused):
+         # `run_task` already printed the refused line, and no task exists
+diff --git a/saffron/events.py b/saffron/events.py
+index 7aacd77..405b2e5 100644
+--- a/saffron/events.py
++++ b/saffron/events.py
+@@ -901,6 +901,8 @@ FAMILIES: tuple[_Family, ...] = (
+     _Family("preflight: (claude_md digest, or CLAUDE.md: none found)", _S, Preflight),
+     _Family("cell:", _S, Preflight),
+     _Family("unstacked:", _TASK, Preflight),
++    _Family("preflight: GitHub could not be asked", _TASK, Preflight),
++    _Family("preflight: newest task is CHANGES_REQUESTED for", _TASK, Preflight),
+     _Family("ceilings:", _RT, Ceilings),
+     _Family("baseline: (joined gate=status)", _S, Baseline),
+     _Family("baseline errored in", _S, Baseline),
+diff --git a/saffron/reconcile.py b/saffron/reconcile.py
+index 4cbe897..ab3af34 100644
+--- a/saffron/reconcile.py
++++ b/saffron/reconcile.py
+@@ -137,14 +137,21 @@ def reconcile(
+     *,
+     gh: GhRunner = run_gh,
+     stamp_orphaned: bool = False,
++    spec_id: str | None = None,
+ ) -> ReconcileResult:
+     """Bring one repo's `tasks.state` into line with what GitHub decided,
+     and — only when `stamp_orphaned=True` asserts §4.2.1's batch-scan
+     premise — stamp any corpse a dead scan left behind. Defaults to `False`,
+     which is what `saffron queue` and `saffron reconcile` want; `saffron
+-    batch` is the one caller that passes `True`."""
++    batch` is the one caller that passes `True`.
++
++    `spec_id` narrows the rows read to one spec, matched exactly rather
++    than by prefix. `None`, the default, reads every task in the repo, the
++    shape every caller before `task._resolve_stacked_on` still wants."""
+     result = ReconcileResult()
+     rows = ledger.tasks_by_repo(repo_id)
++    if spec_id is not None:
++        rows = [row for row in rows if row["spec_id"] == spec_id]
+ 
+     for row in rows:
+         state, pr_url = row["state"], row["pr_url"]
+diff --git a/saffron/task.py b/saffron/task.py
+index 394482f..dbf40c6 100644
+--- a/saffron/task.py
++++ b/saffron/task.py
+@@ -46,6 +46,7 @@ from saffron.ledger import Ledger
+ from saffron.phases import package as package_phase
+ from saffron.phases.rebut import sustained_blockers, unkept_fixes
+ from saffron.phases.review import anchored_concerns
++from saffron.reconcile import GhRunner, reconcile
+ from saffron.report import index as index_report
+ from saffron.repos import image as repo_image
+ from saffron.repos.mirror import (
+@@ -56,6 +57,10 @@ from saffron.repos.mirror import (
+ )
+ from saffron.scheduler import DEPENDENCY_WAITING_STATES, _branch
+ 
++# `_resolve_stacked_on`'s accepted states once a `gh` reconciles the parent.
++# `CHANGES_REQUESTED` joins only on that path (`DESIGN.md` §4.2.1).
++_STACKABLE_ON_RECONCILE = DEPENDENCY_WAITING_STATES | frozenset({"CHANGES_REQUESTED"})
++
+ 
+ @dataclass(frozen=True, kw_only=True)
+ class Handoff:
+@@ -155,6 +160,7 @@ def _resolve_stacked_on(
+     url: str,
+     spec_id: str,
+     emit: Callable[[Event], None] = lambda event: print(describe(event)),
++    gh: GhRunner | None = None,
+ ) -> tuple[str | None, str | None]:
+     """The tree sha `CellSpec.stacked_on` should carry and the branch name
+     `package()`'s stacking parameter should carry, or `(None, None)`
+@@ -211,11 +217,54 @@ def _resolve_stacked_on(
+     if repo_id is None or not depends_on:
+         return None, None
+     parent_id = depends_on[0]
+-    rows = ledger.tasks_by_spec_id(repo_id, parent_id)
+-    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
+-    if not waiting:
+-        return None, None
+-    newest = waiting[-1]
++    if gh is None:
++        rows = ledger.tasks_by_spec_id(repo_id, parent_id)
++        waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
++        if not waiting:
++            return None, None
++        newest = waiting[-1]
++    else:
++        # Narrowed to this one spec, and read only after it comes back
++        # (`b-877e93`), so a stale merge is never stacked on by accident.
++        reconciled = reconcile(ledger, repo_id, gh=gh, spec_id=parent_id)
++        rows = ledger.tasks_by_spec_id(repo_id, parent_id)
++        if not rows:
++            return None, None
++        # The absolute newest task decides, whatever its state. No fallback
++        # to an older waiting row, ever (`DESIGN.md` §4.2.1).
++        newest_task = rows[-1]
++        if newest_task["state"] not in _STACKABLE_ON_RECONCILE:
++            emit(
++                Preflight(
++                    timestamp=time.time(),
++                    spec_id=spec_id,
++                    step="unstacked",
++                    detail=f"{parent_id}'s newest task is {newest_task['state']}",
++                )
++            )
++            return None, None
++        if newest_task["task_id"] in reconciled.unasked:
++            emit(
++                Preflight(
++                    timestamp=time.time(),
++                    spec_id=spec_id,
++                    step="gh_unreachable",
++                    detail=(
++                        f"GitHub could not be asked whether {parent_id}'s "
++                        "pull request merged"
++                    ),
++                )
++            )
++        if newest_task["state"] == "CHANGES_REQUESTED":
++            emit(
++                Preflight(
++                    timestamp=time.time(),
++                    spec_id=spec_id,
++                    step="changes_requested",
++                    detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
++                )
++            )
++        newest = newest_task
+     branch = newest["branch"]
+     # Refused here rather than left to the fetch: a row that evidences no push
+     # has no branch worth fetching, and "branch None is gone" would send an
+@@ -275,6 +324,9 @@ def run_task(
+     # that task instead of minting a fresh one (§4.2.1).
+     task_id: int | None = None,
+     emit: Callable[[Event], None] | None = None,
++    # `cli._run_cell`'s reason for a `gh`: it reaches `_resolve_stacked_on`,
++    # which reconciles the parent before it stacks on one (`b-877e93`).
++    gh: GhRunner | None = None,
+ ) -> CellOutcome | Refused:
+     """One task, start to finish: stack it if it has a parent, run its cell,
+     and package the result if the cell came back reviewable.
+@@ -348,6 +400,7 @@ def run_task(
+             url=base.url,
+             spec_id=spec.id,
+             emit=emit,
++            gh=gh,
+         )
+     # Which tree a run was cut from is not recoverable from the exit code, and
+     # a stacked run that surprises an operator is one they cannot diagnose.
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 7981eb9..552feca 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -703,6 +703,229 @@ def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
+     assert "unstacked: parent branch saffron/SY-9000 is gone" in printed
+ 
+ 
++def _gh_by_url(urls_asked, answers):
++    """A `gh` double keyed by the exact pull request url in `argv`, the shape
++    `b-877e93`'s three witnesses share: each records every url it is asked
++    about and answers only the ones a caller declared."""
++
++    def fake_gh(argv):
++        url = argv[3]
++        urls_asked.append(url)
++        return subprocess.CompletedProcess(argv, 0, json.dumps(answers[url]), "")
++
++    return fake_gh
++
++
++def _new_parent_preflights(out_dir, spec_id, parent_id, before):
++    """The `Preflight` events one `_capture_cell_spec` call added, naming
++    `parent_id`. Never the ones an earlier call in the same test already
++    wrote to the same `events.jsonl`."""
++    events = read_log(out_dir / spec_id)[before:]
++    return [
++        event
++        for event in events
++        if isinstance(event, Preflight) and parent_id in event.detail
++    ]
++
++
++def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_merged_or_closed(
++    tmp_path, monkeypatch, capsys
++):
++    """`b-877e93`: `saffron cell` reconciles the parent it stacks on, so a
++    merge or a close nobody scanned for yet still cuts the child loose.
++    The newest task decides, even over an older row still waiting. Only
++    the parent's own tasks are ever asked about."""
++    repo = _local_origin(tmp_path)
++    _push_parent_branch(repo, "saffron/SY-9000")
++    args = _namespace(repo, tmp_path)
++    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
++
++    ledger = Ledger(tmp_path / "seeded.db")
++    repo_id = _seed_repo(ledger, package.real_remote(repo))
++    older_pr = "https://github.com/o/r/pull/1"
++    newer_pr = "https://github.com/o/r/pull/2"
++    sibling_pr = "https://github.com/o/r/pull/3"
++    older = _seed_task(
++        ledger, repo_id, spec_id="SY-9000", state="ORPHANED", pr_url=older_pr
++    )
++    newer = _seed_task(
++        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
++    )
++    # A different spec whose id starts with the parent's: the filter must
++    # match `SY-9000` exactly, never by prefix.
++    sibling = _seed_task(
++        ledger, repo_id, spec_id="SY-90001", state="READY_FOR_REVIEW", pr_url=sibling_pr
++    )
++
++    urls_asked: list[str] = []
++    answers: dict[str, dict] = {}
++    monkeypatch.setattr("saffron.cli.run_gh", _gh_by_url(urls_asked, answers))
++
++    def state_of(task_id):
++        row = ledger._db.execute(
++            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
++        ).fetchone()
++        return row["state"]
++
++    def run_and_check(expected_state, expected_urls):
++        urls_asked.clear()
++        before = len(read_log(tmp_path / "out" / "SY-2"))
++        cell_spec, _printed = _capture_cell_spec(
++            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
++        )
++        assert cell_spec.stacked_on is None
++        assert urls_asked == expected_urls
++        assert state_of(newer) == expected_state
++        lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
++        assert len(lines) == 1
++        assert lines[0].step == "unstacked"
++        assert expected_state in lines[0].detail
++        for other in {"MERGED", "REJECTED", "CHANGES_REQUESTED"} - {expected_state}:
++            assert other not in lines[0].detail
++
++    # 1. The newer task is READY_FOR_REVIEW, and gh answers merged.
++    answers[newer_pr] = {"state": "MERGED", "reviewDecision": None}
++    run_and_check("MERGED", [newer_pr])
++
++    # 2. Nothing is reset, so the newer task is already MERGED, not asked.
++    run_and_check("MERGED", [])
++
++    # 3. The newer task is APPROVED, and gh answers merged.
++    ledger.set_task_state(newer, "APPROVED")
++    run_and_check("MERGED", [newer_pr])
++
++    # 4. The newer task is READY_FOR_REVIEW, and gh answers CLOSED.
++    ledger.set_task_state(newer, "READY_FOR_REVIEW")
++    answers[newer_pr] = {"state": "CLOSED", "reviewDecision": None}
++    run_and_check("REJECTED", [newer_pr])
++
++    # 5. Both tasks are READY_FOR_REVIEW. gh answers open for the older
++    # one and merged for the newer one.
++    ledger.set_task_state(older, "READY_FOR_REVIEW")
++    ledger.set_task_state(newer, "READY_FOR_REVIEW")
++    answers[older_pr] = {"state": "OPEN", "reviewDecision": None}
++    answers[newer_pr] = {"state": "MERGED", "reviewDecision": None}
++    run_and_check("MERGED", [older_pr, newer_pr])
++
++    assert state_of(older) == "READY_FOR_REVIEW"
++    assert state_of(sibling) == "READY_FOR_REVIEW"
++    ledger.close()
++
++
++def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once(
++    tmp_path, monkeypatch, capsys
++):
++    """`b-877e93`: a `gh` that cannot answer must not refuse an attended run.
++    It leaves the parent's task exactly as it was, and says, once, that
++    GitHub could not be asked, whatever state that row keeps."""
++    repo = _local_origin(tmp_path)
++    head = _push_parent_branch(repo, "saffron/SY-9000")
++    args = _namespace(repo, tmp_path)
++    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
++
++    ledger = Ledger(tmp_path / "seeded.db")
++    repo_id = _seed_repo(ledger, package.real_remote(repo))
++    older_pr = "https://github.com/o/r/pull/1"
++    newer_pr = "https://github.com/o/r/pull/2"
++    older = _seed_task(
++        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=older_pr
++    )
++    newer = _seed_task(
++        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=newer_pr
++    )
++    ledger.record_push(older, "1" * 40)
++    ledger.record_push(newer, "2" * 40)
++
++    def run_once(before):
++        cell_spec, _printed = _capture_cell_spec(
++            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
++        )
++        assert cell_spec.stacked_on == head
++        return _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
++
++    def exit_one(_argv):
++        return subprocess.CompletedProcess(_argv, 1, "", "boom")
++
++    def cannot_start(_argv):
++        raise FileNotFoundError("gh")
++
++    def answers_undecided(_argv):
++        return subprocess.CompletedProcess(
++            _argv, 0, '{"state": "OPEN", "reviewDecision": "REVIEW_REQUIRED"}', ""
++        )
++
++    before = len(read_log(tmp_path / "out" / "SY-2"))
++    monkeypatch.setattr("saffron.cli.run_gh", exit_one)
++    lines = run_once(before)
++    assert len(lines) == 1
++    assert lines[0].step != "unstacked"
++
++    before = len(read_log(tmp_path / "out" / "SY-2"))
++    monkeypatch.setattr("saffron.cli.run_gh", cannot_start)
++    lines = run_once(before)
++    assert len(lines) == 1
++    assert lines[0].step != "unstacked"
++
++    before = len(read_log(tmp_path / "out" / "SY-2"))
++    monkeypatch.setattr("saffron.cli.run_gh", answers_undecided)
++    lines = run_once(before)
++    assert lines == []
++
++    ledger.set_task_state(newer, "CHANGES_REQUESTED")
++    before = len(read_log(tmp_path / "out" / "SY-2"))
++    monkeypatch.setattr("saffron.cli.run_gh", exit_one)
++    lines = run_once(before)
++    assert len(lines) == 2
++    assert all(line.step != "unstacked" for line in lines)
++    assert sum("CHANGES_REQUESTED" in line.detail for line in lines) == 1
++    ledger.close()
++
++
++def test_saffron_cell_stacks_on_a_changes_requested_parent_and_names_the_state(
++    tmp_path, monkeypatch, capsys
++):
++    """`b-877e93`: a `CHANGES_REQUESTED` parent still keeps its child
++    stacked on the parent's branch, where the review fixes land. It says so
++    once, whether this reconcile moved the task there or the ledger
++    already held it there."""
++    repo = _local_origin(tmp_path)
++    head = _push_parent_branch(repo, "saffron/SY-9000")
++    args = _namespace(repo, tmp_path)
++    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
++
++    ledger = Ledger(tmp_path / "seeded.db")
++    repo_id = _seed_repo(ledger, package.real_remote(repo))
++    parent_pr = "https://github.com/o/r/pull/1"
++    parent = _seed_task(
++        ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=parent_pr
++    )
++    ledger.record_push(parent, "1" * 40)
++
++    def fake_gh(_argv):
++        return subprocess.CompletedProcess(
++            _argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
++        )
++
++    monkeypatch.setattr("saffron.cli.run_gh", fake_gh)
++
++    for _ in range(2):
++        before = len(read_log(tmp_path / "out" / "SY-2"))
++        cell_spec, _printed = _capture_cell_spec(
++            monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
++        )
++        assert cell_spec.stacked_on == head
++        row = ledger._db.execute(
++            "SELECT state FROM tasks WHERE task_id = ?", (parent,)
++        ).fetchone()
++        assert row["state"] == "CHANGES_REQUESTED"
++        lines = _new_parent_preflights(tmp_path / "out", "SY-2", "SY-9000", before)
++        assert len(lines) == 1
++        assert lines[0].step != "unstacked"
++        assert "CHANGES_REQUESTED" in lines[0].detail
++
++    ledger.close()
++
++
+ def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
+     tmp_path, monkeypatch, capsys
+ ):
+diff --git a/tests/test_events.py b/tests/test_events.py
+index 7511fa9..fe90f03 100644
+--- a/tests/test_events.py
++++ b/tests/test_events.py
+@@ -1211,9 +1211,9 @@ def test_the_table_did_not_quietly_lose_a_row():
+     that matters.
+ 
+     `SA-0085`, `SA-0125` and `SA-0126` each moved this count. `SA-0133`
+-    moves it again, by two."""
+-    assert len(FAMILIES) == 67
+-    assert len({f.prefix for f in FAMILIES}) == 67
++    and `SA-0186` each move it again, by two."""
++    assert len(FAMILIES) == 69
++    assert len({f.prefix for f in FAMILIES}) == 69
+ 
+ 
+ def test_the_duplicated_agent_renderer_still_matches_its_original():

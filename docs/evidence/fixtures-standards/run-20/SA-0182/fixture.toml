@@ -1,0 +1,22 @@
+# Run 20's Standards defect on #559. Recorded range: patch.json's tree_base
+# 145f087c does not reproduce patch.diff. PACKAGE rebased the squash onto
+# 2a20e23a, and 2a20e23a..1a3796e8 is byte-identical to it.
+spec_id = "SA-0182"
+pr = 559
+base_sha = "2a20e23af654c6a9ca92f4efebee5a694ad9766c"
+head_sha = "1a3796e801bbb5c5ed7d040891d3172c523f1188"
+source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "restated-record-key-lookup"
+# `spec_text` and `spec_texts` each repeat the task-to-record_key query.
+locations = [
+  { file = "saffron/ledger.py", lines = [1492, 1496] },
+  { file = "saffron/ledger.py", lines = [1506, 1510] },
+]
+owner = "conventions"
+# The seat's own grade is unrecorded. #559 had no seat blocker (run 20's table).
+min_severity = "concern"
+must_mention = ["record_key"]
