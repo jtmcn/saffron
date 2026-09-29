@@ -1,10 +1,11 @@
 ---
 id: b-149df3
 title: A bound cut with nothing committed ends `ORPHANED` once SA-0126 lands, and the glossary, §4.5 and the spec loop's gotchas still say otherwise
-status: open
+status: done
 tier: 1
 by_hand: true
 filed: 2026-09-22
+closed: 2026-09-28
 specs: [SA-0126]
 prs: []
 commits: []
@@ -59,3 +60,12 @@ and `--until`, with the one retry, and says a resumed task row must re-key the
 cap. `GOTCHAS.md` says a first cut with no room to salvage ends `ORPHANED` and
 re-queues, and a second at the same `spec_sha` ends `NOT_IMPLEMENTED`. All
 land after `SA-0126` merges, not before.
+
+## Record
+
+- 2026-09-28: done by hand, after `SA-0126` merged (`917afe6b`). `CONTEXT.md`
+  §6 and `DESIGN.md` §4.5 name the bound cut and its one retry. §4.5 says a
+  resumed task row must re-key the cap. `GOTCHAS.md` says a first cut ends
+  `ORPHANED` and a second `NOT_IMPLEMENTED`. The cap's phase rule now admits
+  `SPEC_REVIEW` and `SPEC_WRITING` besides `IMPLEMENTING`. The resumption change
+  must still revisit it for a row that went through REBUT.

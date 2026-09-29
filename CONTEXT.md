@@ -514,8 +514,9 @@ Everything else is internal.
 
 `TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
 IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
-reasons ends the task in `PLAN_REJECTED` or `NOT_IMPLEMENTED`. The two names are
-deliberately distinct.
+reasons ends the task in `PLAN_REJECTED` or `NOT_IMPLEMENTED`, with one exception. A turn
+the turn ceiling or the wall clock cut with nothing committed ends `ORPHANED` the first time
+at a `spec_sha`, and `NOT_IMPLEMENTED` the second. The two names are deliberately distinct.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase.
@@ -534,6 +535,8 @@ _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.
+A bound cut with nothing committed also ends here, the first time at a `spec_sha`, so the
+spec re-queues once. The second such cut ends `NOT_IMPLEMENTED`.
 
 **Ratify**: What the operator does to a proposed `touches` set at `SCOPE_REVIEW`.
 _Avoid_: "approve" (reserved for PRs), "confirm", "sign off".

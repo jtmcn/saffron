@@ -496,6 +496,8 @@ Steps 2 and 3 together are what make "only new failures count" (§5.4) do real w
 
 **`ORPHANED` is stamped when the cell dies, not when gc notices.** The supervisor sets it on kill, on crash, and on `--until`; gc only reclaims. Deriving the state from a stale `updated_at` instead puts reclamation a full night out of phase — a cell killed at 06:30 is twelve hours old when the next batch starts, so nothing is freed and you carry an extra night of volumes in steady state, permanently. The delay is still the feature (§4.3, never auto-clean on failure); it just runs from the death rather than from gc's first glance at the corpse.
 
+**A bound cut also ends `ORPHANED`, once per `spec_sha`.** The turn ceiling or the wall clock cuts an implement turn with nothing committed (`SA-0126`). The salvage turn then recovers nothing or has no budget to run. The first such task at a `spec_sha` ends `ORPHANED`, so the next scan re-queues the spec. A second ends `NOT_IMPLEMENTED`. A task `ORPHANED` by a kill, a crash or a scan does not count toward the cap. The cap finds the earlier cut as another task row at the same `spec_sha` (`previous_cut_orphan`). §4.2.1 has a re-queue resume its task row, and once one does, that row is the earlier cut. The cap must then be re-keyed, or it stops firing in silence.
+
 Without this, `--until 06:30` killing three mid-flight cells leaks three multi-GB volumes a night. Two weeks and the disk is full — and preflight would detect it and abort, which is detection without reclamation. F10 exists because of this.
 
 ### 4.6 The run record as a provenance graph — derived, one-way, provisional
