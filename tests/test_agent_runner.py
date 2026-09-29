@@ -783,6 +783,7 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
         return rebut.run_rebut(
             "cell",
             blockers=blockers,
+            acceptance=[],
             options=implement.agent_options(
                 system_prompt="s", max_turns=5, budget_usd=2.0
             ),

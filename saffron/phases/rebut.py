@@ -15,7 +15,7 @@ read-only session that sees the argument and never the transcript behind it.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, ValidationError
 from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.events import Agent, Event, PhaseStart, describe
+from saffron.intake import Criterion
 from saffron.phases import implement, review
 
 VERDICT_PROMPT_FILE = "rebut-verdict.md"
@@ -115,6 +116,9 @@ class LensVerdicts:
     never_started: bool = False
     # One entry per `contradicted` verdict the host's quote check rejected.
     quote_failures: list[dict] = field(default_factory=list)
+    # One entry per `withdrawn` verdict the guard below refused, keyed by
+    # finding number and carrying the lens's own reason (backlog b-cd5fd2).
+    withdrawal_refusals: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -149,6 +153,7 @@ class RebutResult:
                     "never_started": v.never_started,
                     "verdicts": [d.model_dump() for d in v.verdicts],
                     "quote_failures": v.quote_failures,
+                    "withdrawal_refusals": v.withdrawal_refusals,
                 }
                 for v in self.verdicts
             ],
@@ -412,6 +417,73 @@ def _check_contradictions(lens_verdicts: LensVerdicts, spec_body: str) -> None:
     lens_verdicts.quote_failures = failures
 
 
+# The host's own sentence ahead of a refused withdrawal's reason: a
+# `preserves` criterion holds over the whole file (backlog b-cd5fd2).
+_WITHDRAWAL_REFUSED_REASON = (
+    "The host kept this blocker: its criterion is `preserves`, so it holds "
+    "over the whole file, and no committed fix answered it. The lens withdrew it:"
+)
+
+
+def _guarded_blockers(
+    numbered: Sequence[tuple[int, Finding]], acceptance: Sequence[Criterion]
+) -> set[int]:
+    """Blocker numbers whose claim opens with a `preserves` criterion's own
+    guard text: `review.HOST_FILED`, that criterion's witness, then
+    `' stayed green with '`. `survivor_finding` writes that exact prefix for
+    the criterion's own edit and for a wrong version alike. A shared witness
+    still guards a survivor of the other criterion. Nothing here tells the
+    two apart, and keeping a blocker is the safe direction.
+    """
+    prefixes = tuple(
+        f"{review.HOST_FILED}{criterion.witness} stayed green with "
+        for criterion in acceptance
+        if criterion.preserves
+    )
+    return {
+        n
+        for n, finding in numbered
+        if any(finding.claim.startswith(prefix) for prefix in prefixes)
+    }
+
+
+def _check_withdrawal_refusals(
+    lens_verdicts: LensVerdicts,
+    *,
+    guarded: set[int],
+    answers: Mapping[int, Rebuttal],
+    moved: bool,
+) -> None:
+    """Every `withdrawn` verdict in `lens_verdicts` on a guarded blocker,
+    checked and mutated in place. It stands only when the blocker's first
+    answer was `fixed` and HEAD moved. Every other one becomes `confirmed`,
+    the host's sentence ahead of the lens's own reason and no quotes. The
+    refusal is recorded in `lens_verdicts.withdrawal_refusals` under this
+    lens (backlog b-cd5fd2)."""
+    kept: list[Verdict] = []
+    refusals: list[dict] = []
+    for verdict in lens_verdicts.verdicts:
+        if verdict.verdict != "withdrawn" or verdict.finding not in guarded:
+            kept.append(verdict)
+            continue
+        answer = answers.get(verdict.finding)
+        if moved and answer is not None and answer.action == "fixed":
+            kept.append(verdict)
+            continue
+        refusals.append(
+            {"finding": verdict.finding, "withdrawn_reason": verdict.reason}
+        )
+        kept.append(
+            Verdict(
+                finding=verdict.finding,
+                verdict="confirmed",
+                reason=f"{_WITHDRAWAL_REFUSED_REASON} {verdict.reason}",
+            )
+        )
+    lens_verdicts.verdicts = kept
+    lens_verdicts.withdrawal_refusals = refusals
+
+
 def rebut_state(
     *, moved: bool, rebuttal: RebuttalTurn, verdicts: Sequence[LensVerdicts]
 ) -> tuple[str, str]:
@@ -556,6 +628,9 @@ def run_rebut(
     container: str,
     *,
     blockers: Sequence[Finding],
+    # Required, not defaulted: a default would hide that `preserves` never
+    # reached the guard below (backlog b-cd5fd2).
+    acceptance: Sequence[Criterion],
     options: dict,
     session_id: str,
     spec_body: str,
@@ -700,8 +775,13 @@ def run_rebut(
         )
     # Every lens is checked on its own, not only the first or the last one
     # built. The failing verdict can come from either side of a rebuttal.
+    guarded = _guarded_blockers(numbered, acceptance)
+    answers = first_answers(turn)
     for lens_verdicts in result.verdicts:
         _check_contradictions(lens_verdicts, spec_body)
+        _check_withdrawal_refusals(
+            lens_verdicts, guarded=guarded, answers=answers, moved=moved
+        )
     result.cost_usd += sum(v.cost_usd for v in result.verdicts)
     result.state, result.why = rebut_state(
         moved=moved, rebuttal=turn, verdicts=result.verdicts

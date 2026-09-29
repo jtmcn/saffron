@@ -7504,6 +7504,97 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
         assert not stripped.findings[0].claim.startswith(review.HOST_FILED)
 
 
+def test_a_preserves_criterion_probe_argued_out_of_the_diff_is_kept_confirmed(
+    monkeypatch, tmp_path
+):
+    """Backlog b-cd5fd2: a `preserves` criterion's own survivor is a
+    property of the whole file, not of where the diff sits. The implementer
+    argues the survivor's line sits outside its diff and commits nothing.
+    The adequacy lens withdraws the host-filed blocker anyway. The host
+    refuses that withdrawal and keeps the blocker `confirmed`."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="one prompt claims it", witness="t.py::a", preserves=True
+    )
+
+    anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    _stub_probe_gates(
+        monkeypatch, cell, gate_results=[_tests_result("pass", collected=["t.py::a"])]
+    )
+    contents = {"src/x.py": "def y():\n    return 1\nassert x == 1\n"}
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(_probe_answer(anchors, "removing the check lets the total drift"))
+        )
+        + [
+            _turn("outside my diff."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {
+                            "finding": 1,
+                            "action": "argued",
+                            "argument": "outside my diff",
+                        }
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
+            ),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    host_sentence = (
+        "The host kept this blocker: its criterion is `preserves`, so it holds "
+        "over the whole file, and no committed fix answered it. The lens withdrew it:"
+    )
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (lens_entry,) = record["verdicts"]
+    assert lens_entry["lens"] == "adequacy"
+    assert lens_entry["verdicts"] == [
+        {
+            "finding": 1,
+            "verdict": "confirmed",
+            "reason": f"{host_sentence} fair",
+            "rebuttal_quote": None,
+            "finding_quote": None,
+        }
+    ]
+    assert lens_entry["withdrawal_refusals"] == [
+        {"finding": 1, "withdrawn_reason": "fair"}
+    ]
+
+    (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+    (row,) = ledger.findings(task_id)
+    assert (row["verdict"], row["rebuttal"]) == ("confirmed", "argued: outside my diff")
+
+
 def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
     monkeypatch, tmp_path
 ):
