@@ -32,8 +32,8 @@ live only in code. `saffron/cell/session.py` holds REBUT's budget check, and
 
 REVIEW is a set of lenses. Each lens is a fresh, read-only session with its own
 remit. Its prompt asks for the reason not to merge the change, and forbids
-inventing one. The three lenses are correctness, contract and adequacy. ADR 3
-records what adequacy is.
+inventing one. The four lenses are correctness, contract, adequacy and conventions.
+ADR 3 records what adequacy is, and ADR 8 records conventions.
 
 The host starts every lens itself. A lens is never a subagent, because the
 model decides when to spawn a subagent. A lens that runs only when the model
@@ -69,8 +69,9 @@ findings written.
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the
 gates do not run. Otherwise the gates run again, and a red re-run ends the task
-`EXHAUSTED`. Then each lens with a blocker confirms or withdraws it, in a fresh
-session in a critic cell rebuilt from the post-rebuttal patch. The adequacy
+`EXHAUSTED`. Then each lens with a blocker answers it in a fresh session, in a
+critic cell rebuilt from the post-rebuttal patch. The answer is `confirmed`,
+`withdrawn` or `contradicted`. The adequacy
 session answers the host's blockers too. Each session also reads the diff
 REVIEW saw, because a blocker's line number was filed against that tree. A
 verdict set that leaves a blocker unanswered is an error, never a withdrawal. A
@@ -78,7 +79,9 @@ verdict session that errors halts the task at `REBUTTING`.
 
 Any confirmed blocker reaches `READY_FOR_REVIEW`, whether the implementer
 argued against it or fixed it and stayed green. So do a withdrawn set and a
-green fix. The operator adjudicates a confirmed blocker in the pull request.
+green fix. So does a contradicted blocker, whose rebuttal and finding rest on
+two spec lines that disagree. The operator adjudicates a confirmed or contradicted blocker in the pull
+request.
 
 Inside a stack batch, ADR 7 takes four exceptions to this decision for its end
 review. Every in-cell critic keeps it whole.

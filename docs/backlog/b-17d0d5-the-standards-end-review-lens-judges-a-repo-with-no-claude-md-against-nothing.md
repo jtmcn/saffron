@@ -4,7 +4,7 @@ title: The Standards end-review lens runs over a repo with no `CLAUDE.md` and ju
 status: open
 tier: 3
 filed: 2026-09-26
-specs: []
+specs: [SA-0192]
 prs: []
 commits: []
 cites: [§6]
