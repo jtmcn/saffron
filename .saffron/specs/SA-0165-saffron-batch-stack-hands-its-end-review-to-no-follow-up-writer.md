@@ -98,8 +98,16 @@ acceptance:
       a minted group without a text. It drives a raise after a mint with no
       text, and one before a group's session. Each holds a whole pooled
       group, a narrowed pooled group, and an accepted group written
-      narrowed.
+      narrowed. Each also holds one unaccepted group on the accepted
+      group's layer with another file, and one on its file with another
+      layer.
     witness: tests/test_cli.py::test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_base_at_the_stacks_top
+    wrong_versions:
+      - Accepted matched by task_key alone, so group C on B's layer counts as accepted and C[1] is not pooled.
+      - Accepted matched by file alone, so group E on B's file counts as accepted and is not pooled.
+      - A group accepted at its mint with no recorded spec text, so D in the first round is not pooled.
+      - Already pooled judged by layer and file rather than by finding, which drops C[1].
+      - The system prompt filled from the policy in repo or at the mirror's HEAD, not from the export at the pinned base.
   - claim: >-
       `saffron batch --stack --budget N` passes `run_stack_batch` a
       `writer_usd` of `N` times `follow_up.WRITER_SHARE`, read when the
@@ -112,6 +120,12 @@ acceptance:
       builds no callable and passes `follow_ups=None`, and still passes
       the same `writer_usd`.
     witness: tests/test_cli.py::test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer
+    wrong_versions:
+      - WRITER_SHARE imported by name at import time, or RESERVE_SHARE used in its place, so the writer figure reads 10.5.
+      - The budget less the writer share passed to run_stack_batch as its budget.
+      - A cap_usd of the whole budget in place of writer_usd.
+      - The callable built when readiness fails, so follow_ups is not None there.
+      - A plan header with no writer figure, or the reserve printed as the writer figure.
   - claim: >-
       A night without `--stack` prints its plan header as before, with no
       reserve and no writer share.
@@ -147,9 +161,9 @@ builds the command-line callable that binds its cells, and passes it from
 1.
 
 **What the tree base holds.** This spec's tree base is `SA-0173`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain from
-`SA-0142` puts these names there, so they are cited by symbol. Every line
-number below was read at `71140772`, where none of them exist.
+Only `depends_on[0]` stacks (`task._resolve_stacked_on`'s docstring,
+`saffron/task.py:197-200`). Every name below is at `a1148c1e` already, except those from `SA-0161`
+and `SA-0173`. All of them are cited by symbol.
 
 - From `SA-0143` and `SA-0144`: `run_stack_batch` in `saffron/batch.py`,
   and `saffron batch --stack`. Its `_batch` calls `run_stack_batch` where
@@ -201,15 +215,16 @@ number below was read at `71140772`, where none of them exist.
   It calls `follow_ups` once after its end review, with the batch's key and
   the `StackReview`.
 
-**What the base holds.** `_drive_cell` hands REVIEW's probe call the
+**What the base holds.** Line numbers here were read at `a1148c1e`.
+`_drive_cell` hands REVIEW's probe call, `_probe_adequacy`, the
 policy's `thread_env` and `test_paths`, its gates, its `created` set and a
-teardown `note` (`saffron/cell/session.py:2590-2604`). Its gates are the
+teardown `note` (`saffron/cell/session.py:2739-2753`). Its gates are the
 cell-side paths under `worktree.GATES_MOUNT`
-(`saffron/cell/session.py:1681-1683`, `saffron/cell/worktree.py:22`).
+(`saffron/cell/session.py:1795`, `saffron/cell/worktree.py:22`).
 `gate_executables` joins `.saffron/gates/<name>` to the directory it gets
-(`saffron/repos/policy.py:87-90`). `critic_cell` removes each name it
+(`saffron/repos/policy.py:87-90`). `critic_cell` removes each resource it
 added to `created` in its own `finally`, and reports a survivor through
-`note` (`saffron/cell/session.py:1219-1234`). `export_saffron_dir` removes
+`note` (`saffron/cell/session.py:1294-1309`). `export_saffron_dir` removes
 its destination first (`saffron/repos/mirror.py:182-227`). It raises
 `GitError` for a sha the mirror lacks (`saffron/repos/mirror.py:217-219`).
 `load_policy` raises `PolicyError` (`saffron/repos/policy.py:114-138`). A
@@ -217,14 +232,15 @@ pydantic refusal carries its message over several lines, measured.
 `context.PROMPTS_DIR` is the one locator for core's prompt tree
 (`saffron/agents/context.py:21`).
 `resolve_repo_id` returns `None` for a url with no row
-(`saffron/ledger.py:673-681`). `run_agent` takes `spec_id` and
+(`saffron/ledger.py:857-865`). `run_agent` takes `spec_id` and
 `timeout_s` as keywords, and `timeout_s` defaults to 3600
-(`saffron/phases/implement.py:196-205`). `critic_cell` and the probe call
-take `note` as `(step, ok, detail)` (`saffron/cell/session.py:1130`,
-`saffron/cell/session.py:1229-1234`, `saffron/cell/session.py:1304`).
-`TURN_TIMEOUT_S` is 900 s, per turn (`saffron/cell/session.py:58-63`).
+(`saffron/phases/implement.py:207-217`). `critic_cell` and the probe call
+take `note` as `(step, ok, detail)` (`saffron/cell/session.py:1205`,
+`saffron/cell/session.py:1304-1308`, `saffron/cell/session.py:1379`).
+`TURN_TIMEOUT_S` is 900 s, per turn (`saffron/cell/session.py:63`).
 `_print_batch_plan` prints the night's header
-(`saffron/cli.py:725-747`).
+(`saffron/cli.py:1114-1152`). The `--stack` path builds its callables
+only after `_resolve_queue` succeeds (`saffron/cli.py:1250-1291`).
 
 ## Problem
 
@@ -258,8 +274,11 @@ Build two things in `saffron/cli.py`.
 2. **The wiring.** In `_batch`'s `--stack` path, where readiness passed,
    create `pooled: list[follow_up.Pooled] = []`. Compute `writer_usd` as
    `args.budget * follow_up.WRITER_SHARE`. Build the callable once, and
-   pass `run_stack_batch` `writer_usd` and `follow_ups`. Pass
-   `follow_ups=None` when readiness fails, with the same `writer_usd`.
+   pass `run_stack_batch` `writer_usd` and `follow_ups`. Build it after
+   `_resolve_queue` succeeds, beside `_stack_mint`, as the other stack
+   callables are. Pass `follow_ups=None` when readiness fails, and when
+   readiness passes but `_resolve_queue` raises, with the same
+   `writer_usd`. The witness drives the first of those two.
    `SA-0173` holds the share either way, which costs nothing on a night
    that runs no task. Add `writer_usd`, `None` by
    default, to `_print_batch_plan`. Given one, the header reads `budget
@@ -304,14 +323,16 @@ group.
 
 **Why no second teardown.** `created` goes to `qualify` alone, and each
 probe cell removes its own names in its `finally`
-(`saffron/cell/session.py:1219-1234`). `layer_cell` holds a set of its
+(`saffron/cell/session.py:1294-1309`). `layer_cell` holds a set of its
 own. A second removal of the same names would only repeat those calls and
 print their misses.
 
 **The share.** `SA-0161` sets `WRITER_SHARE` to 0.25, so a $100 night
 writes at least one follow-up at `SPEC_WRITER_SESSION_USD` of 18.5. It passes the same number as `writer_usd` and as
-`cap_usd`, so the loop holds back exactly the writer's sub-cap. With
-`SA-0157`'s reserve, generation 0 runs within half of `--budget`.
+`cap_usd`, so the loop holds back exactly the writer's sub-cap. The
+writer's share sits beside `SA-0157`'s reserve, not inside it, so
+generation 0 runs within half of `--budget`. The header prints each
+figure on its own. The operator settled both on 2026-09-29.
 
 **`SA-0174` reuses the list.** `SA-0174` sits above this spec in the
 chain (`SA-0165`, `SA-0162`, `SA-0151`, then `SA-0174`). It gives `_stack_finish` a `pooled`
@@ -347,7 +368,7 @@ spec creates the list, and `SA-0174` must pass that same object to
   for it, where `_stack_revise` reads `Policy()`. The case cannot reach
   this callable. Every task's cell loads the policy from the same
   export of the base, and stops without one
-  (`saffron/cell/session.py:1674-1676`). So no layer exists, and the
+  (`saffron/cell/session.py:1786-1791`). So no layer exists, and the
   callable returns `[]` before it exports. No witness drives it.
 - **A raise from `ledger.spec_text` in the `except` branch.** The
   accepted check reads the ledger after a raise. A second raise there
@@ -388,7 +409,7 @@ same for any other witness in `tests/test_cli.py` that asserts the
 `--stack` header.
 
 **Criterion 1's witness** builds a git repository in `tmp_path` as the
-mirror, with `_git` and `_rev_parse` (`tests/test_cli.py:36-52`). Each
+mirror, with `_git` and `_rev_parse` (`tests/test_cli.py:48`, `tests/test_cli.py:63`). Each
 commit makes `.saffron/gates/tests` an executable file. `P(x)` is a policy
 with the gate `tests`, `test_paths` `tests/**`, `thread_env` `X: x` and
 `protected` `x/**`.
@@ -488,7 +509,17 @@ That line starts `follow-ups: stopped, ` and holds the text above. No case
 calls `cell_up`, `qualify` or the writer.
 
 Next it drives a raise part-way, twice. `qualify` now returns five
-groups, `A` to `E`, on distinct pairs of layer and file. `X[n]` is `X`
+groups, `A` to `E`, on distinct pairs of layer and file:
+
+| group | layer | file |
+|---|---|---|
+| `A` | `k-top` | `src/a.py` |
+| `B` | `k-bot` | `src/b.py` |
+| `C` | `k-bot` | `src/c.py` |
+| `D` | `k-top` | `src/d.py` |
+| `E` | `k-top` | `src/b.py` |
+
+`C` shares `B`'s layer alone, and `E` shares `B`'s file alone. `X[n]` is `X`
 narrowed to its finding `n`, through `dataclasses.replace`. The
 `write_follow_ups` double calls `qualify`. It appends `A` whole with the
 reason `own a`, then `B[0]` with `moved`. It writes `B[1]`, mints the
@@ -503,16 +534,21 @@ broke`.
 
 The first round alone fails every build listed below. The second alone
 passes a group counted accepted at its mint, measured. It is there for
-the raise before a group's session.
+the raise before a group's session. The prototype placed `A` to `E` on
+five distinct layers and files. The table above came after the first
+review, and is unmeasured. The re-review at `SA-0173`'s branch runs this
+list over it.
 
 Last, it removes `out_dir` and calls a fresh callable with an empty
 stack. That returns `[]`, calls and prints nothing, and leaves `out_dir`
 absent.
 
-These fail it. Each was measured, except three. The first and the third
+These fail it. Each was measured, except five. The first and the third
 changed when the prompt became core's. The `spec_session=True` item came
-with `SA-0169`'s keyword, which the prototype's `layer_cell` lacked. Those
-three, the check's recorder and the shared log are unmeasured.
+with `SA-0169`'s keyword, which the prototype's `layer_cell` lacked. The
+two matched by `task_key` alone or by file alone came with the table
+above. Those five, the check's recorder and the shared log are
+unmeasured.
 
 - the prompt filled from `repo`'s policy, or from the one at the mirror's
   `HEAD`
@@ -549,6 +585,10 @@ three, the check's recorder and the shared log are unmeasured.
 - a group's remaining findings pooled as the whole group
 - a group accepted at its mint, with or without a text
 - accepted matched by the whole group, which the narrowed `B[1]` misses
+- accepted matched by `task_key` alone, which counts `C` as accepted and
+  drops `C[1]` (unmeasured)
+- accepted matched by file alone, which counts `E` as accepted and drops
+  it (unmeasured)
 - every group after the last accepted one
 - the groups past the count of mints
 - every group from the last one written
@@ -559,7 +599,7 @@ three, the check's recorder and the shared log are unmeasured.
 
 **Criterion 2's witness** follows `SA-0157`'s wiring witness, with
 `_readiness_passes` and `_fake_batch_resolution`
-(`tests/test_cli.py:2603-2640`). It sets `follow_up.WRITER_SHARE` to 0.125
+(`tests/test_cli.py:2939`, `tests/test_cli.py:2960`). It sets `follow_up.WRITER_SHARE` to 0.125
 through `monkeypatch`. It replaces `cli._stack_follow_ups` with a recorder
 that returns a sentinel. It replaces `cli.run_stack_batch` with a fake
 that records its ledger, budget and keywords and returns `DRAINED`. It
@@ -580,8 +620,10 @@ and `writer_usd` 5.25.
 at import, or `RESERVE_SHARE` in its place, gives 10.5. The budget less
 the reserve, times the share, gives 3.94.
 
-These fail it, unmeasured, since `SA-0144`'s `--stack` path is not at
-`68892367`:
+These fail it, unmeasured. The prototype at `68892367` predates
+`SA-0144`'s `--stack` path. That path is at `a1148c1e`
+(`saffron/cli.py:1276-1336`), but `SA-0173`'s keywords are not. So the
+list waits for the parent's branch.
 
 - `WRITER_SHARE` imported by name, or `RESERVE_SHARE` in its place
 - the budget less the writer share passed as the budget
@@ -624,6 +666,9 @@ message's whitespace.
 - A `created` name that survives its probe cell. `qualify`'s cells report
   it through `note`, which prints it.
 - `emit` beyond one line.
+- A night whose readiness passes and whose `_resolve_queue` raises. The
+  callable is built after the resolve, so none exists there, and
+  `SA-0173` calls `follow_ups` only after an end review.
 - Where the prompt's fill runs. It reads core's own file and cannot miss
   per repo, so a fill inside `write` gives the same prompt.
 

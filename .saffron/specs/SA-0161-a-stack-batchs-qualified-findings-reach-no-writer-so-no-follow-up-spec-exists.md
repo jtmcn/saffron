@@ -52,7 +52,7 @@ forbidden:
 budget_usd: 24
 max_attempts: 3
 max_turns: 130
-estimated_lines: 586
+estimated_lines: 590
 pending_symbols:
   - saffron/follow_up.py::write_follow_ups
   - saffron/follow_up.py::WRITER_SHARE
@@ -63,10 +63,11 @@ acceptance:
       pooled)` calls `qualify` once, with the stack's layers and its join.
       It emits one line counting the `Qualification`'s own pool. It takes
       the groups in the order returned. Each pooled entry is appended to the
-      caller's `pooled` as it arises, and `emit` gets one line for it. A
-      finding whose named probe does not match exactly once in its file at
-      the top layer's head is pooled, in a group narrowed to such findings.
-      The group's other findings go on. A whole group is pooled in each of
+      caller's `pooled` as it arises, and `emit` gets one line for it. An
+      accepted group emits no line. A finding whose named probe does not
+      match exactly once in its file at the top layer's head is pooled, in a
+      group narrowed to such findings. A file absent at that head matches
+      nothing. The group's other findings go on. A whole group is pooled in each of
       these cases. A writer session before it met a reset time. The sub-cap
       left is under `spec_review.SPEC_WRITER_SESSION_USD`. Its allowed paths
       hold no path `test_paths` match. `write` raises. The session carries
@@ -85,12 +86,19 @@ acceptance:
       pooled after its probe check holds only the findings not already
       pooled. A raise part-way through leaves `pooled` holding every entry
       before it. The witness drives each case, a group with a failing and
-      a matching probe, a revised origin spec, other tasks of the origin's
+      a matching probe, a probe on a file absent at the top head, an origin
+      spec revised twice at two budgets, other tasks of the origin's
       spec id with their own texts, a glob in `touches`, and a test path
       the stack's range leaves unchanged. It drives a budget equal to the
       origin's, a layer task with spend of its own, and a sub-cap remainder
       equal to the ceiling.
     witness: tests/test_follow_up.py::test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool
+    wrong_versions:
+      - The origin spec read from the task's first spec text, so group 1's budget of 10 is refused against the draft's 9.
+      - A probe's file text counted with no check for `None`, which raises on `src/gone.py`.
+      - The remainder read as `cap_usd` less `batch_spend`, which pools group 17.
+      - The origin task found by spec id, taking the first or the last `SA-0102` task.
+      - A whole group pooled for one failing probe, or a failing probe's group pooled unnarrowed.
   - claim: >-
       Every other group becomes one `Candidate`, in the groups' order, and
       the call returns the list. Its id is `next_spec_id` of the origin
@@ -109,12 +117,22 @@ acceptance:
       It names no pooled finding. The witness drives three accepted groups
       on two layers, one of them with an empty slug.
     witness: tests/test_follow_up.py::test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_cost
+    wrong_versions:
+      - A mutant refused by its file alone, or by its `find` alone.
+      - The accepted session charged to the origin task.
+      - The spec text recorded before the attach, or the attach before the attempt.
+      - The test paths read from the top layer's diff alone, or from the origin layer's.
+      - A slug that drops an apostrophe, or an empty slug kept.
   - claim: >-
       A sub-cap of $100 times `follow_up.WRITER_SHARE` writes one
       follow-up whose session costs
       `spec_review.SPEC_WRITER_SESSION_USD`. It pools the second and third
       groups as over the sub-cap.
     witness: tests/test_follow_up.py::test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling
+    wrong_versions:
+      - A `WRITER_SHARE` of 0.18, which writes no follow-up.
+      - A `WRITER_SHARE` of 0.37, which writes two.
+      - No session's cost taken from the remainder, which writes all three.
   - claim: >-
       `follow_up.next_spec_id(origin_id, specs_dir, ledger, repo_id)`
       returns one more than the highest number carrying the origin id's
@@ -124,6 +142,12 @@ acceptance:
       the highest in turn. It holds a file of another prefix, a task of
       another repo, and an origin id of another width.
     witness: tests/test_follow_up.py::test_the_next_spec_id_reads_both_spec_directories_and_the_repos_tasks
+    wrong_versions:
+      - The `done/` directory left unread, or the tasks left unread.
+      - The tasks of every repo read.
+      - A file name pattern not anchored on the prefix.
+      - A width fixed at four digits.
+      - The first free number in place of one past the highest.
 ---
 
 ## Context
@@ -150,10 +174,9 @@ builds the command-line callable that binds `qualify`, the writer's critic
 cell and the mint, and passes it from `saffron batch --stack`. `SA-0162`
 then runs the follow-ups as generation 1.
 
-**What the tree base holds.** This spec's tree base is `SA-0164`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:144-148`). The chain
-`SA-0142` to `SA-0164` puts these names there, so they are cited by symbol.
-Every line number below was read at `642a26c3`, where none of them exist.
+**What the chain put at base.** `SA-0164` is merged, so this spec runs on
+`origin/main`. The chain `SA-0142` to `SA-0164` put these names there, cited
+by symbol.
 
 - `SA-0145` and `SA-0146`: `record_stack_layer`, and
   `end_review.layer_fields(ledger, task_key)`, whose `head` is the layer's
@@ -169,8 +192,8 @@ Every line number below was read at `642a26c3`, where none of them exist.
 - `SA-0182`: `Ledger.record_spec_text(task_id, *, origin, spec_id, path,
   text)`, and `Ledger.spec_text(task_id)`, the latest row or `None`. A row's
   `spec_sha` is the SHA-256 of its text, as `load_spec` hashes a file
-  (`saffron/intake.py:308-319`). Its fact's `batch_key` is the task's run's
-  batch when it is written (`saffron/ledger.py:372-391`).
+  (`saffron/intake.py:338-349`). Its fact's `batch_key` is the task's run's
+  batch when it is written (`_build_fact`, `saffron/ledger.py:459-475`).
 - `SA-0156` and `SA-0168`: `cli._stack_mint`, whose mint creates a run and
   a task with no batch and returns the task's id.
 - `SA-0155`: `Ledger.task_run(task_id)`.
@@ -185,11 +208,12 @@ Every line number below was read at `642a26c3`, where none of them exist.
   attempt on its spec's task.
 
 **What the base holds.** `batch_spend` sums the attempts of the tasks on
-the batch's runs (`saffron/ledger.py:897-912`). `attach_run_to_batch` sets
-a run's batch (`:848-863`). `open_attempt` takes a phase (`:1000-1023`).
-`tasks_by_repo` lists a repo's tasks with their spec ids (`:712-727`), and
-`record_key` gives a task's key (`:366-370`). `parse_spec` refuses a mutant
-whose `find` the body or a claim spells (`saffron/intake.py:260-303`). It
+the batch's runs, plus the end-review cost of its layers
+(`saffron/ledger.py:1102-1125`). `attach_run_to_batch` sets a run's batch
+(`:1032`). `open_attempt` takes a phase (`:1214`). `tasks_by_repo` lists a
+repo's tasks with their spec ids and no record key (`:896-911`).
+`record_key` gives a task's key (`:453-457`). `parse_spec` refuses a
+mutant whose `find` the body or a claim spells (`saffron/intake.py:283-333`). It
 does not refuse one a finding named. The `scope` gate's glob match is
 `matches` (`saffron/gates/core/scope.py:31-36`), and `touches` is judged
 by it. `mirror.changed_files`
@@ -199,7 +223,7 @@ and `mirror.file_at` read a range's paths and a file at a sha
 spec file's name starts with its id and a hyphen
 (`saffron/cell/session.py:459-466`), and ids are numbered from the highest
 existing one (`docs/agents/issue-tracker.md:10-11`). `RETIRED_DIRNAME` is
-`done` (`saffron/scheduler.py:504`).
+`done` (`saffron/scheduler.py:505`).
 
 **What a writer costs.** No writer session is in the ledger yet. So the cost
 was measured on the operator's `spec-writer` and `spec-reviewer` sessions,
@@ -244,7 +268,8 @@ Build two things in `saffron/follow_up.py`.
      with no finding ends here.
    - The allowed paths: the group's file, then the stack's test paths. With
      none matching `test_paths`, the group is pooled.
-   - The origin task, found by record key among `tasks_by_repo`. Its head
+   - The origin task: the row of `tasks_by_repo` whose
+     `ledger.record_key(task_id)` is the group's key. Its head
      is `layer_fields` of the group's key. Its text, and its parse. With no
      spec text, the file is the one in `specs_dir` whose name starts with
      the layer's spec id and a hyphen. The id, from `next_spec_id`.
@@ -256,14 +281,14 @@ Build two things in `saffron/follow_up.py`.
      carry no batch, and the spec text's fact carries this one.
 
    The prompt opens with a `context:` line naming the origin spec. It says
-   the reply is the spec text, and that the writer files no record. It says
-   the findings cite lines at the origin head, and that the writer's tree is
+   the reply is the spec text, and that the session files no record. It says
+   the findings cite lines at the origin head, and that the session's tree is
    the top head. The diff is `git diff` with `DIFF_FLAGS` over
    `<head>^..<head>` in `mirror`, through `worktree.git_argv`.
 
 **Why a probe is checked at the top.** A follow-up runs on top of the
 stack. A later layer can move a probe's `find` text, and a `find` that
-matches other than once is `unproven` (`saffron/cell/worktree.py:640-648`,
+matches other than once is `unproven` (`saffron/cell/worktree.py:651-657`,
 `saffron/probe.py:206-210`). So a finding whose probe no longer matches
 once at the top is pooled. Principle 28 asks that the group's other
 findings still reach a follow-up.
@@ -347,8 +372,8 @@ each on its own run, in order:
 - `SA-0102`, no batch, a `revision` spec text at budget 9 saying "before"
 - `SA-0101` on the batch, packaged `READY_FOR_REVIEW` at `H1`, with one
   closed `IMPLEMENTING` attempt at 0.5
-- `SA-0102` on the batch, packaged at `H2`, with a `revision` spec text at
-  budget 10 saying "revised body"
+- `SA-0102` on the batch, packaged at `H2`, with two `revision` spec texts:
+  budget 9 saying "draft body", then budget 10 saying "revised body"
 - `SA-0102`, no batch, a `revision` spec text at budget 8 saying "after"
 - `SA-0107`, no batch and no file
 
@@ -362,6 +387,8 @@ turns in order. A string turn is a session of that text at 0.25, with a
 `session_id` and three turns. `mint` creates a run with no batch and a
 task. `cap_usd` is 4.25, and `test_paths` is `["tests/**"]`. `rate` is a
 survived probe on `beta_rate` in `src/b.py`, and `gone` one on `beta_l2`.
+`lost` is a survived probe on `alpha` in `src/gone.py`, a path no commit
+holds.
 
 | # | layer, file | findings | turn | outcome |
 |---|---|---|---|---|
@@ -379,7 +406,7 @@ survived probe on `beta_rate` in `src/b.py`, and `gone` one on `beta_l2`.
 | 12 | the same | the concern | a text with no frontmatter | parse |
 | 13 | the same | the concern | a session with error `idle bound` | error |
 | 14 | the same | the concern | `write` raises `RuntimeError("cell gone")` | raise |
-| 15 | `SA-0101`, `src/b.py` | `gone` | none | probe, no match at `H2` |
+| 15 | `SA-0101`, `src/b.py` | `gone`, `lost` | none | probe, no match at `H2` |
 | 16 | `SA-0102`, `src/c.py` | a probe on `gamma` | none | probe, two matches |
 | 17 | `SA-0102`, `src/b.py` | `rate` | title "(-)", a mutant on `src/c.py` with the `find` `beta_rate` | accepted |
 | 18 | the same | the concern | none | sub-cap |
@@ -389,10 +416,11 @@ carries `SA-0110`, except group 3's. Group 1's title is "A layer's rate,
 re-read".
 
 **Criterion 1's witness** asserts `qualify` got the layers and the join.
-The first `emit` line holds `2`, and one more line comes per pooled entry.
-It asserts the seventeen pooled entries in order, each with a reason
-naming its case. The first holds `gone` alone. Group 9's two entries hold
-`gone`, then `rate`. Group 15's names `SA-0101`'s key. It asserts fifteen
+`emit` got exactly eighteen lines. The first holds `2`, and each later
+line names one pooled entry, so an accepted group emits none. It asserts
+the seventeen pooled entries in order, each with a reason naming its case.
+The first holds `gone` alone. Group 9's two entries hold `gone`, then
+`rate`. Group 15's holds `gone` and `lost` and names `SA-0101`'s key. It asserts fifteen
 `write` calls. `SA-0101`'s layer task holds its `IMPLEMENTING` attempt
 alone, and the two other `SA-0102` tasks hold none. The layer task of
 `SA-0102` holds eleven `WRITING_PHASE` attempts, and the batch's spend is
@@ -420,6 +448,9 @@ These fail it, each measured:
 - a refused group pooled with a finding already pooled
 - a budget equal to the origin's, refused
 - the origin budget read from the file, past a revision
+- the origin spec read from the task's first spec text
+- a probe's file text counted with no check for `None`
+- an accepted group that emits a line of its own
 - the origin task found by spec id, the first or the last
 - no check of the id, the type, `depends_on` or the mutant
 - the probe read at the origin head, or not checked
@@ -446,7 +477,7 @@ batch's. Group 1's prompt holds `SA-0108` and the allowed paths `src/b.py`,
 `tests/test_a.py` and `tests/test_b.py`. It holds the budget 10.0, both
 written claims, `src/b.py:1`, the probe's `find`, `replace` and
 `survived`, "revised body", `+beta_rate` and `H2`. It holds neither
-`gone`'s claim, "before", "after" nor `alpha_new`. Group 2's prompt holds
+`gone`'s claim, "draft body", "before", "after" nor `alpha_new`. Group 2's prompt holds
 its allowed paths, `+alpha_new`, `H1`, `H2` and `SA-0101`'s file text, and
 not `+beta_rate`. These fail it, each measured:
 
@@ -454,6 +485,7 @@ not `+beta_rate`. These fail it, each measured:
 - the id read once for the whole walk, or from `specs_dir` alone
 - the origin task found by spec id, the first or the last
 - the whole group pooled for one failing probe
+- the origin spec's first text in the prompt
 - a mutant refused by its file alone, or by its `find` alone
 - the accepted session charged to the origin task
 - the minted run left off the batch
@@ -502,7 +534,18 @@ on the host's git. It stood in for `StackReview`, `LayerReview`,
 ran the real `parse_spec`, `matches`, `changed_files`, `file_at`,
 `git_argv`, `Ledger` and `MemoryRecord`. The right build passed every
 witness above. Each wrong version listed was applied as a text edit, and
-each failed its own witness.
+each failed its own witness. Three were added on 2026-09-29 and are
+reasoned, not measured: the first spec text, the unchecked `None`, and an
+accepted group's own `emit` line.
+
+**Where the real symbols differ from the stand-ins.** The eleven names are
+real at base, and the lists were not re-run against them. Real
+`layer_fields` needs a `stack_layers` row and a `pushed_sha`
+(`saffron/end_review.py:112-115`). So record each layer and its push
+before the call. `LayerReview` carries `reviews` (`:241-247`). A
+`revision` spec text's path must match `_REVISION_PATH`, and a
+`follow_up` one `_FOLLOW_UP_PATH` (`saffron/ledger.py:43-44`). The
+loop's re-review at the parent's branch measures the lists there.
 
 **What the witnesses leave undriven.**
 
@@ -510,6 +553,13 @@ each failed its own witness.
   `KeyError`.
 - An origin spec with no spec text and no file. The lookup raises.
 - A stack with no layers. `qualify` then returns no group.
+
+**Docstrings name the spec writer session**, as `SpecWriterSession`'s
+does. `CONTEXT.md` lists "the writer" among **Implementer**'s _Avoid_
+words.
+
+**After this spec retires to `done/`**, nothing defers the `dead` gate for
+`write_follow_ups` and `WRITER_SHARE` until `SA-0165` calls them.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense, a hedge or a

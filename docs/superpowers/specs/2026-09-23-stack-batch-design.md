@@ -219,10 +219,10 @@ across both spec directories and the ledger.
 risk tier are claims. The host refuses a follow-up whose `touches` reaches past
 its anchored files and their tests, or whose budget exceeds its origin spec's.
 
-**Money.** Spec work draws on the same start-of-batch reserve. Writing costs
-about six times a review, measured on the writer and reviewer chain. So the
-writer has its own sub-cap. Once it is spent, the remaining groups go to the
-backlog pool.
+**Money.** Spec work holds its own share of the batch budget, `writer_usd`.
+It sits beside the end review's `reserve_usd`, not inside it. Writing costs
+about six times a review, measured on the writer and reviewer chain. Once
+`writer_usd` is spent, the remaining groups go to the backlog pool.
 
 ## 4. Finishing the stack, escalations, and the delegate
 

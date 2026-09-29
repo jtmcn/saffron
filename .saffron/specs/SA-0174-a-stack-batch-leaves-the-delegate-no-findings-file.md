@@ -47,10 +47,10 @@ forbidden:
   - tests/test_ledger_fold_task.py
   - tests/test_end_review.py
   - tests/test_task.py
-budget_usd: 22
+budget_usd: 23
 max_attempts: 3
 max_turns: 130
-estimated_lines: 335
+estimated_lines: 345
 acceptance:
   - claim: >-
       `finish.write_findings(ledger, batch_id, unrun, dest, *, pooled=())`
@@ -61,8 +61,8 @@ acceptance:
       `qualifications` rows in the order recorded. A `qualified` row is
       `pooled`, with that `Pooled`'s reason, when a `Pooled` in `pooled`
       holds its finding. The `Pooled` must name the layer's `task_key` and
-      the row's file, and its group must hold a finding of the row's lens,
-      line and claim. Where two such `Pooled` hold it, the first one's
+      the row's file, and its group must hold a `Qualified` whose `finding`
+      has the row's lens, line and claim. Where two such `Pooled` hold it, the first one's
       reason wins. Every other `qualified` row is `follow_up`, with an
       empty reason. A row whose outcome is `unverified`, `unanchored` or
       `note` is listed as it stands, and a `killed` row is left out. For a
@@ -88,14 +88,21 @@ acceptance:
       holding one finding, another batch's pooled group, a generation 0
       layer's in-cell concern, and layers recorded out of position order.
       On a follow-up layer it drives a concern, a blocker with each of the
-      two verdicts, a blocker with a rebuttal alone, an unanchored note and
-      a `spec` lens concern. It drives a follow-up that ran and missed after
-      a revision, one that gate 0 refused, an unrun one, a revised queued
-      spec with no layer, and another batch's follow-up. It drives
-      follow-ups whose critic left findings and that ended `REVIEWING`,
-      `REBUTTING` and `GATE_ERROR`. It drives findings on the revised
-      queued spec and on another batch's follow-up.
+      two verdicts, a blocker with a rebuttal alone, an unanchored note, a
+      `conventions` concern and a `spec` lens concern. It drives a
+      follow-up that ran and missed after a revision, one that gate 0
+      refused, an unrun one, a revised queued spec with no layer, and
+      another batch's follow-up. It drives follow-ups whose critic left
+      findings and that ended `EXHAUSTED`, `REVIEWING`, `REBUTTING` and
+      `GATE_ERROR`. It drives findings on the revised queued spec and on
+      another batch's follow-up.
     witness: tests/test_finish.py::test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_no_layer
+    wrong_versions:
+      - A lens set hard-coded to `correctness`, `contract` and `adequacy` rather than read from `review.LENSES`, which drops the `conventions` concern.
+      - Pool membership checked before the outcome, which pools the killed and unverified rows.
+      - A `Pooled` match that compares the severity too, so the promoted finding matches no row.
+      - Critic findings added only for follow-ups not ended `EXHAUSTED`, which drops `TE-22`'s concern.
+      - A follow-up's kind read off its latest `spec_texts` row, which drops `TE-22`.
   - claim: >-
       `cli._stack_finish` takes `pooled`, and `saffron batch --stack` passes
       it the very list it passes `_stack_follow_ups`. Given a batch id and
@@ -109,6 +116,12 @@ acceptance:
       finish runs. It drives a findings file, a `GitError` and a
       `ValueError` from `write_findings`, and a raise from `commit_finish`.
     witness: tests/test_cli.py::test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_filled
+    wrong_versions:
+      - A copy of the list taken when `_stack_finish` is built, which misses the sentinel.
+      - One `try` around both calls, so a findings raise skips the commit.
+      - A guard around `GitError` or `OSError` alone, which lets the `ValueError` reach `main`.
+      - The findings written after the commit.
+      - A `dest` outside `out_dir / "finish" / <batch id>`.
   - claim: >-
       `saffron batch` without `--stack` still hands `run_batch` its budget
       and its defaults.
@@ -135,7 +148,7 @@ notes included.
 **Which `findings.json` this is.** It lives at `out_dir / "finish" /
 <batch id> / "findings.json"`, one per stack batch. Each cell already
 writes its own critic's `findings.json` into its task directory,
-`out_dir / <spec id>` (`saffron/cell/session.py:1646`, `:2652-2654`). The
+`out_dir / <spec id>` (`saffron/cell/session.py:2832`). The
 two files share a name and nothing else.
 
 **Step 8 is four specs.** `SA-0151` builds the finishing commit and runs
@@ -145,21 +158,27 @@ the commit to the finishing layer's own branch, and opens its pull
 request. `SA-0170` links the stack.
 
 **What the tree base holds.** This spec's tree base is `SA-0151`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:144-147`). None of the chain
-from `SA-0142` on exists at `ead4c8ee`, where every line number below was
-read. So chain names are cited by symbol. This spec consumes these.
+Only `depends_on[0]` stacks (`saffron/task.py:197`, `:245`). Line numbers
+below were read at `a1148c1e`. The first three items below exist there.
+Those from `SA-0151`, `SA-0161`, `SA-0162` and `SA-0165` do not, so they
+are cited by symbol. This spec consumes these.
 
-- From `SA-0145`: the `stack_layers` table and `Ledger.record_stack_layer`.
-- From `SA-0147`: the `qualifications` table, one row per end-review
-  finding under its layer's task, with `lens`, `severity`, `file`,
-  `line`, `claim`, `outcome` and `reason`. `severity` is the one the lens
-  filed, captured before a survived probe promotes the finding to a
-  `blocker`. `outcome` is one of `qualified`, `killed`, `unverified`,
-  `unanchored` and `note`. A killed probe drops its finding.
-  `Ledger.record_qualification` writes it. `qualify.FollowUpGroup` holds a
-  `task_key`, a `file` and a tuple of `Finding`s.
-- From `SA-0182`: the `spec_texts` table, `Ledger.record_spec_text` and
-  `Ledger.spec_text`. A task's kind is its first row's origin.
+- From `SA-0145`: the `stack_layers` table (`saffron/ledger.py:191-199`)
+  and `Ledger.record_stack_layer`.
+- From `SA-0179` and `SA-0180`: the `qualifications` table
+  (`saffron/ledger.py:215-228`), one row per end-review finding under its
+  layer's task, with `lens`, `severity`, `file`, `line`, `claim`,
+  `outcome` and `reason`. `severity` is the one the lens filed, captured
+  before a survived probe promotes the finding to a `blocker`. `outcome`
+  is one of `qualified`, `killed`, `unverified`, `unanchored` and `note`.
+  A killed probe drops its finding. `Ledger.record_qualification` writes
+  it. `qualify.FollowUpGroup` holds a `task_key`, a `file` and a tuple of
+  `Qualified` (`saffron/qualify.py:44-51`). Each `Qualified` holds
+  `task_key`, `finding`, `outcome` and `reason`, in that order
+  (`:32-41`). Its `finding` is the object a probe promotes in place.
+- From `SA-0182`: the `spec_texts` table, `Ledger.record_spec_text`,
+  `Ledger.spec_text` and `Ledger.spec_texts`. A task's kind is its first
+  row's origin.
 - From `SA-0161` and `SA-0165`: `follow_up.Pooled`, of `group` and
   `reason`. `write_follow_ups` appends one to a caller-owned list as each
   group pools. A group can be narrowed to the findings it pooled.
@@ -171,21 +190,24 @@ read. So chain names are cited by symbol. This spec consumes these.
   them.
 - From `SA-0151`: `Ledger.stack_layers(batch_id)`, the batch's rows by
   `position`, each with its task's `task_id`, `state`, `branch` and
-  `pushed_sha`. `finish.commit_finish`. `cli._stack_finish(*, pinned,
+  `pushed_sha`. Criterion 1 also reads each row's `generation`,
+  `task_key` and `spec_id`, and the parent-branch re-review confirms
+  those columns come too. `finish.commit_finish`. `cli._stack_finish(*, pinned,
   ledger, out_dir)`, whose callable takes the batch id as an `int` and
   `unrun`, commits, and prints one line. `run_stack_batch` calls it once,
   after the follow-ups, whatever the stop reason. The `stack` fixture in
   `tests/test_finish.py`.
 
 **What the base already offers.** `Ledger.findings` returns a task's
-findings in the order recorded (`saffron/ledger.py:1190-1196`), and
-`record_rebuttal` writes a verdict and a rebuttal (`:1171-1188`).
-`review.LENSES` names the three in-cell lenses
-(`saffron/phases/review.py:39-43`). REBUT rebuts anchored blockers alone
-(`saffron/phases/rebut.py:3-5`). The cell writes a verdict and a rebuttal
-onto each anchored blocker's row alone (`saffron/cell/session.py:2785-2790`),
-so a concern or a note carries neither. `saffron batch` writes its batch tree under `out_dir`, which is
-`<home>/batches/v0` by default (`saffron/cli.py:182`).
+findings in the order recorded (`saffron/ledger.py:1612-1618`).
+`record_rebuttal` writes a verdict and a rebuttal (`:1593-1610`).
+`review.LENSES` names the four in-cell lenses, `correctness`, `contract`,
+`adequacy` and `conventions` (`saffron/phases/review.py:40-45`). REBUT
+rebuts anchored blockers alone (`saffron/phases/rebut.py:3-5`). The cell
+writes a verdict and a rebuttal onto each anchored blocker's row alone
+(`saffron/cell/session.py:2945-2970`), so a concern or a note carries
+neither. `saffron batch` writes its batch tree under `out_dir`, which is
+`<home>/batches/v0` by default (`saffron/cli.py:196`).
 
 ## Problem
 
@@ -203,8 +225,9 @@ Build three things.
    rows, use it and add no second one.
 2. **The file.** Add `FINDINGS_NAME` of `"findings.json"` and
    `write_findings` to `saffron/finish.py`, as criterion 1 states. Match a
-   finding to a `Pooled` by lens, line and claim, never by severity, since
-   the group holds the promoted one. Read a critic's findings with
+   row to a `Pooled` through each `q.finding` of its group, by lens, line
+   and claim. Never match by severity, since the group holds the promoted
+   one. Read a critic's findings with
    `Ledger.findings`, and keep those whose lens is in `review.LENSES`.
 3. **The wiring.** `_stack_finish` gains `pooled`, as criterion 2 states.
    It calls `write_findings` in a `try` of its own, before the commit's.
@@ -291,11 +314,12 @@ where it lacks one, and reach each task by its spec id. Then record these
 | `TE-6` | `spec` | concern | `qualified` | `qualified.py` | pooled spec | |
 
 It records one `correctness` concern on `TE-10`. On `TE-20` it records
-six findings. They are a `correctness` concern, a `contract` blocker
+seven findings. They are a `correctness` concern, a `contract` blocker
 given the verdict `confirmed` and a rebuttal, and an `adequacy` blocker
 given a rebuttal and no verdict. Then come a `correctness` blocker given
-the verdict `withdrawn`, a `correctness` note recorded unanchored, and a
-`spec` concern.
+the verdict `withdrawn`, a `correctness` note recorded unanchored, a
+`conventions` concern and a `spec` concern. It records one `correctness`
+concern on `TE-22`.
 
 In the test body, not the shared fixture, it creates three more follow-ups
 in B, the way the fixture creates `TE-22`. Each has one `follow_up` text
@@ -304,9 +328,10 @@ row and no push. `TE-27` ends `REVIEWING` with a `correctness` concern.
 ends `GATE_ERROR` with an `adequacy` note, then a `spec` concern. It also
 records a `correctness` concern on `TE-5` and on `TE-26`.
 
-`pooled` holds three groups on `qualified.py`, each of one `spec` finding
-at line 3 with the claim "pooled spec" and the severity `blocker`. They
-name `TE-10`'s key with "cap", `TE-6`'s with "O", and `TE-10`'s again with
+`pooled` holds three groups on `qualified.py`. Each holds one
+`Qualified(task_key, Finding(...), "qualified", "")`, whose `Finding` is a
+`spec` finding at line 3 with the claim "pooled spec" and the severity
+`blocker`. They name `TE-10`'s key with "cap", `TE-6`'s with "O", and `TE-10`'s again with
 "later". It calls `write_findings` for B with `unrun` of `TE-21`'s task,
 and a `dest` in a directory that does not exist. It asserts the whole
 object, and `batch` equal to B's `int` id. Each entry's `head` is its
@@ -317,10 +342,12 @@ layer's packaged head. `findings` holds `TE-10`'s rows in order:
   as `follow_up`
 - the `unanchored`, `note` and `unverified` rows
 
-Then comes `TE-7`'s row as `follow_up`. Then come `TE-20`'s first five
+Then comes `TE-7`'s row as `follow_up`. Then come `TE-20`'s first six
 findings in the order recorded, each as `left_by_critic`, each with its
 severity as filed. Their reasons are empty, `confirmed`, empty,
-`withdrawn` and empty. Then come `TE-27`'s concern, `TE-28`'s blocker and
+`withdrawn`, empty and empty. Then comes `TE-22`'s concern as
+`left_by_critic` with an empty reason, and `TE-22`'s `pushed_sha` or
+`null` as its head. Then come `TE-27`'s concern, `TE-28`'s blocker and
 `TE-29`'s note, each as `left_by_critic` with an empty reason and a `null`
 head. `follow_ups` starts with `TE-22` `EXHAUSTED`, with its path and its
 revised text. Then come `TE-23` `QUEUED`, `TE-27` `REVIEWING`, `TE-28`
@@ -346,6 +373,10 @@ writes both lists empty. These fail it:
 - a verdict left out of the reason, or a rebuttal put there
 - the reason fixed at `confirmed`, or a `withdrawn` blocker dropped
 - a follow-up that added no layer left without its critic's findings
+- critic findings added only for follow-ups not ended `EXHAUSTED`
+- a lens set hard-coded to `correctness`, `contract` and `adequacy`
+- a group's `Qualified` compared to the row directly, not through its
+  `finding`
 - the findings of a task that is no follow-up, or of another batch's
   follow-up, kept
 - a follow-up with no push given another task's head
@@ -369,11 +400,15 @@ and each failed the witness. That prototype predates criterion 1's
 `left_by_critic` rule. It listed a follow-up layer's concerns alone. The
 rule now lists every finding a lens in `review.LENSES` left, of any
 severity, on a follow-up layer or off the stack. So the nine wrong builds
-on that list are unmeasured, and so are `TE-27` to `TE-29`.
+on that list are unmeasured, and so are `TE-27` to `TE-29`. The round 1
+review added the `conventions` concern, the concern on `TE-22` and three
+wrong builds. Those are unmeasured too. The prototype's groups held bare
+`Finding` objects, not `Qualified`. The parent-branch re-review measures
+this arrangement at `SA-0151`'s head, where the `stack` fixture exists.
 
 **Criterion 2's witness** follows `SA-0151`'s command-line witness, with
-`_readiness_passes` (`tests/test_cli.py:2603-2621`) and
-`_fake_batch_resolution` (`:2624-2640`). It wraps `cli._stack_follow_ups`
+`_readiness_passes` (`tests/test_cli.py:2939-2957`) and
+`_fake_batch_resolution` (`:2960-2976`). It wraps `cli._stack_follow_ups`
 and `cli._stack_finish` in spies that record the `pooled` each got and
 call the real one. Its fake `run_stack_batch` appends a sentinel `Pooled`
 to the list `_stack_follow_ups` got. Then it calls `finish` with the `int`
@@ -397,8 +432,9 @@ call is still recorded. These fail it:
 - a `dest` outside `out_dir / "finish" / <batch id>`
 - a raise that reaches `main`, which exits 2
 
-This criterion is unmeasured. The `--stack` path does not exist at
-`ead4c8ee`.
+This criterion is unmeasured. At `a1148c1e` the `--stack` path holds no
+`_stack_finish` and no `_stack_follow_ups`, and `saffron/finish.py` does
+not exist. The parent-branch re-review measures it at `SA-0151`'s head.
 
 **What the witnesses leave undriven.** A `Pooled` whose finding matches no
 row of its layer. It adds no entry, and no row changes outcome.
@@ -416,7 +452,8 @@ prototype of the change, with its witnesses and their docstrings,
 formatted with `ruff`, was measured with `size_gate` at `68892367`. It came
 to 1139 tokens. The critic's findings for every follow-up, the `withdrawn`
 blocker and the three new follow-ups add about 200 more, estimated and not
-measured. So the estimate is about 1340 tokens, 45% of the ceiling.
+measured. The round 1 review's two findings and `Qualified` groups add
+about 40 more. So the estimate is about 1380 tokens, 46% of the ceiling.
 
 | part | lines | tokens |
 |---|---|---|

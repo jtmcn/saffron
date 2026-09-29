@@ -49,7 +49,7 @@ forbidden:
 budget_usd: 37
 max_attempts: 3
 max_turns: 130
-estimated_lines: 665
+estimated_lines: 700
 acceptance:
   - claim: >-
       Given `follow_ups`, `run_stack_batch` runs the candidates it returns,
@@ -67,6 +67,12 @@ acceptance:
       nor `follow_ups` runs again. An escalated or missed follow-up is not
       unrun, so the batch prints no `follow-ups unrun  ` line.
     witness: tests/test_batch.py::test_a_stack_batch_runs_its_follow_ups_on_top_as_generation_one_layers
+    wrong_versions:
+      - A follow-up cut from `base_sha`, which hands `TE-31` no predecessor.
+      - A follow-up cut from the last follow-up run, which hands `TE-29` the predecessor `TE-35`.
+      - A follow-up recorded as a layer of generation 0.
+      - The `mint` callable called for a follow-up, or skipped for a spec the queue handed with a `task_id`.
+      - The follow-ups sorted by id or by priority before they run.
   - claim: >-
       Follow-ups run only when generation 0's loop drained. Before each
       follow-up the batch checks `--until`, the budget and the breaker, in
@@ -78,7 +84,8 @@ acceptance:
       holds back both. The breaker's count carries over from generation 0.
       Each follow-up the batch stops before its review reaches `run`,
       `escalate` or `revise` is unrun, one whose review routed `wait`
-      included. Once the follow-ups settle, one line starting `follow-ups unrun  ` names each
+      included. A follow-up whose review raises, or routes `error`, while
+      the batch carries on is unrun too. Once the follow-ups settle, one line starting `follow-ups unrun  ` names each
       unrun spec id, in the order the batch met them. A task that
       generation 0 left in flight lets the follow-ups run, and the batch
       then stops `INCOMPLETE`. The witness drives a follow-up that fits
@@ -89,8 +96,15 @@ acceptance:
       routed `revise` that either held reserve would leave unrevised, and a
       re-queued spec of the order routed `revise` that fits only with
       `writer_usd` released. It drives a follow-up whose review routes
-      `wait` past `until`.
+      `wait` past `until`. It drives one follow-up whose review raises and
+      one whose review routes `error`, in a batch that carries on.
     witness: tests/test_batch.py::test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does
+    wrong_versions:
+      - The reserve or the writer's share still held back for the follow-ups, which stops batch 1 at `BUDGET`.
+      - Follow-ups the batch never reached left out of the unrun line, which prints no line for batch 2.
+      - A follow-up whose review raised or routed `error` left out of the unrun line, which drops `TE-122` or `TE-123` in batch 9.
+      - The follow-ups run whatever generation 0 stopped on, which runs `TE-47` in batch 3.
+      - The breaker's count reset for the follow-ups, which runs `TE-54` in batch 5.
   - claim: >-
       `run_stack_batch` checks readiness once and closes its batch row once,
       after the end review and the follow-ups. The row's status is the stop
@@ -102,6 +116,12 @@ acceptance:
       batch with a follow-up, one with `follow_ups` of `None`, one whose
       follow-up stops it at `BUDGET`, and each of the three raises.
     witness: tests/test_batch.py::test_a_stack_batch_closes_its_row_once_after_its_follow_ups_or_their_raise
+    wrong_versions:
+      - The row closed as generation 0's loop returns, which stores a spend of 1.0 for `TE-71`'s batch.
+      - The row closed with generation 0's reason, which writes `DRAINED` for `TE-74`'s batch.
+      - A second close after the first.
+      - Readiness checked again before the follow-ups.
+      - No `finally` around the end review and the follow-ups, which leaves the row open after a raise.
   - claim: >-
       Given `open_prs`, `run_stack_batch` calls it once for the follow-ups,
       after `follow_ups` returns at least one follow-up to run and before
@@ -113,15 +133,21 @@ acceptance:
       one from a layer of an earlier batch. A follow-up refused there is
       never reviewed or run, adds no layer, counts as no abort, and emits
       one line. The line is its id padded to ten, then ` refused  `, then
-      a reason naming the pull request's url. Such a follow-up is unrun. The `follow-ups unrun  ` line names every follow-up never
-      reviewed, refused on the overlap before its review or never reached,
-      in the order the batch met them.
+      a reason naming the pull request's url. Such a follow-up is unrun,
+      and the `follow-ups unrun  ` line names it among criterion 2's unrun
+      follow-ups, in the order the batch met them.
       The witness drives an overlap with a layer below the predecessor,
       with a layer that is no longer the predecessor, and with the
       follow-up's own branch. It drives one with a task that ended
       `MERGE_FAILED`, with an earlier batch's layer, and with an unrelated
       branch.
     witness: tests/test_batch.py::test_a_follow_up_meets_gate_0_with_only_this_batchs_layers_exempt
+    wrong_versions:
+      - Nothing exempt, which refuses `TE-91`.
+      - The predecessor's branch alone exempt, which refuses `TE-91` and `TE-94`.
+      - Every task of the batch exempt, which runs `TE-92`.
+      - The layers of every batch exempt, read from `stack_layers`, which runs `TE-96`.
+      - The open pull requests read again before each follow-up.
   - claim: >-
       `saffron batch --stack` passes `run_stack_batch` an `open_prs`
       callable where readiness passed, and `None` where it failed. The
@@ -134,6 +160,12 @@ acceptance:
       working `gh`, a slug with a `gh` that cannot start, no slug, and a
       readiness failure.
     witness: tests/test_cli.py::test_a_stack_batch_reads_the_open_pull_requests_a_follow_up_meets
+    wrong_versions:
+      - The list read as the callable is built, so `gh` runs before `main` returns.
+      - The `run_gh` callable called unguarded, which raises `OSError`.
+      - A `gh` run with no slug.
+      - No `note:` line for no slug, or for a `gh` that could not start.
+      - A callable passed after a readiness failure.
   - claim: >-
       Given `open_prs`, a spec of the order whose task's latest spec text
       has origin `revision` meets gate 0's open pull request overlap
@@ -149,6 +181,12 @@ acceptance:
       and one whose only text is a `follow_up`, each beside an overlapping
       pull request.
     witness: tests/test_batch.py::test_a_revised_spec_meets_gate_0s_open_pull_request_refusals_before_its_cell
+    wrong_versions:
+      - No check on a revised spec, which runs `TE-145`.
+      - The queued `touches` checked in place of the revision's, which runs `TE-144` and `TE-145`.
+      - The check before the review, where no revision is recorded yet, which runs `TE-145`.
+      - Every spec of the order checked, revised or not, which refuses `TE-146`.
+      - The check run on any spec text whatever its origin, which refuses `TE-148`.
   - claim: >-
       `run_batch` still closes its batch row once, with each of its stop
       reasons.
@@ -206,9 +244,11 @@ cannot run. That closes backlog item b-df59f8. It closes the batch row once all 
 done. `SA-0151`, the finishing layer, follows it in the chain.
 
 **What the tree base holds.** This spec's tree base is `SA-0165`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:144-147`). The chain from
-`SA-0142` puts these there, so they are cited by symbol. Every line number
-below was read at `a5d52c29`, where no chain code from `SA-0142` on exists.
+Only `depends_on[0]` stacks (`_resolve_stacked_on` in `saffron/task.py`).
+Every line number below was read at `a1148c1e`. That commit holds the chain
+from `SA-0142` through `SA-0164`, so its symbols are cited by line. The
+last three, `SA-0161`, `SA-0173` and `SA-0165`, add their names on the way
+to the tree base, and those are cited by symbol alone.
 
 - From `SA-0135`: `Refused` in `saffron/task.py`. `_drive` skips the
   attach and the breaker's count for a `Refused`.
@@ -240,8 +280,9 @@ below was read at `a5d52c29`, where no chain code from `SA-0142` on exists.
   and route with its rounds. A task with a `spec_texts` row runs that
   text, and its review reads it. `run_task` runs gate 0's other refusals
   again on that text, and leaves the two open pull request refusals to
-  this spec. Before each revision the wrapper checks the budget left: the
-  batch budget less `reserve_usd`, `writer_usd` and `batch_spend`.
+  this spec. Before each revision the wrapper checks the budget left. At
+  `a1148c1e` that is the batch budget less `reserve_usd` and `batch_spend`
+  (`saffron/batch.py:570-574`). `SA-0173` holds back `writer_usd` there too.
 - From `SA-0161`: `write_follow_ups`. Each follow-up it returns is a
   `Candidate` with its task minted and a `spec_text` of origin `follow_up`
   recorded. Each writer session is an attempt on a task whose run is in
@@ -254,41 +295,52 @@ below was read at `a5d52c29`, where no chain code from `SA-0142` on exists.
   `writer_usd`. Its callable catches every raise, so `follow_ups` never
   raises in production.
 
-**How the loop closes its row today.** `run_batch` opens the row
-(`saffron/batch.py:113`) and runs `_drive` (`:120-134`). Every return in
-`_drive` goes through `_stop` (`:162-164`). `_stop` names each task left
+**How the loop closes its row today.** `run_batch` opens the row with
+`create_batch` (`saffron/batch.py:139`) and runs `_drive` (`:146-163`). Every return in
+`_drive` goes through `_stop` (`:192-196`). `_stop` names each task left
 in flight, and turns an ordinary reason into `INCOMPLETE` for one. It then
-calls `close_batch` (`:267-293`). A raise closes the row
-`INFRASTRUCTURE` in `run_batch`'s `finally` (`:135-143`). `close_batch`
-stores the spend `batch_spend` reads at that moment (`saffron/ledger.py:820-846`). So at
-the tree base the row closes before `end_review` runs, and its spend
-leaves the end review out. `SA-0153` names this in its Out of scope and
+calls `close_batch` (`:662-688`). A raise closes the row
+`INFRASTRUCTURE` in `run_batch`'s `finally` (`:164-172`). `close_batch`
+stores the spend `batch_spend` reads at that moment (`Ledger.close_batch`
+and `Ledger.batch_spend` in `saffron/ledger.py`). `run_stack_batch` calls
+`run_batch`, then `end_review` (`saffron/batch.py:641-659`). So the row
+closes before `end_review` runs, and its spend leaves the end review out. `SA-0153` names this in its Out of scope and
 hands the close to this step.
 
 **How `_drive` holds its state.** The breaker's count is a local of
-`_drive` (`saffron/batch.py:172`), and so are `started` and `pending`
-(`:175-178`). `in_flight` belongs to `run_batch` (`:118`). `_drive`
-checks readiness once, at its top (`:165-170`). Before each task it checks
-`--until`, then the budget, then the breaker (`:195-203`).
+`_drive`, `consecutive_aborts` (`saffron/batch.py:204`), and so are `started` and `pending`
+(`:207-210`). `in_flight` belongs to `run_batch` (`:144`). `_drive`
+calls `readiness_check` once, at its top (`:197-202`). Before each task
+it checks `until`, then the budget, then `_BREAKER_THRESHOLD` (`:227-237`).
+
+**How the wrapper treats a spec today.** `run_stack_batch`'s `wrapped`
+(`saffron/batch.py:455-639`) mints a task whenever the spec id is not yet
+in `task_ids` (`:462-474`). A follow-up already holds a minted task from
+`SA-0161`, so seed `task_ids` with it and skip the mint. Every exit of
+`wrapped` also calls `remaining.remove(original)` (`:470`, `:501`, `:544`,
+`:581`, `:635`). A follow-up is never in `remaining`, so a straight reuse
+raises `ValueError` on its first exit. Keep that bookkeeping to specs of
+the order.
 
 **Gate 0's open pull request refusals.** `_refuse` runs them in
-`build_queue`'s plan (`saffron/scheduler.py:623-727`). A spec's own
-branch with an open pull request refuses a new task (`:646-662`). An open
+`build_queue`'s plan (`saffron/scheduler.py:624-738`). A spec's own
+branch with an open pull request refuses a new task (`:652-669`). An open
 pull request whose changed files match the spec's `touches` refuses it,
 unless its head branch is the spec's own or an ancestor's
-(`:676-698`). The ancestors walk `depends_on[0]` (`:166-201`). A follow-up
+(`:683-705`). The ancestors walk `depends_on[0]` (`:167-204`). A follow-up
 has no `depends_on`, so no branch of the stack is its ancestor. Its
 `touches` are its anchored files and their tests. Those are files a layer
 changed, so the layer's own pull request overlaps it. `build_queue` reads
-the list with `_open_prs(repo_slug, gh)` (`:841`), which returns `[]` on
-any `gh` failure (`:204-252`). `cli._resolve_queue` reads the slug with
+the list with `_open_prs(repo_slug, gh)` (`:914`), which returns `[]` on
+any `gh` failure (`:205-246`). `cli._resolve_queue` reads the slug with
 `package_phase.github_slug`, and `None` when it cannot
-(`saffron/cli.py:601-604`). `_guarded_gh` records a `gh` that cannot
-start and returns exit 127 (`:1075-1090`). For the plan,
+(`saffron/cli.py:975-978`). `_guarded_gh` records a `gh` that cannot
+start and returns exit 127 (`:1534-1549`). For the plan,
 `_print_scan_gaps` prints `_print_skipped`'s `note:` line with
-`_GH_REFUSALS_SKIPPED` for no slug or a failed `gh` (`:1132-1135`,
-`:1170-1191`, `:1204-1212`). `saffron/cli.py` imports `run_gh` from
-`scheduler` (`saffron/cli.py:29-37`). `SA-0150` runs the refusals that need no `gh` again on a
+`_GH_REFUSALS_SKIPPED` for no slug or a failed `gh` (`:1591-1594`,
+`:1629-1660`, `:1663-1671`). Inside `main`, `_print_batch_plan` calls
+`_print_scan_gaps` (`:1152`). `saffron/cli.py` imports `run_gh` from `scheduler`
+(`saffron/cli.py:37-46`). `SA-0150` runs the refusals that need no `gh` again on a
 recorded text, in `run_task`. `run_task` holds no slug and no `gh`. So
 its Out of scope leaves the two open pull request refusals to this spec,
 on a revision and on a follow-up. Nothing on the stack path reads the
@@ -316,8 +368,8 @@ Build six things.
    the list and a set of exempt branches. `_refuse` passes it
    `ancestor_branches`, so `build_queue` refuses what it refuses today.
    The function skips the candidate's own branch in the overlap refusal
-   itself, as `_refuse` does at `:676-679`, so no caller adds it to the
-   set. Add an `open_prs` keyword to `run_stack_batch`, `None` by default,
+   itself, so no caller adds it to the set. `_refuse`'s `own_branch` test
+   does so at `:683-686`. Add an `open_prs` keyword to `run_stack_batch`, `None` by default,
    and with `None` nothing is refused. For the follow-ups, call it only
    when at least one follow-up is to run. Refuse a follow-up as criterion 4 states. Its
    exempt set is `_branch` of each layer's spec id in this batch,
@@ -328,7 +380,8 @@ Build six things.
    `run`, `escalate` or `revise`. Gate 0 refused it on the overlap before
    its review, or the batch stopped before it at `UNTIL`, `BUDGET` or the
    breaker. A follow-up whose review routed `wait` before the batch
-   stopped is unrun too. An escalated, unrevised or missed follow-up was
+   stopped is unrun too. So is one whose review raised or routed `error`
+   while the batch carried on. An escalated, unrevised or missed follow-up was
    reviewed, so it is not unrun. Keep
    the unrun follow-ups' task ids, as `int`s, in the order the batch met them. Once
    the follow-ups settle, emit one `follow-ups unrun  ` line naming their
@@ -352,7 +405,7 @@ Build six things.
 **Why only after `DRAINED`.** A follow-up sits above every spec of the
 order, so it runs only once each of them has had its turn. A generation 0
 that stopped at `BUDGET` left a spec that did not fit, and `_drive` never
-skips past one (`saffron/batch.py:198-200`). At `UNTIL` or
+skips past one (`saffron/batch.py:232-234`). At `UNTIL` or
 `INFRASTRUCTURE`, the first follow-up would meet the same check. Those
 follow-ups run on no night of their own. `SA-0151` decides what of them
 reaches the finishing commit and `findings.json`.
@@ -411,10 +464,11 @@ own layers, and reads no other `stack_layers` row.
   it. A pull request a missed task opened tonight goes unseen for it, as
   at the tree base.
 - **The `note:` line's words mid-batch.** Criterion 5's callable prints
-  its `note:` line once per `open_prs` read. Its clause ends "refusal list
-  above is incomplete", and a read during the batch prints no list. Three
-  tests pin that text for the plan (`tests/test_cli.py:2451`, `:2495`,
-  `:3854`), so rewording `_GH_REFUSALS_SKIPPED` is not cheap here.
+  its `note:` line once per `open_prs` read. That line claims a refusal
+  list above it, and a read during the batch prints no list. Rewording
+  `_GH_REFUSALS_SKIPPED` is not cheap here. Three tests pin its last words
+  for the plan, `refusal list above is incomplete` (`tests/test_cli.py:2710`,
+  `:2754`, `:4884`).
 - **Gate 0's other refusals on a recorded text.** `SA-0150` runs them in
   `run_task`, on every revised and follow-up spec.
 - **An unrun follow-up's text.** Its task keeps the state `SA-0161` left it
@@ -425,6 +479,10 @@ own layers, and reads no other `stack_layers` row.
 - **The design record's words.** Section 1 of the design says the batch's
   "own tasks". This spec exempts its layers alone. `docs/**` is forbidden
   here, and the delegate edits that sentence by hand.
+- **`Ledger.latest_batch_id`'s docstring.** It says `run_stack_batch`
+  reads the id "once `run_batch` returns" (`saffron/ledger.py:1076-1079`).
+  That goes stale if the change drives `_drive` directly.
+  `saffron/ledger.py` is forbidden here, so the delegate files it.
 - **The vocabulary.** `CONTEXT.md` has no entry for a follow-up spec or a
   generation. Backlog item b-466005 files both by hand.
 
@@ -456,10 +514,18 @@ The second call checks no readiness. `run_batch` itself keeps its shape.
 through `**kwargs` or by name. The file is in `touches`, so edit each fake
 that refuses it.
 
-**Docstrings this makes false.** `_drive`'s says every return is `_stop`,
-the one call to `close_batch` (`saffron/batch.py:160-164`). `_stop`'s
-says it is the single call site for `close_batch` (`:285-287`). Reword
-each to match what the change builds.
+**Docstrings this makes false.** Reword each to match what the change
+builds.
+
+- `_drive`'s says every return is `_stop`, the one call to `close_batch`
+  (`saffron/batch.py:192-196`).
+- `_stop`'s says it is the single call site for `close_batch` (`:680-682`).
+- `run_stack_batch`'s says a candidate is "refused before `run_batch`
+  sees it" (`:397-398`). That goes false if the change drives `_drive`
+  directly, as the note below suggests.
+- `_stack_end_review`'s says a raise never reaches "`run_stack_batch`,
+  which already closed its loop" (`saffron/cli.py:617-624`). After
+  criterion 3 the row is still open while `end_review` runs.
 
 **One shared arrangement.** Criteria 1 to 4 and 6 share doubles over one
 `Ledger`, built once in `tests/test_batch.py`. Use `_ready`, the `ledger`
@@ -477,8 +543,9 @@ the chain's own witnesses pass.
   block. The block holds no findings, or one `scope` blocker for a spec
   routed `escalate`, or one `build` blocker for a spec routed `revise`.
   A spec with a list of routes gets them in turn. A spec routed `wait`
-  gets a session with no block and its row's `resets_at`. Every review
-  costs 0.
+  gets a session with no block and its row's `resets_at`. A spec routed
+  `error` gets a session with no block and no reset. For a spec routed
+  `raise` the double raises `RuntimeError("review")`. Every review costs 0.
 - **The revise double** records the spec id and returns a
   `SpecWriterSession` of a text, cost 0, no error and no reset. Where a
   row gives a revised `touches`, the text is a spec file with the spec's
@@ -489,11 +556,15 @@ the chain's own witnesses pass.
 - **The end review double** records its call. Where a row gives it a cost,
   it records one `reviewed` Spec lens at that cost with
   `record_end_review`, under the batch's lowest layer. It returns a
-  sentinel.
+  sentinel. Every batch that passes `follow_ups` passes this double too,
+  since `SA-0173` never calls `follow_ups` without `end_review`. Where no
+  cost is given, the batch has an end review at no cost, which records
+  nothing.
 - **The follow-ups double** records its arguments. For each follow-up in
   its row it mints a run and a task and records a `spec_text` of origin
-  `follow_up`. It returns each as `_candidate` with the row's budget,
-  priority and `touches`, and that `task_id`.
+  `follow_up`. It returns each as `_candidate` with the row's budget and
+  priority. `dataclasses.replace` sets the row's `touches` and that
+  `task_id`, which `_candidate` does not take.
 
 Read the `stack_layers` rows by `batch_key`, with each row's predecessor
 spec found through its `predecessor_key`.
@@ -559,12 +630,13 @@ and 8.0 on that module through `monkeypatch`, and calls their sum of 18
 |---|---|---|---|---|---|---|
 | 1 | `TE-41` 5 | `TE-42` 25 | all ready | $3 | `DRAINED` | `TE-41`, `TE-42` |
 | 2 | `TE-43` 5 | `TE-44` 27, `TE-40` 1 | all ready | $3 | `BUDGET` | `TE-43` |
-| 3 | `TE-45` 5, `TE-46` 24 | `TE-47` 1 | all ready | none | `BUDGET` | `TE-45` |
+| 3 | `TE-45` 5, `TE-46` 24 | `TE-47` 1 | all ready | at no cost | `BUDGET` | `TE-45` |
 | 4 | `TE-48` 5 | `TE-49` 1 | all ready | moves the clock past `until` | `UNTIL` | `TE-48` |
-| 5 | `TE-51` 1, `TE-52` 1 | `TE-53` 1, `TE-54` 1 | `TE-52`, `TE-53` `GATE_ERROR` | none | `INFRASTRUCTURE` | `TE-51`, `TE-52`, `TE-53` |
-| 6 | `TE-61` 1, `TE-62` 1 | `TE-63` 1 | `TE-62` `REVIEWING` | none | `INCOMPLETE` | all three |
-| 7 | `TE-101` 1, then `TE-103` 4, re-queued, routed `revise` | `TE-102` 10, routed `revise` then `run` | all ready | none | `DRAINED` | `TE-101`, `TE-102` |
-| 8 | `TE-111` 1 | `TE-112` 1, its review routed `wait` with `resets_at` two hours on | all ready | none | `UNTIL` | `TE-111` |
+| 5 | `TE-51` 1, `TE-52` 1 | `TE-53` 1, `TE-54` 1 | `TE-52`, `TE-53` `GATE_ERROR` | at no cost | `INFRASTRUCTURE` | `TE-51`, `TE-52`, `TE-53` |
+| 6 | `TE-61` 1, `TE-62` 1 | `TE-63` 1 | `TE-62` `REVIEWING` | at no cost | `INCOMPLETE` | all three |
+| 7 | `TE-101` 1, then `TE-103` 4, re-queued, routed `revise` | `TE-102` 10, routed `revise` then `run` | all ready | at no cost | `DRAINED` | `TE-101`, `TE-102` |
+| 8 | `TE-111` 1 | `TE-112` 1, its review routed `wait` with `resets_at` two hours on | all ready | at no cost | `UNTIL` | `TE-111` |
+| 9 | `TE-121` 1 | `TE-122` 1 routed `raise`, `TE-124` 1, `TE-123` 1 routed `error`, `TE-125` 1 | all ready | at no cost | `DRAINED` | `TE-121`, `TE-124`, `TE-125` |
 
 In batch 1 the spend before `TE-42` is 4, so 26 remain and 25 fits. With
 the reserve held, 20 remain, and with the writer's share held, 24. In
@@ -573,6 +645,12 @@ review's $3 leaves 29. Batch 4's `until` is an hour after the clock's
 start, and the end review double sets the clock a minute past it. Batch 6
 emits one line naming `TE-62` as left in flight. Batch 8's `until` is an
 hour after the clock's start, so `SA-0148`'s wait stops the batch `UNTIL`.
+
+Batch 9's follow-ups come back in the order the table gives. Each failed
+review counts one abort, and the ready follow-up after it resets the
+count, so the breaker never fires. Batch 9 emits a line starting `TE-122`
+with `raised RuntimeError: review`, and one ` unreviewed  ` line starting
+`TE-123`.
 
 In batch 7, `TE-103` carries a `task_id` the witness minted, as the queue
 hands a re-queued spec. The spend before each revision is 1. `TE-103`'s
@@ -584,8 +662,9 @@ against its need of 28. With `writer_usd` held, 27 would remain, and with
 one ` unrevised  ` line, for `TE-103`.
 
 The `follow-ups unrun  ` lines are these. Batch 2 names `TE-44 TE-40`,
-batch 3 `TE-47`, batch 4 `TE-49`, batch 5 `TE-54` and batch 8 `TE-112`.
-Batches 1, 6 and 7 print none. These fail it, each measured:
+batch 3 `TE-47`, batch 4 `TE-49`, batch 5 `TE-54`, batch 8 `TE-112` and
+batch 9 `TE-122 TE-123`. Batches 1, 6 and 7 print none. These fail it,
+each measured but the last three, which came after the simulation:
 
 - the reserve still held for the follow-ups, which stops batch 1 at
   `BUDGET`
@@ -611,6 +690,12 @@ Batches 1, 6 and 7 print none. These fail it, each measured:
 - the breaker's count reset for the follow-ups, which runs `TE-54`
 - the in-flight list dropped between the two, which stops batch 6
   `DRAINED`
+- a follow-up whose review raised left out of the unrun line, which prints
+  `TE-123` alone for batch 9
+- a follow-up whose review routed `error` left out of the unrun line,
+  which prints `TE-122` alone for batch 9
+- only the follow-ups the batch stopped before counted as unrun, which
+  prints no line for batch 9
 
 **Criterion 3's witness** wraps the ledger's `close_batch` to log each
 call beside the doubles' calls, and counts readiness calls.
@@ -692,12 +777,15 @@ layer that stopped being the predecessor. These fail it, each measured:
 
 **Criterion 5's witness** follows `SA-0156`'s wiring witness, with
 `_readiness_passes` and `_fake_batch_resolution`
-(`tests/test_cli.py:2603-2640`). `_resolve_queue` returns that resolution
+(`tests/test_cli.py:2939-2976`). `_resolve_queue` returns that resolution
 with `repo_slug` set by `dataclasses.replace`. A fake `run_stack_batch`
 records its keywords and returns `DRAINED`. `cli.run_gh` is replaced with a
 recorder that returns exit 0 and a JSON list of one pull request. It runs
-`main` with `batch --stack --budget 40` three times, and reads the output
-with `capsys` after each call of the callable.
+`main` with `batch --stack --budget 40` three times. After `main` returns
+it drains `capsys`, before it calls the callable. With no slug the plan's
+`_print_scan_gaps` prints its own `note:` line inside `main`, so an output
+read only after the call would hold two. It then reads the output after
+each call of the callable.
 
 - Slug `o/r`. After `main`, no `gh` ran. The `open_prs` it got returns the
   one pull request, and the `gh` argv holds `o/r`. No `note:` line names
@@ -781,7 +869,7 @@ other. `open_prs` ran four times, each right after the last review of
 - a refusal counted as an abort, which fires the breaker before `TE-146`
 
 **How the lists were measured.** A throwaway simulation ran on 2026-09-24
-at `68892367`. It stood in for the chain's loop: `_drive`'s checks,
+at `68892367`, before the chain's wrapper existed. It stood in for the chain's loop: `_drive`'s checks,
 `SA-0143`'s handoff, `SA-0145`'s layers, `SA-0149`'s routing, `SA-0153`'s
 reserve and end review, `SA-0155`'s mint, `SA-0164`'s revision check and
 `SA-0173`'s `follow_ups`. It ran a real `Ledger` with the two tables
@@ -793,13 +881,15 @@ constants of that day, a writer session of 12.5 and a review of 6.0, so
 a `need` of 18.5. Today's sum is 26.5, with the review's reserve at
 `SPEC_REVIEW_SESSION_USD`. The witness patches both, so its
 `need` of 18 and its one-dollar margins hold either way. Criterion 5 needs `SA-0144`'s
-`--stack` path, so nothing ran it. Criterion 6 came after the simulation,
-so nothing ran it either.
+`--stack` path, so nothing ran it. Criterion 6 and batch 9 of criterion 2
+came after the simulation, so nothing ran them either. The real wrapper at
+`a1148c1e` differs from the simulation's in two ways, both named under "How the wrapper treats a spec today":
+it mints for every new spec id, and removes each spec from `remaining`.
+The loop re-reviews this spec at `SA-0165`'s pushed head and runs these
+wrong versions there.
 
 **What the witnesses leave undriven.**
 
-- A follow-up routed `error` or `wait`. The same wrapper routes it as it
-  routes a spec of the order.
 - A generation 0 that stops `UNTIL` or `INFRASTRUCTURE`. Its first
   follow-up would meet the same check and stop the same way, so a build
   that runs follow-ups after either is indistinguishable here.
@@ -832,5 +922,8 @@ changed tokens with `size_gate` itself. `batch.py` took 407,
 chain's wrapper and the verdict-route record, so allow about 170 more
 there. Criterion 6 adds about 60 to `batch.py` and about 260 to
 `tests/test_batch.py`, reasoned from criterion 4's share. That is about
-2660, 89% of the ceiling, and past the 80% a spec aims under. Keep the
-doubles in one shared class, and criterion 6's witness on them.
+2660. Batch 9 and the unrun path for a failed review add about 35 lines,
+so `estimated_lines` is 700, about 2800 tokens. That is 93% of the
+ceiling, past the 80% a spec aims under. The operator kept it as one spec
+on review. Keep the doubles in one shared class, and criterion 6's witness
+on them.
