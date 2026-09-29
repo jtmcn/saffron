@@ -55,8 +55,12 @@ class Verdict(BaseModel):
     the operator's `adjudication`, which happens in GitHub against a PR."""
 
     finding: int
-    verdict: Literal["confirmed", "withdrawn"]
+    verdict: Literal["confirmed", "withdrawn", "contradicted"]
     reason: str
+    # Required only with `contradicted`, by the host's check below, not by
+    # this schema: every verdict validates with or without them.
+    rebuttal_quote: str | None = None
+    finding_quote: str | None = None
 
 
 class _Verdicts(BaseModel):
@@ -109,6 +113,8 @@ class LensVerdicts:
     # Set only when `error` is too: the runner reported that `query` yielded
     # no message before this session raised (backlog item b-8487de).
     never_started: bool = False
+    # One entry per `contradicted` verdict the host's quote check rejected.
+    quote_failures: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -142,6 +148,7 @@ class RebutResult:
                     "cost_usd": v.cost_usd,
                     "never_started": v.never_started,
                     "verdicts": [d.model_dump() for d in v.verdicts],
+                    "quote_failures": v.quote_failures,
                 }
                 for v in self.verdicts
             ],
@@ -348,6 +355,63 @@ def run_verdict(
     return LensVerdicts(lens, verdicts=report.verdicts, cost_usd=attempt.cost_usd_est)
 
 
+def _normalized(text: str | None) -> str:
+    """`text` with every run of whitespace collapsed to one space and both
+    ends stripped, or the empty string for `None`."""
+    return " ".join((text or "").split())
+
+
+def _contradiction_failure(
+    rebuttal_quote: str | None, finding_quote: str | None, spec_body: str
+) -> str | None:
+    """Why a `contradicted` verdict's quotes fail the host's check, or `None`
+    when both hold. Checked in order: the rebuttal's quote, the finding's
+    quote, then whether the two are equal. A pair that is both absent and
+    equal still names the missing quote first."""
+    spec_text = _normalized(spec_body)
+    rebuttal = _normalized(rebuttal_quote)
+    if not rebuttal or rebuttal not in spec_text:
+        return "the rebuttal's quote is not in the spec text"
+    finding = _normalized(finding_quote)
+    if not finding or finding not in spec_text:
+        return "the finding's quote is not in the spec text"
+    if rebuttal == finding:
+        return "the two quotes are the same spec text"
+    return None
+
+
+def _check_contradictions(lens_verdicts: LensVerdicts, spec_body: str) -> None:
+    """Every `contradicted` verdict in `lens_verdicts`, checked against
+    `spec_body` and mutated in place. A verdict that fails the check becomes
+    a `confirmed` one carrying the lens's own reason and no quotes. The
+    failure is recorded in `lens_verdicts.quote_failures` under this lens."""
+    kept: list[Verdict] = []
+    failures: list[dict] = []
+    for verdict in lens_verdicts.verdicts:
+        if verdict.verdict != "contradicted":
+            kept.append(verdict)
+            continue
+        reason = _contradiction_failure(
+            verdict.rebuttal_quote, verdict.finding_quote, spec_body
+        )
+        if reason is None:
+            kept.append(verdict)
+            continue
+        failures.append(
+            {
+                "finding": verdict.finding,
+                "reason": reason,
+                "rebuttal_quote": verdict.rebuttal_quote,
+                "finding_quote": verdict.finding_quote,
+            }
+        )
+        kept.append(
+            Verdict(finding=verdict.finding, verdict="confirmed", reason=verdict.reason)
+        )
+    lens_verdicts.verdicts = kept
+    lens_verdicts.quote_failures = failures
+
+
 def rebut_state(
     *, moved: bool, rebuttal: RebuttalTurn, verdicts: Sequence[LensVerdicts]
 ) -> tuple[str, str]:
@@ -382,11 +446,23 @@ def rebut_state(
     confirmed = [
         v for lens in verdicts for v in lens.verdicts if v.verdict == "confirmed"
     ]
+    contradicted = [
+        v for lens in verdicts for v in lens.verdicts if v.verdict == "contradicted"
+    ]
     unfixed = (
         " (a fix was claimed for some of them and no commit was made)"
         if (claimed and not moved)
         else ""
     )
+    if contradicted:
+        # The check already confirmed a failing quote pair. What remains
+        # here is a real disagreement between two lines of the same spec.
+        return "READY_FOR_REVIEW", (
+            f"{len(confirmed)} blocker(s) confirmed after the rebuttal, "
+            f"{len(contradicted)} on spec lines that contradict each other, "
+            f"{len(argued)} argued — recorded disagreement, yours to adjudicate"
+            + unfixed
+        )
     if confirmed:
         # No state for "the critic was right": adjudication is the operator's,
         # in GitHub (§5.6). What the phase owes them is the disagreement.
@@ -426,11 +502,13 @@ def _confirmed_with(rebut_result: RebutResult, action: str) -> int:
         for finding, r in first_answers(rebut_result.rebuttal).items()
         if r.action == action
     }
+    # A `contradicted` verdict counts here too. The host's check already
+    # turned a failing one into `confirmed`.
     confirmed = {
         v.finding
         for lens in rebut_result.verdicts
         for v in lens.verdicts
-        if v.verdict == "confirmed"
+        if v.verdict in ("confirmed", "contradicted")
     }
     return len(answered & confirmed)
 
@@ -626,6 +704,10 @@ def run_rebut(
                 emit=emit,
             )
         )
+    # Every lens is checked on its own, not only the first or the last one
+    # built. The failing verdict can come from either side of a rebuttal.
+    for lens_verdicts in result.verdicts:
+        _check_contradictions(lens_verdicts, spec_body)
     result.cost_usd += sum(v.cost_usd for v in result.verdicts)
     result.state, result.why = rebut_state(
         moved=moved, rebuttal=turn, verdicts=result.verdicts

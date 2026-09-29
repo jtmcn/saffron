@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,22 @@ DIFF = """diff --git a/src/gap.py b/src/gap.py
 """
 
 OPTIONS = implement.agent_options(system_prompt="s", max_turns=5, budget_usd=1.0)
+
+# The spec text every `contradicted`-verdict witness shares. Two lines, the
+# second wrapped with a two-space indent, as real markdown would wrap it.
+_CONTRADICTION_SPEC = (
+    "Only a `MERGED` or `REJECTED` newest task unstacks a child.\n"
+    "\n"
+    "The resolver stacks on no row when the newest task\n"
+    "  is outside the waiting states.\n"
+)
+# The second line, rejoined onto one line with a single space where it wrapped.
+_VALID_REBUTTAL_QUOTE = (
+    "The resolver stacks on no row when the newest task is outside the waiting states."
+)
+# The first line, with a leading space, a tab after `MERGED`, and a
+# trailing newline. All three collapse under the host's check.
+_VALID_FINDING_QUOTE = " Only a `MERGED`\tor `REJECTED` newest task unstacks a child.\n"
 
 
 def _blocker(lens="correctness", **kwargs) -> Finding:
@@ -72,6 +89,16 @@ def _argued(finding=1, argument="the default is set by the caller"):
 
 def _verdict(finding=1, verdict="withdrawn", reason="r"):
     return {"finding": finding, "verdict": verdict, "reason": "r" + reason}
+
+
+def _contradicted(finding, rebuttal_quote, finding_quote, reason="the lines disagree"):
+    return {
+        "finding": finding,
+        "verdict": "contradicted",
+        "reason": reason,
+        "rebuttal_quote": rebuttal_quote,
+        "finding_quote": finding_quote,
+    }
 
 
 def _agent(*texts, record=None):
@@ -134,6 +161,7 @@ def _run(
     critic_container_name="critic-cell",
     diff=None,
     reviewed_diff=None,
+    spec_body="fix the gap",
 ):
     def _rerun_gates():
         if gate_suites is not None:
@@ -152,7 +180,7 @@ def _run(
         blockers=blockers if blockers is not None else [_blocker()],
         options=OPTIONS,
         session_id="sess-1",
-        spec_body="fix the gap",
+        spec_body=spec_body,
         context_md=CONTEXT_MD,
         claude_md=None,
         prompts_dir=PROMPTS,
@@ -929,3 +957,429 @@ def test_unkept_fixes_does_not_count_an_argued_first_answer_stray_fixed_later():
         moved=False,
     )
     assert rebut.unkept_fixes(result) == 0
+
+
+# --- b-ab4b33: a lens that reads the spec disagreeing with itself contradicts
+# rather than withdraws the blocker it filed ---
+
+
+def test_a_blocker_argued_from_one_spec_line_against_another_is_contradicted_and_counted_apart():
+    # (texts after the rebuttal turn's own free text, blockers, moved, expected why)
+    correctness = _blocker()
+    adequacy = _blocker(lens="adequacy", line=2)
+    second_correctness = _blocker(line=3)
+
+    # Case 1: one correctness blocker, argued, HEAD unmoved, contradicted.
+    result = _run(
+        "The finding rests on the wrong line.",
+        _rebuttals(_argued()),
+        _verdicts(
+            _contradicted(1, _VALID_REBUTTAL_QUOTE, _VALID_FINDING_QUOTE, "disagree")
+        ),
+        blockers=[correctness],
+        moved=False,
+        spec_body=_CONTRADICTION_SPEC,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.why == (
+        "0 blocker(s) confirmed after the rebuttal, 1 on spec lines that "
+        "contradict each other, 1 argued — recorded disagreement, yours to "
+        "adjudicate"
+    )
+    (lens_verdicts,) = result.verdicts
+    assert lens_verdicts.verdicts == [
+        rebut.Verdict(
+            finding=1,
+            verdict="contradicted",
+            reason="disagree",
+            rebuttal_quote=_VALID_REBUTTAL_QUOTE,
+            finding_quote=_VALID_FINDING_QUOTE,
+        )
+    ]
+    record = result.as_dict([correctness])
+    assert all(v["quote_failures"] == [] for v in record["verdicts"])
+
+    # Case 2: blocker 1 the same, blocker 2 an adequacy blocker fixed and
+    # confirmed, HEAD unmoved. The unkept-fix suffix joins the new clause.
+    result = _run(
+        "The finding rests on the wrong line.",
+        _rebuttals(_argued(1), _fixed(2)),
+        _verdicts(
+            _contradicted(1, _VALID_REBUTTAL_QUOTE, _VALID_FINDING_QUOTE, "disagree")
+        ),
+        _verdicts(_verdict(2, verdict="confirmed", reason="still wrong")),
+        blockers=[correctness, adequacy],
+        moved=False,
+        spec_body=_CONTRADICTION_SPEC,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.why == (
+        "1 blocker(s) confirmed after the rebuttal, 1 on spec lines that "
+        "contradict each other, 1 argued — recorded disagreement, yours to "
+        "adjudicate (a fix was claimed for some of them and no commit was made)"
+    )
+    record = result.as_dict([correctness, adequacy])
+    assert all(v["quote_failures"] == [] for v in record["verdicts"])
+
+    # Case 3: two correctness blockers argued and withdrawn, one adequacy
+    # blocker fixed and contradicted on the same valid quotes, HEAD moved.
+    result = _run(
+        "Two arguments, one fix.",
+        _rebuttals(_argued(1), _argued(3), _fixed(2)),
+        _verdicts(_verdict(1, verdict="withdrawn"), _verdict(3, verdict="withdrawn")),
+        _verdicts(
+            _contradicted(2, _VALID_REBUTTAL_QUOTE, _VALID_FINDING_QUOTE, "disagree")
+        ),
+        blockers=[correctness, adequacy, second_correctness],
+        moved=True,
+        spec_body=_CONTRADICTION_SPEC,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert result.why == (
+        "0 blocker(s) confirmed after the rebuttal, 1 on spec lines that "
+        "contradict each other, 2 argued — recorded disagreement, yours to "
+        "adjudicate"
+    )
+    record = result.as_dict([correctness, adequacy, second_correctness])
+    assert all(v["quote_failures"] == [] for v in record["verdicts"])
+
+    # The claim's "and the two quotes differ" is load-bearing: the same
+    # quote on both sides must fail the check instead of standing.
+    same_quote = _run(
+        "The finding rests on the wrong line.",
+        _rebuttals(_argued()),
+        _verdicts(
+            _contradicted(1, _VALID_REBUTTAL_QUOTE, _VALID_REBUTTAL_QUOTE, "disagree")
+        ),
+        blockers=[correctness],
+        moved=False,
+        spec_body=_CONTRADICTION_SPEC,
+    )
+    assert same_quote.state == "READY_FOR_REVIEW"
+    (same_quote_lens,) = same_quote.verdicts
+    assert same_quote_lens.verdicts == [
+        rebut.Verdict(finding=1, verdict="confirmed", reason="disagree")
+    ]
+    assert same_quote_lens.quote_failures == [
+        {
+            "finding": 1,
+            "reason": "the two quotes are the same spec text",
+            "rebuttal_quote": _VALID_REBUTTAL_QUOTE,
+            "finding_quote": _VALID_REBUTTAL_QUOTE,
+        }
+    ]
+
+
+_INVALID_QUOTE = "a quote that never appears in the shared spec text"
+_ANOTHER_INVALID_QUOTE = "another quote that never appears in the shared spec text"
+_LOWERCASED_FINDING_QUOTE = (
+    "Only a `merged` or `rejected` newest task unstacks a child."
+)
+_UNWRAPPED_REBUTTAL_QUOTE = "The resolver stacks on no row when the newest task\n  is outside the waiting states."
+
+# label, rebuttal_quote, finding_quote, the check's reason.
+_QUOTE_FAILURE_CASES = [
+    (
+        "a",
+        _INVALID_QUOTE,
+        _VALID_FINDING_QUOTE,
+        "the rebuttal's quote is not in the spec text",
+    ),
+    (
+        "b",
+        _VALID_REBUTTAL_QUOTE,
+        _LOWERCASED_FINDING_QUOTE,
+        "the finding's quote is not in the spec text",
+    ),
+    (
+        "c",
+        _VALID_REBUTTAL_QUOTE,
+        _UNWRAPPED_REBUTTAL_QUOTE,
+        "the two quotes are the same spec text",
+    ),
+    (
+        "d",
+        " \n\t",
+        _VALID_FINDING_QUOTE,
+        "the rebuttal's quote is not in the spec text",
+    ),
+    (
+        "e",
+        _INVALID_QUOTE,
+        _ANOTHER_INVALID_QUOTE,
+        "the rebuttal's quote is not in the spec text",
+    ),
+    (
+        "f",
+        _INVALID_QUOTE,
+        _VALID_FINDING_QUOTE,
+        "the rebuttal's quote is not in the spec text",
+    ),
+    (
+        "g",
+        _INVALID_QUOTE,
+        _INVALID_QUOTE,
+        "the rebuttal's quote is not in the spec text",
+    ),
+    ("h", _VALID_REBUTTAL_QUOTE, " \t", "the finding's quote is not in the spec text"),
+]
+
+
+def test_a_contradicted_verdict_whose_quotes_fail_the_check_is_read_as_confirmed_and_recorded():
+    blocker1 = _blocker(lens="correctness", line=1)
+    blocker2 = _blocker(lens="contract", line=2)
+    # Both arguments hold case (a)'s failing rebuttal quote word for word, so a
+    # check that reads `spec_body` joined with the rebuttal would wrongly find it.
+    argument_1 = f"On finding 1, the caller sets it: {_INVALID_QUOTE}"
+    argument_2 = f"On finding 2, the same holds: {_INVALID_QUOTE}"
+
+    for label, rebuttal_quote, finding_quote, reason in _QUOTE_FAILURE_CASES:
+        swapped = label == "f"
+        failing_finding = 1 if swapped else 2
+        withdrawn_finding = 2 if swapped else 1
+        failing_lens = "correctness" if swapped else "contract"
+        withdrawn_lens = "contract" if swapped else "correctness"
+        failing_verdict = _contradicted(
+            failing_finding, rebuttal_quote, finding_quote, "still wrong"
+        )
+        withdrawn_verdict = _verdict(withdrawn_finding, verdict="withdrawn")
+        correctness_turn = _verdicts(failing_verdict if swapped else withdrawn_verdict)
+        contract_turn = _verdicts(withdrawn_verdict if swapped else failing_verdict)
+
+        result = _run(
+            "Two arguments filed.",
+            _rebuttals(
+                _argued(1, argument=argument_1), _argued(2, argument=argument_2)
+            ),
+            correctness_turn,
+            contract_turn,
+            blockers=[blocker1, blocker2],
+            moved=False,
+            spec_body=_CONTRADICTION_SPEC,
+        )
+        assert result.state == "READY_FOR_REVIEW", label
+        assert result.why == (
+            "1 blocker(s) confirmed after the rebuttal, 2 argued — recorded "
+            "disagreement, yours to adjudicate"
+        ), label
+        lenses = {v.lens: v for v in result.verdicts}
+        assert lenses[failing_lens].verdicts == [
+            rebut.Verdict(
+                finding=failing_finding, verdict="confirmed", reason="still wrong"
+            )
+        ], label
+        assert lenses[withdrawn_lens].verdicts == [
+            rebut.Verdict(finding=withdrawn_finding, verdict="withdrawn", reason="rr")
+        ], label
+        by_lens = {
+            v["lens"]: v for v in result.as_dict([blocker1, blocker2])["verdicts"]
+        }
+        assert by_lens[withdrawn_lens]["quote_failures"] == [], label
+        assert by_lens[failing_lens]["quote_failures"] == [
+            {
+                "finding": failing_finding,
+                "reason": reason,
+                "rebuttal_quote": rebuttal_quote,
+                "finding_quote": finding_quote,
+            }
+        ], label
+
+
+def test_a_contradicted_verdict_missing_a_quote_is_read_as_confirmed_and_recorded():
+    base = {"finding": 1, "verdict": "contradicted", "reason": "still wrong"}
+    # label, the verdict dict the lens gives, the check's reason, the two
+    # quotes as `quote_failures` must record them.
+    rows = [
+        (
+            "a",
+            base | {"finding_quote": _VALID_FINDING_QUOTE},
+            None,
+            _VALID_FINDING_QUOTE,
+        ),
+        (
+            "b",
+            base | {"rebuttal_quote": _VALID_REBUTTAL_QUOTE},
+            _VALID_REBUTTAL_QUOTE,
+            None,
+        ),
+        (
+            "c",
+            base | {"rebuttal_quote": _VALID_REBUTTAL_QUOTE, "finding_quote": None},
+            _VALID_REBUTTAL_QUOTE,
+            None,
+        ),
+        (
+            "d",
+            base | {"rebuttal_quote": "", "finding_quote": _VALID_FINDING_QUOTE},
+            "",
+            _VALID_FINDING_QUOTE,
+        ),
+        (
+            "e",
+            base | {"rebuttal_quote": _VALID_REBUTTAL_QUOTE, "finding_quote": ""},
+            _VALID_REBUTTAL_QUOTE,
+            "",
+        ),
+    ]
+    reasons = {
+        "a": "the rebuttal's quote is not in the spec text",
+        "b": "the finding's quote is not in the spec text",
+        "c": "the finding's quote is not in the spec text",
+        "d": "the rebuttal's quote is not in the spec text",
+        "e": "the finding's quote is not in the spec text",
+    }
+
+    for label, verdict_dict, rebuttal_quote, finding_quote in rows:
+        result = _run(
+            "Argued.",
+            _rebuttals(_argued()),
+            _verdicts(verdict_dict),
+            blockers=[_blocker()],
+            moved=False,
+            spec_body=_CONTRADICTION_SPEC,
+        )
+        assert result.state == "READY_FOR_REVIEW", label
+        assert result.why == (
+            "1 blocker(s) confirmed after the rebuttal, 1 argued — recorded "
+            "disagreement, yours to adjudicate"
+        ), label
+        (lens_verdicts,) = result.verdicts
+        assert lens_verdicts.error is None, label
+        assert lens_verdicts.verdicts == [
+            rebut.Verdict(finding=1, verdict="confirmed", reason="still wrong")
+        ], label
+        assert lens_verdicts.quote_failures == [
+            {
+                "finding": 1,
+                "reason": reasons[label],
+                "rebuttal_quote": rebuttal_quote,
+                "finding_quote": finding_quote,
+            }
+        ], label
+
+    # The sixth row: a verdict value outside the three accepted is still not
+    # the schema, and the task halts unjudged.
+    result = _run(
+        "Argued.",
+        _rebuttals(_argued()),
+        _verdicts({"finding": 1, "verdict": "overruled", "reason": "?"}),
+        blockers=[_blocker()],
+        moved=False,
+        spec_body=_CONTRADICTION_SPEC,
+    )
+    assert result.state == "REBUTTING"
+    (lens_verdicts,) = result.verdicts
+    assert lens_verdicts.verdicts == []
+    assert lens_verdicts.error is not None
+    assert (
+        result.why == "['correctness'] produced no verdict — the rebuttal is unjudged"
+    )
+
+
+def test_a_contradicted_blocker_counts_as_sustained_or_unkept_like_a_confirmed_one():
+    # action, HEAD moved, verdict, expected sustained_blockers, expected unkept_fixes.
+    rows = [
+        ("argued", True, "contradicted", 1, 0),
+        ("fixed", False, "contradicted", 0, 1),
+        ("argued", True, "withdrawn", 0, 0),
+    ]
+    for action, moved, verdict_value, sustained, unkept in rows:
+        result = _result(
+            rebuttal=rebut.RebuttalTurn(
+                rebuttals=[
+                    rebut.Rebuttal.model_validate(
+                        {"finding": 1, "action": action, "argument": "the argument"}
+                    )
+                ]
+            ),
+            verdicts=[
+                rebut.LensVerdicts(
+                    lens="correctness",
+                    verdicts=[
+                        rebut.Verdict.model_validate(
+                            {"finding": 1, "verdict": verdict_value, "reason": "r"}
+                        )
+                    ],
+                )
+            ],
+            moved=moved,
+        )
+        case = (action, moved, verdict_value)
+        assert rebut.sustained_blockers(result) == sustained, case
+        assert rebut.unkept_fixes(result) == unkept, case
+
+
+def _between(text: str, start: str, end: str) -> str:
+    begin = text.index(start) + len(start)
+    stop = text.index(end, begin)
+    return text[begin:stop]
+
+
+def _first_paragraph(section: str) -> str:
+    return " ".join(section.strip().split("\n\n", 1)[0].split())
+
+
+def _bullets(section: str) -> list[str]:
+    return [
+        " ".join(item.split())
+        for item in re.findall(r"(?ms)^- (.+?)(?=\n- |\n\n|\Z)", section)
+    ]
+
+
+def test_the_verdict_prompts_offer_contradicted_and_ask_for_both_quotes():
+    turn = rebut.RebuttalTurn(
+        rebuttals=[
+            rebut.Rebuttal(finding=1, action="argued", argument="the caller sets it")
+        ]
+    )
+    prompt = rebut.verdict_prompt(
+        "correctness",
+        blockers=[(1, _blocker())],
+        rebuttal=turn,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        reviewed_diff=DIFF,
+        diff=DIFF,
+    )
+
+    instruction = _between(prompt, "## Your instruction", "## Your findings")
+    assert _first_paragraph(instruction) == (
+        "For each finding, answer `confirmed`, `withdrawn` or `contradicted`."
+    )
+    assert _bullets(instruction) == [
+        "`confirmed` — the finding still stands. The fix does not address it, "
+        "or the argument is wrong, or nothing was done about it. Say "
+        "concretely why.",
+        '`withdrawn` — you were wrong, or the change under "The diff, after '
+        'the rebuttal" resolves it.',
+        '`contradicted`: two lines of the spec under "The task" disagree. '
+        "The rebuttal's argument rests on one of them, and your finding "
+        "rests on the other. Quote both, each copied exactly. The host "
+        "looks for both quotes in that spec. It reads your answer as "
+        "`confirmed` when it cannot find one, or when the two are the same "
+        "text.",
+    ]
+
+    emit = _between(
+        prompt, "## What to emit", "## The diff your findings were filed against"
+    )
+    assert _bullets(emit) == [
+        "`finding` (integer) — the number of the finding, exactly as listed above.",
+        "`verdict` (string): `confirmed`, `withdrawn` or `contradicted`.",
+        "`reason` (string) — one or two sentences. If you are confirming, why "
+        "the fix or the argument does not settle it; if you are withdrawing, "
+        "what changed your mind.",
+        "`rebuttal_quote` (string): required with `contradicted`. The spec "
+        "text the rebuttal's argument rests on.",
+        "`finding_quote` (string): required with `contradicted`. The spec "
+        "text your finding rests on.",
+    ]
+
+    assert " ".join(rebut.VERDICT_TURN_PROMPT.split()) == (
+        "For each of your findings, answer `confirmed`, `withdrawn` or "
+        "`contradicted` now, given the rebuttal. Read whatever you need to. "
+        "You hold no tool that can change anything. Answer now in the "
+        "required structured format."
+    )

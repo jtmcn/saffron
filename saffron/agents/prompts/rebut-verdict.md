@@ -14,12 +14,17 @@ These terms have exactly one meaning here. Use them and no synonyms.
 
 ## Your instruction
 
-For each finding, **confirm** it or **withdraw** it.
+For each finding, answer `confirmed`, `withdrawn` or `contradicted`.
 
 - `confirmed` — the finding still stands. The fix does not address it, or the
   argument is wrong, or nothing was done about it. Say concretely why.
 - `withdrawn` — you were wrong, or the change under "The diff, after the
   rebuttal" resolves it.
+- `contradicted`: two lines of the spec under "The task" disagree. The
+  rebuttal's argument rests on one of them, and your finding rests on the
+  other. Quote both, each copied exactly. The host looks for both quotes in
+  that spec. It reads your answer as `confirmed` when it cannot find one, or
+  when the two are the same text.
 
 Withdrawing is a real answer and it is not a concession: an operator who learns
 that your findings never withdraw learns to stop reading them. Confirming is
@@ -52,13 +57,17 @@ included, and the files under /work are the code. Then answer in the
 required structured format: an object with one key, `verdicts`, whose value
 is an array with **one entry per finding above** — a finding you leave out
 is not a withdrawal, it is a missing answer, and the host treats the whole
-turn as one. Each element has exactly these fields:
+turn as one. Each element has these fields:
 
 - `finding` (integer) — the number of the finding, exactly as listed above.
-- `verdict` (string) — `confirmed` or `withdrawn`.
+- `verdict` (string): `confirmed`, `withdrawn` or `contradicted`.
 - `reason` (string) — one or two sentences. If you are confirming, why the fix
   or the argument does not settle it; if you are withdrawing, what changed your
   mind.
+- `rebuttal_quote` (string): required with `contradicted`. The spec text the
+  rebuttal's argument rests on.
+- `finding_quote` (string): required with `contradicted`. The spec text your
+  finding rests on.
 
 A person reads your `reason` in the pull request's disagreements table. Write
 it in plain, specific language and state each fact once.
