@@ -62,6 +62,10 @@ which the host read at `base_sha`. It asks four questions of every hunk:
 The last question needs no standing instructions. A repo with no `CLAUDE.md`
 still gets it, and the prompt says the repo declares none.
 
+A line outside every hunk is in the remit when the change makes it false. Run
+21 left a comment counting three lenses far from any hunk, and only the
+Standards seat found it (SA-0195).
+
 Format, lint, types, structure and prose form stay with their gates. The lens
 reports only what a gate cannot see.
 
