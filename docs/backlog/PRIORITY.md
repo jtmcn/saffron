@@ -49,10 +49,11 @@ declared against safely, are done — 2026-09-08), then **97**, ~~**102**~~, ~~*
 ~~**7**~~, and ~~**78**~~.
 
 Closed since the 2026-09-04 sort, and left in place because their numbers are
-cited: **74** is done (`SA-0063`, `SA-0064`); **88** is closed on a negative
-result (2026-09-08 — the gate summary was not the confound); **71** is
-done (2026-09-08), **78** is done (its `DESIGN.md` half 2026-09-12), and **94** has its recording half done
-and its explanation half open — each item's own `Status` line says what is left.
+cited: **74** is done (`SA-0063`, `SA-0064`). **88** is closed on a negative
+result, 2026-09-08. The gate summary was not the confound. **71** is done
+(2026-09-08). **78** is done, its `DESIGN.md` half on 2026-09-12. **94** is done,
+its recording half on 2026-09-09 and its explanation on 2026-09-29. Each item's
+own `Status` line says what is left.
 (**59** is done — `SA-0052`, PR #118.) Stack #222, merged 2026-09-12, closed
 **45**, **57**, **61**, **70** and **95**, and the spec'd half of **42**, **46**,
 **63** and **89**; each of those four stays listed for the half its `Status`
