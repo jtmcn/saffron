@@ -3,7 +3,7 @@ id: SA-0193
 title: A lens withdraws the host's probe blocker on a `preserves` criterion because its line is outside the diff
 type: feature
 priority: 1
-estimated_lines: 211
+estimated_lines: 218
 touches:
   - saffron/phases/rebut.py
   - saffron/cell/session.py
@@ -71,6 +71,8 @@ acceptance:
       - The refusal is not written to `rebuttal.json`.
       - A guarded blocker the lens confirmed is recorded as refused.
       - Only the first lens's verdicts are checked.
+      - A withdrawal is refused only when the first answer argued or HEAD did not move, so an unanswered blocker's withdrawal stands once HEAD moved.
+      - A refusal is recorded only when HEAD did not move.
   - claim: >-
       A task whose `preserves` criterion's probe survives its witness and
       anchors, whose implementer argues the blocker is outside the diff and
@@ -261,16 +263,21 @@ lens fails. The witness asserts these.
   `withdrawal_refusals` is empty. The adequacy entry's equals four dicts,
   `{"finding": n, "withdrawn_reason": "rn"}` for n from 1 to 4.
 
-Run 2, HEAD moved, run 1's first three blockers. Blocker 1 is answered
+Run 2, HEAD moved, run 1's first four blockers. Blocker 1 is answered
 `fixed`. Blocker 2 is argued. Blocker 3 is argued first and answered
-`fixed` second. The lens withdraws all three. The adequacy verdicts equal
-three `Verdict`s: finding 1 `withdrawn` with `r1`, and findings 2 and 3
-`confirmed`, each reason the host's sentence then `r2` or `r3`. `why`
-equals this line.
+`fixed` second. Blocker 4 has no answer. The lens withdraws all four. The
+witness asserts these.
 
-```
-2 blocker(s) confirmed after the rebuttal, 2 argued — recorded disagreement, yours to adjudicate
-```
+- The adequacy verdicts equal four `Verdict`s. Finding 1 is `withdrawn`
+  with `r1`. Findings 2 to 4 are `confirmed`, each reason the host's
+  sentence then `r2` to `r4`.
+- In `as_dict`, the adequacy entry's `withdrawal_refusals` equals three
+  dicts, `{"finding": n, "withdrawn_reason": "rn"}` for n from 2 to 4.
+- `why` equals this line.
+
+  ```
+  3 blocker(s) confirmed after the rebuttal, 2 argued — recorded disagreement, yours to adjudicate
+  ```
 
 Write each expected string and each expected `Verdict` as a literal in the
 test. Never build one from `rebut.py`'s own constant.
@@ -302,13 +309,22 @@ answer to finding 1, argument `outside my diff`. The third is one
 witnesses. With its source reverted to `60510037`, both failed. Criterion
 1's failed with a `TypeError` from `_run`, and criterion 2's on its
 `verdicts` assertion. Each wrong version above was applied to the
-prototype, and at least one of the two witnesses failed on every one.
+prototype, and at least one of the two witnesses failed on every one. The
+two about HEAD having moved passed a run 2 without blocker 4 and its
+refusal asserts. They fail the run 2 above.
+
+**A shared witness.** The guard keys on witness text. Nothing in
+`saffron/intake.py` makes a witness unique to one criterion, and
+`SA-0121` shared one across three. So a survivor of a criterion without
+`preserves` is guarded too if another criterion is `preserves` over the
+same witness. That errs toward keeping a blocker, which is the safe
+direction. No criterion drives it.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence
 over 25 words.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks here. The
-prototype, counted by `size_gate`, came to 845 tokens against the
+prototype, counted by `size_gate`, came to 871 tokens against the
 `feature` ceiling of 3000. `estimated_lines` is that over four, with no
 overrun added. About a quarter of it is `saffron/`, and the rest is tests.
