@@ -1,0 +1,506 @@
+diff --git a/saffron/ledger.py b/saffron/ledger.py
+index b1166ea..7662c8a 100644
+--- a/saffron/ledger.py
++++ b/saffron/ledger.py
+@@ -3,21 +3,23 @@
+ Still true of what runs. No caller constructs a `Ledger` with a record, so no
+ row here is derived from one and §4.6 rule 1 holds as written. The record
+ design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
+-by `saffron/record/fold.py`, deletable at any time. Only the fifteen kinds
++by `saffron/record/fold.py`, deletable at any time. Only the sixteen kinds
+ `_append` writes fold back, so even then it stays authoritative for the rest.
+ That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
+ with it rather than ahead of it.
+ 
+ Eight of the nine tables. `decisions` waits for an operator to have something
+ to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
+-`qualifications` and `spec_reviews` are a tenth, an eleventh, a twelfth, a
+-thirteenth and a fourteenth table, outside that count: `DESIGN.md` §4.1 does
+-not list any of them.
++`qualifications`, `spec_reviews` and `spec_texts` are a tenth, an eleventh, a
++twelfth, a thirteenth, a fourteenth and a fifteenth table, outside that
++count: `DESIGN.md` §4.1 does not list any of them.
+ """
+ 
+ from __future__ import annotations
+ 
++import hashlib
+ import json
++import re
+ import sqlite3
+ from collections.abc import Sequence
+ from datetime import UTC, datetime
+@@ -32,6 +34,15 @@ from saffron.record.contract import Fact, Record, new_task_key
+ RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
+ _PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
+ 
++# The closed set `record_spec_text` writes: a spec review's revision, or a
++# follow-up spec neither is at `base_sha` (ADR 7).
++SPEC_TEXT_ORIGINS = ("revision", "follow_up")
++
++# A follow-up's file is named for its own spec id by the host. A revision's
++# is the queued spec's own file, tied to no id.
++_FOLLOW_UP_PATH = r"\.saffron/specs/{}-[A-Za-z0-9._-]+\.md"
++_REVISION_PATH = r"\.saffron/specs/[A-Za-z0-9][A-Za-z0-9._-]*\.md"
++
+ SCHEMA = f"""
+ CREATE TABLE IF NOT EXISTS repos (
+     repo_id     INTEGER PRIMARY KEY,
+@@ -227,6 +238,19 @@ CREATE TABLE IF NOT EXISTS spec_reviews (
+     PRIMARY KEY (task_key, n)
+ );
+ 
++-- One spec text a stack batch runs that is not at `base_sha`: a spec review's
++-- revision, or a follow-up spec's own text, keyed like `spec_reviews` (ADR 7).
++CREATE TABLE IF NOT EXISTS spec_texts (
++    task_key  TEXT NOT NULL,
++    n         INTEGER NOT NULL,
++    origin    TEXT NOT NULL,
++    spec_id   TEXT NOT NULL,
++    path      TEXT NOT NULL,
++    text      TEXT NOT NULL,
++    spec_sha  TEXT NOT NULL,
++    PRIMARY KEY (task_key, n)
++);
++
+ CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
+ CREATE INDEX IF NOT EXISTS gate_results_by_run ON gate_results(run_id);
+ CREATE INDEX IF NOT EXISTS gate_results_by_attempt ON gate_results(attempt_id);
+@@ -477,12 +501,14 @@ class Ledger:
+     def _drop_task_rows(self, key: str) -> None:
+         """Delete every row under `record_key = key`, task row last. Makes
+         `fold_task` an upsert, and a no-op on a task with no row yet.
+-        `stack_layers`, `end_reviews`, `qualifications` and `spec_reviews`
+-        are keyed on `key` itself, so all four deletes run first."""
++        `stack_layers`, `end_reviews`, `qualifications`, `spec_reviews` and
++        `spec_texts` are keyed on `key` itself, so all five deletes run
++        first."""
+         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
+         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
+         self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
+         self._db.execute("DELETE FROM spec_reviews WHERE task_key = ?", (key,))
++        self._db.execute("DELETE FROM spec_texts WHERE task_key = ?", (key,))
+         row = self._db.execute(
+             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
+         ).fetchone()
+@@ -775,6 +801,23 @@ class Ledger:
+                 ),
+             )
+             return None
++        if fact.kind == "spec_text":
++            # `n` comes straight from the payload, `spec_review`'s shape,
++            # so `fold_task` keeps a dropped fact's numbering on what remains.
++            self._db.execute(
++                "INSERT INTO spec_texts (task_key, n, origin, spec_id, "
++                "path, text, spec_sha) VALUES (?, ?, ?, ?, ?, ?, ?)",
++                (
++                    fact.task_key,
++                    payload["n"],
++                    payload["origin"],
++                    payload["spec_id"],
++                    payload["path"],
++                    payload["text"],
++                    payload["spec_sha"],
++                ),
++            )
++            return None
+         if fact.kind == "rebuttal":
+             finding_id = self._finding_at(task_id, payload["position"])
+             if finding_id is None:
+@@ -1386,6 +1429,93 @@ class Ledger:
+         )
+         self._commit_and_append(fact)
+ 
++    def record_spec_text(
++        self,
++        task_id: int,
++        *,
++        origin: str,
++        spec_id: str,
++        path: str,
++        text: str,
++    ) -> int:
++        """Record one spec text a stack batch runs, not at `base_sha`: a spec
++        review's revision, or a follow-up spec's own text (ADR 7). Numbered
++        one more than the task's own `spec_texts` rows, starting at 1. Raises
++        `ValueError` for an origin outside `SPEC_TEXT_ORIGINS`, a task id
++        that names no task, or a `spec_id` the task does not carry. It also
++        raises for a `path` the origin's own pattern refuses, writing no row
++        and no fact."""
++        if origin not in SPEC_TEXT_ORIGINS:
++            raise ValueError(
++                f"spec text origin {origin!r} is not one of {SPEC_TEXT_ORIGINS}"
++            )
++        row = self._db.execute(
++            "SELECT record_key, spec_id FROM tasks WHERE task_id = ?", (task_id,)
++        ).fetchone()
++        if row is None:
++            raise ValueError(f"no task {task_id} to record a spec text against")
++        if spec_id != row["spec_id"]:
++            raise ValueError(f"task {task_id} does not carry spec id {spec_id!r}")
++        pattern = (
++            _FOLLOW_UP_PATH.format(re.escape(spec_id))
++            if origin == "follow_up"
++            else _REVISION_PATH
++        )
++        if re.fullmatch(pattern, path) is None:
++            raise ValueError(f"path {path!r} is not a valid {origin} spec path")
++        n = (
++            1
++            + self._db.execute(
++                "SELECT COUNT(*) AS n FROM spec_texts WHERE task_key = ?",
++                (row["record_key"],),
++            ).fetchone()["n"]
++        )
++        fact = self._build_fact(
++            task_id,
++            "spec_text",
++            {
++                "n": n,
++                "origin": origin,
++                "spec_id": spec_id,
++                "path": path,
++                "text": text,
++                "spec_sha": hashlib.sha256(text.encode("utf-8")).hexdigest(),
++            },
++        )
++        self._commit_and_append(fact)
++        return n
++
++    def spec_text(self, task_id: int) -> sqlite3.Row | None:
++        """The task's `spec_texts` row with the highest `n`, or `None` for a
++        task that holds none. Raises `ValueError` for a task id that names
++        no task."""
++        row = self._db.execute(
++            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
++        ).fetchone()
++        if row is None:
++            raise ValueError(f"no task {task_id} to read a spec text for")
++        return self._db.execute(
++            "SELECT task_key, n, origin, spec_id, path, text, spec_sha "
++            "FROM spec_texts WHERE task_key = ? ORDER BY n DESC LIMIT 1",
++            (row["record_key"],),
++        ).fetchone()
++
++    def spec_texts(self, task_id: int) -> list[sqlite3.Row]:
++        """Every `spec_texts` row the task holds, oldest first, or an empty
++        list. Raises `ValueError` for a task id that names no task."""
++        row = self._db.execute(
++            "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
++        ).fetchone()
++        if row is None:
++            raise ValueError(f"no task {task_id} to read spec texts for")
++        return list(
++            self._db.execute(
++                "SELECT task_key, n, origin, spec_id, path, text, spec_sha "
++                "FROM spec_texts WHERE task_key = ? ORDER BY n",
++                (row["record_key"],),
++            )
++        )
++
+     def record_end_review(
+         self,
+         task_id: int,
+diff --git a/tests/test_ledger_fold_task.py b/tests/test_ledger_fold_task.py
+index 637ca8c..8d89da5 100644
+--- a/tests/test_ledger_fold_task.py
++++ b/tests/test_ledger_fold_task.py
+@@ -8,6 +8,7 @@ into SQLite.
+ 
+ from __future__ import annotations
+ 
++import hashlib
+ import re
+ import sqlite3
+ from dataclasses import replace
+@@ -906,3 +907,290 @@ def test_every_task_write_applies_its_fact_through_apply(tmp_path, record, monke
+                 call()
+         monkeypatch.undo()
+         ledger.close()
++
++
++_SPEC_TEXT_COLUMNS = "task_key, n, origin, spec_id, path, text, spec_sha"
++
++
++def _all_spec_texts(path: Path) -> list[dict]:
++    con = sqlite3.connect(path)
++    con.row_factory = sqlite3.Row
++    try:
++        rows = con.execute(
++            f"SELECT {_SPEC_TEXT_COLUMNS} FROM spec_texts ORDER BY task_key, n"
++        ).fetchall()
++        return [dict(r) for r in rows]
++    finally:
++        con.close()
++
++
++def _sha256(text: str) -> str:
++    return hashlib.sha256(text.encode("utf-8")).hexdigest()
++
++
++def test_a_spec_text_is_numbered_on_its_task_and_read_back_latest(tmp_path, record):
++    from saffron.ledger import SPEC_TEXT_ORIGINS
++
++    assert SPEC_TEXT_ORIGINS == ("revision", "follow_up")
++    ledger = Ledger(tmp_path / "ledger.db", record=record)
++    sy1 = _minimal(ledger, "SY-1")
++    sy2 = _minimal(ledger, "SY-2")
++    sy3 = _minimal(ledger, "SY-3")
++    first = "---\nid: SY-1\n---\nfirst é\n"
++    second = "second\n"
++    path1 = ".saffron/specs/SY-1-a.md"
++
++    assert ledger.spec_text(sy3) is None
++    assert ledger.spec_texts(sy3) == []
++
++    assert (
++        ledger.record_spec_text(
++            sy1, origin="revision", spec_id="SY-1", path=path1, text=first
++        )
++        == 1
++    )
++    row_after_first = ledger.spec_text(sy1)
++    assert row_after_first is not None
++    assert row_after_first["n"] == 1
++    assert (
++        ledger.record_spec_text(
++            sy2,
++            origin="follow_up",
++            spec_id="SY-2",
++            path=".saffron/specs/SY-2-b.md",
++            text="b",
++        )
++        == 1
++    )
++    assert (
++        ledger.record_spec_text(
++            sy1, origin="revision", spec_id="SY-1", path=path1, text=second
++        )
++        == 2
++    )
++
++    sy1b = _minimal(ledger, "SY-1")
++    assert ledger.spec_text(sy1b) is None
++    assert (
++        ledger.record_spec_text(
++            sy1b, origin="revision", spec_id="SY-1", path=path1, text="again"
++        )
++        == 1
++    )
++    assert (
++        ledger.record_spec_text(
++            sy3,
++            origin="revision",
++            spec_id="SY-3",
++            path=".saffron/specs/other.md",
++            text="o",
++        )
++        == 1
++    )
++
++    key1 = _key(ledger, sy1)
++    key1b = _key(ledger, sy1b)
++
++    latest = ledger.spec_text(sy1)
++    assert latest is not None
++    assert dict(latest) == {
++        "task_key": key1,
++        "n": 2,
++        "origin": "revision",
++        "spec_id": "SY-1",
++        "path": path1,
++        "text": second,
++        "spec_sha": _sha256(second),
++    }
++    assert [dict(r) for r in ledger.spec_texts(sy1)] == [
++        {
++            "task_key": key1,
++            "n": 1,
++            "origin": "revision",
++            "spec_id": "SY-1",
++            "path": path1,
++            "text": first,
++            "spec_sha": _sha256(first),
++        },
++        {
++            "task_key": key1,
++            "n": 2,
++            "origin": "revision",
++            "spec_id": "SY-1",
++            "path": path1,
++            "text": second,
++            "spec_sha": _sha256(second),
++        },
++    ]
++    assert [dict(r) for r in ledger.spec_texts(sy1b)] == [
++        {
++            "task_key": key1b,
++            "n": 1,
++            "origin": "revision",
++            "spec_id": "SY-1",
++            "path": path1,
++            "text": "again",
++            "spec_sha": _sha256("again"),
++        }
++    ]
++    facts = [f.payload for f in record.read(key1) if f.kind == "spec_text"]
++    assert facts == [
++        {
++            "n": 1,
++            "origin": "revision",
++            "spec_id": "SY-1",
++            "path": path1,
++            "text": first,
++            "spec_sha": _sha256(first),
++        },
++        {
++            "n": 2,
++            "origin": "revision",
++            "spec_id": "SY-1",
++            "path": path1,
++            "text": second,
++            "spec_sha": _sha256(second),
++        },
++    ]
++
++    def _row_count() -> int:
++        return ledger._db.execute("SELECT COUNT(*) AS n FROM spec_texts").fetchone()[
++            "n"
++        ]
++
++    def _fact_count() -> int:
++        return sum(len(record.read(k)) for k in record.task_keys())
++
++    rows_before, facts_before = _row_count(), _fact_count()
++
++    def _refused(**kwargs) -> None:
++        with pytest.raises(ValueError):
++            ledger.record_spec_text(**kwargs)
++        assert _row_count() == rows_before
++        assert _fact_count() == facts_before
++
++    for origin in ("Revision", "follow-up", ""):
++        _refused(task_id=sy1, origin=origin, spec_id="SY-1", path=path1, text="x")
++    _refused(task_id=sy1, origin="revision", spec_id="SY-2", path=path1, text="x")
++    _refused(task_id=999, origin="revision", spec_id="SY-1", path=path1, text="x")
++    with pytest.raises(ValueError):
++        ledger.spec_text(999)
++    with pytest.raises(ValueError):
++        ledger.spec_texts(999)
++
++    bad_either_origin = [
++        "docs/SY-1-a.md",
++        ".saffron/specs/done/SY-1-a.md",
++        ".saffron/specs/../SY-1-a.md",
++        "/r/.saffron/specs/SY-1-a.md",
++        "./.saffron/specs/SY-1-a.md",
++        ".saffron/specs/SY-1-a.txt",
++        ".saffron/specs/SY-1-a/b.md",
++        ".saffron/specs/SY-1-a.md.bak",
++    ]
++    for bad_path in bad_either_origin:
++        _refused(
++            task_id=sy1, origin="revision", spec_id="SY-1", path=bad_path, text="x"
++        )
++        _refused(
++            task_id=sy1, origin="follow_up", spec_id="SY-1", path=bad_path, text="x"
++        )
++
++    bad_follow_up_only = [
++        ".saffron/specs/SY-10-a.md",
++        ".saffron/specs/other.md",
++        ".saffron/specs/SY-1.md",
++    ]
++    for bad_path in bad_follow_up_only:
++        _refused(
++            task_id=sy1, origin="follow_up", spec_id="SY-1", path=bad_path, text="x"
++        )
++
++    ledger.close()
++
++
++def test_the_spec_texts_fold_back_from_the_record_alone(tmp_path, record):
++    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
++    source = Ledger(source_path, record=record)
++    sy1 = _minimal(source, "SY-1")
++    sy2 = _minimal(source, "SY-2")
++    path1 = ".saffron/specs/SY-1-a.md"
++    source.record_spec_text(
++        sy1, origin="revision", spec_id="SY-1", path=path1, text="first"
++    )
++    source.record_spec_text(
++        sy2,
++        origin="follow_up",
++        spec_id="SY-2",
++        path=".saffron/specs/SY-2-b.md",
++        text="other",
++    )
++    source.record_spec_text(
++        sy1, origin="revision", spec_id="SY-1", path=path1, text="second"
++    )
++    sy1b = _minimal(source, "SY-1")
++    source.record_spec_text(
++        sy1b, origin="revision", spec_id="SY-1", path=path1, text="again"
++    )
++    key1 = _key(source, sy1)
++    key2 = _key(source, sy2)
++    key1b = _key(source, sy1b)
++
++    into = Ledger(fold_path)
++    _seed_unrelated_task(tmp_path / "seed", into)
++    fold(record, into)
++    assert _all_spec_texts(fold_path) == _all_spec_texts(source_path)
++
++    for key in (key1, key2, key1b):
++        before = _all_spec_texts(source_path)
++        source.fold_task(key, record.read(key))
++        assert _all_spec_texts(source_path) == before
++
++    kept = [r for r in _all_spec_texts(fold_path) if r["task_key"] in (key2, key1b)]
++    into.fold_task(key1, [])
++    assert [r for r in _all_spec_texts(fold_path) if r["task_key"] == key1] == []
++    assert [
++        r for r in _all_spec_texts(fold_path) if r["task_key"] in (key2, key1b)
++    ] == kept
++
++    trimmed = [
++        f
++        for f in record.read(key1)
++        if not (f.kind == "spec_text" and f.payload["n"] == 1)
++    ]
++    into.fold_task(key1, trimmed)
++    rows1 = [r for r in _all_spec_texts(fold_path) if r["task_key"] == key1]
++    assert len(rows1) == 1
++    assert rows1[0]["n"] == 2
++
++    # `spec_text` reads the highest `n`, not the last row inserted.
++    sy4 = _minimal(source, "SY-4")
++    source.record_spec_text(
++        sy4,
++        origin="revision",
++        spec_id="SY-4",
++        path=".saffron/specs/SY-4-a.md",
++        text="x",
++    )
++    source.record_spec_text(
++        sy4,
++        origin="revision",
++        spec_id="SY-4",
++        path=".saffron/specs/SY-4-a.md",
++        text="y",
++    )
++    key4 = _key(source, sy4)
++    facts4 = record.read(key4)
++    spec_text_facts = [f for f in facts4 if f.kind == "spec_text"]
++    assert [f.payload["n"] for f in spec_text_facts] == [1, 2]
++    reordered = [f for f in facts4 if f.kind != "spec_text"] + spec_text_facts[::-1]
++    into.fold_task(key4, reordered)
++    task_id4 = _raw_rows(
++        fold_path, "SELECT task_id FROM tasks WHERE record_key = ?", key4
++    )[0]["task_id"]
++    latest4 = into.spec_text(task_id4)
++    assert latest4 is not None
++    assert (latest4["n"], latest4["text"]) == (2, "y")
++
++    source.close()
++    into.close()

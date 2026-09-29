@@ -1,0 +1,18 @@
+# Run 20's Standards defect on #565. A repair turn wrote the comment to pass
+# `prose`, and review commit 6fc23834 corrected it.
+spec_id = "SA-0160"
+pr = 565
+base_sha = "89a244a6c90ce8e5c19cc223537497c1213ee5a1"
+head_sha = "b9cbb5cc1db0b40390e0aad045a3ed97d405b823"
+source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "timeout-comment-contradicts"
+# The comment calls 3600 seconds twice the idle bound of 300 seconds.
+locations = [{ file = "saffron/spec_review.py", lines = [539, 541] }]
+owner = "conventions"
+# The seat's own grade is unrecorded. #565's one seat blocker was a witness.
+min_severity = "concern"
+must_mention = ["idle bound", "twice"]

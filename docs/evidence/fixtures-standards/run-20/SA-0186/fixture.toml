@@ -1,0 +1,22 @@
+# Run 20's Standards defect on #562. Head is the ledger's pushed_sha, reachable
+# only from refs/fixtures/SA-0186-head. dd7fd989 on main is the restacked copy
+# and reproduces no recorded diff. SA-0191's lines are at dd7fd989, 26 later.
+spec_id = "SA-0186"
+pr = 562
+base_sha = "2a20e23af654c6a9ca92f4efebee5a694ad9766c"
+head_sha = "3c2bdd4171db1c1d648b02eac5f8ae85feffd3f8"
+source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "citation-overclaims-4-2-1"
+# Two comments cite DESIGN.md §4.2.1 for resolver rules it does not state.
+locations = [
+  { file = "saffron/task.py", lines = [60, 61] },
+  { file = "saffron/task.py", lines = [233, 234] },
+]
+owner = "conventions"
+# The seat's own grade is unrecorded. Filed as b-710086, tier 3.
+min_severity = "concern"
+must_mention = ["4.2.1"]

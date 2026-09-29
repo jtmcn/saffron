@@ -1,0 +1,38 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.350406,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 1.0329084000000002,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 0.9888530999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/ledger.py",
+        "line": 1499,
+        "claim": "`Ledger.spec_text` is specified to return the row with the highest `n`, and the query enforces that with `ORDER BY n DESC LIMIT 1`. But in every scenario the tests build, a task's `spec_texts` rows are always inserted in the same order as their `n` values increase (sequential `record_spec_text` calls, or a fold replaying a fact list that is itself ordered by `n`), so SQLite's insertion-order rowid always agrees with `n` order. Replacing `ORDER BY n DESC` with `ORDER BY rowid DESC` would return the identical row in `test_a_spec_text_is_numbered_on_its_task_and_read_back_latest` (the only test that calls `spec_text`), and `test_the_spec_texts_fold_back_from_the_record_alone` never calls the `spec_text` method at all, so it would not notice either. The suite therefore does not actually pin down 'ordered by `n`' versus 'ordered by insertion', though in practice the two never diverge given how `record_spec_text` and `fold_task` are used, which is why this is a note rather than a concern.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/ledger.py",
+          "find": "FROM spec_texts WHERE task_key = ? ORDER BY n DESC LIMIT 1",
+          "replace": "FROM spec_texts WHERE task_key = ? ORDER BY rowid DESC LIMIT 1"
+        },
+        "probe_verdict": "survived"
+      }
+    ]
+  }
+]

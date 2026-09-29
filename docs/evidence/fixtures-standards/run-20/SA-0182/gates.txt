@@ -1,0 +1,17 @@
+- scope: pass (no tool reported) — 2 changed files within touches
+- integrity: pass (no tool reported) — 2 changed files clean of suppression and gate-config edits
+- size: pass (no tool reported) — 1319 changed tokens within the feature ceiling of 3000
+- format: pass (ruff 0.16.3) — formatted
+- lint: pass (ruff 0.16.3) — 0 violations
+- types: pass (ty 0.0.77) — no type errors
+- tests: pass (pytest 9.1.1) — 2926 passed, 2 skipped, 24 deselected in 59.98s
+- witness: skip (no tool reported) — the spec declares no mutants
+- shacl: pass (PySHACL Version: 0.40.1) — 0 violations across 2 graphs
+- structure: pass (ast-grep 0.45.3) — 0 violations
+- prose: fail (saffron-prose c2b56f163754) — 10930 failures in 612 files. em-dash 4175, sentence-length 3578, semicolon 1294, comment-block 591, filler 529, hedge 257, perfect-tense 230, docstring-length 186, contraction 90
+- dead: pass (vulture 2.16) — 0 unused, 4 deferred by open specs, 12 stale pending entries
+- terms: fail (saffron-prose c2b56f163754) — 1 failures in 612 files. avoided-term 1
+- revert: pass (pytest 9.1.1) — 2 new test(s) failed without their source, as required
+- committed: pass (no tool reported) — worktree clean
+- census: pass (no tool reported) — 2928 tests collected, none of 2926 removed
+- criteria: pass (no tool reported) — 2 criteria witnessed at head

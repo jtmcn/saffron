@@ -1,0 +1,22 @@
+# Run 20's Standards defect on #566.
+spec_id = "SA-0164"
+pr = 566
+base_sha = "6fc238349b19dc08a1d1798d14beae349d5a610f"
+head_sha = "a67ec01b0783eda266839be241bf896c8e1a8874"
+source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "lone-concern-docstrings"
+# Three docstrings call a witness concern lone, and the route revises on any.
+locations = [
+  { file = "saffron/spec_review.py", lines = [256, 258] },
+  { file = "tests/test_batch.py", lines = [3588, 3589] },
+  { file = "tests/test_spec_review.py", lines = [395, 396] },
+]
+owner = "conventions"
+# The seat's own grade is unrecorded.
+min_severity = "concern"
+# A bare `lone` matches "alone".
+must_mention = ["lone `concern`", "lone concern"]

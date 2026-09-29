@@ -1,0 +1,1146 @@
+diff --git a/saffron/cli.py b/saffron/cli.py
+index 2c59b70..d84d5a7 100644
+--- a/saffron/cli.py
++++ b/saffron/cli.py
+@@ -747,6 +747,81 @@ def _stack_review(
+     return run
+ 
+ 
++def _stack_revise(
++    *, pinned: PinnedBase, repo: Path, out_dir: Path
++) -> Callable[
++    [Candidate, Candidate | None, str | None, str], spec_review.SpecWriterSession
++]:
++    """`SA-0164`'s revision round adapter (ADR 7), built the way
++    `_stack_review` is. Given a layer, it fetches that spec's branch fresh
++    and seeds the cell there. Given `None`, it seeds the cell at the
++    pinned `base_sha`. The prompt and gates always come from `base_sha`'s
++    own export, never a layer's head.
++    """
++
++    def run(
++        candidate: Candidate,
++        layer: Candidate | None,
++        spec_text: str | None,
++        review_text: str,
++    ) -> spec_review.SpecWriterSession:
++        if layer is None:
++            head = pinned.base_sha
++        else:
++            branch = _branch(layer.spec.id)
++            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
++
++        # The export always reads `base_sha`, never a layer's head (ADR 7).
++        exported = git_mirror.export_saffron_dir(
++            pinned.mirror, pinned.base_sha, out_dir / "spec-write" / candidate.spec.id
++        )
++        policy = _spec_review_policy(exported)
++
++        fields = end_review.LayerFields(
++            spec_id=candidate.spec.id,
++            branch=_branch(candidate.spec.id),
++            pr_url="",
++            base=head,
++            head=head,
++            known="",
++        )
++        system_prompt = spec_review.spec_writer_system_prompt(
++            policy, prompts_dir=context.PROMPTS_DIR
++        )
++        prompt = (
++            "review: the spec review between the review tags below.\n"
++            f"spec: .saffron/specs/{candidate.path.name}\n"
++            f"base: {head}\n"
++            "The checkout is a snapshot of the base.\n"
++            "The text between the spec tags below is the spec's current "
++            "text, and it replaces the file at that path.\n"
++            "Keep the spec's id and its exact depends_on.\n"
++            "Raise no budget_usd, max_turns or max_attempts.\n"
++            "A follow-up's revision keeps its touches within its first "
++            "text's touches.\n"
++            f"<review>\n{review_text}\n</review>\n"
++            f"<spec>\n{spec_text}\n</spec>\n"
++        )
++        agent = partial(
++            implement.run_agent,
++            spec_id=candidate.spec.id,
++            timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
++        )
++        with end_review.layer_cell(
++            fields,
++            repo=repo,
++            mirror=pinned.mirror,
++            gates_dir=exported,
++            thread_env=policy.thread_env,
++            spec_session=True,
++        ) as container:
++            return spec_review.run_spec_writer(
++                container, system_prompt=system_prompt, prompt=prompt, agent=agent
++            )
++
++    return run
++
++
+ def _stack_mint(
+     *, pinned: PinnedBase, repo: Path, ledger: Ledger
+ ) -> Callable[[Candidate], int]:
+diff --git a/saffron/spec_review.py b/saffron/spec_review.py
+index bc0068e..5e235b7 100644
+--- a/saffron/spec_review.py
++++ b/saffron/spec_review.py
+@@ -520,3 +520,220 @@ def spec_writer_system_prompt(policy: Policy, *, prompts_dir: Path) -> str:
+         elevate_on=_path_lines(policy.elevate_on),
+         ceilings=_ceiling_lines(),
+     )
++
++
++# The p90 of 74 hand `spec-writer` sessions, $16.92, rounded up (SA-0161).
++SPEC_WRITER_BUDGET_USD = 17.0
++
++# Reasoned from the spike's own extraction turns, $0.40 and $0.41, with
++# room: a real writer resumes a longer context than the spike's did.
++SPEC_WRITER_EXTRACT_BUDGET_USD = 1.5
++
++# What one session records at most, best effort: the writer turn plus one
++# extraction turn (the re-ask's cap sits above this, in the docstring).
++SPEC_WRITER_SESSION_USD = SPEC_WRITER_BUDGET_USD + SPEC_WRITER_EXTRACT_BUDGET_USD
++
++# A third above SPEC_REVIEW_MAX_TURNS: a writer session can run longer.
++SPEC_WRITER_MAX_TURNS = 120
++
++# Clears the spike's own extraction turns, 130 to 150 seconds, many times
++# over. Twice the idle bound of 300 seconds.
++SPEC_WRITER_TIMEOUT_S = 3600.0
++
++
++@dataclass(frozen=True)
++class SpecWriterSession:
++    """What `run_spec_writer` returns for one draft or revision.
++
++    `text` is the extraction turn's validated `spec` field, stripped, plus
++    one newline. Neither turn's own `text` feeds it. `spec_sha` is
++    `hash_artifact` of it, or `None` beside empty text."""
++
++    text: str
++    cost_usd: float
++    error: str | None
++    resets_at: int | None
++    session_id: str | None
++    num_turns: int
++    spec_sha: str | None
++
++
++def _writer_session(
++    *,
++    text: str,
++    cost: float,
++    error: str | None,
++    resets_at: int | None,
++    session_id: str | None,
++    turns: int,
++) -> SpecWriterSession:
++    return SpecWriterSession(
++        text=text,
++        cost_usd=cost,
++        error=error,
++        resets_at=resets_at,
++        session_id=session_id,
++        num_turns=turns,
++        spec_sha=hash_artifact(text) if text else None,
++    )
++
++
++def run_spec_writer(
++    container: str,
++    *,
++    system_prompt: str,
++    prompt: str,
++    agent: Callable[..., implement.AttemptResult],
++) -> SpecWriterSession:
++    """One host-invoked, tool-using session that drafts or revises a whole
++    spec file (ADR 7). A second turn then extracts the file through
++    `output_format`, resumed on the same session, never read from either
++    turn's own text.
++
++    Calls `agent` directly, never through `session.stop_on_rejected`, for
++    the reason `run_spec_review` does: a rejected session must still be
++    charged for what it spent (§4.1).
++    """
++    options = implement.agent_options(
++        system_prompt=system_prompt,
++        max_turns=SPEC_WRITER_MAX_TURNS,
++        budget_usd=SPEC_WRITER_BUDGET_USD,
++        tools=SPEC_SESSION_TOOLS,
++    )
++    cost = 0.0
++    turns = 0
++    sid: str | None = None
++
++    def _measure(attempt: implement.AttemptResult | None) -> None:
++        nonlocal cost, turns, sid
++        if attempt is None:
++            return
++        cost += attempt.cost_usd_est
++        turns += attempt.num_turns
++        sid = attempt.session_id or sid
++
++    def _rejected(attempt: implement.AttemptResult) -> SpecWriterSession:
++        return _writer_session(
++            text="",
++            cost=cost,
++            error=None,
++            resets_at=_reset(attempt.rate_limit_resets_at),
++            session_id=sid,
++            turns=turns,
++        )
++
++    try:
++        first = agent(container, prompt=prompt, options=options)
++    except implement.AgentFailed as failed:
++        _measure(failed.attempt)
++        if failed.attempt and session.terminal_for_rate_limit(
++            failed.attempt.rate_limit_status
++        ):
++            return _rejected(failed.attempt)
++        return _writer_session(
++            text="",
++            cost=cost,
++            error=str(failed),
++            resets_at=None,
++            session_id=sid,
++            turns=turns,
++        )
++
++    if session.terminal_for_rate_limit(first.rate_limit_status):
++        _measure(first)
++        return _rejected(first)
++    _measure(first)
++    if first.session_id is None:
++        return _writer_session(
++            text="",
++            cost=cost,
++            error="no session to extract from",
++            resets_at=None,
++            session_id=None,
++            turns=turns,
++        )
++
++    extract_options = options | {
++        "max_budget_usd": SPEC_WRITER_EXTRACT_BUDGET_USD,
++        "output_format": SPEC_WRITER_FORMAT,
++    }
++
++    def _extraction_turn(
++        *, turn_prompt: str, resume: str | None, last_cost_usd: float
++    ) -> SpecWriterSession | implement.AttemptResult:
++        """One extraction attempt: a rejected or failed `SpecWriterSession`,
++        or the clean `AttemptResult` for the caller to validate."""
++        try:
++            got = agent(
++                container,
++                prompt=turn_prompt,
++                options=extract_options,
++                resume=resume,
++                last_cost_usd=last_cost_usd,
++            )
++        except implement.AgentFailed as failed:
++            _measure(failed.attempt)
++            if failed.attempt and session.terminal_for_rate_limit(
++                failed.attempt.rate_limit_status
++            ):
++                return _rejected(failed.attempt)
++            return _writer_session(
++                text="",
++                cost=cost,
++                error=str(failed),
++                resets_at=None,
++                session_id=sid,
++                turns=turns,
++            )
++        if session.terminal_for_rate_limit(got.rate_limit_status):
++            _measure(got)
++            return _rejected(got)
++        _measure(got)
++        return got
++
++    def _read(attempt: implement.AttemptResult) -> tuple[str | None, str | None]:
++        report, error = rebut._validate(_SpecWriterReply, attempt.structured_output)
++        if report is None:
++            return None, error
++        return report.spec.strip() + "\n", None
++
++    extracted = _extraction_turn(
++        turn_prompt=SPEC_WRITER_EXTRACT_PROMPT,
++        resume=first.session_id,
++        last_cost_usd=min(first.cost_usd_est, SPEC_WRITER_EXTRACT_BUDGET_USD),
++    )
++    if isinstance(extracted, SpecWriterSession):
++        return extracted
++    text, error = _read(extracted)
++    if text is not None:
++        return _writer_session(
++            text=text,
++            cost=cost,
++            error=None,
++            resets_at=None,
++            session_id=sid,
++            turns=turns,
++        )
++
++    # One re-ask, as run_spec_review makes (§5.3 says two). The CLI already
++    # retries the shape inside a turn.
++    reasked = _extraction_turn(
++        turn_prompt=f"{error}\n\n{SPEC_WRITER_EXTRACT_PROMPT}",
++        resume=sid,
++        last_cost_usd=min(extracted.cost_usd_est, SPEC_WRITER_EXTRACT_BUDGET_USD),
++    )
++    if isinstance(reasked, SpecWriterSession):
++        return reasked
++    text, error = _read(reasked)
++    if text is not None:
++        return _writer_session(
++            text=text,
++            cost=cost,
++            error=None,
++            resets_at=None,
++            session_id=sid,
++            turns=turns,
++        )
++    return _writer_session(
++        text="", cost=cost, error=error, resets_at=None, session_id=sid, turns=turns
++    )
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 7981eb9..85b5fb0 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -5008,6 +5008,312 @@ def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_
+     assert cell_up_calls[-1]["thread_env"] == {}
+ 
+ 
++def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
++    tmp_path, monkeypatch
++):
++    """`cli._stack_revise` seeds its cell at a layer's fetched head, or at
++    the pinned `base_sha` with no layer. It always reads its prompt and
++    gates from the pinned `base_sha`'s own export, never a layer's head,
++    the operator's checkout, or the mirror's `HEAD`."""
++    from saffron.agents.artifacts import hash_artifact
++
++    mirror = tmp_path / "mirror"
++    mirror.mkdir()
++    _git(mirror, "init", "-q")
++    (mirror / ".saffron").mkdir()
++    (mirror / ".saffron" / "README").write_text("bare\n")
++    _git(mirror, "add", "-A")
++    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "bare")
++    bare_sha = _rev_parse(mirror, "HEAD")
++
++    (mirror / ".saffron" / "policy.yaml").write_text(
++        "gates: {}\nthread_env:\n  X: base\nprotected:\n  - base/**\n"
++    )
++    _git(mirror, "add", "-A")
++    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
++    base_sha = _rev_parse(mirror, "HEAD")
++
++    (mirror / ".saffron" / "policy.yaml").write_text(
++        "gates: {}\nthread_env:\n  X: head\nprotected:\n  - head/**\n"
++    )
++    _git(mirror, "add", "-A")
++    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
++
++    repo = tmp_path / "checkout"
++    (repo / ".saffron").mkdir(parents=True)
++    (repo / ".saffron" / "policy.yaml").write_text(
++        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
++    )
++
++    out_dir = tmp_path / "out"
++
++    fetch_calls: list[tuple] = []
++
++    def _fake_fetch(mirror_arg, url_arg, branch):
++        fetch_calls.append((mirror_arg, url_arg, branch))
++        if branch == "saffron/SY-8":
++            raise package.ParentGone("gone")
++        return "d" * 40
++
++    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
++
++    cell_up_calls: list[dict] = []
++
++    def _fake_cell_up(
++        *,
++        repo,
++        mirror,
++        tree_base,
++        branch,
++        network,
++        volume,
++        state,
++        container,
++        gates_dir,
++        thread_env,
++        created,
++        note,
++        cap_add=None,
++    ):
++        cell_up_calls.append(
++            {
++                "repo": repo,
++                "mirror": mirror,
++                "tree_base": tree_base,
++                "branch": branch,
++                "gates_dir": gates_dir,
++                "thread_env": dict(thread_env),
++                "container": container,
++                "cap_add": cap_add,
++            }
++        )
++        created.add(container)
++        note("cell_up", "cell up")
++
++    cell_down_calls: list[dict] = []
++
++    def _fake_cell_down(*, network, volume, state, container, created, note):
++        cell_down_calls.append({"container": container})
++        note("cell_down", True, "cell down")
++
++    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
++    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
++    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
++
++    unpriv_calls: list[str] = []
++    monkeypatch.setattr(
++        session,
++        "assert_bash_is_unprivileged",
++        lambda container: unpriv_calls.append(container),
++    )
++
++    real_layer_cell = end_review.layer_cell
++    layer_cell_calls: list[dict] = []
++
++    @contextmanager
++    def _spy_layer_cell(fields, **kwargs):
++        layer_cell_calls.append({"fields": fields, "kwargs": kwargs})
++        with real_layer_cell(fields, **kwargs) as container:
++            yield container
++
++    monkeypatch.setattr(end_review, "layer_cell", _spy_layer_cell)
++
++    def _unreadable_reset(value):
++        """An unannotated pass-through, so `types` reads `value` as the
++        `int | None` `AttemptResult` declares rather than its literal."""
++        return value
++
++    agent_calls: list[dict] = []
++
++    def _fake_run_agent(
++        container,
++        *,
++        prompt,
++        options,
++        spec_id,
++        timeout_s,
++        resume=None,
++        emit=None,
++        last_cost_usd=0.0,
++    ):
++        agent_calls.append(
++            {
++                "container": container,
++                "prompt": prompt,
++                "options": options,
++                "spec_id": spec_id,
++                "timeout_s": timeout_s,
++                "resume": resume,
++                "last_cost_usd": last_cost_usd,
++            }
++        )
++        if spec_id == "SY-2":
++            return implement.AttemptResult(
++                session_id="s-2",
++                subtype="success",
++                terminal_reason=None,
++                num_turns=1,
++                cost_usd_est=0.25,
++                text="t",
++                rate_limit_status="rejected",
++                rate_limit_resets_at=_unreadable_reset("soon"),
++            )
++        if resume is not None:
++            return implement.AttemptResult(
++                session_id="s-1",
++                subtype="success",
++                terminal_reason=None,
++                num_turns=1,
++                cost_usd_est=0.25,
++                text="t",
++                structured_output={"spec": "---\nid: SY-1\n---\nrevised"},
++            )
++        return implement.AttemptResult(
++            session_id="s-1",
++            subtype="success",
++            terminal_reason=None,
++            num_turns=7,
++            cost_usd_est=0.5,
++            text="report",
++        )
++
++    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
++
++    def _spec_path(spec_id):
++        return tmp_path / "export" / ".saffron" / "specs" / f"{spec_id}-x.md"
++
++    def _candidate(spec_id, *, depends_on=None):
++        return Candidate(
++            path=_spec_path(spec_id),
++            spec=intake.Spec(
++                id=spec_id, title="t", type="chore", depends_on=depends_on or []
++            ),
++            spec_sha="s" * 64,
++            task_id=None,
++        )
++
++    pinned = task.PinnedBase(
++        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
++    )
++    revise = cli._stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
++
++    assert not (out_dir / "spec-write").exists()
++
++    sy1 = _candidate("SY-1")
++    sy2 = _candidate("SY-2", depends_on=["SY-9"])
++    layer7 = _candidate("SY-7")
++    layer8 = _candidate("SY-8")
++
++    result1 = revise(sy1, None, "spec one\n", "review one")
++    result2 = revise(sy2, layer7, "spec two\n", "review two")
++    with pytest.raises(package.ParentGone):
++        revise(_candidate("SY-3"), layer8, "spec three\n", "review three")
++
++    revised_text = "---\nid: SY-1\n---\nrevised\n"
++    assert result1 == spec_review.SpecWriterSession(
++        text=revised_text,
++        cost_usd=0.75,
++        error=None,
++        resets_at=None,
++        session_id="s-1",
++        num_turns=8,
++        spec_sha=hash_artifact(revised_text),
++    )
++    assert result2.text == ""
++    assert result2.error is None
++    assert result2.resets_at == 1
++    assert result2.cost_usd == 0.25
++
++    assert fetch_calls == [
++        (mirror, pinned.url, "saffron/SY-7"),
++        (mirror, pinned.url, "saffron/SY-8"),
++    ]
++
++    assert len(cell_up_calls) == 2
++    assert len(cell_down_calls) == 2
++    assert [c["tree_base"] for c in cell_up_calls] == [base_sha, "d" * 40]
++    for c in cell_up_calls:
++        assert c["repo"] == repo
++        assert c["mirror"] == mirror
++        assert c["thread_env"] == {"X": "base"}
++    assert cell_up_calls[0]["gates_dir"] == out_dir / "spec-write" / "SY-1"
++    assert cell_up_calls[1]["gates_dir"] == out_dir / "spec-write" / "SY-2"
++    for c in cell_up_calls:
++        policy_text = (c["gates_dir"] / ".saffron" / "policy.yaml").read_text()
++        assert "X: base" in policy_text
++
++    assert len(unpriv_calls) == 2
++    assert unpriv_calls == [c["container"] for c in cell_up_calls]
++
++    assert len(layer_cell_calls) == 2
++    assert all(call["kwargs"]["spec_session"] is True for call in layer_cell_calls)
++    assert [call["fields"].branch for call in layer_cell_calls] == [
++        "saffron/SY-1",
++        "saffron/SY-2",
++    ]
++
++    assert len(agent_calls) == 3
++    assert [c["spec_id"] for c in agent_calls] == ["SY-1", "SY-1", "SY-2"]
++    assert spec_review.SPEC_WRITER_TIMEOUT_S == 3600
++    assert all(c["timeout_s"] == spec_review.SPEC_WRITER_TIMEOUT_S for c in agent_calls)
++    assert agent_calls[0]["container"] == cell_up_calls[0]["container"]
++    assert agent_calls[1]["container"] == cell_up_calls[0]["container"]
++    assert agent_calls[2]["container"] == cell_up_calls[1]["container"]
++
++    assert agent_calls[1]["resume"] == "s-1"
++    assert agent_calls[1]["last_cost_usd"] == 0.5
++    assert agent_calls[1]["prompt"] == spec_review.SPEC_WRITER_EXTRACT_PROMPT
++    assert agent_calls[1]["options"]["output_format"] == spec_review.SPEC_WRITER_FORMAT
++    assert agent_calls[0]["resume"] is None
++    assert agent_calls[2]["resume"] is None
++
++    for spec_id in ("SY-1", "SY-2"):
++        exported = out_dir / "spec-write" / spec_id
++        policy, _ = load_policy(exported)
++        expected_prompt = spec_review.spec_writer_system_prompt(
++            policy, prompts_dir=context.PROMPTS_DIR
++        )
++        first_call = agent_calls[0] if spec_id == "SY-1" else agent_calls[2]
++        assert first_call["options"]["system_prompt"] == expected_prompt
++        assert "`base/**`" in expected_prompt
++        assert "head/**" not in expected_prompt
++        assert "checkout/**" not in expected_prompt
++        prompt = first_call["prompt"]
++        review_text = "review one" if spec_id == "SY-1" else "review two"
++        spec_text = "spec one\n" if spec_id == "SY-1" else "spec two\n"
++        tree = base_sha if spec_id == "SY-1" else "d" * 40
++        expected_lines = [
++            "review: the spec review between the review tags below.",
++            f"spec: .saffron/specs/{spec_id}-x.md",
++            f"base: {tree}",
++            "The checkout is a snapshot of the base.",
++            "The text between the spec tags below is the spec's current "
++            "text, and it replaces the file at that path.",
++            "Keep the spec's id and its exact depends_on.",
++            "Raise no budget_usd, max_turns or max_attempts.",
++            "A follow-up's revision keeps its touches within its first text's touches.",
++        ]
++        assert prompt.splitlines()[:8] == expected_lines
++        assert prompt.index("<review>") < prompt.index(review_text)
++        assert prompt.index(review_text) < prompt.index("</review>")
++        assert prompt.index("</review>") < prompt.index("<spec>")
++        assert prompt.index("<spec>") < prompt.index(spec_text)
++        assert prompt.index(spec_text) < prompt.index("</spec>")
++        assert str(tmp_path) not in prompt
++
++    pinned_bare = task.PinnedBase(
++        mirror=mirror, url="https://github.com/o/r.git", base_sha=bare_sha
++    )
++    revise_bare = cli._stack_revise(pinned=pinned_bare, repo=repo, out_dir=out_dir)
++    revise_bare(_candidate("SY-4"), None, "spec four\n", "review four")
++
++    expected_bare_prompt = spec_review.spec_writer_system_prompt(
++        Policy(), prompts_dir=context.PROMPTS_DIR
++    )
++    assert agent_calls[-1]["options"]["system_prompt"] == expected_bare_prompt
++    assert cell_up_calls[-1]["thread_env"] == {}
++
++
+ def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
+     tmp_path, monkeypatch
+ ):
+diff --git a/tests/test_spec_review.py b/tests/test_spec_review.py
+index e0bb74e..4732dda 100644
+--- a/tests/test_spec_review.py
++++ b/tests/test_spec_review.py
+@@ -1342,3 +1342,513 @@ def test_the_spec_writer_format_is_the_schema_of_one_string_field():
+     for bad in refused:
+         with pytest.raises(pydantic.ValidationError):
+             _SpecWriterReply.model_validate(bad)
++
++
++# An `<output>` block sits inside the spec text, so a reader that parses
++# text instead of the schema's value would still look right.
++_WRITE_SPEC = "---\nid: SY-1\n---\nbody quotes <output>a</output> here\n"
++_WRITE_V = {"spec": _WRITE_SPEC}
++_WRITE_B = "<output>\n" + _WRITE_SPEC + "</output>"
++
++
++def _write_options():
++    from saffron.spec_review import (
++        SPEC_SESSION_TOOLS,
++        SPEC_WRITER_BUDGET_USD,
++        SPEC_WRITER_MAX_TURNS,
++    )
++
++    return implement.agent_options(
++        system_prompt=_SYSTEM_PROMPT,
++        max_turns=SPEC_WRITER_MAX_TURNS,
++        budget_usd=SPEC_WRITER_BUDGET_USD,
++        tools=SPEC_SESSION_TOOLS,
++    )
++
++
++def _write_extract_options():
++    from saffron.spec_review import SPEC_WRITER_EXTRACT_BUDGET_USD, SPEC_WRITER_FORMAT
++
++    return _write_options() | {
++        "max_budget_usd": SPEC_WRITER_EXTRACT_BUDGET_USD,
++        "output_format": SPEC_WRITER_FORMAT,
++    }
++
++
++def _run_writer(double):
++    from saffron.spec_review import run_spec_writer
++
++    return run_spec_writer(
++        _CONTAINER, system_prompt=_SYSTEM_PROMPT, prompt=_PROMPT, agent=double
++    )
++
++
++def _draft(**overrides):
++    return _attempt(
++        **{"text": "t", "cost": 0.5, "session_id": "s-1", "num_turns": 7} | overrides
++    )
++
++
++def _write_extract(**overrides):
++    base = {
++        "text": "t",
++        "cost": 0.25,
++        "session_id": "s-2",
++        "num_turns": 7,
++        "structured_output": _WRITE_V,
++    }
++    return _attempt(**base | overrides)
++
++
++def _write_third(**overrides):
++    base = {
++        "text": "t",
++        "cost": 0.25,
++        "session_id": "s-3",
++        "num_turns": 7,
++        "structured_output": _WRITE_V,
++    }
++    return _attempt(**base | overrides)
++
++
++def _assert_write_first_call(double):
++    args, kwargs = double.calls[0]
++    assert args == (_CONTAINER,)
++    assert kwargs == {"prompt": _PROMPT, "options": _write_options()}
++    assert "output_format" not in kwargs["options"]
++
++
++def _assert_write_second_call(double, *, last_cost_usd=0.5, resume="s-1"):
++    from saffron.spec_review import SPEC_WRITER_EXTRACT_PROMPT
++
++    args, kwargs = double.calls[1]
++    assert args == (_CONTAINER,)
++    assert kwargs == {
++        "prompt": SPEC_WRITER_EXTRACT_PROMPT,
++        "options": _write_extract_options(),
++        "resume": resume,
++        "last_cost_usd": last_cost_usd,
++    }
++
++
++def _write_expected(text, cost, error, resets_at, session_id, turns):
++    from saffron.agents.artifacts import hash_artifact
++    from saffron.spec_review import SpecWriterSession
++
++    return SpecWriterSession(
++        text=text,
++        cost_usd=cost,
++        error=error,
++        resets_at=resets_at,
++        session_id=session_id,
++        num_turns=turns,
++        spec_sha=hash_artifact(text) if text else None,
++    )
++
++
++def test_a_spec_writer_session_returns_the_extraction_turns_spec():
++    from saffron.spec_review import (
++        SPEC_WRITER_BUDGET_USD,
++        SPEC_WRITER_EXTRACT_BUDGET_USD,
++        SPEC_WRITER_MAX_TURNS,
++        SPEC_WRITER_SESSION_USD,
++        SPEC_WRITER_TIMEOUT_S,
++    )
++
++    assert SPEC_WRITER_MAX_TURNS == 120
++    assert type(SPEC_WRITER_MAX_TURNS) is int
++    assert SPEC_WRITER_BUDGET_USD == 17.0
++    assert SPEC_WRITER_EXTRACT_BUDGET_USD == 1.5
++    assert SPEC_WRITER_SESSION_USD == 18.5
++    assert SPEC_WRITER_TIMEOUT_S == 3600
++
++    final = _write_extract()
++    padded = _write_extract(structured_output={"spec": "\n  " + _WRITE_SPEC + "\n\n"})
++    conflicting = _write_extract(text="<output>\n---\nid: SY-9\n---\nwrong\n</output>")
++
++    # A clean extraction turn, and its equal-text variants.
++    for second in (final, padded, conflicting):
++        double = _Agent([_draft(), second])
++        result = _run_writer(double)
++        assert len(double.calls) == 2
++        _assert_write_first_call(double)
++        _assert_write_second_call(double)
++        assert result == _write_expected(_WRITE_SPEC, 0.75, None, None, "s-2", 14)
++
++    # First status allowed, reset 9, the same clean second turn.
++    double = _Agent([_draft(status="allowed", resets_at=9), final])
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    _assert_write_second_call(double)
++    assert result == _write_expected(_WRITE_SPEC, 0.75, None, None, "s-2", 14)
++
++    # Second is the killed turn.
++    double = _Agent([_draft(), _KILLED])
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    _assert_write_second_call(double)
++    assert result == _write_expected(
++        "", 1.0, "the agent produced no result event", None, "s-1", 7
++    )
++
++    # First at cost 4.0, second the killed turn: `last_cost_usd` caps at 1.5.
++    double = _Agent([_draft(cost=4.0), _KILLED])
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    _assert_write_second_call(double, last_cost_usd=1.5)
++    assert result == _write_expected(
++        "", 5.5, "the agent produced no result event", None, "s-1", 7
++    )
++
++    # Second raises AgentFailed("api_error") with its own turns and cost.
++    double = _Agent(
++        [_draft(), implement.AgentFailed("api_error", _attempt(cost=0.5, num_turns=7))]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 1.0, "api_error", None, "s-1", 14)
++
++    # First returned, rejected, reset R.
++    for reset, given in (
++        (1755800000, 1755800000),
++        (10**20, 10**20),
++        (None, 1),
++        ("soon", 1),
++        (True, 1),
++        (1755800000.0, 1),
++        (0, 1),
++        (-5, 1),
++    ):
++        double = _Agent(
++            [
++                _attempt(
++                    text="t",
++                    cost=0.25,
++                    status="rejected",
++                    resets_at=reset,
++                    session_id="s-1",
++                    num_turns=7,
++                )
++            ]
++        )
++        result = _run_writer(double)
++        assert len(double.calls) == 1
++        _assert_write_first_call(double)
++        assert result == _write_expected("", 0.25, None, given, "s-1", 7)
++        assert type(result.resets_at) is int
++
++        # Raised, rejected, the same reset.
++        double = _Agent(
++            [
++                implement.AgentFailed(
++                    "api_error",
++                    _attempt(
++                        status="rejected",
++                        resets_at=reset,
++                        cost=0.125,
++                        session_id="s-1",
++                        num_turns=7,
++                    ),
++                )
++            ]
++        )
++        result = _run_writer(double)
++        assert len(double.calls) == 1
++        assert result == _write_expected("", 0.125, None, given, "s-1", 7)
++        assert type(result.resets_at) is int
++
++    # Second returned, rejected.
++    double = _Agent(
++        [
++            _draft(),
++            _attempt(
++                text="t",
++                cost=0.0625,
++                status="rejected",
++                resets_at=1755800000,
++                num_turns=7,
++                structured_output=_WRITE_V,
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 0.5625, None, 1755800000, "s-1", 14)
++    assert type(result.resets_at) is int
++
++    double = _Agent(
++        [
++            _draft(),
++            _attempt(
++                text="t",
++                cost=0.0625,
++                status="rejected",
++                resets_at=-5,
++                num_turns=7,
++                structured_output=_WRITE_V,
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 0.5625, None, 1, "s-1", 14)
++
++    # Second raises AgentFailed, rejected, no reset.
++    double = _Agent(
++        [
++            _draft(),
++            implement.AgentFailed(
++                "api_error",
++                _attempt(status="rejected", resets_at=None, cost=0.0625, num_turns=7),
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 0.5625, None, 1, "s-1", 14)
++    assert type(result.resets_at) is int
++
++    # First raises, not rejected, with an attempt.
++    double = _Agent(
++        [
++            implement.AgentFailed(
++                "idle bound",
++                _attempt(
++                    cost=0.0625,
++                    session_id="s-1",
++                    num_turns=7,
++                    structured_output=_WRITE_V,
++                ),
++            )
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 1
++    assert result == _write_expected("", 0.0625, "idle bound", None, "s-1", 7)
++
++    # First raises, with no attempt at all.
++    double = _Agent([implement.AgentFailed("no result")])
++    result = _run_writer(double)
++    assert len(double.calls) == 1
++    assert result == _write_expected("", 0.0, "no result", None, None, 0)
++
++    # Second raises AgentFailed, not rejected, with an attempt.
++    double = _Agent(
++        [
++            _draft(),
++            implement.AgentFailed(
++                "api_error",
++                _attempt(cost=0.125, num_turns=7, structured_output=_WRITE_V),
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 0.625, "api_error", None, "s-1", 14)
++
++    double = _Agent(
++        [
++            _draft(),
++            implement.AgentFailed(
++                "idle bound", _attempt(cost=0.125, num_turns=7, session_id=None)
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 0.625, "idle bound", None, "s-1", 14)
++
++    # Second raises AgentFailed, with no attempt at all.
++    double = _Agent([_draft(), implement.AgentFailed("no result")])
++    result = _run_writer(double)
++    assert len(double.calls) == 2
++    assert result == _write_expected("", 0.5, "no result", None, "s-1", 7)
++
++    # First returned, with no session_id: no second call.
++    double = _Agent([_draft(session_id=None)])
++    result = _run_writer(double)
++    assert len(double.calls) == 1
++    _assert_write_first_call(double)
++    assert result == _write_expected(
++        "", 0.5, "no session to extract from", None, None, 7
++    )
++
++    # Any other exception propagates, from either turn.
++    double = _Agent([RuntimeError("runner died")])
++    with pytest.raises(RuntimeError):
++        _run_writer(double)
++    assert len(double.calls) == 1
++
++    double = _Agent([_draft(), RuntimeError("boom")])
++    with pytest.raises(RuntimeError):
++        _run_writer(double)
++    assert len(double.calls) == 2
++
++
++def test_a_spec_writer_re_asks_once_when_its_extraction_is_not_the_schema():
++    from dataclasses import replace
++
++    from saffron.spec_review import SPEC_WRITER_EXTRACT_PROMPT, _SpecWriterReply
++
++    def _validation_message(value):
++        try:
++            _SpecWriterReply.model_validate(value)
++        except Exception as exc:  # pydantic.ValidationError
++            return f"not the schema: {exc}"
++        raise AssertionError("value unexpectedly validated")
++
++    m_null = "not the schema: the turn returned no structured output"
++    reask_prompt_null = m_null + "\n\n" + SPEC_WRITER_EXTRACT_PROMPT
++
++    second_n = _write_extract(structured_output=None, text=_WRITE_B)
++    second_k = _write_extract(
++        structured_output={"spec": "x", "extra": 1}, text=_WRITE_B
++    )
++    second_z = _write_extract(structured_output={"spec": 3}, text=_WRITE_B)
++    second_j = _write_extract(structured_output=json.dumps(_WRITE_V), text=_WRITE_B)
++    second_o = _write_extract(structured_output={}, text=_WRITE_B)
++
++    def _assert_third_call(double, *, resume, last_cost_usd, prompt_text=None):
++        args, kwargs = double.calls[2]
++        assert args == (_CONTAINER,)
++        assert set(kwargs) == {"prompt", "options", "resume", "last_cost_usd"}
++        assert kwargs["options"] == _write_extract_options()
++        assert kwargs["resume"] == resume
++        assert kwargs["last_cost_usd"] == last_cost_usd
++        if prompt_text is None:
++            assert kwargs["prompt"].startswith("not the schema: ")
++            assert kwargs["prompt"].endswith("\n\n" + SPEC_WRITER_EXTRACT_PROMPT)
++        else:
++            assert kwargs["prompt"] == prompt_text
++
++    # Every refused second-value row: a clean third turn that returns V.
++    for second in (second_n, second_k, second_z, second_j, second_o):
++        double = _Agent([_draft(), second, _write_third()])
++        result = _run_writer(double)
++        assert len(double.calls) == 3
++        _assert_third_call(double, resume="s-2", last_cost_usd=0.25)
++        assert result == _write_expected(_WRITE_SPEC, 1.0, None, None, "s-3", 21)
++
++    # A null second value, second carries no session_id: the re-ask resumes
++    # the first turn's.
++    double = _Agent([_draft(), replace(second_n, session_id=None), _write_third()])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    _assert_third_call(
++        double, prompt_text=reask_prompt_null, resume="s-1", last_cost_usd=0.25
++    )
++    assert result == _write_expected(_WRITE_SPEC, 1.0, None, None, "s-3", 21)
++
++    # Third returns, with no session_id.
++    double = _Agent([_draft(), second_n, _write_third(session_id=None)])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected(_WRITE_SPEC, 1.0, None, None, "s-2", 21)
++
++    # Second N, third N: both refused.
++    double = _Agent([_draft(), second_n, _write_third(structured_output=None)])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    _assert_third_call(
++        double, prompt_text=reask_prompt_null, resume="s-2", last_cost_usd=0.25
++    )
++    assert result == _write_expected("", 1.0, m_null, None, "s-3", 21)
++
++    # Second N, third K: the third's own message is kept.
++    k_value = {"spec": "x", "extra": 1}
++    double = _Agent([_draft(), second_n, _write_third(structured_output=k_value)])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected(
++        "", 1.0, _validation_message(k_value), None, "s-3", 21
++    )
++
++    # Second K, third N: the re-ask's own message is kept.
++    double = _Agent([_draft(), second_k, _write_third(structured_output=None)])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected("", 1.0, m_null, None, "s-3", 21)
++
++    # Third returns rejected.
++    double = _Agent([_draft(), second_n, _write_third(status="rejected", resets_at=9)])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected("", 1.0, None, 9, "s-3", 21)
++    assert type(result.resets_at) is int
++
++    double = _Agent([_draft(), second_n, _write_third(status="rejected", resets_at=0)])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected("", 1.0, None, 1, "s-3", 21)
++
++    # Third raises AgentFailed, rejected, reset "soon".
++    double = _Agent(
++        [
++            _draft(),
++            second_n,
++            implement.AgentFailed(
++                "api_error",
++                _attempt(
++                    status="rejected",
++                    resets_at="soon",
++                    cost=0.25,
++                    session_id="s-3",
++                    num_turns=7,
++                ),
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected("", 1.0, None, 1, "s-3", 21)
++
++    # Third raises AgentFailed("cut") with an attempt of value V.
++    double = _Agent(
++        [
++            _draft(),
++            second_n,
++            implement.AgentFailed(
++                "cut",
++                _attempt(
++                    cost=0.25, session_id="s-3", num_turns=7, structured_output=_WRITE_V
++                ),
++            ),
++        ]
++    )
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected("", 1.0, "cut", None, "s-3", 21)
++
++    # Third is the killed turn.
++    double = _Agent([_draft(), second_n, _KILLED])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    _assert_third_call(
++        double, prompt_text=reask_prompt_null, resume="s-2", last_cost_usd=0.25
++    )
++    assert result == _write_expected(
++        "", 1.0, "the agent produced no result event", None, "s-2", 14
++    )
++
++    # Second at cost 3.0, third the killed turn: `last_cost_usd` caps at 1.5.
++    double = _Agent([_draft(), replace(second_n, cost_usd_est=3.0), _KILLED])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    _assert_third_call(
++        double, prompt_text=reask_prompt_null, resume="s-2", last_cost_usd=1.5
++    )
++    assert result == _write_expected(
++        "", 5.0, "the agent produced no result event", None, "s-2", 14
++    )
++
++    # Third raises AgentFailed("gone") with no attempt.
++    double = _Agent([_draft(), second_n, implement.AgentFailed("gone")])
++    result = _run_writer(double)
++    assert len(double.calls) == 3
++    assert result == _write_expected("", 0.75, "gone", None, "s-2", 14)
++
++    # Third raises an exception the module does not know about.
++    double = _Agent([_draft(), second_n, RuntimeError("boom")])
++    with pytest.raises(RuntimeError):
++        _run_writer(double)
++    assert len(double.calls) == 3
