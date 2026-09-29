@@ -4,7 +4,7 @@ title: A finding outside every hunk anchors through a shared common word, so a l
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 110
+estimated_lines: 121
 touches:
   - saffron/agents/findings.py
   - tests/test_findings.py
@@ -37,15 +37,20 @@ max_attempts: 3
 max_turns: 60
 acceptance:
   - claim: >-
-      A finding on a line outside every hunk does not anchor when each word
-      the line shares with the diff is one of the 54 common English words
-      this spec lists. That holds for each of the 54, spelled in lower case and
+      The module's list of common English words is exactly the 54 this spec
+      lists. A finding on a line outside every hunk, in a Markdown or a Python
+      file, does not anchor when each word the line shares with the diff is
+      on that list. That holds for each of the 54, spelled in lower case and
       capitalised, whether the diff carries it on an added line, on a removed
-      line or in a renamed path.
+      line or in a renamed path. `parse_diff` still reports each such word
+      among the diff's tokens.
     witness: tests/test_findings.py::test_a_line_sharing_only_common_words_with_the_diff_does_not_anchor
     wrong_versions:
       - A comparison that does not fold case, so a capitalised word from the list still anchors.
       - A list missing one of the 54 words.
+      - A list holding the 54 words and more, such as def, return and self.
+      - The filter placed in parse_diff, over the hunk walk and the renamed paths both.
+      - A filter applied only to findings on a Markdown file.
       - A filter applied to the tokens of added lines alone, so a shared word from a removed line still anchors.
       - A filter applied inside the hunk walk, so a word from a renamed path still anchors.
       - A filter applied only to findings on a Python file.
@@ -54,14 +59,16 @@ acceptance:
       `SA-0192`'s probe line anchors through `changed`, `code` and `lenses`,
       and through each of them alone. With those three taken out it does not
       anchor, and neither does a line sharing `is`, `other`, `the` or `what`
-      alone. A Markdown line is read like any other: a shared word off the
-      list anchors it.
+      alone. A line whose only shared word off the list is a capitalised
+      identifier, `DiffFacts`, anchors in a Markdown file and in a Python
+      file alike.
     witness: tests/test_findings.py::test_sa_0192s_probe_line_anchors_through_its_content_words_alone
     wrong_versions:
       - Identifier-shaped tokens only, meaning a token with an underscore, a digit beside a letter, or a lower-case letter before a capital.
       - A line anchored only when it shares two or more words off the list.
       - A list that also holds the word code.
       - A list missing the word other.
+      - The cited line's tokens folded to lower case before the intersection, so a capitalised identifier no longer matches.
   - claim: >-
       An adequacy finding on an untouched line of a Python test file anchors
       when the line calls a function the diff changed, even when that
@@ -134,8 +141,9 @@ so the finding reaches REBUT and the queue as if it pointed at this change.
 
 Drop common words from the comparison, and keep everything else as it is.
 
-1. **The list.** Add a module-scope `frozenset` of these 54 words to
-   `saffron/agents/findings.py`.
+1. **The list.** Add a module-scope `frozenset` named `_COMMON_WORDS`
+   of these 54 words to `saffron/agents/findings.py`. Write it as a list
+   literal, since `ruff` flags `str.split` on a literal.
 
    ```
    a an and are as at be been being but by else for from here how if in into
@@ -148,7 +156,8 @@ Drop common words from the comparison, and keep everything else as it is.
    `saffron/agents/findings.py:166` computes today. Return true when any token in it, folded with
    `str.casefold`, is not in the list. Change nothing before that line.
 3. **Leave `parse_diff` alone.** `DiffFacts.tokens` still holds every token,
-   and its docstring stays true. A filter at the comparison reaches every
+   and its docstring stays true. It describes the tokens, which stay
+   unfiltered, so leave it as it is. A filter at the comparison reaches every
    source of a token at once: added lines, removed lines and renamed paths.
 
 **Why a list, and not identifier-shaped tokens.** The item offered both. On
@@ -194,10 +203,10 @@ Keep the head read and the hunk check in `_is_anchored` as they stand.
 Criterion 4 is `preserves`, and names a test that passes now.
 
 **Write each witness's own copy of the list.** Criterion 1's witness spells
-the 54 words as a literal in the test module. It asserts there are 54. It
-never imports the module's constant. A loop over that constant passes
-whatever the constant holds. Use the names `tests/test_findings.py:6`
-already imports, and import nothing new at module scope.
+the 54 words as a literal in the test module. It imports `_COMMON_WORDS`
+inside the test body, never at module scope, and asserts the constant
+equals `frozenset` of that literal. The loop then runs over the literal.
+Use the names `tests/test_findings.py:6` already imports for the rest.
 
 **Build diffs as text.** `anchor` takes the diff as a string and `read_head`
 as any callable (`saffron/agents/findings.py:128-146`). A dict's `get` is
@@ -208,11 +217,14 @@ and `rename to`, with no hunk.
 
 **Criterion 1's witness.** Each of the 54 words has two spellings: as
 listed, and with its first letter upper-cased. For each spelling, build
-three diffs. The first adds the line `<spelling> zebra` against a removed
-`yak`. The second removes `<spelling> zebra` and adds `yak`. The third
-renames `<spelling>.md` to `yak.md`. Cite line 1 of a file `cited.md` whose
-content is `<spelling> owl`. Each of the 324 findings reads
-`anchored` false. At base every one reads true.
+three diffs. The first edits `changed.md`, adding the line
+`<spelling> zebra` against a removed `yak`. The second edits `changed.md`,
+removing `<spelling> zebra` and adding `yak`. The third renames
+`<spelling>.md` to `yak.md`. For each diff, assert that
+`parse_diff(diff).tokens` holds the spelling. Then cite line 1 of
+`cited.md`, and line 1 of `cited.py`, each with the content
+`<spelling> owl`. Each of the 648 findings reads `anchored` false. At base
+the import fails first.
 
 **Criterion 2's witness.** The diff adds three lines to
 `tests/test_review.py`, taken from `44dd8e17..07e0ad21`.
@@ -238,6 +250,12 @@ is redundant.                                                        False
 what redundant.                                                      False
 the redundant.                                                       False
 ```
+
+Then build a second diff, editing `changed.md` to add `The DiffFacts row`
+against a removed `yak`. Cite line 1 of `cited.md`, and line 1 of
+`cited.py`, each with the content `the DiffFacts owl`. The only shared
+token is `DiffFacts`, and both findings read `anchored` true, compared with
+`is`.
 
 At base the four `False` rows read `True`.
 
@@ -266,13 +284,17 @@ source reverted to the base. Each wrong version under the three criteria
 was applied to the prototype, and at least one of the three witnesses failed
 it. Each criterion's own witness failed every wrong version listed under
 it. Criterion 3's declared mutant failed its witness. The rest of the suite
-passed on the prototype, and no existing test needed an edit.
+passed on the prototype, and no existing test needed an edit. The review
+of this spec added four more, rerun on the revised witnesses on
+2026-09-29. A superset constant and the filter in `parse_diff` failed
+criterion 1. A cited-side case fold failed criterion 2. A Markdown-only
+filter failed criterion 1's witness alone.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** No touched path is in `elevate_on`, so `size` is advisory. The
-prototype counted 441 changed tokens by `size_gate`, against the `bug`
-ceiling of 1300. `estimated_lines` is those 441 tokens over four, with no
+prototype counted 482 changed tokens by `size_gate`, against the `bug`
+ceiling of 1300. `estimated_lines` is those 482 tokens over four, with no
 overrun added. About a quarter is `saffron/`, the rest tests.
