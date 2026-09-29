@@ -6100,7 +6100,7 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the
+        # plan, implement, 4 lenses, rebuttal, extraction = 8 turns by the
         # time REBUT asks for a critic cell; every earlier export is REVIEW's.
         return grown if len(cell.turns) > 5 else _ANCHORING_DIFF
 
@@ -6270,10 +6270,8 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the time
-        # REBUT asks for a critic cell; every earlier export is REVIEW's (the
-        # same threshold `test_rebut_verdicts_read_a_tree_rebuilt_from_the_post
-        # _rebuttal_patch` above uses).
+        # 8 turns precede REBUT's critic cell: plan, implement, 4 lenses, rebuttal
+        # and extraction. Every earlier export is REVIEW's, as in the test above.
         if len(cell.turns) > 5:
             return after_rebuttal
         # Keyed on the container too, not the turn alone: a second export taken

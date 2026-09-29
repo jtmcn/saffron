@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from harness import lens_scoring
+from saffron import end_review
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -331,8 +332,8 @@ def test_the_blast_radius_lens_is_not_declared():
     assert set(review.LENSES) == {"correctness", "contract", "adequacy", "conventions"}
 
 
-# Each lens's own framing sentence. The fourth one says "must", never
-# "should", so the hedge the `prose` gate refuses stays out of the file.
+# Each lens's own framing sentence. The fourth one says "must", never "should",
+# so the hedge the `prose` gate refuses stays out of `review-conventions.md`.
 _FRAMING = {
     "correctness": "Find the reason this change should not be merged",
     "contract": "Find the reason this change should not be merged",
@@ -434,6 +435,12 @@ def test_the_conventions_prompt_asks_its_four_questions_against_the_base_standar
     end = next(i for i in range(start, len(lines)) if lines[i].startswith("## "))
     remit = "\n".join(lines[start:end])
     assert " ".join(remit.split()) == " ".join(_CONVENTIONS_REMIT.split())
+    # The whole template, not only the remit. The implementer could edit the
+    # worktree copy, so no line sends the lens to read it.
+    template = (PROMPTS / review.LENSES["conventions"]).read_text()
+    for line in template.splitlines():
+        if "CLAUDE.md" in line:
+            assert "/work" not in line and "read" not in line.lower(), line
 
 
 def test_the_lenses_declare_disjoint_remits():
@@ -483,7 +490,7 @@ def test_the_declared_lenses_are_the_four_that_run():
         _block([]),
         _block([]),
         _block([]),
-        _block([]),
+        _block([_finding(claim="the docstring contradicts its code")]),
         record=record,
         claude_md="- Never collapse `error` into `fail`.\n",
     )
@@ -492,6 +499,9 @@ def test_the_declared_lenses_are_the_four_that_run():
         "contract",
         "adequacy",
         "conventions",
+    ]
+    assert [(f.lens, f.claim) for f in reviews[3].findings] == [
+        ("conventions", "the docstring contradicts its code")
     ]
     assert len(record) == 4
     expected = review.lens_prompt(
@@ -503,7 +513,12 @@ def test_the_declared_lenses_are_the_four_that_run():
         diff=DIFF,
         gates="- tests: pass (pytest 8.0)",
     )
-    assert record[3]["options"]["system_prompt"] == expected
+    system_prompt = record[3]["options"]["system_prompt"]
+    assert system_prompt == expected
+    assert "Find the reason this change must not be merged" in " ".join(
+        system_prompt.split()
+    )
+    assert "- Never collapse `error` into `fail`." in system_prompt
 
 
 def test_no_in_cell_lens_shares_a_name_with_an_end_review_lens():
@@ -511,8 +526,6 @@ def test_no_in_cell_lens_shares_a_name_with_an_end_review_lens():
     every end-review finding of that name back in as an in-cell one. Two
     readers tell the two apart, `end_review._known_block` and
     `qualify._in_cell_concerns`, and both do it by name alone."""
-    from saffron import end_review
-
     assert set(review.LENSES) == {"correctness", "contract", "adequacy", "conventions"}
     assert set(end_review.END_LENSES) == {"spec", "standards"}
     assert set(review.LENSES) & set(end_review.END_LENSES) == set()

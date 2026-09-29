@@ -2270,12 +2270,8 @@ def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp
         agent_says=spoken,
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Exact, not `>= 1`: the count is the number of seams exercised, and a
-    # migration that drops one should fail here rather than pass quietly.
-    # Derived, not hard-coded: two turns plus one session per lens. A
-    # fourth lens does not fail this test for a change that has nothing to
-    # do with the seam. `review.LENSES` now declares four lenses, and this
-    # count still comes from `len(review.LENSES)`, not a literal.
+    # Exact and derived: two turns plus one session per lens. A dropped seam
+    # fails here, and a new lens does not.
     assert cell.watched.count(spoken) == 2 + len(review.LENSES), cell.watched
 
 
