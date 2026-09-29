@@ -7636,8 +7636,8 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
     )
 
     killed_edit = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
-    # Line 3 of `src/x.py`, outside `_ANCHORING_DIFF`'s hunk. It shares a
-    # token with the diff, the same shape as criterion 1's own witness.
+    # Line 3 of `src/x.py`, outside the hunk but sharing a token with it,
+    # the shape SA-0120's surviving-criterion-probe witness uses.
     anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
 
     cell = _stub_the_runtime(
@@ -7716,17 +7716,24 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
     ]
 
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
-    (blocker,) = record["blockers"]
-    assert blocker["claim"] == (
-        f"{review.HOST_FILED}t.py::a stayed green with the spec's "
-        "wrong version 'the guard is removed' applied to src/x.py as an "
-        "edit. The claim was 'the guard rejects a negative amount', and "
-        "only that witness ran under the edit."
-    )
-    assert blocker["lens"] == "adequacy"
-    assert blocker["probe_verdict"] == "survived"
-    assert blocker["line"] == 3
-    assert blocker["probe"] == anchors
+    assert record["blockers"] == [
+        {
+            "anchored": True,
+            "claim": (
+                f"{review.HOST_FILED}t.py::a stayed green with the spec's "
+                "wrong version 'the guard is removed' applied to src/x.py as an "
+                "edit. The claim was 'the guard rejects a negative amount', and "
+                "only that witness ran under the edit."
+            ),
+            "file": "src/x.py",
+            "finding": 1,
+            "lens": "adequacy",
+            "line": 3,
+            "probe": anchors,
+            "probe_verdict": "survived",
+            "severity": "blocker",
+        }
+    ]
 
 
 def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(
@@ -7971,6 +7978,19 @@ def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_sp
         )
         assert outcome.state == "READY_FOR_REVIEW"
         assert networks == expected_networks
+        # The container name outlives teardown, so only the timeline shows
+        # the wrong-version session asked inside the critic cell.
+        critic = [
+            e
+            for e in cell.order
+            if e.endswith(f":{_CRITIC_CONTAINER}")
+            and e.split(":")[0] in ("turn", "removed")
+        ]
+        assert critic == [
+            f"removed:container:{_CRITIC_CONTAINER}",
+            *[f"turn:{_CRITIC_CONTAINER}"] * 5,
+            f"removed:container:{_CRITIC_CONTAINER}",
+        ]
 
         if name == "both":
             assert cell.mutated == [

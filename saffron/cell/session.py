@@ -1590,7 +1590,6 @@ def _apply_criterion_probes(
     from saffron.gates import runner
     from saffron.gates.core.witness import witness_gate
 
-    paired = pairs
     unknown_tree = (
         "an earlier edit left this cell's tree in an unknown state, so nothing "
         "after it was asked"
@@ -1603,7 +1602,7 @@ def _apply_criterion_probes(
 
     # The mutator is never entered for an entry with no edit or a refused one.
     with_edit: list[tuple[Criterion, dict]] = []
-    for criterion, entry in paired:
+    for criterion, entry in pairs:
         if entry["edit"] is None:
             _unproven([(criterion, entry)], "this session named no edit")
             continue
