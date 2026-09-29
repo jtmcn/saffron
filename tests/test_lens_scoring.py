@@ -9,12 +9,13 @@ is about, whose answer is already written down.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 import pytest
 
-from harness import lens_scoring
+from harness import corpus, lens_scoring
 from saffron.agents.findings import Finding, Severity
 from saffron.phases.review import LENSES, LensReview
 
@@ -115,9 +116,87 @@ def test_the_fixture_carries_its_frozen_inputs(sa0062):
 def test_the_calibration_case_reproduces_the_run_it_was_built_from(sa0062):
     """The one run whose answer is known: 0 of 2, both ways. A predicate that
     cannot reproduce this may not be trusted with a run nobody has read."""
-    scores = lens_scoring.score_run(sa0062, sa0062.recorded_reviews())
+    scores = lens_scoring.score_run(
+        sa0062, sa0062.recorded_reviews(), expect=PASS_2026_09_07_LENSES
+    )
     assert [s.seen for s in scores.values()] == [False, False]
     assert [s.graded for s in scores.values()] == [False, False]
+
+
+def test_a_live_run_without_a_conventions_result_is_refused_by_name(sa0062):
+    """`expect` defaults to today's lens set, so a run missing a lens added
+    after it was scripted is refused rather than scored as a miss. The
+    refusal names the lens, so it reads as "run again", not "the lens
+    found nothing"."""
+    reviews = [
+        LensReview(lens=lens, findings=[]) for lens in LENSES if lens != "conventions"
+    ]
+    with pytest.raises(lens_scoring.LensErrored) as excinfo:
+        lens_scoring.score_run(sa0062, reviews)
+    assert str(excinfo.value) == (
+        "SA-0062: no result for conventions, so this run says nothing about "
+        "the defects those lenses own"
+    )
+
+
+def _recorded(root: Path, reviews: list[LensReview]) -> lens_scoring.Fixture:
+    """A one-defect fixture whose recorded run is exactly `reviews`.
+    Written the way `LensReview.as_dict` writes it, so `calibrate` reads a
+    real shape, not a hand-rolled one."""
+    _one_defect(root, f"locations = [{PR_BODY}]")
+    (root / "recorded-findings.json").write_text(
+        json.dumps([r.as_dict() for r in reviews])
+    )
+    return lens_scoring.load_fixture(root)
+
+
+def test_calibrate_scores_a_recorded_run_against_the_lenses_it_ran(tmp_path):
+    """A scoring run recorded before a lens existed still reproduces its answer.
+    `graded_per_run` scores a slice against the lens set its caller names,
+    or today's lenses when the caller names none."""
+    clean = _recorded(tmp_path / "clean", [LensReview(lens="correctness", findings=[])])
+    assert lens_scoring.calibrate(clean) is None
+
+    errored = _recorded(
+        tmp_path / "errored",
+        [LensReview(lens="correctness", findings=[], error="boom")],
+    )
+    with pytest.raises(lens_scoring.LensErrored, match=re.escape("boom")) as raised:
+        lens_scoring.calibrate(errored)
+    assert str(raised.value) == "SA-9999: correctness: boom"
+
+    empty = _recorded(tmp_path / "empty", [])
+    with pytest.raises(lens_scoring.LensErrored) as raised:
+        lens_scoring.calibrate(empty)
+    assert str(raised.value) == "SA-9999: the recorded scoring run carries no lens"
+
+    one_lens_run = [LensReview(lens="correctness", findings=[])]
+    named = corpus.graded_per_run(
+        [clean], {clean.spec_id: [one_lens_run]}, ("correctness",)
+    )
+    assert len(named) == 1
+    slice_ = named[0]
+    assert slice_ is not None
+    assert (slice_.declared, slice_.graded) == (1, 0)
+    assert corpus.graded_per_run([clean], {clean.spec_id: [one_lens_run]}) == [None]
+
+    hit = _recorded(
+        tmp_path / "hit",
+        [
+            LensReview(
+                lens="correctness",
+                findings=[
+                    _finding(
+                        file="saffron/report/pr_body.py",
+                        line=395,
+                        claim="deleting the neutraliz call keeps every test green",
+                    )
+                ],
+            )
+        ],
+    )
+    with pytest.raises(lens_scoring.CalibrationError):
+        lens_scoring.calibrate(hit)
 
 
 def test_a_finding_on_the_defects_lines_without_its_words_is_not_the_defect(sa0062):

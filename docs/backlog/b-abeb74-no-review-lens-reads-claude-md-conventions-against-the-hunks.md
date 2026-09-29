@@ -1,12 +1,12 @@
 ---
 id: b-abeb74
 title: No REVIEW lens reads CLAUDE.md's conventions against the hunks, and the Standards seat finds them on every PR
-status: open
+status: partial
 tier: 1
 filed: 2026-09-28
 closed:
 specs: [SA-0189, SA-0191, SA-0192]
-prs: []
+prs: [579, 580, 581]
 commits: []
 cites: [§5.5]
 related: [79, b-17d0d5, b-7e69d0]
@@ -34,3 +34,10 @@ states. It is measured on run 20's Standards findings before and after.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-09-29: partial after `SA-0189` (#579), `SA-0191` (#580) and `SA-0192`
+  (#581) in the spec loop's run 21. The conventions lens exists. ADR 8's
+  measured pass is still hand work: a fixture of run 20's five Standards
+  defects in its own directory, scored with `harness/lens_scoring.py` before
+  and after. The lens ran live in no cell, because lenses run from the
+  host's `main` (item b-66d1c3). Item b-78ccc7 holds what the Standards seat
+  found the prompt would miss.

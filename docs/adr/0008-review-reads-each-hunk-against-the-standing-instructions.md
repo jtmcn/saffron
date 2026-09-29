@@ -114,10 +114,9 @@ the two lens sets share no key.
   test still separates them.
 - **29** upholds. The amendment is stated in the Decision, and ADR 4's own
   text names this ADR.
-- **30** departs. §5.5, §5.5.1, §7's cost row and `CONTEXT.md`'s Lens entry
-  now count four lenses. §5.3 still says "the three review lenses", in a
-  sentence the `prose` ratchet holds as written. `CONTEXT.md` and §5.5 still
-  call the lenses disjoint, which b-ac97c0 owns.
+- **30** departs. §5.3, §5.5, §5.5.1, §7's cost row and `CONTEXT.md`'s Lens
+  entry now count four lenses. `CONTEXT.md` and §5.5 still call the lenses
+  disjoint, which b-ac97c0 owns.
 - **41** upholds. The prompt names no repo's language or tools. It reads the
   standards a repo declares at `base_sha`, and none when it declares none.
 - **43** departs. The prompt carries the standing instructions read at

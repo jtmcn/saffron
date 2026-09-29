@@ -110,10 +110,13 @@ def witnesses_block(acceptance: Sequence[Criterion]) -> str:
         "nothing about this change.",
         "",
     ]
-    lines += [
-        f"- `{c.witness}`{' *(preserves)*' if c.preserves else ''} — {c.claim}"
-        for c in acceptance
-    ]
+    for c in acceptance:
+        lines.append(
+            f"- `{c.witness}`{' *(preserves)*' if c.preserves else ''} — {c.claim}"
+        )
+        if c.wrong_versions:
+            lines.append("  Wrong versions this witness must fail on:")
+            lines += [f"  - {version}" for version in c.wrong_versions]
     return "\n".join(lines)
 
 

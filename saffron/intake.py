@@ -128,6 +128,30 @@ class Criterion(BaseModel):
     """The edit that would falsify `claim` (§5.4.1). Absent by default, and
     every spec in this repo predates the field — an omitted `mutant` must
     parse exactly as it did before this field existed."""
+    wrong_versions: list[str] = Field(default_factory=list)
+    """Plausible wrong implementations of this criterion, in the author's own
+    words (backlog item b-7e69d0). Absent by default, and an omitted field
+    must parse exactly as it did before this field existed."""
+
+    @field_validator("wrong_versions")
+    @classmethod
+    def _wrong_versions_are_declared_meaningfully(cls, value: list[str]) -> list[str]:
+        """Runs only when the spec sets this key. Pydantic skips a field
+        validator on a default, so an omitted list needs no rule here. An
+        explicit empty or duplicate one is refused where it costs nothing.
+
+        Returned as declared, never sorted. The author's own order is the
+        order shown to the implementer and to the wrong-version session."""
+        if not value:
+            raise ValueError("wrong_versions is declared but empty")
+        seen: set[str] = set()
+        for version in value:
+            if not version.strip():
+                raise ValueError(f"wrong_versions entry {version!r} is blank")
+            if version in seen:
+                raise ValueError(f"wrong_versions entry {version!r} is declared twice")
+            seen.add(version)
+        return value
 
 
 class Spec(BaseModel):
@@ -292,6 +316,12 @@ def parse_spec(text: str) -> Spec:
                         if witness == criterion.witness
                         else f"the claim for {witness}"
                     )
+                    break
+        # `witnesses_block` hands the implementer every wrong version too.
+        if where is None:
+            for holder in spec.acceptance:
+                if any(find in version for version in holder.wrong_versions):
+                    where = f"the wrong versions of {holder.witness}"
                     break
         if where is not None:
             raise DisclosedMutantError(

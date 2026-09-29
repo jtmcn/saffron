@@ -174,11 +174,18 @@ IMPLEMENT sessions. Two plans were refused on a size nothing priced before the
 cell, one of them on a token count read as lines. A cell stacked on a merged
 parent's stale branch and ran the old gates.
 
-**Placed 2026-09-28**, from the spec loop's run 20: **b-7e69d0**,
-**b-ab4b33**, then **b-abeb74**. They follow ~~**b-2750d5**~~ into the cell.
+**Placed 2026-09-28**, from the spec loop's run 20: ~~**b-7e69d0**~~,
+~~**b-ab4b33**~~, then **b-abeb74**. They follow ~~**b-2750d5**~~ into the cell.
 The PR seats found blockers the critic passed on six of eight pull requests.
 Most were wrong versions the spec listed and nothing applied. REBUT argued a
 real blocker away on #562, and no lens reads `CLAUDE.md`'s conventions.
+Run 21 closed the first two. The third is partial until ADR 8's measured pass.
+
+**Placed 2026-09-29**, from the spec loop's run 21: **b-cf832a**, **b-5b1f8a**,
+then **b-cd5fd2**. The loop repairs each by hand every run. One uncollectable
+id makes `revert` check no witness. A witness that reads the constant it tests
+cannot fail. A lens withdrew a real `preserves` blocker because its line sat
+outside the diff.
 
 ### Tier 2 — the morning after
 
@@ -310,6 +317,11 @@ merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 **Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
 session transcript, so a strange PR shows what the agent did but not what it read.
 
+**Placed 2026-09-29**, from the spec loop's run 21: **b-66d1c3**, **b-78ccc7**,
+**b-47659f**, then **b-38d45f**. The first is REVIEW running from `main`, so a
+stack's new lens runs in none of its cells. The second is what the conventions
+prompt misses. The last two are a witness and an anchor that pass too much.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -348,6 +360,10 @@ text a split left, or a defect in the loop's own tools.
 **b-30bbd7**, **b-5ec5c5**, **b-64e40c**, **b-710086**, **b-713e90**, then
 **b-74e564**. Each is a seam review kept as written, text a spec could not
 reach, or a gate hole the operator accepted once.
+
+**Placed 2026-09-29**, from the spec loop's run 21: **b-84d4f8**, then
+**b-6d43da**. One is vocabulary in summaries a cell wrote under `gates/**`. The
+other is a fixture field under `docs/**` that no cell could add.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",

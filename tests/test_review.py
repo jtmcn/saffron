@@ -8,6 +8,8 @@ import pytest
 from pydantic import ValidationError
 
 from harness import lens_scoring
+from saffron import end_review
+from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -65,7 +67,7 @@ def _agent(*texts, record=None):
     return run
 
 
-def _review(*texts, read_head=lambda _p: None, record=None):
+def _review(*texts, read_head=lambda _p: None, record=None, claude_md=None):
     return review.run_review(
         "cell",
         diff=DIFF,
@@ -73,7 +75,7 @@ def _review(*texts, read_head=lambda _p: None, record=None):
         spec_body="fix the gap",
         gates="- tests: pass (pytest 8.0)",
         context_md=CONTEXT_MD,
-        claude_md=None,
+        claude_md=claude_md,
         prompts_dir=PROMPTS,
         max_turns=20,
         budget_usd=2.0,
@@ -328,7 +330,17 @@ def test_the_blast_radius_lens_is_not_declared():
     """BACKLOG item 6, settled by #34: the third lens is test adequacy, not
     blast radius — that plan is retired, not merely deferred, and a lens
     wired here would run on every task with no risk tier to gate it."""
-    assert set(review.LENSES) == {"correctness", "contract", "adequacy"}
+    assert set(review.LENSES) == {"correctness", "contract", "adequacy", "conventions"}
+
+
+# Each lens's own framing sentence. The fourth one says "must", never "should",
+# so the hedge the `prose` gate refuses stays out of `review-conventions.md`.
+_FRAMING = {
+    "correctness": "Find the reason this change should not be merged",
+    "contract": "Find the reason this change should not be merged",
+    "adequacy": "Find the reason this change should not be merged",
+    "conventions": "Find the reason this change must not be merged",
+}
 
 
 @pytest.mark.parametrize("lens", sorted(review.LENSES))
@@ -344,7 +356,7 @@ def test_each_lens_prompt_carries_the_framing_that_makes_it_a_critic(lens):
     )
     # Normalized: the prompt file is wrapped, and the clause spans two lines.
     flat = " ".join(prompt.split())
-    assert "Find the reason this change should not be merged" in flat
+    assert _FRAMING[lens] in flat
     assert "do not manufacture one" in flat
     for severity in ("`blocker`", "`concern`", "`note`"):
         assert severity in prompt
@@ -375,6 +387,63 @@ def test_each_lens_prompt_carries_the_repo_s_claude_md(lens):
     assert "- Never collapse `error` into `fail`." in prompt
 
 
+# The text between the conventions prompt's `## Your remit` heading and the
+# next heading, kept here rather than read off the file by path (see below).
+_CONVENTIONS_REMIT = """
+Yours is each hunk read against the standing instructions below, and against
+the code and text it describes. Judge against the standing instructions in
+this prompt, never a copy of them in the worktree. The host read them at this task's
+base commit, before the implementer could touch them.
+
+Ask four questions of every hunk:
+
+- **Vocabulary.** Does each term carry the meaning the standing instructions
+  give it, and avoid every term they rule against?
+- **Invariants and conventions.** Does the hunk hold to each rule the
+  standing instructions state?
+- **One source.** Is a type, constant or helper the repository already
+  defines imported, rather than restated? A constant restated is yours even
+  when the two values agree today.
+- **Said versus done.** Does each comment, docstring and citation say what
+  the code or the cited text says? A comment or docstring that contradicts
+  its code is yours. So is a citation to a section or line that does not say
+  what the text claims.
+
+The fourth question needs no standing instructions. Format, lint, types,
+structure and sentence form each have a gate. Leave what they judge alone.
+"""
+
+
+def test_the_conventions_prompt_asks_its_four_questions_against_the_base_standards():
+    """The conventions lens judges every hunk against the standing
+    instructions this prompt carries, never a copy in the worktree the
+    implementer could edit. Read through `review.lens_prompt`, not the
+    file's own path. A mutant that points the `LENSES` entry at another
+    prompt file must fail this witness, not pass it by accident."""
+    prompt = review.lens_prompt(
+        "conventions",
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    flat = " ".join(prompt.split())
+    assert "Find the reason this change must not be merged" in flat
+    lines = prompt.splitlines()
+    start = lines.index("## Your remit") + 1
+    end = next(i for i in range(start, len(lines)) if lines[i].startswith("## "))
+    remit = "\n".join(lines[start:end])
+    assert " ".join(remit.split()) == " ".join(_CONVENTIONS_REMIT.split())
+    # The whole template, not only the remit. The implementer could edit the
+    # worktree copy, so no line sends the lens to read it.
+    template = (PROMPTS / review.LENSES["conventions"]).read_text()
+    for line in template.splitlines():
+        if "CLAUDE.md" in line:
+            assert "/work" not in line and "read" not in line.lower(), line
+
+
 def test_the_lenses_declare_disjoint_remits():
     """Lenses are disjoint by construction — that is why one blocker routes
     onward and why there is no vote. Each names the other's territory as not
@@ -392,14 +461,235 @@ def test_the_lenses_declare_disjoint_remits():
     assert "blast-radius lens" in adequacy.split("Not yours.")[1]
 
 
+_APPENDED_BULLET = (
+    "A comment, docstring or citation that misstates its own code or the "
+    "text it cites, or a constant or helper restated rather than imported. "
+    "That is the conventions lens."
+)
+
+_CONVENTIONS_BULLETS = [
+    "Whether the computation is right: timezones, boundaries, null "
+    "handling, units, ordering. That is the correctness & data-semantics "
+    "lens.",
+    "A docstring that misstates a public interface's documented contract, "
+    "and every other promise to something outside the change. That is the "
+    "contract & schema lens.",
+    "Whether a test would notice this code being wrong. That is the "
+    "test-adequacy lens.",
+    "What else in the repository calls the changed code, and what breaks "
+    "downstream of it. That is the blast-radius lens.",
+]
+
+_CONVENTIONS_EDGE = (
+    "The test at the edge: if fixing the defect means changing the "
+    "comment, the citation or the import rather than what the code does, "
+    "it is yours."
+)
+
+# The whole `## Its edges` body, compared against the raw template file.
+_CONVENTIONS_LIST = """
+Not yours. Another lens reports these, so leave them alone even when you see
+them, and do not mention them in your findings:
+
+- Whether the computation is right: timezones, boundaries, null handling,
+  units, ordering. That is the correctness & data-semantics lens.
+- A docstring that misstates a public interface's documented contract, and
+  every other promise to something outside the change. That is the contract
+  & schema lens.
+- Whether a test would notice this code being wrong. That is the
+  test-adequacy lens.
+- What else in the repository calls the changed code, and what breaks
+  downstream of it. That is the blast-radius lens.
+
+The test at the edge: if fixing the defect means changing the comment, the
+citation or the import rather than what the code does, it is yours.
+"""
+
+
+def _section_after(text, heading):
+    """The heading right after `heading`, and that next section's own body,
+    up to the line opening `## ` after that."""
+    lines = text.splitlines()
+    start = lines.index(heading) + 1
+    next_heading = next(
+        i for i in range(start, len(lines)) if lines[i].startswith("## ")
+    )
+    end = next(
+        i for i in range(next_heading + 1, len(lines)) if lines[i].startswith("## ")
+    )
+    return lines[next_heading], "\n".join(lines[next_heading + 1 : end])
+
+
+def _not_yours_bullets_and_edge(text):
+    """One lens template's `Not yours.` list and its edge sentence, each
+    joined on whitespace. Shared across all four templates: each carries
+    exactly one `Not yours.` paragraph and one edge sentence that opens
+    `The test at the edge`."""
+    start = text.index("Not yours.")
+    edge_start = text.index("The test at the edge", start)
+    block_lines = text[start:edge_start].splitlines()
+    first_bullet = next(
+        i for i, line in enumerate(block_lines) if line.startswith("- ")
+    )
+    bullets: list[str] = []
+    current: list[str] = []
+    for line in block_lines[first_bullet:]:
+        if not line.strip():
+            continue
+        if line.startswith("- "):
+            if current:
+                bullets.append(" ".join(" ".join(current).split()))
+            current = [line[2:]]
+        else:
+            current.append(line)
+    if current:
+        bullets.append(" ".join(" ".join(current).split()))
+    edge_paragraph = text[edge_start:].split("\n\n")[0]
+    return bullets, " ".join(edge_paragraph.split())
+
+
+def test_the_four_lenses_declare_disjoint_remits():
+    """Each of the four lens prompts names every other lens's remit as not
+    its own. The conventions lens carries a `## Its edges` section after
+    its remit. The other three each end their own `Not yours.` list with
+    the same territory."""
+    conventions_template = (PROMPTS / review.LENSES["conventions"]).read_text()
+    heading, its_edges = _section_after(conventions_template, "## Your remit")
+    assert heading == "## Its edges"
+    assert " ".join(its_edges.split()) == " ".join(_CONVENTIONS_LIST.split())
+
+    table = {
+        lens: _not_yours_bullets_and_edge((PROMPTS / path).read_text())
+        for lens, path in review.LENSES.items()
+    }
+    assert set(table) == set(review.LENSES)
+
+    for lens in ("correctness", "contract", "adequacy"):
+        bullets, _edge = table[lens]
+        assert bullets[-1] == _APPENDED_BULLET
+
+    bullets, edge = table["conventions"]
+    assert bullets == _CONVENTIONS_BULLETS
+    assert edge == _CONVENTIONS_EDGE
+
+
+# The spec's block, restated so the witness cannot agree with any wording.
+_NO_STANDING_INSTRUCTIONS = (
+    "## This repository's standing instructions\n\n"
+    "This repository declares no standing instructions: no `CLAUDE.md`, "
+    "or a blank one, stood at this task's base commit. Judge each comment, "
+    "docstring and citation against the code or text it describes."
+)
+
+
+def test_the_conventions_lens_says_a_repo_without_claude_md_declares_none():
+    """A repo with no `CLAUDE.md`, or a blank one, gets a fixed block in the
+    conventions prompt's standing-instructions slot. It still asks the lens
+    to judge each comment, docstring and citation. A real `CLAUDE.md` still
+    reaches the conventions prompt as before, and the other three lenses
+    keep the empty slot for a repo declaring none."""
+    one_liner = "- Never collapse `error` into `fail`.\n"
+    cases = [
+        ("conventions", None, _NO_STANDING_INSTRUCTIONS),
+        ("conventions", "", _NO_STANDING_INSTRUCTIONS),
+        ("conventions", " \n\t\n", _NO_STANDING_INSTRUCTIONS),
+        ("conventions", one_liner, context.standing_instructions(one_liner)),
+        ("correctness", None, ""),
+        ("contract", None, ""),
+        ("adequacy", None, ""),
+    ]
+    for lens, claude_md, standing in cases:
+        template = (PROMPTS / review.LENSES[lens]).read_text()
+        expected = context.build_system_prompt(
+            "REVIEW",
+            CONTEXT_MD,
+            template=template,
+            spec="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+            standing_instructions=standing,
+        )
+        actual = review.lens_prompt(
+            lens,
+            context_md=CONTEXT_MD,
+            claude_md=claude_md,
+            prompts_dir=PROMPTS,
+            spec_body="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+        )
+        assert actual == expected, (lens, claude_md)
+
+
 def test_the_declared_lenses_are_the_three_that_run():
     """A third lens is declared, and its remit is whether the suite would
     notice the code being wrong. `review.py` gains one entry in `LENSES` and
     one prompt file; `run_review` iterates the mapping rather than a second,
-    hand-written list, so nothing else has to learn a third lens exists."""
-    assert set(review.LENSES) == {"correctness", "contract", "adequacy"}
-    reviews = _review(_block([]), _block([]), _block([]))
-    assert [r.lens for r in reviews] == list(review.LENSES)
+    hand-written list, so nothing else has to learn a third lens exists.
+
+    Narrowed to what stays true once a fourth lens joins: the first three
+    keys, in order. `test_the_declared_lenses_are_the_four_that_run` below
+    covers the full set."""
+    assert list(review.LENSES)[:3] == ["correctness", "contract", "adequacy"]
+
+
+def test_the_declared_lenses_are_the_four_that_run():
+    """A fourth lens is declared, keyed `conventions` rather than `standards`.
+    The end review already declares a `standards` lens (ADR 7), and a shared
+    name would feed its concerns back in as in-cell ones, qualified twice.
+    `run_review` iterates `LENSES` rather than a second, hand-written list,
+    so the fourth call gets the standing instructions like every other."""
+    assert review.LENSES == {
+        "correctness": "review-correctness.md",
+        "contract": "review-contract.md",
+        "adequacy": "review-adequacy.md",
+        "conventions": "review-conventions.md",
+    }
+    assert list(review.LENSES) == ["correctness", "contract", "adequacy", "conventions"]
+    record: list[dict] = []
+    reviews = _review(
+        _block([]),
+        _block([]),
+        _block([]),
+        _block([_finding(claim="the docstring contradicts its code")]),
+        record=record,
+        claude_md="- Never collapse `error` into `fail`.\n",
+    )
+    assert [r.lens for r in reviews] == [
+        "correctness",
+        "contract",
+        "adequacy",
+        "conventions",
+    ]
+    assert [(f.lens, f.claim) for f in reviews[3].findings] == [
+        ("conventions", "the docstring contradicts its code")
+    ]
+    assert len(record) == 4
+    expected = review.lens_prompt(
+        "conventions",
+        context_md=CONTEXT_MD,
+        claude_md="- Never collapse `error` into `fail`.\n",
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    system_prompt = record[3]["options"]["system_prompt"]
+    assert system_prompt == expected
+    assert "Find the reason this change must not be merged" in " ".join(
+        system_prompt.split()
+    )
+    assert "- Never collapse `error` into `fail`." in system_prompt
+
+
+def test_no_in_cell_lens_shares_a_name_with_an_end_review_lens():
+    """A shared name between an in-cell lens and an end-review lens would feed
+    every end-review finding of that name back in as an in-cell one. Two
+    readers tell the two apart, `end_review._known_block` and
+    `qualify._in_cell_concerns`, and both do it by name alone."""
+    assert set(review.LENSES) == {"correctness", "contract", "adequacy", "conventions"}
+    assert set(end_review.END_LENSES) == {"spec", "standards"}
+    assert set(review.LENSES) & set(end_review.END_LENSES) == set()
 
 
 def test_exactly_one_prompt_claims_the_test_adequacy_remit():
@@ -426,6 +716,13 @@ def test_exactly_one_prompt_claims_the_test_adequacy_remit():
     # And it left the correctness lens's own remit, not just its Not-yours list.
     correctness_remit = texts["correctness"].split("Not yours.")[0]
     assert "pass identically before this change" not in correctness_remit.lower()
+    # A reworded claim still says a test would notice, and only adequacy's remit does.
+    remit_carriers = [
+        lens
+        for lens, text in texts.items()
+        if "notice" in text.split("Not yours.")[0].lower()
+    ]
+    assert remit_carriers == ["adequacy"], remit_carriers
 
 
 def test_the_adequacy_prompt_demands_a_checkable_mutation():
@@ -543,8 +840,9 @@ def _probe_text(edit, reason):
 
 def _probe_agent(*turns, record=None):
     """Like `_lens_agent`, scripting one turn per `run_criterion_probes` call
-    rather than per lens: an exception is raised, anything else is the
-    session's raw text."""
+    rather than per lens. An exception is raised. A scripted
+    `implement.AttemptResult` passes through with its own cost. Anything else
+    is wrapped as the session's raw text at the default cost."""
     scripted = iter(turns)
 
     def run(container, *, prompt, options, **kwargs):
@@ -553,6 +851,8 @@ def _probe_agent(*turns, record=None):
         turn = next(scripted)
         if isinstance(turn, BaseException):
             raise turn
+        if isinstance(turn, implement.AttemptResult):
+            return turn
         return _turn(turn)
 
     return run
@@ -596,3 +896,351 @@ def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still
     assert "not the schema" in entries[1]["error"]
     # A refused session still spent its turn, and the task is charged for it.
     assert entries[1]["cost_usd"] == pytest.approx(0.1)
+
+
+# --- wrong versions: one session per criterion that declares any (backlog item b-7e69d0) ---
+
+
+def _wrong_version_block(versions):
+    return f"Here it is.\n<output>\n{json.dumps({'versions': versions})}\n</output>"
+
+
+def _expected_wrong_version_tail(numbered: str, claim: str) -> str:
+    return (
+        "## The diff\n\n"
+        + DIFF
+        + "\n\n## The wrong versions\n\n"
+        + numbered
+        + "\n\n## The claim\n\n"
+        + claim
+        + "\n"
+    )
+
+
+def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_into_an_edit():
+    """Criterion 3: `run_wrong_versions` buys one fresh session per criterion
+    that declares wrong versions, in the spec's order, and none for one that
+    declares none. Its prompt shows one claim and the diff, never a witness
+    or another criterion's claim."""
+    edit_a1 = {"file": "src/gap.py", "find": "amount < 0", "replace": "amount <= 0"}
+    edit_a2 = {"file": "src/gap.py", "find": "log.info(total)", "replace": "pass"}
+    edit_c = {
+        "file": "src/gap.py",
+        "find": "total = total",
+        "replace": "total = total * 2",
+    }
+
+    a = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="t.py::test_a",
+        wrong_versions=[
+            "the guard is removed",
+            "the guard accepts zero",
+            "the guard logs nothing",
+        ],
+    )
+    b = Criterion(claim="the total is logged", witness="t.py::test_b")
+    c = Criterion(
+        claim="the total stays unchanged",
+        witness="t.py::test_c",
+        preserves=True,
+        wrong_versions=["the total is doubled"],
+    )
+
+    record: list[dict] = []
+    agent = _probe_agent(
+        _turn(
+            _wrong_version_block(
+                [
+                    {
+                        "edit": edit_a1,
+                        "reason": "removing the guard lets negatives through",
+                    },
+                    {"edit": None, "reason": "zero cannot be isolated as one edit"},
+                    {"edit": edit_a2, "reason": "logging nothing still runs the guard"},
+                ]
+            ),
+            cost=0.35,
+        ),
+        _turn(
+            _wrong_version_block(
+                [{"edit": edit_c, "reason": "doubling changes the preserved value"}]
+            ),
+            cost=0.15,
+        ),
+        record=record,
+    )
+
+    entries = review.run_wrong_versions(
+        "cell",
+        acceptance=[a, b, c],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 2  # b buys no session
+
+    numbered_a = (
+        "1. the guard is removed\n2. the guard accepts zero\n3. the guard logs nothing"
+    )
+    numbered_c = "1. the total is doubled"
+    tail_a = _expected_wrong_version_tail(numbered_a, a.claim)
+    tail_c = _expected_wrong_version_tail(numbered_c, c.claim)
+    assert record[0]["options"]["system_prompt"].endswith(tail_a)
+    assert record[1]["options"]["system_prompt"].endswith(tail_c)
+
+    for call in record:
+        prompt = call["options"]["system_prompt"]
+        turn_prompt = call["prompt"]
+        for witness in ("t.py::test_a", "t.py::test_b", "t.py::test_c"):
+            assert witness not in prompt
+            assert witness not in turn_prompt
+    assert b.claim not in record[0]["options"]["system_prompt"]
+    assert c.claim not in record[0]["options"]["system_prompt"]
+    assert a.claim not in record[1]["options"]["system_prompt"]
+    assert b.claim not in record[1]["options"]["system_prompt"]
+
+    assert record[0]["options"]["tools"] == review.REVIEW_TOOLS
+    assert record[0]["options"]["max_turns"] == 20
+    assert record[0]["options"]["max_budget_usd"] == 2.0
+    assert record[1]["options"]["tools"] == review.REVIEW_TOOLS
+    assert record[1]["options"]["max_turns"] == 20
+    assert record[1]["options"]["max_budget_usd"] == 2.0
+
+    assert entries == [
+        {
+            "witness": "t.py::test_a",
+            "claim": "the guard rejects a negative amount",
+            "cost_usd": pytest.approx(0.35),
+            "error": None,
+            "versions": [
+                {
+                    "version": "the guard is removed",
+                    "edit": edit_a1,
+                    "reason": "removing the guard lets negatives through",
+                },
+                {
+                    "version": "the guard accepts zero",
+                    "edit": None,
+                    "reason": "zero cannot be isolated as one edit",
+                },
+                {
+                    "version": "the guard logs nothing",
+                    "edit": edit_a2,
+                    "reason": "logging nothing still runs the guard",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::test_c",
+            "claim": "the total stays unchanged",
+            "cost_usd": pytest.approx(0.15),
+            "error": None,
+            "versions": [
+                {
+                    "version": "the total is doubled",
+                    "edit": edit_c,
+                    "reason": "doubling changes the preserved value",
+                },
+            ],
+        },
+    ]
+
+    # The criterion-probe session keeps its own view: one claim and the diff,
+    # never the wrong versions a spec's author listed for it.
+    probe_record: list[dict] = []
+    probe_agent = _probe_agent(
+        _probe_text(None, "no edit found"),
+        _probe_text(None, "no edit found"),
+        _probe_text(None, "no edit found"),
+        record=probe_record,
+    )
+    review.run_criterion_probes(
+        "cell",
+        acceptance=[a, b, c],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=probe_agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+    assert len(probe_record) == 3
+    for call in probe_record:
+        prompt = call["options"]["system_prompt"]
+        for version in (
+            "the guard is removed",
+            "the guard accepts zero",
+            "the guard logs nothing",
+            "the total is doubled",
+        ):
+            assert version not in prompt
+
+    assert (
+        review.describe_wrong_versions(entries)
+        == "wrong versions: 4 declared, 3 expressed"
+    )
+
+
+def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version():
+    """Criterion 4: a failed session, a bad reply, and a mismatched count each
+    keep every version, with a null edit and an empty reason. None of the
+    four truncates, stops the loop, or re-prompts. Every later criterion is
+    still asked."""
+    c1 = Criterion(
+        claim="claim one", witness="t.py::test_1", wrong_versions=["c1 v1", "c1 v2"]
+    )
+    c2 = Criterion(
+        claim="claim two", witness="t.py::test_2", wrong_versions=["c2 v1", "c2 v2"]
+    )
+    c3 = Criterion(
+        claim="claim three", witness="t.py::test_3", wrong_versions=["c3 v1", "c3 v2"]
+    )
+    c4 = Criterion(
+        claim="claim four", witness="t.py::test_4", wrong_versions=["c4 v1", "c4 v2"]
+    )
+
+    failed = implement.AgentFailed("turn cut short", _turn("", cost=0.42))
+    one_answer = _wrong_version_block(
+        [
+            {
+                "edit": {"file": "src/gap.py", "find": "x", "replace": "y"},
+                "reason": "one answer",
+            }
+        ]
+    )
+    three_answers = _wrong_version_block(
+        [
+            {
+                "edit": {"file": "src/gap.py", "find": "p", "replace": "q"},
+                "reason": "first",
+            },
+            {
+                "edit": {"file": "src/gap.py", "find": "r", "replace": "s"},
+                "reason": "second",
+            },
+            {
+                "edit": {"file": "src/gap.py", "find": "t", "replace": "u"},
+                "reason": "third",
+            },
+        ]
+    )
+
+    record: list[dict] = []
+    agent = _probe_agent(
+        failed, "not a block at all", one_answer, three_answers, record=record
+    )
+
+    entries = review.run_wrong_versions(
+        "cell",
+        acceptance=[c1, c2, c3, c4],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 4, "every criterion is asked, whatever the previous answer"
+    assert entries == [
+        {
+            "witness": "t.py::test_1",
+            "claim": "claim one",
+            "cost_usd": pytest.approx(0.42),
+            "error": "turn cut short",
+            "versions": [
+                {"version": "c1 v1", "edit": None, "reason": ""},
+                {"version": "c1 v2", "edit": None, "reason": ""},
+            ],
+        },
+        {
+            "witness": "t.py::test_2",
+            "claim": "claim two",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: no <output> block in the response",
+            "versions": [
+                {"version": "c2 v1", "edit": None, "reason": ""},
+                {"version": "c2 v2", "edit": None, "reason": ""},
+            ],
+        },
+        {
+            "witness": "t.py::test_3",
+            "claim": "claim three",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: 1 answers for 2 wrong versions",
+            "versions": [
+                {"version": "c3 v1", "edit": None, "reason": ""},
+                {"version": "c3 v2", "edit": None, "reason": ""},
+            ],
+        },
+        {
+            "witness": "t.py::test_4",
+            "claim": "claim four",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: 3 answers for 2 wrong versions",
+            "versions": [
+                {"version": "c4 v1", "edit": None, "reason": ""},
+                {"version": "c4 v2", "edit": None, "reason": ""},
+            ],
+        },
+    ]
+
+
+def test_a_wrong_versions_survivor_names_the_version_it_came_from():
+    """`survivor_finding`'s optional `version` keyword (backlog item b-7e69d0).
+    Given one, the claim names the wrong version that survived rather than
+    reading the edit as the criterion's own. Without it, the claim is
+    unchanged."""
+    criterion = Criterion(
+        claim="the guard rejects a negative amount", witness="t.py::a"
+    )
+    edit = Mutant(file="src/x.py", find="if x < 0:", replace="if False:")
+    content = "def f(x):\n    if x < 0:\n        raise ValueError\n"
+
+    plain = review.survivor_finding(criterion, edit, content)
+    assert plain == Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="src/x.py",
+        line=2,
+        claim=(
+            f"{review.HOST_FILED}t.py::a stayed green with the criterion's "
+            "own edit applied to src/x.py. The claim was "
+            "'the guard rejects a negative amount', and only that witness "
+            "ran under the edit."
+        ),
+        probe=edit,
+        probe_verdict="survived",
+    )
+
+    versioned = review.survivor_finding(
+        criterion, edit, content, version="the guard is removed"
+    )
+    assert versioned == Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="src/x.py",
+        line=2,
+        claim=(
+            f"{review.HOST_FILED}t.py::a stayed green with the spec's "
+            "wrong version 'the guard is removed' applied to src/x.py as an "
+            "edit. The claim was 'the guard rejects a negative amount', and "
+            "only that witness ran under the edit."
+        ),
+        probe=edit,
+        probe_verdict="survived",
+    )

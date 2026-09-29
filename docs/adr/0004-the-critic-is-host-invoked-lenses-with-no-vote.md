@@ -80,8 +80,10 @@ verdict session that errors halts the task at `REBUTTING`.
 Any confirmed blocker reaches `READY_FOR_REVIEW`, whether the implementer
 argued against it or fixed it and stayed green. So do a withdrawn set and a
 green fix. So does a contradicted blocker, whose rebuttal and finding rest on
-two spec lines that disagree. The operator adjudicates a confirmed or contradicted blocker in the pull
-request.
+two spec lines that disagree (`SA-0188`). The lens quotes both lines. The host
+demotes the answer to `confirmed` unless each quote is in the spec text shown
+and the two differ. The operator adjudicates a confirmed or contradicted
+blocker in the pull request.
 
 Inside a stack batch, ADR 7 takes four exceptions to this decision for its end
 review. Every in-cell critic keeps it whole.
@@ -151,8 +153,9 @@ review. Every in-cell critic keeps it whole.
   runs. Item 6 records that the overlap did not recur. §5.5.1 records a class
   owned by nobody. Every prompt still routes callers and downstream findings to
   the retired blast radius lens.
-- **55** upholds. Four routes reach `READY_FOR_REVIEW`. The fourth is a fix
+- **55** upholds. Five routes reach `READY_FOR_REVIEW`. The fourth is a fix
   that committed and stayed green, whose blocker the verdict still confirmed.
+  The fifth is a contradicted blocker, counted apart from the confirmed ones.
   `rebuttal.json` tells the routes apart, and the sustained blockers alone do
   not. Three routes share `EXHAUSTED` at REBUT, and item 132 owns the
   definition that covers only one. Only the budget exit writes no

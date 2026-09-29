@@ -976,6 +976,11 @@ def test_every_shipped_fixture_s_head_declares_a_tests_gate():
         assert "tests" in declared, fixture.spec_id
 
 
+# The three lenses every scoring pass below ran, before a fourth lens existed.
+# Naming it keeps a later lens from retroactively widening these numbers.
+PASS_LENSES = ("correctness", "contract", "adequacy")
+
+
 def test_the_baseline_pass_s_published_aggregate_is_re_derivable():
     """The record's headline, re-derived from the runs beside it rather than
     read from the prose. A record whose number nobody can recompute is the
@@ -988,7 +993,7 @@ def test_the_baseline_pass_s_published_aggregate_is_re_derivable():
         ]
         for f in fixtures
     }
-    scored = corpus.score_corpus(fixtures, runs)
+    scored = corpus.score_corpus(fixtures, runs, expect=PASS_LENSES)
     record = RECORD.read_text()
     table = (BASELINE / "table.md").read_text()
 
@@ -1149,13 +1154,14 @@ def test_the_spread_pass_s_per_run_totals_are_re_derivable():
         for f in fixtures
     }
     assert all(len(r) == 3 for r in runs.values())
-    per_run = corpus.graded_per_run(fixtures, runs)
+    per_run = corpus.graded_per_run(fixtures, runs, expect=PASS_LENSES)
     line = next(
         line
         for line in (SPREAD / "table.md").read_text().splitlines()
         if line.startswith("Per run")
     )
     totals = " · ".join(f"{s.graded}/{s.declared}" for s in per_run if s is not None)
+    assert totals == "1/12 · 2/12 · 3/12"
     assert totals in line
     assert line in SPREAD_RECORD.read_text()
 
@@ -1180,7 +1186,7 @@ def test_the_claude_md_pass_s_per_run_totals_are_re_derivable():
         for f in fixtures
     }
     assert all(len(r) == 3 for r in runs.values())
-    per_run = corpus.graded_per_run(fixtures, runs)
+    per_run = corpus.graded_per_run(fixtures, runs, expect=PASS_LENSES)
     line = next(
         line
         for line in (CLAUDE_MD / "table.md").read_text().splitlines()
@@ -1192,3 +1198,52 @@ def test_the_claude_md_pass_s_per_run_totals_are_re_derivable():
     assert totals in line
     assert totals == "1/10 · 4/12 · 4/12"
     assert line in CLAUDE_MD_RECORD.read_text()
+
+
+def test_the_published_passes_re_derive_under_a_fourth_lens(monkeypatch):
+    """Each re-derivation above must name the lens set its own scoring pass ran,
+    never the harness default. A later lens must not silently widen what
+    an already-published number was scored against."""
+    from tests.test_lens_scoring import (
+        test_the_calibration_case_reproduces_the_run_it_was_built_from as calibration_case,
+    )
+
+    absent = object()
+    seen: dict[str, list] = {
+        "score_corpus": [],
+        "graded_per_run": [],
+        "score_run": [],
+    }
+
+    def _spy(name, real):
+        def spy(*args, **kwargs):
+            if "expect" in kwargs:
+                seen[name].append(kwargs["expect"])
+            elif len(args) > 2:
+                seen[name].append(args[2])
+            else:
+                seen[name].append(absent)
+            return real(*args, **kwargs)
+
+        return spy
+
+    monkeypatch.setattr(
+        corpus, "score_corpus", _spy("score_corpus", corpus.score_corpus)
+    )
+    monkeypatch.setattr(
+        corpus, "graded_per_run", _spy("graded_per_run", corpus.graded_per_run)
+    )
+    monkeypatch.setattr(
+        lens_scoring, "score_run", _spy("score_run", lens_scoring.score_run)
+    )
+
+    calibration_case(lens_scoring.load_fixture(FIXTURES / "SA-0062"))
+    test_the_baseline_pass_s_published_aggregate_is_re_derivable()
+    test_the_spread_pass_s_per_run_totals_are_re_derivable()
+    test_the_claude_md_pass_s_per_run_totals_are_re_derivable()
+
+    for name, calls in seen.items():
+        assert calls, name
+        for expect in calls:
+            assert expect is not absent, name
+            assert tuple(expect) == PASS_LENSES, name

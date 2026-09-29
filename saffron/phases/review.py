@@ -17,6 +17,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -40,6 +41,7 @@ LENSES = {
     "correctness": "review-correctness.md",
     "contract": "review-contract.md",
     "adequacy": "review-adequacy.md",
+    "conventions": "review-conventions.md",
 }
 # BACKLOG item 6, settled by #34: the third lens is not blast radius (that plan
 # is retired) and it is not `revert`, which is unbuilt and asks a different
@@ -51,6 +53,15 @@ LENSES = {
 # Marks a finding the host filed, never a lens (item b-2750d5): excluded
 # from `drop_rate` and stripped by `_from_report` so a lens cannot forge one.
 HOST_FILED = "[host-filed criterion probe] "
+
+# The conventions lens judges against standing instructions, so an empty
+# section reads as none declared rather than none to judge (item b-17d0d5).
+NO_STANDING_INSTRUCTIONS = (
+    "## This repository's standing instructions\n\n"
+    "This repository declares no standing instructions: no `CLAUDE.md`, "
+    "or a blank one, stood at this task's base commit. Judge each comment, "
+    "docstring and citation against the code or text it describes."
+)
 
 REVIEW_PROMPT = context.turn_prompt("review")
 
@@ -188,6 +199,9 @@ def lens_prompt(
 ) -> str:
     """The lens's system prompt: its own file, plus what a fresh session lacks."""
     template = (prompts_dir / LENSES[lens]).read_text()
+    standing = context.standing_instructions(claude_md)
+    if lens == "conventions" and not standing:
+        standing = NO_STANDING_INSTRUCTIONS
     return context.build_system_prompt(
         "REVIEW",
         context_md,
@@ -195,7 +209,7 @@ def lens_prompt(
         spec=spec_body,
         diff=diff,
         gates=gates,
-        standing_instructions=context.standing_instructions(claude_md),
+        standing_instructions=standing,
     )
 
 
@@ -487,6 +501,159 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     return f"criterion probes: {named} named, {len(entries) - named} unnamed"
 
 
+WRONG_VERSION_PROMPT = context.turn_prompt("wrong-version")
+
+
+def wrong_version_prompt(
+    *,
+    claim: str,
+    wrong_versions: Sequence[str],
+    diff: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+) -> str:
+    """The system prompt for one criterion's wrong-version session: the claim
+    substituted for `{spec}`, the versions numbered from 1 in declared order
+    for `{wrong_versions}`, and never the witness or the spec body."""
+    template = (prompts_dir / "wrong-version.md").read_text()
+    numbered = "\n".join(
+        f"{index}. {version}" for index, version in enumerate(wrong_versions, start=1)
+    )
+    return context.build_system_prompt(
+        "REVIEW",
+        context_md,
+        template=template,
+        spec=claim,
+        diff=diff,
+        wrong_versions=numbered,
+        standing_instructions=context.standing_instructions(claude_md),
+    )
+
+
+class _WrongVersionReport(BaseModel):
+    """One wrong-version session's own answer: one `_ProbeAnswer` per version
+    it was shown, paired back to those versions by position."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    versions: list[_ProbeAnswer]
+
+
+def _unresolved_wrong_versions(criterion: Criterion, cost: float, error: str) -> dict:
+    """The entry filed for a criterion whose session gave nothing usable: every
+    declared version kept, with a null edit and an empty reason."""
+    return {
+        "witness": criterion.witness,
+        "claim": criterion.claim,
+        "cost_usd": cost,
+        "error": error,
+        "versions": [
+            {"version": version, "edit": None, "reason": ""}
+            for version in criterion.wrong_versions
+        ],
+    }
+
+
+def run_wrong_versions(
+    container: str,
+    *,
+    acceptance: Sequence[Criterion],
+    diff: str,
+    context_md: str,
+    claude_md: str | None,
+    prompts_dir: Path,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> list[dict]:
+    """One fresh session per criterion that declares wrong versions, in the
+    spec's own declared order (backlog item b-7e69d0). A criterion declaring
+    none buys no session, exactly like `run_criterion_probes`."""
+    entries = []
+    for criterion in acceptance:
+        if not criterion.wrong_versions:
+            continue
+        system_prompt = wrong_version_prompt(
+            claim=criterion.claim,
+            wrong_versions=criterion.wrong_versions,
+            diff=diff,
+            context_md=context_md,
+            claude_md=claude_md,
+            prompts_dir=prompts_dir,
+        )
+        options = implement.agent_options(
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            budget_usd=budget_usd,
+            tools=REVIEW_TOOLS,
+        )
+        declared = len(criterion.wrong_versions)
+        try:
+            attempt = agent(
+                container, prompt=WRONG_VERSION_PROMPT, options=options, emit=emit
+            )
+        except implement.AgentFailed as failed:
+            cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            entries.append(_unresolved_wrong_versions(criterion, cost, str(failed)))
+            continue
+        try:
+            report = _WrongVersionReport.model_validate(
+                json.loads(parse_output_block(attempt.text))
+            )
+        except (ValueError, ValidationError) as exc:
+            entries.append(
+                _unresolved_wrong_versions(
+                    criterion, attempt.cost_usd_est, f"not the schema: {exc}"
+                )
+            )
+            continue
+        if len(report.versions) != declared:
+            entries.append(
+                _unresolved_wrong_versions(
+                    criterion,
+                    attempt.cost_usd_est,
+                    f"not the schema: {len(report.versions)} answers for "
+                    f"{declared} wrong versions",
+                )
+            )
+            continue
+        entries.append(
+            {
+                "witness": criterion.witness,
+                "claim": criterion.claim,
+                "cost_usd": attempt.cost_usd_est,
+                "error": None,
+                "versions": [
+                    {
+                        "version": version,
+                        "edit": None
+                        if answer.edit is None
+                        else answer.edit.model_dump(),
+                        "reason": answer.reason,
+                    }
+                    for version, answer in zip(
+                        criterion.wrong_versions, report.versions, strict=True
+                    )
+                ],
+            }
+        )
+    return entries
+
+
+def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
+    """The one REVIEW line the wrong-version sessions add, counted over the
+    entries `run_wrong_versions` returns: every version across every entry,
+    and how many of those an edit was named for."""
+    versions = [
+        v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])
+    ]
+    expressed = sum(1 for v in versions if v["edit"] is not None)
+    return f"wrong versions: {len(versions)} declared, {expressed} expressed"
+
+
 # `witness_gate`'s own status, over one criterion, in this record's words
 # (item b-2750d5): `pass` killed, `fail` survived, `skip` unproven, `error` error.
 _CRITERION_PROBE_OUTCOMES = {
@@ -503,25 +670,37 @@ def criterion_probe_outcome(status: GateStatus) -> str:
     return _CRITERION_PROBE_OUTCOMES[status]
 
 
-def survivor_finding(criterion: Criterion, edit: Mutant, content: str) -> Finding:
-    """The blocker filed when a criterion's own witness survives the edit its
-    own session named for it (backlog item b-2750d5). `content` is the file at
-    head in the cell that applied and restored the edit. The line is where
-    `edit.find` begins there, never a hunk line.
+def survivor_finding(
+    criterion: Criterion, edit: Mutant, content: str, *, version: str | None = None
+) -> Finding:
+    """The blocker filed when a criterion's own witness survives an edit
+    (backlog items b-2750d5, b-7e69d0). `content` is the file at head in the
+    cell that applied and restored the edit. The line is where `edit.find`
+    begins there, never a hunk line. `version` names the wrong version the
+    edit came from. Without it, the edit is read as the criterion's own.
 
     Unanchored: the caller still runs this through `findings.anchor`, exactly
     as every other finding in a `LensReview` is."""
     line = content.count("\n", 0, content.index(edit.find)) + 1
+    claim = (
+        (
+            f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
+            f"own edit applied to {edit.file}. The claim was "
+            f"{criterion.claim!r}, and only that witness ran under the edit."
+        )
+        if version is None
+        else (
+            f"{HOST_FILED}{criterion.witness} stayed green with the spec's "
+            f"wrong version {version!r} applied to {edit.file} as an edit. The claim "
+            f"was {criterion.claim!r}, and only that witness ran under the edit."
+        )
+    )
     return Finding(
         lens="adequacy",
         severity="blocker",
         file=edit.file,
         line=line,
-        claim=(
-            f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
-            f"own edit applied to {edit.file}. The claim was "
-            f"{criterion.claim!r}, and only that witness ran under the edit."
-        ),
+        claim=claim,
         probe=edit,
         probe_verdict="survived",
     )

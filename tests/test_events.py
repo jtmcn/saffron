@@ -1777,7 +1777,19 @@ def _golden_fixture_path() -> Path:
 def test_watch_output_matches_the_golden_fixture(monkeypatch, tmp_path):
     cell_a = _stub_the_runtime(monkeypatch, suites=([], []))
     outcome_a, _ = _drive(
-        monkeypatch, tmp_path / "a", cell=cell_a, turns=[_turn(_block(_PLAN)), _turn()]
+        monkeypatch,
+        tmp_path / "a",
+        cell=cell_a,
+        # The fourth lens scripted at $0.00, so the golden run's total spend
+        # stays $0.50. Every other turn keeps its own default cost.
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []}), cost=0.0),
+        ],
     )
     assert outcome_a.state == "READY_FOR_REVIEW"
 
@@ -2051,12 +2063,24 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
             detail="CLAUDE.md: none found at base_sha",
         )
     )
+    # The conventions lens's own line, inline rather than a new `_JOINED`
+    # row: a row inserted there renumbers every positional id after it.
+    conventions_line = describe(
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REVIEW",
+            label="REVIEW",
+            detail="conventions: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.00",
+        )
+    )
     unchecked = [
         line
         for line in captured
         if line not in joined
         and line not in per_gate
         and line != no_claude_md
+        and line != conventions_line
         and "<" not in line
     ]
     assert unchecked == [], f"captured but joined to no kind: {unchecked}"
@@ -2085,7 +2109,7 @@ def test_run_one_cell_with_no_emit_argument_still_prints(monkeypatch, tmp_path, 
     assert outcome.state == "READY_FOR_REVIEW"
     printed = capsys.readouterr().out
     assert "preflight: starting the proxy" in printed
-    assert "READY_FOR_REVIEW: $0.50 spent, session sess-1" in printed
+    assert "READY_FOR_REVIEW: $0.60 spent, session sess-1" in printed
 
 
 def test_events_jsonl_reproduces_what_the_terminal_printed(
@@ -2246,12 +2270,8 @@ def test_the_supervisor_hands_the_adapter_to_the_agent_it_calls(monkeypatch, tmp
         agent_says=spoken,
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Exact, not `>= 1`: the count is the number of seams exercised, and a
-    # migration that drops one should fail here rather than pass quietly.
-    # Derived, not hard-coded: two turns plus one session per lens. `5` reads
-    # as a constant and is not one — `review.LENSES` gained its third entry in
-    # #34 and a fourth is still an open question, and adding one would fail
-    # this test for a change that has nothing to do with the seam.
+    # Exact and derived: two turns plus one session per lens. A dropped seam
+    # fails here, and a new lens does not.
     assert cell.watched.count(spoken) == 2 + len(review.LENSES), cell.watched
 
 
@@ -2358,7 +2378,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
     assert "agent: (raw) some stray stdout" in implement_lines
     assert 'agent: Bash {"command": "ls"}' in implement_lines
 
-    # "REVIEW: ..." — review.run_review's own PhaseStart, three clean lenses.
+    # "REVIEW: ..." — review.run_review's own PhaseStart, four clean lenses.
     review_captured: list[Event] = []
     review.run_review(
         "cell",
@@ -2372,6 +2392,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
         max_turns=5,
         budget_usd=1.0,
         agent=_scripted_agent(
+            _block({"findings": []}),
             _block({"findings": []}),
             _block({"findings": []}),
             _block({"findings": []}),

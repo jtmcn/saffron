@@ -76,6 +76,9 @@ them, and do not mention them in your findings:
   the contract & schema lens.
 - What else in the repository calls the changed code, and what breaks
   downstream of it — that is the blast-radius lens.
+- A comment, docstring or citation that misstates its own code or the text
+  it cites, or a constant or helper restated rather than imported. That is
+  the conventions lens.
 
 The test at the edge: if fixing the defect means changing what the code
 computes or what it promises, it is not yours; if it means changing what the

@@ -1690,9 +1690,9 @@ def test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged(
     # (§4.3). Without this the whole salvage path can measure from the wrong
     # base and 159 tests stay green.
     assert cell.measured_from == "c" * 40
-    # Charged like any other turn — plan + the cut-off implement turn + the
-    # salvage turn + REVIEW's three lenses at their default cost each.
-    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.3)
+    # Charged like any other turn: plan, the cut-off implement turn, the
+    # salvage turn, and REVIEW's four lenses at their default cost each.
+    assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.1 + 0.4)
     assert any("recovered 1 commit" in line for line in cell.watched)
 
 
@@ -3188,10 +3188,9 @@ def test_a_repair_turn_that_fails_does_not_discard_committed_work(
     assert outcome.state == "READY_FOR_REVIEW"
     (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
     assert run_row["status"] == "COMPLETE"
-    # Plan, implement, the failed repair turn's $0.40, and REVIEW's three
-    # lenses: the critic is spend too, and a total that omits it stops being
-    # a total.
-    assert any("$0.90 spent" in line for line in cell.watched)
+    # Plan, implement, the repair turn's $0.40, and REVIEW's four lenses:
+    # the critic spends too, and a total that omits it stops being a total.
+    assert any("$1.00 spent" in line for line in cell.watched)
     # A clean tree has nothing to checkpoint — the host must not commit an
     # empty no-op just because a turn was cut.
     assert cell.checkpointed == []
@@ -3501,7 +3500,7 @@ def _rebuttable(monkeypatch, cell, *, rebut_commits):
 
 
 def _through_rebut(*rebut_turns):
-    """Plan, implement, one lens filing a blocker, the other two filing
+    """Plan, implement, one lens filing a blocker, the other three filing
     nothing, then the rebuttal's own turns. No notes turn: none of these
     specs declares `forbidden`, and the default test policy declares no
     `protected` either, so there is nothing this channel would be asked
@@ -3510,6 +3509,7 @@ def _through_rebut(*rebut_turns):
         _turn(_block(_PLAN)),
         _turn(),
         _turn(_block(_BLOCKER)),
+        _turn(_block({"findings": []})),
         _turn(_block({"findings": []})),
         _turn(_block({"findings": []})),
         *rebut_turns,
@@ -3623,8 +3623,10 @@ _TASK_HEAD = [
 _EMPTY = _block({"findings": []})
 
 
-def _adequacy_turns(adequacy, *, correctness=_EMPTY, contract=_EMPTY, rebut=()):
-    """Plan, implement, then the three lenses in `LENSES` order, plus any
+def _adequacy_turns(
+    adequacy, *, correctness=_EMPTY, contract=_EMPTY, conventions=_EMPTY, rebut=()
+):
+    """Plan, implement, then the four lenses in `LENSES` order, plus any
     REBUT turns — the shape every probe witness drives `_drive` with."""
     return [
         _turn(_block(_PLAN)),
@@ -3632,6 +3634,7 @@ def _adequacy_turns(adequacy, *, correctness=_EMPTY, contract=_EMPTY, rebut=()):
         _turn(correctness),
         _turn(contract),
         _turn(_block(adequacy)),
+        _turn(conventions),
         *rebut,
     ]
 
@@ -4066,7 +4069,7 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
 
     # The REBUT prompt's line for the survivor shows its probe and does not
     # say the tests stayed green.
-    rebut_prompt = cell.turns[5]
+    rebut_prompt = cell.turns[6]
     assert "src/a.py" in rebut_prompt
     assert "`a` -> `A`" in rebut_prompt
     assert "tests stayed green" not in rebut_prompt
@@ -4363,6 +4366,7 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
             _turn(),
             _turn(),  # the repair turn after attempt 1
             _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
             _turn(_block({"findings": []})),
             _turn(_block({"findings": []})),
             _turn("Fixed it."),
@@ -4879,9 +4883,10 @@ def test_the_outcome_event_round_trips_and_describes_as_its_old_line(
     )
     assert outcome.state == "READY_FOR_REVIEW"
     logged = _task_outcome(tmp_path)
-    assert (logged.outcome, logged.spent_usd_est) == ("READY_FOR_REVIEW", 0.5)
+    assert logged.outcome == "READY_FOR_REVIEW"
+    assert logged.spent_usd_est == pytest.approx(0.6)
     assert logged.session_id == "sess-1"
-    assert describe(logged) == "READY_FOR_REVIEW: $0.50 spent, session sess-1"
+    assert describe(logged) == "READY_FOR_REVIEW: $0.60 spent, session sess-1"
 
 
 def test_a_rate_limited_outcome_survives_the_log_whatever_reopen_time_was_reported(
@@ -6095,7 +6100,7 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the
+        # plan, implement, 4 lenses, rebuttal, extraction = 8 turns by the
         # time REBUT asks for a critic cell; every earlier export is REVIEW's.
         return grown if len(cell.turns) > 5 else _ANCHORING_DIFF
 
@@ -6265,10 +6270,8 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 3 lenses, rebuttal, extraction = 7 turns by the time
-        # REBUT asks for a critic cell; every earlier export is REVIEW's (the
-        # same threshold `test_rebut_verdicts_read_a_tree_rebuilt_from_the_post
-        # _rebuttal_patch` above uses).
+        # 8 turns precede REBUT's critic cell: plan, implement, 4 lenses, rebuttal
+        # and extraction. Every earlier export is REVIEW's, as in the test above.
         if len(cell.turns) > 5:
             return after_rebuttal
         # Keyed on the container too, not the turn alone: a second export taken
@@ -6356,7 +6359,7 @@ def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
 def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_path):
     """The equality is the point: `spent_usd_est` is derived from `attempts`, so
     a turn that spends without opening a row makes the two disagree. Every
-    phase's turns are counted here — plan, implement, all three lenses,
+    phase's turns are counted here: plan, implement, all four lenses, and the
     rebuttal."""
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=0)
@@ -6375,6 +6378,7 @@ def test_what_the_task_spent_is_the_sum_of_the_turns_it_ran(monkeypatch, tmp_pat
     assert [row["phase"] for row in ledger.attempts(outcome.task_id)] == [
         "IMPLEMENTING",
         "IMPLEMENTING",
+        "REVIEWING",
         "REVIEWING",
         "REVIEWING",
         "REVIEWING",
@@ -7161,6 +7165,13 @@ def _probe_answer(edit, reason):
     return f"Here it is.\n<output>\n{json.dumps({'edit': edit, 'reason': reason})}\n</output>"
 
 
+def _wrong_version_answer(*versions):
+    """The text of one `<output>` block holding `{"versions": [...]}`, one
+    `{"edit": ..., "reason": ...}` pair per entry in `versions`, in order."""
+    body = [{"edit": edit, "reason": reason} for edit, reason in versions]
+    return f"Here it is.\n<output>\n{json.dumps({'versions': body})}\n</output>"
+
+
 def _section(prompt, heading, next_heading=None):
     """The prompt text strictly between `heading` and `next_heading` (or the
     end). Positional, not `in`: a caller that swapped which value fills which
@@ -7171,12 +7182,13 @@ def _section(prompt, heading, next_heading=None):
 
 
 def _probe_turns(*probes):
-    """Plan, implement, the three lenses clean, then one criterion-probe turn
+    """Plan, implement, the four lenses clean, then one criterion-probe turn
     per entry in `probes`, in the spec's own declared order. Both
     criterion-probe witnesses below drive with this shape."""
     return [
         _turn(_block(_PLAN)),
         _turn(),
+        _turn(_EMPTY),
         _turn(_EMPTY),
         _turn(_EMPTY),
         _turn(_EMPTY),
@@ -7224,10 +7236,10 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     )
     assert outcome.state == "READY_FOR_REVIEW"
 
-    # Five calls precede the criterion probes: the plan, the implement turn,
-    # and the three lenses (correctness, contract, adequacy).
-    probe_prompts = cell.system_prompts[5:]
-    probe_options = cell.turn_options[5:]
+    # Six calls precede the criterion probes: the plan, the implement turn,
+    # and the four lenses (correctness, contract, adequacy, conventions).
+    probe_prompts = cell.system_prompts[6:]
+    probe_options = cell.turn_options[6:]
     assert len(probe_prompts) == 2
 
     # Positional, not `in`: the claim must land under its own heading, never
@@ -7253,12 +7265,12 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
     assert "tests/test_x.py::test_total" not in probe_prompts[1]
 
     # The turn prompt is a prompt the host builds too.
-    for turn in cell.turns[5:]:
+    for turn in cell.turns[6:]:
         assert "tests/test_x.py::test_guard" not in turn
         assert "tests/test_x.py::test_total" not in turn
 
     # Asked inside the critic cell the lenses ran in, never a cell of its own.
-    assert cell.turn_containers[5:] == [_CRITIC_CONTAINER] * 2
+    assert cell.turn_containers[6:] == [_CRITIC_CONTAINER] * 2
 
     # The same read-only tools and the same per-session ceiling a lens holds.
     lens_options = cell.turn_options[2]
@@ -7268,7 +7280,7 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
         assert options["max_budget_usd"] == lens_options["max_budget_usd"]
 
     # Charged to the task beside the lenses' own cost.
-    assert outcome.spent_usd == pytest.approx(0.1 * 5 + 0.05 + 0.07)
+    assert outcome.spent_usd == pytest.approx(0.1 * 6 + 0.05 + 0.07)
 
 
 def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
@@ -7337,6 +7349,7 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
             _turn(_EMPTY),
             _turn(_EMPTY),
             _turn(_EMPTY),
+            _turn(_EMPTY),
         ],
         spec=_spec(),
     )
@@ -7344,7 +7357,7 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
     assert not (
         tmp_path / "no-criteria" / "out" / "SY-1" / "criterion-probes.json"
     ).exists()
-    assert len(empty_cell.system_prompts) == 5
+    assert len(empty_cell.system_prompts) == 6
     assert not [
         w for w in empty_cell.watched if w.startswith("REVIEW: criterion probes:")
     ]
@@ -7608,6 +7621,400 @@ def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
     assert adequacy["findings"] == []
 
 
+# --- wrong versions: one fresh session per criterion that declares them (b-7e69d0) ---
+
+
+def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
+    monkeypatch, tmp_path
+):
+    """Criterion 2: a wrong version whose criterion's witness stays green
+    under its edit is filed as a host-filed `adequacy` blocker whose claim
+    names that version. Its criterion-probe session names no edit, so only
+    the two wrong-version edits ask the witness. The first is killed. The
+    second anchors by the token rule and survives, and only the survivor
+    reaches `rebuttal.json`."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="t.py::a",
+        wrong_versions=["removing the guard entirely", "the guard is removed"],
+    )
+
+    killed_edit = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+    # Line 3 of `src/x.py`, outside the hunk but sharing a token with it,
+    # the shape SA-0120's surviving-criterion-probe witness uses.
+    anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    contents = {
+        "src/x.py": "def y():\n    return 1\nassert x == 1\n",
+        "src/y.py": "def other():\n    check(9)\n",
+    }
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("fail", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
+        ],
+        subsets=subsets,
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "the diff needs no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (killed_edit, "the substitute is still caught"),
+                    (anchors, "nothing notices the guard is gone"),
+                )
+            ),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTING"
+    assert subsets == [["t.py::a"], ["t.py::a"]]
+
+    entry = json.loads((tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text())
+    assert entry == [
+        {
+            "witness": "t.py::a",
+            "claim": "the guard rejects a negative amount",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "removing the guard entirely",
+                    "edit": killed_edit,
+                    "reason": "the substitute is still caught",
+                    "outcome": "killed",
+                    "summary": "1 of 1 witness(es) died under their own mutant",
+                },
+                {
+                    "version": "the guard is removed",
+                    "edit": anchors,
+                    "reason": "nothing notices the guard is gone",
+                    "outcome": "survived",
+                    "summary": "1 of 1 witness(es) survived their own mutant",
+                },
+            ],
+        }
+    ]
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert record["blockers"] == [
+        {
+            "anchored": True,
+            "claim": (
+                f"{review.HOST_FILED}t.py::a stayed green with the spec's "
+                "wrong version 'the guard is removed' applied to src/x.py as an "
+                "edit. The claim was 'the guard rejects a negative amount', and "
+                "only that witness ran under the edit."
+            ),
+            "file": "src/x.py",
+            "finding": 1,
+            "lens": "adequacy",
+            "line": 3,
+            "probe": anchors,
+            "probe_verdict": "survived",
+            "severity": "blocker",
+        }
+    ]
+
+
+def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: four criteria, one declaring no wrong version between two
+    that do. The first's versions are one the session could not express and
+    one on a declared test path. The second's are an edit the `tests` gate
+    errors under, then an edit the witness kills. The third's session fails
+    outright, so both its versions are unproven with the entry's own error.
+    Only the second criterion's edits ever reach the witness, and no survivor
+    is filed, so the task ends `READY_FOR_REVIEW`. A spec declaring no wrong
+    version buys no such session and writes no such file."""
+    from saffron.intake import Criterion
+
+    a = Criterion(claim="a is true", witness="t.py::a", wrong_versions=["a v1", "a v2"])
+    b = Criterion(claim="b is true", witness="t.py::b")
+    c = Criterion(claim="c is true", witness="t.py::c", wrong_versions=["c v1", "c v2"])
+    d = Criterion(claim="d is true", witness="t.py::d", wrong_versions=["d v1", "d v2"])
+
+    on_test_path = {"file": "spec/t.py", "find": "assert 1", "replace": "2"}
+    edit_c1 = {"file": "src/x.py", "find": "assert x == 1", "replace": "c1"}
+    edit_c2 = {"file": "src/x.py", "find": "assert x == 1", "replace": "c2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[
+            _tests_result(
+                "pass", collected=["t.py::a", "t.py::b", "t.py::c", "t.py::d"]
+            )
+        ],
+    )
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("error", summary="collection crashed"),
+            _tests_result("fail"),
+        ],
+        subsets=subsets,
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            *(_turn(_probe_answer(None, f"no probe for {n}")) for n in "abcd")
+        )
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"), (on_test_path, "hits the test file")
+                )
+            ),
+            _turn(
+                _wrong_version_answer((edit_c1, "reason c1"), (edit_c2, "reason c2"))
+            ),
+            _turn("not a block at all"),
+        ],
+        spec=_spec(acceptance=[a, b, c, d]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert subsets == [["t.py::c"], ["t.py::c"]]
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    assert entries == [
+        {
+            "witness": "t.py::a",
+            "claim": "a is true",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "a v1",
+                    "edit": None,
+                    "reason": "nothing changes",
+                    "outcome": "unproven",
+                    "summary": "this session named no edit",
+                },
+                {
+                    "version": "a v2",
+                    "edit": on_test_path,
+                    "reason": "hits the test file",
+                    "outcome": "unproven",
+                    "summary": "spec/t.py is a test; a probe must target source",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::c",
+            "claim": "c is true",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "c v1",
+                    "edit": edit_c1,
+                    "reason": "reason c1",
+                    "outcome": "error",
+                    "summary": (
+                        "the `tests` gate errored under t.py::c's mutant — "
+                        "collection crashed"
+                    ),
+                },
+                {
+                    "version": "c v2",
+                    "edit": edit_c2,
+                    "reason": "reason c2",
+                    "outcome": "killed",
+                    "summary": "1 of 1 witness(es) died under their own mutant",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::d",
+            "claim": "d is true",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: no <output> block in the response",
+            "versions": [
+                {
+                    "version": "d v1",
+                    "edit": None,
+                    "reason": "",
+                    "outcome": "unproven",
+                    "summary": "not the schema: no <output> block in the response",
+                },
+                {
+                    "version": "d v2",
+                    "edit": None,
+                    "reason": "",
+                    "outcome": "unproven",
+                    "summary": "not the schema: no <output> block in the response",
+                },
+            ],
+        },
+    ]
+
+    lines = [
+        w
+        for w in cell.watched
+        if w.startswith("REVIEW: criterion probes:")
+        or w.startswith("REVIEW: wrong versions:")
+    ]
+    assert lines == [
+        "REVIEW: criterion probes: 0 named, 4 unnamed",
+        "REVIEW: wrong versions: 6 declared, 3 expressed",
+    ]
+
+    # A spec whose criteria declare no wrong version buys no such session,
+    # writes no such file and emits no such line.
+    empty_cell = _stub_the_runtime(monkeypatch)
+    empty_outcome, _empty_ledger = _drive(
+        monkeypatch,
+        tmp_path / "no-wrong-versions",
+        cell=empty_cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe"))),
+        spec=_spec(acceptance=[Criterion(claim="x is true", witness="t.py::x")]),
+    )
+    assert empty_outcome.state == "READY_FOR_REVIEW"
+    assert not (
+        tmp_path / "no-wrong-versions" / "out" / "SY-1" / "wrong-versions.json"
+    ).exists()
+    assert len(empty_cell.system_prompts) == 7  # six plus one per criterion
+    assert not [
+        w for w in empty_cell.watched if w.startswith("REVIEW: wrong versions:")
+    ]
+
+
+def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend(
+    monkeypatch, tmp_path
+):
+    """Criterion 4: wrong versions run through the same gate-only cell
+    criterion probes use, applied after them, entered once, and both
+    sessions' cost lands in `spent`. Every `tests` run in the probe cell
+    answers `fail`, so every edit is killed and no verdict cell joins the
+    list. The lens gate table's cell is the first entry, and REVIEW's own
+    critic cell is the second. The gate-only apply cell is the third,
+    entered only when some list holds an edit."""
+    from saffron.intake import Criterion, Mutant
+
+    edit_probe = {"file": "src/x.py", "find": "assert x == 1", "replace": "p"}
+    edit_wrong = {"file": "src/x.py", "find": "assert x == 1", "replace": "w"}
+
+    rows = [
+        ("both", edit_probe, edit_wrong, [None, "saffron-cells", None]),
+        ("wrong_only", None, edit_wrong, [None, "saffron-cells", None]),
+        ("neither", None, None, [None, "saffron-cells"]),
+    ]
+
+    real_critic_cell = session.critic_cell
+    probe_turn_cost = 0.11
+    wrong_turn_cost = 0.13
+
+    for name, probe_edit, wrong_edit, expected_networks in rows:
+        criterion = Criterion(
+            claim="the guard holds", witness="t.py::a", wrong_versions=["v1"]
+        )
+        cell = _stub_the_runtime(
+            monkeypatch,
+            patch=_ANCHORING_DIFF,
+            gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+        )
+
+        networks: list[str | None] = []
+
+        def _spy(*, _networks=networks, **kwargs):
+            _networks.append(kwargs["network"])
+            return real_critic_cell(**kwargs)
+
+        monkeypatch.setattr("saffron.cell.session.critic_cell", _spy)
+
+        with_edit_count = sum(e is not None for e in (probe_edit, wrong_edit))
+        _stub_probe_gates(
+            monkeypatch,
+            cell,
+            gate_results=[_tests_result("fail") for _ in range(with_edit_count)],
+        )
+
+        turns_list = _probe_turns(
+            _turn(_probe_answer(probe_edit, "probe reason"), cost=probe_turn_cost)
+        ) + [
+            _turn(
+                _wrong_version_answer((wrong_edit, "wrong reason")),
+                cost=wrong_turn_cost,
+            )
+        ]
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=turns_list,
+            spec=_spec(acceptance=[criterion]),
+            policy=_PROBE_POLICY,
+            gates=("tests",),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert networks == expected_networks
+        # The container name outlives teardown, so only the timeline shows
+        # the wrong-version session asked inside the critic cell.
+        critic = [
+            e
+            for e in cell.order
+            if e.endswith(f":{_CRITIC_CONTAINER}")
+            and e.split(":")[0] in ("turn", "removed")
+        ]
+        assert critic == [
+            f"removed:container:{_CRITIC_CONTAINER}",
+            *[f"turn:{_CRITIC_CONTAINER}"] * 6,
+            f"removed:container:{_CRITIC_CONTAINER}",
+        ]
+
+        if name == "both":
+            assert cell.mutated == [
+                Mutant.model_validate(edit_probe),
+                Mutant.model_validate(edit_wrong),
+            ]
+
+        probe_options = cell.turn_options[6]
+        wrong_options = cell.turn_options[7]
+        assert wrong_options["tools"] == probe_options["tools"]
+        assert wrong_options["max_turns"] == probe_options["max_turns"]
+        assert wrong_options["max_budget_usd"] == probe_options["max_budget_usd"]
+        assert cell.turn_containers[7] == _CRITIC_CONTAINER
+
+        total_cost = sum(turn.cost_usd_est for turn in turns_list)
+        assert outcome.spent_usd == pytest.approx(total_cost)
+
+
 def test_a_proposed_scope_keeps_the_specs_declared_touches(monkeypatch, tmp_path):
     """The ratified set is a superset, not a replacement. The prompt asks the
     model for every path "inside or outside" the declared `touches`, but a
@@ -7855,9 +8262,9 @@ def test_no_notes_turn_is_asked_for_when_nothing_could_have_been_denied(
         turns=[_turn(_block(_PLAN)), _turn()],
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    # Plan, implement, and REVIEW's three lenses — no extra turn spent asking
+    # Plan, implement, and REVIEW's four lenses: no extra turn spent asking
     # for notes nothing declared a `forbidden`/`protected` path against.
-    assert len(cell.turns) == 5
+    assert len(cell.turns) == 6
     assert outcome.notes == ""
     assert outcome.notes_sha256 == ""
     assert not (outcome.task_dir / "notes.json").exists()
@@ -8040,7 +8447,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
 ):
     """AC2: every session kind leaves the SHA-256 of its own request among
     the task's events, in order. Four cells between them reach the plan,
-    IMPLEMENT, a repair, a salvage, the three lenses, a criterion probe,
+    IMPLEMENT, a repair, a salvage, the four lenses, a criterion probe,
     the rebuttal, its extraction and a verdict.
 
     Not driven: a plan re-prompt, a lens re-prompt, the notes turn. Each
@@ -8063,6 +8470,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
     assert [_request_kind(r) for r in probe_raw] == [
         "plan",
         "implement",
+        "lens",
         "lens",
         "lens",
         "lens",
@@ -8089,6 +8497,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
         "lens",
         "lens",
         "lens",
+        "lens",
     ]
     _assert_digests_match_requests(repair_raw, repair_capture)
 
@@ -8111,6 +8520,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
         "plan",
         "implement",
         "salvage",
+        "lens",
         "lens",
         "lens",
         "lens",
@@ -8148,6 +8558,7 @@ def test_every_session_a_task_starts_records_the_sha256_of_its_request(
     assert [_request_kind(r) for r in rebut_raw] == [
         "plan",
         "implement",
+        "lens",
         "lens",
         "lens",
         "lens",
@@ -8259,6 +8670,6 @@ def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_p
     claude_c, digests_c = _run("c", "an unrelated set of rules entirely\n")
 
     assert claude_a == claude_b != claude_c
-    assert len(digests_a) == 5
+    assert len(digests_a) == 6
     assert digests_a == digests_b
     assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))

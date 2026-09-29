@@ -1,12 +1,12 @@
 ---
 id: b-7e69d0
 title: The host probes no wrong version a spec lists, so the seats kill 20 to 70 mutants the cell never ran
-status: open
+status: done
 tier: 1
 filed: 2026-09-28
-closed:
+closed: 2026-09-29
 specs: [SA-0187, SA-0190]
-prs: []
+prs: [574, 576]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-2750d5, b-2dea1c, b-9ed36d]
@@ -35,3 +35,8 @@ witness. A survivor is a blocker for REBUT, like a surviving criterion probe.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-09-29: done by `SA-0187` (#574) and `SA-0190` (#576) in the spec loop's
+  run 21. A criterion declares its wrong versions, and the host applies each in
+  a Gate-only cell after GATE. Both seats still found a witness hole on each
+  pull request, fixed in review. Items b-cf832a and b-47659f hold what run 21
+  kept.

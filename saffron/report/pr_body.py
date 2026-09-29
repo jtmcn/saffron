@@ -324,12 +324,24 @@ def _disagreements(
             implementer_cell = (
                 rebuttal.action + ": " + rebuttal.argument if rebuttal else "—"
             )
+        if verdict is None:
+            critic_cell = "—"
+        elif verdict.verdict == "contradicted":
+            # The spec's own two lines disagree, not the critic and the
+            # implementer, so the cell names the quotes rather than a side.
+            critic_cell = (
+                f"spec contradicts itself: the rebuttal quotes "
+                f'"{verdict.rebuttal_quote}", the finding quotes '
+                f'"{verdict.finding_quote}": {verdict.reason}'
+            )
+        else:
+            critic_cell = f"{verdict.verdict}: {verdict.reason}"
         lines.append(
             f"| {number} | `{_cell(finding.lens)}` "
             f"| {_cell(finding.file)}:{finding.line} "
             f"| {_cell(finding.claim)} "
             f"| {_cell(implementer_cell)} "
-            f"| {_cell(verdict.verdict + ': ' + verdict.reason) if verdict else '—'} |"
+            f"| {_cell(critic_cell)} |"
         )
     lines.append("")
     return "\n".join(lines)

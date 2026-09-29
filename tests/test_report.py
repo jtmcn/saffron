@@ -1914,3 +1914,59 @@ def test_a_byte_inside_an_added_line_cannot_end_the_test_stanza_early():
     )
     assert "-def test_kept_me_honest():" in body
     assert "-    assert thing()" in body
+
+
+def test_a_contradicted_row_says_the_spec_contradicts_itself_and_shows_both_quotes():
+    """A `contradicted` blocker's critic cell names both quotes and the
+    reason instead of a side. The pipes in all three prove the whole cell
+    still passes through `_cell` (SA-0188)."""
+    reason = "the two lines disagree | both hold"
+    rebuttal_quote = "The resolver stacks on no row outside the waiting states."
+    finding_quote = "Only a `MERGED` | `REJECTED` newest task unstacks a child."
+    rebut_result = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="test",
+        rebuttal=RebuttalTurn(
+            rebuttals=[
+                Rebuttal(finding=1, action="argued", argument="argued it"),
+                Rebuttal(finding=2, action="argued", argument="argued it too"),
+            ]
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    Verdict(
+                        finding=1,
+                        verdict="contradicted",
+                        reason=reason,
+                        rebuttal_quote=rebuttal_quote,
+                        finding_quote=finding_quote,
+                    ),
+                    Verdict(finding=2, verdict="confirmed", reason="still wrong"),
+                ],
+            )
+        ],
+        moved=True,
+        cost_usd=0.0,
+    )
+    # Both findings default to the `correctness` lens (`_finding`'s own
+    # default), proving the row names the lens rather than assuming it.
+    body = _rebut_body(rebut_result)
+    rows = [
+        line
+        for line in body.splitlines()
+        if line.startswith("| 1 ") or line.startswith("| 2 ")
+    ]
+    row1 = (
+        "| 1 | `correctness` | a.py:1 | blocker one claim | argued: argued it "
+        '| spec contradicts itself: the rebuttal quotes "The resolver stacks '
+        'on no row outside the waiting states.", the finding quotes "Only a '
+        '`MERGED` \\| `REJECTED` newest task unstacks a child.": the two '
+        "lines disagree \\| both hold |"
+    )
+    row2 = (
+        "| 2 | `correctness` | b.py:2 | blocker two claim | argued: argued it too "
+        "| confirmed: still wrong |"
+    )
+    assert rows == [row1, row2]

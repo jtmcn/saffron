@@ -1283,3 +1283,83 @@ taken by hand, so no critic ran on it and it has no lines here.
 - `SA-0164` (#566): the `revise` type, the budget sum and a phase name are each
   restated.
   **Bucket 2**, one source. **Open:** item b-74e564.
+
+## 2026-09-29, `SA-0187` to `SA-0192` (the spec loop's run 21, #574 to #581)
+
+- `SA-0187` (#574): criterion 2's witness passed a renderer keyed on
+  `preserves`, since its one listing criterion was also its one `preserves`
+  one.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #574.
+- `SA-0187` (#574): `tests/test_context.py` read a new constant at import, so
+  the file failed to collect at base and `revert` checked no witness.
+  **Bucket 1**, `revert`. **Open:** item b-cf832a.
+- `SA-0187` (#574): the implement prompt forbade running only the wrong
+  versions a spec's notes list, not those under each witness.
+  **Bucket 2**, the implementer's standing text. **Landed:** step 5's edit to
+  `implement.md`, on the operator's call.
+- `SA-0187` (#574): a docstring named a file nothing writes, and the new
+  prompt listed its sections out of order.
+  **Bucket 3**, contract. **Landed:** a review commit on #574.
+- `SA-0190` (#576): criterion 4's witness read a container name that outlives
+  teardown, so a session asked after it survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #576.
+- `SA-0190` (#576): criterion 2's witness checked five fields of the blocker,
+  not the whole of it.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #576.
+- `SA-0190` (#576): a leftover alias restated a parameter, and a comment
+  cited the wrong criterion's witness.
+  **Bucket 2**, one source. **Landed:** a review commit on #576.
+- `SA-0190` (#576): wrong-version summaries say "mutant", and wrong versions
+  run under the criterion-probe helper's name.
+  **Bucket 2**, `CONTEXT.md`'s vocabulary. **Open:** item b-84d4f8.
+- `SA-0188` (#577): a quote check that folded case passed both witnesses.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #577.
+- `SA-0188` (#577): two more docstrings described a two-valued verdict, and a
+  comment gave the host the critic's verb.
+  **Bucket 3**, contract. **Landed:** a review commit on #577.
+- `SA-0188` (#577): a test copied two helpers the file defines, and a
+  constant's name said the opposite of its value.
+  **Bucket 2**, one source. **Landed:** a review commit on #577.
+- `SA-0188` (#577): `DESIGN.md` §4.1 and §5.6 still gave the verdict two
+  values.
+  **Bucket 2**, the design record. **Landed:** step 5's hand edit.
+- `SA-0189` (#579): the fourth-lens witness caught a default `expect` only by
+  `TypeError`, never by an assertion.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #579.
+- `SA-0189` (#579): no witness pinned `expect` as positional.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #579.
+- `SA-0189` (#579): one check used two constants, new prose said bare "run"
+  and "pass", and a docstring restated a signature.
+  **Bucket 2**, one source. **Landed:** a review commit on #579.
+- `SA-0189` (#579): a fixture declares no recorded lens set, so a truncated
+  recorded run still calibrates.
+  **No bucket**, it names a field that does not exist. **Open:** item
+  b-6d43da.
+- `SA-0191` (#580): criterion 3's witness read only the remit, so a worktree
+  `CLAUDE.md` instruction elsewhere passed the suite.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #580.
+- `SA-0191` (#580): no test drove a conventions finding through `run_review`,
+  so one filed under another lens survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #580.
+- `SA-0191` (#580): two comments still counted three lenses and seven turns,
+  far from any hunk.
+  **Bucket 3**, the conventions lens. **Landed:** a review commit on #580.
+  The lens asks of each hunk only, which item b-78ccc7 tracks.
+- `SA-0191` (#580): `DESIGN.md` §5.3, §5.5.1 and the roadmap still counted
+  three lenses.
+  **Bucket 2**, the design record. **Landed:** step 5's hand edit.
+- `SA-0192` (#581): criterion 2's witness expected the constant it tested, so
+  any wording passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #581. Item
+  b-5b1f8a asks a gate to refuse the pattern.
+- `SA-0192` (#581): the lens withdrew a real `preserves` probe blocker as
+  outside the diff.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #581. Item b-cd5fd2
+  keeps REBUT from arguing such a blocker away.
+- `SA-0192` (#581): the block said no `CLAUDE.md` stood while serving a blank
+  one.
+  **Bucket 3**, contract. **Landed:** a review commit on #581, on the
+  operator's call.
+- `SA-0192` (#581): the three other prompts hand over "a constant or helper",
+  where the conventions remit says "a type, constant or helper".
+  **Bucket 3**, the conventions lens. **Open:** item b-78ccc7.
