@@ -44,7 +44,7 @@ leaks a mutant wherever 80 stores one), ~~**114**~~ (109's other path, to the cr
 ~~**115**~~ (a path hidden from `scope` by committed content), **80** (~~**83**~~, ~~**85**~~, ~~**84**~~,
 ~~**82**~~ and ~~**81**~~, pulled up from tier 3 as why 69's gate could not be
 declared against safely, are done — 2026-09-08), then **97**, ~~**102**~~, ~~**112**~~, **119**, **120**, **118** and ~~**136**~~. Honesty second:
-~~**73**~~, ~~**70**~~, ~~**45**~~, **51** (with **49**/**50**, which its fix closes),
+~~**73**~~, ~~**70**~~, ~~**45**~~, ~~**51**~~ (with **49**/~~**50**~~, which its fix closes),
 ~~**47**~~, **46** (with ~~**95**~~, which compounds it), **40**, ~~**26**~~,
 ~~**7**~~, and ~~**78**~~.
 
@@ -181,7 +181,7 @@ Most were wrong versions the spec listed and nothing applied. REBUT argued a
 real blocker away on #562, and no lens reads `CLAUDE.md`'s conventions.
 Run 21 closed the first two. The third is partial until ADR 8's measured pass.
 
-**Placed 2026-09-29**, from the spec loop's run 21: **b-cf832a**, **b-5b1f8a**,
+**Placed 2026-09-29**, from the spec loop's run 21: ~~**b-cf832a**~~, **b-5b1f8a**,
 then **b-cd5fd2**. The loop repairs each by hand every run. One uncollectable
 id makes `revert` check no witness. A witness that reads the constant it tests
 cannot fail. A lens withdrew a real `preserves` blocker because its line sat

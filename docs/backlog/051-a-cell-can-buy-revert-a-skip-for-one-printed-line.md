@@ -1,11 +1,13 @@
 ---
 id: 51
 title: A cell can buy `revert` a `skip` for one printed line
-status: partial
+status: done
 tier: 1
+closed: 2026-09-29
+by_hand: true
 specs: [SA-0127]
 prs: [476]
-commits: []
+commits: [166d467f]
 cites: [§2.1, §5.4, §9]
 related: [50]
 ---
@@ -60,3 +62,6 @@ language knowledge §2.1 keeps out of core. **Contract or nothing.**
   in the spec loop's run 15. `GateResult` carries `uncollected` and `revert`
   reads it. This closes in full when the operator fills the field in
   `.saffron/gates/tests.py` by hand. `SA-0127` retires to `done/`.
+- 2026-09-29: closed by hand in 166d467f. A handed name the gate cannot
+  collect reads as `uncollected`, so `zzz::bogus` no longer buys a `skip`. Ids
+  leaked by another file's collection never count as collected.

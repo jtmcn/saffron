@@ -1,13 +1,14 @@
 ---
 id: b-cf832a
 title: '`revert` gives no verdict when one new test cannot be collected at base, so it checks no witness in the subset'
-status: open
+status: done
 tier: 1
 filed: 2026-09-29
-closed:
+closed: 2026-09-29
+by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [166d467f]
 cites: [§5.4]
 related: [50, 51, b-4a63b7, b-76f08d, b-7e69d0]
 ---
@@ -50,3 +51,6 @@ for the real one.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-29: fixed by hand in 166d467f, since `.saffron/**` is protected.
+  This closes item 50. `TURN_PROMPTS` stays eager, because a module that
+  cannot import now reads as uncollected, not as a broken run.
