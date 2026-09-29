@@ -19,8 +19,9 @@ Rules of conduct belong in `CLAUDE.md`; rules of naming belong here.
 
 `_Avoid_` lists are the load-bearing part. A synonym that reads as harmless in prose
 is what makes two log lines, two prompts, and a ledger column quietly disagree.
-They are written for the operator and the `terms` gate, and stripped at injection:
+They are written for the operator and the `terms` gate. Injection strips them, since
 a prohibition puts the banned word in the prompt, so a cell sees only the headword.
+The conventions lens keeps them, because it judges a diff against them (SA-0195).
 A definition therefore never lives on an `_Avoid_` line.
 
 | § | Section | Injected into |
