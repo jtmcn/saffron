@@ -1568,27 +1568,29 @@ def _apply_criterion_probes(
     test_paths: Sequence[str],
     gates: dict[str, Path],
     patch: str,
-    entries: list[dict],
+    pairs: list[tuple[Criterion, dict]],
     diff: str,
     gate_comparison: SuiteComparison,
     reviews: list[review.LensReview],
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> None:
-    """Every criterion probe's own edit, applied and asked of its own witness
-    (backlog item b-2750d5). It runs in a Gate-only cell entered after
-    `_probe_adequacy`'s own is torn down, never inside the critic cell.
+    """Applies every criterion probe's and wrong version's own edit, and
+    asks its criterion's witness (items b-2750d5, b-7e69d0). Runs in a
+    Gate-only cell entered after `_probe_adequacy`'s own is torn down.
+    `pairs` pairs each criterion-probe entry with its criterion, then each
+    wrong version with the criterion that declared it.
 
-    Writes each edit's outcome and summary into `entries` in place. Appends a
-    survivor's `Finding` to the `adequacy` review in `reviews`, the same
-    in-place contract `_probe_adequacy` keeps with its caller.
+    Writes each pair's outcome and summary in place. Appends a survivor's
+    `Finding` to the `adequacy` review in `reviews`, the same in-place
+    contract `_probe_adequacy` keeps.
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
     from saffron.gates.core.witness import witness_gate
 
-    paired = list(zip(spec.acceptance, entries, strict=True))
+    paired = pairs
     unknown_tree = (
         "an earlier edit left this cell's tree in an unknown state, so nothing "
         "after it was asked"
@@ -1697,7 +1699,9 @@ def _apply_criterion_probes(
                     entry["outcome"] = "error"
                     entry["summary"] = "the survivor's line could not be read"
                     continue
-                finding = review.survivor_finding(criterion, edit, content)
+                finding = review.survivor_finding(
+                    criterion, edit, content, version=entry.get("version")
+                )
                 (anchored,) = anchor(
                     [finding], diff, read_head=partial(worktree.read_at_head, container)
                 )
@@ -2531,6 +2535,9 @@ def _drive_cell(
         # One entry per criterion (backlog item b-2750d5), empty for a spec
         # declaring none. Bound early for the same reason as `reviews`.
         criterion_probes: list[dict] = []
+        # One entry per criterion that declares wrong versions (item
+        # b-7e69d0), empty for a spec declaring none. Bound early too.
+        wrong_versions: list[dict] = []
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
@@ -2696,6 +2703,21 @@ def _drive_cell(
                             spec_id=spec.spec_id,
                             emit=emit,
                         )
+                        # One fresh session per criterion declaring wrong
+                        # versions, in the same cell (item b-7e69d0).
+                        wrong_versions = review.run_wrong_versions(
+                            critic_container,
+                            acceptance=spec.acceptance,
+                            diff=reviewed_diff,
+                            context_md=context_md,
+                            claude_md=claude_md,
+                            prompts_dir=context.PROMPTS_DIR,
+                            max_turns=spec.max_turns,
+                            budget_usd=probe_budget,
+                            agent=agent,
+                            spec_id=spec.spec_id,
+                            emit=emit,
+                        )
                 except CriticPatchRejected as rejected:
                     outcome = "EXHAUSTED"
                     _phase_start(
@@ -2740,8 +2762,25 @@ def _drive_cell(
                             review.describe_probes(probed),
                         )
 
-                    # Every named edit, applied and asked (item b-2750d5),
-                    # before the record below is written.
+                    # Pairs each criterion-probe entry with its criterion,
+                    # then each wrong version with the criterion that declared it.
+                    pairs: list[tuple[Criterion, dict]] = list(
+                        zip(spec.acceptance, criterion_probes, strict=True)
+                    )
+                    declaring = [c for c in spec.acceptance if c.wrong_versions]
+                    for criterion, wv_entry in zip(
+                        declaring, wrong_versions, strict=True
+                    ):
+                        if wv_entry["error"] is not None:
+                            for version in wv_entry["versions"]:
+                                version["outcome"] = "unproven"
+                                version["summary"] = wv_entry["error"]
+                            continue
+                        for version in wv_entry["versions"]:
+                            pairs.append((criterion, version))
+
+                    # Every named edit, applied and asked (items b-2750d5,
+                    # b-7e69d0), before the records below are written.
                     _apply_criterion_probes(
                         spec=spec,
                         repo=repo,
@@ -2751,7 +2790,7 @@ def _drive_cell(
                         test_paths=policy.integrity.test_paths,
                         gates=gates,
                         patch=patch_to_review,
-                        entries=criterion_probes,
+                        pairs=pairs,
                         diff=reviewed_diff,
                         gate_comparison=gate_comparison,
                         reviews=reviews,
@@ -2771,11 +2810,25 @@ def _drive_cell(
                             review.describe_criterion_probes(criterion_probes),
                         )
 
+                    # A spec declaring no wrong version bought no session
+                    # above and writes no record here (item b-7e69d0).
+                    if wrong_versions:
+                        (task_dir / "wrong-versions.json").write_text(
+                            json.dumps(wrong_versions, indent=2)
+                        )
+                        _phase_start(
+                            "REVIEW",
+                            "REVIEW",
+                            review.describe_wrong_versions(wrong_versions),
+                        )
+
                     # Deliberately not gated on the host ceiling: a green diff
                     # nobody reviewed is exactly the product Appendix K says
                     # means nothing.
-                    spent += sum(r.cost_usd for r in reviews) + sum(
-                        e["cost_usd"] for e in criterion_probes
+                    spent += (
+                        sum(r.cost_usd for r in reviews)
+                        + sum(e["cost_usd"] for e in criterion_probes)
+                        + sum(e["cost_usd"] for e in wrong_versions)
                     )
                     (task_dir / "findings.json").write_text(
                         json.dumps([r.as_dict() for r in reviews], indent=2)

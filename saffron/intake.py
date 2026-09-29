@@ -317,6 +317,12 @@ def parse_spec(text: str) -> Spec:
                         else f"the claim for {witness}"
                     )
                     break
+        # `witnesses_block` hands the implementer every wrong version too.
+        if where is None:
+            for holder in spec.acceptance:
+                if any(find in version for version in holder.wrong_versions):
+                    where = f"the wrong versions of {holder.witness}"
+                    break
         if where is not None:
             raise DisclosedMutantError(
                 f"{criterion.witness}'s mutant names text this spec also "

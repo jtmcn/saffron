@@ -901,3 +901,49 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
             ],
         },
     ]
+
+
+def test_a_wrong_versions_survivor_names_the_version_it_came_from():
+    """`survivor_finding`'s optional `version` keyword (backlog item b-7e69d0).
+    Given one, the claim names the wrong version that survived rather than
+    reading the edit as the criterion's own. Without it, the claim is
+    unchanged."""
+    criterion = Criterion(
+        claim="the guard rejects a negative amount", witness="t.py::a"
+    )
+    edit = Mutant(file="src/x.py", find="if x < 0:", replace="if False:")
+    content = "def f(x):\n    if x < 0:\n        raise ValueError\n"
+
+    plain = review.survivor_finding(criterion, edit, content)
+    assert plain == Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="src/x.py",
+        line=2,
+        claim=(
+            f"{review.HOST_FILED}t.py::a stayed green with the criterion's "
+            "own edit applied to src/x.py. The claim was "
+            "'the guard rejects a negative amount', and only that witness "
+            "ran under the edit."
+        ),
+        probe=edit,
+        probe_verdict="survived",
+    )
+
+    versioned = review.survivor_finding(
+        criterion, edit, content, version="the guard is removed"
+    )
+    assert versioned == Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="src/x.py",
+        line=2,
+        claim=(
+            f"{review.HOST_FILED}t.py::a stayed green with the spec's "
+            "wrong version 'the guard is removed' applied to src/x.py as an "
+            "edit. The claim was 'the guard rejects a negative amount', and "
+            "only that witness ran under the edit."
+        ),
+        probe=edit,
+        probe_verdict="survived",
+    )

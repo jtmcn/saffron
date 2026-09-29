@@ -559,6 +559,66 @@ def test_a_mutant_a_sibling_claim_discloses_is_refused_too():
         )
 
 
+def test_a_mutant_a_wrong_version_discloses_is_refused_too():
+    """A wrong version's text discloses a mutant too (b-7e69d0), since
+    `witnesses_block` hands the implementer every one. The first row's
+    holder is the mutant's own criterion. The second row's holder is a
+    sibling declared first, and the mutant's own criterion declares a
+    version without the text."""
+    from saffron.intake import DisclosedMutantError
+
+    rows = [
+        (
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: the constant is declared\n"
+            "    witness: tests/test_billing.py::test_declared\n"
+            "    mutant:\n"
+            "      file: saffron/billing.py\n"
+            "      find: 'CEILING = 60'\n"
+            "      replace: 'CEILING = 0'\n"
+            "    wrong_versions:\n"
+            "      - a CEILING = 60 that stays at 60\n"
+            "  - claim: nothing else changes\n"
+            "    witness: tests/test_billing.py::test_unchanged\n"
+            "---\n\nDeclare the constant.\n",
+            "tests/test_billing.py::test_declared",
+            "tests/test_billing.py::test_declared",
+        ),
+        (
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: nothing else changes\n"
+            "    witness: tests/test_billing.py::test_unchanged\n"
+            "    wrong_versions:\n"
+            "      - a CEILING = 60 that stays at 60\n"
+            "  - claim: the constant is declared\n"
+            "    witness: tests/test_billing.py::test_declared\n"
+            "    mutant:\n"
+            "      file: saffron/billing.py\n"
+            "      find: 'CEILING = 60'\n"
+            "      replace: 'CEILING = 0'\n"
+            "    wrong_versions:\n"
+            "      - a version with no ceiling text at all\n"
+            "---\n\nDeclare the constant.\n",
+            "tests/test_billing.py::test_declared",
+            "tests/test_billing.py::test_unchanged",
+        ),
+    ]
+    for spec_text, mutant_witness, holder_witness in rows:
+        with pytest.raises(DisclosedMutantError) as excinfo:
+            parse_spec(spec_text)
+        exc = excinfo.value
+        assert exc.spec.id == "TE-1"
+        assert str(exc) == (
+            f"{mutant_witness}'s mutant names text this spec also puts in "
+            f"the wrong versions of {holder_witness} ('CEILING = 60'); the "
+            "implementer reads that, so the witness would be written "
+            "to kill a known edit. Pin text the existing code already "
+            "determines, or declare a witness and no mutant"
+        )
+
+
 def test_a_mutant_pinning_text_the_code_determines_parses():
     """The shape item 82 recommends and `SA-0064` used: pin what the existing
     code already determines, so the natural spelling is close to forced and no

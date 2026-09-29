@@ -7161,6 +7161,13 @@ def _probe_answer(edit, reason):
     return f"Here it is.\n<output>\n{json.dumps({'edit': edit, 'reason': reason})}\n</output>"
 
 
+def _wrong_version_answer(*versions):
+    """The text of one `<output>` block holding `{"versions": [...]}`, one
+    `{"edit": ..., "reason": ...}` pair per entry in `versions`, in order."""
+    body = [{"edit": edit, "reason": reason} for edit, reason in versions]
+    return f"Here it is.\n<output>\n{json.dumps({'versions': body})}\n</output>"
+
+
 def _section(prompt, heading, next_heading=None):
     """The prompt text strictly between `heading` and `next_heading` (or the
     end). Positional, not `in`: a caller that swapped which value fills which
@@ -7606,6 +7613,380 @@ def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
     findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
     (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
     assert adequacy["findings"] == []
+
+
+# --- wrong versions: one fresh session per criterion that declares them (b-7e69d0) ---
+
+
+def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
+    monkeypatch, tmp_path
+):
+    """Criterion 2: a wrong version whose criterion's witness stays green
+    under its edit is filed as a host-filed `adequacy` blocker whose claim
+    names that version. Its criterion-probe session names no edit, so only
+    the two wrong-version edits ask the witness. The first is killed. The
+    second anchors by the token rule and survives, and only the survivor
+    reaches `rebuttal.json`."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="t.py::a",
+        wrong_versions=["removing the guard entirely", "the guard is removed"],
+    )
+
+    killed_edit = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+    # Line 3 of `src/x.py`, outside `_ANCHORING_DIFF`'s hunk. It shares a
+    # token with the diff, the same shape as criterion 1's own witness.
+    anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    contents = {
+        "src/x.py": "def y():\n    return 1\nassert x == 1\n",
+        "src/y.py": "def other():\n    check(9)\n",
+    }
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("fail", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
+        ],
+        subsets=subsets,
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "the diff needs no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (killed_edit, "the substitute is still caught"),
+                    (anchors, "nothing notices the guard is gone"),
+                )
+            ),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTING"
+    assert subsets == [["t.py::a"], ["t.py::a"]]
+
+    entry = json.loads((tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text())
+    assert entry == [
+        {
+            "witness": "t.py::a",
+            "claim": "the guard rejects a negative amount",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "removing the guard entirely",
+                    "edit": killed_edit,
+                    "reason": "the substitute is still caught",
+                    "outcome": "killed",
+                    "summary": "1 of 1 witness(es) died under their own mutant",
+                },
+                {
+                    "version": "the guard is removed",
+                    "edit": anchors,
+                    "reason": "nothing notices the guard is gone",
+                    "outcome": "survived",
+                    "summary": "1 of 1 witness(es) survived their own mutant",
+                },
+            ],
+        }
+    ]
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (blocker,) = record["blockers"]
+    assert blocker["claim"] == (
+        f"{review.HOST_FILED}t.py::a stayed green with the spec's "
+        "wrong version 'the guard is removed' applied to src/x.py as an "
+        "edit. The claim was 'the guard rejects a negative amount', and "
+        "only that witness ran under the edit."
+    )
+    assert blocker["lens"] == "adequacy"
+    assert blocker["probe_verdict"] == "survived"
+    assert blocker["line"] == 3
+    assert blocker["probe"] == anchors
+
+
+def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: four criteria, one declaring no wrong version between two
+    that do. The first's versions are one the session could not express and
+    one on a declared test path. The second's are an edit the `tests` gate
+    errors under, then an edit the witness kills. The third's session fails
+    outright, so both its versions are unproven with the entry's own error.
+    Only the second criterion's edits ever reach the witness, and no survivor
+    is filed, so the task ends `READY_FOR_REVIEW`. A spec declaring no wrong
+    version buys no such session and writes no such file."""
+    from saffron.intake import Criterion
+
+    a = Criterion(claim="a is true", witness="t.py::a", wrong_versions=["a v1", "a v2"])
+    b = Criterion(claim="b is true", witness="t.py::b")
+    c = Criterion(claim="c is true", witness="t.py::c", wrong_versions=["c v1", "c v2"])
+    d = Criterion(claim="d is true", witness="t.py::d", wrong_versions=["d v1", "d v2"])
+
+    on_test_path = {"file": "spec/t.py", "find": "assert 1", "replace": "2"}
+    edit_c1 = {"file": "src/x.py", "find": "assert x == 1", "replace": "c1"}
+    edit_c2 = {"file": "src/x.py", "find": "assert x == 1", "replace": "c2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[
+            _tests_result(
+                "pass", collected=["t.py::a", "t.py::b", "t.py::c", "t.py::d"]
+            )
+        ],
+    )
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("error", summary="collection crashed"),
+            _tests_result("fail"),
+        ],
+        subsets=subsets,
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            *(_turn(_probe_answer(None, f"no probe for {n}")) for n in "abcd")
+        )
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"), (on_test_path, "hits the test file")
+                )
+            ),
+            _turn(
+                _wrong_version_answer((edit_c1, "reason c1"), (edit_c2, "reason c2"))
+            ),
+            _turn("not a block at all"),
+        ],
+        spec=_spec(acceptance=[a, b, c, d]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert subsets == [["t.py::c"], ["t.py::c"]]
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    assert entries == [
+        {
+            "witness": "t.py::a",
+            "claim": "a is true",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "a v1",
+                    "edit": None,
+                    "reason": "nothing changes",
+                    "outcome": "unproven",
+                    "summary": "this session named no edit",
+                },
+                {
+                    "version": "a v2",
+                    "edit": on_test_path,
+                    "reason": "hits the test file",
+                    "outcome": "unproven",
+                    "summary": "spec/t.py is a test; a probe must target source",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::c",
+            "claim": "c is true",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "c v1",
+                    "edit": edit_c1,
+                    "reason": "reason c1",
+                    "outcome": "error",
+                    "summary": (
+                        "the `tests` gate errored under t.py::c's mutant — "
+                        "collection crashed"
+                    ),
+                },
+                {
+                    "version": "c v2",
+                    "edit": edit_c2,
+                    "reason": "reason c2",
+                    "outcome": "killed",
+                    "summary": "1 of 1 witness(es) died under their own mutant",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::d",
+            "claim": "d is true",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: no <output> block in the response",
+            "versions": [
+                {
+                    "version": "d v1",
+                    "edit": None,
+                    "reason": "",
+                    "outcome": "unproven",
+                    "summary": "not the schema: no <output> block in the response",
+                },
+                {
+                    "version": "d v2",
+                    "edit": None,
+                    "reason": "",
+                    "outcome": "unproven",
+                    "summary": "not the schema: no <output> block in the response",
+                },
+            ],
+        },
+    ]
+
+    lines = [
+        w
+        for w in cell.watched
+        if w.startswith("REVIEW: criterion probes:")
+        or w.startswith("REVIEW: wrong versions:")
+    ]
+    assert lines == [
+        "REVIEW: criterion probes: 0 named, 4 unnamed",
+        "REVIEW: wrong versions: 6 declared, 3 expressed",
+    ]
+
+    # A spec whose criteria declare no wrong version buys no such session,
+    # writes no such file and emits no such line.
+    empty_cell = _stub_the_runtime(monkeypatch)
+    empty_outcome, _empty_ledger = _drive(
+        monkeypatch,
+        tmp_path / "no-wrong-versions",
+        cell=empty_cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe"))),
+        spec=_spec(acceptance=[Criterion(claim="x is true", witness="t.py::x")]),
+    )
+    assert empty_outcome.state == "READY_FOR_REVIEW"
+    assert not (
+        tmp_path / "no-wrong-versions" / "out" / "SY-1" / "wrong-versions.json"
+    ).exists()
+    assert len(empty_cell.system_prompts) == 6  # five plus one per criterion
+    assert not [
+        w for w in empty_cell.watched if w.startswith("REVIEW: wrong versions:")
+    ]
+
+
+def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend(
+    monkeypatch, tmp_path
+):
+    """Criterion 4: wrong versions run through the same gate-only cell
+    criterion probes use, applied after them, entered once, and both
+    sessions' cost lands in `spent`. Every `tests` run in the probe cell
+    answers `fail`, so every edit is killed and no verdict cell joins the
+    list. The lens gate table's cell is the first entry, and REVIEW's own
+    critic cell is the second. The gate-only apply cell is the third,
+    entered only when some list holds an edit."""
+    from saffron.intake import Criterion, Mutant
+
+    edit_probe = {"file": "src/x.py", "find": "assert x == 1", "replace": "p"}
+    edit_wrong = {"file": "src/x.py", "find": "assert x == 1", "replace": "w"}
+
+    rows = [
+        ("both", edit_probe, edit_wrong, [None, "saffron-cells", None]),
+        ("wrong_only", None, edit_wrong, [None, "saffron-cells", None]),
+        ("neither", None, None, [None, "saffron-cells"]),
+    ]
+
+    real_critic_cell = session.critic_cell
+    probe_turn_cost = 0.11
+    wrong_turn_cost = 0.13
+
+    for name, probe_edit, wrong_edit, expected_networks in rows:
+        criterion = Criterion(
+            claim="the guard holds", witness="t.py::a", wrong_versions=["v1"]
+        )
+        cell = _stub_the_runtime(
+            monkeypatch,
+            patch=_ANCHORING_DIFF,
+            gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+        )
+
+        networks: list[str | None] = []
+
+        def _spy(*, _networks=networks, **kwargs):
+            _networks.append(kwargs["network"])
+            return real_critic_cell(**kwargs)
+
+        monkeypatch.setattr("saffron.cell.session.critic_cell", _spy)
+
+        with_edit_count = sum(e is not None for e in (probe_edit, wrong_edit))
+        _stub_probe_gates(
+            monkeypatch,
+            cell,
+            gate_results=[_tests_result("fail") for _ in range(with_edit_count)],
+        )
+
+        turns_list = _probe_turns(
+            _turn(_probe_answer(probe_edit, "probe reason"), cost=probe_turn_cost)
+        ) + [
+            _turn(
+                _wrong_version_answer((wrong_edit, "wrong reason")),
+                cost=wrong_turn_cost,
+            )
+        ]
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=turns_list,
+            spec=_spec(acceptance=[criterion]),
+            policy=_PROBE_POLICY,
+            gates=("tests",),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert networks == expected_networks
+
+        if name == "both":
+            assert cell.mutated == [
+                Mutant.model_validate(edit_probe),
+                Mutant.model_validate(edit_wrong),
+            ]
+
+        probe_options = cell.turn_options[5]
+        wrong_options = cell.turn_options[6]
+        assert wrong_options["tools"] == probe_options["tools"]
+        assert wrong_options["max_turns"] == probe_options["max_turns"]
+        assert wrong_options["max_budget_usd"] == probe_options["max_budget_usd"]
+        assert cell.turn_containers[6] == _CRITIC_CONTAINER
+
+        total_cost = sum(turn.cost_usd_est for turn in turns_list)
+        assert outcome.spent_usd == pytest.approx(total_cost)
 
 
 def test_a_proposed_scope_keeps_the_specs_declared_touches(monkeypatch, tmp_path):

@@ -657,25 +657,37 @@ def criterion_probe_outcome(status: GateStatus) -> str:
     return _CRITERION_PROBE_OUTCOMES[status]
 
 
-def survivor_finding(criterion: Criterion, edit: Mutant, content: str) -> Finding:
-    """The blocker filed when a criterion's own witness survives the edit its
-    own session named for it (backlog item b-2750d5). `content` is the file at
-    head in the cell that applied and restored the edit. The line is where
-    `edit.find` begins there, never a hunk line.
+def survivor_finding(
+    criterion: Criterion, edit: Mutant, content: str, *, version: str | None = None
+) -> Finding:
+    """The blocker filed when a criterion's own witness survives an edit
+    (backlog items b-2750d5, b-7e69d0). `content` is the file at head in the
+    cell that applied and restored the edit. The line is where `edit.find`
+    begins there, never a hunk line. `version` names the wrong version the
+    edit came from. Without it, the edit is read as the criterion's own.
 
     Unanchored: the caller still runs this through `findings.anchor`, exactly
     as every other finding in a `LensReview` is."""
     line = content.count("\n", 0, content.index(edit.find)) + 1
+    claim = (
+        (
+            f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
+            f"own edit applied to {edit.file}. The claim was "
+            f"{criterion.claim!r}, and only that witness ran under the edit."
+        )
+        if version is None
+        else (
+            f"{HOST_FILED}{criterion.witness} stayed green with the spec's "
+            f"wrong version {version!r} applied to {edit.file} as an edit. The claim "
+            f"was {criterion.claim!r}, and only that witness ran under the edit."
+        )
+    )
     return Finding(
         lens="adequacy",
         severity="blocker",
         file=edit.file,
         line=line,
-        claim=(
-            f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
-            f"own edit applied to {edit.file}. The claim was "
-            f"{criterion.claim!r}, and only that witness ran under the edit."
-        ),
+        claim=claim,
         probe=edit,
         probe_verdict="survived",
     )
