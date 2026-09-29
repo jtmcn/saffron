@@ -398,6 +398,18 @@ _Avoid_: "mutant" for one. A mutant is declared in a criterion, and a criterion 
 named by a session that wrote neither the code nor the witness. _Avoid_ "vacuity probe" for
 one. A lens names a vacuity probe against the tests, and a criterion probe targets a claim.
 
+**Wrong version**: A plausible wrong implementation a spec's author lists in prose under one
+criterion's `wrong_versions`. The implementer reads the list under that criterion's witness.
+During REVIEW one fresh session per such criterion turns each into a find-and-replace edit.
+It sees the claim, the list and the diff, and is never told which test is its witness. A
+version it cannot express as an edit is recorded as such. The host applies each edit in the
+gate-only cell criterion probes use and runs that criterion's witness. Every outcome is
+recorded in `wrong-versions.json`. A survivor that anchors to the diff is a blocker for REBUT
+(`SA-0187`, `SA-0190`).
+_Avoid_ "mutant" for one. A mutant is exact text withheld from the implementer, and a wrong
+version is prose the implementer reads. _Avoid_ "criterion probe" for its edit. A criterion
+probe's session is shown no list.
+
 ---
 
 ## 5. Review

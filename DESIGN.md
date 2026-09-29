@@ -996,6 +996,18 @@ kill it, so it is not chosen to be killed. The edit is a **criterion probe**
 guards. The host applies each one in a gate-only cell, and a survivor that
 anchors to the diff is a blocker for REBUT (`SA-0120`, ADR 3).
 
+**An edit a spec lists in prose.** A criterion also lists its known **wrong
+versions** (`CONTEXT.md` §4), one sentence each (`SA-0187`). The implementer
+reads them. The lenses' criteria and the criterion-probe session omit the
+field. An edit steered by the author's list is no evidence about what the
+list missed. A list left in a spec's notes still
+reaches the lenses with the body. During
+REVIEW a fresh session per such criterion turns each version into an edit. It
+sees the claim, the list and the diff, and never the witness. The host applies
+each edit in the gate-only cell the criterion probes use, and runs that
+criterion's witness. A survivor that anchors to the diff is a blocker for
+REBUT, filed as a surviving criterion probe is (`SA-0190`).
+
 **Reversion is at hunk granularity and cannot reach this.** `revert` (§5.4)
 stashes whole files and asks whether the new tests test *anything*. Scaling it
 down to hunks does not help: a diff that adds a function has one hunk, and
