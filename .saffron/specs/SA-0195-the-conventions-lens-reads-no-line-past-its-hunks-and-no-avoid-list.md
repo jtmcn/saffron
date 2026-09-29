@@ -39,7 +39,7 @@ forbidden:
   - tests/test_rebut.py
 budget_usd: 24
 max_attempts: 3
-max_turns: 180
+max_turns: 200
 acceptance:
   - claim: >-
       The conventions prompt carries a section headed `## Past the hunk`,
@@ -175,7 +175,7 @@ the lens to "avoid every term they rule against"
 (`saffron/agents/prompts/review-conventions.md:30-31`), with none of those
 terms in front of it. The strip's stated reason is that a prohibition puts
 the banned word in the prompt (`saffron/agents/context.py:38-40`,
-`CONTEXT.md:20-23`). That cost falls on a session that writes the words.
+`CONTEXT.md:20-24`). That cost falls on a session that writes the words.
 The conventions lens writes no code, and it reads for those words.
 
 **The other three prompts say "a constant or helper".** Each ends its
@@ -224,6 +224,10 @@ says "a type, constant or helper"
   section is empty. The verdict prompt never tells its lens to judge against
   it (`saffron/agents/prompts/rebut-verdict.md:75`), so no heading sits over
   nothing. `SA-0193` edits `rebut.py`, and this spec forbids it.
+- **The verdict session's vocabulary.** REBUT's verdict prompt keeps the
+  stripped vocabulary (`saffron/phases/rebut.py:278-288`). So a verdict on a
+  blocker filed on an `_Avoid_` word reads no list. `rebut.py` is forbidden
+  here, and the verdict can read `CONTEXT.md` under `/work` where one exists.
 - **The spec's own directives.** The item's Problem names them, and its
   "Done looks like" does not.
 - **The end review's Standards lens.** It keeps the stripped vocabulary
@@ -350,7 +354,7 @@ exercising the actual changed path.
   `**Cell**: One isolated container.` and no `_Avoid_`. Last, build the conventions and the
   correctness prompts over the real `CONTEXT.md`. The first must contain
   the line `_Avoid_: "reviewer", "pass", "check", "critic #2".` and the
-  second must not (`CONTEXT.md:503`).
+  second must not (`CONTEXT.md:504`).
 - **Criterion 3.** For each of `correctness`, `contract` and `adequacy`,
   read `PROMPTS / review.LENSES[lens]` and split its list with
   `_not_yours_bullets_and_edge` (`tests/test_review.py:523-548`). The last
@@ -405,7 +409,7 @@ version listed above. Each new witness failed with the four prompts,
 **Protected edits**, made by hand in this spec's pull request, not by the
 cell:
 
-- `CONTEXT.md:20-23` says the `_Avoid_` lists are stripped at injection,
+- `CONTEXT.md:20-24` says the `_Avoid_` lists are stripped at injection,
   so a cell sees only the headword. The conventions lens now sees them.
 - `DESIGN.md` §5.5's fourth lens says it catches "a constant or helper
   restated". It now says a type as well, and names strings and lines
