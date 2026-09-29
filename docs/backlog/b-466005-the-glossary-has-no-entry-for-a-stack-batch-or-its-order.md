@@ -1,13 +1,13 @@
 ---
 id: b-466005
 title: The glossary has no entry for a stack batch or its order, and SA-0142 uses both
-status: open
+status: partial
 tier: 2
 by_hand: true
 filed: 2026-09-23
 specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0150, SA-0151, SA-0153, SA-0154, SA-0155, SA-0156, SA-0160, SA-0161, SA-0162, SA-0164, SA-0167, SA-0170, SA-0174]
 prs: []
-commits: []
+commits: [d354c859]
 cites: [§4.2, §4.2.1]
 related: [b-792ab2, 65, 72]
 ---
@@ -95,3 +95,14 @@ The **Refusal** entry names the stack order's refusal. This lands after
   `SPEC_REVIEW`, which the glossary lacks. #546's `tasks_by_spec` docstring
   said "unstacked", against the **Stacked branch** entry, and review
   reworded it.
+- 2026-09-29: the merged half landed by hand in `CONTEXT.md`. §2 gains stack
+  batch, stack order, predecessor, layer, mint, spec writer session, revision
+  and recorded spec text. §5 gains end review, end-review lens, join lens,
+  end-review reserve and end-review status. Phase, Refusal, Critic cell, Lens,
+  Spec review, `SPEC_WITHHELD` and Stacked branch widen. The entries are
+  hand-written, since only closed-set spans render from `ontology/factory.ttl`.
+  Open: follow-up spec, writer sub-cap, generation, finishing layer,
+  `findings.json`, escalation line and linking a stack wait on `SA-0151`,
+  `SA-0161`, `SA-0162`, `SA-0167`, `SA-0170`, `SA-0174` and `SA-0177`.
+  Qualification, follow-up group and backlog pool wait on a caller of
+  `qualify()`.

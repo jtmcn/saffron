@@ -1,13 +1,14 @@
 ---
 id: b-343c21
 title: The glossary has no entry for a consumed name, and SA-0134 and SA-0135 use the term
-status: open
+status: done
+closed: 2026-09-29
 tier: 2
 by_hand: true
 filed: 2026-09-22
 specs: [SA-0134]
 prs: []
-commits: []
+commits: [d354c859]
 cites: [§3.2, §4.2]
 related: [b-602d00, 65, 72]
 ---
@@ -40,3 +41,6 @@ unresolved one refuses the task before its cell starts, and the
 - 2026-09-25: #517's **Refusal** entry in `CONTEXT.md` names the refusal for
   an unresolved `consumes` entry. The glossary still has no entry for a
   consumed name.
+- 2026-09-29: done by hand. `CONTEXT.md` gains a **Consumed name** entry. The
+  entry is hand-written in `CONTEXT.md`, since only its closed-set spans render
+  from `ontology/factory.ttl`.

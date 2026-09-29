@@ -1,14 +1,14 @@
 ---
 id: b-1adb50
 title: Sentences in DESIGN.md and CLAUDE.md go false once a stack batch lands, and no cell may edit either
-status: open
+status: partial
 tier: 2
 by_hand: true
 filed: 2026-09-23
 closed:
 specs: [SA-0151, SA-0156, SA-0160, SA-0165, SA-0169]
 prs: []
-commits: []
+commits: [d354c859]
 cites: [§4.2.1, §6]
 related: [b-792ab2, b-466005]
 ---
@@ -55,3 +55,11 @@ deadline plus one task plus its end review. Each cites ADR 7.
   record the narrowed departures (`SA-0169`).
 - 2026-09-26: the spec loop's run 18 found a third. `DESIGN.md` §4.2 item 1
   meets a dependency at `READY_FOR_REVIEW`, and a stack order does not.
+- 2026-09-29: the merged half landed by hand. §3.3 and §4.2.1 list
+  `SPEC_WITHHELD`, and §3.3's `GATE_ERROR` line names a spec session. §4.2.1
+  counts an errored spec session as an abort, names the stack batch's rate-limit
+  wait, and runs the end review after any stop. `CLAUDE.md` and `README.md`
+  name the end review past `--until`. §5.1 and §5.5 record the spec session's
+  departures. §4.2 item 1 was already right. Open: §6's queue source waits on
+  `SA-0152`, and the finish and follow-up writer past `--until` wait on
+  `SA-0151` and `SA-0165`.

@@ -261,7 +261,7 @@ git.
 **From comparing Saffron with the superpowers skills** (2026-09-21):
 ~~**b-602d00**~~. A stacked child whose parent built its names differently pays for
 a cell overnight and packages nothing mergeable. A host check refuses it first.
-Then **b-343c21**, filed writing `SA-0134`. It is the glossary entry for a
+Then ~~**b-343c21**~~, filed writing `SA-0134`. It is the glossary entry for a
 consumed name, which a cell cannot write.
 
 **Placed 2026-09-23**, from writing `SA-0142`: **b-466005**. It is the
@@ -274,7 +274,7 @@ person edits that file.
 
 
 **Placed 2026-09-23**, from the spec loop's run 15: ~~**b-6377cf**~~, then
-**b-cde96b**. Baseline subtraction hid a `preserves` mutant that survived at
+~~**b-cde96b**~~. Baseline subtraction hid a `preserves` mutant that survived at
 base on `SA-0127`. The second is the by-hand half of run 15's merges.
 
 **Placed 2026-09-23**, from asking whether to adopt Pydantic AI: **b-4e0868**.
