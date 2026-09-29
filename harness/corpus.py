@@ -116,8 +116,7 @@ def graded_per_run(
     """Run index k across every fixture, scored alone as one corpus pass —
     one sample of the aggregate per run, which is the spread item 93 asks for.
     `None` where no fixture's run k survived: unscored, never zero.
-    `expect` defaults to the current lens set and passes through to
-    `score_corpus`.
+    A caller re-deriving an older scoring pass names that pass's lens set.
     """
     depth = max((len(r) for r in runs.values()), default=0)
     out: list[CorpusScore | None] = []

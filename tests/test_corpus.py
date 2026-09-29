@@ -976,7 +976,7 @@ def test_every_shipped_fixture_s_head_declares_a_tests_gate():
         assert "tests" in declared, fixture.spec_id
 
 
-# The three lenses every pass below ran, before a fourth lens existed.
+# The three lenses every scoring pass below ran, before a fourth lens existed.
 # Naming it keeps a later lens from retroactively widening these numbers.
 PASS_LENSES = ("correctness", "contract", "adequacy")
 
@@ -1201,12 +1201,9 @@ def test_the_claude_md_pass_s_per_run_totals_are_re_derivable():
 
 
 def test_the_published_passes_re_derive_under_a_fourth_lens(monkeypatch):
-    """Each re-derivation above must name the lens set its own pass ran,
+    """Each re-derivation above must name the lens set its own scoring pass ran,
     never the harness default. A later lens must not silently widen what
     an already-published number was scored against."""
-    from tests.test_lens_scoring import (
-        PASS_2026_09_07_LENSES,
-    )
     from tests.test_lens_scoring import (
         test_the_calibration_case_reproduces_the_run_it_was_built_from as calibration_case,
     )
@@ -1248,4 +1245,5 @@ def test_the_published_passes_re_derive_under_a_fourth_lens(monkeypatch):
     for name, calls in seen.items():
         assert calls, name
         for expect in calls:
-            assert tuple(expect) == PASS_2026_09_07_LENSES, name
+            assert expect is not absent, name
+            assert tuple(expect) == PASS_LENSES, name

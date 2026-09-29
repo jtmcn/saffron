@@ -135,7 +135,7 @@ def _recorded(root: Path, reviews: list[LensReview]) -> lens_scoring.Fixture:
 
 
 def test_calibrate_scores_a_recorded_run_against_the_lenses_it_ran(tmp_path):
-    """A run recorded before a lens existed still reproduces its answer.
+    """A scoring run recorded before a lens existed still reproduces its answer.
     `graded_per_run` scores a slice against the lens set its caller names,
     or today's lenses when the caller names none."""
     clean = _recorded(tmp_path / "clean", [LensReview(lens="correctness", findings=[])])
@@ -149,9 +149,14 @@ def test_calibrate_scores_a_recorded_run_against_the_lenses_it_ran(tmp_path):
         lens_scoring.calibrate(errored)
     assert str(raised.value) == "SA-9999: correctness: boom"
 
+    empty = _recorded(tmp_path / "empty", [])
+    with pytest.raises(lens_scoring.LensErrored) as raised:
+        lens_scoring.calibrate(empty)
+    assert str(raised.value) == "SA-9999: the recorded scoring run carries no lens"
+
     one_lens_run = [LensReview(lens="correctness", findings=[])]
     named = corpus.graded_per_run(
-        [clean], {clean.spec_id: [one_lens_run]}, expect=("correctness",)
+        [clean], {clean.spec_id: [one_lens_run]}, ("correctness",)
     )
     assert len(named) == 1
     slice_ = named[0]
