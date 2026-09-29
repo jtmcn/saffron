@@ -95,6 +95,11 @@ def main() -> int:
         "leaves a $36 ceiling on a command whose measured cost is $5.70.",
     )
     parser.add_argument("--max-turns", type=int, default=30)
+    parser.add_argument(
+        "--with-claude-md",
+        action="store_true",
+        help="pass the fixture's frozen CLAUDE.md, as production REVIEW does.",
+    )
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -166,8 +171,8 @@ def main() -> int:
                 spec_body=fixture.spec_body,
                 gates=fixture.gates,
                 context_md=fixture.context_md,
-                # Its recorded passes ran with none (item 7).
-                claude_md=None,
+                # Recorded passes ran with none (item 7). The conventions lens needs it.
+                claude_md=fixture.claude_md if args.with_claude_md else None,
                 # Off the script's own root, not the CWD: a relative resolve
                 # puts the failure inside the run loop, after an image build
                 # and a container start.
