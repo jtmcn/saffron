@@ -1,13 +1,14 @@
 ---
 id: b-cde96b
 title: Run 15's merges leave protected docs stating the old behaviour
-status: open
+status: done
+closed: 2026-09-29
 tier: 2
 by_hand: true
 filed: 2026-09-23
 specs: []
 prs: []
-commits: []
+commits: [d354c859]
 cites: [§3.2, §4.2.1, §5.4]
 related: [b-149df3]
 ---
@@ -43,3 +44,9 @@ through a measured pass, as `.github/pull_request_template.md` asks.
 ## Record
 
 - 2026-09-23: filed from the spec loop's run 15.
+- 2026-09-29: done by hand. §4.2.1 names the third admission. §5.4 gives token
+  ceilings and names `revert` and `witness` as readers of `collected`. The Risk
+  tier entry names the plan's forecast. `CLAUDE.md`, the spec agents, the
+  pre-flight and the driver's `size` help say tokens or drop "mutant". §3.2,
+  `implement.md` and the spec-loop skill were already right. `CLAUDE.md:161`
+  misused "mutant" too, and this record missed it.

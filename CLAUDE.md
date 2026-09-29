@@ -68,7 +68,8 @@ uv run saffron chains                      # compare Q4 with the checked walk ov
 ```
 
 `saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a
-kill, so a night ends at the deadline plus at most one task (backlog item 67). Under launchd it
+kill, so a night ends at the deadline plus at most one task (backlog item 67). A `--stack`
+night then runs its end review, paid from the reserve it held back (ADR 7). Under launchd it
 needs `PYTHONUNBUFFERED=1`, or SIGTERM discards the log — which is the night's only
 human-readable record. `docs/host/dev.saffron.batch.plist` and `docs/HOST-HARDENING.md` §4a
 carry the setup.
@@ -158,8 +159,8 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 The six marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
-means a rule ships with the mutant that proves it fires. Read `.saffron/sgconfig.yml` before
-writing one.
+means a rule ships with the failing snippet that proves it fires. Read
+`.saffron/sgconfig.yml` before writing one.
 
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
@@ -215,8 +216,8 @@ writing one.
   hedge or sentence over 25 words. `python3 hooks/prose_limit.py --file <path>` counts one
   file in the working tree, staged or not. With no arguments it reads the staged index,
   so stage again after each rewrite.
-- A new test is not trusted until it has been run against the unfixed code — or, for one
-  guarding a property already true, against a mutant that breaks it.
+- A new test is not trusted until it runs against the unfixed code. A test guarding a
+  property already true runs against an edit that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the
   defect rather than the file — see `git log`.
 - A pull request body you write follows `.github/pull_request_template.md`: `gh pr create --body`

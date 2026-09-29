@@ -102,10 +102,11 @@ Three more breaks the command does not look for.
 
 ## 7. Ceilings and size
 
-Estimate size per part from `wc -l` of the files the change touches, against
-`saffron/gates/core/size.py`. An estimate at or above 80% of the ceiling is
+Estimate size per part in lines from `wc -l` of the files the change touches.
+Multiply by four and compare with the token ceiling in
+`saffron/gates/core/size.py`. An estimate at or above 80% of that ceiling is
 split before review, never argued in one. `SA-0123` cut 90 lines from an
-estimate of 865 against 1000, and its cell landed at 1001. A spec that states no estimate
+estimate of 865 against the old 1000-line ceiling, and its cell landed at 1001. A spec that states no estimate
 gets one here.
 
 `D check <SA-ID>` compares the ceilings against cells of the same shape. A
