@@ -631,8 +631,8 @@ def run_wrong_versions(
 
 
 def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
-    """The one REVIEW line wrong-versioning adds, counted over
-    `wrong-versions.json`'s own entries: every version across every entry,
+    """The one REVIEW line the wrong-version sessions add, counted over the
+    entries `run_wrong_versions` returns: every version across every entry,
     and how many of those an edit was named for."""
     versions = [
         v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])

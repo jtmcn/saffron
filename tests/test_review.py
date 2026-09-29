@@ -699,13 +699,10 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
     assert record[0]["options"]["system_prompt"].endswith(tail_a)
     assert record[1]["options"]["system_prompt"].endswith(tail_c)
 
-    for call, other_witnesses in (
-        (record[0], ["t.py::test_a", "t.py::test_b", "t.py::test_c"]),
-        (record[1], ["t.py::test_a", "t.py::test_b", "t.py::test_c"]),
-    ):
+    for call in record:
         prompt = call["options"]["system_prompt"]
         turn_prompt = call["prompt"]
-        for witness in other_witnesses:
+        for witness in ("t.py::test_a", "t.py::test_b", "t.py::test_c"):
             assert witness not in prompt
             assert witness not in turn_prompt
     assert b.claim not in record[0]["options"]["system_prompt"]

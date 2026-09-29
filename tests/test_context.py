@@ -241,6 +241,11 @@ def test_the_implementer_reads_each_criterions_wrong_versions_under_its_line():
             wrong_versions=["a second wrong version", "a first wrong version"],
         ),
         Criterion(claim="the box ticks", witness="tests/test_criteria.py::test_a"),
+        Criterion(
+            claim="the lid closes",
+            witness="tests/test_criteria.py::test_c",
+            wrong_versions=["a lid left open"],
+        ),
     ]
     block = context.witnesses_block(acceptance)
     assert block == (
@@ -259,11 +264,15 @@ def test_the_implementer_reads_each_criterions_wrong_versions_under_its_line():
         "  Wrong versions this witness must fail on:\n"
         "  - a second wrong version\n"
         "  - a first wrong version\n"
-        "- `tests/test_criteria.py::test_a` — the box ticks"
+        "- `tests/test_criteria.py::test_a` — the box ticks\n"
+        "- `tests/test_criteria.py::test_c` — the lid closes\n"
+        "  Wrong versions this witness must fail on:\n"
+        "  - a lid left open"
     )
     section = context.criteria_section(acceptance)
     assert section == (
         "## Acceptance criteria\n\n- [ ] nothing broke\n- [ ] the box ticks"
+        "\n- [ ] the lid closes"
     )
 
 

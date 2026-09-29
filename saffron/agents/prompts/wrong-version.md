@@ -11,8 +11,8 @@ These terms have exactly one meaning here. Use them and no synonyms.
 
 ## Your task
 
-Below is one claim from this change's acceptance list, the wrong versions
-its author listed against that claim, and the diff the change produced.
+Below is the diff the change produced, the wrong versions its author
+listed against one claim, and that claim from the change's acceptance list.
 Read the diff and the files under /work.
 
 For each wrong version, in order, name the smallest edit to the source,
