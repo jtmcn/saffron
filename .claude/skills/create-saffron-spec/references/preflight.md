@@ -2,7 +2,7 @@
 
 Each check names what it catches, the command where one exists, and what the
 command cannot see. `findings.md` holds the evidence each check rests on.
-`SKILL.md` step 6 names checks 1 to 8 by these numbers. Checks 9 to 11 live
+`SKILL.md` step 6 names checks 1 to 8 by these numbers. Checks 9 to 12 live
 only here.
 
 Run them against the committed draft. `D` below is
@@ -153,6 +153,18 @@ looks for.
 - Prose. `python3 hooks/prose_limit.py --file <path>` on every new file
   before it is committed. It compares against `HEAD`, so a committed file
   compares with itself and always reports zero.
+
+## 12. The delegate's own edits
+
+Land a spec's `protected` edits by hand in its branch before the first
+review. Two first reviews on 2026-09-29 spent a concern on a `DESIGN.md`
+sentence the spec already listed. Tell the second reviewer to read each hand
+edit against the build. The one second-round concern on `SA-0195`'s docs
+was an edit the delegate wrote.
+
+Run `python3 hooks/prose_limit.py --file` on a copy of each file a spec
+dictates text into, with the text in place. A dictated sentence the `prose`
+gate refuses leaves a witness no cell can meet.
 
 ## Adding a check
 
