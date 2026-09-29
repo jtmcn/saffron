@@ -2225,10 +2225,10 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-09-28, a hundred-and-tenth time: `SA-0189`, `SA-0191`
-    and `SA-0192` queued for b-abeb74 on `SA-0188`, which heads them in turn.
-    `SA-0187` joins `SA-0161` as a candidate, and the chain above it is
-    refused on a parent. So is the rest of b-792ab2's chain, as after run 20.
+    """Re-measured 2026-09-29, a hundred-and-eleventh time: run 21 retired
+    `SA-0187` to `SA-0192`, and `SA-0193` queued for b-cd5fd2. It declares no
+    `depends_on`, so it joins `SA-0161` as a candidate. The rest of b-792ab2's
+    chain is still refused on a parent, as after run 20.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -2827,7 +2827,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0161"]
+    assert [c.spec.id for c in candidates] == ["SA-0161", "SA-0193"]
     assert [r.path.name[:7] for r in refusals] == [
         "SA-0151",
         "SA-0152",
