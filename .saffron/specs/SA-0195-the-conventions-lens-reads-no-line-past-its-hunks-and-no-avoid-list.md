@@ -3,7 +3,7 @@ id: SA-0195
 title: The conventions lens reads no line past its hunks and no `_Avoid_` list, and its one-source question reaches a test's pinned value
 type: feature
 priority: 2
-estimated_lines: 252
+estimated_lines: 289
 touches:
   - saffron/agents/prompts/review-conventions.md
   - saffron/agents/prompts/review-correctness.md
@@ -66,8 +66,8 @@ acceptance:
       one-line paragraph, an `_Avoid_ also` paragraph and a paragraph wrapped
       onto a second line. A section REVIEW does not receive stays out. The
       correctness, contract and adequacy prompts carry no `_Avoid_`
-      paragraph, and neither does REVIEW's vocabulary built without the
-      conventions lens's switch.
+      paragraph. Neither do the criterion-probe and wrong-version prompts,
+      nor REVIEW's vocabulary built without the conventions lens's switch.
     witness: tests/test_review.py::test_only_the_conventions_lens_reads_the_avoid_lists
     mutant:
       file: saffron/agents/context.py
@@ -79,6 +79,7 @@ acceptance:
       - A wrapped paragraph keeps its first line and loses its second.
       - The paragraphs gathered into one block after the vocabulary, away from their entries.
       - The conventions lens given every numbered section of the file, not REVIEW's.
+      - The criterion-probe or wrong-version session given the switch as well.
   - claim: >-
       The correctness, contract and adequacy prompts each end their Not-yours
       list with a bullet handing the conventions lens "a type, constant or
@@ -103,7 +104,9 @@ acceptance:
       whose expected value is the constant or file under test, compared
       directly or through a helper built from it. It is a finding only when
       no test pins that value as a literal. A routing check beside a literal
-      pin is not one. No other lens prompt carries the bullet.
+      pin is not one. No other lens prompt carries the bullet. The
+      prompt's edge sentence asks a test to derive the value under test by
+      running the code, never to derive its expected value from that code.
     witness: tests/test_review.py::test_the_adequacy_prompt_names_a_witness_pinned_to_its_own_constant
     mutant:
       file: saffron/phases/review.py
@@ -114,6 +117,7 @@ acceptance:
       - The bullet placed in the Not-yours list rather than the remit list.
       - The bullet added to the conventions prompt as well as the adequacy prompt.
       - The bullet with no edit to name, so its finding carries no probe.
+      - The edge sentence left as it was, still asking a test to derive a value instead of writing it out.
 ---
 
 ## Context
@@ -124,7 +128,8 @@ what the Standards seat found on #580 (`SA-0191`) and #581 (`SA-0192`)
 that the conventions lens's prompt would miss. ADR 8 declared the lens.
 Its evidence section is in
 `docs/evidence/2026-09-29-spec-loop-skill-feedback-run-21.md:80-98`. Every
-line number below was read at `60510037`.
+line number below was read at `60510037`, and none of those files
+changed by `4d7c19b9`.
 
 **The prompt reads each hunk and nothing past it.** The remit asks "four
 questions of every hunk" (`saffron/agents/prompts/review-conventions.md:28`).
@@ -132,7 +137,8 @@ questions of every hunk" (`saffron/agents/prompts/review-conventions.md:28`).
 They sat about 2,600 lines from the nearest hunk, and the Standards seat
 filed them as a blocker. A finding on such a line still anchors when the
 line shares a word with the diff's changed lines
-(`saffron/agents/findings.py:149-166`).
+(`saffron/agents/findings.py:149-166`). `SA-0194` takes common English
+words out of that match, and a count or a renamed term still anchors.
 
 **Its fourth question names comments, docstrings and citations only**
 (`saffron/agents/prompts/review-conventions.md:37-40`). `SA-0192`'s constant said no `CLAUDE.md`
@@ -144,10 +150,14 @@ reach it.
 the constant it checks, which is the shape of item b-5b1f8a.
 
 **No lens flags a witness pinned to its own constant** (item b-5b1f8a).
-At `07e0ad21`, `SA-0192`'s criterion 2 compared the conventions prompt with
+At `07e0ad21`, on `SA-0192`'s own branch, its criterion 2 compared the conventions prompt with
 `review.NO_STANDING_INSTRUCTIONS`, the constant under test. Any wording
 passed, and the adequacy lens passed the witness. Its remit list names five
 shapes and not this one (`saffron/agents/prompts/review-adequacy.md:42-58`).
+Its edge sentence counts "deriving a value instead of hard-coding it" as
+the lens's own remit (`saffron/agents/prompts/review-adequacy.md:83-86`).
+Beside the new bullet, it reads as asking a test to derive its expected
+value from the code under test. That is the shape the bullet files.
 A structure rule cannot hold it. The operator counted 62 base asserts in
 `tests/` comparing with a module constant, most of them routing checks
 beside a literal pin. `tests/test_cli.py:5142-5143` is one: the literal
@@ -188,7 +198,9 @@ says "a type, constant or helper"
    False`. With it true, `sections_for` keeps each `_Avoid_` paragraph where
    it stands, and selects the same sections. `build_system_prompt` passes it
    through. `review.lens_prompt` sets it for the conventions lens alone.
-   Every other caller keeps the default.
+   Every other caller keeps the default, `criterion_probe_prompt` and
+   `wrong_version_prompt` included (`saffron/phases/review.py:389-407`,
+   `saffron/phases/review.py:507-531`).
 3. **The three bullets.** In `review-correctness.md`,
    `review-contract.md` and `review-adequacy.md`, the last Not-yours bullet
    becomes the text under **The new bullet** in the notes.
@@ -196,6 +208,9 @@ says "a type, constant or helper"
    the notes as the last bullet of `review-adequacy.md`'s remit list. That
    list opens under `## Your remit, and its edges`, and the paragraph
    opening "For every one of these" follows it.
+5. **The adequacy edge.** In `review-adequacy.md`, replace the paragraph
+   that opens "The test at the edge". Its new text is under **The adequacy
+   edge** in the notes, word for word.
 
 ## Out of scope
 
@@ -259,9 +274,9 @@ literal, on purpose. A test that imports the constant it checks passes
 whatever that constant holds. A literal expected value in a test is never a
 restated constant.
 
-Each term in the vocabulary above keeps its `_Avoid_` line. Where the
-standing instructions enforce that vocabulary, a word on one of those lines
-is yours.
+An `_Avoid_` line in the vocabulary above names the words ruled out for
+its term. Where the standing instructions enforce that vocabulary, a word on
+one of those lines is yours.
 ```
 
 ### The new bullet
@@ -281,6 +296,16 @@ is yours.
   It is yours only when no test in the suite pins that value as a literal. A
   routing check beside a literal pin of the same value is not a finding. The
   edit to name is a wrong value for that constant.
+```
+
+### The adequacy edge
+
+```text
+The test at the edge: if fixing the defect means changing what the code
+computes or what it promises, it is not yours. If it means changing what the
+*test* proves, it is yours. That covers strengthening an assertion, deriving
+the value under test by running the code rather than restating it, and
+exercising the actual changed path.
 ```
 
 ### The witnesses
@@ -320,7 +345,9 @@ is yours.
   contain `**Cell**: One isolated container.` and contain none of
   `_Avoid_`, `"box"`, `"checker"` and `runs the suite`. Then build
   `context.sections_for("REVIEW", <the same text>)` with no switch, and
-  assert it contains no `_Avoid_`. Last, build the conventions and the
+  assert it contains no `_Avoid_`. Build `review.criterion_probe_prompt`
+  and `review.wrong_version_prompt` over the same text. Each must contain
+  `**Cell**: One isolated container.` and no `_Avoid_`. Last, build the conventions and the
   correctness prompts over the real `CONTEXT.md`. The first must contain
   the line `_Avoid_: "reviewer", "pass", "check", "critic #2".` and the
   second must not (`CONTEXT.md:503`).
@@ -341,7 +368,9 @@ is yours.
   these`. Split it into bullets, each joined on whitespace. The last must
   equal the adequacy bullet above, without its `- `. Then read each other
   lens's prompt through `review.LENSES`, joined on whitespace. None contains
-  `A witness pinned to the constant it tests`.
+  `A witness pinned to the constant it tests`. Last, the adequacy edge
+  sentence from `_not_yours_bullets_and_edge` must equal the adequacy edge
+  above, joined on whitespace.
 
 **Two existing tests change in body only.**
 `test_the_four_lenses_declare_disjoint_remits` asserts each of the three
@@ -359,17 +388,19 @@ its seven cases, in their order.
 compare against that default (`tests/test_end_review.py:318`).
 
 **The prose gate** counts every new line of a prompt and fails a hit the
-base lacks. The new section and the new bullet measured zero hits.
+base lacks. The four edited prompts, with every text above in place,
+measured zero new hits.
 `build_system_prompt`'s docstring runs to thirteen lines
 (`saffron/agents/context.py:195-210`). A docstring's hit is keyed on its
 length, so leave that one exactly as it is. Put any note on the switch in
 `sections_for`'s docstring or a one-line comment.
 
-**Size.** A prototype of this change measured 1006 tokens under
+**Size.** A prototype of this change measured 1156 tokens under
 `size_gate`'s counter, four new tests and two edited ones included.
 `estimated_lines` is that over four, with no overrun added. In that
-prototype each declared mutant failed its witness. Each new witness failed
-with the four prompts, `context.py` and `review.py` restored to base.
+prototype each declared mutant failed its witness, and so did each wrong
+version listed above. Each new witness failed with the four prompts,
+`context.py` and `review.py` restored to base.
 
 **Protected edits**, made by hand in this spec's pull request, not by the
 cell:
