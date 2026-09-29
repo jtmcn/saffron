@@ -5,7 +5,7 @@ status: open
 tier: 1
 filed: 2026-09-29
 closed:
-specs: []
+specs: [SA-0195]
 prs: []
 commits: []
 cites: [§5.4.1, §5.5]
