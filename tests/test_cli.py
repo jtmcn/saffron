@@ -4776,7 +4776,11 @@ def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys)
         exported=tmp_path,
         candidates=[],
         refusals=[
-            Refusal(path=tmp_path / "SY-7.md", reason="depends_on SY-9000 is unknown")
+            Refusal(
+                path=tmp_path / "SY-7.md",
+                reason="depends_on SY-9000 is unknown",
+                kind="depends_on",
+            )
         ],
         reconciled=cli.ReconcileResult(),
         gh_failures=[],
@@ -4855,7 +4859,13 @@ def test_the_printed_night_is_unchanged_by_sharing_the_base(
                 task_id=None,
             )
         ],
-        refusals=[Refusal(path=refusal_path, reason="depends_on SY-9000 is unknown")],
+        refusals=[
+            Refusal(
+                path=refusal_path,
+                reason="depends_on SY-9000 is unknown",
+                kind="depends_on",
+            )
+        ],
         reconciled=cli.ReconcileResult(merged=[3]),
         gh_failures=["gh: command not found"],
         policy_unread=["policy.yaml: no such file"],

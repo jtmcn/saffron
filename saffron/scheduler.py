@@ -41,6 +41,7 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from saffron.gates.core.scope import matches
 from saffron.intake import DiscoveryFailure, Spec, discover_specs
@@ -138,14 +139,23 @@ class Candidate:
     task_id: int | None
 
 
+# §4.2.1's refusals, one name each. A test holds §4.2.1's count to this set (item 48).
+# `preflight` has no site here: a repo that failed preflight is refused by the batch.
+RefusalKind = Literal[
+    "open_pr_on_spec",
+    "open_pr_overlap",
+    "malformed_spec",
+    "preflight",
+    "unmatched_criterion_path",
+    "depends_on",
+    "protected_touch",
+    "retirement_marker",
+]
+
+
 @dataclass(frozen=True)
 class Refusal:
-    """One path refused before any cell starts — five of §4.2.1's six
-    reasons: a parse failure (`SA-0015`), an open pull request from another
-    task, a `touches` overlap with an open pull request's files, acceptance
-    criteria naming a path outside `touches`, and a `depends_on` the ledger
-    does not show merged (`SA-0016`, all four here). The sixth, a repo that failed preflight, is a
-    batch-level check outside `build_queue`.
+    """One path refused before any cell starts, for the §4.2.1 refusal `kind` names.
 
     A parse failure also reaches here from `specs/done/`, where the path is
     not a candidate at all: that file is refused *credit* rather than refused
@@ -155,6 +165,7 @@ class Refusal:
 
     path: Path
     reason: str
+    kind: RefusalKind
 
 
 # A task's branch is always this, keyed on the spec rather than the task
@@ -496,6 +507,7 @@ def _dangling_marker_refusals(
                 f"this directory or {RETIRED_DIRNAME}/ declares {spec_id} — "
                 f"a dangling reference{blind}"
             ),
+            kind="retirement_marker",
         )
         for path, spec_id in markers
         if spec_id not in known_ids
@@ -633,8 +645,8 @@ def _refuse(
     markers: Sequence[tuple[str, str]],
     ancestor_branches: frozenset[str],
     check_dependencies: bool = True,
-) -> str | None:
-    """The first of §4.2.1's remaining refusals this candidate earns, or
+) -> tuple[RefusalKind, str] | None:
+    """The kind and reason of the first §4.2.1 refusal this candidate earns, or
     `None`. Order matches the acceptance criteria's own listing — except the
     `SA-0023` check below, which runs first because it is the cheapest: no
     `gh`, no ledger, nothing but the spec and the policy already in hand.
@@ -648,7 +660,7 @@ def _refuse(
             candidate.spec.touches, protected, candidate.spec.forbidden
         )
     ) is not None:
-        return reason
+        return "protected_touch", reason
 
     own_branch = _branch(candidate.spec.id)
     same_spec_pr = next(
@@ -665,7 +677,8 @@ def _refuse(
         # so a present-but-null url would otherwise print "None" at an operator.
         url = same_spec_pr.get("url") or own_branch
         return (
-            f"an open pull request from another task already targets this spec: {url}"
+            "open_pr_on_spec",
+            f"an open pull request from another task already targets this spec: {url}",
         )
 
     # K=1, walked transitively (backlog item 59): a child cut from its
@@ -701,17 +714,21 @@ def _refuse(
             if len(overlap) > 3:
                 files += f", … ({len(overlap)} files)"
             return (
-                f"touches overlaps open pull request {where}'s changed files: {files}"
+                "open_pr_overlap",
+                f"touches overlaps open pull request {where}'s changed files: {files}",
             )
 
     if (escaped := _unmatched_criterion_path(candidate.spec)) is not None:
-        return f"acceptance criteria name {escaped!r}, which no touches pattern matches"
+        return (
+            "unmatched_criterion_path",
+            f"acceptance criteria name {escaped!r}, which no touches pattern matches",
+        )
 
     # The eighth refusal, beside the fifth: the same "touches doesn't reach
     # what this spec claims it will" defect, read from the repository's own
     # `saffron:retired-by` markers instead of the spec's acceptance criteria.
     if (retirement := retirement_refusal(candidate.spec, markers)) is not None:
-        return retirement
+        return "retirement_marker", retirement
 
     if not check_dependencies:
         return None
@@ -732,7 +749,7 @@ def _refuse(
         # dependency and rediscovers the next tomorrow has lost a night to a
         # line that could have said there were two.
         suffix = f" (+{len(unmet) - 1} more unmet)" if len(unmet) > 1 else ""
-        return unmet[0] + suffix
+        return "depends_on", unmet[0] + suffix
 
     return None
 
@@ -791,6 +808,7 @@ def _stack_order(
         Refusal(
             path=c.path,
             reason=_stack_dependency_reason(c, frozenset(taken_ids), on_default_branch),
+            kind="depends_on",
         )
         for c in remaining
     ]
@@ -929,7 +947,9 @@ def build_queue(
     # anything else is a dangling reference, not any candidate's own refusal.
     known_ids = frozenset(discovered.spec.id for discovered in specs) | retired
 
-    refusals = [Refusal(path=f.path, reason=f.reason) for f in failures]
+    refusals = [
+        Refusal(path=f.path, reason=f.reason, kind="malformed_spec") for f in failures
+    ]
     refusals += [
         Refusal(
             path=f.path,
@@ -937,6 +957,7 @@ def build_queue(
                 f"retired to {RETIRED_DIRNAME}/ but does not parse, so it "
                 f"credits no dependency: {f.reason}"
             ),
+            kind="malformed_spec",
         )
         for f in retired_failures
     ]
@@ -945,7 +966,7 @@ def build_queue(
     )
     kept: list[Candidate] = []
     for candidate in candidates:
-        reason = _refuse(
+        refused = _refuse(
             candidate,
             open_prs=open_prs,
             merged_anywhere=merged_anywhere,
@@ -957,8 +978,9 @@ def build_queue(
             ancestor_branches=_ancestor_branches(candidate.spec.id, parent_of),
             check_dependencies=not stack,
         )
-        if reason is not None:
-            refusals.append(Refusal(path=candidate.path, reason=reason))
+        if refused is not None:
+            kind, reason = refused
+            refusals.append(Refusal(path=candidate.path, reason=reason, kind=kind))
         else:
             kept.append(candidate)
 
