@@ -6,7 +6,7 @@ tier: 2
 filed: 2026-09-29
 closed: 2026-09-30
 specs: []
-prs: []
+prs: [606]
 commits: []
 cites: []
 related: [b-bf970a, 173]
@@ -28,9 +28,7 @@ Every run 22 cell's baseline read `tests=fail` with exactly these four.
 Baseline subtraction spares each cell. It also hides the four from every
 later cell.
 
-## Cause
-
-Diagnosed 2026-09-30 by running the four in `saffron/cell:saffron` with no
+Cause, diagnosed 2026-09-30 by running the four in `saffron/cell:saffron` with no
 network. Every gate there reported `env: 'python3': No such file or directory`.
 
 The helper `_onboarded_from_templates` set `PATH` to a tmp `bin`, the directory
@@ -53,4 +51,4 @@ production starts one. A cell's baseline then reads `tests` without them.
 
 - 2026-09-29: filed from the spec loop's run 22.
 - 2026-09-30: diagnosed and fixed in the test helper. All 24 tests in the
-  file pass inside the cell image.
+  file pass inside the cell image. #606 closes it.
