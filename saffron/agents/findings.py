@@ -25,7 +25,7 @@ Severity = Literal["blocker", "concern", "note"]
 _HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _WORD = re.compile(r"\w+")
 
-# A list literal, not text.split(): ruff flags str.split on a literal (§5.5).
+# A list literal, not text.split(): ruff flags str.split on a literal (SIM905).
 _COMMON_WORDS = frozenset(
     [
         "a",

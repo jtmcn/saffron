@@ -23,8 +23,8 @@ def repo(tmp_path):
     git(repo, "config", "user.name", "Test")
     (repo / "alpha.py").write_text("def compute_gap(series):\n    return series\n")
     (repo / "caller.py").write_text(
-        "from alpha import compute_gap\n\n\ndef report(series):\n"
-        "    return compute_gap(series)\n"
+        "from alpha import compute_gap\n\n\ndef report(values):\n"
+        "    return compute_gap(values)\n"
     )
     (repo / "importer.py").write_text("from legacy import LEGACY\n")
     (repo / "unrelated.py").write_text('MAX_RETRIES = "untouched"\n')
