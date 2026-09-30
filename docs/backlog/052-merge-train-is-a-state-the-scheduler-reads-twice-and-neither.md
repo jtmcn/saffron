@@ -1,12 +1,13 @@
 ---
 id: 52
 title: '`MERGE_TRAIN` is a state the scheduler reads twice and neither authoritative document declares'
-status: open
+status: done
+closed: 2026-09-29
 tier: 2
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [911c314a]
 cites: [§3.3, §4.2.1, §6]
 related: [72, 75]
 ---
