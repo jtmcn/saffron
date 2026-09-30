@@ -143,11 +143,14 @@ which is the night's only human-readable record.
 
 Load-bearing, and the only thing a calling script reads:
 
-| Code | Meaning |
-|---|---|
-| `0` | the task is reviewable |
-| `1` | the task did not make it |
-| `2` | infrastructure failed |
+| Code | `saffron cell` | `saffron batch` |
+|---|---|---|
+| `0` | the task is reviewable | the night stopped at `DRAINED`, `BUDGET` or `UNTIL` |
+| `1` | the task did not make it | never |
+| `2` | infrastructure failed, or the task is `RATE_LIMITED` | infrastructure failed, or the night is `INCOMPLETE` |
+
+`INCOMPLETE` means a task came back with no end state. The token and the mirror
+were fine, and the line it prints says so.
 
 PACKAGE opens the PR as a draft: ratifying one means `gh pr ready <n>` before
 `gh pr merge`.

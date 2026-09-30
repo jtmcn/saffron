@@ -498,8 +498,9 @@ checkpoint. An attempt that ends in a scope proposal writes neither.
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data
-semantics, contract & schema, test adequacy, conventions. Lenses are disjoint by construction,
-which is why any single blocker routes to REBUT and why there is no vote. The end
+semantics, contract & schema, test adequacy, conventions. Their remits are meant to be disjoint, and Appendix L
+measured two lenses filing one finding. That agreement is a fact about the prompts,
+so any single blocker routes to REBUT and there is no vote. The end
 review's Spec, Standards and join lenses are not among them (ADR 7).
 _Avoid_: "reviewer", "pass", "check", "critic #2".
 
