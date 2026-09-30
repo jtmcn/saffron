@@ -1,12 +1,12 @@
 ---
 id: b-cd5fd2
 title: A lens withdraws a probe blocker on a `preserves` criterion because its line is outside the diff
-status: open
+status: done
 tier: 1
 filed: 2026-09-29
-closed:
+closed: 2026-09-29
 specs: [SA-0193]
-prs: []
+prs: [596]
 commits: []
 cites: [§5.5, §5.6]
 related: [b-ab4b33, b-38d45f]
@@ -42,3 +42,4 @@ standing.
 - 2026-09-29: hit again one run later, on `SA-0194` (#598) in run 22.
   `SA-0193`'s fix sat unmerged, and REVIEW runs main's code (item b-66d1c3).
   The review commit fixed the witness.
+- 2026-09-29: closed by `SA-0193` (#596). REBUT refuses a lens's withdrawal of the host's own probe blocker on a `preserves` criterion.

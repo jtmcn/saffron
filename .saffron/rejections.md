@@ -1363,3 +1363,29 @@ taken by hand, so no critic ran on it and it has no lines here.
 - `SA-0192` (#581): the three other prompts hand over "a constant or helper",
   where the conventions remit says "a type, constant or helper".
   **Bucket 3**, the conventions lens. **Open:** item b-78ccc7.
+
+## 2026-09-29, `SA-0193` to `SA-0195` (the spec loop's run 22, #596 to #600)
+
+- `SA-0193` (#596): a guard matching the host's text anywhere in a claim
+  passed both witnesses, where the spec says the claim starts with it.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #596. Step 1b had
+  named it as a note.
+- `SA-0193` (#596): a test docstring gave the lens the implementer's
+  argument.
+  **Bucket 3**, the conventions lens. **Landed:** a review commit on #596.
+- `SA-0194` (#598): the `preserves` witness anchored through a shared
+  parameter, so it stayed green with the renamed name dropped. The host filed
+  it, and the lens withdrew it after REBUT.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #598. Item b-cd5fd2
+  closes the withdrawal once #596 merges.
+- `SA-0194` (#598): a renamed path adds its file extension to the diff's
+  tokens, so a line naming another `.py` file anchors.
+  **Bucket 3**, the correctness lens. **Open:** item b-2dd65f.
+- `SA-0195` (#600): a new test helper restated the bullet parser beside it.
+  **Bucket 3**, the conventions lens. **Landed:** a review commit on #600.
+  REVIEW ran main's conventions prompt, not the branch's (b-66d1c3).
+- `SA-0195` (#600): a test docstring kept the wording the change removed.
+  **Bucket 3**, the conventions lens. **Landed:** a review commit on #600.
+- `SA-0195` (#600): two declared mutants died on a `ValueError`, not an
+  assertion.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #600.

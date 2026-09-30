@@ -1,12 +1,12 @@
 ---
 id: b-78ccc7
 title: The conventions lens prompt asks nothing that finds what the Standards seat caught in run 21
-status: open
+status: partial
 tier: 2
 filed: 2026-09-29
 closed:
 specs: [SA-0195]
-prs: []
+prs: [600]
 commits: []
 cites: [§5.5, §5.6]
 related: [b-abeb74, 162, b-17d0d5, b-5b1f8a, b-66d1c3]
@@ -55,3 +55,4 @@ measured pass builds (item b-abeb74).
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-29: `SA-0195` (#600) landed the past-the-hunk section, the `_Avoid_` lists and the three bullets. The verdict prompt still lacks the standing instructions.

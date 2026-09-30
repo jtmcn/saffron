@@ -1,12 +1,12 @@
 ---
 id: b-5b1f8a
 title: A witness whose expected value is the constant it tests cannot fail, and no gate or lens flags it
-status: open
+status: partial
 tier: 1
 filed: 2026-09-29
 closed:
 specs: [SA-0195]
-prs: []
+prs: [600]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-2750d5, b-78ccc7, b-7e69d0]
@@ -36,3 +36,4 @@ replaced the constant with a literal.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-29: `SA-0195` (#600) made the adequacy prompt name the shape. No gate refuses it yet.
