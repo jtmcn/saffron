@@ -480,6 +480,7 @@ def test_the_conventions_prompt_reads_past_the_hunk():
         diff=DIFF,
         gates="- tests: pass (pytest 8.0)",
     )
+    assert "## Its edges" in prompt.splitlines()
     heading, body = _section_after(prompt, "## Its edges")
     assert heading == "## Past the hunk"
     assert " ".join(body.split()) == " ".join(_PAST_THE_HUNK.split())
@@ -572,25 +573,8 @@ def _not_yours_bullets_and_edge(text):
     joined on whitespace. Shared across all four templates: each carries
     exactly one `Not yours.` paragraph and one edge sentence that opens
     `The test at the edge`."""
-    start = text.index("Not yours.")
-    edge_start = text.index("The test at the edge", start)
-    block_lines = text[start:edge_start].splitlines()
-    first_bullet = next(
-        i for i, line in enumerate(block_lines) if line.startswith("- ")
-    )
-    bullets: list[str] = []
-    current: list[str] = []
-    for line in block_lines[first_bullet:]:
-        if not line.strip():
-            continue
-        if line.startswith("- "):
-            if current:
-                bullets.append(" ".join(" ".join(current).split()))
-            current = [line[2:]]
-        else:
-            current.append(line)
-    if current:
-        bullets.append(" ".join(" ".join(current).split()))
+    bullets = _bullets_between(text, "Not yours.", "The test at the edge")
+    edge_start = text.index("The test at the edge", text.index("Not yours."))
     edge_paragraph = text[edge_start:].split("\n\n")[0]
     return bullets, " ".join(edge_paragraph.split())
 
@@ -638,8 +622,7 @@ def test_the_other_three_lenses_hand_a_restated_type_to_conventions():
 
 def _bullets_between(text, start_marker, end_marker):
     """The bulleted list between two markers, each bullet joined on
-    whitespace. The same parsing `_not_yours_bullets_and_edge` uses,
-    bounded by a caller-given pair of markers rather than the fixed
+    whitespace. `_not_yours_bullets_and_edge` calls it with the
     `Not yours.` and `The test at the edge` pair every lens shares."""
     start = text.index(start_marker)
     end = text.index(end_marker, start)
@@ -685,8 +668,10 @@ _ADEQUACY_EDGE = (
 def test_the_adequacy_prompt_names_a_witness_pinned_to_its_own_constant():
     """Adequacy's remit gains a bullet for a witness pinned to the
     constant it tests. Its edge sentence now names deriving a value by
-    running the code, rather than hard-coding it."""
+    running the code, rather than restating it."""
     text = (PROMPTS / review.LENSES["adequacy"]).read_text()
+    assert "## Your remit, and its edges" in text
+    assert "For every one of these" in text
     bullets = _bullets_between(
         text, "## Your remit, and its edges", "For every one of these"
     )
