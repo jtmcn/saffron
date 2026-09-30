@@ -53,11 +53,18 @@ acceptance:
       discards the return, and none of its candidates reaches the runner.
       It never calls `follow_ups` without `end_review`, nor after a raise
       out of the loop. The share is held whether or not `follow_ups` is
-      given. The witness drives a task the share alone stops, with
+      given. `end_review` still receives `reserve_usd` alone as its
+      reserve. The witness drives a task the share alone stops, with
       `follow_ups` and without. It drives a revision the share alone
       refuses, and a second round the share alone refuses after a first it
       admits.
     witness: tests/test_batch.py::test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_share
+    wrong_versions:
+      - "`writer_usd` is not held back in the task loop, or is held back there in place of `reserve_usd`."
+      - "`writer_usd` is not held back before a revision round, or is held back twice there."
+      - "`writer_usd` is held back only when `follow_ups` is given."
+      - "`end_review` is handed `reserve_usd` plus `writer_usd` as its reserve."
+      - "`follow_ups` is called before `end_review`, or with no `end_review` given."
   - claim: >-
       `run_stack_batch` hands `end_review` each spec of the order by its id.
       A spec whose task this call minted, and whose task holds a recorded
@@ -67,6 +74,12 @@ acceptance:
       witness drives a spec revised twice, a spec with no text, and a spec
       whose latest text is no spec.
     witness: tests/test_batch.py::test_a_stack_batch_hands_its_end_review_each_revised_specs_latest_text
+    wrong_versions:
+      - "Every spec maps to its queued `Spec`, whatever its task recorded."
+      - "A revised spec maps to its queued `Spec` with only the latest body copied in."
+      - "A spec revised twice maps to its first recorded text in place of its latest."
+      - "The text is read through the candidate's own `task_id`, which is `None`."
+      - "A `SpecError` from a latest text that is no spec propagates out of `run_stack_batch`."
   - claim: >-
       `run_batch` still holds nothing back from its budget comparison.
     witness: tests/test_batch.py::test_the_budget_gate_is_one_comparison_before_each_task
@@ -86,14 +99,16 @@ and §5.5. ADR 7
 decides that qualified end-review findings become follow-up specs, one
 generation deep. The **Money** paragraph of section 3 of
 `docs/superpowers/specs/2026-09-23-stack-batch-design.md` gives the writer
-a sub-cap of its own.
+a share of its own, `writer_usd`. It sits beside `reserve_usd`, not inside
+it. The operator decided that on 2026-09-29, and the delegate amends that
+paragraph by hand in the pull request that adds this spec.
 
 **This spec is the second of three for follow-up writing.** `SA-0161`
 builds `follow_up.write_follow_ups` and `WRITER_SHARE`. This spec adds the
 two `run_stack_batch` keywords it needs. `SA-0165` passes both from
 `saffron batch --stack`, with `writer_usd` of `--budget` times
 `WRITER_SHARE`. It split from `SA-0161` to keep that spec's size under
-the margin.
+the margin. This spec imports nothing from `saffron/follow_up.py`.
 
 **It also hands the end review a revised spec's latest text.** A revised
 spec's cell holds its base text. ADR 7 names the end-review Spec lens
@@ -106,43 +121,50 @@ above both of them in the chain, so neither can read it. This is the
 first spec above `SA-0164`, which records the revisions, to edit that
 `end_review` call.
 
-**What the tree base holds.** This spec's tree base is `SA-0161`'s head.
-The chain puts these names there, so they are cited by symbol. Every line
-number below was read at `642a26c3`, where none of them exist.
+**What the base holds.** Every name below is on `origin/main` at
+`a1148c1e`, and every line number was read there. This spec's tree base
+is `SA-0161`'s head, which adds only `saffron/follow_up.py` above it.
 
-- `SA-0143`: `run_stack_batch` in `saffron/batch.py`. It takes the order,
-  the ledger, the budget, `until` and a runner, and the keywords
-  `run_batch` takes. Its runner takes a candidate and its predecessor.
-- `SA-0153`: `reserve_usd` and `end_review`. The task loop holds the
-  reserve back from each budget comparison. `end_review` runs once after
-  the loop returns, with the batch's id as text, the reserve and each spec
-  of the order by its id. `run_stack_batch` calls it and discards the
-  return. A raise out of the loop propagates, and `end_review` does not
-  run.
-- `SA-0154`: `end_review.StackReview`.
-- `SA-0149`, `SA-0155` and `SA-0164`: the `review`, `mint` and `revise`
-  keywords. Before each revision round, `SA-0164` checks the budget left:
-  the budget less one held amount and `batch_spend`. It computes that
-  amount where the task loop computes its own, and it is `reserve_usd`. A
-  shortfall returns a `Refused` with an ` unrevised  ` line, and `revise`
-  is not called. `SA-0155`'s wrapper calls `mint` once for each spec it
-  reviews, and keeps that task for the spec within the call. `SA-0164`
-  records each revision on it with `record_spec_text`.
-- `SA-0182`: `Ledger.spec_text(task_id)`, the task's latest row or `None`.
-- `SA-0150`: `run_task` refuses a latest text `parse_spec` refuses, so that spec adds
-  no layer.
-
-**What the base holds.** `run_batch` compares each candidate's
-`budget_usd` with the budget less the batch's spend
-(`saffron/batch.py:198-200`). `tests/test_batch.py` has `_candidate`,
-`_outcome` and `_spend` (`:34-75`).
+- `run_stack_batch` (`saffron/batch.py:360`) takes the order, the ledger,
+  the budget, `until` and a runner, and the keywords `run_batch` takes.
+  Its runner takes a candidate and its predecessor.
+- `reserve_usd` and `end_review` (`:370-371`). `run_stack_batch` passes
+  `reserve_usd` to `run_batch` (`:653`), which holds it back from each
+  budget comparison (`:232-233`). `end_review` is typed
+  `Callable[[str, float, Mapping[str, Spec]], object] | None`. `end_review`
+  runs once the loop returns, handed the batch's id as text, the reserve
+  and each spec of the order by its id (`:656-658`). The return is
+  discarded. A raise out of the loop propagates, and `end_review` does
+  not run.
+- `StackReview` (`saffron/end_review.py:497`).
+  `saffron/end_review.py` imports nothing from `saffron/batch.py`.
+- The `review`, `mint` and `revise` keywords (`:376-388`). Before each
+  revision round the wrapper checks the budget left, which is the budget
+  less `reserve_usd` and `batch_spend` (`:565-585`). A shortfall emits an
+  ` unrevised  ` line and returns a `Refused`, and `revise` is not called.
+  After `revise` returns, the wrapper opens and closes one attempt on the
+  spec's task, at the session's `cost_usd` (`:593-604`). It records each
+  revision with `record_spec_text` (`:617-623`).
+- `task_ids` (`:413`) maps each spec id to the task `mint` gave it this
+  call. It is a local of `run_stack_batch` itself, so it is in scope once
+  `run_batch` returns.
+- `Ledger.spec_text(task_id)` (`saffron/ledger.py:1488`) returns the
+  task's latest row or `None`.
+- `run_task` refuses a latest text `parse_spec` refuses
+  (`_recorded_spec_text`, `saffron/task.py:340`), so that spec adds no
+  layer.
+- `run_batch` (`saffron/batch.py:80`) compares each candidate's
+  `budget_usd` with the budget less `reserve_usd` and the batch's spend
+  (`:232-233`). `tests/test_batch.py` has `_candidate` (`:45`), `_outcome`
+  (`:78`) and `_spend` (`:87`), and the stack helpers `_package_runner`
+  (`:1752`) and `_logging_end_review` (`:1787`).
 
 ## Problem
 
 1. **`writer_usd: float = 0.0`.** Add it to the held amount, so both the
-   task loop and `SA-0164`'s pre-revision check subtract it beside
-   `reserve_usd`. Generation 1 releases both reserves in `SA-0162`, so it
-   is out of scope here.
+   task loop and the pre-revision check subtract it beside `reserve_usd`.
+   `end_review` still gets `reserve_usd` alone. Generation 1 releases both
+   reserves in `SA-0162`, so it is out of scope here.
 2. **`follow_ups`, `None` by default.** It takes the batch's key and the
    `StackReview`, and returns a list of `Candidate`s. `run_stack_batch`
    calls it once, right after `end_review`, when both are given. It calls
@@ -150,12 +172,9 @@ number below was read at `642a26c3`, where none of them exist.
    alone, since `saffron/batch.py` builds none.
 3. **The texts the end review reads.** Build `end_review`'s mapping as
    criterion 2 states. Read each minted task's text with
-   `ledger.spec_text` once the loop returns, and parse it with
-   `intake.parse_spec`. Catch `SpecError` alone. So the map from each spec
-   id to the task this call minted must be reachable after the loop.
-   Where `SA-0155`'s wrapper keeps it in a local of its own, lift it to
-   `run_stack_batch`'s scope. This spec touches `saffron/batch.py`, so
-   that edit is in bounds.
+   `ledger.spec_text` through `task_ids` once `run_batch` returns, and
+   parse it with `intake.parse_spec`. Catch `SpecError` alone. `task_ids`
+   is already in `run_stack_batch`'s own scope, so nothing moves.
 
 ## Out of scope
 
@@ -168,15 +187,24 @@ number below was read at `642a26c3`, where none of them exist.
 - **The batch row's spend.** It closes before the end review (`SA-0153`),
   so its stored spend lacks the writer's.
 - **A revised spec's title and ceilings elsewhere.** Only `end_review`'s
-  mapping takes the latest text. The runner reads it through `run_task`
-  (`SA-0150`).
+  mapping takes the latest text. The runner reads it through `run_task`.
+- **`end_review`'s declared return type and `saffron/cli.py`.** Both stay
+  as they are. See the typing note below.
 
 ## Notes for the agent
 
-**Criterion 1 edits `run_stack_batch`**, whose text is not at `f2a08a9f`,
-so no `find` can be pinned there. It and criterion 2 declare a witness
-and no mutant, and `witness` reports `skip` for each. Criteria 3 and 4
-are `preserves`, and name tests that pass now. Import every new name
+**The typing path.** `end_review`'s declared return is `object`, and so is
+the production callable in `saffron/cli.py`, which is forbidden here. A
+`follow_ups` typed on `StackReview` cannot take that return unchanged, so
+the `types` gate would flag the call. Wrap it at the call that hands it on:
+`follow_ups(key, typing.cast("StackReview", end_review(...)))`. The string
+form needs no runtime import, and `saffron/ledger.py:1591` already casts
+that way. Leave `end_review`'s type and `saffron/cli.py` alone. This is
+reasoned from the source, and `ty` did not run on it.
+
+**Criteria 1 and 2 are new code** in `run_stack_batch`, so each declares a
+witness and no mutant, and `witness` reports `skip` for each. Criteria 3
+and 4 are `preserves`, and name tests that pass now. Import every new name
 inside the test body.
 
 **Criterion 1's witness** follows `_candidate`, `_outcome` and `_spend`.
@@ -185,9 +213,12 @@ The runner makes a run, a task and an attempt of 0.5, and returns
 record their calls, and `follow_ups` returns one more candidate.
 
 - The order is `SY-1` at a budget of 12 and `SY-2` at 12.25. The budget is
-  20, `reserve_usd` 3 and `writer_usd` 4.5. It asserts `BUDGET`, one runner
-  call for `SY-1`, then `end_review` and `follow_ups` in that order. Each
-  got the batch's key, and `follow_ups` got `end_review`'s return.
+  20, `reserve_usd` 3 and `writer_usd` 4.5. `SY-1` has 12.5 left and runs.
+  `SY-2` has 12 left after the 0.5 spent, and stops. It asserts `BUDGET`,
+  one runner call for `SY-1`, then `end_review` and `follow_ups` in that
+  order. Each got the batch's key, and `follow_ups` got `end_review`'s
+  return. It asserts `end_review` got 3.0 as its reserve, with `==`. A
+  build that hands it 7.5 fails there.
 - A batch with `follow_ups` and no `end_review` calls no `follow_ups`. A
   readiness check that raises propagates, and calls neither.
 - `SY-4` alone at a budget of 12.75, with budget 20, `reserve_usd` 3,
@@ -197,30 +228,26 @@ record their calls, and `follow_ups` returns one more candidate.
   together. One spec `SY-3` at a budget of 12 runs with a budget of
   `3 + need + 2` and `reserve_usd` 3. Every review of it blocks with one
   `build` blocker, as `SA-0164`'s arrangement scripts it, and costs
-  nothing. Each `revise` records one attempt at 1.0 on a run in the batch.
+  nothing. The `mint` double creates the task on a run in the batch. The
+  `revise` double returns a `SpecWriterSession` whose `cost_usd` is 1.0,
+  and records no attempt itself. The wrapper's own `close_attempt` carries
+  that 1.0, so each round spends it once.
   - With `writer_usd` 4.0, and no `end_review` or `follow_ups`, `revise` is
     never called. The first round's check leaves `need` less 2.
   - With `writer_usd` 1.5, and both `end_review` and `follow_ups` passed,
     `revise` is called once. The first round leaves `need` plus 0.5. The
     second review blocks again, and its round leaves `need` less 0.5.
 
-These fail it, each measured on a stand-in:
-
-- `writer_usd` not held back in the task loop, or held in place of the
-  reserve
-- `writer_usd` not held back before a revision, or held back twice there
-- `writer_usd` held back only beside a `follow_ups`, in the task loop or
-  before a revision
-- `follow_ups` called before `end_review`, or with no stack
-- `follow_ups` called with no `end_review`
-- a follow-up passed to the runner
+Beyond criterion 1's `wrong_versions`, a follow-up passed to the runner
+fails it too.
 
 **How the list was measured.** A throwaway prototype ran on 2026-09-24. It
 stood in for `run_stack_batch`, with `SA-0153`'s reserve and `SA-0164`'s
 pre-revision check as their specs state them. The right build passed.
 Each wrong version was applied as a text edit, and each failed the
-witness. The chain's own `run_stack_batch` is not at `f2a08a9f`, so the
-list ran on the stand-in alone.
+witness. The reserve handed to `end_review` was not in that list. The
+real `run_stack_batch` is on `origin/main` now, and the list did not run
+against it. The re-review at `SA-0161`'s branch measures it there.
 
 **Criterion 2's witness** follows `SA-0164`'s arrangement for the
 `review` and `mint` doubles. Every review returns a clean read, so no
@@ -237,16 +264,9 @@ records one text of origin `revision`, `not a spec`, at
 task it is handed. `end_review` records its third argument. It asserts
 that mapping's keys are the three ids. `SY-1`'s value equals
 `intake.parse_spec(REV_TWO)` with `==`, and is not the queued `Spec`.
-`SY-2`'s and `SY-3`'s are the queued `Spec` objects, by `is`. These fail
-it, reasoned:
-
-- the queued `Spec` for every spec, which gives `SY-1` no `rev` body
-- the queued `Spec` with the latest body copied in, which keeps no
-  `touches` and no criterion
-- the first text in place of the latest, which gives `rev one`
-- the text read through the candidate's own `task_id`, which is `None`
-- a `SpecError` that propagates from `SY-3`
-- the mapping built before the loop, which sees no recorded text
+`SY-2`'s and `SY-3`'s are the queued `Spec` objects, by `is`. The
+`wrong_versions` under criterion 2 were reasoned, not run. A mapping
+built before the loop fails it too, since it sees no recorded text.
 
 **What criterion 2 leaves undriven.** A batch with no `mint`. Its mapping
 holds each queued `Spec`, as `SA-0153`'s criterion 4 witness asserts.
@@ -261,5 +281,6 @@ sentence over 25 words.
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
 prototype measured 275 changed tokens with `size_gate` itself:
 `saffron/batch.py` 53 and `tests/test_batch.py` 222. Criterion 2 adds
-about 40 in `saffron/batch.py` and 200 in its witness, unmeasured. That
-is about 515, 17% of the ceiling.
+about 40 in `saffron/batch.py` and 200 in its witness, unmeasured. The
+cast and the reserve assertion add about 10. That is about 525, 18% of
+the ceiling.

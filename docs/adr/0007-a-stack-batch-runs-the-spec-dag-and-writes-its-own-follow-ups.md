@@ -120,6 +120,12 @@ retired spec's work is in the default branch. It reaches the default branch
 only when the operator merges the stack, so the operator's merge makes the
 assertion.
 
+**The finishing layer's parent is the top layer's recorded head.** §5.7 says a
+parent's head is fetched, never remembered. The finish is not a task, and it
+takes the recorded `pushed_sha` of the batch's highest layer. That stays safe
+because the batch compares each layer's remote head with its record before
+the push, and escalates a moved branch (`SA-0167`).
+
 **Nothing merges.** The batch links the stack, and `--ready` marks it ready.
 Merging stays the operator's, as §1.4 says of every version.
 
