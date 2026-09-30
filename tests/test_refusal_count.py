@@ -6,6 +6,7 @@ ninth `RefusalKind` lands and `DESIGN.md` still says eight.
 
 import ast
 import re
+from collections import Counter
 from pathlib import Path
 from typing import get_args
 
@@ -32,11 +33,27 @@ def _stated_count() -> int:
     return NUMBER_WORDS[stated[0]]
 
 
-def _kinds_emitted() -> set[str]:
-    """Every kind `scheduler.py` passes as `kind=` or returns first in a tuple."""
+# Sites per kind in `scheduler.py`. A new site under an old kind changes a count here,
+# so a ninth refusal cannot hide inside one of the eight.
+SITES = {
+    "open_pr_on_spec": 1,
+    "open_pr_overlap": 1,
+    # A live spec that does not parse, and a retired one in `done/` (§4.2.1).
+    "malformed_spec": 2,
+    "unmatched_criterion_path": 1,
+    # One entry at a time, and the stack order that replaces it under `--stack`.
+    "depends_on": 2,
+    "protected_touch": 1,
+    # A marker `touches` does not reach, and one naming an id nothing declares.
+    "retirement_marker": 2,
+}
+
+
+def _sites() -> Counter[str]:
+    """Each kind `scheduler.py` passes as `kind=` or returns first in a tuple."""
     tree = ast.parse(Path(scheduler.__file__).read_text())
     kinds = set(get_args(RefusalKind))
-    found: set[str] = set()
+    found: Counter[str] = Counter()
     for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "kind":
             value = node.value
@@ -45,7 +62,7 @@ def _kinds_emitted() -> set[str]:
         else:
             continue
         if isinstance(value, ast.Constant) and value.value in kinds:
-            found.add(str(value.value))
+            found[str(value.value)] += 1
     return found
 
 
@@ -53,6 +70,16 @@ def test_design_states_as_many_refusals_as_the_scheduler_names():
     assert _stated_count() == len(get_args(RefusalKind))
 
 
-def test_every_refusal_kind_but_preflight_has_a_site_in_the_scan():
-    # A kind with no site would let the count pass while a refusal went unnamed.
-    assert _kinds_emitted() == set(get_args(RefusalKind)) - {"preflight"}
+def test_every_refusal_kind_but_preflight_has_its_pinned_sites_in_the_scan():
+    assert set(SITES) == set(get_args(RefusalKind)) - {"preflight"}
+    assert _sites() == SITES
+
+
+def test_only_the_scan_constructs_a_refusal():
+    # The site count reads `scheduler.py` alone, so a refusal built elsewhere goes uncounted.
+    builders = [
+        path
+        for path in (ROOT / "saffron").rglob("*.py")
+        if path.name != "scheduler.py" and "Refusal(" in path.read_text()
+    ]
+    assert builders == []

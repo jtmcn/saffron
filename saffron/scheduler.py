@@ -3,13 +3,13 @@ what order (DESIGN.md §4.2.1).
 
 This is the second and third of `SA-0009`'s split. `SA-0015` built the
 `spec_sha`-keyed done/re-queue filter and the ordering, refusing only a spec
-`discover_specs` could not parse. `SA-0016` (here) adds the other four of
-§4.2.1's six refusals: an open pull request from another task already
-targeting this spec, a `touches` overlap with an open pull request's changed
-files, an acceptance criterion naming a path no `touches` pattern matches,
-and a `depends_on` that no `MERGED` task or landed push satisfies. That is five of the six refusals gate 0
-describes — the sixth, a repo that failed preflight, is a batch-level check
-outside `build_queue`'s job. A landed push counts only when the caller
+`discover_specs` could not parse. `SA-0016` (here) adds four more: an open
+pull request from another task already targeting this spec, a `touches`
+overlap with an open pull request's changed files, an acceptance criterion
+naming a path no `touches` pattern matches, and a `depends_on` that no
+`MERGED` task or landed push satisfies. A repo that failed preflight is
+refused by the batch, outside `build_queue`. `RefusalKind` names every
+refusal §4.2.1 counts. A landed push counts only when the caller
 passes `pushed_landed` (`SA-0131`).
 
 `SA-0023` adds the seventh §4.2.1 now counts: `protected_touch_refusal`
@@ -139,7 +139,6 @@ class Candidate:
     task_id: int | None
 
 
-# §4.2.1's refusals, one name each. A test holds §4.2.1's count to this set (item 48).
 # `preflight` has no site here: a repo that failed preflight is refused by the batch.
 RefusalKind = Literal[
     "open_pr_on_spec",
