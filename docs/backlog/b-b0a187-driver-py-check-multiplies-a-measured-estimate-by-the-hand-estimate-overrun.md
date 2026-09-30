@@ -10,7 +10,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [b-43a061, b-db95e1]
+related: [b-43a061, b-db95e1, b-792ab2]
 ---
 
 ## Problem
@@ -37,3 +37,6 @@ estimate at 1.0. `check` prints which basis it used.
 - 2026-09-29: hit again in the spec loop's run 22. `SA-0151` blocked at 3044
   tokens on the 1.59 multiplier. Its spec recorded a measured prototype at
   1909 (64%). The operator ran it as written.
+- 2026-09-30: still live. `_size_verdict` cannot tell a measured estimate
+  from a hand one. ADR 7 retires `check` once b-792ab2 completes, and each
+  loop meets this until then.

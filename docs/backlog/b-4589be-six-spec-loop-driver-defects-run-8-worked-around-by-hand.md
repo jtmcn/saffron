@@ -9,7 +9,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [157, 158, b-36b551, b-65e7e2]
+related: [157, 158, b-36b551, b-65e7e2, b-792ab2]
 ---
 
 ## Problem
@@ -49,3 +49,8 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-09-30: the `record` bullet is stale. b-36b551 (#478) ends a first
+  wall cut with nothing committed at `ORPHANED`. `ORPHANED` is not in
+  `DONE_STATES`, so `record` leaves the spec pending. The other five bullets
+  stand. ADR 7's stack batch retires `next` and `hold` once b-792ab2
+  completes.
