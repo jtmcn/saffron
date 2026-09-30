@@ -1,7 +1,8 @@
 ---
 id: 48
 title: §4.2.1's count of the refusal gate drifts every time one is added, and has twice
-status: open
+status: done
+closed: 2026-09-29
 tier: 2
 specs: [SA-0021, SA-0023, SA-0027]
 prs: []
@@ -64,3 +65,4 @@ exists.
   consumed entry does not resolve or cannot be read. That one is not a gate
   0 refusal. Decide whether §4.2.1's count includes it once `SA-0136` merges.
 - 2026-09-29: checked, and the count holds at eight. ADR 6's composite refusal is unbuilt. §4.2.1 names `SA-0136`'s `consumes` refusal outside the gate. Under `--stack`, `_stack_order` refuses in place of the sixth, and §4.2.1 now says so.
+- 2026-09-29: the check exists. `RefusalKind` names the eight, and the type checker makes every `Refusal` carry one. `tests/test_refusal_count.py` holds §4.2.1's number word to the set, and pins each kind's sites in the scan. A ninth kind with `DESIGN.md` unchanged failed the count test. A ninth site under an old kind failed the site test. Both were watched against the code. A refusal built outside `scheduler.py` fails a third test. §4.2.1 now says which kind the dangling marker and the unparseable retired spec share.
