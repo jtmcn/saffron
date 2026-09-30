@@ -28,8 +28,13 @@ decisions (settled, do not re-argue):
 Report back with: the spec's path and id, its touches, depends_on,
 ceilings and estimated size, which of the six checks it settled with
 evidence, and how each claim that quantifies over a set is driven.
-If the estimate splits, lead with that.
+If the estimate splits, stop at step 1 and report the split alone.
 ```
+
+A writer that splits returns within minutes and writes no file. Dispatch one
+writer per spec it names, in parallel, each with `item:`, the split's scope
+for that spec, and its `depends_on`. `SA-0113`'s draft took 35.7 minutes, so
+the early stop saves most of that for each child.
 
 Hand it the pre-flight commands by name. A writer that knows `driver.py cite`
 exists runs it on its own draft. One that does not writes a throwaway resolver

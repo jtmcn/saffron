@@ -27,6 +27,9 @@ GitHub issues remain in use only for research/evidence records under
   repo-relative `path` or `path:name` that `depends_on[0]` produces. A spec
   that declares it needs a `depends_on`. `run_task` resolves each entry at
   the tree base before the cell starts and refuses the task on a miss.
+  Load refuses an entry that is empty, or whose path or name is empty once
+  split at the first colon. It also refuses a path that is not canonical. That
+  covers an absolute path, a `.` or `..` segment, a trailing `/` and a `//`.
 - **`pending_symbols`** lists dead code this spec will bring into use, one
   `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
   defers each one while the spec is open, so a parent spec can add what only its

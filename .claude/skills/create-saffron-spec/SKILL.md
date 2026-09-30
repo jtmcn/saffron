@@ -49,6 +49,8 @@ now than after a draft.
 
 - **Size.** Estimate from real files as `references/preflight.md` check 7
   says. An estimate inside its margin splits into a parent and children.
+  A writer that meets a split stops at its step 1 and names each spec. Then
+  dispatch one writer per spec, as `references/dispatch.md` says.
 - **Overlap.** A queued spec whose `touches` intersect yours is your parent.
   `saffron queue --repo .` reads the mirror at the pinned `base_sha` and cannot
   see an unmerged spec, so drive `build_queue` over the working tree instead.
