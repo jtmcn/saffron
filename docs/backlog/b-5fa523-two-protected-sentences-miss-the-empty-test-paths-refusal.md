@@ -1,11 +1,12 @@
 ---
 id: b-5fa523
 title: Two protected sentences say every probe off a test path reaches a cell, and `SA-0119` refuses them all on an empty `test_paths`
-status: open
+status: done
 tier: 3
 filed: 2026-09-21
+closed: 2026-09-29
 by_hand: true
-specs: []
+specs: [SA-0119]
 prs: []
 commits: []
 cites: [§5.5.1]
@@ -35,3 +36,7 @@ from it.
 ## Record
 
 - 2026-09-21: filed by hand with `SA-0119`. It waits on that spec's merge.
+- 2026-09-29: done by hand. `SA-0119` merged, and `probe_refusal` refuses every
+  probe when `test_paths` is empty. `DESIGN.md` §5.5.1 and the **Vacuity probe**
+  entry name that refusal beside the test-path one. The entry is hand-written,
+  so `ontology/factory.ttl` did not change.
