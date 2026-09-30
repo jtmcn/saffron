@@ -1,13 +1,14 @@
 ---
 id: 124
 title: The spec review's "witness already green at base" check raises false blockers
-status: open
+status: done
 tier: 3
 by_hand: true
 filed: 2026-09-14
+closed: 2026-09-30
 specs: []
 prs: []
-commits: []
+commits: ["bd2bee54"]
 cites: []
 related: [123, 125]
 ---
@@ -34,3 +35,7 @@ would serve as the witness; otherwise it is a concern.
 ## Record
 
 **Filed 2026-09-14.**
+
+- 2026-09-30: check 3 now blocks only on a named test that already passes at
+  `base`. Behaviour that exists at base is a concern. The spec writer and the
+  loop skill already treat the old shape as a forecast, and that stays true.
