@@ -1,13 +1,14 @@
 ---
 id: b-542beb
 title: An `integrity` comment, a `DESIGN.md` row and two test docstrings went stale after `SA-0118` and `SA-0121`
-status: open
+status: done
+closed: 2026-09-29
 tier: 3
 filed: 2026-09-22
 by_hand: true
 specs: [SA-0118, SA-0121]
 prs: [433, 435]
-commits: []
+commits: [0e399951]
 cites: [§5.4]
 related: [103, 89]
 ---
@@ -34,3 +35,4 @@ protected.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
+- 2026-09-29: each sentence says what the code does today. `size`'s docstring now takes a NUL byte as its example, since no `-diff` attribute reaches the diff.

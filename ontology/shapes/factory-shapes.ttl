@@ -171,8 +171,8 @@ factory:PolicyShape a sh:NodeShape ;
     sh:targetClass factory:Policy ;
     sh:property [ sh:path factory:declaresGate ; sh:minCount 1 ; sh:class factory:Gate ] .
 
-# Lens disjointness (§5.5): one finding, one lens. It is why any single blocker
-# routes to REBUT and why there is no vote.
+# One finding, one lens. Lens remits are meant to be disjoint (§5.5), and Appendix L
+# measured an overlap. Any single blocker routes to REBUT, and there is no vote.
 factory:FindingShape a sh:NodeShape ;
     sh:targetClass factory:Finding ;
     sh:property [ sh:path factory:severity ; sh:minCount 1 ; sh:maxCount 1 ;

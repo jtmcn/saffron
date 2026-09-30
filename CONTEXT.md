@@ -179,6 +179,13 @@ stack batch runs at most three per spec, then escalates the spec. A revision sta
 only while the budget left, less the reserve, covers a writer, a review and the spec's
 budget.
 
+**Escalation**: A stack batch's spec review sending a spec to the operator and not to
+a cell. A `blocker` tagged neither `build` nor `witness` escalates. So does any
+`blocker` left after three revisions, or read with no spec writer to revise it. The
+task ends `SPEC_WITHHELD`, and each spec that depends on it is refused. It counts as
+no abort.
+_Avoid_: "rejected", "blocked".
+
 **Recorded spec text**: A spec's text that a stack batch runs and that is not at
 `base_sha`. It is a `spec_texts` row and a `spec_text` fact, hashed when recorded.
 Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against
@@ -426,7 +433,8 @@ edit a lens names in a review finding; that is a vacuity probe.
 
 **Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
 notice the behaviour it describes breaking. After REVIEW the host applies each anchored adequacy
-finding's probe in a gate-only cell, unless the probe edits a declared test path. An end review's
+finding's probe in a gate-only cell. It refuses a probe that edits a declared test path, and
+every probe when the repo declares no `test_paths`. An end review's
 anchored findings that carry a probe are applied the same way. The corpus harness applies one inside a
 fixture's cell. No gate applies one. Its outcome is inverted from a mutant's: a
 vacuity probe that *survives* the suite is the finding confirmed, where a mutant that
@@ -498,8 +506,10 @@ checkpoint. An attempt that ends in a scope proposal writes neither.
 _Avoid_: "the coder", "the writer", "the worker".
 
 **Lens**: One critic perspective with a bounded remit — correctness & data
-semantics, contract & schema, test adequacy, conventions. Lenses are disjoint by construction,
-which is why any single blocker routes to REBUT and why there is no vote. The end
+semantics, contract & schema, test adequacy, conventions. Their remits are meant to
+be disjoint, and Appendix L measured two lenses filing one finding. Two lenses agreeing
+is a fact about the prompts, not corroboration. So any single blocker routes to REBUT,
+and there is no vote (principles 9 and 51). The end
 review's Spec, Standards and join lenses are not among them (ADR 7).
 _Avoid_: "reviewer", "pass", "check", "critic #2".
 
@@ -523,7 +533,8 @@ both of its lenses' ceilings.
 
 **End-review status**: One lens's outcome against one layer: `reviewed`, `error` or
 `not_reached`. `not_reached` is a layer the reserve did not cover, and no cell opens
-for it. `error` is the lens breaking, never a verdict on the layer.
+for it. `error` is the lens breaking, never a verdict on the layer. Unlike a gate
+`error`, its cost is still charged to the reserve.
 
 **Finding**: Anything a critic reports, pointing at one file and line. Whether
 that line is one the change reaches is **anchored** below, a separate property

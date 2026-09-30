@@ -58,7 +58,7 @@ factory:ImplementerSession a owl:Class ; rdfs:subClassOf prov:SoftwareAgent ; rd
 factory:CriticLens a owl:Class ;
     rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ;
     rdfs:label "lens" ;
-    rdfs:comment "Lenses are disjoint by construction (§5.5) — which is why one blocker routes to REBUT and there is no vote." .
+    rdfs:comment "Lens remits are meant to be disjoint (§5.5), and Appendix L measured two lenses filing one finding. One blocker routes to REBUT, and there is no vote." .
 factory:Operator a owl:Class ; rdfs:subClassOf prov:Person, earl:Assertor ; rdfs:label "operator" .
 
 # Acts on the operator's behalf under their git identity and credentials. None of

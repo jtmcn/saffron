@@ -205,9 +205,9 @@ def size_gate(
     """The diff's changed tokens (added + removed, by the shortest per-file
     edit) against the ceiling `spec_type` sets.
 
-    `error` before anything else is measured: a file git renders as
-    `Binary files ... differ` (a `-diff` gitattribute, say) hides its content,
-    so a hunk-counting gate cannot tell a genuine binary asset from 2000
+    `error` before anything else is measured. A file git renders as
+    `Binary files ... differ` hides its content, as one NUL byte does to text.
+    A hunk-counting gate cannot tell a genuine binary asset from 2000
     rewritten lines routed past the ceiling. `integrity` answers the identical
     shape by checking the file against the task's `touches`: unreadable and
     declared is `error` — the gate saying it cannot measure, never a verdict
@@ -221,7 +221,7 @@ def size_gate(
     and at `standard`, where §5.6 says this gate stops nothing, aborting is the
     opposite of nothing. It is also indistinguishable from the honest case: a
     task legitimately adding a PNG inside `touches` renders the same way as the
-    `-diff` trick, and no diff can tell them apart. So the refusal is spent
+    NUL-byte trick, and no diff can tell them apart. So the refusal is spent
     where the verdict is load-bearing — at `elevated` — and below it the
     readable tokens are counted and the unreadable file is named in the summary.
 

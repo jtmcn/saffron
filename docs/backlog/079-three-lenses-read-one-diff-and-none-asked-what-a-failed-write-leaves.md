@@ -37,8 +37,8 @@ running can give. Here the answer was in the repository, and no lens was looking
 for it.
 
 §5.5's three lenses are correctness & data semantics, contract & schema, and
-test adequacy, **disjoint by construction** — which is the property that makes
-any single blocker route to REBUT without a vote. The cost of that choice is
+test adequacy, with remits **meant to be disjoint**. Appendix L measured one
+overlap. Principles 9 and 51 route any single blocker to REBUT without a vote. The cost of that choice is
 that the lenses do not backstop each other, so a question no lens owns is not
 covered thinly, it is invisible. *What does the failure path leave behind* is
 such a question. It is not correctness of the happy path, not schema, and not
