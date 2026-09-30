@@ -9,7 +9,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [b-4589be, 137]
+related: [b-4589be, 137, b-792ab2]
 ---
 
 ## Problem
@@ -34,3 +34,6 @@ while that pull request is open. `status` names every hold it kept and why.
 - 2026-09-25: recurred in the spec loop's run 16. `snapshot --force` after
   #497 released `SA-0140`'s hold while its edit (#498) was open. The
   delegate held it again by hand.
+- 2026-09-30: still live. `hold` stores a free-text reason and no pull
+  request number. ADR 7 moves spec revision inside the batch, so no hold is
+  needed once b-792ab2 completes.

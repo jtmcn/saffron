@@ -10,7 +10,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [172]
+related: [172, b-792ab2]
 ---
 
 ## Problem
@@ -35,3 +35,7 @@ next loop. No drop is recorded for them, and `snapshot --new` picks them up.
 - 2026-09-29: hit again in the spec loop's run 22. `snapshot` put nine chain
   specs before `SA-0193` by priority and offers no operator order. The
   delegate held `SA-0161` to run the four new specs first.
+- 2026-09-30: the need outlives the driver. `saffron batch --stack` plans
+  the whole queue and takes only `--budget` and `--until`. It cannot stop
+  after a named spec or run one chain. ADR 7 retires `drop`, so the fix
+  belongs in the stack batch (b-792ab2).

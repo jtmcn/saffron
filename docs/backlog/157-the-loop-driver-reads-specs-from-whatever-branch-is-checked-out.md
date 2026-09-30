@@ -9,7 +9,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [137]
+related: [137, b-792ab2]
 ---
 
 ## Problem
@@ -46,3 +46,6 @@ checked out, saying which.
 - 2026-09-19: met again in the spec loop's run 8 through `history`, which is
   item b-4589be. A stacked child's branch also carries its spec as of the
   parent's cut, which item b-65e7e2 removes.
+- 2026-09-30: still live. `_stale_reasons`, `_edit_traps` and `_known_specs`
+  read the working tree. ADR 7's stack batch reads every queued spec at
+  `base_sha`, so this closes as superseded once b-792ab2 completes.
