@@ -63,3 +63,4 @@ exists.
   `SA-0136` add one in `run_task`, after the tree base resolves, when a
   consumed entry does not resolve or cannot be read. That one is not a gate
   0 refusal. Decide whether §4.2.1's count includes it once `SA-0136` merges.
+- 2026-09-29: checked, and the count holds at eight. ADR 6's composite refusal is unbuilt. §4.2.1 names `SA-0136`'s `consumes` refusal outside the gate. Under `--stack`, `_stack_order` refuses in place of the sixth, and §4.2.1 does not say so.

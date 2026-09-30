@@ -1,13 +1,14 @@
 ---
 id: b-ac97c0
 title: Seven sentences still call the lenses disjoint by construction, after Appendix L measured two lenses filing one finding
-status: open
+status: done
+closed: 2026-09-29
 tier: 3
 filed: 2026-09-22
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [0e399951]
 cites: [§4.6, §5.5, §7]
 related: [6, 79]
 ---
@@ -39,3 +40,4 @@ overlap. The no-vote rule rests on principle 51 as well as 9.
 
 - 2026-09-22: filed from ADR 4's review. ADR 4's principle 30 records it.
   By hand, because `DESIGN.md` and `CONTEXT.md` are `protected`.
+- 2026-09-29: all seven say the remits are meant to be disjoint, and name Appendix L's overlap. §5.5's no-vote rule cites principles 9 and 51.
