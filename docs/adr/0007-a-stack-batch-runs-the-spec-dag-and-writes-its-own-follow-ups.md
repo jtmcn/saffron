@@ -235,7 +235,8 @@ this decision rests on.
 ## Consequences
 
 `CONTEXT.md` gains "predecessor", "stack batch", "follow-up spec", "end
-review", "end-review lens" and "join lens" through `ontology/factory.ttl`.
+review", "end-review lens" and "join lens", written by hand. Only closed-set
+spans render from `ontology/factory.ttl`.
 "Spec review", "critic cell", "lens", "run", "stacked branch", "tree base" and
 "spec chain" widen.
 

@@ -112,3 +112,8 @@ The **Refusal** entry names the stack order's refusal. This lands after
   Consequences still route the entries through `ontology/factory.ttl`.
   A lens headword naming a session the Lens entry excludes stays
   open, and so do the headwords "Revision" and "Mint".
+- 2026-09-29: more of the merged half landed by hand. **Escalation** has an
+  entry. **End-review status** says an errored lens is still charged to the
+  reserve. ADR 7's Consequences say the entries are hand-written. **Mint** and
+  **Revision** already had entries. The lens headword and the terms waiting on
+  unmerged specs stay open.
