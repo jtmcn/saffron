@@ -206,7 +206,9 @@ def _onboarded_from_templates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     bin_dir.mkdir()
     (bin_dir / "fake").write_text(FAKE_TOOL)
     (bin_dir / "fake").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin")
+    # The runner drops the venv's bin from a gate's PATH, so the real interpreter's must stay.
+    python_dir = Path(sys.executable).resolve().parent
+    monkeypatch.setenv("PATH", f"{bin_dir}:{python_dir}:/usr/bin:/bin")
     repo = _target(tmp_path)
     shutil.copy(TEMPLATES / "policy.yaml", repo / ".saffron" / "policy.yaml")
     shutil.copy(TEMPLATES / "Dockerfile", repo / ".saffron" / "Dockerfile")

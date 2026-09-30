@@ -328,7 +328,7 @@ session transcript, so a strange PR shows what the agent did but not what it rea
 stack's new lens runs in none of its cells. The second is what the conventions
 prompt misses. The last two are a witness and an anchor that pass too much.
 
-**Placed 2026-09-29**, from the spec loop's run 22: **b-7a70fd**, then
+**Placed 2026-09-29**, from the spec loop's run 22: ~~**b-7a70fd**~~, then
 **b-ef8543**. Four tests fail in every cell, and subtraction hides them. A
 spec's wrong builds listed in prose reach no host run.
 
