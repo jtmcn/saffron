@@ -44,6 +44,19 @@ ONTOLOGY = REPO / "ontology" / "factory.ttl"
 ONTOLOGY_NS = "urn:software-factory:ns#"
 # Where `jev` writes. A cell's own batch directory sits under `v0/`, as `saffron/cli.py` puts it.
 JEV_ROOT = Path.home() / ".saffron" / "batches"
+# The paths `check` walks `depends_on` for. A live ancestor touching one of
+# these shapes REVIEW or REBUT, and a stacked child's REVIEW never runs it.
+_REVIEW_TRIGGER_PATHS = (
+    "saffron/phases/review.py",
+    "saffron/phases/rebut.py",
+    "saffron/agents/findings.py",
+    "saffron/agents/prompts/turns/review.md",
+    "saffron/agents/prompts/turns/extraction.md",
+    "saffron/agents/prompts/turns/rebut.md",
+    "saffron/agents/prompts/turns/verdict.md",
+    "saffron/agents/prompts/turns/rebut-extract.md",
+)
+_REVIEW_TRIGGER_GLOB = "saffron/agents/prompts/review-*.md"
 # What the CLI prints at column 0 while a cell runs. Terminal states are not
 # listed here: `watch_pattern` takes them from the ontology's closed set.
 WATCH_PREFIXES = (
@@ -1074,6 +1087,37 @@ def _cell_running(spec_id: str) -> bool:
     return done.returncode == 0
 
 
+def _review_lenses_line(spec_id: str) -> str:
+    """The lenses the spec's latest REVIEW ran, read from `findings.json` in
+    its batch directory. A re-run overwrites that file, and each run
+    recreates `gates/` first. A `findings.json` no older than `gates/`
+    belongs to the latest run (DESIGN.md §5.5, §5.6)."""
+    none_recorded = "lenses: none recorded for this spec's latest run"
+    directory = JEV_ROOT / "v0" / spec_id
+    findings_path = directory / "findings.json"
+    gates_dir = directory / "gates"
+    try:
+        findings_mtime = findings_path.stat().st_mtime
+    except OSError:
+        return none_recorded
+    if gates_dir.is_dir() and findings_mtime < gates_dir.stat().st_mtime:
+        return none_recorded
+    try:
+        data = json.loads(findings_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return none_recorded
+    if not isinstance(data, list) or not data:
+        return none_recorded
+    names = []
+    for entry in data:
+        if not isinstance(entry, dict) or "lens" not in entry:
+            return none_recorded
+        error = entry.get("error")
+        marker = " (error)" if isinstance(error, str) and error else ""
+        names.append(f"{entry['lens']}{marker}")
+    return "lenses: " + ", ".join(names)
+
+
 def cmd_record(args) -> int:
     """What the cell did, read from the ledger (§4.3)."""
     rows = _load()
@@ -1145,6 +1189,7 @@ def cmd_record(args) -> int:
         else:
             why = "nothing was decided; `next` moves on to the next untouched spec"
         print(f"left pending: {why}.", file=sys.stderr)
+    print(_review_lenses_line(args.spec_id))
     return 0 if state == "READY_FOR_REVIEW" else 1
 
 
@@ -2086,6 +2131,57 @@ def _size_verdict(
     )
 
 
+def _is_review_trigger(entry: str) -> bool:
+    """Whether a `touches` entry names REVIEW or REBUT code, a turn prompt
+    they load, or a `review-*.md` lens prompt, the glob entry included."""
+    import fnmatch
+
+    return entry in _REVIEW_TRIGGER_PATHS or fnmatch.fnmatchcase(
+        entry, _REVIEW_TRIGGER_GLOB
+    )
+
+
+def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
+    """One `review:` line per live ancestor, reached through `depends_on` at
+    any depth, whose `touches` names a REVIEW-shaping path. A stacked
+    child's REVIEW is main's REVIEW (DESIGN.md §5.5, §5.6), so an ancestor's
+    change there never runs in the target's own cell."""
+    if not target.depends_on:
+        return []
+    from saffron.intake import discover_specs
+
+    found, _failures = discover_specs(SPECS_DIR)
+    live_ids = {d.spec.id for d in found}
+
+    seen = {target.id}
+    queue: list[str] = []
+    for dep in target.depends_on:
+        if dep not in seen:
+            seen.add(dep)
+            queue.append(dep)
+
+    lines = []
+    while queue:
+        current_id = queue.pop(0)
+        spec = specs.get(current_id)
+        if spec is None:
+            continue
+        if current_id in live_ids:
+            matches = [e for e in spec.touches if _is_review_trigger(e)]
+            if matches:
+                lines.append(
+                    f"review: {current_id} is not retired and touches "
+                    f"{', '.join(matches)}. This spec's REVIEW is main's "
+                    "and will not run that change, so budget_usd should "
+                    "not assume it."
+                )
+        for dep in spec.depends_on:
+            if dep not in seen:
+                seen.add(dep)
+                queue.append(dep)
+    return lines
+
+
 def cmd_check(args) -> int:
     """Judge a spec's ceilings against cells of its own shape, before a cell
     runs — the arithmetic `_ceilings_line` renders, turned into an exit
@@ -2109,6 +2205,8 @@ def cmd_check(args) -> int:
     size_blocker, size_concern = _size_verdict(target, ratio, basis, _elevate_on())
     if size_concern:
         print(f"concern: {size_concern}")
+    for line in _review_change_lines(target, specs):
+        print(line)
     if not rows:
         if size_blocker:
             print(f"blocker: {size_blocker}")
