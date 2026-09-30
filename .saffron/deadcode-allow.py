@@ -36,6 +36,7 @@ _.render_table  # docs/evidence/scripts/2026-09-07-lens-scoring.py
 _.recover_fixture  # docs/evidence/scripts/2026-09-08-recover-fixture.py
 _.FIXTURE_FILES  # docs/evidence/scripts/2026-09-08-recover-fixture.py
 _.task_results  # .claude/skills/run-saffron-spec-loop/driver.py
+_.estimate_measured  # Spec field: read only by .claude/skills/run-saffron-spec-loop/driver.py `check`
 
 # Documented, or edited in place by an open spec.
 _.CPU_OFFSET  # dialect value DESIGN.md §5.1 documents, read only by the cell-marked image test

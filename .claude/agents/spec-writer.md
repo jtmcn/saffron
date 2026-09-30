@@ -60,6 +60,8 @@ And optionally:
    `.saffron/policy.yaml`'s `elevate_on` says when the gate blocks.
    Declare it as `estimated_lines`: changed lines, measured tokens over four,
    with no overrun added, since `driver.py check` applies the measured one.
+   An estimate measured from a prototype with `size_gate` also sets
+   `estimate_measured: true`, and `check` prices it at 1.0.
    **Done when** `check` prices it under 80% of that ceiling. `SA-0117` and
    `SA-0123` both landed within 25 lines of the old 1000-line ceiling. An
    estimate at or above 80% splits into a parent and children with
