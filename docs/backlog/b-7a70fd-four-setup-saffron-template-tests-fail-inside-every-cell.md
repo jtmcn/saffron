@@ -1,11 +1,12 @@
 ---
 id: b-7a70fd
 title: Four setup-saffron template tests fail inside every cell and pass on the host
-status: open
+status: done
 tier: 2
 filed: 2026-09-29
+closed: 2026-09-30
 specs: []
-prs: []
+prs: [606]
 commits: []
 cites: []
 related: [b-bf970a, 173]
@@ -27,10 +28,19 @@ Every run 22 cell's baseline read `tests=fail` with exactly these four.
 Baseline subtraction spares each cell. It also hides the four from every
 later cell.
 
-The cause is not diagnosed. The operator chose to file it. The helper
-`_onboarded_from_templates` sets `PATH` to a tmp `bin`, the directory of
-`sys.executable`, `/usr/bin` and `/bin` (`tests/test_setup_saffron.py:209`).
-The `gate` and `tests` templates start `#!/usr/bin/env python3`.
+Cause, diagnosed 2026-09-30 by running the four in `saffron/cell:saffron` with no
+network. Every gate there reported `env: 'python3': No such file or directory`.
+
+The helper `_onboarded_from_templates` set `PATH` to a tmp `bin`, the directory
+of `sys.executable`, `/usr/bin` and `/bin`. In a cell that directory is
+`/opt/venv/bin`. The runner's `_gate_env` removes `sys.prefix/bin` from a
+gate's `PATH` when Saffron runs in a venv. That leaves `/usr/bin:/bin`. The cell
+image's only `python3` is `/usr/local/bin/python3`. So the templates'
+`#!/usr/bin/env python3` finds nothing. On the host, macOS ships
+`/usr/bin/python3`, so the four passed on the system interpreter by accident.
+
+The runner is right, and the test was wrong. The helper now puts the resolved
+interpreter's directory on `PATH`, which `_gate_env` keeps.
 
 ## Done looks like
 
@@ -40,3 +50,5 @@ production starts one. A cell's baseline then reads `tests` without them.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-09-30: diagnosed and fixed in the test helper. All 24 tests in the
+  file pass inside the cell image. #606 closes it.
