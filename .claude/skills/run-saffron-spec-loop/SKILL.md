@@ -281,7 +281,7 @@ state that decided nothing keeps the spec pending, and `next` moves past it.
 Once the process has exited, an in-flight state is a **halt**: the cell stopped
 at a ceiling and nothing decided the task. `record` says so, and a halt goes
 to the operator (GOTCHAS, Recording). `record` also prints the lenses the
-REVIEW ran. The task's report carries that line.
+REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`. A non-zero exit is noted and the loop carries on.
