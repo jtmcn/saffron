@@ -81,7 +81,9 @@ prints a concern instead. A spec with no estimate says so. A blocker here is
 arithmetic rather than judgement, so it goes to the operator before the
 review rather than after it. For turns or budget, raise the ceiling, run the
 spec as written, or drop it. A concern it prints is advisory and exits 0,
-and a usage error, such as a spec id no file declares, also exits 1.
+and a usage error, such as a spec id no file declares, also exits 1. A
+`review:` line means the spec's REVIEW is main's, so its budget leaves
+that ancestor's change out.
 
 A spec of a shape no past cell matches prints `ceilings: no past cells of this
 shape to compare against`, with no verdict line under it. That is check 4's
@@ -282,7 +284,8 @@ Monitor now: `tail -F` outlives the cell. A **decided** state — one in
 state that decided nothing keeps the spec pending, and `next` moves past it.
 Once the process has exited, an in-flight state is a **halt**: the cell stopped
 at a ceiling and nothing decided the task. `record` says so, and a halt goes
-to the operator (GOTCHAS, Recording).
+to the operator (GOTCHAS, Recording). `record` also prints the lenses the
+REVIEW ran. The task's report carries that line.
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`. A non-zero exit is noted and the loop carries on.
