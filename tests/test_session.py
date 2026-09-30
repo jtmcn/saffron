@@ -5221,6 +5221,32 @@ def test_a_patch_that_does_not_apply_to_its_base_never_reaches_review(
     assert "patch does not apply" in review_line.detail
 
 
+def test_commits_that_net_to_no_change_end_exhausted_with_a_reason_that_says_so(
+    monkeypatch, tmp_path
+):
+    """Backlog item 132: an empty export reached `git apply`, which refused it,
+    and the reason read as a patch that did not apply."""
+    cell = _stub_the_runtime(monkeypatch, patch="")
+    _stub_critic_apply(
+        monkeypatch, cell, stderr="error: No valid patches in input", returncode=128
+    )
+    capture: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture,
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert len(cell.turns) == 2
+    details = [
+        e.detail for e in capture if isinstance(e, PhaseStart) and e.phase == "REVIEW"
+    ]
+    assert any("net to no change" in d for d in details), details
+    assert not any("did not apply" in d for d in details), details
+
+
 def test_a_commit_the_patchs_own_content_refuses_is_the_tasks_not_infrastructure(
     monkeypatch, tmp_path
 ):
@@ -7812,14 +7838,14 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
                     "edit": killed_edit,
                     "reason": "the substitute is still caught",
                     "outcome": "killed",
-                    "summary": "1 of 1 witness(es) died under their own mutant",
+                    "summary": "1 of 1 witness(es) died under their own wrong version",
                 },
                 {
                     "version": "the guard is removed",
                     "edit": anchors,
                     "reason": "nothing notices the guard is gone",
                     "outcome": "survived",
-                    "summary": "1 of 1 witness(es) survived their own mutant",
+                    "summary": "1 of 1 witness(es) survived their own wrong version",
                 },
             ],
         }
@@ -7951,7 +7977,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
                     "reason": "reason c1",
                     "outcome": "error",
                     "summary": (
-                        "the `tests` gate errored under t.py::c's mutant — "
+                        "the `tests` gate errored under t.py::c's wrong version — "
                         "collection crashed"
                     ),
                 },
@@ -7960,7 +7986,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
                     "edit": edit_c2,
                     "reason": "reason c2",
                     "outcome": "killed",
-                    "summary": "1 of 1 witness(es) died under their own mutant",
+                    "summary": "1 of 1 witness(es) died under their own wrong version",
                 },
             ],
         },

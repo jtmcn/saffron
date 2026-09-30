@@ -886,3 +886,23 @@ def test_an_unknown_enumeration_checks_nothing(tmp_path):
         acceptance=[criterion], mutate=host_mutator(tmp_path), run_tests=run_tests
     )
     assert result.status == "pass"
+
+
+@pytest.mark.parametrize("status", ["pass", "fail"])
+def test_a_criterion_probe_summary_names_its_edit_and_never_a_mutant(tmp_path, status):
+    # b-37924b: SA-0120 records this summary for a criterion probe, and
+    # CONTEXT.md avoids "mutant" for one.
+    _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
+    criterion = _criterion(claim="the total is clamped at zero", replace="0")
+
+    def run_tests(subset):
+        return _tests(status=status, collected=(criterion.witness,))
+
+    result = witness_gate(
+        acceptance=[criterion],
+        mutate=host_mutator(tmp_path),
+        run_tests=run_tests,
+        edit_noun="criterion probe",
+    )
+    assert "criterion probe" in result.summary
+    assert "mutant" not in result.summary
