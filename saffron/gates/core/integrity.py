@@ -225,21 +225,11 @@ def integrity_gate(
     for file_diff in files:
         declared = any(matches(file_diff.path, pattern) for pattern in touches)
 
-        # Only reported for a file the spec authorized. A file outside `touches`
-        # has already failed `scope`, which is a `fail` the agent can repair by
-        # deleting it — and `repair_loop` checks `aborted_gates` before the
-        # subtraction, so erroring here would replace that repairable failure
-        # with an abandoned task.
-        #
-        # ponytail: two ceilings, one rule. A genuine binary fixture inside
-        # `touches` aborts the attempt — the false positive. And an agent can
-        # reach `error` *on purpose*: `*.py -diff` in a committed `.gitattributes`,
-        # or a worktree setting no commit shows (BACKLOG item 103), renders every
-        # Python file this way, and `error` is `GATE_ERROR`, charged to nobody.
-        # A `--numstat` cross-check cannot close it: measured on git 2.54, both
-        # counts read `-` under `-diff`, with `--text` or without. `--text` on the
-        # patch restores the hunks, but renders every genuine binary as text too —
-        # a design change (BACKLOG items 1 and 103), not built here.
+        # A file outside `touches` already fails `scope`, which the agent can repair.
+        # An `error` here would abort the attempt in place of that repairable `fail`.
+
+        # ponytail: a genuine binary inside `touches` aborts the attempt. No `-diff`
+        # attribute reaches here, since `export_patch` diffs in a fresh git dir.
         if file_diff.unreadable:
             if not declared:
                 continue

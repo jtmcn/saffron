@@ -268,7 +268,7 @@ def _hunk_headers(diff):
 def test_the_pinned_flags_beat_a_configured_context_width(tmp_path, monkeypatch):
     """A worktree that configures a wider `diff.context` does not widen the
     pinned diff: `--unified=3` on the command line beats it, matching every
-    recorded fixture's hunk headers (`harness/recovery.py`'s `pinned_diff`).
+    recorded fixture's hunk headers (`worktree.DIFF_FLAGS`).
     `parse_diff` puts every line a hunk's range covers into what a critic
     finding may anchor to, so this is the one of the three pins in this file
     with a consequence beyond byte-identity."""
@@ -300,7 +300,7 @@ def test_the_pinned_flags_beat_a_configured_abbrev_and_algorithm(tmp_path, monke
     move the pinned diff's bytes either: `--abbrev=7` and
     `--diff-algorithm=myers` on the command line beat both, matching what
     `auto` actually emitted across every shipped fixture
-    (`harness/recovery.py`'s `pinned_diff`)."""
+    (`worktree.DIFF_FLAGS`)."""
     # A global `diff.algorithm=histogram` is common, and would move the
     # unpinned reference diff this compares against.
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")

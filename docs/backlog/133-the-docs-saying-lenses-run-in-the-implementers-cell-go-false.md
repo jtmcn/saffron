@@ -1,13 +1,14 @@
 ---
 id: 133
 title: Three live surfaces say the lenses still run in the implementer's cell, and go false as SA-0087 merges
-status: open
+status: done
+closed: 2026-09-29
 tier: 3
 filed: 2026-09-15
 by_hand: true
 specs: [SA-0087, SA-0088, SA-0089]
 prs: [274]
-commits: []
+commits: [8c6f7357]
 cites: [§5.5]
 related: [118]
 ---
@@ -37,3 +38,7 @@ and decays on a schedule nobody owns.
 
 the three sentences rewritten once the last of `SA-0087`–`SA-0089` merges, in a
 doc pull request that names which spec made each one false.
+
+## Record
+
+- 2026-09-29: closed on a check. `8c6f7357` rewrote all three sentences when `SA-0088` to `SA-0092` retired, and this record stayed open.

@@ -1,13 +1,14 @@
 ---
 id: b-26315b
 title: REBUT's budget check is stated only in a code comment, and §5.5.1 cites a §5.5 sentence that does not exist for REVIEW's exemption
-status: open
+status: done
+closed: 2026-09-29
 tier: 3
 filed: 2026-09-22
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [0e399951]
 cites: [§4.3, §5.5, §5.5.1, §5.6]
 related: [120]
 ---
@@ -37,3 +38,4 @@ citation points at a sentence that exists.
 ## Record
 
 - 2026-09-22: filed from ADR 4's review. ADR 4's principle 29 records it.
+- 2026-09-29: §4.3 names both departures from the spend row. §5.6 states REBUT's check before the rebuttal turn. §5.5.1 now cites §4.3.
