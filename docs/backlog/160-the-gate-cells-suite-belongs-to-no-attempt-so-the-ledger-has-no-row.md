@@ -51,3 +51,5 @@ from it. A cell cannot move the generated half with the vocabulary in one task.
   one `GateResult` per gate. The post-rebuttal suite, the one this item asks
   about, still has no `against` value and emits none. The item stays partial on
   it.
+- 2026-09-30: parked behind item 170. Whether the record or the ledger is
+  authoritative decides what REVIEW's suite belongs to, so this waits on it.
