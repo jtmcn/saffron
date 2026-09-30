@@ -474,6 +474,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         # `run_task` already printed the refused line, and no task exists
         # for this to add anything more about.
         return 1
+    # 1 on purpose: "did not make it" is true of a state nobody classified (item 52).
     return CELL_EXIT.get(outcome.state, 1)
 
 
@@ -1555,6 +1556,7 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
         ("MERGED", result.merged),
         ("REJECTED", result.rejected),
         ("CHANGES_REQUESTED", result.changes_requested),
+        ("APPROVED", result.approved),
         # `orphaned` counted toward "something moved" below while having no
         # line of its own, so a resolution that only orphaned printed nothing
         # at all — not the ids, not "nothing moved". `saffron queue` never
@@ -1580,6 +1582,7 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
             result.merged,
             result.rejected,
             result.changes_requested,
+            result.approved,
             result.orphaned,
             result.unasked,
             result.head_moved,

@@ -294,6 +294,8 @@ Design notes:
 
 Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `SPEC_WITHHELD`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
 
+`MERGE_TRAIN` is an end state and not a terminal one, like `APPROVED` before it (item 52). A task there waits on the train, not on the operator. The rule behind every end state is that the task is no longer Saffron's to advance. The eight in-flight states from `DRAFT` to `REBUTTING` are the rest, and `CONTEXT.md` §6 names both sets.
+
 ---
 
 ## 4. Control plane
@@ -1281,7 +1283,7 @@ Inside the PR body, the ordering that matters is: **disagreements first.** Anywh
 
 ### 6.1 Merge train
 
-You approve in GitHub; nothing merges on your click. Approved tasks enter a serial train that rebases onto current `main`, re-runs the **full** gate suite on the merged result, and merges only if green.
+You approve in GitHub by marking PACKAGE's draft ready, and `saffron reconcile` records that as `APPROVED` (item 52). GitHub refuses an author's own review approval, so this is the only approval you can give. Nothing merges on your click. No train is built yet, so today your merge is still `gh pr merge`. Approved tasks enter a serial train that rebases onto current `main`, re-runs the **full** gate suite on the merged result, and merges only if green.
 
 Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents *file* collisions but not *semantic* ones — two tasks can each pass while jointly breaking an invariant — and stacked branches (§4.2) make this more likely, not less. The train catches it at machine cost rather than at yours.
 

@@ -594,6 +594,17 @@ _Avoid_: "response", "appeal", "pushback".
 
 ## 6. Outcomes
 
+**Task state**: A value `tasks.state` holds, which is an in-flight state or an end
+state. An end state is one the task waits in, on the operator, GitHub, the merge
+train or `saffron gc`. A re-queue resumes the same row from five end states, so an
+end state need not be final. `TaskState` in `saffron/ledger.py` names every task
+state, and a test holds it to the vocabulary.
+
+**In-flight state**: A state in which Saffron advances the task, tonight or now: `DRAFT`,
+`QUEUED`, `DIAGNOSING`, `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING`,
+`REBUTTING`.
+A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
+
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
@@ -933,6 +944,13 @@ defect rather than a word choice (Appendix E).
    performs. `spec-reviewer` stays as the agent definition's file and id, which
    the loop invokes and the backtest's frozen reports cite.
 
+8. **approve vs. mark ready**: GitHub refuses an author's own approval, and PACKAGE
+   opens every pull request as the operator. So `APPROVED` had no writer, and the
+   step that admits a task to the merge train had no signal. The operator's act is
+   marking PACKAGE's draft ready, and reconcile records it as `APPROVED` (backlog
+   item 52). The state keeps its name, since `DESIGN.md` §3.3 and §6.1 use it.
+   Until a train exists, the act admits a task to nothing.
+
 ## Open naming decisions
 
 Add here rather than resolving in prose elsewhere — an ambiguity that gets settled
@@ -946,13 +964,3 @@ in a commit message is an ambiguity that comes back.
    vocabulary. Left open deliberately: coining a supertype before §4.1 reconciles
    would put a word here that nothing says. Resolve when the schema does — or record
    that it never will.
-
-2. **Approve names an act GitHub refuses the operator.** PACKAGE opens every pull
-   request as the operator. GitHub does not let an author approve their own pull
-   request. Nothing else writes `APPROVED` either: reconcile reads `reviewDecision`
-   only for `CHANGES_REQUESTED`. So the step that admits a task to the merge train
-   (`DESIGN.md` §6.1) has no signal, and the operator's acceptance today is the
-   merge itself. The likely signal is marking
-   PACKAGE's draft ready, which is the operator's own act and readable from GitHub.
-   Until a train exists that act carries no judgement, and it is called "mark
-   ready". Resolve with backlog item 52, which holds the train's other state.

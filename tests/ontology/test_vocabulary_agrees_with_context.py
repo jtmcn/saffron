@@ -20,6 +20,7 @@ CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
 
 # term in CONTEXT.md -> the class in the ontology whose members it should match
 CLOSED_SETS = {
+    "In-flight state": "InFlightState",
     "Terminal state": "TerminalState",
     "Batch stop reason": "BatchStopReason",
     "Severity": "Severity",

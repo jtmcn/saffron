@@ -67,6 +67,7 @@ IN_FLIGHT_STATES = frozenset(
 
 # What one `_next_state` outcome writes into, keyed off the state it produces.
 _BUCKET = {
+    "APPROVED": "approved",
     "MERGED": "merged",
     "REJECTED": "rejected",
     "CHANGES_REQUESTED": "changes_requested",
@@ -91,6 +92,7 @@ class ReconcileResult:
     merged: list[int] = field(default_factory=list)
     rejected: list[int] = field(default_factory=list)
     changes_requested: list[int] = field(default_factory=list)
+    approved: list[int] = field(default_factory=list)
     orphaned: list[int] = field(default_factory=list)
     # Pull requests `gh` gave no trustworthy answer about — missing,
     # unauthenticated, erroring, or an unparseable/wrong shape. Absence of an
@@ -103,9 +105,11 @@ class ReconcileResult:
 
 
 def _pr_status(url: str, gh: GhRunner) -> dict | None:
-    """One pull request's `state`, `reviewDecision` and `headRefOid`, or
+    """One pull request's `state`, `reviewDecision`, `isDraft` and `headRefOid`, or
     `None` on anything that keeps the answer from being trustworthy."""
-    done = gh(["gh", "pr", "view", url, "--json", "state,reviewDecision,headRefOid"])
+    done = gh(
+        ["gh", "pr", "view", url, "--json", "state,reviewDecision,isDraft,headRefOid"]
+    )
     if done.returncode != 0:
         return None
     try:
@@ -117,10 +121,12 @@ def _pr_status(url: str, gh: GhRunner) -> dict | None:
 
 def _next_state(pr: dict) -> str | None:
     """What a task should become given `pr`, or `None` to leave it exactly
-    as it was. Four outcomes, and only four: merged, closed-unmerged,
-    open-with-changes-requested, open-undecided — any other `reviewDecision`
-    or unrecognised `state` is treated as the last, a fifth mapping nothing
-    here exercises."""
+    as it was. Five outcomes, and only five: merged, closed-unmerged,
+    open-with-changes-requested, open and marked ready, open-undecided. Any
+    other `reviewDecision` or unrecognised `state` is treated as the last.
+
+    Marked ready is `APPROVED`: PACKAGE opens a draft, and GitHub refuses an
+    author's own approval, so the operator's `gh pr ready` is the signal (item 52)."""
     state = pr.get("state")
     if state == "MERGED":
         return "MERGED"
@@ -128,6 +134,9 @@ def _next_state(pr: dict) -> str | None:
         return "REJECTED"
     if state == "OPEN" and pr.get("reviewDecision") == "CHANGES_REQUESTED":
         return "CHANGES_REQUESTED"
+    # `is False`, not falsy: an answer without the field says nothing about a draft.
+    if state == "OPEN" and pr.get("isDraft") is False:
+        return "APPROVED"
     return None
 
 

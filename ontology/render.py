@@ -138,6 +138,7 @@ def render_context(
 SHAPE_SETS = {
     "factory:CoreGateShape": "CoreGate",
     "factory:GateRoleShape": "GateRole",
+    "factory:InFlightStateShape": "InFlightState",
     "factory:TerminalStateShape": "TerminalState",
     "sh:path factory:riskTier": "RiskTier",
     "sh:path factory:endedBecause": "BatchStopReason",
