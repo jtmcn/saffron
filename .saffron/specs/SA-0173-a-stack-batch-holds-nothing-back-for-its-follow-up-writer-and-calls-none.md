@@ -54,7 +54,8 @@ acceptance:
       It never calls `follow_ups` without `end_review`, nor after a raise
       out of the loop. The share is held whether or not `follow_ups` is
       given. `end_review` still receives `reserve_usd` alone as its
-      reserve. The witness drives a task the share alone stops, with
+      reserve. The batch row still records the whole budget it was given.
+      The witness drives a task the share alone stops, with
       `follow_ups` and without. It drives a revision the share alone
       refuses, and a second round the share alone refuses after a first it
       admits.
@@ -64,6 +65,7 @@ acceptance:
       - "`writer_usd` is not held back before a revision round, or is held back twice there."
       - "`writer_usd` is held back only when `follow_ups` is given."
       - "`end_review` is handed `reserve_usd` plus `writer_usd` as its reserve."
+      - "`run_batch` is handed `budget_usd` less `writer_usd`, so the batch row records less than its budget."
       - "`follow_ups` is called before `end_review`, or with no `end_review` given."
   - claim: >-
       `run_stack_batch` hands `end_review` each spec of the order by its id.
@@ -122,8 +124,8 @@ first spec above `SA-0164`, which records the revisions, to edit that
 `end_review` call.
 
 **What the base holds.** Every name below is on `origin/main` at
-`a1148c1e`, and every line number was read there. This spec's tree base
-is `SA-0161`'s head, which adds only `saffron/follow_up.py` above it.
+`3f8775f2`, and every line number was read there. This spec's tree base
+is `SA-0161`'s head, which adds `saffron/follow_up.py` and its tests above it.
 
 - `run_stack_batch` (`saffron/batch.py:360`) takes the order, the ledger,
   the budget, `until` and a runner, and the keywords `run_batch` takes.
@@ -148,7 +150,7 @@ is `SA-0161`'s head, which adds only `saffron/follow_up.py` above it.
 - `task_ids` (`:413`) maps each spec id to the task `mint` gave it this
   call. It is a local of `run_stack_batch` itself, so it is in scope once
   `run_batch` returns.
-- `Ledger.spec_text(task_id)` (`saffron/ledger.py:1488`) returns the
+- `Ledger.spec_text(task_id)` (`saffron/ledger.py:1517`) returns the
   task's latest row or `None`.
 - `run_task` refuses a latest text `parse_spec` refuses
   (`_recorded_spec_text`, `saffron/task.py:340`), so that spec adds no
@@ -198,7 +200,7 @@ the production callable in `saffron/cli.py`, which is forbidden here. A
 `follow_ups` typed on `StackReview` cannot take that return unchanged, so
 the `types` gate would flag the call. Wrap it at the call that hands it on:
 `follow_ups(key, typing.cast("StackReview", end_review(...)))`. The string
-form needs no runtime import, and `saffron/ledger.py:1591` already casts
+form needs no runtime import, and `saffron/ledger.py:1620` already casts
 that way. Leave `end_review`'s type and `saffron/cli.py` alone. This is
 reasoned from the source, and `ty` did not run on it.
 
@@ -218,7 +220,10 @@ record their calls, and `follow_ups` returns one more candidate.
   one runner call for `SY-1`, then `end_review` and `follow_ups` in that
   order. Each got the batch's key, and `follow_ups` got `end_review`'s
   return. It asserts `end_review` got 3.0 as its reserve, with `==`. A
-  build that hands it 7.5 fails there.
+  build that hands it 7.5 fails there. It asserts the batch row's
+  `budget_usd` is 20.0, as `tests/test_batch.py:1826` does for the reserve.
+  A build that hands `run_batch` the budget less `writer_usd` records 15.5
+  and fails there.
 - A batch with `follow_ups` and no `end_review` calls no `follow_ups`. A
   readiness check that raises propagates, and calls neither.
 - `SY-4` alone at a budget of 12.75, with budget 20, `reserve_usd` 3,
@@ -247,7 +252,10 @@ pre-revision check as their specs state them. The right build passed.
 Each wrong version was applied as a text edit, and each failed the
 witness. The reserve handed to `end_review` was not in that list. The
 real `run_stack_batch` is on `origin/main` now, and the list did not run
-against it. The re-review at `SA-0161`'s branch measures it there.
+against it. The re-review at `SA-0161`'s branch worked it by arithmetic
+instead, because `writer_usd` does not exist at that base. With `need` at
+38.5, each entry leaves a figure the right build does not. Each wrong
+version therefore fails the witness. That is arithmetic, not a run.
 
 **Criterion 2's witness** follows `SA-0164`'s arrangement for the
 `review` and `mint` doubles. Every review returns a clean read, so no
