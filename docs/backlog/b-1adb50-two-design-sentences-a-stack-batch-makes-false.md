@@ -63,3 +63,6 @@ deadline plus one task plus its end review. Each cites ADR 7.
   departures. §4.2 item 1 was already right. Open: §6's queue source waits on
   `SA-0152`, and the finish and follow-up writer past `--until` wait on
   `SA-0151` and `SA-0165`.
+- 2026-09-29: checked, and nothing more is writable. No task exists for `SA-0151`,
+  `SA-0152` or `SA-0165`, so §6's queue source and the finish past `--until` still
+  describe code that does not exist.

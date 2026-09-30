@@ -117,3 +117,8 @@ The **Refusal** entry names the stack order's refusal. This lands after
   reserve. ADR 7's Consequences say the entries are hand-written. **Mint** and
   **Revision** already had entries. The lens headword and the terms waiting on
   unmerged specs stay open.
+- 2026-09-29: the lens headword is settled, and no rename follows. The operator kept
+  "end-review lens" and "join lens". The Lens entry already says neither is one of
+  ADR 4's declared lenses, and the code, ADR 7 and the specs use both names. What
+  stays open is the terms that wait on unmerged specs. No task exists for `SA-0151`,
+  `SA-0161`, `SA-0162`, `SA-0167`, `SA-0170`, `SA-0174` or `SA-0177`.
