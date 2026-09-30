@@ -382,7 +382,9 @@ uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 **Placed 2026-09-29**, from the spec loop's run 22: **b-695234**,
 **b-12e717**, **b-2dd65f**, **b-830dc7**, **b-b1a7d4**, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
-The last three are gaps in the spec chain's own tools.
+The last three are gaps in the spec chain's own tools. **b-9529e9** and
+**b-91ead2** came from closing the run. The scoring driver cannot reach a
+fixture head or clean up after a kill, and `labels` reads no cell round.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",

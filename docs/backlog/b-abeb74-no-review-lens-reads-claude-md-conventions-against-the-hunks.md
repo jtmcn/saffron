@@ -41,3 +41,7 @@ states. It is measured on run 20's Standards findings before and after.
   and after. The lens ran live in no cell, because lenses run from the
   host's `main` (item b-66d1c3). Item b-78ccc7 holds what the Standards seat
   found the prompt would miss.
+- 2026-09-29: the measured pass ran for `SA-0195` on the run-20 fixture, one run per
+  arm. Both arms saw two of five defects: `SA-0186` gained, `SA-0160` lost. At one run
+  per arm the effect is unmeasured. The fixture and the driver's `--with-claude-md`
+  landed in #602.
