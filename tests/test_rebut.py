@@ -1376,8 +1376,8 @@ def _host_filed(witness, tail="the criterion's own edit"):
 
 
 def test_a_withdrawn_host_filed_blocker_on_a_preserves_criterion_stands_only_after_a_committed_fix():
-    """Criterion 1: a lens cannot clear a host-filed blocker on a `preserves`
-    criterion's survivor by arguing the line is outside the diff. It stands
+    """Criterion 1: a lens cannot withdraw a host-filed blocker on a `preserves`
+    criterion's survivor after the implementer argues the line is outside the diff. It stands
     only when the blocker's first answer was `fixed` and HEAD moved. That
     holds whether the blocker came from the criterion's own edit or a wrong
     version, and a shared witness prefix does not fool the guard."""
@@ -1510,6 +1510,33 @@ def test_a_withdrawn_host_filed_blocker_on_a_preserves_criterion_stands_only_aft
     assert adequacy_2_dict["withdrawal_refusals"] == [
         {"finding": n, "withdrawn_reason": f"r{n}"} for n in range(2, 5)
     ]
+
+
+def test_a_lens_blocker_quoting_the_host_text_mid_claim_stays_withdrawn():
+    """The guard reads the start of a claim only. This lens blocker quotes
+    the host's text after a word of its own. It is withdrawn as the lens
+    says, and no refusal is recorded."""
+    from saffron.intake import Criterion
+
+    preserved = Criterion(
+        claim="the total is unchanged", witness="t.py::test_a", preserves=True
+    )
+    quoting = _blocker(lens="adequacy", claim="see " + _host_filed("t.py::test_a"))
+    result = _run(
+        "I have answered every finding.",
+        _rebuttals(_argued(1, _WITHDRAWAL_ARGUMENT)),
+        _verdicts(_verdict(1, reason="1")),
+        blockers=[quoting],
+        acceptance=[preserved],
+        moved=False,
+    )
+
+    (adequacy,) = result.verdicts
+    assert adequacy.verdicts == [
+        rebut.Verdict(finding=1, verdict="withdrawn", reason="r1")
+    ]
+    (adequacy_dict,) = result.as_dict([quoting])["verdicts"]
+    assert adequacy_dict["withdrawal_refusals"] == []
 
 
 def _between(text: str, start: str, end: str) -> str:
