@@ -166,7 +166,8 @@ means a rule ships with the failing snippet that proves it fires. Read
   Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 77)**
 - **A skip is spelled in full where it is used.** `integrity` reads `.saffron/policy.yaml`'s
   suppression tokens as *text*. One bound to a name, imported, or named by string spells none of
-  them, so every later use passes (item 112). **(gated over all Python, not only `tests/`)**
+  them, so every later use passes (item 112). An unannotated identity hides a value's type from
+  `types` with no token at all (b-713e90). **(gated over all Python, not only `tests/`)**
 - **One module drives a task.** `saffron/task.py` is the only caller of `run_one_cell`; both
   commands go through it. Two copies is what let the unattended path stop recording the
   ceilings that bound each task. **(gated over `saffron/`)**

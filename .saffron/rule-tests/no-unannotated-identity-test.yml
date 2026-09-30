@@ -1,0 +1,27 @@
+id: no-unannotated-identity
+valid:
+  # An identity lambda stored as a stub, as tests/test_package.py does for CellExecutor.
+  - 'monkeypatch.setattr("m.CellExecutor", lambda container: container)'
+  # A property that returns the instance.
+  - |
+    def executor(self):
+        return self
+  # An annotated identity: `ty` checks what reaches it.
+  - |
+    def same(x: int) -> int:
+        return x
+  # A return of some other name, so the parameter and the return must match.
+  - |
+    def pick(x):
+        return default
+  # A helper that does more than hand its argument back.
+  - |
+    def _turn(text):
+        log(text)
+        return text
+invalid:
+  # SA-0160's shape: the wrapper that let a `str` reach an `int | None` field.
+  - |
+    def _as_is(x):
+        return x
+  - 'reset = (lambda v: v)("soon")'

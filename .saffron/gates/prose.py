@@ -105,10 +105,11 @@ WORD_RULES = (
 # What to change, per code. `message` appends the hit's own text, so a failure's
 # identity is the sentence or block it names (backlog item b-044ae7).
 MESSAGES = {
-    "sentence-length": f"a sentence over {SENTENCE_LIMIT} words; split it:",
+    "sentence-length": f"a sentence over {SENTENCE_LIMIT} words; split it, each still true:",
     "hedge": "a should/may/might; say must, or state the fact:",
-    "em-dash": "an em-dash or spaced hyphen; use two sentences or name the relation:",
-    "semicolon": "a semicolon in prose; use two sentences:",
+    "em-dash": "an em-dash or spaced hyphen; use two sentences, each still true, or name"
+    " the relation:",
+    "semicolon": "a semicolon in prose; use two sentences, each still true:",
     "filler": f"a filler word ({', '.join(FILLER[:8])}, ...); delete it:",
     "perfect-tense": "a has/have/had been or has/have + -ed; use the simple past:",
     "trailing-condition": "a mid-sentence if/when in a spec instruction;"
@@ -159,8 +160,8 @@ class Hit:
     line: int
     code: str
     excerpt: str
-    # What the hit is, whatever line it sits on: a whole sentence, or a block's
-    # name and length. `excerpt` when empty.
+    # What the hit is, whatever line it sits on, such as a whole sentence.
+    # `excerpt` when empty.
     key: str = ""
 
 
@@ -300,18 +301,19 @@ def _comment_blocks(text: str) -> list[Hit]:
 
 
 def _long_docstrings(text: str) -> list[Hit]:
-    """Function, class and test docstrings longer than `DOCSTRING_LIMIT` lines."""
+    """One hit per line past `DOCSTRING_LIMIT` in each function, class and test
+    docstring. Subtraction compares identities, so a shrink then adds none and
+    a growth adds only the lines past its base (b-ec607a)."""
     found = []
     for node in _documented(text) or []:
         if isinstance(node, ast.Module):
             continue
         doc = ast.get_docstring(node, clean=False)
-        if doc is not None and doc.count("\n") + 1 > DOCSTRING_LIMIT:
-            first = doc.strip().splitlines()[0] if doc.strip() else ""
-            size = doc.count("\n") + 1
-            excerpt = _excerpt(f"{node.name}, {size} lines: {first}")
-            key = f"{node.name}, {size} lines"
-            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt, key))
+        if doc is None:
+            continue
+        for line in range(DOCSTRING_LIMIT + 1, doc.count("\n") + 2):
+            excerpt = _excerpt(f"{node.name}, line {line}")
+            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt))
     return found
 
 

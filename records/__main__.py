@@ -115,6 +115,19 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
+    if args.kind is not None:
+        # A bare number stays a backlog item, so another kind is asked for by name.
+        found = [
+            r for r in load(KINDS[args.kind], args.root) if r.model.id == as_id(args.id)
+        ]
+        if not found:
+            print(f"no {args.kind} {args.id}", file=sys.stderr)
+            return 1
+        text = _render(found[0], args.section)
+        if text is None:
+            return 1
+        print(text, end="")
+        return 0
     if re.fullmatch(APPENDIX_ID, args.id):
         found = [r for r in load(KINDS["appendix"], args.root) if r.model.id == args.id]
         if not found:
@@ -189,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         "show", help="one record by id or letter, or the records naming a spec id"
     )
     p.add_argument("id")
+    p.add_argument("--kind", choices=sorted(KINDS))
     p.add_argument("--section")
     _add_root(p)
     p.set_defaults(func=cmd_show)

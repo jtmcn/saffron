@@ -1,0 +1,39 @@
+id: no-unannotated-identity
+language: python
+severity: error
+message: an unannotated identity hides a value's type from `types`; annotate it, or pass the value with a suppression token
+note: |
+  Backlog item b-713e90. SA-0160's cell wrapped a `str` where the field takes
+  `int | None` in an unannotated identity, and `ty` then passed it. `integrity`
+  reads suppression tokens, and a wrapper carries none. Write the value in place
+  with a `ty: ignore[...]` token, which `integrity` can read.
+
+# ponytail: an unannotated helper that forwards its argument into a typed call
+# is the same hole. 241 test helpers here do that on purpose, so no rule names it.
+rule:
+  any:
+    # `def f(x): return x`, one unannotated parameter handed straight back.
+    - kind: function_definition
+      all:
+        - has:
+            field: parameters
+            all:
+              - has: { kind: identifier, pattern: $X, nthChild: 1 }
+              - not: { has: { nthChild: 2 } }
+        - has:
+            field: body
+            all:
+              - has: { kind: return_statement, has: { pattern: $X } }
+              - not: { has: { nthChild: 2 } }
+    # `(lambda x: x)(value)`: an identity lambda applied, not one stored as a stub.
+    - kind: call
+      has:
+        field: function
+        kind: parenthesized_expression
+        has:
+          kind: lambda
+          all:
+            - has: { field: parameters, has: { kind: identifier, pattern: $Y } }
+            - has: { field: body, pattern: $Y }
+constraints:
+  X: { not: { regex: '^(self|cls)$' } }
