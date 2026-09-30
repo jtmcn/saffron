@@ -574,10 +574,10 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         if a["phase"] == spec_review.WRITING_PHASE
     ]
     assert len(writing) == 11
+    assert [a["subtype"] for a in writing].count("error") == 1
     assert built.ledger.batch_spend(built.batch_id) == pytest.approx(4.0)
 
-    highest_before = "SA-0110"
-    del highest_before  # documents the state the three extra calls below read
+    # SA-0110 is the highest id now, so the calls below start at SA-0111.
 
     # A reset time met earlier pools every later group with it too.
     reset_pool: list = []
@@ -614,6 +614,12 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
     assert len(reset_calls) == 1
     assert len(reset_pool) == 3
     assert all("rate limit" in p.reason for p in reset_pool)
+    reset_writing = [
+        a
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    assert len(reset_writing) == 12
 
     # `test_paths` that match nothing changed in the stack's range pools
     # every group with no write call at all.
@@ -755,6 +761,7 @@ def test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_co
 
     prompt1 = write_calls[0][1]
     assert "SA-0108" in prompt1
+    assert "budget_usd must not exceed 10.0" in prompt1
     assert "tests/test_a.py" in prompt1
     assert "tests/test_b.py" in prompt1
     assert "claim-rate" in prompt1
@@ -834,7 +841,9 @@ def test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling(tmp_p
 @pytest.mark.parametrize(
     "share, expected", [(0.18, []), (0.37, ["SA-0108", "SA-0109"])]
 )
-def test_writer_share_boundaries_are_wrong(tmp_path, share, expected):
+def test_a_sub_cap_of_18_dollars_writes_none_and_37_writes_two(
+    tmp_path, share, expected
+):
     from saffron import follow_up, spec_review
 
     built = _build(tmp_path)
@@ -889,6 +898,7 @@ def test_the_next_spec_id_reads_both_spec_directories_and_the_repos_tasks(tmp_pa
     # A name that carries "SA-0950" past its own start, so a pattern not
     # anchored on the prefix would read 950 as an SA number here.
     (specs / "ZSA-0950-decoy.md").write_text("not a real spec\n")
+    (specs / "SA9999-nohyphen.md").write_text("not a real spec\n")
     ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
     repo_id = ledger.upsert_repo("acme", "https://example/o", "/m.git", policy_sha=None)
     other_repo_id = ledger.upsert_repo(
@@ -910,3 +920,27 @@ def test_the_next_spec_id_reads_both_spec_directories_and_the_repos_tasks(tmp_pa
     assert next_spec_id("SA-0001", specs, ledger, repo_id) == "SA-0021"
 
     assert next_spec_id("SB-01", specs, ledger, repo_id) == "SB-901"
+
+
+def test_a_stack_with_no_layers_writes_nothing_and_raises_nothing(tmp_path):
+    from saffron import follow_up
+
+    built = _build(tmp_path)
+    lines: list[str] = []
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        StackReview(join=None, layers=[]),
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [], []),
+        write=lambda group, prompt: pytest.fail("no layer, no session"),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lines.append,
+        pooled=[],
+    )
+    assert candidates == []
+    assert lines == ["0 qualified findings joined no group"]

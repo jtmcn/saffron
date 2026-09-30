@@ -4,8 +4,8 @@ candidates (ADR 7, backlog item b-792ab2, step 7).
 `write_follow_ups` is the first caller of `qualify.qualify`. It walks one
 stack's layers, asks the injected `qualify` for `FollowUpGroup`s, and turns
 each affordable, validated group into a `Candidate` a caller can `mint`.
-A reset writer, an exhausted sub-cap, a stale probe, or a spec the host
-cannot trust joins the caller-owned `pooled` list instead. This module
+Other groups join the caller-owned `pooled` list instead. A reset time, a
+spent sub-cap, a stale probe or an untrusted spec sends a group there. This module
 opens no cell and calls no model. `write` and `mint` are the caller's own
 adapters.
 """
@@ -24,11 +24,11 @@ from saffron.gates.core.scope import matches
 from saffron.ledger import Ledger
 from saffron.phases import review
 from saffron.qualify import FollowUpGroup, Qualification, Qualified
-from saffron.repos.mirror import GitError, changed_files, file_at
+from saffron.repos.mirror import changed_files, file_at
 from saffron.scheduler import RETIRED_DIRNAME, Candidate
 
-# The share of `--budget` a stack batch holds back for its writer (§3).
-# `SA-0173` passes `--budget * WRITER_SHARE` in as `cap_usd`.
+# The share of `--budget` a stack batch holds back for the spec writer session (ADR 7).
+# `SA-0165` passes `--budget * WRITER_SHARE` in as `cap_usd`.
 WRITER_SHARE = 0.25
 
 _SPEC_ID = re.compile(r"^([A-Za-z0-9]+)-([0-9]+)$")
@@ -83,17 +83,9 @@ def _slug(title: str) -> str:
     return "-".join(words) if words else "follow-up"
 
 
-def _read_head(mirror: Path, head: str, path: str) -> str | None:
-    try:
-        return file_at(mirror, head, path)
-    except GitError:
-        return None
-
-
 def _diff(mirror: Path, base: str, head: str) -> str:
     """One range's patch, read from `mirror` under the same pins a cell's
-    own diff carries, `DIFF_FLAGS` and `worktree.git_argv`. Reads no
-    operator `.git/config` either.
+    own diff carries, `DIFF_FLAGS` and `worktree.git_argv`.
     """
     completed = subprocess.run(
         git_argv("diff", *DIFF_FLAGS, f"{base}..{head}"),
@@ -129,7 +121,7 @@ def _probe_survives(mirror: Path, head: str, qualified: Qualified) -> bool:
     probe = qualified.finding.probe
     if probe is None:
         return True
-    text = _read_head(mirror, head, probe.file)
+    text = file_at(mirror, head, probe.file)
     return text is not None and text.count(probe.find) == 1
 
 
@@ -150,7 +142,7 @@ def _prompt(
         f"{origin_spec_id}, the origin spec quoted in full below.",
         "Reply with the whole spec text; this session files no record of its own.",
         f"The findings below cite lines at the origin head {origin_head}. "
-        f"The checkout in front of you is the top of the stack, head "
+        f"The tree in front of you is the top of the stack, head "
         f"{top_head}.",
         f"id: {candidate_id}",
         f"budget_usd must not exceed {budget}.",
@@ -242,6 +234,11 @@ def write_follow_ups(
     minted. This function opens no cell. `write` and `mint` are the
     caller's own.
     """
+    qualification = qualify(stack.layers, stack.join)
+    emit(f"{len(qualification.pool)} qualified findings joined no group")
+    if not stack.layers:
+        return []
+
     top = end_review.layer_fields(ledger, stack.layers[0].task_key)
     bottom = end_review.layer_fields(ledger, stack.layers[-1].task_key)
     stack_paths = [
@@ -249,9 +246,6 @@ def write_follow_ups(
         for path in changed_files(mirror, f"{bottom.head}^", top.head)
         if any(matches(path, glob) for glob in test_paths)
     ]
-
-    qualification = qualify(stack.layers, stack.join)
-    emit(f"{len(qualification.pool)} qualified findings joined no group")
 
     def _pool(group: FollowUpGroup, reason: str) -> None:
         pooled.append(Pooled(group=group, reason=reason))
@@ -279,7 +273,9 @@ def write_follow_ups(
 
         remainder = cap_usd - spent
         if remainder < spec_review.SPEC_WRITER_SESSION_USD:
-            _pool(group, "the writer's sub-cap cannot cover another session")
+            _pool(
+                group, "the spec writer session's sub-cap cannot cover another session"
+            )
             continue
 
         kept: list[Qualified] = []
@@ -336,13 +332,13 @@ def write_follow_ups(
         spent += session.cost_usd
 
         if session.resets_at is not None:
-            reset_reason = "a writer session met the account's rate limit"
+            reset_reason = "a spec writer session met the account's rate limit"
             _charge(origin_task_id, session)
             _pool(group, reset_reason)
             continue
         if session.error is not None:
             _charge(origin_task_id, session)
-            _pool(group, f"writer session errored: {session.error}")
+            _pool(group, f"the spec writer session carried an error: {session.error}")
             continue
 
         try:
