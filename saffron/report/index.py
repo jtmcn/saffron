@@ -13,8 +13,14 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
-_STATE_RANK = {
+from saffron.ledger import TaskState
+
+# A row is a task or a skipped repo (§6). `SKIPPED` waits on multi-repo, which is v2.
+RowState = TaskState | Literal["SKIPPED"]
+
+_STATE_RANK: dict[RowState, int] = {
     "SKIPPED": 0,
     "SCOPE_REVIEW": 1,
     "MERGE_FAILED": 2,
@@ -33,12 +39,34 @@ _STATE_RANK = {
     # The provider's wall, not the task's: it needs you, and a retry is all it
     # needs. Absent, it sorted below green reviewable tasks.
     "RATE_LIMITED": 2,
+    # Withheld before any cell, for the operator to read (ADR 7).
+    "SPEC_WITHHELD": 2,
     # A task the night left mid-phase, ranked with elevated risk (rev 17
     # shifted these from 3 to 4 to make room for level 3, sustained blockers,
     # below) rather than by omission.
     "REVIEWING": 4,
     "REBUTTING": 4,
+    "DRAFT": 4,
+    "QUEUED": 4,
+    "DIAGNOSING": 4,
+    "IMPLEMENTING": 4,
+    "GATING": 4,
+    "REPAIRING": 4,
 }
+# Ranked by risk on purpose, not by omission. A test holds this and `_STATE_RANK`
+# to every `RowState`, once each (item 52).
+_RANKED_BY_RISK: frozenset[RowState] = frozenset(
+    {
+        "READY_FOR_REVIEW",
+        "APPROVED",
+        "MERGE_TRAIN",
+        "MERGED",
+        "CHANGES_REQUESTED",
+        "REJECTED",
+    }
+)
+# Where a state in neither set sorts: with the states that need you.
+_UNRANKED = _STATE_RANK["GATE_ERROR"]
 # Level 3 (§6): a sustained blocker — `confirmed` **and** `argued`, never a
 # state in `_STATE_RANK`, so it only pre-empts the elevated/ordinary fallback
 # below and never the states above, which already need you more.
@@ -95,6 +123,8 @@ def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
     """
     if line.state in _STATE_RANK:
         rank = _STATE_RANK[line.state]
+    elif line.state not in _RANKED_BY_RISK:
+        rank = _UNRANKED
     elif line.sustained or line.unkept:
         rank = _SUSTAINED
     else:

@@ -16,6 +16,8 @@ MEMBER_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_-]*)`")
 # ones already committed; a generator that normalised them would rewrite prose
 # it does not own.
 SETS = {
+    "In-flight state": ("InFlightState", "comma"),
+    "End state": ("EndState", "comma"),
     "Terminal state": ("TerminalState", "comma"),
     "Batch stop reason": ("BatchStopReason", "or-comma"),
     "Severity": ("Severity", "or-comma"),

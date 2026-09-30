@@ -1,12 +1,13 @@
 ---
 id: 52
 title: '`MERGE_TRAIN` is a state the scheduler reads twice and neither authoritative document declares'
-status: open
+status: done
+closed: 2026-09-29
 tier: 2
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [911c314a]
 cites: [§3.3, §4.2.1, §6]
 related: [72, 75]
 ---
@@ -191,3 +192,27 @@ So declaring `MERGE_TRAIN` settles a state that nothing can enter yet. The desig
 question comes first: what signal admits a task to the train. Marking PACKAGE's
 draft ready is the candidate, since it is the operator's own act and GitHub
 records it. `CONTEXT.md`'s open naming decision 2 holds the vocabulary half.
+
+### 2026-09-29: done, by hand
+
+The operator chose the signal: marking PACKAGE's draft ready. Reconcile asks for
+`isDraft` and records an open, non-draft pull request as `APPROVED`. `CONTEXT.md`'s
+open naming decision 2 is now settled decision 8.
+
+- `ontology/factory.ttl` has `TaskState` over `EndState` and `InFlightState`, and
+  `MERGE_TRAIN` is an `EndState`. `EndState`'s comment now states the rule: the
+  task is no longer Saffron's to advance. `TaskShape` lists `MERGE_TRAIN`.
+- `InFlightStateShape` closes the eight and refuses one also typed an end state.
+- The glossary renders **In-flight state** and **End state**, and **Task state** is
+  their union in prose. The renderer now reads a class's subclasses too, so it
+  writes `TaskShape`'s endedInState list, which was hand-kept.
+- `ledger.TaskState` is held to the three classes. `IN_FLIGHT_STATES` equals
+  `InFlightState`. The scheduler's four sets sit inside `TaskState`, and done plus
+  re-queue covers every end state exactly once.
+- `_STATE_RANK` and `_RANKED_BY_RISK` cover every `RowState` once. A state in
+  neither now sorts with the states that need you. `CELL_EXIT` keeps its default.
+- `DESIGN.md` §3.3 says which set `MERGE_TRAIN` joined, and §6.1 names the signal.
+- PACKAGE returns a reused pull request to draft, so a resumed task needs a new
+  mark ready. Without it, a ready left from an earlier round approved the new push.
+- The refusal row kind this item said was filed separately had no record. It is
+  now b-cec9a7.

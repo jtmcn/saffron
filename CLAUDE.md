@@ -7,10 +7,9 @@ does; `CONTEXT.md` is authoritative for what the words mean. Both are read const
 `DESIGN.md` by section number (`§5.4`), and use `CONTEXT.md`'s vocabulary exactly. For the
 closed sets `tests/ontology/test_vocabulary_agrees_with_context.py` names, `ontology/factory.ttl`
 is authoritative and both `CONTEXT.md` and `ontology/shapes/factory-shapes.ttl` are generated
-from it: edit the vocabulary and run `uv run python -m ontology.render`. Two shape lists stay
-hand-maintained because the vocabulary cannot imply them — a new core gate needs a blocking level
-in `factory:CoreGateBlockingShape`, a new terminal state a place in `factory:TaskShape`'s
-endedInState — and a test names the shape and the file when you forget. The `shacl` gate
+from it: edit the vocabulary and run `uv run python -m ontology.render`. One shape list stays
+hand-maintained because the vocabulary cannot imply it: a new core gate needs a blocking level
+in `factory:CoreGateBlockingShape`, and a test names the shape and the file when you forget. The `shacl` gate
 validates every `.ttl` in the tree against those shapes, so a graph no test loads is still
 checked. The same command also rewrites `DESIGN.md`'s principle and appendix indexes, and those
 run the other way: the appendix records in `docs/appendices/` are authoritative and the indexes

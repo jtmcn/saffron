@@ -132,8 +132,12 @@ factory:role         a owl:ObjectProperty ; rdfs:domain factory:ContractGate ; r
 ## Enumerated values. Each set is an axiom the relational schema cannot state:
 ## every one of these is a TEXT column in §4.1.
 
-factory:EndState a owl:Class ; rdfs:label "end state" ;
-    rdfs:comment "A state a task can finish in. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
+factory:TaskState a owl:Class ; rdfs:label "task state" ;
+    rdfs:comment "A value tasks.state can hold: an in-flight state or an end state (item 52)." .
+factory:InFlightState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "in-flight state" ;
+    rdfs:comment "A state in which the task is Saffron's to advance, tonight or now (§4.2.1)." .
+factory:EndState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "end state" ;
+    rdfs:comment "A state in which the task is not Saffron's to advance. It waits on the operator, GitHub, the merge train or saffron gc. A re-queue resumes the same row from five of them, so an end state need not be final. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
 factory:TerminalState a owl:Class ; rdfs:subClassOf factory:EndState ;
     rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal. CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists nine; §3.3 governs, see RATIONALE.md." .
 
@@ -148,6 +152,13 @@ factory:RATE_LIMITED a factory:TerminalState . factory:SPEC_WITHHELD a factory:T
 factory:APPROVED a factory:EndState . factory:CHANGES_REQUESTED a factory:EndState .
 factory:REJECTED a factory:EndState . factory:MERGED a factory:EndState .
 factory:ORPHANED a factory:EndState .
+# Entered from APPROVED once a train exists (§6.1). Nothing enters it yet.
+factory:MERGE_TRAIN a factory:EndState .
+
+factory:DRAFT a factory:InFlightState . factory:QUEUED a factory:InFlightState .
+factory:DIAGNOSING a factory:InFlightState . factory:IMPLEMENTING a factory:InFlightState .
+factory:GATING a factory:InFlightState . factory:REPAIRING a factory:InFlightState .
+factory:REVIEWING a factory:InFlightState . factory:REBUTTING a factory:InFlightState .
 
 factory:RiskTier a owl:Class .
 factory:standard a factory:RiskTier . factory:elevated a factory:RiskTier .

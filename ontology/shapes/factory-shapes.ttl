@@ -14,11 +14,11 @@ factory:TaskShape a sh:NodeShape ;
     sh:property [ sh:path factory:endedInState ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:EndState ;
         sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
-                factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
-                factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
-                factory:SPEC_WITHHELD
-                factory:APPROVED factory:CHANGES_REQUESTED factory:REJECTED
-                factory:MERGED factory:ORPHANED ) ] ;
+            factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
+            factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
+            factory:SPEC_WITHHELD factory:APPROVED factory:CHANGES_REQUESTED
+            factory:REJECTED factory:MERGED factory:ORPHANED
+            factory:MERGE_TRAIN ) ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] .
 
@@ -34,6 +34,16 @@ factory:TerminalStateShape a sh:NodeShape ;
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
             factory:SPEC_WITHHELD ) .
+
+# Eight states in which Saffron advances the task, and no end state among them.
+# A batch scan stamps these ORPHANED, so one also typed an end state would read as done.
+factory:InFlightStateShape a sh:NodeShape ;
+    sh:targetClass factory:InFlightState ;
+    sh:class factory:TaskState ;
+    sh:not [ sh:class factory:EndState ] ;
+    sh:in ( factory:DRAFT factory:QUEUED factory:DIAGNOSING
+            factory:IMPLEMENTING factory:GATING factory:REPAIRING
+            factory:REVIEWING factory:REBUTTING ) .
 
 factory:SpecShape a sh:NodeShape ;
     sh:targetClass factory:Spec ;

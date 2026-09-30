@@ -207,8 +207,8 @@ def test_a_new_terminal_state_reaches_the_shape_that_closes_the_set(tmp_path):
     `TaskShape`'s riskTier each hold a second copy that the generator did not
     cover, and `ontology/shapes/**` is `gate_config`, so no cell could repair it.
 
-    `TaskShape`'s endedInState list stays hand-maintained: it closes over
-    `EndState`, a superset of the terminal states, so it is not one of the six.
+    `TaskShape`'s endedInState list closes over `EndState` and its subclasses,
+    so the new state reaches it too (item 52).
     """
     vocab = tmp_path / "factory.ttl"
     vocab.write_text(
@@ -220,6 +220,8 @@ def test_a_new_terminal_state_reaches_the_shape_that_closes_the_set(tmp_path):
     # It must land in the shape that closes the set, not merely somewhere.
     head = out[out.index("factory:TerminalStateShape") :]
     assert "factory:BUDGET_SPENT" in head[: head.index(" .")]
+    ended = out[out.index("sh:path factory:endedInState") :]
+    assert "factory:BUDGET_SPENT" in ended[: ended.index(")")]
 
 
 def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
@@ -242,10 +244,8 @@ def test_severity_and_risk_tier_render_into_their_nested_property_shapes():
         opened = text.index("sh:in (", at)
         return text[opened : text.index(")", opened)]
 
-    # endedInState is a superset and must not have been touched. Compared to the
-    # input rather than pinned to a literal: it is hand-maintained, so pinning
-    # its tail would make adding a terminal state fail *this* test, which is the
-    # brittleness that got the width band rewritten.
+    # endedInState is another set and must be untouched. Compared to the input,
+    # not a literal, so a new end state does not fail this test.
     assert ended_in_state(out) == ended_in_state(committed)
 
 

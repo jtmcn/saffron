@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import get_args
 from unittest import mock
 
 from saffron.agents.findings import Finding
@@ -17,7 +18,15 @@ from saffron.phases.rebut import (
     Verdict,
 )
 from saffron.phases.review import LensReview
-from saffron.report.index import QueueLine, append_queue_line, render_index, sort_key
+from saffron.report.index import (
+    _RANKED_BY_RISK,
+    _STATE_RANK,
+    QueueLine,
+    RowState,
+    append_queue_line,
+    render_index,
+    sort_key,
+)
 from saffron.report.pr_body import _NOTES_LIMIT, render_pr_body
 
 SPEC = parse_spec(
@@ -1970,3 +1979,25 @@ def test_a_contradicted_row_says_the_spec_contradicts_itself_and_shows_both_quot
         "| confirmed: still wrong |"
     )
     assert rows == [row1, row2]
+
+
+def test_every_row_state_is_ranked_by_state_or_by_risk_and_not_both():
+    """Item 52. Both landed rank defects were a state that fell through to ordinary."""
+    row_states = {name for literal in get_args(RowState) for name in get_args(literal)}
+    assert set(_STATE_RANK) | _RANKED_BY_RISK == row_states
+    assert not set(_STATE_RANK) & _RANKED_BY_RISK
+
+
+def test_a_state_nobody_ranked_sorts_with_the_states_that_need_you():
+    line = QueueLine(
+        repo="r",
+        spec_id="A",
+        state="INVENTED",
+        attempts=1,
+        cost_usd_est=None,
+        concerns=0,
+        added=0,
+        removed=0,
+        link="",
+    )
+    assert sort_key(line)[0] == _STATE_RANK["GATE_ERROR"]

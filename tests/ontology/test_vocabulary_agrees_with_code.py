@@ -14,9 +14,9 @@ set: `saffron/gates/core/` is a directory, and reading it is what
 sentence cost three pull requests with `witness` built and undeclared
 (backlog item 72). The set is closed a second time as
 `policy.CORE_GATE_NAMES`, the names a repo may not declare (item 22), and held
-equal to the vocabulary so a gate is reserved before it is built. The terminal states the code names do
-still fall through to a documented default rather than a raise, so they are not
-a closed set on the code side and are not checked here.
+equal to the vocabulary so a gate is reserved before it is built. Task states are
+closed as `ledger.TaskState`, and the scheduler's and reconcile's state sets are
+held inside it (item 52).
 
 This reads the code; it does not make the code read the ontology. Nothing under
 `saffron/` imports the generator, and no scheduling decision reads a triple (§1.4).
@@ -31,9 +31,16 @@ from ontology_paths import NS, ONTOLOGY, VOCABULARY
 from saffron.agents.findings import Severity
 from saffron.batch import StopReason
 from saffron.events import Event
-from saffron.ledger import RUN_PREFLIGHT_OUTCOMES, SCHEMA
+from saffron.ledger import RUN_PREFLIGHT_OUTCOMES, SCHEMA, TaskState
+from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.record.contract import KINDS
 from saffron.repos.policy import CORE_GATE_NAMES
+from saffron.scheduler import (
+    DEPENDENCY_DEAD_STATES,
+    DEPENDENCY_WAITING_STATES,
+    DONE_STATES,
+    REQUEUE_STATES,
+)
 
 
 def _declared(class_name: str) -> set[str]:
@@ -167,3 +174,39 @@ def test_the_fact_kinds_the_record_accepts_are_the_ones_the_vocabulary_declares(
     assert _declared("FactKind") == set(KINDS), (
         "factory:FactKind and saffron/record/contract.py's KINDS disagree"
     )
+
+
+def _task_states() -> set[str]:
+    # rdflib infers no subclass, so each subclass is read by its own name.
+    return (
+        _declared("InFlightState") | _declared("EndState") | _declared("TerminalState")
+    )
+
+
+def test_the_task_states_the_code_names_are_the_ones_the_vocabulary_declares():
+    """Item 52. Two landed defects were states the code wrote and a table missed."""
+    assert set(get_args(TaskState)) == _task_states(), (
+        "factory:TaskState's subclasses and saffron/ledger.py's TaskState disagree"
+    )
+
+
+def test_reconcile_stamps_orphaned_over_exactly_the_in_flight_states():
+    assert _declared("InFlightState") == IN_FLIGHT_STATES
+
+
+def test_every_scheduler_state_set_holds_only_task_states():
+    for states in (
+        DONE_STATES,
+        REQUEUE_STATES,
+        DEPENDENCY_WAITING_STATES,
+        DEPENDENCY_DEAD_STATES,
+    ):
+        assert states <= set(get_args(TaskState)), sorted(states)
+
+
+def test_every_end_state_is_done_or_requeued_and_never_both():
+    """§4.2.1 leaves the in-flight states off both lists. An end state on neither
+    would never queue again and never say why, the omission a subset check misses."""
+    end_states = set(get_args(TaskState)) - _declared("InFlightState")
+    assert end_states == DONE_STATES | REQUEUE_STATES
+    assert not DONE_STATES & REQUEUE_STATES

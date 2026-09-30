@@ -1,0 +1,5 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix : <urn:software-factory:data:> .
+
+# QUEUED is Saffron's to advance, so it cannot also be a state the task waits in.
+factory:QUEUED a factory:InFlightState, factory:TaskState, factory:EndState .

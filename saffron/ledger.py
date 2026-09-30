@@ -24,11 +24,40 @@ import sqlite3
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, new_task_key
+
+# Every value `tasks.state` holds, held to `factory:TaskState` by a test (item 52).
+# `set_task_state` stays `str`: no defect measured so far was a bad write.
+TaskState = Literal[
+    "DRAFT",
+    "QUEUED",
+    "DIAGNOSING",
+    "IMPLEMENTING",
+    "GATING",
+    "REPAIRING",
+    "REVIEWING",
+    "REBUTTING",
+    "SCOPE_REVIEW",
+    "PLAN_REJECTED",
+    "EXHAUSTED",
+    "READY_FOR_REVIEW",
+    "MERGE_FAILED",
+    "PREFLIGHT_FAILED",
+    "NOT_IMPLEMENTED",
+    "GATE_ERROR",
+    "RATE_LIMITED",
+    "SPEC_WITHHELD",
+    "APPROVED",
+    "CHANGES_REQUESTED",
+    "REJECTED",
+    "MERGED",
+    "ORPHANED",
+    "MERGE_TRAIN",
+]
 
 # The closed set `set_run_preflight` writes; the `CHECK` below is built from it.
 RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")

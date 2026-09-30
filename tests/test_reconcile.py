@@ -119,14 +119,26 @@ def test_the_real_six_tasks_reconcile_to_their_real_pull_request_states(ledger):
             "changes_requested",
             "CHANGES_REQUESTED",
         ),
+        (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": False},
+            "approved",
+            "APPROVED",
+        ),
+        (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": True},
+            None,
+            "READY_FOR_REVIEW",
+        ),
         ({"state": "OPEN", "reviewDecision": None}, None, "READY_FOR_REVIEW"),
-        # The fifth mapping the module says it does not make: an unrecognised
+        # The sixth mapping the module says it does not make: an unrecognised
         # `state` leaves the row exactly as it was, like an unanswerable `gh`.
         ({"state": "SOMETHING_NEW", "reviewDecision": None}, None, "READY_FOR_REVIEW"),
     ],
     ids=[
         "closed-unmerged",
         "open-changes-requested",
+        "open-marked-ready",
+        "open-draft",
         "open-undecided",
         "unrecognised-state",
     ],
@@ -146,6 +158,32 @@ def test_one_pull_request_outcome_maps_to_one_ledger_state(
         assert getattr(result, bucket) == [task_id]
     else:
         assert result.merged == result.rejected == result.changes_requested == []
+        assert result.approved == []
+    assert _state(ledger, task_id) == expect_state
+
+
+@pytest.mark.parametrize(
+    "pr, expect_state",
+    [
+        ({"state": "MERGED", "reviewDecision": None}, "MERGED"),
+        ({"state": "CLOSED", "reviewDecision": None}, "REJECTED"),
+        (
+            {"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED", "isDraft": False},
+            "CHANGES_REQUESTED",
+        ),
+        ({"state": "OPEN", "reviewDecision": None, "isDraft": False}, "APPROVED"),
+        ({"state": "OPEN", "reviewDecision": None, "isDraft": True}, "APPROVED"),
+    ],
+    ids=["merged", "closed", "changes-requested", "still-ready", "back-to-draft"],
+)
+def test_an_approved_task_moves_on_and_never_back(ledger, pr, expect_state):
+    """Item 52. A pull request returned to draft leaves `APPROVED` as it was."""
+    repo_id = _repo(ledger)
+    url = "https://github.com/jtmcn/saffron/pull/101"
+    task_id = _task(ledger, repo_id, spec_id="SA-9002", state="APPROVED", pr_url=url)
+
+    reconcile(ledger, repo_id, gh=_FakeGh({url: pr}))
+
     assert _state(ledger, task_id) == expect_state
 
 
