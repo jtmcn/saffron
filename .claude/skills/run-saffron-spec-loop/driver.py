@@ -1094,7 +1094,7 @@ def _review_lenses_line(spec_id: str) -> str:
     """The lenses the spec's latest REVIEW ran, read from `findings.json` in
     its batch directory. A re-run overwrites that file, and each run
     recreates `gates/` first. A `findings.json` no older than `gates/`
-    belongs to the latest run (DESIGN.md §5.5, §5.6)."""
+    belongs to the latest run."""
     none_recorded = "lenses: none recorded for this spec's latest run"
     directory = JEV_ROOT / "v0" / spec_id
     findings_path = directory / "findings.json"
@@ -1107,7 +1107,7 @@ def _review_lenses_line(spec_id: str) -> str:
         return none_recorded
     try:
         data = json.loads(findings_path.read_text())
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return none_recorded
     if not isinstance(data, list) or not data:
         return none_recorded
@@ -2170,7 +2170,7 @@ def _is_review_trigger(entry: str) -> bool:
 def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
     """One `review:` line per live ancestor, reached through `depends_on` at
     any depth, whose `touches` names a REVIEW-shaping path. A stacked
-    child's REVIEW is main's REVIEW (DESIGN.md §5.5, §5.6), so an ancestor's
+    child's REVIEW is main's REVIEW (DESIGN.md §2), so an ancestor's
     change there never runs in the target's own cell."""
     if not target.depends_on:
         return []

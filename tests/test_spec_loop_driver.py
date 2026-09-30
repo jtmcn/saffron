@@ -873,7 +873,7 @@ def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
 def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, capsys):
     # b-66d1c3: a stacked child's REVIEW is main's REVIEW, run at the host
     # checkout. `findings.json` is the only record of which lenses ran.
-    import json as jsonlib
+    import json
 
     from saffron.ledger import Ledger
 
@@ -934,7 +934,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
         return status, capsys.readouterr().out
 
     # 1. the only file, latest by default.
-    findings_path.write_text(jsonlib.dumps(step_one))
+    findings_path.write_text(json.dumps(step_one))
     touch(findings_path, 0)
     assert record() == (0, first_line + named)
 
@@ -965,14 +965,20 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     assert record() == (0, first_line + none_recorded)
 
     # 7. not a list.
-    findings_path.write_text(jsonlib.dumps({"lens": "correctness"}))
+    findings_path.write_text(json.dumps({"lens": "correctness"}))
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+    findings_path.write_text("5")
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
+    # 7b. bytes that are not UTF-8.
+    findings_path.write_bytes(b"\xff\xfe[")
     touch(findings_path, 200)
     assert record() == (0, first_line + none_recorded)
 
     # 8. an entry with no `lens`.
-    findings_path.write_text(
-        jsonlib.dumps([*step_one, {"error": None, "findings": []}])
-    )
+    findings_path.write_text(json.dumps([*step_one, {"error": None, "findings": []}]))
     touch(findings_path, 200)
     assert record() == (0, first_line + none_recorded)
 
@@ -980,8 +986,8 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     findings_path.unlink()
     assert record() == (0, first_line + none_recorded)
 
-    # 10. the lens line follows an `EXHAUSTED` halt too.
-    findings_path.write_text(jsonlib.dumps(step_one))
+    # 10. the lens line follows an `EXHAUSTED` end state too.
+    findings_path.write_text(json.dumps(step_one))
     touch(findings_path, 200)
     fresh = Ledger(loop.root / "ledger.db")
     fresh.set_task_state(task_id, "EXHAUSTED")
@@ -1681,7 +1687,7 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
         lines += ["---", "", "body", ""]
         (target / f"{spec_id}-x.md").write_text("\n".join(lines))
 
-    write("SA-0910", ["SA-0906", "SA-0903", "SA-0999"], ["saffron/phases/review.py"])
+    write("SA-0910", ["SA-0999", "SA-0906", "SA-0903"], ["saffron/phases/review.py"])
     write(
         "SA-0906",
         ["SA-0901", "SA-0903"],
@@ -1703,7 +1709,7 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
     )
     write(
         "SA-0901",
-        ["SA-0905"],
+        ["SA-0999", "SA-0905"],
         [
             "saffron/phases/review.py",
             "tests/test_review.py",
