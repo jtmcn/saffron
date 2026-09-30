@@ -206,6 +206,7 @@ def lens_prompt(
         "REVIEW",
         context_md,
         template=template,
+        keep_avoid=lens == "conventions",
         spec=spec_body,
         diff=diff,
         gates=gates,

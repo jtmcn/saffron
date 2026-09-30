@@ -42,9 +42,18 @@ _AVOID = re.compile(r"^_Avoid_.*(?:\n(?!\n).*)*\n?", re.MULTILINE)
 
 
 def sections_for(
-    phase: str, context_md: str, sections: tuple[int, ...] | None = None
+    phase: str,
+    context_md: str,
+    sections: tuple[int, ...] | None = None,
+    *,
+    keep_avoid: bool = False,
 ) -> str:
-    """The numbered sections this phase receives, in document order."""
+    """The numbered sections this phase receives, in document order.
+
+    `keep_avoid` leaves each `_Avoid_` paragraph in place instead of
+    stripping it. The conventions lens reads for banned vocabulary rather
+    than writing it, so it alone needs the paragraph kept.
+    """
     wanted = set(sections if sections is not None else SECTIONS_BY_PHASE[phase])
     matches = list(_HEADING.finditer(context_md))
     chunks = []
@@ -55,7 +64,10 @@ def sections_for(
         end = (
             matches[index + 1].start() if index + 1 < len(matches) else len(context_md)
         )
-        chunks.append(_AVOID.sub("", context_md[match.start() : end]).rstrip())
+        chunk = context_md[match.start() : end]
+        if not keep_avoid:
+            chunk = _AVOID.sub("", chunk)
+        chunks.append(chunk.rstrip())
     return "\n\n".join(chunks)
 
 
@@ -193,7 +205,12 @@ def turn_prompt(name: str) -> str:
 
 
 def build_system_prompt(
-    phase: str, context_md: str, template: str, **values: str
+    phase: str,
+    context_md: str,
+    template: str,
+    *,
+    keep_avoid: bool = False,
+    **values: str,
 ) -> str:
     """Assemble a prompt from a versioned template plus substituted values.
 
@@ -210,7 +227,7 @@ def build_system_prompt(
     """
     if "{spec}" not in template:
         raise ValueError(f"prompt template for {phase!r} has no {{spec}} placeholder")
-    vocabulary = sections_for(phase, context_md)
+    vocabulary = sections_for(phase, context_md, keep_avoid=keep_avoid)
     other_values = {k: v for k, v in values.items() if k != "spec"}
     parts = [
         part.format(vocabulary=vocabulary, **other_values)

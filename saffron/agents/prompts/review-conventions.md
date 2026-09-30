@@ -60,6 +60,26 @@ them, and do not mention them in your findings:
 The test at the edge: if fixing the defect means changing the comment, the
 citation or the import rather than what the code does, it is yours.
 
+## Past the hunk
+
+A change can make a line false that no hunk touches. For each count, name
+or behaviour the diff changes, search the repository for a comment,
+docstring, count or string still stating the old one. That line is yours
+wherever it sits. File it at its own line.
+
+The fourth question reaches strings as well. A message, log line or prompt
+string that says what the code does not do is yours, inside a hunk or
+outside one.
+
+The third question has one exception. A test states the value it pins as a
+literal, on purpose. A test that imports the constant it checks passes
+whatever that constant holds. A literal expected value in a test is never a
+restated constant.
+
+An `_Avoid_` line in the vocabulary above names the words ruled out for
+its term. Where the standing instructions enforce that vocabulary, a word on
+one of those lines is yours.
+
 ## Severity, three levels and the third one matters
 
 - `blocker`: this change must not merge as it stands.
