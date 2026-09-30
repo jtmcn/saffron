@@ -536,6 +536,20 @@ An isomorphic re-encoding of §4.1 — one class per table, one datatype propert
 
 `SA-0001` enforces this mechanically with a dead-term test: every term in the `factory:` namespace must be referenced by at least one committed query or one shape, or it is deleted rather than commented. That check rides the existing blocking `tests` gate; it is not a new repo gate.
 
+### 4.7 The event log
+
+Each task writes one `events.jsonl`, beside its other per-task artifacts. `saffron watch` follows it. It is a record for a person, and no control reads it.
+
+**The kinds are the `Event` union in `saffron/events.py`.** Each kind is its own frozen dataclass, never one class with a `type` string. The union is the list. This section names no count, because a count here drifts each time a kind lands.
+
+**Every event carries `timestamp` and `spec_id`.** The timestamp is unix epoch seconds as a float, from `time.time()`. That is the one representation every reader and writer uses.
+
+**On the wire, a `kind` field names the dataclass.** The in-memory type needs no discriminator, and a JSON line does. `EventLog.append` writes one object per line and flushes it. It never raises, and sets `failed` instead.
+
+**A reader tolerates damage per line, never per file.** `read_log` drops a line it cannot make into an event. A truncated line, an unknown `kind` and a field of the wrong shape each cost that line alone.
+
+**The ceiling is one file per task, with no rotation, compression or size cap.** One `Agent` event is cut at `BOUND_CHARS` characters. Nothing bounds the file.
+
 ---
 
 ## 5. The cell pipeline

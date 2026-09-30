@@ -1,13 +1,14 @@
 ---
 id: 36
 title: The event schema wants its own `DESIGN.md` §4 subsection, and nothing can write one
-status: open
+status: done
+closed: 2026-09-29
 tier: 2
 by_hand: true
 specs: [SA-0040]
 prs: []
 commits: []
-cites: [§4]
+cites: [§4, §4.7]
 related: []
 ---
 
@@ -26,3 +27,9 @@ count that moves, rather than a number to correct again.
 a new §4.x naming the kinds, the wire discriminator and
 `events.jsonl`'s one-file-per-task, no-rotation ceiling — by hand, after
 `SA-0040`, when the shape has stopped moving.
+
+## Record
+
+- 2026-09-29: §4.7 landed by hand. It names the `Event` union as the list of kinds,
+  the `kind` discriminator, the epoch-seconds `timestamp` and the one-file,
+  no-rotation ceiling. It states no count, so a new kind leaves it true.
