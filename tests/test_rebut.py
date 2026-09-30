@@ -152,6 +152,7 @@ def test_a_blocker_whose_probe_survived_names_the_probe_to_the_implementer():
 def _run(
     *texts,
     blockers=None,
+    acceptance=(),
     moved=True,
     gates=None,
     record=None,
@@ -178,6 +179,7 @@ def _run(
     return rebut.run_rebut(
         "cell",
         blockers=blockers if blockers is not None else [_blocker()],
+        acceptance=list(acceptance),
         options=OPTIONS,
         session_id="sess-1",
         spec_body=spec_body,
@@ -1356,6 +1358,185 @@ def test_a_contradicted_blocker_counts_as_sustained_or_unkept_like_a_confirmed_o
         case = (action, moved, verdict_value)
         assert rebut.sustained_blockers(result) == sustained, case
         assert rebut.unkept_fixes(result) == unkept, case
+
+
+# --- backlog b-cd5fd2: a `preserves` criterion's guarded blocker cannot be
+# withdrawn by pointing outside the diff ---
+
+_WITHDRAWAL_ARGUMENT = "the line sits outside my diff, so it is not mine to answer"
+
+_WITHDRAWAL_HOST_SENTENCE = (
+    "The host kept this blocker: its criterion is `preserves`, so it holds "
+    "over the whole file, and no committed fix answered it. The lens withdrew it:"
+)
+
+
+def _host_filed(witness, tail="the criterion's own edit"):
+    return f"{review.HOST_FILED}{witness} stayed green with {tail}"
+
+
+def test_a_withdrawn_host_filed_blocker_on_a_preserves_criterion_stands_only_after_a_committed_fix():
+    """Criterion 1: a lens cannot withdraw a host-filed blocker on a `preserves`
+    criterion's survivor after the implementer argues the line is outside the diff. It stands
+    only when the blocker's first answer was `fixed` and HEAD moved. That
+    holds whether the blocker came from the criterion's own edit or a wrong
+    version, and a shared witness prefix does not fool the guard."""
+    from saffron.intake import Criterion
+
+    preserved = Criterion(
+        claim="the total is unchanged", witness="t.py::test_a", preserves=True
+    )
+    extended = Criterion(claim="the total stays sorted", witness="t.py::test_a_b")
+
+    b1 = _blocker(lens="adequacy", claim=_host_filed("t.py::test_a"))
+    b2 = _blocker(lens="adequacy", claim=_host_filed("t.py::test_a", "a wrong version"))
+    b3 = _blocker(lens="adequacy", claim=_host_filed("t.py::test_a"))
+    b4 = _blocker(lens="adequacy", claim=_host_filed("t.py::test_a"))
+    b5 = _blocker(lens="adequacy", claim=_host_filed("t.py::test_a_b"))
+    b6 = _blocker(lens="adequacy", claim="t.py::test_a stayed green with any edit")
+    b7 = _blocker(lens="adequacy", claim=_host_filed("t.py::test_a"))
+    b8 = _blocker()
+    blockers_1 = [b1, b2, b3, b4, b5, b6, b7, b8]
+
+    result_1 = _run(
+        "I have answered every finding.",
+        _rebuttals(
+            _argued(1, _WITHDRAWAL_ARGUMENT),
+            _argued(2, _WITHDRAWAL_ARGUMENT),
+            _fixed(3, "fixed it"),
+            _argued(5, _WITHDRAWAL_ARGUMENT),
+            _argued(6, _WITHDRAWAL_ARGUMENT),
+            _argued(7, _WITHDRAWAL_ARGUMENT),
+            _argued(8, _WITHDRAWAL_ARGUMENT),
+        ),
+        _verdicts(_verdict(8, reason="8")),
+        _verdicts(
+            _verdict(1, reason="1"),
+            _verdict(2, reason="2"),
+            _verdict(3, reason="3"),
+            _verdict(4, reason="4"),
+            _verdict(5, reason="5"),
+            _verdict(6, reason="6"),
+            _verdict(7, verdict="confirmed", reason="7"),
+        ),
+        blockers=blockers_1,
+        acceptance=[preserved, extended],
+        moved=False,
+    )
+
+    assert result_1.state == "READY_FOR_REVIEW"
+    assert result_1.why == (
+        "5 blocker(s) confirmed after the rebuttal, 6 argued — recorded "
+        "disagreement, yours to adjudicate (a fix was claimed for some of "
+        "them and no commit was made)"
+    )
+
+    correctness_1 = next(v for v in result_1.verdicts if v.lens == "correctness")
+    assert correctness_1.verdicts == [
+        rebut.Verdict(finding=8, verdict="withdrawn", reason="r8")
+    ]
+
+    adequacy_1 = next(v for v in result_1.verdicts if v.lens == "adequacy")
+    assert adequacy_1.verdicts == [
+        rebut.Verdict(
+            finding=1, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r1"
+        ),
+        rebut.Verdict(
+            finding=2, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r2"
+        ),
+        rebut.Verdict(
+            finding=3, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r3"
+        ),
+        rebut.Verdict(
+            finding=4, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r4"
+        ),
+        rebut.Verdict(finding=5, verdict="withdrawn", reason="r5"),
+        rebut.Verdict(finding=6, verdict="withdrawn", reason="r6"),
+        rebut.Verdict(finding=7, verdict="confirmed", reason="r7"),
+    ]
+
+    as_dict_1 = result_1.as_dict(blockers_1)
+    by_lens_1 = {v["lens"]: v for v in as_dict_1["verdicts"]}
+    assert by_lens_1["correctness"]["withdrawal_refusals"] == []
+    assert by_lens_1["adequacy"]["withdrawal_refusals"] == [
+        {"finding": n, "withdrawn_reason": f"r{n}"} for n in range(1, 5)
+    ]
+
+    # Run 2, HEAD moved: blocker 1 stands, since its only answer is `fixed`.
+    # Blocker 3 is argued first and `fixed` second, so the first answer wins.
+    blockers_2 = [b1, b2, b3, b4]
+    result_2 = _run(
+        "Here is my second answer.",
+        _rebuttals(
+            _fixed(1, "fixed it"),
+            _argued(2, _WITHDRAWAL_ARGUMENT),
+            _argued(3, _WITHDRAWAL_ARGUMENT),
+            _fixed(3, "fixed it too"),
+        ),
+        _verdicts(
+            _verdict(1, reason="1"),
+            _verdict(2, reason="2"),
+            _verdict(3, reason="3"),
+            _verdict(4, reason="4"),
+        ),
+        blockers=blockers_2,
+        acceptance=[preserved, extended],
+        moved=True,
+    )
+
+    assert result_2.state == "READY_FOR_REVIEW"
+    assert result_2.why == (
+        "3 blocker(s) confirmed after the rebuttal, 2 argued — recorded "
+        "disagreement, yours to adjudicate"
+    )
+
+    (adequacy_2,) = result_2.verdicts
+    assert adequacy_2.lens == "adequacy"
+    assert adequacy_2.verdicts == [
+        rebut.Verdict(finding=1, verdict="withdrawn", reason="r1"),
+        rebut.Verdict(
+            finding=2, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r2"
+        ),
+        rebut.Verdict(
+            finding=3, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r3"
+        ),
+        rebut.Verdict(
+            finding=4, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r4"
+        ),
+    ]
+
+    as_dict_2 = result_2.as_dict(blockers_2)
+    (adequacy_2_dict,) = as_dict_2["verdicts"]
+    assert adequacy_2_dict["withdrawal_refusals"] == [
+        {"finding": n, "withdrawn_reason": f"r{n}"} for n in range(2, 5)
+    ]
+
+
+def test_a_lens_blocker_quoting_the_host_text_mid_claim_stays_withdrawn():
+    """The guard reads the start of a claim only. This lens blocker quotes
+    the host's text after a word of its own. It is withdrawn as the lens
+    says, and no refusal is recorded."""
+    from saffron.intake import Criterion
+
+    preserved = Criterion(
+        claim="the total is unchanged", witness="t.py::test_a", preserves=True
+    )
+    quoting = _blocker(lens="adequacy", claim="see " + _host_filed("t.py::test_a"))
+    result = _run(
+        "I have answered every finding.",
+        _rebuttals(_argued(1, _WITHDRAWAL_ARGUMENT)),
+        _verdicts(_verdict(1, reason="1")),
+        blockers=[quoting],
+        acceptance=[preserved],
+        moved=False,
+    )
+
+    (adequacy,) = result.verdicts
+    assert adequacy.verdicts == [
+        rebut.Verdict(finding=1, verdict="withdrawn", reason="r1")
+    ]
+    (adequacy_dict,) = result.as_dict([quoting])["verdicts"]
+    assert adequacy_dict["withdrawal_refusals"] == []
 
 
 def _between(text: str, start: str, end: str) -> str:

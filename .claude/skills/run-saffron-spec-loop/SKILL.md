@@ -435,3 +435,26 @@ with no label or an unknown value, or a missing `blocker_followed` field.
 **Done when** every kept finding has an item, every spec's origin item names
 its PR, every fixed or kept finding the critic missed has a rejection line, and
 `driver.py labels` exits 0. This PR reads back based on the last layer.
+
+## 6. Hand off to the next delegate
+
+Every loop ends with a handoff, whether it ran its whole order or stopped
+early. The operator asked for this on 2026-09-29, when run 22 stopped before
+its chain. Write `HANDOFF-loop.md` in a fresh temp directory and give the
+operator its path.
+
+It says where `main` stands and what merged during the loop. It lists the
+stack and the step 5 PR. It names each spec still queued, with its step 1b
+state and the re-reviews it still owes. It carries these as well:
+
+- the operator's standing decisions, such as listeners, the push grant,
+  budgets and scope calls
+- the decisions to raise before `snapshot --new`
+- what this run learned, for the next run to apply
+- process notes and the scratch worktrees left behind
+
+Start the file once context passes about 40%, and keep it current. A
+compaction then loses nothing the next delegate needs.
+
+**Done when** the handoff names every queued spec and every open question,
+and the operator has its path.

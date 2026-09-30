@@ -1,0 +1,19 @@
+# Run 20's Standards defect on #560. Head is the ledger's pushed_sha, reachable
+# only from refs/fixtures/SA-0184-head. c4ac878e on main is the restacked copy.
+spec_id = "SA-0184"
+pr = 560
+base_sha = "2a20e23af654c6a9ca92f4efebee5a694ad9766c"
+head_sha = "69083659ac10552659399d61e74ce603ac6f9b06"
+source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
+recorded_seen = 0
+recorded_graded = 0
+
+[[defects]]
+id = "restated-library-hour"
+# `WALL_CAP_S = 3600.0` restates the library's hour. Line 66 is the comment
+# naming that hour in the same hunk, so this widens SA-0191's [68, 68].
+locations = [{ file = "saffron/cell/session.py", lines = [66, 68] }]
+owner = "conventions"
+# The seat's own grade is unrecorded. #560's one seat blocker was a witness.
+min_severity = "concern"
+must_mention = ["3600", "hour"]

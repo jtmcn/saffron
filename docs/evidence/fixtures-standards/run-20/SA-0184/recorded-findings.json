@@ -1,0 +1,38 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.5262639,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.6202080000000001,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 1.0932617999999998,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/intake.py",
+        "line": 167,
+        "claim": "[host-filed criterion probe] tests/test_session.py::test_every_turn_carries_the_drivers_wall_clock_not_the_librarys stayed green with the criterion's own edit applied to saffron/intake.py. The claim was 'A spec that declares no `max_turns` still runs every turn under the 900-second wall.', and only that witness ran under the edit.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/intake.py",
+          "find": "max_turns: int = Field(default=60, gt=0)",
+          "replace": "max_turns: int = Field(default=61, gt=0)"
+        },
+        "probe_verdict": "survived"
+      }
+    ]
+  }
+]

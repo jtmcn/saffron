@@ -56,6 +56,12 @@ notice the code being wrong:
 - **A witness whose setup is the only input the new code is correct for** —
   the acceptance criterion's claim is broader than the one case the test
   builds, so the test cannot tell a narrow fix from a general one.
+- **A witness pinned to the constant it tests.** It compares the output
+  with that constant or file, or with a helper that builds from either. Give
+  the constant a wrong value and both sides of the assertion move together.
+  It is yours only when no test in the suite pins that value as a literal. A
+  routing check beside a literal pin of the same value is not a finding. The
+  edit to name is a wrong value for that constant.
 
 For every one of these, name the smallest concrete edit — to the source or to
 the test — that would keep the test passing while the behaviour it claims to
@@ -77,13 +83,14 @@ them, and do not mention them in your findings:
 - What else in the repository calls the changed code, and what breaks
   downstream of it — that is the blast-radius lens.
 - A comment, docstring or citation that misstates its own code or the text
-  it cites, or a constant or helper restated rather than imported. That is
-  the conventions lens.
+  it cites, or a type, constant or helper restated rather than imported.
+  That is the conventions lens.
 
 The test at the edge: if fixing the defect means changing what the code
-computes or what it promises, it is not yours; if it means changing what the
-*test* proves — strengthening an assertion, deriving a value instead of
-hard-coding it, exercising the actual changed path — it is yours.
+computes or what it promises, it is not yours. If it means changing what the
+*test* proves, it is yours. That covers strengthening an assertion, deriving
+the value under test by running the code rather than restating it, and
+exercising the actual changed path.
 
 ## Severity — three levels, and the third one matters here most of all
 

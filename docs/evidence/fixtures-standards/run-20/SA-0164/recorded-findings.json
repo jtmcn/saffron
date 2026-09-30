@@ -1,0 +1,23 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 1.1420415,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 2.7284478000000005,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 1.1625237,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": []
+  }
+]

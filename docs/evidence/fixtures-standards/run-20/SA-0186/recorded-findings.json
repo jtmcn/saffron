@@ -1,0 +1,70 @@
+[
+  {
+    "lens": "correctness",
+    "cost_usd": 0.808455,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "correctness",
+        "severity": "blocker",
+        "file": "saffron/task.py",
+        "line": 236,
+        "claim": "When a `GhRunner` is given, the resolver picks the parent's absolute newest task row (`rows[-1]`, set at line 235) and, if its state is anything other than `READY_FOR_REVIEW`/`APPROVED`/`MERGE_TRAIN`/`CHANGES_REQUESTED`, unstacks unconditionally at line 236-245 \u2014 with no fallback to an older row still genuinely waiting. The design note at lines 233-235 justifies this only for a newest task that is `MERGED` or `REJECTED` ('the pull request the newer one replaced'), but the code applies the same short-circuit to every other state too: `DRAFT`, `QUEUED`, `DIAGNOSING`, `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING`, `REBUTTING`, `ORPHANED`, `EXHAUSTED`, `MERGE_FAILED`. None of those states mean the newer task's PR replaced the older one's branch; an in-flight or independently-dead newest attempt (no PR opened yet, or one that failed before packaging) says nothing about an older sibling row's still-open, unmerged pull request. `saffron cell` performs no dependency refusal and no scheduling conflict check (confirmed by the 'Out of scope' notes), so nothing prevents a second task existing for the same parent spec while an older task's PR is still legitimately `READY_FOR_REVIEW`/`APPROVED`. In that case the resolver now reports the parent as `unstacked` and cuts the child from the default branch, discarding the parent's real, not-yet-merged work \u2014 reversing the 'waiting outranks dead' precedence this same function's own docstring (lines 180-186) and `scheduler._dependency_refusal` (lines 605-612) both document and rely on. None of the three new tests exercise a newest-task state outside `MERGED`/`REJECTED`/`CHANGES_REQUESTED`/open-undecided, so this is untested and the gates cannot see it.",
+        "anchored": true,
+        "probe": null,
+        "probe_verdict": null
+      }
+    ]
+  },
+  {
+    "lens": "contract",
+    "cost_usd": 0.5984607,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "contract",
+        "severity": "concern",
+        "file": "saffron/task.py",
+        "line": 176,
+        "claim": "`_resolve_stacked_on`'s docstring says the parent's task is chosen as 'the newest row in a `scheduler.DEPENDENCY_WAITING_STATES` state ... the same waiting-outranks-dead precedence `scheduler._dependency_refusal` gives it' (line 180-182), i.e. an older waiting row is preferred over a newer dead one. That is only true when `gh` is `None`. When a `GhRunner` is passed (the default from `saffron cell` after this change, per `cli.py`'s new `gh=_guarded_gh(...)` argument), the function instead takes the absolute newest task row regardless of state (`newest_task = rows[-1]`, line 235) and explicitly refuses to fall back to an older waiting row if that newest row is dead. The docstring was not updated to describe this second, now-default-for-attended-runs selection rule, so it misdescribes the function's actual contract for its primary caller.",
+        "anchored": true,
+        "probe": null,
+        "probe_verdict": null
+      },
+      {
+        "lens": "contract",
+        "severity": "note",
+        "file": "saffron/events.py",
+        "line": 905,
+        "claim": "The `_Family` class is documented (line 864-865) as a table whose rows `tests/test_events.py` pairs with 'the literal line it must produce'. The new row `_Family(\"preflight: newest task is CHANGES_REQUESTED\", _TASK, Preflight)` is not a prefix of anything ever rendered: `task.py`'s emit always builds the detail as `f\"{parent_id}'s newest task is CHANGES_REQUESTED\"`, so the real line is always `preflight: SY-9000's newest task is CHANGES_REQUESTED` (parent id inserted before 'newest'), never `preflight: newest task is CHANGES_REQUESTED`. No test in this diff pairs the row with a concrete rendered example, so the table's own documented invariant is false for this row.",
+        "anchored": true,
+        "probe": null,
+        "probe_verdict": null
+      }
+    ]
+  },
+  {
+    "lens": "adequacy",
+    "cost_usd": 1.1776689,
+    "error": null,
+    "drop_rate": 0.0,
+    "findings": [
+      {
+        "lens": "adequacy",
+        "severity": "blocker",
+        "file": "saffron/events.py",
+        "line": 905,
+        "claim": "The new CHANGES_REQUESTED family row's declared prefix, `preflight: newest task is CHANGES_REQUESTED`, is not actually a prefix of what `describe()` produces for that event: `_resolve_stacked_on` (task.py) builds the detail as `f\"{parent_id}'s newest task is CHANGES_REQUESTED\"`, so the real line is `preflight: SY-9000's newest task is CHANGES_REQUESTED` \u2014 the parent id sits between `preflight: ` and `newest`, so the declared prefix never occurs verbatim in any line the code emits. `events.py`'s own docstring claims `tests/test_events.py` pairs every row with 'the literal line it must produce', but the tests touched by this diff (`test_every_family_has_a_kind_and_renders`, `test_the_table_did_not_quietly_lose_a_row`) only check that the row's `kind` is a known kind, that its citation resolves to a real file/symbol, and that the table has 69 distinct-prefix rows \u2014 none of them render the actual event and compare it against the row's `prefix`. You can replace the row's text with anything (e.g. `preflight: totally unrelated text`) and the whole suite, including these two tests, stays green, so the mismatch already shipped in this diff is undetectable by the gates that passed.",
+        "anchored": true,
+        "probe": {
+          "file": "saffron/events.py",
+          "find": "_Family(\"preflight: newest task is CHANGES_REQUESTED\", _TASK, Preflight),",
+          "replace": "_Family(\"preflight: this text does not appear in any rendered line\", _TASK, Preflight),"
+        },
+        "probe_verdict": "survived"
+      }
+    ]
+  }
+]

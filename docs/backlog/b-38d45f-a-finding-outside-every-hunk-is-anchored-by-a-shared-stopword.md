@@ -1,12 +1,12 @@
 ---
 id: b-38d45f
 title: A finding outside every hunk is anchored by any shared word, stopwords included
-status: open
+status: done
 tier: 2
 filed: 2026-09-29
-closed:
+closed: 2026-09-29
 specs: [SA-0194]
-prs: []
+prs: [598]
 commits: []
 cites: [§5.5]
 related: [b-cd5fd2, b-e40d09, b-1e9a7a]
@@ -35,3 +35,4 @@ the diff and reads it unanchored.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-29: closed by `SA-0194` (#598). Anchoring outside a hunk ignores 54 common words.

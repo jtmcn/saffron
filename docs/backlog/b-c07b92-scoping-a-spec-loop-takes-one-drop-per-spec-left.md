@@ -32,3 +32,6 @@ next loop. No drop is recorded for them, and `snapshot --new` picks them up.
 - 2026-09-28: filed from the spec loop's run 20.
 - 2026-09-29: hit again in the spec loop's run 21. Scoping it to `SA-0187`'s
   chain of six took eleven `drop` calls.
+- 2026-09-29: hit again in the spec loop's run 22. `snapshot` put nine chain
+  specs before `SA-0193` by priority and offers no operator order. The
+  delegate held `SA-0161` to run the four new specs first.

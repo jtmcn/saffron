@@ -1,0 +1,248 @@
+diff --git a/saffron/cell/session.py b/saffron/cell/session.py
+index 0678039..ff73723 100644
+--- a/saffron/cell/session.py
++++ b/saffron/cell/session.py
+@@ -56,12 +56,17 @@ if TYPE_CHECKING:
+ _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
+ 
+ # §4.3's wall clock, per turn, set here rather than inherited: this is the bound
+-# the operator sits through, so it belongs where the task is driven. Fifteen
+-# minutes is long enough for a turn that runs a real gate suite between tool
+-# calls and short enough to watch; the idle bound (runtime.IDLE_TIMEOUT_S) is
+-# what catches a stall sooner, and this only catches a turn that never stops.
++# the operator sits through, so it belongs where the task is driven. The floor
++# below is what a spec of sixty turns or fewer still gets. WALL_SECONDS_PER_TURN
++# and WALL_CAP_S scale it upward for a longer one, and the idle bound
++# (runtime.IDLE_TIMEOUT_S) still catches a stall sooner regardless.
+ TURN_TIMEOUT_S = 900.0
+ 
++# Named separately since `cli.py` and `spec_review.py` read TURN_TIMEOUT_S by
++# name (backlog item b-bf0c91): 15 seconds a turn, capped at the library's hour.
++WALL_SECONDS_PER_TURN = 15.0
++WALL_CAP_S = 3600.0
++
+ # REVIEW is deliberately not gated on the spend ceiling — a green diff nobody
+ # reviewed is not a product — so its sessions are capped at what is left rather
+ # than at the whole task budget, which is how a $12 task bills $40 — one
+@@ -1951,6 +1956,12 @@ def _drive_cell(
+         )
+         ledger.set_task_state(task_id, "IMPLEMENTING")
+ 
++        # Scaled to this spec's own turn ceiling (backlog item b-bf0c91),
++        # floored and capped by the two constants above.
++        turn_wall_s = min(
++            WALL_CAP_S, max(TURN_TIMEOUT_S, WALL_SECONDS_PER_TURN * spec.max_turns)
++        )
++
+         # Bound once, here, so no turn — plan, implement, repair, review or
+         # rebuttal — can quietly inherit the library's hour (§4.3), or run on
+         # against a window the provider already closed. `spec_id` is bound
+@@ -1960,7 +1971,7 @@ def _drive_cell(
+             record_attempts(
+                 partial(
+                     implement.run_agent,
+-                    timeout_s=TURN_TIMEOUT_S,
++                    timeout_s=turn_wall_s,
+                     spec_id=spec.spec_id,
+                 ),
+                 ledger=ledger,
+diff --git a/saffron/phases/implement.py b/saffron/phases/implement.py
+index d90a860..8ba3d5f 100644
+--- a/saffron/phases/implement.py
++++ b/saffron/phases/implement.py
+@@ -331,10 +331,12 @@ def run_agent(
+             exec_(container, ["rm", "-f", prompt_path], timeout_s=60)
+ 
+     detail = "; ".join(errors) or done.stderr.strip()[-800:] or "no output"
+-    # One phrasing for both failure paths, so "why did this turn end" reads the
+-    # same whether or not a result event arrived first.
++    # One phrasing for both failure paths, so "why did this turn end" reads
++    # the same way. The wall names its own seconds ahead of detail below.
+     how = (
+-        f"was cut by the {done.bound} bound"
++        f"was cut by the wall bound, given {timeout_s:.0f}s"
++        if done.bound == "wall"
++        else f"was cut by the {done.bound} bound"
+         if done.bound
+         else "timed out"
+         if done.timed_out
+diff --git a/tests/test_implement.py b/tests/test_implement.py
+index 24b39bd..fc4c011 100644
+--- a/tests/test_implement.py
++++ b/tests/test_implement.py
+@@ -830,6 +830,36 @@ def test_a_wall_clock_kill_before_any_result_names_the_bound_too():
+         )
+ 
+ 
++def test_a_wall_cut_names_the_seconds_it_was_given_and_an_idle_cut_does_not():
++    """Backlog item b-bf0c91: the wall now scales with a spec's own max_turns.
++    Its own cut names the seconds `run_agent` was handed, ahead of the
++    stderr `detail` it quotes. The idle bound keeps its old wording and
++    never names seconds at all."""
++    stderr = "e" * 800
++
++    def _cut(bound):
++        with pytest.raises(implement.AgentFailed) as raised:
++            implement.run_agent(
++                "cell",
++                prompt="p",
++                options={},
++                spec_id="SY-1",
++                timeout_s=1950.0,
++                exec_stream=_stream(
++                    returncode=124, timed_out=True, bound=bound, stderr=stderr
++                ),
++                reap_cell=_no_reap,
++            )
++        return str(raised.value)
++
++    wall_message = _cut("wall")
++    assert "1950" in wall_message
++    assert wall_message.index("1950") < wall_message.index(stderr[:10])
++
++    idle_message = _cut("idle")
++    assert "1950" not in idle_message
++
++
+ def test_a_turn_killed_before_its_result_event_still_reports_what_it_spent():
+     """The costliest failure of all: an idle or wall kill takes the runner
+     mid-stream, so no result event ever carries the cost fields. Charging it
+diff --git a/tests/test_session.py b/tests/test_session.py
+index 78b7d4b..0687f82 100644
+--- a/tests/test_session.py
++++ b/tests/test_session.py
+@@ -1244,6 +1244,9 @@ def _drive(
+     base_claude_md=None,
+     # A list: each turn goes through the real `run_agent`, its request kept.
+     real_run_agent=None,
++    # Seconds a modelled turn's own `num_turns` is scaled by, opt-in for the
++    # wall-scaling witness below. `None` leaves every prior caller unchanged.
++    turn_seconds=None,
+ ):
+     """Run one whole cell against the stubbed runtime and return its outcome.
+ 
+@@ -1326,8 +1329,18 @@ def _drive(
+             raise turn
+         attempt = turn.attempt if cut_off else turn
+ 
+-        def _exec_stream(_container, _command, *, stdin_data, on_line, **_kwargs):
++        def _exec_stream(
++            _container, _command, *, stdin_data, on_line, timeout_s=None, **_kwargs
++        ):
+             real_run_agent.append(stdin_data)
++            # A modelled turn scaled past its own wall never reaches a result
++            # event, which models a real kill exactly (backlog item b-bf0c91).
++            if (
++                turn_seconds is not None
++                and timeout_s is not None
++                and attempt.num_turns * turn_seconds > timeout_s
++            ):
++                return runtime.Completed(124, "", "", timed_out=True, bound="wall")
+             on_line(json.dumps({"type": "text", "text": attempt.text}))
+             on_line(
+                 json.dumps(
+@@ -1345,6 +1358,11 @@ def _drive(
+             )
+             return runtime.Completed(0, "", "")
+ 
++        def _exec(*_args, **_kwargs):
++            # A wall cut removes the prompt file with `exec_`. `tests/conftest.py`
++            # refuses a real one, so this stands in for it here too.
++            return runtime.Completed(0, "", "")
++
+         return _REAL_RUN_AGENT(
+             container,
+             prompt=prompt,
+@@ -1352,6 +1370,7 @@ def _drive(
+             resume=resume,
+             exec_stream=_exec_stream,
+             reap_cell=_no_reap,
++            exec_=_exec,
+             **kwargs,
+         )
+ 
+@@ -4515,9 +4534,18 @@ def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
+ ):
+     """3600s is the transport's ceiling; the bound an operator actually sits
+     through is set here, and a turn that inherits the default is an hour of
+-    watching nothing happen."""
++    watching nothing happen. `bare` is parsed the way a real spec is, with
++    no `max_turns:` line. Its own default governs this test, not a
++    coincidence in `_spec()`."""
+     cell = _stub_the_runtime(monkeypatch)
+-    _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
++    bare = parse_spec("---\nid: SA-9\ntitle: no turns declared\ntype: feature\n---\n")
++    _drive(
++        monkeypatch,
++        tmp_path,
++        cell=cell,
++        spec=_spec(max_turns=bare.max_turns),
++        turns=[_turn(_block(_PLAN)), _turn()],
++    )
+     assert session.TURN_TIMEOUT_S < 3600
+     assert cell.timeouts == [session.TURN_TIMEOUT_S] * len(cell.turns)
+     # `spec_id` is bound in the same `partial`, and nothing read its value:
+@@ -4527,6 +4555,63 @@ def test_every_turn_carries_the_drivers_wall_clock_not_the_librarys(
+     assert cell.spec_ids == ["SY-1"] * len(cell.turns)
+ 
+ 
++def test_every_turn_carries_a_wall_scaled_to_the_specs_max_turns(monkeypatch, tmp_path):
++    """Backlog item b-bf0c91: the wall scales with the spec's own `max_turns`.
++    It is floored and capped, so a long spec is cut by its turn ceiling and
++    not by a flat 900 seconds. Driven through a wall cut, the salvage turn it
++    buys, a repair turn and REVIEW's own lenses, all sharing one binding."""
++    failing = Failure(file="a.py", code="E501", message="too long")
++    for max_turns, wall in [(40, 900.0), (130, 1950.0), (300, 3600.0)]:
++        cell = _stub_the_runtime(
++            monkeypatch, commits=[0, 1], suites=([], _results(failing), [])
++        )
++        _drive(
++            monkeypatch,
++            tmp_path / f"case-{max_turns}",
++            cell=cell,
++            spec=_spec(max_turns=max_turns),
++            turns=[_turn(_block(_PLAN)), _wall_cut_turn(), _turn(), _turn()],
++        )
++        assert cell.turns[2] == implement.SALVAGE_PROMPT
++        assert "too long" in cell.turns[3]
++        assert len(cell.turns) > 4
++        assert cell.timeouts == [wall] * len(cell.timeouts)
++
++
++def test_a_long_session_ends_at_its_turn_ceiling_not_the_wall(monkeypatch, tmp_path):
++    """Backlog item b-bf0c91: at 10.8 seconds a turn a 130-turn spec still
++    ends on its own turn ceiling, and the wall is never named. At 16 seconds
++    a turn the same spec is cut by the wall instead, and the line names it
++    and its own 1950 seconds."""
++
++    def _cut(seconds_per_turn, name):
++        cell = _stub_the_runtime(monkeypatch)
++        raw: list[str] = []
++        _drive(
++            monkeypatch,
++            tmp_path / name,
++            cell=cell,
++            spec=_spec(max_turns=130),
++            turns=[
++                _turn(_block(_PLAN)),
++                implement.AgentFailed(
++                    "max turns", replace(_cut_off_turn(), num_turns=130)
++                ),
++            ],
++            real_run_agent=raw,
++            turn_seconds=seconds_per_turn,
++        )
++        return next(line for line in cell.watched if "the session failed" in line)
++
++    ceiling_line = _cut(10.8, "ceiling")
++    assert "ceiling of 130 turns" in ceiling_line
++    assert "wall" not in ceiling_line
++
++    wall_line = _cut(16.0, "wall")
++    assert "wall bound" in wall_line
++    assert "1950" in wall_line
++
++
+ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
+     """A plan turn that crashed is neither a plan rejected on content nor a dead
+     cell (§4.5). It carries what the checkpoint already spent, or the re-prompt's

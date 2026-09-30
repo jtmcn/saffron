@@ -56,8 +56,8 @@ them, and do not mention them in your findings:
   defect you can name is yours even when the test around it is also weak, but
   the weakness of the test itself is not.
 - A comment, docstring or citation that misstates its own code or the text
-  it cites, or a constant or helper restated rather than imported. That is
-  the conventions lens.
+  it cites, or a type, constant or helper restated rather than imported.
+  That is the conventions lens.
 
 The test at the edge: if fixing the defect means changing what the code
 computes, it is yours; if it means holding an interface or a stored format

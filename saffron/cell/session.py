@@ -2908,6 +2908,7 @@ def _drive_cell(
                     result = rebut.run_rebut(
                         container,
                         blockers=blockers,
+                        acceptance=spec.acceptance,
                         options=options,
                         session_id=session_id,
                         spec_body=spec.body + context.criteria_section(spec.acceptance),

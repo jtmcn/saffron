@@ -444,6 +444,54 @@ def test_the_conventions_prompt_asks_its_four_questions_against_the_base_standar
             assert "/work" not in line and "read" not in line.lower(), line
 
 
+# The section's own body, restated so the witness cannot agree with the
+# prompt file by accident.
+_PAST_THE_HUNK = """
+A change can make a line false that no hunk touches. For each count, name
+or behaviour the diff changes, search the repository for a comment,
+docstring, count or string still stating the old one. That line is yours
+wherever it sits. File it at its own line.
+
+The fourth question reaches strings as well. A message, log line or prompt
+string that says what the code does not do is yours, inside a hunk or
+outside one.
+
+The third question has one exception. A test states the value it pins as a
+literal, on purpose. A test that imports the constant it checks passes
+whatever that constant holds. A literal expected value in a test is never a
+restated constant.
+
+An `_Avoid_` line in the vocabulary above names the words ruled out for
+its term. Where the standing instructions enforce that vocabulary, a word on
+one of those lines is yours.
+"""
+
+
+def test_the_conventions_prompt_reads_past_the_hunk():
+    """A section between the edges and the severity levels sends the lens
+    past the hunk. It names a stale count, a stale string and an
+    `_Avoid_`-listed word. Only this prompt file carries it."""
+    prompt = review.lens_prompt(
+        "conventions",
+        context_md=CONTEXT_MD,
+        claude_md="- Never collapse `error` into `fail`.\n",
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    assert "## Its edges" in prompt.splitlines()
+    heading, body = _section_after(prompt, "## Its edges")
+    assert heading == "## Past the hunk"
+    assert " ".join(body.split()) == " ".join(_PAST_THE_HUNK.split())
+    next_heading, _next_body = _section_after(prompt, "## Past the hunk")
+    assert next_heading == "## Severity, three levels and the third one matters"
+
+    for path in PROMPTS.rglob("*.md"):
+        contains_it = "## Past the hunk" in path.read_text()
+        assert contains_it == (path.name == "review-conventions.md"), path
+
+
 def test_the_lenses_declare_disjoint_remits():
     """Lenses are disjoint by construction — that is why one blocker routes
     onward and why there is no vote. Each names the other's territory as not
@@ -463,8 +511,8 @@ def test_the_lenses_declare_disjoint_remits():
 
 _APPENDED_BULLET = (
     "A comment, docstring or citation that misstates its own code or the "
-    "text it cites, or a constant or helper restated rather than imported. "
-    "That is the conventions lens."
+    "text it cites, or a type, constant or helper restated rather than "
+    "imported. That is the conventions lens."
 )
 
 _CONVENTIONS_BULLETS = [
@@ -525,25 +573,8 @@ def _not_yours_bullets_and_edge(text):
     joined on whitespace. Shared across all four templates: each carries
     exactly one `Not yours.` paragraph and one edge sentence that opens
     `The test at the edge`."""
-    start = text.index("Not yours.")
-    edge_start = text.index("The test at the edge", start)
-    block_lines = text[start:edge_start].splitlines()
-    first_bullet = next(
-        i for i, line in enumerate(block_lines) if line.startswith("- ")
-    )
-    bullets: list[str] = []
-    current: list[str] = []
-    for line in block_lines[first_bullet:]:
-        if not line.strip():
-            continue
-        if line.startswith("- "):
-            if current:
-                bullets.append(" ".join(" ".join(current).split()))
-            current = [line[2:]]
-        else:
-            current.append(line)
-    if current:
-        bullets.append(" ".join(" ".join(current).split()))
+    bullets = _bullets_between(text, "Not yours.", "The test at the edge")
+    edge_start = text.index("The test at the edge", text.index("Not yours."))
     edge_paragraph = text[edge_start:].split("\n\n")[0]
     return bullets, " ".join(edge_paragraph.split())
 
@@ -571,6 +602,89 @@ def test_the_four_lenses_declare_disjoint_remits():
     bullets, edge = table["conventions"]
     assert bullets == _CONVENTIONS_BULLETS
     assert edge == _CONVENTIONS_EDGE
+
+
+def test_the_other_three_lenses_hand_a_restated_type_to_conventions():
+    """Correctness, contract and adequacy each hand the conventions lens
+    'a type, constant or helper restated rather than imported'. That
+    phrase matches the conventions remit's own third question. No prompt
+    file still carries the older 'a constant or helper restated'."""
+    for lens in ("correctness", "contract", "adequacy"):
+        text = (PROMPTS / review.LENSES[lens]).read_text()
+        bullets, _edge = _not_yours_bullets_and_edge(text)
+        assert bullets[-1] == _APPENDED_BULLET
+
+    joined = " ".join(
+        " ".join(path.read_text().split()) for path in PROMPTS.rglob("*.md")
+    )
+    assert "a constant or helper restated" not in joined
+
+
+def _bullets_between(text, start_marker, end_marker):
+    """The bulleted list between two markers, each bullet joined on
+    whitespace. `_not_yours_bullets_and_edge` calls it with the
+    `Not yours.` and `The test at the edge` pair every lens shares."""
+    start = text.index(start_marker)
+    end = text.index(end_marker, start)
+    block_lines = text[start:end].splitlines()
+    first_bullet = next(
+        i for i, line in enumerate(block_lines) if line.startswith("- ")
+    )
+    bullets: list[str] = []
+    current: list[str] = []
+    for line in block_lines[first_bullet:]:
+        if not line.strip():
+            continue
+        if line.startswith("- "):
+            if current:
+                bullets.append(" ".join(" ".join(current).split()))
+            current = [line[2:]]
+        else:
+            current.append(line)
+    if current:
+        bullets.append(" ".join(" ".join(current).split()))
+    return bullets
+
+
+_ADEQUACY_WITNESS_BULLET = (
+    "**A witness pinned to the constant it tests.** It compares the output "
+    "with that constant or file, or with a helper that builds from either. "
+    "Give the constant a wrong value and both sides of the assertion move "
+    "together. It is yours only when no test in the suite pins that value "
+    "as a literal. A routing check beside a literal pin of the same value "
+    "is not a finding. The edit to name is a wrong value for that constant."
+)
+
+_ADEQUACY_EDGE = (
+    "The test at the edge: if fixing the defect means changing what the "
+    "code computes or what it promises, it is not yours. If it means "
+    "changing what the *test* proves, it is yours. That covers "
+    "strengthening an assertion, deriving the value under test by running "
+    "the code rather than restating it, and exercising the actual changed "
+    "path."
+)
+
+
+def test_the_adequacy_prompt_names_a_witness_pinned_to_its_own_constant():
+    """Adequacy's remit gains a bullet for a witness pinned to the
+    constant it tests. Its edge sentence now names deriving a value by
+    running the code, rather than restating it."""
+    text = (PROMPTS / review.LENSES["adequacy"]).read_text()
+    assert "## Your remit, and its edges" in text
+    assert "For every one of these" in text
+    bullets = _bullets_between(
+        text, "## Your remit, and its edges", "For every one of these"
+    )
+    assert bullets[-1] == _ADEQUACY_WITNESS_BULLET
+
+    for lens, path in review.LENSES.items():
+        if lens == "adequacy":
+            continue
+        other = " ".join((PROMPTS / path).read_text().split())
+        assert "A witness pinned to the constant it tests" not in other
+
+    _bullets, edge = _not_yours_bullets_and_edge(text)
+    assert edge == _ADEQUACY_EDGE
 
 
 # The spec's block, restated so the witness cannot agree with any wording.
@@ -604,6 +718,7 @@ def test_the_conventions_lens_says_a_repo_without_claude_md_declares_none():
             "REVIEW",
             CONTEXT_MD,
             template=template,
+            keep_avoid=lens == "conventions",
             spec="fix the gap",
             diff=DIFF,
             gates="- tests: pass (pytest 8.0)",
@@ -619,6 +734,95 @@ def test_the_conventions_lens_says_a_repo_without_claude_md_declares_none():
             gates="- tests: pass (pytest 8.0)",
         )
         assert actual == expected, (lens, claude_md)
+
+
+_AVOID_CONTEXT_MD = """## 1. Core
+
+**Cell**: One isolated container.
+_Avoid_: "box", "pod".
+
+**Gate**: One declared check.
+_Avoid_ also: "linter" for a gate that
+runs the suite, "checker".
+
+## 6. Outcomes
+
+**Verdict**: A lens's answer.
+_Avoid_: "ruling".
+"""
+
+
+def test_only_the_conventions_lens_reads_the_avoid_lists():
+    """The conventions lens alone keeps each `_Avoid_` paragraph of the
+    sections REVIEW receives, in place under its own entry. A one-line
+    paragraph, an `_Avoid_ also` paragraph and a wrapped paragraph all
+    survive for it. A section REVIEW does not receive, such as section 6,
+    stays out. Every other REVIEW session keeps the stripped vocabulary."""
+
+    def _prompt(lens: str) -> str:
+        return review.lens_prompt(
+            lens,
+            context_md=_AVOID_CONTEXT_MD,
+            claude_md=None,
+            prompts_dir=PROMPTS,
+            spec_body="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+        )
+
+    conventions = _prompt("conventions")
+    assert '**Cell**: One isolated container.\n_Avoid_: "box", "pod".' in conventions
+    assert (
+        '**Gate**: One declared check.\n_Avoid_ also: "linter" for a gate that\n'
+        'runs the suite, "checker".'
+    ) in conventions
+    assert "**Verdict**" not in conventions
+    assert '"ruling"' not in conventions
+
+    for lens in ("correctness", "contract", "adequacy"):
+        prompt = _prompt(lens)
+        assert "**Cell**: One isolated container." in prompt
+        for banned in ("_Avoid_", '"box"', '"checker"', "runs the suite"):
+            assert banned not in prompt
+
+    assert "_Avoid_" not in context.sections_for("REVIEW", _AVOID_CONTEXT_MD)
+
+    probe_prompt = review.criterion_probe_prompt(
+        claim="fix the gap",
+        diff=DIFF,
+        context_md=_AVOID_CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+    )
+    assert "**Cell**: One isolated container." in probe_prompt
+    assert "_Avoid_" not in probe_prompt
+
+    version_prompt = review.wrong_version_prompt(
+        claim="fix the gap",
+        wrong_versions=["skip the fix"],
+        diff=DIFF,
+        context_md=_AVOID_CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+    )
+    assert "**Cell**: One isolated container." in version_prompt
+    assert "_Avoid_" not in version_prompt
+
+    def _real_prompt(lens: str) -> str:
+        return review.lens_prompt(
+            lens,
+            context_md=CONTEXT_MD,
+            claude_md=None,
+            prompts_dir=PROMPTS,
+            spec_body="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+        )
+
+    real_conventions = _real_prompt("conventions")
+    real_correctness = _real_prompt("correctness")
+    assert '_Avoid_: "reviewer", "pass", "check", "critic #2".' in real_conventions
+    assert '_Avoid_: "reviewer", "pass", "check", "critic #2".' not in real_correctness
 
 
 def test_the_declared_lenses_are_the_three_that_run():
