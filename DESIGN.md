@@ -400,7 +400,7 @@ Everything above is the scheduler once the queue is deep. This is what v1 builds
 
 > Item 18 counts five instances and declines to number a sixth. This is the sixth, and #27 called it the fifth — the miscount is worth correcting precisely because the pattern's value is in the count.
 
-**The refusal gate refuses eight things, and the fifth is the only one with a corpse behind it.** §4.2's four stand as written, `depends_on` is the sixth, `SA-0023`'s is the seventh — a spec whose own `touches` are protected paths, refused before the cell rather than after the plan checkpoint has spent its budget — and `SA-0027`'s is the eighth, which belongs beside the fifth rather than at the end: both refuse *a path named that no `touches` pattern reaches*, read from two different sources — an acceptance criterion in the one case, a `saffron:retired-by` marker in the repository in the other. This count has now been wrong by one twice, each time within a release of being corrected; backlog item 48 is the standing item for the reader that would notice a ninth. The fifth is: **a spec whose acceptance criteria name a path that no `touches` pattern matches.** Item 18 measured that such a spec is unsatisfiable by construction — `SA-0005` burned $5.34 and died at turn 61 because its criteria reached `cli.py` and `package.py` while its `touches` did not, so the implementer could not have satisfied them without failing `scope`, and one finding was dropped as unanchorable for the same reason. The adjudication was that **the fault was the spec's, not the implementer's**, and nothing in intake checked for it. A ninth refusal now exists outside the gate. `run_task` refuses an unresolved or unreadable `consumes` entry before the cell. The scan admitted that task, so the refusal prints one line and writes no queue row (§4.2, gate 0).
+**The refusal gate refuses eight things, and the fifth is the only one with a corpse behind it.** §4.2's four stand as written, `depends_on` is the sixth, `SA-0023`'s is the seventh — a spec whose own `touches` are protected paths, refused before the cell rather than after the plan checkpoint has spent its budget — and `SA-0027`'s is the eighth, which belongs beside the fifth rather than at the end: both refuse *a path named that no `touches` pattern reaches*, read from two different sources — an acceptance criterion in the one case, a `saffron:retired-by` marker in the repository in the other. This count has now been wrong by one twice, each time within a release of being corrected; backlog item 48 is the standing item for the reader that would notice a ninth. The fifth is: **a spec whose acceptance criteria name a path that no `touches` pattern matches.** Item 18 measured that such a spec is unsatisfiable by construction — `SA-0005` burned $5.34 and died at turn 61 because its criteria reached `cli.py` and `package.py` while its `touches` did not, so the implementer could not have satisfied them without failing `scope`, and one finding was dropped as unanchorable for the same reason. The adjudication was that **the fault was the spec's, not the implementer's**, and nothing in intake checked for it. A ninth refusal now exists outside the gate. `run_task` refuses an unresolved or unreadable `consumes` entry before the cell. The scan admitted that task, so the refusal prints one line and writes no queue row (§4.2, gate 0). Under `--stack` the stack order replaces the sixth. It refuses a spec whose `depends_on` entry is neither earlier in the order nor on the default branch (ADR 7, `SA-0142`).
 
 Three things that condition has to get right, and the obvious statement of it gets all three wrong:
 
@@ -446,7 +446,7 @@ Every phase is bounded on five axes, all enforced host-side:
 
 **Note the order of the spend row, because it inverts the obvious one.** The agent runtime offers a per-query spend ceiling, and it is tempting to treat that as *the* budget enforcement. It is not: it is evaluated by the runtime process, which runs **inside the cell**, against the runtime's own running estimate. That places it on the untrusted side of §2's boundary — the same category as the `PreToolUse` path check (§5.3), valuable for cutting off a runaway attempt a few seconds earlier, worthless as a guarantee. The ceiling that holds is the supervisor's, because the supervisor is on the host and stops the cell rather than asking it to stop itself. The in-cell ceiling is still worth setting, for the same reason the path check is: it saves turns. It is just not what N2 rests on.
 
-**Two phases depart from the spend row.** REVIEW is never stopped for money. Each lens runs on the task's remainder, floored at $2 (`REVIEW_FLOOR_USD`), and the host sums the cost after every lens has run. REBUT checks the ceiling before its turn, so a task already at it ends `EXHAUSTED` with no rebuttal (§5.6).
+**Two phases depart from the spend row.** REVIEW is never stopped for money. Each lens runs on the task's remainder, floored at $2 (`REVIEW_FLOOR_USD`), and the host sums the cost after every lens has run. REBUT checks the ceiling before its turn (§5.6).
 
 Five, and the last two are the ones you only discover by running this overnight — rev 2 had three. Splitting **idle** from **completion** matters because they want opposite treatment: silence *before* the agent claims to be done is a stall, and silence *after* is almost always a lingering child process. Collapsing them means a finished agent burns the full idle timeout and then gets treated as a failure.
 
@@ -540,7 +540,7 @@ An isomorphic re-encoding of §4.1 — one class per table, one datatype propert
 
 ### 4.7 The event log
 
-Each task writes one `events.jsonl`, beside its other per-task artifacts. `saffron watch` follows it. It is a record for a person, and no control reads it.
+Each spec has one `events.jsonl`, shared by every task that spec runs. `saffron watch` follows it. It is a log for a person, and no control reads it.
 
 **The kinds are the `Event` union in `saffron/events.py`.** Each kind is its own frozen dataclass, never one class with a `type` string. The union is the list. This section names no count, because a count here drifts each time a kind lands.
 
@@ -550,7 +550,7 @@ Each task writes one `events.jsonl`, beside its other per-task artifacts. `saffr
 
 **A reader tolerates damage per line, never per file.** `read_log` drops a line it cannot make into an event. A truncated line, an unknown `kind` and a field of the wrong shape each cost that line alone.
 
-**The ceiling is one file per task, with no rotation, compression or size cap.** One `Agent` event is cut at `BOUND_CHARS` characters. Nothing bounds the file.
+**The ceiling is one file per spec, with no rotation, compression or size cap.** One `Agent` event is cut at `BOUND_CHARS` characters. Nothing bounds the file.
 
 ---
 

@@ -35,4 +35,4 @@ protected.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
-- 2026-09-29: each sentence says what the code does today. `size`'s own docstring still names a `-diff` attribute as its example.
+- 2026-09-29: each sentence says what the code does today. `size`'s docstring now takes a NUL byte as its example, since no `-diff` attribute reaches the diff.

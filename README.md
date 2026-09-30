@@ -149,8 +149,8 @@ Load-bearing, and the only thing a calling script reads:
 | `1` | the task did not make it | never |
 | `2` | infrastructure failed, or the task is `RATE_LIMITED` | infrastructure failed, or the night is `INCOMPLETE` |
 
-`INCOMPLETE` means a task came back with no end state. The token and the mirror
-were fine, and the line it prints says so.
+`INCOMPLETE` means a task came back with no end state. The machine did not break,
+so look at the task before the token or the mirror.
 
 PACKAGE opens the PR as a draft: ratifying one means `gh pr ready <n>` before
 `gh pr merge`.
