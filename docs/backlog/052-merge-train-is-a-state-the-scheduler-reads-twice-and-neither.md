@@ -203,11 +203,16 @@ open naming decision 2 is now settled decision 8.
   `MERGE_TRAIN` is an `EndState`. `EndState`'s comment now states the rule: the
   task is no longer Saffron's to advance. `TaskShape` lists `MERGE_TRAIN`.
 - `InFlightStateShape` closes the eight and refuses one also typed an end state.
-- The glossary's closed set is **In-flight state**. **Task state** is prose, since
-  rdflib infers no subclass and a rendered span over all 24 would retype each one.
+- The glossary renders **In-flight state** and **End state**, and **Task state** is
+  their union in prose. The renderer now reads a class's subclasses too, so it
+  writes `TaskShape`'s endedInState list, which was hand-kept.
 - `ledger.TaskState` is held to the three classes. `IN_FLIGHT_STATES` equals
   `InFlightState`. The scheduler's four sets sit inside `TaskState`, and done plus
   re-queue covers every end state exactly once.
 - `_STATE_RANK` and `_RANKED_BY_RISK` cover every `RowState` once. A state in
   neither now sorts with the states that need you. `CELL_EXIT` keeps its default.
 - `DESIGN.md` §3.3 says which set `MERGE_TRAIN` joined, and §6.1 names the signal.
+- PACKAGE returns a reused pull request to draft, so a resumed task needs a new
+  mark ready. Without it, a ready left from an earlier round approved the new push.
+- The refusal row kind this item said was filed separately had no record. It is
+  now b-cec9a7.

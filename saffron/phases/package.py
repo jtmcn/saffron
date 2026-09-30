@@ -407,7 +407,7 @@ def open_draft_pr(
     body_path: Path,
     gh: GhRunner = run_gh,
 ) -> str:
-    """Open the pull request as a draft, or report the one already there.
+    """Open the pull request as a draft, or return the one already there to draft.
 
     Called *after* the push, deliberately: a missing or unauthenticated `gh`
     then leaves a branch you can open by hand, where the other order loses the
@@ -450,7 +450,16 @@ def open_draft_pr(
         ["gh", "pr", "view", branch, "--repo", slug, "--json", "url", "--jq", ".url"]
     )
     if view.returncode == 0 and view.stdout.strip():
-        return view.stdout.strip()
+        existing = view.stdout.strip()
+        # Reconcile reads a non-draft pull request as APPROVED, so an earlier
+        # ready must not approve this new push (item 52).
+        undo = gh(["gh", "pr", "ready", existing, "--repo", slug, "--undo"])
+        if undo.returncode != 0:
+            raise PackageError(
+                f"{existing} could not be returned to draft, so reconcile would "
+                f"read it as approved: {undo.stderr.strip()[:200]}"
+            )
+        return existing
     raise PackageError(
         f"gh could not open or find a pull request for {branch} "
         f"(it is already pushed): {done.stderr.strip()[:200]}"

@@ -101,14 +101,10 @@ def test_every_core_gate_declares_a_blocking_level(shapes_graph):
 
 
 def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
-    """`TaskShape`'s endedInState list is a hand-maintained *superset* of the
-    now-generated `TerminalStateShape` list, and nothing held the generated
-    subset inside it. Measured: declaring `factory:BUDGET_SPENT` and running the
-    renderer left `tests/ontology/` and the `shacl` gate green while a one-task
-    graph was rejected — the shapes file saying a state reaches the operator and
-    that no task may end in it. endedInState closes over `EndState`, a superset,
-    so it is correctly not generated; that makes it a hole to route to a person,
-    which is the argument `CoreGateBlockingShape` already carries one shape over.
+    """`TaskShape`'s endedInState list is a *superset* of `TerminalStateShape`'s.
+    Measured when it was hand-kept: declaring `factory:BUDGET_SPENT` left the gate
+    green while a one-task graph was rejected. The renderer now writes it from
+    `EndState` and its subclasses (item 52), and this still holds the subset.
     """
     vocabulary = rdflib.Graph().parse(VOCABULARY, format="turtle")
     terminal = set(
@@ -121,8 +117,7 @@ def test_every_terminal_state_is_a_state_a_task_can_end_in(shapes_graph):
     missing = sorted(str(state).removeprefix(NS) for state in terminal - accepted)
     assert not missing, (
         f"terminal states no task may end in: {missing}. Add each to "
-        "factory:TaskShape's endedInState sh:in list in factory-shapes.ttl — it "
-        "closes over EndState, a superset, so the generator cannot write it."
+        "factory:TaskShape's endedInState list. Run `uv run python -m ontology.render`."
     )
 
 

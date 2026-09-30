@@ -20,17 +20,21 @@ NS = "urn:software-factory:ns#"
 
 
 def members(class_name: str, *, vocabulary: Path) -> list[str]:
-    """Local names of every instance of `factory:<class_name>`, in the order
-    they first appear in the vocabulary's own text.
+    """Local names of every instance of `factory:<class_name>` or a subclass of
+    it, in the order they first appear in the vocabulary's own text.
 
     Source order, not graph order: rdflib iterates unordered, and the committed
     enumerations are in an order a reader chose. Sorting would rewrite them.
     """
     text = vocabulary.read_text()
     graph = rdflib.Graph().parse(vocabulary, format="turtle")
+    classes = graph.transitive_subjects(
+        rdflib.RDFS.subClassOf, rdflib.URIRef(f"{NS}{class_name}")
+    )
     names = [
         str(s).removeprefix(NS)
-        for s in graph.subjects(rdflib.RDF.type, rdflib.URIRef(f"{NS}{class_name}"))
+        for cls in classes
+        for s in graph.subjects(rdflib.RDF.type, cls)
     ]
 
     def first_offset(name: str) -> int:
@@ -140,6 +144,7 @@ SHAPE_SETS = {
     "factory:GateRoleShape": "GateRole",
     "factory:InFlightStateShape": "InFlightState",
     "factory:TerminalStateShape": "TerminalState",
+    "sh:path factory:endedInState": "EndState",
     "sh:path factory:riskTier": "RiskTier",
     "sh:path factory:endedBecause": "BatchStopReason",
     "sh:path factory:severity": "Severity",

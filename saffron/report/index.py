@@ -66,7 +66,7 @@ _RANKED_BY_RISK: frozenset[RowState] = frozenset(
     }
 )
 # Where a state in neither set sorts: with the states that need you.
-_UNRANKED = 2
+_UNRANKED = _STATE_RANK["GATE_ERROR"]
 # Level 3 (§6): a sustained blocker — `confirmed` **and** `argued`, never a
 # state in `_STATE_RANK`, so it only pre-empts the elevated/ordinary fallback
 # below and never the states above, which already need you more.

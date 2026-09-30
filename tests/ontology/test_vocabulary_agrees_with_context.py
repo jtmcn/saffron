@@ -21,6 +21,7 @@ CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
 # term in CONTEXT.md -> the class in the ontology whose members it should match
 CLOSED_SETS = {
     "In-flight state": "InFlightState",
+    "End state": "EndState",
     "Terminal state": "TerminalState",
     "Batch stop reason": "BatchStopReason",
     "Severity": "Severity",
@@ -54,10 +55,15 @@ def context_enumeration(term: str) -> set[str]:
 
 
 def ontology_members(class_name: str) -> set[str]:
+    """Instances of the class or any subclass. rdflib infers neither."""
     graph = rdflib.Graph().parse(VOCABULARY, format="turtle")
+    classes = graph.transitive_subjects(
+        rdflib.RDFS.subClassOf, rdflib.URIRef(f"{NS}{class_name}")
+    )
     return {
         str(s).removeprefix(NS)
-        for s in graph.subjects(rdflib.RDF.type, rdflib.URIRef(f"{NS}{class_name}"))
+        for cls in classes
+        for s in graph.subjects(rdflib.RDF.type, cls)
     }
 
 

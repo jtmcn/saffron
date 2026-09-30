@@ -671,6 +671,52 @@ def test_a_second_package_reports_the_existing_pr(tmp_path):
     assert calls[1][2] == "view"
 
 
+def test_a_second_package_returns_the_existing_pr_to_draft(tmp_path):
+    """Item 52: marking ready is the approval, so a new push needs a new act."""
+    body = tmp_path / "body.md"
+    body.write_text("## body\n")
+    calls = []
+    open_draft_pr(
+        slug="o/r",
+        branch="saffron/SA-0005",
+        base="main",
+        title="t",
+        body_path=body,
+        gh=fake_gh(calls, create_rc=1, view_url="https://github.com/o/r/pull/3"),
+    )
+    assert calls[2] == [
+        "gh",
+        "pr",
+        "ready",
+        "https://github.com/o/r/pull/3",
+        "--repo",
+        "o/r",
+        "--undo",
+    ]
+
+
+def test_a_pr_that_cannot_return_to_draft_fails_packaging(tmp_path):
+    body = tmp_path / "body.md"
+    body.write_text("## body\n")
+
+    def gh(argv):
+        if argv[2] == "create":
+            return sp.CompletedProcess(argv, 1, "", "already exists")
+        if argv[2] == "view":
+            return sp.CompletedProcess(argv, 0, "https://github.com/o/r/pull/3\n", "")
+        return sp.CompletedProcess(argv, 1, "", "drafts unsupported")
+
+    with pytest.raises(PackageError, match="approved"):
+        open_draft_pr(
+            slug="o/r",
+            branch="saffron/SA-0005",
+            base="main",
+            title="t",
+            body_path=body,
+            gh=gh,
+        )
+
+
 def test_a_missing_gh_is_infrastructure_and_says_the_branch_is_pushed(tmp_path):
     body = tmp_path / "body.md"
     body.write_text("## body\n")

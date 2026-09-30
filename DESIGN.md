@@ -294,7 +294,7 @@ Design notes:
 
 Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `SPEC_WITHHELD`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`. Everything else is internal. The last three are named rather than folded into a neighbour because the alternative is an abort, or an attempt that produced nothing, reading as an ordinary task outcome — principle 34 wearing a state name.
 
-`MERGE_TRAIN` is an end state and not a terminal one, like `APPROVED` before it (item 52). A task there waits on the train, not on the operator. The rule behind every end state is that the task is no longer Saffron's to advance. The eight in-flight states from `DRAFT` to `REBUTTING` are the rest, and `CONTEXT.md` §6 names both sets.
+`MERGE_TRAIN` is an end state and not a terminal one, as `APPROVED` is (item 52). A task there waits on the train, not on the operator. The rule behind every end state is that the task is no longer Saffron's to advance. The eight in-flight states from `DRAFT` to `REBUTTING` are the rest, and `CONTEXT.md` §6 names both sets.
 
 ---
 
