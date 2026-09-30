@@ -25,6 +25,66 @@ Severity = Literal["blocker", "concern", "note"]
 _HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _WORD = re.compile(r"\w+")
 
+# A list literal, not text.split(): ruff flags str.split on a literal (§5.5).
+_COMMON_WORDS = frozenset(
+    [
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "but",
+        "by",
+        "else",
+        "for",
+        "from",
+        "here",
+        "how",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "no",
+        "nor",
+        "not",
+        "of",
+        "on",
+        "or",
+        "other",
+        "so",
+        "than",
+        "that",
+        "the",
+        "then",
+        "there",
+        "these",
+        "this",
+        "those",
+        "to",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "with",
+        "you",
+        "your",
+        "yours",
+    ]
+)
+
 
 class Finding(BaseModel):
     """One finding from one lens — the `findings` row the critic produces (§4.1).
@@ -163,4 +223,7 @@ def _is_anchored(
     lines = split_lines(content)
     if not 1 <= finding.line <= len(lines):
         return False
-    return bool(facts.tokens & set(_WORD.findall(lines[finding.line - 1])))
+    shared = facts.tokens & set(_WORD.findall(lines[finding.line - 1]))
+    # A shared "the" or "is" names nothing the diff changed. Only a token that
+    # survives the common-word list is a real anchor (backlog item b-38d45f).
+    return any(token.casefold() not in _COMMON_WORDS for token in shared)

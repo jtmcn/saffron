@@ -66,6 +66,24 @@ def read_head(repo):
     return read
 
 
+def _edit_diff(path: str, removed: list[str], added: list[str]) -> str:
+    """Render one synthetic unified-diff hunk editing `path`, with no context."""
+    header = f"@@ -1,{len(removed)} +1,{len(added)} @@\n"
+    body = "".join(f"-{line}\n" for line in removed)
+    body += "".join(f"+{line}\n" for line in added)
+    return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{header}{body}"
+
+
+def _rename_diff(old_path: str, new_path: str) -> str:
+    """Render a pure rename, the four header lines and no hunk."""
+    return (
+        f"diff --git a/{old_path} b/{new_path}\n"
+        "similarity index 100%\n"
+        f"rename from {old_path}\n"
+        f"rename to {new_path}\n"
+    )
+
+
 def test_the_fixture_is_real_git_output_with_the_markers_that_bite(diff):
     assert "\\ No newline at end of file" in diff
     assert "--- /dev/null" in diff
@@ -213,3 +231,150 @@ def test_a_patch_file_parses_like_its_diff(repo, diff):
     patch = git(repo, "format-patch", "-1", "-M", "--stdout")
     assert patch.rstrip().splitlines()[-2] == "-- "
     assert parse_diff(patch) == parse_diff(diff)
+
+
+def test_a_line_sharing_only_common_words_with_the_diff_does_not_anchor():
+    from saffron.agents.findings import _COMMON_WORDS
+
+    words = [
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "being",
+        "but",
+        "by",
+        "else",
+        "for",
+        "from",
+        "here",
+        "how",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "no",
+        "nor",
+        "not",
+        "of",
+        "on",
+        "or",
+        "other",
+        "so",
+        "than",
+        "that",
+        "the",
+        "then",
+        "there",
+        "these",
+        "this",
+        "those",
+        "to",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "with",
+        "you",
+        "your",
+        "yours",
+    ]
+    assert frozenset(words) == _COMMON_WORDS
+
+    for word in words:
+        for spelling in (word, word[0].upper() + word[1:]):
+            diffs = [
+                _edit_diff("changed.md", ["yak"], [f"{spelling} zebra"]),
+                _edit_diff("changed.md", [f"{spelling} zebra"], ["yak"]),
+                _rename_diff(f"{spelling}.md", "yak.md"),
+            ]
+            for one_diff in diffs:
+                assert spelling in parse_diff(one_diff).tokens
+                for cited in ("cited.md", "cited.py"):
+                    content = {cited: f"{spelling} owl"}
+                    finding = Finding(
+                        lens="l", severity="note", file=cited, line=1, claim="c"
+                    )
+                    reconciled = anchor([finding], one_diff, read_head=content.get)
+                    assert reconciled[0].anchored is False
+
+
+def test_sa_0192s_probe_line_anchors_through_its_content_words_alone():
+    diff = _edit_diff(
+        "tests/test_review.py",
+        [],
+        [
+            '    "What else in the repository calls the changed code, and what breaks "',
+            "    reaches the conventions prompt as before, and the other three lenses",
+            "  every other promise to something outside the change. That is the contract",
+        ],
+    )
+    path = "saffron/agents/prompts/review-correctness.md"
+    cases = [
+        ("other lenses redundant. Yours is what the changed code *computes*:", True),
+        ("other redundant. Yours is what the *computes*:", False),
+        ("changed redundant.", True),
+        ("code redundant.", True),
+        ("lenses redundant.", True),
+        ("other redundant.", False),
+        ("is redundant.", False),
+        ("what redundant.", False),
+        ("the redundant.", False),
+    ]
+    for line, expected in cases:
+        content = {path: "\n" * 29 + line}
+        finding = Finding(
+            lens="adequacy", severity="blocker", file=path, line=30, claim="c"
+        )
+        reconciled = anchor([finding], diff, read_head=content.get)
+        assert reconciled[0].anchored is expected
+
+    diff2 = _edit_diff("changed.md", ["yak"], ["The DiffFacts row"])
+    for cited in ("cited.md", "cited.py"):
+        finding = Finding(
+            lens="adequacy", severity="blocker", file=cited, line=1, claim="c"
+        )
+        matching = {cited: "the DiffFacts owl"}
+        assert anchor([finding], diff2, read_head=matching.get)[0].anchored is True
+
+        mismatched = {cited: "the Difffacts owl"}
+        result = anchor([finding], diff2, read_head=mismatched.get)
+        assert result[0].anchored is False
+
+
+def test_an_adequacy_finding_on_an_untouched_test_line_anchors_through_a_one_word_identifier():
+    diff = _edit_diff(
+        "src/fold.py",
+        ["def fold(rows):"],
+        [
+            "def fold(rows, strict):",
+            '    """Return the rows, and fail if it is empty."""',
+        ],
+    )
+    path = "tests/test_fold.py"
+    content = {
+        path: (
+            "def test_fold_keeps_order():\n"
+            "    assert fold([]) == []\n"
+            "    # it is the same list, and that is all"
+        )
+    }
+    findings = [
+        Finding(lens="adequacy", severity="concern", file=path, line=2, claim="a"),
+        Finding(lens="adequacy", severity="concern", file=path, line=3, claim="b"),
+    ]
+    reconciled = anchor(findings, diff, read_head=content.get)
+    assert [f.anchored for f in reconciled] == [True, False]
