@@ -34,3 +34,6 @@ estimate at 1.0. `check` prints which basis it used.
 - 2026-09-29: hit again in the spec loop's run 21. `check` priced `SA-0188` at
   92%. It landed at 2596 of 3000, then 2732 after review. The prose ratchet
   judges a rewritten docstring as new text, so review grew it.
+- 2026-09-29: hit again in the spec loop's run 22. `SA-0151` blocked at 3044
+  tokens on the 1.59 multiplier. Its spec recorded a measured prototype at
+  1909 (64%). The operator ran it as written.

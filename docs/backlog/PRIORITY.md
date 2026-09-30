@@ -188,6 +188,11 @@ id makes `revert` check no witness. A witness that reads the constant it tests
 cannot fail. A lens withdrew a real `preserves` blocker because its line sat
 outside the diff.
 
+**Placed 2026-09-29**, from the spec loop's run 22: **b-8170eb**, then
+**b-a6bfb0**. An agent that never reached the API was recorded
+`NOT_IMPLEMENTED`, and the loop passed its spec over. Its calls were refused
+though preflight's egress check passed, and no log says why.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -323,6 +328,10 @@ session transcript, so a strange PR shows what the agent did but not what it rea
 stack's new lens runs in none of its cells. The second is what the conventions
 prompt misses. The last two are a witness and an anchor that pass too much.
 
+**Placed 2026-09-29**, from the spec loop's run 22: **b-7a70fd**, then
+**b-ef8543**. Four tests fail in every cell, and subtraction hides them. A
+spec's wrong builds listed in prose reach no host run.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -368,6 +377,11 @@ other is a fixture field under `docs/**` that no cell could add.
 
 **Placed 2026-09-29**, from closing item 94: **b-bf970a**. Two tests skip on
 uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
+
+**Placed 2026-09-29**, from the spec loop's run 22: **b-695234**,
+**b-12e717**, **b-2dd65f**, **b-830dc7**, **b-b1a7d4**, then **b-1f1188**.
+The first three are defects in REVIEW and REBUT that the run's seats found.
+The last three are gaps in the spec chain's own tools.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",

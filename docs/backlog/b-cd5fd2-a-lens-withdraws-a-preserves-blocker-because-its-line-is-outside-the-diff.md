@@ -39,3 +39,6 @@ standing.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-29: hit again one run later, on `SA-0194` (#598) in run 22.
+  `SA-0193`'s fix sat unmerged, and REVIEW runs main's code (item b-66d1c3).
+  The review commit fixed the witness.
