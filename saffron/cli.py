@@ -9,15 +9,15 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
-from saffron import end_review, preflight, spec_review
+from saffron import end_review, follow_up, preflight, qualify, spec_review
 from saffron.agents import context
 from saffron.batch import run_batch, run_stack_batch
-from saffron.cell import runtime
+from saffron.cell import runtime, worktree
 from saffron.cell.session import (
     _SAFFRON_ROOT,
     TURN_TIMEOUT_S,
@@ -876,6 +876,143 @@ def _stack_mint(
     return run
 
 
+def _stack_follow_ups(
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    ledger: Ledger,
+    out_dir: Path,
+    cap_usd: float,
+    pooled: list[follow_up.Pooled],
+) -> Callable[[str, end_review.StackReview], list[Candidate]]:
+    """`run_stack_batch`'s `follow_ups` adapter (ADR 7, `SA-0165`). Every
+    input is read at the pinned base, once, before `follow_up.write_follow_ups`
+    runs. A broken policy then costs one line and no cell. A raise from
+    that call after `qualify` returns still pools every unaccepted finding
+    its walk never reached.
+    """
+
+    def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
+        if not stack.layers:
+            return []
+
+        kept: qualify.Qualification | None = None
+        written: tuple[str, str] | None = None
+        minted: dict[tuple[str, str], int] = {}
+
+        def note(step: str, ok: bool, detail: str) -> None:
+            print(detail)
+
+        try:
+            exported = git_mirror.export_saffron_dir(
+                pinned.mirror, pinned.base_sha, out_dir / "follow-ups" / batch_key
+            )
+            policy, _ = load_policy(exported)
+            system_prompt = spec_review.spec_writer_system_prompt(
+                policy, prompts_dir=context.PROMPTS_DIR
+            )
+            repo_id = ledger.resolve_repo_id(pinned.url)
+            if repo_id is None:
+                raise ValueError(f"no repo recorded for {pinned.url}")
+            top = end_review.layer_fields(ledger, stack.layers[0].task_key)
+
+            created: set[str] = set()
+
+            def run_qualify(
+                layers: Sequence[end_review.LayerReview],
+                join: review.LensReview | None,
+            ) -> qualify.Qualification:
+                nonlocal kept
+                kept = qualify.qualify(
+                    ledger,
+                    layers,
+                    join,
+                    mirror=pinned.mirror,
+                    repo=repo,
+                    gates_dir=exported,
+                    thread_env=policy.thread_env,
+                    test_paths=policy.integrity.test_paths,
+                    gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
+                    created=created,
+                    note=note,
+                )
+                return kept
+
+            def write(
+                group: follow_up.FollowUpGroup, prompt: str
+            ) -> spec_review.SpecWriterSession:
+                nonlocal written
+                written = (group.task_key, group.file)
+                origin = end_review.layer_fields(ledger, group.task_key)
+                agent = partial(
+                    implement.run_agent,
+                    spec_id=f"follow-up-{origin.spec_id}",
+                    timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+                )
+                with end_review.layer_cell(
+                    top,
+                    repo=repo,
+                    mirror=pinned.mirror,
+                    gates_dir=exported,
+                    thread_env=policy.thread_env,
+                    spec_session=True,
+                ) as container:
+                    return spec_review.run_spec_writer(
+                        container,
+                        system_prompt=system_prompt,
+                        prompt=prompt,
+                        agent=agent,
+                    )
+
+            stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
+
+            def mint(candidate: Candidate) -> int:
+                task_id = stack_mint(candidate)
+                if written is not None:
+                    minted[written] = task_id
+                return task_id
+
+            return follow_up.write_follow_ups(
+                ledger,
+                stack,
+                batch_key=batch_key,
+                qualify=run_qualify,
+                write=write,
+                mint=mint,
+                mirror=pinned.mirror,
+                specs_dir=exported / ".saffron" / "specs",
+                repo_id=repo_id,
+                test_paths=policy.integrity.test_paths,
+                cap_usd=cap_usd,
+                emit=print,
+                pooled=pooled,
+            )
+        except Exception as exc:
+            message = " ".join(f"{type(exc).__name__}: {exc}".split())
+            print(f"follow-ups: stopped, {message}")
+            if kept is not None:
+                accepted = {
+                    key
+                    for key, task_id in minted.items()
+                    if ledger.spec_text(task_id) is not None
+                }
+                already = [f for p in pooled for f in p.group.findings]
+                for group in kept.groups:
+                    if (group.task_key, group.file) in accepted:
+                        continue
+                    remaining = tuple(f for f in group.findings if f not in already)
+                    if remaining:
+                        pooled.append(
+                            follow_up.Pooled(
+                                group=replace(group, findings=remaining),
+                                reason=message,
+                            )
+                        )
+            return []
+
+    return run
+
+
 @dataclass
 class QueueResolution:
     """What resolving one repo's queue over the pinned base produced —
@@ -1118,6 +1255,7 @@ def _print_batch_plan(
     budget_usd: float,
     until: datetime | None,
     reserve_usd: float | None = None,
+    writer_usd: float | None = None,
 ) -> None:
     """What the night is about to attempt, and what its scan could not check.
 
@@ -1133,11 +1271,13 @@ def _print_batch_plan(
     do before it says what became of it.
     """
     deadline = until.strftime("%Y-%m-%d %H:%M") if until is not None else "none"
-    # Only a `--stack` night holds a reserve, printed beside its budget.
+    # Only a `--stack` night holds a reserve or a writer sub-cap, printed
+    # beside its budget.
     reserve = f", reserve ${reserve_usd:.2f}" if reserve_usd is not None else ""
+    writer = f", writer ${writer_usd:.2f}" if writer_usd is not None else ""
     print(
         f"batch: {len(resolved.candidates)} candidate(s), "
-        f"budget ${budget_usd:.2f}{reserve}, until {deadline}"
+        f"budget ${budget_usd:.2f}{reserve}{writer}, until {deadline}"
     )
     for candidate in resolved.candidates:
         print(f"  {candidate.spec.id:<10} priority={candidate.spec.priority}")
@@ -1194,6 +1334,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # Bound to `--budget` and `--stack` alone, so the night stays sized
     # against the one number the operator gives it (stack-batch design §4).
     reserve_usd = args.budget * end_review.RESERVE_SHARE if args.stack else None
+    # The spec writer's own sub-cap, held back beside the reserve rather
+    # than inside it (stack-batch design §3, Money).
+    writer_usd = args.budget * follow_up.WRITER_SHARE if args.stack else None
 
     # Readiness first, and before the scan — §4.4's own order, step 1 ahead of
     # step 4. Run after it, `Readiness`'s `mirror`, `origin` and
@@ -1232,6 +1375,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         ]
         | None
     ) = None
+    # Same: no finding is turned into a follow-up until then.
+    follow_ups: Callable[[str, end_review.StackReview], list[Candidate]] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1269,7 +1414,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             # the one path where nobody is awake to notice.
             _print_reconcile_summary(resolved.reconciled)
             _print_batch_plan(
-                resolved, budget_usd=args.budget, until=until, reserve_usd=reserve_usd
+                resolved,
+                budget_usd=args.budget,
+                until=until,
+                reserve_usd=reserve_usd,
+                writer_usd=writer_usd,
             )
             candidates = resolved.candidates
 
@@ -1289,6 +1438,16 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 stack_review = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
                 stack_revise = _stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
                 stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
+                pooled: list[follow_up.Pooled] = []
+                assert writer_usd is not None  # set whenever `args.stack` is
+                follow_ups = _stack_follow_ups(
+                    pinned=pinned,
+                    repo=repo,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                    cap_usd=writer_usd,
+                    pooled=pooled,
+                )
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`
                 # callable reads the latest answer, not the opening one.
@@ -1331,10 +1490,12 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 stack_runner,
                 readiness_check=_readiness_or_raise,
                 reserve_usd=reserve_usd or 0.0,
+                writer_usd=writer_usd or 0.0,
                 end_review=stack_end_review,
                 review=stack_review,
                 mint=stack_mint,
                 revise=stack_revise,
+                follow_ups=follow_ups,
             )
         else:
             stop = run_batch(
