@@ -128,6 +128,9 @@ phase. The lines in `.saffron/rejections.md` are the evidence.
 - Jev filed a round as `round-3` because run 23 left an empty `round-2`.
 - The skill has no path for an `EXHAUSTED` cell the operator adopts: no PR
   body, no `stack` entry and no `size` (it refuses a non-reviewable task).
+- `stack --execute --top` refuses one reviewable PR ("needs two or more"),
+  even with step 5 on top. The delegate based #631 on #630 by hand and
+  marked both ready.
 - The delegate's first commit carried a `Co-Authored-By` line, against the
   operator's global rule. The session's attribution reminder asks for one.
   It was amended before the push.
