@@ -5339,3 +5339,210 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
         line.startswith("TE-126") and "RuntimeError: runner" in line for line in lines9
     )
     assert "follow-ups unrun  TE-122 TE-123" in lines9
+
+
+def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
+    ledger, repo_id
+):
+    """`finish` runs once, after the follow-ups, while the batch row is open.
+    It carries the task ids of every follow-up whose review never reached a
+    route (ADR 7, `SA-0171`). Driven across five nights: `UNTIL` mid
+    follow-up, a drain with no follow-ups offered, a `BUDGET` stop before
+    any candidate starts, and two drains with `follow_ups` then `end_review`
+    left out."""
+    from saffron.batch import run_stack_batch
+
+    finish_calls: list[tuple[int, list[int]]] = []
+    status_at_call: list[tuple[object, object]] = []
+
+    def finish(batch_id, unrun, /):
+        row = ledger._db.execute(
+            "SELECT status, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
+        ).fetchone()
+        status_at_call.append((row["status"], row["ended_at"]))
+        finish_calls.append((batch_id, list(unrun)))
+
+    # Night 1: `UNTIL` fires mid follow-up, at task 44's wait.
+    start1 = datetime(2026, 1, 1, tzinfo=UTC)
+    until1 = start1 + timedelta(seconds=30)
+
+    def _no_sleep(seconds):
+        raise AssertionError("sleep must not be called")
+
+    label_task_ids: dict[str, int] = {}
+
+    def follow_ups1(batch_key, stack_review):
+        for label in range(40, 49):
+            spec_id = f"TE-{label}"
+            run_id = ledger.create_run(
+                repo_id, base_sha="a" * 40, batch_id=int(batch_key)
+            )
+            task_id = ledger.create_task(
+                run_id, spec_id=spec_id, spec_sha="f" * 64, branch=f"saffron/{spec_id}"
+            )
+            label_task_ids[spec_id] = task_id
+        built = []
+        for label in (40, 41, 42, 48, 43, 46, 47, 44, 45):
+            spec_id = f"TE-{label}"
+            touches = ["f41.py"] if label == 41 else []
+            candidate = dataclasses.replace(
+                _candidate(spec_id, budget_usd=1.0, priority=1),
+                task_id=label_task_ids[spec_id],
+            )
+            candidate = dataclasses.replace(
+                candidate, spec=candidate.spec.model_copy(update={"touches": touches})
+            )
+            built.append(candidate)
+        return built
+
+    def _open_prs():
+        return [{"headRefName": "some/other-branch", "files": [{"path": "f41.py"}]}]
+
+    rows1 = {
+        "TE-42": {"route": "escalate"},
+        "TE-48": {"route": "raise"},
+        "TE-43": {"runner": "EXHAUSTED"},
+        "TE-46": {"route": "error"},
+        "TE-44": {
+            "route": "wait",
+            "resets_at": int((start1 + timedelta(minutes=10)).timestamp()),
+        },
+    }
+    doubles1 = StackDoubles(ledger, repo_id, rows1)
+
+    def runner1(candidate, predecessor=None):
+        if candidate.spec.id == "TE-47":
+            return Refused(reason="gate 0 refused")
+        return doubles1.runner(candidate, predecessor)
+
+    reason1 = run_stack_batch(
+        [_candidate("SP-1", budget_usd=1.0)],
+        ledger,
+        1000.0,
+        until1,
+        runner1,
+        readiness_check=_ready,
+        clock=lambda: start1,
+        emit=lambda line: None,
+        review=doubles1.review,
+        mint=doubles1.mint,
+        sleep=_no_sleep,
+        end_review=doubles1.end_review,
+        follow_ups=follow_ups1,
+        open_prs=_open_prs,
+        finish=finish,
+    )
+    assert reason1 == "UNTIL"
+    assert (
+        label_task_ids["TE-40"]
+        < label_task_ids["TE-41"]
+        < label_task_ids["TE-42"]
+        < label_task_ids["TE-43"]
+        < label_task_ids["TE-44"]
+        < label_task_ids["TE-45"]
+        < label_task_ids["TE-46"]
+        < label_task_ids["TE-47"]
+        < label_task_ids["TE-48"]
+    )
+    assert len(finish_calls) == 1
+    batch_id_1, unrun_1 = finish_calls[0]
+    assert unrun_1 == [
+        label_task_ids["TE-41"],
+        label_task_ids["TE-48"],
+        label_task_ids["TE-46"],
+        label_task_ids["TE-44"],
+        label_task_ids["TE-45"],
+    ]
+    assert unrun_1 != sorted(unrun_1)
+    assert status_at_call[0] == (None, None)
+    closed = ledger._db.execute(
+        "SELECT status FROM batches WHERE batch_id = ?", (batch_id_1,)
+    ).fetchone()
+    assert closed["status"] == "UNTIL"
+
+    # Night 2: drains, and its own `follow_ups` offers nothing.
+    doubles0 = StackDoubles(ledger, repo_id, {})
+    reason2 = run_stack_batch(
+        [_candidate("SP-2", budget_usd=1.0)],
+        ledger,
+        1000.0,
+        None,
+        doubles0.runner,
+        readiness_check=_ready,
+        review=doubles0.review,
+        mint=doubles0.mint,
+        end_review=doubles0.end_review,
+        follow_ups=lambda batch_key, stack_review: [],
+        finish=finish,
+    )
+    assert reason2 == "DRAINED"
+    assert len(finish_calls) == 2
+    assert finish_calls[1][1] == []
+
+    # Night 3: `BUDGET` fires before the order's own spec ever starts. Its
+    # `follow_ups` still runs and offers one follow-up, never driven.
+    task60: dict[str, int] = {}
+
+    def follow_ups3(batch_key, stack_review):
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=int(batch_key))
+        task_id = ledger.create_task(
+            run_id, spec_id="TE-60", spec_sha="f" * 64, branch="saffron/TE-60"
+        )
+        task60["id"] = task_id
+        built = dataclasses.replace(
+            _candidate("TE-60", budget_usd=1.0), task_id=task_id
+        )
+        return [built]
+
+    reason3 = run_stack_batch(
+        [_candidate("SP-3", budget_usd=100.0)],
+        ledger,
+        10.0,
+        None,
+        doubles0.runner,
+        readiness_check=_ready,
+        review=doubles0.review,
+        mint=doubles0.mint,
+        end_review=doubles0.end_review,
+        follow_ups=follow_ups3,
+        finish=finish,
+    )
+    assert reason3 == "BUDGET"
+    assert len(finish_calls) == 3
+    assert finish_calls[2][1] == [task60["id"]]
+
+    # Night 4: drains, given `end_review` and no `follow_ups`.
+    reason4 = run_stack_batch(
+        [_candidate("SP-4", budget_usd=1.0)],
+        ledger,
+        1000.0,
+        None,
+        doubles0.runner,
+        readiness_check=_ready,
+        review=doubles0.review,
+        mint=doubles0.mint,
+        end_review=doubles0.end_review,
+        follow_ups=None,
+        finish=finish,
+    )
+    assert reason4 == "DRAINED"
+    assert len(finish_calls) == 4
+    assert finish_calls[3][1] == []
+
+    # Night 5: drains, given neither.
+    reason5 = run_stack_batch(
+        [_candidate("SP-5", budget_usd=1.0)],
+        ledger,
+        1000.0,
+        None,
+        doubles0.runner,
+        readiness_check=_ready,
+        review=doubles0.review,
+        mint=doubles0.mint,
+        end_review=None,
+        follow_ups=None,
+        finish=finish,
+    )
+    assert reason5 == "DRAINED"
+    assert len(finish_calls) == 5
+    assert finish_calls[4][1] == []

@@ -1425,6 +1425,25 @@ class Ledger:
         )
         self._commit_and_append(fact)
 
+    def stack_layers(self, batch_id: int) -> list[sqlite3.Row]:
+        """One batch's own `stack_layers` rows, lowest position first, each
+        joined to its task for `task_id`, `state`, `budget_usd`, `pr_url`,
+        `branch` and `pushed_sha` (ADR 7, `saffron/finish.py`). `SA-0152`,
+        `SA-0167`, `SA-0170` and `SA-0174` read these same rows."""
+        return list(
+            self._db.execute(
+                """SELECT sl.position, sl.spec_id, sl.predecessor_key,
+                          sl.predecessor_head, sl.generation,
+                          t.task_id, t.state, t.budget_usd, t.pr_url,
+                          t.branch, t.pushed_sha
+                     FROM stack_layers sl
+                     JOIN tasks t ON t.record_key = sl.task_key
+                    WHERE sl.batch_key = ?
+                    ORDER BY sl.position""",
+                (str(batch_id),),
+            )
+        )
+
     def record_spec_review(
         self,
         task_id: int,
