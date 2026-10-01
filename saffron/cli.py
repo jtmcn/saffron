@@ -888,7 +888,8 @@ def _stack_follow_ups(
     """`run_stack_batch`'s `follow_ups` adapter (ADR 7, `SA-0165`). Every
     input is read at the pinned base, once, before `follow_up.write_follow_ups`
     runs. A broken policy then costs one line and no cell. A raise from
-    that call still pools every finding its own walk never reached.
+    that call after `qualify` returns still pools every unaccepted finding
+    its walk never reached.
     """
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
