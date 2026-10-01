@@ -586,7 +586,12 @@ builds.
 - `_stop`'s says it is the single call site for `close_batch` (`:704-706`).
 - `run_stack_batch`'s says a candidate is "refused before `run_batch`
   sees it" (`:407-409`). That goes false if the change drives `_drive`
-  directly, as the note above suggests.
+  directly, as the note above suggests. The same docstring says
+  `reserve_usd` and `writer_usd` "hold back the budget check"
+  (`:408-409`). After the change, that holds for generation 0 only. A
+  follow-up's checks hold neither back.
+- The comment over `record_layer` says each task's row is at generation 0
+  (`:431-432`). Follow-ups now record generation 1 rows.
 - The comment that starts "Runs once, right after `end_review`" says the
   follow-ups' return "is discarded here" (`:379-380`). The batch now runs
   that return.
@@ -597,7 +602,9 @@ builds.
 **One shared arrangement.** Criteria 1 to 4 and 6 share doubles over one
 `Ledger`, built once in `tests/test_batch.py`. Use `_ready`, the `ledger`
 and `repo_id` fixtures, a fake `sleep`, and a clock as `SA-0148`'s
-witnesses build one. Pass `reserve_usd` 6.0 and `writer_usd` 2.0. Every
+witnesses build one. Pass `reserve_usd` 6.0 and `writer_usd` 2.0. A
+batch whose criterion states no budget runs at 30.0, as the prototype
+did. Every
 batch that passes `follow_ups` passes the review and mint doubles too,
 as criterion 3's check requires.
 
@@ -685,7 +692,8 @@ One ` escalated  ` line starts with `TE-27`. No line starts
 - positions counted again from 1 for the follow-ups
 - follow-ups run with no review
 - `mint` called for a follow-up
-- a second `end_review` after the follow-ups, or a second `follow_ups`
+- a second `end_review` and a second `follow_ups` after the follow-ups,
+  measured together. Either one alone fails "each run once" on reading.
 - the follow-ups sorted by id, or by priority
 - every `Refused` follow-up collected as unrun, which names `TE-27`
 
@@ -907,7 +915,8 @@ the middle four on the callable alone, built over `fe128b7d`'s
 `_guarded_gh`, `_print_scan_gaps` and `scheduler._open_prs`. The first
 and the last are by arithmetic from `main` at `fe128b7d`. It builds the
 `--stack` callables inside `if readiness.ok:` and leaves each `None`
-otherwise (`saffron/cli.py:1362-1382`, `:1425-1450`).
+otherwise. The defaults are at `saffron/cli.py:1362-1382`, the check at
+`:1383`, and the callables at `:1425-1450`.
 
 - no `open_prs` passed, which fails the first case's call
 - the list read as the callable is built, so `gh` runs before `main`
@@ -1039,8 +1048,8 @@ sentence over 25 words. Keep each docstring within ten lines.
 **Commit as each witness passes**, before the full suite runs.
 
 **Size.** No path here is in `elevate_on`, so `size` is advisory at the
-`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
-prototype of this change, formatted by `ruff format`, measured 2173
+`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
+2026-09-24 prototype of this change, at `68892367` and formatted by `ruff format`, measured 2173
 changed tokens with `size_gate` itself. `batch.py` took 407,
 `scheduler.py` 197, `cli.py` 89, `tests/test_batch.py` 1315 and
 `tests/test_cli.py` 165. The prototype's `batch.py` stood in for the
