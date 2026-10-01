@@ -1484,3 +1484,9 @@ the critic did not raise.
 - `SA-0162` and `SA-0151`: the batch id read three ways, and the layer query
   and git runner restated.
   **Bucket 3**, conventions. **Open:** b-115f9b.
+- `SA-0174` (#630): criterion 1's witness put no finding on another batch's
+  follow-up, so reading every batch's follow-ups passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #630.
+- `SA-0174` (#630): the comment over `FINDINGS_NAME` named the end review and
+  `SA-0151` as its writer, and two docstrings left out a case they cover.
+  **Bucket 3**, contract. **Landed:** a review commit on #630.
