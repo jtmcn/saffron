@@ -637,6 +637,7 @@ def loop(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "REPO", tmp_path)
     monkeypatch.setattr(driver, "STATE_DIR", tmp_path / ".saffron-loop")
     monkeypatch.setattr(driver, "ORDER", tmp_path / ".saffron-loop" / "order.json")
+    monkeypatch.setattr(driver, "JEV_ROOT", tmp_path / "batches")
     monkeypatch.setattr(
         driver, "_gh_pr_field", lambda n, _name: {10: "OPEN", 11: "MERGED"}[n]
     )
@@ -830,6 +831,7 @@ def test_record_keeps_what_package_pushed_and_says_what_the_cell_spent(
     assert driver._load()[0].pushed_sha == "p" * 40
     assert capsys.readouterr().out == (
         f"{spec_id}  READY_FOR_REVIEW  #247  $7.55 of $6.00\n"
+        "lenses: none recorded for this spec's latest run\n"
     )
 
 
@@ -866,6 +868,142 @@ def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
         assert "halted at REBUTTING" in err and "p" * 12 in err
         assert "still running" not in err
         assert row.undecided_cells == 1
+
+
+def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, capsys):
+    # b-66d1c3: a stacked child's REVIEW is main's REVIEW, run at the host
+    # checkout. `findings.json` is the only record of which lenses ran.
+    import json
+
+    from saffron.ledger import Ledger
+
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=6.0
+    )
+    attempt_id = ledger.open_attempt(task_id, "IMPLEMENT")
+    ledger.close_attempt(
+        attempt_id,
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=7.55,
+    )
+    ledger.set_task_state(task_id, "PACKAGE")
+    ledger.set_task_package(
+        task_id,
+        "READY_FOR_REVIEW",
+        "saffron/X",
+        "p" * 40,
+        "https://github.com/o/r/pull/247",
+    )
+    ledger.close()
+    monkeypatch.setattr(
+        driver,
+        "_ledger_and_repo",
+        lambda: (Ledger(loop.root / "ledger.db"), repo_id, "url"),
+    )
+
+    directory = loop.root / "batches" / "v0" / spec_id
+    directory.mkdir(parents=True)
+    findings_path = directory / "findings.json"
+    gates_dir = directory / "gates"
+    baseline_path = directory / "baseline.json"
+    epoch = 1_700_000_000.0
+
+    def touch(path, offset):
+        os.utime(path, (epoch + offset, epoch + offset))
+
+    step_one = [
+        {"lens": "correctness", "error": None, "findings": []},
+        {"lens": "contract", "error": "boom", "findings": []},
+        {"lens": "adequacy", "error": "", "findings": []},
+        {"lens": "conventions", "error": None, "findings": []},
+    ]
+    first_line = f"{spec_id}  READY_FOR_REVIEW  #247  $7.55 of $6.00\n"
+    named = "lenses: correctness, contract (error), adequacy, conventions\n"
+    none_recorded = "lenses: none recorded for this spec's latest run\n"
+
+    def record():
+        status = driver.cmd_record(argparse.Namespace(spec_id=spec_id))
+        return status, capsys.readouterr().out
+
+    # 1. the only file, latest by default.
+    findings_path.write_text(json.dumps(step_one))
+    touch(findings_path, 0)
+    assert record() == (0, first_line + named)
+
+    # 2. `gates/` now sits beside it, newer.
+    gates_dir.mkdir()
+    touch(gates_dir, 100)
+    assert record() == (0, first_line + none_recorded)
+
+    # 3. `findings.json` moves past `gates/`. `baseline.json` is newer still
+    #    and plays no part.
+    touch(findings_path, 200)
+    baseline_path.write_text("{}")
+    touch(baseline_path, 300)
+    assert record() == (0, first_line + named)
+
+    # 4. a tie with `gates/` still counts as the latest run.
+    touch(findings_path, 100)
+    assert record() == (0, first_line + named)
+
+    # 5. not JSON.
+    findings_path.write_text("{")
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
+    # 6. an empty list.
+    findings_path.write_text("[]")
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
+    # 7. not a list.
+    findings_path.write_text(json.dumps({"lens": "correctness"}))
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+    findings_path.write_text("5")
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
+    # 7b. bytes that are not UTF-8.
+    findings_path.write_bytes(b"\xff\xfe[")
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
+    # 8. an entry with no `lens`.
+    findings_path.write_text(json.dumps([*step_one, {"error": None, "findings": []}]))
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
+    # 9. gone entirely.
+    findings_path.unlink()
+    assert record() == (0, first_line + none_recorded)
+
+    # 10. the lens line follows an `EXHAUSTED` end state too.
+    findings_path.write_text(json.dumps(step_one))
+    touch(findings_path, 200)
+    fresh = Ledger(loop.root / "ledger.db")
+    fresh.set_task_state(task_id, "EXHAUSTED")
+    fresh.close()
+    status, out = record()
+    assert status == 1
+    assert out.splitlines()[-1] == named.rstrip("\n")
+
+    # 11. and a `REBUTTING` halt with no live cell.
+    fresh = Ledger(loop.root / "ledger.db")
+    fresh.set_task_state(task_id, "REBUTTING")
+    fresh.close()
+    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: False)
+    status, out = record()
+    assert status == 1
+    assert out.splitlines()[-1] == named.rstrip("\n")
 
 
 @pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
@@ -1524,6 +1662,134 @@ def test_check_with_nothing_to_compare_against_claims_no_pass(monkeypatch, capsy
     out = capsys.readouterr().out
     assert "no past cells of this shape to compare against" in out
     assert "check: ceilings clear this shape's history" not in out
+
+
+def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_review(
+    tmp_path, monkeypatch, capsys
+):
+    # b-66d1c3: a stacked child's REVIEW is main's REVIEW. `check` must say so
+    # for every live ancestor whose `touches` reaches REVIEW or REBUT code.
+    specs_dir = tmp_path / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_overrun", lambda *a, **k: (1, "run 19"))
+    monkeypatch.setattr(driver, "_elevate_on", lambda: [])
+
+    def write(spec_id, depends_on, touches, done=False):
+        target = (specs_dir / "done") if done else specs_dir
+        target.mkdir(parents=True, exist_ok=True)
+        lines = ["---", f"id: {spec_id}", "title: x", "type: feature"]
+        if depends_on:
+            lines.append(f"depends_on: [{', '.join(depends_on)}]")
+        if touches:
+            lines.append(f"touches: [{', '.join(touches)}]")
+        lines += ["---", "", "body", ""]
+        (target / f"{spec_id}-x.md").write_text("\n".join(lines))
+
+    write("SA-0910", ["SA-0999", "SA-0906", "SA-0903"], ["saffron/phases/review.py"])
+    write(
+        "SA-0906",
+        ["SA-0901", "SA-0903"],
+        [
+            "saffron/phases/implement.py",
+            "saffron/agents/prompts/turns/implement.md",
+            "saffron/agents/artifacts.py",
+        ],
+    )
+    write(
+        "SA-0903",
+        ["SA-0904"],
+        [
+            "saffron/phases/rebut.py",
+            "saffron/agents/prompts/turns/verdict.md",
+            "saffron/agents/prompts/turns/rebut.md",
+            "saffron/agents/prompts/turns/rebut-extract.md",
+        ],
+    )
+    write(
+        "SA-0901",
+        ["SA-0999", "SA-0905"],
+        [
+            "saffron/phases/review.py",
+            "tests/test_review.py",
+            "saffron/agents/prompts/turns/review.md",
+            "saffron/agents/findings.py",
+            "saffron/agents/prompts/review-conventions.md",
+        ],
+    )
+    write(
+        "SA-0904",
+        ["SA-0910"],
+        [
+            "saffron/agents/prompts/review-*.md",
+            "saffron/agents/prompts/turns/extraction.md",
+            "saffron/agents/prompts/review-security.md",
+        ],
+    )
+    write("SA-0905", ["SA-0907"], ["saffron/phases/review.py"], done=True)
+    write("SA-0907", [], ["saffron/agents/prompts/review-correctness.md"])
+    write("SA-0908", [], ["saffron/phases/review.py"], done=True)
+    write("SA-0911", ["SA-0908"], ["f.py"])
+
+    expected = [
+        "review: SA-0903 is not retired and touches saffron/phases/rebut.py, "
+        "saffron/agents/prompts/turns/verdict.md, saffron/agents/prompts/turns/rebut.md, "
+        "saffron/agents/prompts/turns/rebut-extract.md. This spec's REVIEW is main's and "
+        "will not run that change, so budget_usd should not assume it.",
+        "review: SA-0901 is not retired and touches saffron/phases/review.py, "
+        "saffron/agents/prompts/turns/review.md, saffron/agents/findings.py, "
+        "saffron/agents/prompts/review-conventions.md. This spec's REVIEW is main's and "
+        "will not run that change, so budget_usd should not assume it.",
+        "review: SA-0904 is not retired and touches saffron/agents/prompts/review-*.md, "
+        "saffron/agents/prompts/turns/extraction.md, "
+        "saffron/agents/prompts/review-security.md. This spec's REVIEW is main's and "
+        "will not run that change, so budget_usd should not assume it.",
+        "review: SA-0907 is not retired and touches "
+        "saffron/agents/prompts/review-correctness.md. This spec's REVIEW is main's and "
+        "will not run that change, so budget_usd should not assume it.",
+    ]
+
+    def review_lines(out):
+        return sorted(line for line in out.splitlines() if line.startswith("review:"))
+
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+    rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0910"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert review_lines(out) == sorted(expected)
+
+    monkeypatch.setattr(
+        driver, "_past_cells", lambda *a, **k: [_cell("SA-2000", "feature", 1, 0)]
+    )
+    rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0910"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert review_lines(out) == sorted(expected)
+    assert "check: ceilings clear this shape's history" in out
+
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+    rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0911"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert review_lines(out) == []
+
+    with monkeypatch.context() as m:
+        from saffron import intake
+
+        stub = _spec("SA-0912", spec_type="feature", touches=0, criteria=0)
+        stub.touches = ["saffron/phases/review.py"]
+        m.setattr(driver, "_known_specs", lambda: {"SA-0912": stub})
+
+        def boom(_directory):
+            raise AssertionError("discover_specs must not be called")
+
+        m.setattr(intake, "discover_specs", boom)
+
+        rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0912"))
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert review_lines(out) == []
 
 
 def _spec_text(max_turns):

@@ -6,17 +6,29 @@ import functools
 import hashlib
 import inspect
 import json
+import shutil
 import subprocess
 import tempfile
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from saffron import cli, end_review, intake, preflight, spec_review, task
+from saffron import (
+    cli,
+    end_review,
+    follow_up,
+    intake,
+    preflight,
+    qualify,
+    spec_review,
+    task,
+)
 from saffron.agents import context
+from saffron.agents.findings import Finding
 from saffron.cell import session
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
@@ -29,7 +41,7 @@ from saffron.events import (
     read_log,
 )
 from saffron.ledger import Ledger
-from saffron.phases import implement, package
+from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.record.memory import MemoryRecord
 from saffron.repos.mirror import GitError
@@ -3410,7 +3422,7 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
     assert main(["--home", str(home), "batch", "--stack", "--budget", "42"]) == 0
 
     printed = capsys.readouterr().out
-    assert "budget $42.00, reserve $10.50, until none" in printed
+    assert "budget $42.00, reserve $10.50, writer $10.50, until none" in printed
 
     assert run_captured["budget_usd"] == 42.0
     assert run_captured["reserve_usd"] == 10.5
@@ -5746,3 +5758,697 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
         revise(sy5, None, None, "rt")
     assert len(rig.cell_up_calls) == before
+
+
+def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack --budget N` holds `N * follow_up.WRITER_SHARE`
+    back for the spec writer, beside the reserve. It builds `_stack_follow_ups`
+    once, only once readiness and the scan both pass, and passes it and
+    `writer_usd` to `run_stack_batch`. Readiness failing builds no callable
+    and still passes the same `writer_usd`."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(follow_up, "WRITER_SHARE", 0.125)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    sentinel = object()
+    follow_ups_builds: list[dict] = []
+
+    def _fake_stack_follow_ups(**kwargs):
+        follow_ups_builds.append(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(cli, "_stack_follow_ups", _fake_stack_follow_ups)
+
+    run_stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        run_stack_batch_calls.append(
+            {"ledger": ledger, "budget_usd": budget_usd, **kwargs}
+        )
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    # Case 1: readiness passes.
+    _readiness_passes(monkeypatch)
+    home1 = tmp_path / "home1"
+    assert main(["--home", str(home1), "batch", "--stack", "--budget", "42"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "budget $42.00, reserve $10.50, writer $5.25, until none" in printed
+
+    assert len(run_stack_batch_calls) == 1
+    call = run_stack_batch_calls[0]
+    assert call["budget_usd"] == 42.0
+    assert call["reserve_usd"] == 10.5
+    assert call["writer_usd"] == 5.25
+    assert call["follow_ups"] is sentinel
+
+    assert len(follow_ups_builds) == 1
+    built = follow_ups_builds[0]
+    pinned = task.PinnedBase(
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+    assert built["pinned"] == pinned
+    assert built["repo"] == tmp_path.resolve()
+    assert built["ledger"] is call["ledger"]
+    assert built["out_dir"] == home1 / "batches" / "v0"
+    assert built["cap_usd"] == 5.25
+    assert built["pooled"] == []
+
+    # Case 2: readiness fails.
+    follow_ups_builds.clear()
+    run_stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home2 = tmp_path / "home2"
+    main(["--home", str(home2), "batch", "--stack", "--budget", "42"])
+
+    assert follow_ups_builds == []
+    assert len(run_stack_batch_calls) == 1
+    assert run_stack_batch_calls[0]["follow_ups"] is None
+    assert run_stack_batch_calls[0]["writer_usd"] == 5.25
+
+
+def _exec_file(path, text="#!/bin/sh\nexit 0\n"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(0o755)
+
+
+def _follow_ups_mirror(tmp_path):
+    """`broken`, `base` and `head`: three commits of one mirror. Each has
+    its own `.saffron/gates/tests` executable. A read at any sha but the
+    pinned one then shows in what the callable gets."""
+    mirror = tmp_path / "follow-ups-mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+
+    _exec_file(mirror / ".saffron" / "gates" / "tests")
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  tests: {}\n"
+        "integrity:\n  test_paths: ['tests/**']\n"
+        "thread_env:\n  X: broken\n"
+        "protected: ['broken/**']\n"
+        "nope: 1\n"
+    )
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "broken")
+    broken_sha = _rev_parse(mirror, "HEAD")
+
+    _exec_file(mirror / ".saffron" / "gates" / "tests")
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  tests: {}\n"
+        "integrity:\n  test_paths: ['tests/**']\n"
+        "thread_env:\n  X: base\n"
+        "protected: ['base/**']\n"
+    )
+    specs_dir = mirror / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    (specs_dir / "SY-1-x.md").write_text("at base\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+
+    _exec_file(mirror / ".saffron" / "gates" / "tests")
+    _exec_file(mirror / ".saffron" / "gates" / "lint")
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  lint: {}\n"
+        "integrity:\n  test_paths: ['spec/**']\n"
+        "thread_env:\n  X: head\n"
+        "protected: ['head/**']\n"
+    )
+    (specs_dir / "SY-1-x.md").write_text("at head\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
+
+    return SimpleNamespace(mirror=mirror, broken_sha=broken_sha, base_sha=base_sha)
+
+
+def _follow_up_group(task_key, file, claims):
+    findings = tuple(
+        qualify.Qualified(
+            task_key=task_key,
+            finding=Finding(
+                lens="adequacy",
+                severity="blocker",
+                file=file,
+                line=i + 1,
+                claim=claim,
+            ),
+            outcome="qualified",
+            reason="",
+        )
+        for i, claim in enumerate(claims)
+    )
+    return qualify.FollowUpGroup(task_key=task_key, file=file, findings=findings)
+
+
+def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_base_at_the_stacks_top(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_follow_ups` reads every input at the pinned base, not the
+    mirror's own `HEAD` and not `repo`'s own policy, before it writes
+    anything. A raise after `qualify` returns still pools each unaccepted
+    finding its walk never reached."""
+    rig = _follow_ups_mirror(tmp_path)
+    mirror, broken_sha, base_sha = rig.mirror, rig.broken_sha, rig.base_sha
+
+    checkout = tmp_path / "checkout"
+    (checkout / ".saffron").mkdir(parents=True)
+    (checkout / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: checkout\nprotected:\n  - checkout/**\n"
+    )
+
+    out_dir = tmp_path / "out"
+    pinned_url = "https://github.com/o/r.git"
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    ledger.upsert_repo(
+        "other", "https://github.com/o/other.git", "/other.git", policy_sha=None
+    )
+    repo_id = ledger.upsert_repo("r", pinned_url, str(mirror), policy_sha=None)
+    assert repo_id == 2
+
+    pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
+
+    def _fake_layer_fields(ledger_arg, task_key):
+        assert ledger_arg is ledger
+        if task_key == "k-top":
+            return end_review.LayerFields(
+                spec_id="SY-2",
+                branch="saffron/SY-2",
+                pr_url="",
+                base="z" * 40,
+                head="2" * 40,
+                known="",
+            )
+        if task_key == "k-bot":
+            return end_review.LayerFields(
+                spec_id="SY-1",
+                branch="saffron/SY-1",
+                pr_url="",
+                base="y" * 40,
+                head="1" * 40,
+                known="",
+            )
+        raise KeyError(task_key)
+
+    monkeypatch.setattr(cli.end_review, "layer_fields", _fake_layer_fields)
+
+    log: list[str] = []
+    cell_up_calls: list[dict] = []
+    cell_down_calls: list[dict] = []
+    unpriv_calls: list[str] = []
+
+    def _fake_cell_up(
+        *,
+        repo,
+        mirror,
+        tree_base,
+        branch,
+        network,
+        volume,
+        state,
+        container,
+        gates_dir,
+        thread_env,
+        created,
+        note,
+        cap_add=None,
+    ):
+        log.append("up")
+        created.add(container)
+        cell_up_calls.append(
+            {
+                "repo": repo,
+                "mirror": mirror,
+                "tree_base": tree_base,
+                "branch": branch,
+                "container": container,
+                "gates_dir": gates_dir,
+                "thread_env": dict(thread_env),
+                "cap_add": cap_add,
+            }
+        )
+        note("cell_up", "cell up")
+
+    def _fake_cell_down(*, network, volume, state, container, created, note):
+        log.append("down")
+        cell_down_calls.append({"container": container})
+        note("cell_down", True, "cell down")
+
+    def _fake_unpriv(container):
+        log.append("check")
+        unpriv_calls.append(container)
+
+    monkeypatch.setattr(session, "cell_up", _fake_cell_up)
+    monkeypatch.setattr(session, "cell_down", _fake_cell_down)
+    monkeypatch.setattr(session, "assert_bash_is_unprivileged", _fake_unpriv)
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+
+    real_layer_cell = end_review.layer_cell
+    layer_cell_calls: list[dict] = []
+
+    @contextmanager
+    def _spy_layer_cell(fields, **kwargs):
+        layer_cell_calls.append({"fields": fields, **kwargs})
+        with real_layer_cell(fields, **kwargs) as container:
+            yield container
+
+    monkeypatch.setattr(cli.end_review, "layer_cell", _spy_layer_cell)
+
+    real_stack_mint = cli._stack_mint
+    stack_mint_builds: list[dict] = []
+
+    def _spy_stack_mint(**kwargs):
+        stack_mint_builds.append(kwargs)
+        return real_stack_mint(**kwargs)
+
+    monkeypatch.setattr(cli, "_stack_mint", _spy_stack_mint)
+
+    agent_calls: list[dict] = []
+
+    def _fake_run_agent(container, *, spec_id, timeout_s, **kwargs):
+        log.append("agent")
+        agent_calls.append({"spec_id": spec_id, "timeout_s": timeout_s})
+        return implement.AttemptResult(
+            session_id="s",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.0,
+            rate_limit_status="rejected",
+        )
+
+    monkeypatch.setattr(cli.implement, "run_agent", _fake_run_agent)
+
+    writer_calls: list[dict] = []
+    writer_counter = [0]
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+        log.append("writer")
+        writer_calls.append(
+            {"container": container, "system_prompt": system_prompt, "prompt": prompt}
+        )
+        agent(container, prompt=prompt)
+        writer_counter[0] += 1
+        made = spec_review.SpecWriterSession(
+            text="draft\n",
+            cost_usd=0.0,
+            error=None,
+            resets_at=None,
+            session_id=f"w{writer_counter[0]}",
+            num_turns=1,
+            spec_sha="s" * 64,
+        )
+        writer_calls[-1]["session"] = made
+        return made
+
+    monkeypatch.setattr(cli.spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    kbot_group = _follow_up_group("k-bot", "src/a.py", ["bot one", "bot two"])
+    ktop_group = _follow_up_group("k-top", "src/a.py", ["top one", "top two"])
+
+    qualify_calls: list[dict] = []
+
+    def _fake_qualify(ledger_arg, layers, join, **kwargs):
+        qualify_calls.append(
+            {"ledger": ledger_arg, "layers": layers, "join": join, **kwargs}
+        )
+        kwargs["note"]("survived", False, "volume v survived")
+        return qualify.Qualification(groups=[kbot_group, ktop_group], pool=[])
+
+    monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
+
+    write_follow_ups_calls: list[dict] = []
+    written_sessions: list = []
+
+    def _fake_write_follow_ups(
+        ledger_arg,
+        stack_arg,
+        *,
+        batch_key,
+        qualify,
+        write,
+        mint,
+        mirror,
+        specs_dir,
+        repo_id,
+        test_paths,
+        cap_usd,
+        emit,
+        pooled,
+    ):
+        write_follow_ups_calls.append(
+            {
+                "ledger": ledger_arg,
+                "stack": stack_arg,
+                "batch_key": batch_key,
+                "mirror": mirror,
+                "specs_dir": specs_dir,
+                "repo_id": repo_id,
+                "test_paths": test_paths,
+                "cap_usd": cap_usd,
+                "pooled": pooled,
+            }
+        )
+        qualification = qualify(stack_arg.layers, stack_arg.join)
+        kbot, ktop = qualification.groups
+        pooled.append(follow_up.Pooled(group=kbot, reason="p1"))
+        written_sessions.append(write(kbot, "prompt k-bot"))
+        written_sessions.append(write(ktop, "prompt k-top"))
+        candidate = Candidate(
+            path=Path(".saffron/specs/SY-3-x.md"),
+            spec=intake.Spec(
+                id="SY-3", title="t", type="feature", touches=["src/a.py"]
+            ),
+            spec_sha="c" * 64,
+            task_id=None,
+        )
+        minted_id = mint(candidate)
+        emit("pooled line")
+        return [replace(candidate, task_id=minted_id)]
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    p0_group = _follow_up_group("k-old", "src/z.py", ["old"])
+    pooled: list[follow_up.Pooled] = [
+        follow_up.Pooled(group=p0_group, reason="pre-existing")
+    ]
+
+    join_sentinel = review.LensReview(lens="join")
+    stack = end_review.StackReview(
+        join=join_sentinel,
+        layers=[
+            end_review.LayerReview("k-top", []),
+            end_review.LayerReview("k-bot", []),
+        ],
+    )
+
+    make = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=checkout,
+        ledger=ledger,
+        out_dir=out_dir,
+        cap_usd=6.5,
+        pooled=pooled,
+    )
+    result = make("7", stack)
+
+    printed = capsys.readouterr().out
+
+    # --- the success path ---
+    assert len(result) == 1
+    assert write_follow_ups_calls[0]["pooled"] is pooled
+    assert [p.reason for p in pooled] == ["pre-existing", "p1"]
+    assert "pooled line" in printed
+
+    call = write_follow_ups_calls[0]
+    assert call["ledger"] is ledger
+    assert call["stack"] is stack
+    assert call["batch_key"] == "7"
+    assert call["mirror"] == mirror
+    assert call["repo_id"] == 2
+    assert call["test_paths"] == ["tests/**"]
+    assert call["cap_usd"] == 6.5
+    specs_dir = call["specs_dir"]
+    assert out_dir in specs_dir.parents
+    assert (specs_dir / "SY-1-x.md").read_text() == "at base\n"
+
+    minted_task_id = result[0].task_id
+    row = ledger._db.execute(
+        "SELECT spec_id, run_id FROM tasks WHERE task_id = ?", (minted_task_id,)
+    ).fetchone()
+    assert row["spec_id"] == "SY-3"
+    run_row = ledger._db.execute(
+        "SELECT base_sha FROM runs WHERE run_id = ?", (row["run_id"],)
+    ).fetchone()
+    assert run_row["base_sha"] == base_sha
+
+    assert len(stack_mint_builds) == 1
+    assert stack_mint_builds[0] == {
+        "pinned": pinned,
+        "repo": checkout,
+        "ledger": ledger,
+    }
+
+    assert len(qualify_calls) == 1
+    qcall = qualify_calls[0]
+    assert qcall["ledger"] is ledger
+    assert qcall["layers"] == stack.layers
+    assert qcall["join"] is join_sentinel
+    assert qcall["mirror"] == mirror
+    assert qcall["repo"] == checkout
+    assert qcall["thread_env"] == {"X": "base"}
+    assert qcall["test_paths"] == ["tests/**"]
+    assert qcall["gates"] == {"tests": Path("/gates/.saffron/gates/tests")}
+    assert qcall["gates_dir"] == out_dir / "follow-ups" / "7"
+    assert isinstance(qcall["created"], set)
+    assert "volume v survived" in printed
+    gates_policy_text = (qcall["gates_dir"] / ".saffron" / "policy.yaml").read_text()
+    assert "X: base" in gates_policy_text
+
+    assert log == ["up", "check", "writer", "agent", "down"] * 2
+    assert all(c["spec_session"] is True for c in layer_cell_calls)
+    assert unpriv_calls == [
+        cell_up_calls[0]["container"],
+        cell_up_calls[1]["container"],
+    ]
+    assert cell_up_calls[0]["container"] == "saffron-endreview-SY-2"
+    assert cell_up_calls[1]["container"] == "saffron-endreview-SY-2"
+    for c in cell_up_calls:
+        assert c["tree_base"] == "2" * 40
+        assert c["branch"] == "saffron/SY-2"
+        assert c["repo"] == checkout
+        assert c["mirror"] == mirror
+        assert c["thread_env"] == {"X": "base"}
+        assert "X: base" in (c["gates_dir"] / ".saffron" / "policy.yaml").read_text()
+
+    assert [c["prompt"] for c in writer_calls] == ["prompt k-bot", "prompt k-top"]
+    assert [c["container"] for c in writer_calls] == [
+        u["container"] for u in cell_up_calls
+    ]
+    assert len(written_sessions) == 2
+    assert all(
+        got is c["session"]
+        for got, c in zip(written_sessions, writer_calls, strict=True)
+    )
+    exported_policy, _ = load_policy(qcall["gates_dir"])
+    expected_prompt = spec_review.spec_writer_system_prompt(
+        exported_policy, prompts_dir=context.PROMPTS_DIR
+    )
+    for c in writer_calls:
+        assert c["system_prompt"] == expected_prompt
+    assert "base/**" in expected_prompt
+    assert "head/**" not in expected_prompt
+    assert "checkout/**" not in expected_prompt
+
+    assert [c["spec_id"] for c in agent_calls] == ["follow-up-SY-1", "follow-up-SY-2"]
+    assert all(c["timeout_s"] == spec_review.SPEC_WRITER_TIMEOUT_S for c in agent_calls)
+
+    # --- the single-line "stopped" cases ---
+    log.clear()
+    cell_up_calls.clear()
+    cell_down_calls.clear()
+    unpriv_calls.clear()
+    qualify_calls.clear()
+    writer_calls.clear()
+    agent_calls.clear()
+    write_follow_ups_calls.clear()
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    def _fresh_pooled():
+        return [follow_up.Pooled(group=p0_group, reason="pre-existing")]
+
+    def _run_case(pinned_case, stack_case):
+        pooled_case = _fresh_pooled()
+        made = cli._stack_follow_ups(
+            pinned=pinned_case,
+            repo=checkout,
+            ledger=ledger,
+            out_dir=out_dir,
+            cap_usd=6.5,
+            pooled=pooled_case,
+        )
+        outcome = made("7", stack_case)
+        lines = capsys.readouterr().out.splitlines()
+        return outcome, pooled_case, lines
+
+    bad_sha_pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha="f" * 40)
+    bad_url_pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/none.git", base_sha=base_sha
+    )
+    broken_pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=broken_sha)
+    gone_stack = end_review.StackReview(
+        join=None, layers=[end_review.LayerReview("k-gone", [])]
+    )
+
+    for pinned_case, stack_case, needle in (
+        (broken_pinned, stack, "nope"),
+        (bad_sha_pinned, stack, "ffffffffffff"),
+        (bad_url_pinned, stack, "o/none"),
+        (pinned, gone_stack, "k-gone"),
+    ):
+        outcome, pooled_case, lines = _run_case(pinned_case, stack_case)
+        assert outcome == []
+        assert [p.reason for p in pooled_case] == ["pre-existing"]
+        assert len(lines) == 1
+        assert lines[0].startswith("follow-ups: stopped, ")
+        assert needle in lines[0]
+
+    assert cell_up_calls == []
+    assert qualify_calls == []
+    assert writer_calls == []
+
+    def _raising_write_follow_ups(*_a, **_k):
+        raise RuntimeError("mint broke")
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _raising_write_follow_ups)
+    outcome, pooled_case, lines = _run_case(pinned, stack)
+    assert outcome == []
+    assert [p.reason for p in pooled_case] == ["pre-existing"]
+    assert len(lines) == 1
+    assert lines[0].startswith("follow-ups: stopped, ")
+    assert "mint broke" in lines[0]
+    assert cell_up_calls == []
+    assert qualify_calls == []
+    assert writer_calls == []
+
+    # --- a raise part-way through qualify's groups, twice ---
+    a_group = _follow_up_group("k-top", "src/a.py", ["a0", "a1"])
+    b_group = _follow_up_group("k-bot", "src/b.py", ["b0", "b1"])
+    c_group = _follow_up_group("k-bot", "src/c.py", ["c0", "c1"])
+    d_group = _follow_up_group("k-top", "src/d.py", ["d0", "d1"])
+    e_group = _follow_up_group("k-top", "src/b.py", ["e0", "e1"])
+
+    def _fake_qualify_5(ledger_arg, layers, join, **kwargs):
+        return qualify.Qualification(
+            groups=[a_group, b_group, c_group, d_group, e_group], pool=[]
+        )
+
+    def _make_partial_double(round_no):
+        def _double(
+            ledger_arg,
+            stack_arg,
+            *,
+            batch_key,
+            qualify,
+            write,
+            mint,
+            mirror,
+            specs_dir,
+            repo_id,
+            test_paths,
+            cap_usd,
+            emit,
+            pooled,
+        ):
+            qualification = qualify(stack_arg.layers, stack_arg.join)
+            a, b, c, d, _e = qualification.groups
+            pooled.append(
+                follow_up.Pooled(
+                    group=replace(a, findings=(a.findings[0],)), reason="own a"
+                )
+            )
+            pooled.append(
+                follow_up.Pooled(
+                    group=replace(b, findings=(b.findings[0],)), reason="moved"
+                )
+            )
+            write(replace(b, findings=(b.findings[1],)), "prompt b1")
+            minted = mint(
+                Candidate(
+                    path=Path(".saffron/specs/SY-9-x.md"),
+                    spec=intake.Spec(
+                        id="SY-9", title="t", type="feature", touches=["src/b.py"]
+                    ),
+                    spec_sha="d" * 64,
+                    task_id=None,
+                )
+            )
+            ledger_arg.record_spec_text(
+                minted,
+                origin="follow_up",
+                spec_id="SY-9",
+                path=".saffron/specs/SY-9-x.md",
+                text="draft\n",
+            )
+            pooled.append(
+                follow_up.Pooled(
+                    group=replace(c, findings=(c.findings[0],)), reason="own c"
+                )
+            )
+            if round_no == 1:
+                write(d, "prompt d")
+                mint(
+                    Candidate(
+                        path=Path(".saffron/specs/SY-10-x.md"),
+                        spec=intake.Spec(
+                            id="SY-10",
+                            title="t",
+                            type="feature",
+                            touches=["src/d.py"],
+                        ),
+                        spec_sha="e" * 64,
+                        task_id=None,
+                    )
+                )
+            raise RuntimeError("record broke")
+
+        return _double
+
+    for round_no in (1, 2):
+        monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify_5)
+        monkeypatch.setattr(
+            cli.follow_up, "write_follow_ups", _make_partial_double(round_no)
+        )
+        pooled_case = _fresh_pooled()
+        made = cli._stack_follow_ups(
+            pinned=pinned,
+            repo=checkout,
+            ledger=ledger,
+            out_dir=out_dir,
+            cap_usd=6.5,
+            pooled=pooled_case,
+        )
+        outcome = made("7", stack)
+        printed = capsys.readouterr().out
+
+        assert outcome == []
+        reasons = [p.reason for p in pooled_case]
+        assert reasons[:4] == ["pre-existing", "own a", "moved", "own c"]
+        assert reasons[4:] == ["RuntimeError: record broke"] * 4
+        assert [
+            tuple(f.finding.claim for f in p.group.findings) for p in pooled_case[4:]
+        ] == [("a1",), ("c1",), ("d0", "d1"), ("e0", "e1")]
+        assert "follow-ups: stopped, RuntimeError: record broke" in printed
+
+    # --- an empty stack short-circuits before any export ---
+    shutil.rmtree(out_dir)
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+    monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
+    empty_stack = end_review.StackReview(join=None, layers=[])
+    made = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=checkout,
+        ledger=ledger,
+        out_dir=out_dir,
+        cap_usd=6.5,
+        pooled=_fresh_pooled(),
+    )
+    assert made("7", empty_stack) == []
+    assert capsys.readouterr().out == ""
+    assert not out_dir.exists()
+
+    ledger.close()
