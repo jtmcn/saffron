@@ -182,9 +182,8 @@ stack link`. So nothing this spec builds pushes or opens anything.
 
 **What the tree base holds.** This spec's tree base is `SA-0162`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:197`). Line numbers below
-were read at `b6a701a6`, the head of `SA-0162`'s pull request 626. Each
-is named by its symbol too, since a later review commit there moves
-lines in `saffron/batch.py` and `tests/test_batch.py`.
+were read at `071dc384`, `main` once pull request 626 merged. Each is
+named by its symbol too.
 
 - The `stack_layers` table (`saffron/ledger.py:220-228`), keyed on
   `task_key`, with `batch_key` (the batch id as text), `position`,
@@ -220,9 +219,9 @@ lines in `saffron/batch.py` and `tests/test_batch.py`.
   `follow_ups` never raises in production.
 - From `SA-0162`: the follow-ups run on top, as generation 1 layers, only
   after generation 0 drained. Only then does it seed `task_ids` from the
-  candidates (`saffron/batch.py:779-781`). Before its review, each meets
+  candidates (`saffron/batch.py:777-779`). Before its review, each meets
   gate 0's open pull request overlap refusal, and a refused one is never
-  reviewed. It builds a local `unrun` (`:802-808`) of **spec ids**, as
+  reviewed. It builds a local `unrun` (`:800-806`) of **spec ids**, as
   `str`, and prints them on one `follow-ups unrun` line. The ids are each
   follow-up's whose review never reached a verdict route, in the order
   met. That holds each one the overlap refused, and each one whose review
@@ -286,7 +285,7 @@ Build four things.
    `unrun`, fill it with `c.task_id for c in follow_up_candidates if
    c.spec.id not in follow_up_reviewed`, in the same order. Fill it in a
    loop that asserts each `task_id` is not `None`, as the seeding loop
-   does (`saffron/batch.py:780`). A filter that drops a `None` hides one.
+   does (`saffron/batch.py:778`). A filter that drops a `None` hides one.
    Take each id from its candidate, never from `task_ids`, which only a
    `DRAINED` stop seeds. Keep the `follow-ups unrun` line in spec ids,
    since `SA-0162`'s witnesses assert it, as in `"follow-ups unrun  TE-96
@@ -464,15 +463,17 @@ build passed both. Each wrong build in criteria 1 and 2's
 `wrong_versions:` and in the two lists above was applied as a text edit.
 Each failed its witness.
 
-The run used the host's git, 2.54.0. The cell's git is 2.39.5, and no run
-used it. So each kill is measured on the host only. One kill turns on the
-version. With no identity of its own, git 2.54.0 committed under a name
-it derived, and the author assertion failed. A git that refuses to commit
-raises `GitError` there, and the witness fails too.
+The first run used the host's git, 2.54.0. A second run used the cell
+image `saffron/cell:saffron` at `071dc384`, with its git 2.47.3 and Python
+3.12. Both runs gave the same verdicts. One kill turns on the version.
+With no identity of its own, git 2.54.0 committed under a name it derived,
+and the author assertion failed. Git 2.47.3 refused to commit and raised
+`GitError`, and the witness failed there too.
 
 **Criterion 3's witness** reuses the tree base's fakes of the runner,
 `review`, `mint`, `sleep`, `end_review` and `open_prs` in
-`tests/test_batch.py`. Its fake `finish` is written `def finish(batch_id,
+`tests/test_batch.py`. `StackDoubles.runner` cannot return a `Refused`,
+so the witness gives task 47 a runner of its own. Its fake `finish` is written `def finish(batch_id,
 unrun, /)`. It records its arguments and reads the batch row's `status`
 and `ended_at` when called. The first night runs `SP-1` to
 `READY_FOR_REVIEW`. Its own `follow_ups` creates nine tasks in the order
@@ -517,8 +518,8 @@ for REVIEW and not for the cell:
 
 **How criterion 3's list was worked.** It needs code the tree base lacks,
 so it was worked by hand against `saffron/batch.py` at `b6a701a6`. That
-covers `_drive` (`:181-331`), the review wrapper `wrapped` (`:511-736`),
-`_wait_out_rate_limit` (`:332-356`) and `_BREAKER_THRESHOLD = 2` (`:65`).
+covers `_drive` (`:181-331`), the review wrapper `wrapped` (`:509-734`),
+`_wait_out_rate_limit` (`:332-357`) and `_BREAKER_THRESHOLD = 2` (`:65`).
 The first night stops `UNTIL` at task 44's wait, before task 45. So the
 right list is tasks 41, 48, 46, 44 and 45.
 
