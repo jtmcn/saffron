@@ -64,7 +64,9 @@ writes to where it lands.
 - **Each state the flow reads exists when it runs.** A batch-end step cannot
   read a state a later step writes.
 - **What a dependent spec needs.** A queued child names this spec as its
-  parent. Name what the child keys by, and check this spec produces it.
+  parent. Declare each path or `path:name` the child keys by in the child's
+  `consumes:`. `run_task` resolves each entry at the tree base and refuses
+  the task on a miss, so no reading check is needed.
 
 ## 5. Citations and claims about the tree
 

@@ -1,14 +1,14 @@
 ---
 id: b-b0a187
 title: '`driver.py check` applies the hand-estimate overrun to a measured `estimated_lines` and blocks the spec'
-status: open
+status: done
 tier: 2
 filed: 2026-09-28
-closed:
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [5106d0a1]
 cites: []
 related: [b-43a061, b-db95e1, b-792ab2]
 ---
@@ -40,3 +40,6 @@ estimate at 1.0. `check` prints which basis it used.
 - 2026-09-30: still live. `_size_verdict` cannot tell a measured estimate
   from a hand one. ADR 7 retires `check` once b-792ab2 completes, and each
   loop meets this until then.
+- 2026-09-30: a spec can set `estimate_measured: true`. `check` then prices
+  its estimate at 1.0, prints that basis, and leaves it out of the measured
+  overrun.

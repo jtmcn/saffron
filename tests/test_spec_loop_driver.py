@@ -429,6 +429,17 @@ def test_every_progress_line_the_cli_prints_reaches_the_watcher():
         assert pattern.search(f"{label}: something happened"), label
 
 
+def test_the_watch_pattern_shows_the_line_the_cli_prints_when_a_cell_raises():
+    # Item 158: the Monitor showed a teardown line and hid the error that ended the cell.
+    cli = (Path(driver.REPO) / "saffron" / "cli.py").read_text()
+    prefixes = set(re.findall(r'print\(f"([a-z]+: )\{type\(broke\)', cli))
+    assert prefixes == {"saffron: "}
+    pattern = re.compile(driver.watch_pattern())
+    [prefix] = prefixes
+    assert pattern.search(f"{prefix}CellRuntimeError: invalid network name: x")
+    assert not pattern.search('agent: Bash {"command": "echo saffron: x"}')
+
+
 def test_the_watch_pattern_shows_whether_a_salvage_recovered_anything():
     # Item 139: the Monitor showed `IMPLEMENT: cut off at the turn ceiling with
     # nothing committed — spending one turn to salvage it` and then nothing, so
@@ -1890,12 +1901,12 @@ def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cel
         lambda: (Ledger(tmp_path / "ledger.db"), repo_id, "u"),
     )
 
-    args = SimpleNamespace(spec_id="SA-0001", before=early, limit=12)
+    args = SimpleNamespace(spec_id="SA-0001", before=early, limit=12, spec=None)
     assert driver.cmd_history(args) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[1:] == ["ceilings: no past cells of this shape to compare against"]
 
-    args = SimpleNamespace(spec_id="SA-0001", before=then, limit=12)
+    args = SimpleNamespace(spec_id="SA-0001", before=then, limit=12, spec=None)
     assert driver.cmd_history(args) == 0
 
     header, *rest = capsys.readouterr().out.splitlines()
@@ -1905,6 +1916,45 @@ def test_history_before_shows_every_spec_as_it_stood_and_none_of_the_targets_cel
     assert [line.split()[0] for line in cells] == ["SA-0002"]
     assert "touches=2" in cells[0]
     assert ceilings.startswith("ceilings:")
+
+
+def test_history_reads_its_target_from_a_given_path_or_ref(
+    empty_repo, monkeypatch, capsys
+):
+    # Run 8: from `main`, `history` showed SA-0102's old ceilings for a spec edited on a branch.
+    from saffron.ledger import Ledger
+
+    tmp_path = empty_repo
+    (tmp_path / ".saffron" / "specs").mkdir(parents=True)
+    branch = _commit(tmp_path, ".saffron/specs/SA-0001-x.md", _spec_text(75))
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    ledger.close()
+    real_git = driver._git
+    monkeypatch.setattr(driver, "_git", lambda *a, cwd=None: real_git(*a, cwd=tmp_path))
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0001": _spec("SA-0001")})
+    monkeypatch.setattr(
+        driver,
+        "_ledger_and_repo",
+        lambda: (Ledger(tmp_path / "ledger.db"), repo_id, "u"),
+    )
+    edited = tmp_path / "edited.md"
+    edited.write_text(_spec_text(90))
+
+    def header(spec):
+        args = SimpleNamespace(spec_id="SA-0001", before=None, limit=12, spec=spec)
+        assert driver.cmd_history(args) == 0
+        return capsys.readouterr().out.splitlines()[0]
+
+    assert "max_turns=60" in header(None)
+    assert "max_turns=75" in header(branch)
+    assert "max_turns=90" in header(str(edited))
+
+    # A path to another spec must not price that spec under this id.
+    other = tmp_path / "other.md"
+    other.write_text(_spec_text(90).replace("SA-0001", "SA-0002"))
+    args = SimpleNamespace(spec_id="SA-0001", before=None, limit=12, spec=str(other))
+    assert driver.cmd_history(args) == 1
+    assert "SA-0002" in capsys.readouterr().err
 
 
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
@@ -2060,8 +2110,8 @@ def test_a_probe_whose_find_misses_runs_nothing(tmp_path, capsys):
 @pytest.mark.parametrize(
     ("script", "verdict"),
     [
-        ("import mod; assert mod.x == 1", "killed:"),
-        ("import mod", "survived:"),
+        ("import mod; assert mod.x == 1", "killed\n"),
+        ("import mod", "survived\n"),
         (
             "print('FAILED t.py::a - TypeError: boom'); raise SystemExit(1)",
             "killed only by errors",
@@ -2082,6 +2132,28 @@ def test_a_probe_reports_its_verdict_and_restores_the_file(
 
     assert capsys.readouterr().out.startswith(verdict)
     assert (tmp_path / "mod.py").read_text() == "x = 1\n"
+
+
+def test_a_probe_prints_its_verdict_apart_from_a_warning_on_stderr(tmp_path, capsys):
+    # Run 8, #351: uv's VIRTUAL_ENV warning was the last line, so it shared the
+    # verdict's line, and filtering it out hid a `survived`.
+    (tmp_path / "mod.py").write_text("x = 1\n")
+    script = (
+        "import sys, mod; print('1 passed')\n"
+        "sys.stderr.write('warning: `VIRTUAL_ENV=x` does not match\\n')"
+    )
+
+    assert (
+        driver.cmd_probe(
+            _probe(tmp_path, "x = 1", "x = 2", sys.executable, "-c", script)
+        )
+        == 0
+    )
+
+    verdict, *rest = capsys.readouterr().out.splitlines()
+    assert verdict == "survived"
+    assert "  stdout: 1 passed" in rest
+    assert "  stderr: warning: `VIRTUAL_ENV=x` does not match" in rest
 
 
 @pytest.mark.parametrize(
@@ -2159,7 +2231,7 @@ def test_probe_parses_its_options_before_the_command(tmp_path, monkeypatch, caps
     monkeypatch.syspath_prepend(str(tmp_path))
 
     assert driver.main() == 0
-    assert capsys.readouterr().out.startswith("survived:")
+    assert capsys.readouterr().out.startswith("survived\n")
 
 
 def test_only_probe_takes_a_command_after_the_separator(monkeypatch):

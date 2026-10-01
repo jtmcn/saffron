@@ -1,13 +1,14 @@
 ---
 id: b-d1d634
 title: The spec writer's caller learns a split only when the whole draft is done
-status: open
+status: done
 tier: 3
 filed: 2026-09-20
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [b5240baa]
 cites: []
 related: [b-ea1d13, b-b69bb6, 157]
 ---
@@ -50,3 +51,6 @@ reason in one line here.
 - 2026-09-20: filed from the review of #392. `by_hand` because the file is the
   writer agent's own instruction surface, which is why b-ea1d13 carries the
   same flag.
+- 2026-09-30: the operator chose split-and-stop. A writer whose estimate
+  splits ends at step 1, writes no file, and names each spec. The caller
+  dispatches one writer per spec (`references/dispatch.md`).

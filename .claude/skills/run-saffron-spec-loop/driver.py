@@ -82,6 +82,9 @@ WATCH_PREFIXES = (
     "SALVAGE",
     "SCOPE",
     "REPAIR",
+    # The CLI's own error line when a cell raises. Without it the teardown
+    # line after it read as the cause (item 158).
+    "saffron:",
 )
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess
@@ -1527,7 +1530,14 @@ def cmd_probe(args) -> int:
         verdict = "killed only by errors, not by an assertion"
     else:
         verdict = "killed"
-    print(f"{verdict}: {output[-1] if output else f'exit {done.returncode}'}")
+    # The verdict gets its own line: uv's warning on stderr once shared it (run 8, #351).
+    print(verdict)
+    for stream, text in (("stdout", done.stdout), ("stderr", done.stderr)):
+        lines = _ANSI.sub("", text).splitlines()
+        if lines:
+            print(f"  {stream}: {lines[-1]}")
+    if not output:
+        print(f"  exit {done.returncode}")
     for line in failed[:5]:
         print(f"  {line}")
     return 0
@@ -1815,6 +1825,20 @@ def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
         return exc.spec
 
 
+def _spec_given(spec_id: str, given: str) -> Spec | None:
+    """The spec at `given`: a file when one exists there, else a ref. A review
+    from `main` of a spec edited on a branch needs one or the other (run 8)."""
+    from saffron.intake import SpecError, parse_spec
+
+    path = Path(given)
+    if not path.is_file():
+        return _spec_at(spec_id, given)
+    spec = parse_spec(path.read_text())
+    if spec.id != spec_id:
+        raise SpecError(f"the file declares {spec.id}, not {spec_id}")
+    return spec
+
+
 def _specs_at(commit: str, specs: dict[str, Spec], cwd: Path = REPO) -> dict[str, Spec]:
     """Each of `specs` as it stood at `commit`, so a blind review ranks past cells
     by no text later than its base. Today's stands in where none then parses."""
@@ -2071,7 +2095,7 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     newest: dict[str, float] = {}
     for spec_id, rows in landed_rows.items():
         spec = specs.get(spec_id)
-        if spec is None or spec.estimated_lines is None:
+        if spec is None or spec.estimated_lines is None or spec.estimate_measured:
             continue
         if spec_id in _PRE_RAW_ESTIMATES:
             continue
@@ -2109,6 +2133,8 @@ def _size_verdict(
     if lines is None:
         print("size: no estimated_lines declared")
         return None, None
+    if target.estimate_measured:
+        ratio, basis = 1.0, "measured, so no overrun applies"
     ceiling = _CEILINGS.get(target.type, _DEFAULT_CEILING)
     priced = ceil(round(lines * ratio, 6))
     price = priced * _TOKENS_PER_LINE
@@ -2237,18 +2263,26 @@ def cmd_history(args) -> int:
     from saffron.intake import SpecError
 
     specs = _known_specs()
+    target = None
     before = None
     if args.before:
         try:
-            target = _spec_at(args.spec_id, args.before)
+            if not args.spec:
+                target = _spec_at(args.spec_id, args.before)
             before = _commit_time(args.before)
         except (GitError, SpecError) as err:
             return _fail(f"--before {args.before}: {err}")
         specs = _specs_at(args.before, specs)
-    else:
+    if args.spec:
+        try:
+            target = _spec_given(args.spec_id, args.spec)
+        except (GitError, SpecError, OSError) as err:
+            return _fail(f"--spec {args.spec}: {err}")
+    elif not args.before:
         target = specs.get(args.spec_id)
     if target is None:
-        at = f" at {args.before}" if args.before else ""
+        source = args.spec or args.before
+        at = f" at {source}" if source else ""
         return _fail(f"no spec declares {args.spec_id}{at}")
     ledger, repo_id, _url = _ledger_and_repo()
     try:
@@ -2993,6 +3027,9 @@ def main() -> int:
     p = sub.add_parser("history", help="what cells of this spec's shape spent before")
     p.add_argument("spec_id")
     p.add_argument("--before", help="only cells that started before this commit")
+    p.add_argument(
+        "--spec", help="read the spec from this file or ref, not the checkout"
+    )
     p.add_argument("--limit", type=int, default=_ROW_LIMIT)
     p.set_defaults(func=cmd_history)
 

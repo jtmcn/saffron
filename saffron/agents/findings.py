@@ -101,7 +101,9 @@ class Finding(BaseModel):
     anchored: bool = False
     probe: Mutant | None = None
     """The edit this finding says would keep the tests green (a *vacuity
-    probe*, `CONTEXT.md`). Required of the adequacy lens on the way in and
+    probe*, `CONTEXT.md`). A host-filed survivor of a criterion probe or a
+    wrong version carries its edit here too, filed under `adequacy`
+    (`review.survivor_finding`). Required of the adequacy lens on the way in and
     optional here on purpose: every fixture recorded before this field existed
     is rebuilt through `Finding(**f)`, and `calibrate_corpus` runs that before
     every paid pass."""

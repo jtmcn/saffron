@@ -1,13 +1,14 @@
 ---
 id: b-6f7f8d
 title: The spec loop has no step after its stack merges, so main went red on a record the loop had filed
-status: partial
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [5106d0a1]
 cites: []
 related: [b-4589be, b-65e7e2, b-792ab2]
 ---
@@ -61,3 +62,8 @@ stack's own merge.
   the origin item, not every item whose `specs:` names the spec. An
   uncommitted move to `done/` still fails `test_queued_specs.py`. ADR 7's
   finishing layer (`SA-0151`) moves the retirement to the host.
+- 2026-09-30: step 5 now names both traps. It sets the status of every item
+  whose `specs:` names a retired spec, found with `records show SA-NNNN`. It
+  commits each move to `done/` before `make check`.
+- 2026-09-30: step 5 also greps `awaiting:` for each pull request, since
+  `records show` reads only `specs:`.

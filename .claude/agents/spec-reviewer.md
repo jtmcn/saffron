@@ -66,8 +66,11 @@ trivial.
    wrong implementation its witness would pass; if you can, that is a
    blocker. A `preserves: true` witness must already exist at `base` (use
    `git grep` for the test name). A non-`preserves` witness must not already
-   pass at `base`: if the behaviour it claims is already true there, that is
-   a blocker.
+   pass at `base`. Name the existing test at `base` that already passes and
+   would serve as the witness, and that is a blocker. Behaviour that already
+   exists is not enough. The `criteria` and `revert` gates judge the witness
+   the cell writes, and three such blockers were false (item 124). Without a
+   named test it is a concern.
 
    **A wrong implementation that turns on the arrangement goes to step 1b.**
    Some criteria pin a selection, an ordering or a cut.

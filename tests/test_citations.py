@@ -413,7 +413,8 @@ GATED = {
     "no-reexport": "**Import a name from the module that defines it.**",
     "one-task-driver": "**One module drives a task.**",
     "podman-runtime-is-runtime-only": "may spell their own binary",
-    "skip-is-spelled-in-full": "**A skip is spelled in full where it is used.**",
+    "skip-is-spelled-in-full": "**A skip, or a type, is spelled in full where it is used.**",
+    "no-unannotated-identity": "**A skip, or a type, is spelled in full where it is used.**",
 }
 COUNTED = ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 

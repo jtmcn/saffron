@@ -1,14 +1,14 @@
 ---
 id: b-713e90
 title: The `types` gate passes a type mismatch routed through an unannotated helper, and no token marks it
-status: open
+status: done
 tier: 3
 filed: 2026-09-28
-closed:
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [9ef9e7b2, f7111df9]
 cites: [§5.4]
 related: [39, 112]
 ---
@@ -37,3 +37,9 @@ structure rule names the unannotated-helper pattern. A test holds the wrapped
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-09-30: structure rule `no-unannotated-identity` names the cell's
+  wrapper: a def, an applied lambda or a named lambda that hands its one
+  argument back, a docstring beside it or not. It has
+  zero hits on the tree. An unannotated helper that forwards into a typed call
+  stays unnamed, since 241 test helpers do that on purpose.
+  The rule makes `structure` fail on the wrapped value, not `types`.

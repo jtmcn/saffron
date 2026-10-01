@@ -1,13 +1,14 @@
 ---
 id: b-250dc7
 title: A claim quantifying over a set keeps getting a witness that drives one member, and a first review keeps passing it
-status: partial
+status: done
 tier: 2
 filed: 2026-09-20
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: [395]
-commits: []
+commits: ["e60bdc6e"]
 cites: []
 related: [b-ea1d13, b-b69bb6, b-2750d5]
 ---
@@ -84,3 +85,11 @@ author already holds both the claim and the fixture.
   member. The report carries that table as its own Sets section, so a
   reviewer checks a table rather than finding the gap alone. Whether it lowers
   the blocker count stays unmeasured until the next chain.
+- 2026-09-30: measured, and the exit criterion holds. The loop saved 77
+  spec-review rounds over 38 specs from 2026-09-21 on, all after step 6.
+  Those rounds raised 15 blockers in all. Four are this family: two on `SA-0123`
+  and two on `SA-0128`. A keyword read of the concerns finds three more, on
+  `SA-0134`, `SA-0162` and `SA-0170`. Run 11 drew 22 such blockers over three
+  specs. 36 of the 38 specs drew no blocker of this shape. The comparison is
+  not controlled. The criterion probe of b-2750d5 and other reviewer edits
+  landed in the same window, and the labels are the delegate's.

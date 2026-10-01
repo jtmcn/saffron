@@ -60,12 +60,16 @@ And optionally:
    `.saffron/policy.yaml`'s `elevate_on` says when the gate blocks.
    Declare it as `estimated_lines`: changed lines, measured tokens over four,
    with no overrun added, since `driver.py check` applies the measured one.
+   An estimate measured from a prototype with `size_gate` also sets
+   `estimate_measured: true`, and `check` prices it at 1.0.
    **Done when** `check` prices it under 80% of that ceiling. `SA-0117` and
    `SA-0123` both landed within 25 lines of the old 1000-line ceiling. An
    estimate at or above 80% splits into a parent and children with
-   `depends_on`, and you write the parent. A split leads your report, ahead of
-   the files you wrote, and names each child you would write next: the caller
-   dispatches those, and reads the rest of your report knowing what is missing.
+   `depends_on`. **A split ends this run at step 1.** Write no spec file.
+   Report the parent and each child: its id from `records new-id`, its
+   scope, its `depends_on` and its estimate. The caller dispatches one writer
+   per spec. A child names its parent by id, so the parent file need not exist
+   first. An estimate under 80% goes on to step 2.
 2. **For `context:`, file the record.** `uv run python -m records new-id`
    gives the id. Copy a recent `b-` record's shape. **Done when**
    `records show <id>` prints it.
@@ -135,6 +139,8 @@ Your report replaces its Checks section with one line per finding: `applied`
 or `answered`, its severity, and the evidence you read.
 
 ## Report
+
+A run that ended on a split reports the split alone, as step 1 says.
 
 1. **Files written**, one line each.
 2. **Checks**: six lines, each `checked: <check> — <what you read>` or

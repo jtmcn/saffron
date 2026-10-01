@@ -29,6 +29,14 @@ def test_a_spec_declares_its_estimate_as_a_positive_integer_or_not_at_all():
             parse_spec(_frontmatter(f"estimated_lines: {bad}\n"))
 
 
+def test_a_spec_marks_its_estimate_as_measured_or_leaves_it_a_hand_one():
+    assert parse_spec(_frontmatter("")).estimate_measured is False
+    assert parse_spec(_frontmatter("estimate_measured: true\n")).estimate_measured
+    for bad in ("1", "yes please"):
+        with pytest.raises(SpecError):
+            parse_spec(_frontmatter(f"estimate_measured: {bad}\n"))
+
+
 def _run(monkeypatch, capsys, target, rows, *, ratio=1, elevate_on=()):
     """`check` over `target`, the overrun pinned. The ratio defaults to 1 so
     the boundary tests read the ceiling arithmetic alone."""
@@ -197,6 +205,22 @@ def test_check_prices_the_estimate_at_the_overrun_ratio_and_names_it(
     assert not any(x.startswith("blocker: ") for x in out), out
 
 
+def test_check_prices_a_measured_estimate_at_one_and_says_so(monkeypatch, capsys):
+    # b-b0a187: SA-0151's 478 lines came from a prototype `size_gate` measured,
+    # and `check` blocked it at 478 x 1.4.
+    target = _spec("SA-0009", spec_type="feature")
+    target.max_turns = 100
+    target.budget_usd = 100.0
+    target.estimated_lines = 500
+    target.estimate_measured = True
+    target.risk = "elevated"
+    rc, out = _run(monkeypatch, capsys, target, [], ratio=1.4)
+    assert rc == 0, out
+    [size] = [x for x in out if x.startswith("size: ")]
+    assert "× 1.0 (measured" in size, size
+    assert "a pinned ratio" not in size, size
+
+
 def test_check_blocks_a_priced_estimate_only_where_size_blocks(monkeypatch, capsys):
     # Standard risk and no elevating touch: `size` is advisory in the cell,
     # so `check` prints a concern and exits 0.
@@ -269,6 +293,20 @@ def test_the_overrun_is_the_median_landed_ratio_once_three_specs_declare_one():
 
     # Two landed specs is too few to measure, so run 19's 1.4 stands.
     ratio, basis = driver._overrun(_LandedLedger(landed[:2]), 1, specs)
+    assert ratio == 1.4
+    assert "run 19" in basis
+
+
+def test_the_overrun_counts_no_measured_estimate():
+    # A measured estimate is priced at 1.0, so it says nothing about a hand one's overrun.
+    specs = _declaring({"SA-0201": 100, "SA-0202": 100, "SA-0203": 100, "SA-0204": 100})
+    specs["SA-0204"].estimate_measured = True
+    landed = [
+        ("SA-0201", "MERGED", 200, 0),
+        ("SA-0202", "MERGED", 150, 0),
+        ("SA-0204", "MERGED", 100, 0),
+    ]
+    ratio, basis = driver._overrun(_LandedLedger(landed), 1, specs)
     assert ratio == 1.4
     assert "run 19" in basis
 

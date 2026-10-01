@@ -1,14 +1,14 @@
 ---
 id: b-ad1285
 title: A repair turn passed `prose` by splitting a sentence, and the new sentence was false
-status: open
+status: partial
 tier: 2
 filed: 2026-09-28
 closed:
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [9ef9e7b2]
 cites: [§5.4]
 related: [161, 163, b-044ae7]
 ---
@@ -33,3 +33,7 @@ comment the repair changed against its code.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-09-30: the three `prose` messages that ask for a split now say each
+  part stays true. A repair turn reads them verbatim. Two parts stay open.
+  REVIEW does not see that a repair edited a comment only to clear `prose`.
+  No lens reads a comment the repair changed against its code.

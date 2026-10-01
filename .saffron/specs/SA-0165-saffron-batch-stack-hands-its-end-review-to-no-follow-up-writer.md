@@ -208,9 +208,9 @@ and `SA-0173`. All of them are cited by symbol.
   `SpecWriterSession`. `mint` takes a `Candidate` and returns a task id.
   For an accepted group it mints, then opens the attempt, then attaches
   the run, and records the spec text last. `follow_up.Pooled` holds a
-  group and a reason. `follow_up.WRITER_SHARE` is 0.25. A raise from
-  `qualify`, `mint` or a ledger write propagates out of
-  `write_follow_ups`, and `SA-0161` leaves it to this spec to catch.
+  group and a reason. `follow_up.WRITER_SHARE` is 0.25. A raise from `write` is
+  pooled. Any other raise inside `write_follow_ups` propagates out of it,
+  a mirror read's `GitError` included. `SA-0161` leaves it to this spec to catch.
 - From `SA-0173`: `run_stack_batch` takes `writer_usd` and `follow_ups`.
   It calls `follow_ups` once after its end review, with the batch's key and
   the `StackReview`.
@@ -232,14 +232,14 @@ pydantic refusal carries its message over several lines, measured.
 `context.PROMPTS_DIR` is the one locator for core's prompt tree
 (`saffron/agents/context.py:21`).
 `resolve_repo_id` returns `None` for a url with no row
-(`saffron/ledger.py:857-865`). `run_agent` takes `spec_id` and
+(`saffron/ledger.py:886-894` at `c2bb78a6`). `run_agent` takes `spec_id` and
 `timeout_s` as keywords, and `timeout_s` defaults to 3600
 (`saffron/phases/implement.py:207-217`). `critic_cell` and the probe call
 take `note` as `(step, ok, detail)` (`saffron/cell/session.py:1205`,
 `saffron/cell/session.py:1304-1308`, `saffron/cell/session.py:1379`).
 `TURN_TIMEOUT_S` is 900 s, per turn (`saffron/cell/session.py:63`).
 `_print_batch_plan` prints the night's header
-(`saffron/cli.py:1114-1152`). The `--stack` path builds its callables
+(`saffron/cli.py:1115-1153` at `c2bb78a6`). The `--stack` path builds its callables
 only after `_resolve_queue` succeeds (`saffron/cli.py:1250-1291`).
 
 ## Problem
@@ -481,7 +481,9 @@ callable with `cap_usd` 6.5 and `pooled` holding `P0`, and calls it with
 - the log reads up, check, writer, agent, down, twice over. `SA-0169`'s
   `layer_cell` runs the check after `cell_up` and before it yields. Each
   `layer_cell` call carried `spec_session=True`, and each check ran on its
-  own `cell_up`'s container. Each `cell_up` got
+  own `cell_up`'s container. Both containers share one name,
+  `saffron-endreview-SY-2`, so the doubled log tells them apart, not the
+  name. Each `cell_up` got
   `"2" * 40`, `saffron/SY-2`, `repo`, the pinned mirror, `{"X": "base"}`
   and a `gates_dir` whose policy reads `X: base`.
 - each writer call ran in its own `cell_up`'s container, with the prompts
@@ -532,12 +534,16 @@ Then come `C[1]`, `D` and `E`, each with `RuntimeError: record broke`.
 The output holds the line `follow-ups: stopped, RuntimeError: record
 broke`.
 
-The first round alone fails every build listed below. The second alone
-passes a group counted accepted at its mint, measured. It is there for
-the raise before a group's session. The prototype placed `A` to `E` on
-five distinct layers and files. The table above came after the first
-review, and is unmeasured. The re-review at `SA-0173`'s branch runs this
-list over it.
+The first round alone fails every build listed below but one. The groups
+past the count of mints pass it, and the second round fails them. The
+second alone passes a group counted accepted at its mint, measured. So
+the second round is there for that cut and for the raise before a
+group's session. The prototype placed `A` to `E` on five distinct layers
+and files. The table above came after the first review, and is
+unmeasured. The re-review at `SA-0173`'s branch traced this list over it
+by hand, since `_stack_follow_ups` does not exist there. It dropped one
+item. Pooling every group after the last accepted one equals the right
+build under `SA-0161`'s walk, so no witness can fail it.
 
 Last, it removes `out_dir` and calls a fresh callable with an empty
 stack. That returns `[]`, calls and prints nothing, and leaves `out_dir`
@@ -589,7 +595,6 @@ unmeasured.
   drops `C[1]` (unmeasured)
 - accepted matched by file alone, which counts `E` as accepted and drops
   it (unmeasured)
-- every group after the last accepted one
 - the groups past the count of mints
 - every group from the last one written
 - unaccepted groups pooled on success too

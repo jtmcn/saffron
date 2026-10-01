@@ -1,13 +1,14 @@
 ---
 id: b-50b566
 title: The authoring docs do not list the consumes field, and the pre-flight still checks consumed names by reading
-status: open
+status: done
 tier: 3
 by_hand: true
 filed: 2026-09-23
+closed: 2026-09-30
 specs: []
 prs: []
-commits: []
+commits: [b5240baa]
 cites: [§3.2]
 related: [b-602d00, b-343c21]
 ---
@@ -43,3 +44,6 @@ writer to put what a child keys by into `consumes:`. This lands after
 - 2026-09-25: #517 lists `consumes` in `docs/agents/issue-tracker.md`, with
   its entry forms and its need for a `depends_on`. The malformed shapes and
   the pre-flight's check 4 are still open.
+- 2026-09-30: `docs/agents/issue-tracker.md` lists the shapes load refuses.
+  Pre-flight check 4 tells the writer to declare what a child keys by in
+  `consumes:`.

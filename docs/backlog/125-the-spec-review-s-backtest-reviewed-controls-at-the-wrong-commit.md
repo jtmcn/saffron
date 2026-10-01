@@ -1,15 +1,17 @@
 ---
 id: 125
 title: The spec review's backtest reviewed controls at the wrong commit and scored a spec review that has since changed
-status: open
+status: superseded
 tier: 3
 by_hand: true
 filed: 2026-09-14
+closed: 2026-09-30
 specs: []
 prs: []
-commits: []
+commits: ["bd2bee54"]
 cites: []
 related: [123, 124]
+superseded_by: 130
 ---
 
 ## Problem
@@ -42,3 +44,7 @@ in-sample.
 ## Record
 
 **Filed 2026-09-14.**
+
+- 2026-09-30: superseded by item 130. Its exit accepts recall reported as
+  in-sample, and the rerun it asks for is 130's step 2, which 130 now drops.
+  Rescoring a set the prompt was tuned on shows only whether the fixes worked.

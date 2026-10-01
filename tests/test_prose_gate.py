@@ -189,6 +189,17 @@ def test_every_rule_code_has_a_message():
     assert all(word in prose.MESSAGES["filler"] for word in prose.FILLER[:3])
 
 
+def test_every_message_that_asks_for_a_split_asks_that_each_part_stay_true():
+    """A repair split a sentence to pass `prose`, and the new one was false (b-ad1285)."""
+    splits = {
+        c: m
+        for c, m in _prose().MESSAGES.items()
+        if "split" in m or "two sentences" in m
+    }
+    assert set(splits) == {"sentence-length", "em-dash", "semicolon"}
+    assert all("each still true" in m for m in splits.values()), splits
+
+
 def test_a_duplicated_closed_set_definition_is_a_hit():
     context = "**Severity**: `a` or `b`.\n\n**Severity**: `c`.\n"
     assert _codes(context, "CONTEXT.md") == ["rendered-span"]
@@ -362,8 +373,20 @@ def test_a_long_docstring_that_grows_is_new_and_one_edited_in_place_is_not():
 
     base, grown = sentences(33), sentences(38)
     reworded = base.replace("Line 5.", "Line five.")
-    assert _new_at_head("saffron/b.py", base, grown) == [(2, "docstring-length")]
+    assert _new_at_head("saffron/b.py", base, grown) == [(2, "docstring-length")] * 5
     assert _new_at_head("saffron/b.py", base, reworded) == []
+
+
+def test_a_long_docstring_is_new_only_where_it_crosses_the_limit_or_passes_its_base():
+    """A shrink read as new, so the loop padded a docstring to its old length (b-ec607a)."""
+
+    def at(n: int) -> str:
+        body = "\n".join(f"    Line {i}." for i in range(2, n + 1))
+        return f'def f():\n    """Line 1.\n{body}"""\n'
+
+    assert _new_at_head("saffron/d.py", at(14), at(12)) == []
+    assert _new_at_head("saffron/d.py", at(10), at(11)) == [(2, "docstring-length")]
+    assert _new_at_head("saffron/d.py", at(12), at(14)) == [(2, "docstring-length")] * 2
 
 
 def test_a_new_long_comment_is_new_though_an_old_one_is_trimmed():
@@ -588,13 +611,13 @@ def _docstring_hits(text: str) -> list[str]:
 def test_a_docstring_over_ten_lines_is_a_hit_and_ten_are_not():
     # Run 7: SA-0105's cell answered "a short comment" with an 18-line docstring.
     text = _docstring("short", 10) + _docstring("test_long", 11)
-    assert _docstring_hits(text) == ["test_long, 11 lines: line 1"]
+    assert _docstring_hits(text) == ["test_long, line 11"]
 
 
 def test_a_module_docstring_is_exempt_and_a_class_docstring_is_not():
     long = "\n".join(f"line {i}" for i in range(1, 13))
     text = f'"""{long}"""\n\nclass C:\n    """{long}"""\n'
-    assert _docstring_hits(text) == ["C, 12 lines: line 1"]
+    assert _docstring_hits(text) == ["C, line 11", "C, line 12"]
 
 
 def test_an_sql_comment_in_a_string_is_held_to_the_comment_rules():

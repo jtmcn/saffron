@@ -229,3 +229,19 @@ def test_list_adr_prints_the_adrs_and_refuses_the_backlog_s_filters():
     assert bare.returncode == 0
     assert bare.stdout.startswith("---\nid: 1\n")
     assert "A gate that never ran read as green" in bare.stdout
+
+
+def test_show_kind_adr_prints_the_adr_and_a_bare_number_stays_backlog():
+    out = run("show", "--kind", "adr", "1").stdout
+    assert out.startswith("---\nid: 1\n") and "Record one decision per file" in out
+    assert "Record one decision per file" not in run("show", "1").stdout
+    section = run("show", "--kind", "adr", "1", "--section", "Decision").stdout
+    assert (
+        section.strip() == "Record one decision per file, for the fixture's own sake."
+    )
+
+
+def test_show_kind_names_a_missing_record_by_its_kind():
+    proc = run("show", "--kind", "adr", "9")
+    assert proc.returncode == 1 and "no adr 9" in proc.stderr
+    assert run("show", "--kind", "backlog", "2").stdout == run("show", "2").stdout
