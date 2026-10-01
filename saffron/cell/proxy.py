@@ -48,9 +48,9 @@ def _ensure_egress_network() -> None:
         )
 
 
-def start_proxy(internal_network: str, *, timeout_s: float = 30) -> str:
-    """Start the proxy, dual-homed on the cells network and the egress
-    network, and return its address on the cells network."""
+def start_proxy(*internal_networks: str, timeout_s: float = 30) -> str:
+    """Start the proxy on the egress network and every internal network given,
+    and return its address on the first, the cells network."""
     runtime.remove_container(PROXY_NAME)
     _ensure_egress_network()
     # Runs as the squid user from the start, not root: squid's own privilege
@@ -60,7 +60,7 @@ def start_proxy(internal_network: str, *, timeout_s: float = 30) -> str:
     runtime.run_detached(
         PROXY_NAME,
         PROXY_TAG,
-        network=(EGRESS_NETWORK, internal_network),
+        network=(EGRESS_NETWORK, *internal_networks),
         user="squid:squid",
     )
 

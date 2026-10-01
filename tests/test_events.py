@@ -1853,6 +1853,15 @@ _JOINED: tuple[tuple[Event, str], ...] = (
         Preflight(
             timestamp=1.0,
             spec_id="x",
+            step="critic_egress",
+            detail="proxy reaches api.anthropic.com from the critic network (401)",
+        ),
+        "preflight: proxy reaches api.anthropic.com from the critic network (401)",
+    ),
+    (
+        Preflight(
+            timestamp=1.0,
+            spec_id="x",
             step="image",
             detail="building saffron/cell:repo",
         ),

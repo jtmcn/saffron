@@ -1,10 +1,11 @@
 """Item 135: whether the critic cell and the implementer's container reach each other.
 
-`usage: SAFFRON_ALLOW_HOST_PROCESS=... python <this>`
+`usage: SAFFRON_ALLOW_HOST_PROCESS=... python <this> [--shared]`
 
 Starts the implementer cell through `cell_up` and the critic cell through
-`critic_cell` on the task network, as `_drive_cell` does. Each cell runs a
-listener, and each connect has a positive control beside it (principle 34).
+`critic_cell`, as `_drive_cell` does. Each cell runs a listener, and each
+connect has a positive control beside it (principle 34). `--shared` puts the
+critic cell on the task network, the layout measured on 2026-09-30.
 Needs the cell runtime and `saffron/cell-base:python` on the host.
 """
 
@@ -86,6 +87,7 @@ def _fixture(root: Path) -> tuple[Path, str, str]:
 
 
 def main() -> int:
+    shared = "--shared" in sys.argv[1:]
     root = Path(tempfile.mkdtemp(prefix="p135-"))
     repo, base, patch = _fixture(root)
     mirror = mirror_ops.ensure_mirror(repo, root / "m.git")
@@ -100,13 +102,11 @@ def main() -> int:
         spec_type="bug",
         body="",
     )
-    names = {
-        "network": "saffron-cells",
-        "volume": f"saffron-wt-{SPEC_ID}",
-        "state": f"saffron-st-{SPEC_ID}",
-        "container": f"saffron-cell-{SPEC_ID}",
-    }
-    impl = names["container"]
+    network = "saffron-cells"
+    critic_network = network if shared else "saffron-critic-net"
+    own_critic_network = None if shared else critic_network
+    volume, state = f"saffron-wt-{SPEC_ID}", f"saffron-st-{SPEC_ID}"
+    impl = f"saffron-cell-{SPEC_ID}"
     created: set[str] = set()
     try:
         session.cell_up(
@@ -118,11 +118,16 @@ def main() -> int:
             thread_env=policy.thread_env,
             created=created,
             note=lambda step, detail: print(f"[up] {step}: {detail}"),
-            **names,
+            network=network,
+            critic_network=own_critic_network,
+            volume=volume,
+            state=state,
+            container=impl,
         )
         proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
         if proxy_ip is None:
             raise runtime.CellRuntimeError("the proxy has no address")
+        critic_proxy_ip = proxy_ip if shared else session.critic_proxy_address()
         impl_ip = _py(impl, OWN_IP, proxy_ip)
         print(f"implementer {impl_ip}, proxy {proxy_ip}")
         _listen(impl)
@@ -132,18 +137,18 @@ def main() -> int:
             spec=spec,
             repo=repo,
             mirror=mirror,
-            network=names["network"],
-            env=session.cell_env(proxy_ip, policy.thread_env),
+            network=critic_network,
+            env=session.cell_env(critic_proxy_ip, policy.thread_env),
             gates_dir=gates_dir,
             patch=patch,
             created=created,
             note=lambda *a: print("[critic]", a),
         ) as critic:
-            critic_ip = _py(critic, OWN_IP, proxy_ip)
+            critic_ip = _py(critic, OWN_IP, critic_proxy_ip)
             print(f"critic {critic_ip}")
             print("critic listeners:", _py(critic, LISTENERS) or "none")
             port = str(proxy.PROXY_PORT)
-            print("control critic->proxy:", _py(critic, CONNECT, proxy_ip, port))
+            print("control critic->proxy:", _py(critic, CONNECT, critic_proxy_ip, port))
             print("probe critic->impl:", _py(critic, CONNECT, impl_ip, str(PORT)))
             _listen(critic)
             print("control critic->own ip:", _py(critic, CONNECT, critic_ip, str(PORT)))
@@ -152,7 +157,11 @@ def main() -> int:
         session.cell_down(
             created=created,
             note=lambda step, ok, detail: print(f"[down] {step} {ok} {detail}"),
-            **names,
+            network=network,
+            critic_network=own_critic_network,
+            volume=volume,
+            state=state,
+            container=impl,
         )
     return 0
 

@@ -166,6 +166,7 @@ SUBNETS: dict[str, str] = {
     "cells": DEFAULT_SUBNET,  # saffron-cells, the task's own network
     "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
     "gate": "10.90.0.0/24",  # saffron-gate-net-<spec>, the Gate-only cell's
+    "critic": "10.91.0.0/24",  # saffron-critic-net, the critic cells' and the proxy's
 }
 
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
@@ -179,7 +180,14 @@ COMPLETION_TIMEOUT_S = 10.0
 # Derived, never re-typed: a second literal of the subnet is a probe that
 # silently covers nothing the day the subnet moves.
 _NETWORK = ipaddress.ip_network(DEFAULT_SUBNET)
-SUBNET_PREFIX = str(_NETWORK.network_address).rsplit(".", 1)[0] + "."
+
+
+def subnet_prefix(subnet: str) -> str:
+    """The `a.b.c.` an address on a /24 starts with, for `container_ip`."""
+    return str(ipaddress.ip_network(subnet).network_address).rsplit(".", 1)[0] + "."
+
+
+SUBNET_PREFIX = subnet_prefix(DEFAULT_SUBNET)
 GATEWAY = str(next(_NETWORK.hosts()))
 
 
