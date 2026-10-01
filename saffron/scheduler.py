@@ -632,6 +632,77 @@ def _dependency_refusal(
     return f"depends_on {dep} is {states[-1]}, which is not {DEPENDENCY_MERGED}"
 
 
+def open_pr_refusal(
+    candidate: Candidate, open_prs: list[dict], exempt_branches: frozenset[str]
+) -> tuple[RefusalKind, str] | None:
+    """The two open-pull-request refusals `_refuse` used to run inline, moved
+    here. A follow-up and a revised spec of the order (`SA-0162`) can run
+    them too, against their own exempt set rather than `_refuse`'s own
+    `ancestor_branches`.
+
+    The first is the same-spec check: another task's still-open pull request
+    on this candidate's own branch. The second is the touches-overlap check.
+    It skips `candidate`'s own branch and anything in `exempt_branches`. The
+    caller's job is only to say which branches are exempt, never to drop its
+    own from `open_prs` first."""
+    own_branch = _branch(candidate.spec.id)
+    same_spec_pr = next(
+        (pr for pr in open_prs if pr.get("headRefName") == own_branch), None
+    )
+    # *Another* task: a candidate resuming its own `task_id` keeps its open PR,
+    # or the refusal would refuse the re-queue it exists to resume (§4.2.1).
+    # ponytail: "is a resume" stands in for "owns that PR" — the branch is
+    # spec-keyed, so a second re-queueing task at this sha inherits the first
+    # one's PR rather than being refused on it. Recovering the owner needs the
+    # ledger, which this function does not take.
+    if same_spec_pr is not None and candidate.task_id is None:
+        # `or`, not a `.get` default: `_open_prs` filters shapes, not fields,
+        # so a present-but-null url would otherwise print "None" at an operator.
+        url = same_spec_pr.get("url") or own_branch
+        return (
+            "open_pr_on_spec",
+            f"an open pull request from another task already targets this spec: {url}",
+        )
+
+    # K=1, walked transitively (backlog item 59): a child cut from its
+    # parent's branch starts with the parent's changes already in its tree,
+    # and a stack is transitive — the grandparent's changes, and every
+    # ancestor's above it, are in that same tree by construction, so an
+    # overlap with any of their pull requests is what stacking is *for*.
+    # `exempt_branches` is the caller's own answer to what is already in
+    # this candidate's tree: `_ancestor_branches` for `_refuse`, a stack
+    # batch's own recorded layers for a follow-up or a revision (`SA-0162`).
+    # Left un-exempted, this refusal shadows the dependency admission
+    # entirely — a parent at `READY_FOR_REVIEW` has an open pull request by
+    # definition, and almost every spec here touched the backlog file then
+    # (`SA-0026`).
+    for pr in open_prs:
+        branch = pr.get("headRefName")
+        if branch == own_branch or branch in exempt_branches:
+            continue
+        # `or []`, not a `.get` default: a `files` of `null` stores None.
+        changed = [
+            f.get("path", "") for f in (pr.get("files") or []) if isinstance(f, dict)
+        ]
+        overlap = [
+            path
+            for path in changed
+            if any(matches(path, pattern) for pattern in candidate.spec.touches)
+        ]
+        if overlap:
+            # The url, like the sibling refusal above: two lines in one morning
+            # queue naming the same pull request two different ways is a reread.
+            where = pr.get("url") or pr.get("headRefName", "")
+            files = ", ".join(overlap[:3])
+            if len(overlap) > 3:
+                files += f", … ({len(overlap)} files)"
+            return (
+                "open_pr_overlap",
+                f"touches overlaps open pull request {where}'s changed files: {files}",
+            )
+    return None
+
+
 def _refuse(
     candidate: Candidate,
     *,
@@ -661,61 +732,8 @@ def _refuse(
     ) is not None:
         return "protected_touch", reason
 
-    own_branch = _branch(candidate.spec.id)
-    same_spec_pr = next(
-        (pr for pr in open_prs if pr.get("headRefName") == own_branch), None
-    )
-    # *Another* task: a candidate resuming its own `task_id` keeps its open PR,
-    # or the refusal would refuse the re-queue it exists to resume (§4.2.1).
-    # ponytail: "is a resume" stands in for "owns that PR" — the branch is
-    # spec-keyed, so a second re-queueing task at this sha inherits the first
-    # one's PR rather than being refused on it. Recovering the owner needs the
-    # ledger, which this function does not take.
-    if same_spec_pr is not None and candidate.task_id is None:
-        # `or`, not a `.get` default: `_open_prs` filters shapes, not fields,
-        # so a present-but-null url would otherwise print "None" at an operator.
-        url = same_spec_pr.get("url") or own_branch
-        return (
-            "open_pr_on_spec",
-            f"an open pull request from another task already targets this spec: {url}",
-        )
-
-    # K=1, walked transitively (backlog item 59): a child cut from its
-    # parent's branch starts with the parent's changes already in its tree,
-    # and a stack is transitive — the grandparent's changes, and every
-    # ancestor's above it, are in that same tree by construction, so an
-    # overlap with any of their pull requests is what stacking is *for*.
-    # `ancestor_branches` is `_ancestor_branches`' answer, following
-    # `depends_on[0]` one link at a time and nothing else — a *second*
-    # `depends_on` entry is a dependency, not a base, and still refuses
-    # below. Left un-exempted, this refusal shadows the dependency admission
-    # entirely — a parent at `READY_FOR_REVIEW` has an open pull request by
-    # definition, and almost every spec here touched the backlog file then
-    # (`SA-0026`).
-    for pr in open_prs:
-        branch = pr.get("headRefName")
-        if branch == own_branch or branch in ancestor_branches:
-            continue
-        # `or []`, not a `.get` default: a `files` of `null` stores None.
-        changed = [
-            f.get("path", "") for f in (pr.get("files") or []) if isinstance(f, dict)
-        ]
-        overlap = [
-            path
-            for path in changed
-            if any(matches(path, pattern) for pattern in candidate.spec.touches)
-        ]
-        if overlap:
-            # The url, like the sibling refusal above: two lines in one morning
-            # queue naming the same pull request two different ways is a reread.
-            where = pr.get("url") or pr.get("headRefName", "")
-            files = ", ".join(overlap[:3])
-            if len(overlap) > 3:
-                files += f", … ({len(overlap)} files)"
-            return (
-                "open_pr_overlap",
-                f"touches overlaps open pull request {where}'s changed files: {files}",
-            )
+    if (refused := open_pr_refusal(candidate, open_prs, ancestor_branches)) is not None:
+        return refused
 
     if (escaped := _unmatched_criterion_path(candidate.spec)) is not None:
         return (

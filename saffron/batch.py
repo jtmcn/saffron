@@ -41,7 +41,7 @@ from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
-from saffron.scheduler import Candidate
+from saffron.scheduler import Candidate, _branch, open_pr_refusal
 from saffron.task import Refused
 
 if TYPE_CHECKING:
@@ -79,6 +79,15 @@ class SpecReviewWait(Exception):
     def __init__(self, resets_at: int | None) -> None:
         super().__init__("spec review met the account's rate limit")
         self.resets_at = resets_at
+
+
+def _until_ts(until: datetime | None) -> str | None:
+    """`batches.until_ts`'s own shape, UTC and space-separated. `batches.started_at`
+    is `datetime('now')`, which is both. A naive local `isoformat()` matched
+    neither, so the two columns of one row were not comparable."""
+    if until is None:
+        return None
+    return until.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def run_batch(
@@ -132,15 +141,7 @@ def run_batch(
     `INFRASTRUCTURE`, `INCOMPLETE` — never a boolean or an exit code.
     `SA-0051` owns the mapping to an exit code.
     """
-    # UTC, and space-separated: `batches.started_at` is `datetime('now')`,
-    # which is both. A naive local `isoformat()` matched neither, so the two
-    # columns of one row were not comparable.
-    until_ts = (
-        until.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
-        if until is not None
-        else None
-    )
-    batch_id = ledger.create_batch(budget_usd, until_ts=until_ts)
+    batch_id = ledger.create_batch(budget_usd, until_ts=_until_ts(until))
 
     # Every task this run left mid-phase, in the order it happened —
     # `(spec_id, state)`. Owned here, not in `_drive`, so a night that raises
@@ -148,7 +149,7 @@ def run_batch(
     in_flight: list[tuple[str, str]] = []
     stopped: StopReason | None = None
     try:
-        stopped = _drive(
+        reason, _aborts = _drive(
             candidates,
             ledger,
             budget_usd,
@@ -164,6 +165,7 @@ def run_batch(
             reserve_usd=reserve_usd,
             sleep=sleep,
         )
+        stopped = _stop(ledger, batch_id, reason, in_flight, emit)
         return stopped
     finally:
         if stopped is None:
@@ -186,26 +188,29 @@ def _drive(
     *,
     batch_id: int,
     clock: Callable[[], datetime],
-    readiness_check: Callable[[], Readiness],
+    readiness_check: Callable[[], Readiness] | None,
     emit: Callable[[str], None],
     in_flight: list[tuple[str, str]],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
     reserve_usd: float = 0.0,
     sleep: Callable[[float], None] | None = None,
-) -> StopReason:
-    """`run_batch`'s body, split out so every exit closes the batch row.
+    consecutive_aborts: int = 0,
+) -> tuple[StopReason, int]:
+    """`run_batch`'s body, and a stack batch's own per-generation pass
+    (`run_stack_batch`). Returns the stop reason and the breaker's own count.
+    It closes nothing itself. The caller decides when to call `_stop`, which
+    stays the one call to `close_batch`. `readiness_check=None` skips §4.4
+    step 1 outright, for a second pass that already ran it once.
+    `consecutive_aborts` is taken from the caller rather than always starting
+    at zero, so a second pass carries the first one's standing count."""
+    if readiness_check is not None:
+        readiness = readiness_check()
+        if not readiness.ok:
+            # §4.4 step 1: a readiness failure ends the night before any task
+            # starts, but it still has to leave a row behind, or an expired
+            # token at 22:00 produces a night with no record it was attempted.
+            return "INFRASTRUCTURE", consecutive_aborts
 
-    Every `return` here is `_stop`, which is the one call to `close_batch`;
-    anything that leaves without returning is the caller's `finally` to deal
-    with — through `_stop` too, with the same `in_flight`."""
-    readiness = readiness_check()
-    if not readiness.ok:
-        # §4.4 step 1: a readiness failure ends the night before any task
-        # starts, but it still has to leave a row behind, or an expired token
-        # at 22:00 produces a night with no record it was attempted.
-        return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
-
-    consecutive_aborts = 0
     # By spec id: a re-offered spec returns as a new `Candidate` and would
     # start twice. A rate-limited one with `sleep` set is taken back out.
     started: set[str] = set()
@@ -222,23 +227,23 @@ def _drive(
                 # count standing. Reporting `DRAINED` there would exit 0, and
                 # launchd would record a successful night in which every task
                 # died of one global condition.
-                return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
-            return _stop(ledger, batch_id, "DRAINED", in_flight, emit)
+                return "INFRASTRUCTURE", consecutive_aborts
+            return "DRAINED", consecutive_aborts
 
         # Before each task, in this order: the deadline, then the budget,
         # then the breaker's standing count (§4.2.1's ordering, named once
         # here rather than re-derived at each check).
         if until is not None and clock() >= until:
-            return _stop(ledger, batch_id, "UNTIL", in_flight, emit)
+            return "UNTIL", consecutive_aborts
 
         # `reserve_usd` is held back here, not subtracted from `budget_usd`
         # itself. The batch row still records the whole budget it was given.
         remaining = budget_usd - reserve_usd - ledger.batch_spend(batch_id)
         if candidate.spec.budget_usd > remaining:
-            return _stop(ledger, batch_id, "BUDGET", in_flight, emit)
+            return "BUDGET", consecutive_aborts
 
         if consecutive_aborts >= _BREAKER_THRESHOLD:
-            return _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            return "INFRASTRUCTURE", consecutive_aborts
 
         # Named before it starts: the one place the log shows which candidate
         # the latest scan chose.
@@ -256,7 +261,7 @@ def _drive(
                 candidate, wait.resets_at, until, clock, emit, sleep
             )
             if wait_stop is not None:
-                return _stop(ledger, batch_id, wait_stop, in_flight, emit)
+                return wait_stop, consecutive_aborts
             started.discard(candidate.spec.id)
         except Exception as exc:
             # Driving one cell can raise from outside the block that would
@@ -271,10 +276,8 @@ def _drive(
             # never gets, so its spend still counts against the budget gate
             # rather than vanishing behind a NULL `batch_id` forever.
             consecutive_aborts += 1
-            # Bound and reported: by the time `run_batch` returns the
-            # exception is gone, and an unattended night that died from a
-            # runtime that would not start otherwise leaves the operator a
-            # stop reason and no traceback anywhere.
+            # Printed now, because the exception is gone once the caller returns.
+            # Otherwise a night that died here leaves a stop reason and no cause.
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
         else:
@@ -300,7 +303,7 @@ def _drive(
                         candidate, outcome.resets_at, until, clock, emit, sleep
                     )
                     if wait_stop is not None:
-                        return _stop(ledger, batch_id, wait_stop, in_flight, emit)
+                        return wait_stop, consecutive_aborts
                     started.discard(candidate.spec.id)
                 else:
                     if outcome.state in ABORT_STATES:
@@ -361,6 +364,29 @@ def _is_layer(result: CellOutcome | Refused) -> bool:
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 
+def _revised_spec_refusal(
+    ledger: Ledger,
+    task_id: int,
+    candidate: Candidate,
+    open_prs: Callable[[], list[dict]],
+    layer_branches: frozenset[str],
+) -> str | None:
+    """Gate 0's open-pull-request refusals, read again on a spec of the
+    order whose latest `spec_texts` row is a revision (`SA-0162`, problem
+    item 6). `None` for a spec with no revision, or a text `parse_spec`
+    itself refuses. `run_task` meets that second case before any cell."""
+    text_row = ledger.spec_text(task_id)
+    if text_row is None or text_row["origin"] != "revision":
+        return None
+    try:
+        revised = parse_spec(text_row["text"])
+    except SpecError:
+        return None
+    revised_candidate = dataclasses.replace(candidate, spec=revised)
+    refused = open_pr_refusal(revised_candidate, open_prs(), layer_branches)
+    return None if refused is None else refused[1]
+
+
 def run_stack_batch(
     order: Sequence[Candidate],
     ledger: Ledger,
@@ -376,8 +402,8 @@ def run_stack_batch(
     # stack-batch design's section 3, Money). `SA-0165` passes `--budget * WRITER_SHARE`.
     writer_usd: float = 0.0,
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
-    # Runs once, right after `end_review`, only when both are given. Its
-    # return is discarded here. `SA-0165` passes the production writer.
+    # Runs once, right after `end_review`, when both are given. Its return runs
+    # one generation up when the order drained. `SA-0165` passes the writer.
     follow_ups: Callable[[str, StackReview], list[Candidate]] | None = None,
     # A real default. `SA-0144`'s caller passes none (SA-0148).
     sleep: Callable[[float], None] = time.sleep,
@@ -396,19 +422,24 @@ def run_stack_batch(
         ]
         | None
     ) = None,
+    # `None` means nothing is refused on an open pull request. Neither a
+    # follow-up nor a revised spec of the order meets a check (`SA-0162`).
+    open_prs: Callable[[], list[dict]] | None = None,
 ) -> StopReason:
-    """Run one stack's planned `order` once, without rescanning (`SA-0142`). `runner` takes
-    each candidate and its predecessor, the last one that reached `READY_FOR_REVIEW`, or
-    `None` before any has. A `RATE_LIMITED` task waits on it instead of refusing (`sleep`,
-    SA-0148). `review`, when given, runs first and can refuse the spec, raise, or wait
-    (`SpecReviewWait`, ADR 7). A `revise` route calls `revise` for up to
-    `MAX_REVISE_ROUNDS` rounds.
+    """Run one stack's planned `order`, then its follow-ups, without rescanning (`SA-0142`,
+    `SA-0162`). `runner` takes each candidate and its predecessor, the last one that reached
+    `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED` task waits on it instead
+    of refusing (`sleep`, SA-0148). `review`, when given, runs first and can refuse, raise,
+    or wait (`SpecReviewWait`, ADR 7), with `revise` run up to `MAX_REVISE_ROUNDS` times.
 
-    A candidate is refused before `run_batch` sees it, when `depends_on` reaches a spec
-    that ran and missed, direct or through a refused spec. `reserve_usd` and `writer_usd`
-    hold back the budget check, and `end_review` then `follow_ups` run once when given."""
+    A candidate of the order is refused before its own call, when `depends_on` reaches a
+    spec that missed. `reserve_usd` and `writer_usd` hold back only the order's own checks.
+    `end_review` then `follow_ups` run once the order's loop returns, whatever its stop.
+    The follow-ups run the same way, one generation up, only when it returned `DRAINED`."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
+    if follow_ups is not None and review is None:
+        raise ValueError("run_stack_batch needs review whenever follow_ups is given")
     order = list(order)
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
@@ -419,7 +450,7 @@ def run_stack_batch(
     # next call for that spec reviews it again (ADR 7).
     reviewed: set[str] = set()
     # Spec id -> the task `mint` gave it, kept for one call only. A rerun
-    # after `wait` or `RATE_LIMITED` reuses it rather than minting again.
+    # reuses it rather than minting again. A follow-up's is seeded instead.
     task_ids: dict[str, int] = {}
     # Spec id -> revisions run this call, never the ledger's own count (D1):
     # every call of `run_stack_batch` starts every spec at zero.
@@ -427,9 +458,21 @@ def run_stack_batch(
     # Spec id -> the pair a rate-limited writer call was given. A retry
     # after the wait hands `revise` the same one, with no review between.
     pending_revision: dict[str, tuple[str | None, str]] = {}
+    # 0 for the order, 1 for its follow-ups, read by `wrapped` and
+    # `record_layer` below, set once the order's own pass drains.
+    generation = 0
+    # `_branch` of every layer this batch recorded, either generation. The
+    # exempt set a follow-up's and a revision's own open-pull-request check share.
+    layer_branches: set[str] = set()
+    # Spec ids whose review routed `run`, `escalate` or `revise`, decided by the
+    # route alone, never by a raise, a wait or a `Refused` return.
+    follow_up_reviewed: set[str] = set()
+    # The one read of `open_prs` the follow-ups share: read once, before the
+    # first of them, never per follow-up.
+    follow_up_prs: list[dict] = []
 
-    # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at
-    # generation 0. The predecessor is the last such task, not `candidate`.
+    # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at this
+    # pass's own generation. The predecessor is the last such task, not `candidate`.
     def record_layer(candidate: Candidate, outcome: CellOutcome, batch_id: int) -> None:
         nonlocal position, predecessor_task_id
         if not _is_layer(outcome):
@@ -439,9 +482,10 @@ def run_stack_batch(
             outcome.task_id,
             position=position,
             predecessor_task_id=predecessor_task_id,
-            generation=0,
+            generation=generation,
         )
         predecessor_task_id = outcome.task_id
+        layer_branches.add(_branch(candidate.spec.id))
 
     def blocking(candidate: Candidate) -> frozenset[str]:
         found: set[str] = set()
@@ -465,12 +509,13 @@ def run_stack_batch(
     def wrapped(candidate: Candidate) -> CellOutcome | Refused:
         nonlocal predecessor
         pred = predecessor
-        # `remaining` holds the object `run_batch` offered, not the one
+        # `remaining` holds the object `_drive` offered, not the one
         # `dataclasses.replace` builds below. `list.remove` matches by value.
         original = candidate
+        is_follow_up = generation == 1
         if review is not None:
             if candidate.spec.id not in task_ids:
-                # Minted once per spec, whatever `candidate.task_id` names.
+                # Minted once per spec, never for a follow-up, already seeded.
                 # A raise here is a miss, as one from `review` or `runner` is.
                 assert mint is not None
                 try:
@@ -486,6 +531,13 @@ def run_stack_batch(
             candidate = dataclasses.replace(
                 candidate, task_id=task_ids[candidate.spec.id]
             )
+        if is_follow_up and open_prs is not None and candidate.spec.id not in reviewed:
+            refused = open_pr_refusal(
+                candidate, follow_up_prs, frozenset(layer_branches)
+            )
+            if refused is not None:
+                emit(f"{candidate.spec.id:<10} refused  {refused[1]}")
+                return Refused(reason=refused[1])
         if review is not None and candidate.spec.id not in reviewed:
             task_id = task_ids[candidate.spec.id]
             while True:
@@ -507,8 +559,9 @@ def run_stack_batch(
                             error=f"{type(exc).__name__}: {exc}",
                         )
                         ledger.set_task_state(task_id, "GATE_ERROR")
-                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                        remaining.remove(original)
+                        if not is_follow_up:
+                            missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                            remaining.remove(original)
                         raise
                     read = spec_review.read_spec_review(session)
                     route = spec_review.spec_review_route(read)
@@ -538,6 +591,10 @@ def run_stack_batch(
                         block_sha256=read.block_sha256,
                         error=read.error,
                     )
+                    # Decided by the route, whatever happens next: never a raise,
+                    # a wait, or the `Refused` return below.
+                    if route not in ("wait", "error"):
+                        follow_up_reviewed.add(candidate.spec.id)
                     if route == "wait":
                         ledger.set_task_state(task_id, "RATE_LIMITED")
                         raise SpecReviewWait(resets_at=read.resets_at)
@@ -550,21 +607,40 @@ def run_stack_batch(
                         )
                         emit(f"{candidate.spec.id:<10} escalated  {blockers}{suffix}")
                         ledger.set_task_state(task_id, "SPEC_WITHHELD")
-                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                        remaining.remove(original)
+                        if not is_follow_up:
+                            missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                            remaining.remove(original)
                         return Refused(
                             reason=f"spec review escalated with {blockers} blocker(s)"
                         )
                     if route == "error":
                         emit(f"{candidate.spec.id:<10} unreviewed  {read.error}")
                         ledger.set_task_state(task_id, "GATE_ERROR")
-                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                        remaining.remove(original)
+                        if not is_follow_up:
+                            missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                            remaining.remove(original)
                         raise RuntimeError(
                             f"spec review for {candidate.spec.id} could not be read"
                         )
                     if route == "run":
                         reviewed.add(candidate.spec.id)
+                        # Gate 0's open-pull-request refusals again, on a revised
+                        # spec of the order only, never a follow-up's own first text.
+                        if not is_follow_up and open_prs is not None:
+                            reason = _revised_spec_refusal(
+                                ledger,
+                                task_id,
+                                candidate,
+                                open_prs,
+                                frozenset(layer_branches),
+                            )
+                            if reason is not None:
+                                emit(f"{candidate.spec.id:<10} refused  {reason}")
+                                missed[candidate.spec.id] = frozenset(
+                                    {candidate.spec.id}
+                                )
+                                remaining.remove(original)
+                                return Refused(reason=reason)
                         break
                     # route == "revise": a fresh round starts from this read.
                     review_text = session.text
@@ -577,10 +653,12 @@ def run_stack_batch(
                     + spec_review.SPEC_REVIEW_SESSION_USD
                     + candidate.spec.budget_usd
                 )
+                # Held back for a spec of the order only: a follow-up's
+                # revision runs after both already left `batch_spend`.
+                held_back = 0.0 if is_follow_up else reserve_usd + writer_usd
                 budget_left = (
                     budget_usd
-                    - reserve_usd
-                    - writer_usd
+                    - held_back
                     - ledger.batch_spend(ledger.latest_batch_id())
                 )
                 if budget_left < needed:
@@ -588,8 +666,9 @@ def run_stack_batch(
                         f"{candidate.spec.id:<10} unrevised  "
                         f"needs {needed:.3f}, {budget_left:.3f} left"
                     )
-                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                    remaining.remove(original)
+                    if not is_follow_up:
+                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                        remaining.remove(original)
                     return Refused(
                         reason=f"revision for {candidate.spec.id} needs more budget "
                         "than remains"
@@ -598,8 +677,9 @@ def run_stack_batch(
                     turn = revise(candidate, pred, spec_text, review_text)
                 except Exception:
                     ledger.set_task_state(task_id, "GATE_ERROR")
-                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                    remaining.remove(original)
+                    if not is_follow_up:
+                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                        remaining.remove(original)
                     raise
                 attempt_id = ledger.open_attempt(
                     task_id, phase=spec_review.WRITING_PHASE
@@ -619,8 +699,9 @@ def run_stack_batch(
                 if turn.error is not None:
                     emit(f"{candidate.spec.id:<10} unrevised  {turn.error}")
                     ledger.set_task_state(task_id, "GATE_ERROR")
-                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                    remaining.remove(original)
+                    if not is_follow_up:
+                        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                        remaining.remove(original)
                     raise RuntimeError(
                         f"spec writer for {candidate.spec.id} returned an error"
                     )
@@ -636,51 +717,98 @@ def run_stack_batch(
         try:
             result = runner(candidate, pred)
         except Exception:
-            missed[candidate.spec.id] = frozenset({candidate.spec.id})
-            remaining.remove(original)
+            if not is_follow_up:
+                missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                remaining.remove(original)
             raise
         if isinstance(result, CellOutcome) and result.state == "RATE_LIMITED":
             # Neither a layer nor a miss: `original` stays in `remaining` so
             # the same spec is offered again, against this same `pred`.
             return result
-        remaining.remove(original)
+        if not is_follow_up:
+            remaining.remove(original)
         if _is_layer(result):
             predecessor = candidate
-        else:
+        elif not is_follow_up:
             missed[candidate.spec.id] = frozenset({candidate.spec.id})
         return result
 
-    stopped = run_batch(
-        resolve_prefix(),
-        ledger,
-        budget_usd,
-        until,
-        wrapped,
-        rescan=resolve_prefix,
-        clock=clock,
-        readiness_check=readiness_check,
-        emit=emit,
-        after_attach=record_layer,
-        reserve_usd=reserve_usd + writer_usd,
-        sleep=sleep,
-    )
-    if end_review is not None:
-        specs: dict[str, Spec] = {}
-        for candidate in order:
-            resolved = candidate.spec
-            task_id = task_ids.get(candidate.spec.id)
-            if task_id is not None:
-                text_row = ledger.spec_text(task_id)
-                if text_row is not None:
-                    with contextlib.suppress(SpecError):
-                        resolved = parse_spec(text_row["text"])
-            specs[candidate.spec.id] = resolved
-        review_result = end_review(str(ledger.latest_batch_id()), reserve_usd, specs)
-        if follow_ups is not None:
-            follow_ups(
-                str(ledger.latest_batch_id()), cast("StackReview", review_result)
+    in_flight: list[tuple[str, str]] = []
+    batch_id = ledger.create_batch(budget_usd, until_ts=_until_ts(until))
+    stopped: StopReason | None = None
+    try:
+        reason, aborts = _drive(
+            resolve_prefix(),
+            ledger,
+            budget_usd,
+            until,
+            wrapped,
+            rescan=resolve_prefix,
+            batch_id=batch_id,
+            clock=clock,
+            readiness_check=readiness_check,
+            emit=emit,
+            in_flight=in_flight,
+            after_attach=record_layer,
+            reserve_usd=reserve_usd + writer_usd,
+            sleep=sleep,
+        )
+        if end_review is not None:
+            specs: dict[str, Spec] = {}
+            for candidate in order:
+                resolved = candidate.spec
+                task_id = task_ids.get(candidate.spec.id)
+                if task_id is not None:
+                    text_row = ledger.spec_text(task_id)
+                    if text_row is not None:
+                        with contextlib.suppress(SpecError):
+                            resolved = parse_spec(text_row["text"])
+                specs[candidate.spec.id] = resolved
+            review_result = end_review(
+                str(ledger.latest_batch_id()), reserve_usd, specs
             )
-    return stopped
+            if follow_ups is not None:
+                follow_up_candidates = follow_ups(
+                    str(ledger.latest_batch_id()), cast("StackReview", review_result)
+                )
+                # Only once the order's own pass drains. One `follow_ups`
+                # returns otherwise is never driven, so it stays unrun below.
+                if follow_up_candidates and reason == "DRAINED":
+                    for candidate in follow_up_candidates:
+                        assert candidate.task_id is not None  # SA-0161 mints one
+                        task_ids[candidate.spec.id] = candidate.task_id
+                    if open_prs is not None:
+                        follow_up_prs.extend(open_prs())
+                    generation = 1
+                    reason, _aborts = _drive(
+                        follow_up_candidates,
+                        ledger,
+                        budget_usd,
+                        until,
+                        wrapped,
+                        rescan=lambda: follow_up_candidates,
+                        batch_id=batch_id,
+                        clock=clock,
+                        readiness_check=None,
+                        emit=emit,
+                        in_flight=in_flight,
+                        after_attach=record_layer,
+                        reserve_usd=0.0,
+                        sleep=sleep,
+                        consecutive_aborts=aborts,
+                    )
+                unrun = [
+                    c.spec.id
+                    for c in follow_up_candidates
+                    if c.spec.id not in follow_up_reviewed
+                ]
+                if unrun:
+                    emit("follow-ups unrun  " + " ".join(unrun))
+        stopped = _stop(ledger, batch_id, reason, in_flight, emit)
+        return stopped
+    finally:
+        if stopped is None:
+            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
 
 def _stop(
@@ -691,19 +819,14 @@ def _stop(
     emit: Callable[[str], None],
 ) -> StopReason:
     """Name every task this night left in flight, then close the batch row
-    with `reason` — or with `INCOMPLETE` in its place, whenever `in_flight`
-    is non-empty and `reason` is not already `INFRASTRUCTURE`.
+    with `reason`. `INCOMPLETE` takes its place whenever `in_flight` is
+    non-empty and `reason` is not already `INFRASTRUCTURE`.
 
     `INFRASTRUCTURE` outranks `INCOMPLETE`, which outranks every ordinary
-    reason (`DRAINED`, `BUDGET`, `UNTIL`) — never the other way, and never
-    hidden behind either (backlog item 70, `DESIGN.md` §4.2.1). Naming
-    happens first and unconditionally, whatever the final reason turns out to
-    be, `INFRASTRUCTURE` included: a stop reason says something went wrong,
-    and this line says which spec to look at.
-
-    The single call site for `close_batch` — every `_drive` return and
-    `run_batch`'s `finally` come through here: decide the reason, close once,
-    return it."""
+    reason, never the other way (backlog item 70, `DESIGN.md` §4.2.1).
+    The single call site for `close_batch`: `run_batch` and `run_stack_batch`
+    each call it once, for the reason their own `_drive` call, or calls,
+    returned, and in their own `finally` on a raise."""
     for spec_id, state in in_flight:
         emit(f"{spec_id:<10} left in flight in {state}")
     if in_flight and reason != "INFRASTRUCTURE":
