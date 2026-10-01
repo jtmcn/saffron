@@ -1428,12 +1428,13 @@ class Ledger:
     def stack_layers(self, batch_id: int) -> list[sqlite3.Row]:
         """One batch's own `stack_layers` rows, lowest position first, each
         joined to its task for `task_id`, `state`, `budget_usd`, `pr_url`,
-        `branch` and `pushed_sha` (ADR 7, `saffron/finish.py`). `SA-0152`,
-        `SA-0167`, `SA-0170` and `SA-0174` will read these same rows."""
+        `branch` and `pushed_sha` (ADR 7, `saffron/finish.py`). Also carries
+        `task_key`, which `SA-0174`'s finish reads to match a pooled group.
+        `SA-0152`, `SA-0167` and `SA-0170` will read these same rows too."""
         return list(
             self._db.execute(
                 """SELECT sl.position, sl.spec_id, sl.predecessor_key,
-                          sl.predecessor_head, sl.generation,
+                          sl.predecessor_head, sl.generation, sl.task_key,
                           t.task_id, t.state, t.budget_usd, t.pr_url,
                           t.branch, t.pushed_sha
                      FROM stack_layers sl
@@ -1441,6 +1442,39 @@ class Ledger:
                     WHERE sl.batch_key = ?
                     ORDER BY sl.position""",
                 (str(batch_id),),
+            )
+        )
+
+    def qualifications(self, task_id: int) -> list[sqlite3.Row]:
+        """One task's own `qualifications` rows, in the order recorded
+        (`SA-0180`). Raises `ValueError` for a task id that names no task."""
+        key = self.record_key(task_id)
+        if key is None:
+            raise ValueError(f"no task {task_id} to read qualifications for")
+        return list(
+            self._db.execute(
+                "SELECT * FROM qualifications WHERE task_key = ? ORDER BY position",
+                (key,),
+            )
+        )
+
+    def batch_follow_ups(self, batch_id: int) -> list[sqlite3.Row]:
+        """Each task on a run of this batch whose earliest `spec_texts` row
+        carries the origin `follow_up` (`SA-0174`). A follow-up that became
+        a layer is still named here. Its caller tells the two apart.
+        Ordered by `task_id`, with `task_id`, `spec_id`, `state` and
+        `pushed_sha`."""
+        return list(
+            self._db.execute(
+                """SELECT t.task_id, t.spec_id, t.state, t.pushed_sha
+                     FROM tasks t
+                     JOIN runs rn ON rn.run_id = t.run_id
+                    WHERE rn.batch_id = ?
+                      AND (SELECT st.origin FROM spec_texts st
+                            WHERE st.task_key = t.record_key
+                            ORDER BY st.n LIMIT 1) = 'follow_up'
+                    ORDER BY t.task_id""",
+                (batch_id,),
             )
         )
 
