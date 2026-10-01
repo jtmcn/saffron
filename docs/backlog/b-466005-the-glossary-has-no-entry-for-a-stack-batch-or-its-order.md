@@ -122,3 +122,4 @@ The **Refusal** entry names the stack order's refusal. This lands after
   ADR 4's declared lenses, and the code, ADR 7 and the specs use both names. What
   stays open is the terms that wait on unmerged specs. No task exists for `SA-0151`,
   `SA-0161`, `SA-0162`, `SA-0167`, `SA-0170`, `SA-0174` or `SA-0177`.
+- 2026-09-30: `SA-0161` has a task now (#610), unmerged. Its terms become writable once #610 merges.

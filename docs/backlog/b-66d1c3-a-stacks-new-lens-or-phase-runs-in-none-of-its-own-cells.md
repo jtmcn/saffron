@@ -1,12 +1,12 @@
 ---
 id: b-66d1c3
 title: A stack's new lens or REVIEW phase runs in none of its own cells, since REVIEW runs from the host's `main`
-status: open
+status: done
 tier: 2
 filed: 2026-09-29
-closed:
+closed: 2026-09-30
 specs: [SA-0196]
-prs: []
+prs: [608]
 commits: []
 cites: [§5.5, §5.6]
 related: [b-abeb74, b-ab4b33, b-cd5fd2, b-78ccc7]
@@ -38,3 +38,4 @@ says so. The loop's report names the lens set each REVIEW ran.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-09-30: closed by `SA-0196` (#608). `check` names each live ancestor whose `touches` reach REVIEW, and says the child's REVIEW is main's. `record` names the lenses the latest REVIEW ran. Gaps the seats left are item b-a09d30.

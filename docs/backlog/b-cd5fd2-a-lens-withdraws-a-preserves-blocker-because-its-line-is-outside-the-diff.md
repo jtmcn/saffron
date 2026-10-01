@@ -43,3 +43,4 @@ standing.
   `SA-0193`'s fix sat unmerged, and REVIEW runs main's code (item b-66d1c3).
   The review commit fixed the witness.
 - 2026-09-29: closed by `SA-0193` (#596). REBUT refuses a lens's withdrawal of the host's own probe blocker on a `preserves` criterion.
+- 2026-09-30: seen working in the spec loop's run 23. `SA-0173`'s adequacy lens withdrew the host's probe blocker on a `preserves` criterion, and REBUT refused the withdrawal. The disagreement was recorded, and #618's Spec seat fixed the witness.

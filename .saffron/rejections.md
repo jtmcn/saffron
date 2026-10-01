@@ -1389,3 +1389,55 @@ taken by hand, so no critic ran on it and it has no lines here.
 - `SA-0195` (#600): two declared mutants died on a `ValueError`, not an
   assertion.
   **Bucket 1**, `witness`. **Landed:** a review commit on #600.
+
+## 2026-09-30, `SA-0196`, `SA-0161`, `SA-0173` and `SA-0165` (the spec loop's run 23, #608 to #622)
+
+- `SA-0196` (#608): a walk following only `depends_on[0]` at either loop
+  passed, because each ancestor had a second route.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #608.
+- `SA-0196` (#608): dropping the not-a-list check passed, since a dict
+  iterates to a string key the entry check rejects.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #608.
+- `SA-0196` (#608): a `findings.json` that is not UTF-8 raised rather than
+  printing the none-recorded line.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #608.
+- `SA-0196` (#608): a comment called `EXHAUSTED` a halt, SKILL.md named a
+  report it never defines, and a test imported `json` under an alias.
+  **Bucket 2**, `CONTEXT.md`'s vocabulary. **Landed:** a review commit on #608.
+- `SA-0196` (#608): `record` and `jev --kind cell` anchor staleness
+  differently, and a null lens name prints `None`.
+  **Bucket 3**, contract. **Open:** item b-a09d30.
+- `SA-0161` (#610): the reset session's charge, the prompt's budget line and
+  an errored attempt's subtype were each unasserted.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #610.
+- `SA-0161` (#610): `_read_head` turned a mirror read's `GitError` into an
+  absent file, so a broken read pooled a finding as a stale probe.
+  **Bucket 2**, `error` is not `fail`. **Landed:** a review commit on #610.
+  **Open:** item b-00534f, for the same copy in `qualify.py`.
+- `SA-0161` (#610): four messages said bare "writer", one "errored", one
+  "exhausted" and one "checkout".
+  **Bucket 1**, `terms`, whose table holds none of them. **Landed:** a review
+  commit on #610.
+- `SA-0161` (#610): a docstring said `_diff` reads no `.git/config`, a test
+  bound a variable only to delete it, and a test's name said the opposite of
+  its assertions.
+  **Bucket 3**, contract. **Landed:** a review commit on #610.
+- `SA-0161` (#610): the attempt charge is a third inline copy, and two
+  modules diff one layer under different pins.
+  **Bucket 2**, one source. **Open:** item b-979dbe.
+- `SA-0173` (#618): a build holding `writer_usd` in the task loop only when
+  `follow_ups` is given passed the writer-share witness.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #618.
+- `SA-0173` (#618): a docstring named a spec never minted where the witness
+  mints it, and a comment narrated which mutant fails which assertion.
+  **Bucket 2**, `CLAUDE.md`'s comment rule. **Landed:** a review commit on
+  #618.
+- `SA-0165` (#622): the follow-up witness never asserted the writer's
+  session, its cell's `gates_dir` or its container.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #622.
+- `SA-0165` (#622): group `A` was pooled whole before the raise, so two
+  pooling cuts passed both rounds.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #622.
+- `SA-0165` (#622): two docstrings said a raise pools what the walk never
+  reached, which holds only after `qualify` returns.
+  **Bucket 3**, contract. **Landed:** a review commit on #622.
