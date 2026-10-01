@@ -14,7 +14,15 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
-from saffron import end_review, follow_up, preflight, qualify, scheduler, spec_review
+from saffron import (
+    end_review,
+    finish,
+    follow_up,
+    preflight,
+    qualify,
+    scheduler,
+    spec_review,
+)
 from saffron.agents import context
 from saffron.batch import run_batch, run_stack_batch
 from saffron.cell import runtime, worktree
@@ -666,6 +674,33 @@ def _stack_end_review(
             return _end_review_error_reviews(ledger, batch_key, message)
 
     return run
+
+
+def _stack_finish(
+    *, pinned: PinnedBase, ledger: Ledger, out_dir: Path
+) -> Callable[[int, list[int]], object]:
+    """`run_stack_batch`'s `finish` callable (ADR 7). A `GitError` or
+    `ValueError` from `finish.commit_finish` is printed and swallowed here, so
+    the night's exit code stays its stop reason's. Any other raise reaches `main`."""
+
+    def run_finish(batch_id: int, unrun: list[int]) -> object:
+        workdir = out_dir / "finish" / str(batch_id) / "tree"
+        try:
+            sha = finish.commit_finish(
+                ledger, batch_id, unrun, mirror=pinned.mirror, workdir=workdir
+            )
+        except (git_mirror.GitError, ValueError) as exc:
+            print(f"finish: {type(exc).__name__}: {exc}")
+            return None
+        if sha is not None:
+            print(f"finish: committed {sha}, not pushed")
+        elif ledger.stack_layers(batch_id):
+            print("finish: the tree is unchanged, so nothing committed")
+        else:
+            print("finish: no layer, so nothing committed")
+        return sha
+
+    return run_finish
 
 
 # `SA-0181`'s three account lines, verbatim, with no tool path: ADR 7
@@ -1399,6 +1434,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     follow_ups: Callable[[str, end_review.StackReview], list[Candidate]] | None = None
     # Same: nothing is refused on an open pull request until then.
     open_prs: Callable[[], list[dict]] | None = None
+    # Same: no finishing commit runs until then.
+    stack_finish: Callable[[int, list[int]], object] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1471,6 +1508,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                     pooled=pooled,
                 )
                 open_prs = _stack_open_prs(resolved.repo_slug)
+                stack_finish = _stack_finish(
+                    pinned=pinned, ledger=ledger, out_dir=out_dir
+                )
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`
                 # callable reads the latest answer, not the opening one.
@@ -1520,6 +1560,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 revise=stack_revise,
                 follow_ups=follow_ups,
                 open_prs=open_prs,
+                finish=stack_finish,
             )
         else:
             stop = run_batch(

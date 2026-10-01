@@ -425,6 +425,8 @@ def run_stack_batch(
     # `None` means nothing is refused on an open pull request. Neither a
     # follow-up nor a revised spec of the order meets a check (`SA-0162`).
     open_prs: Callable[[], list[dict]] | None = None,
+    # Runs once, after the follow-ups, while the batch row is still open (ADR 7).
+    finish: Callable[[int, list[int]], object] | None = None,
 ) -> StopReason:
     """Run one stack's planned `order`, then its follow-ups, without rescanning (`SA-0142`,
     `SA-0162`). `runner` takes each candidate and its predecessor, the last one that reached
@@ -432,10 +434,10 @@ def run_stack_batch(
     of refusing (`sleep`, SA-0148). `review`, when given, runs first and can refuse, raise,
     or wait (`SpecReviewWait`, ADR 7), with `revise` run up to `MAX_REVISE_ROUNDS` times.
 
-    A candidate of the order is refused before its own call, when `depends_on` reaches a
-    spec that missed. `reserve_usd` and `writer_usd` hold back only the order's own checks.
-    `end_review` then `follow_ups` run once the order's loop returns, whatever its stop.
-    The follow-ups run the same way, one generation up, only when it returned `DRAINED`."""
+    An order candidate whose `depends_on` reaches a missed spec is refused. `reserve_usd` and
+    `writer_usd` hold back only the order's checks. `end_review`, `follow_ups` (run one
+    generation up only on `DRAINED`) and then `finish` run before the row closes, unless one
+    of the first two raises."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     if follow_ups is not None and review is None:
@@ -753,6 +755,9 @@ def run_stack_batch(
             reserve_usd=reserve_usd + writer_usd,
             sleep=sleep,
         )
+        # Filled only when `follow_ups` runs, below. Otherwise it stays `[]`,
+        # so `finish` always sees the right set, whatever `end_review` was given.
+        unrun_task_ids: list[int] = []
         if end_review is not None:
             specs: dict[str, Spec] = {}
             for candidate in order:
@@ -804,6 +809,13 @@ def run_stack_batch(
                 ]
                 if unrun:
                     emit("follow-ups unrun  " + " ".join(unrun))
+                for candidate in follow_up_candidates:
+                    if candidate.spec.id in follow_up_reviewed:
+                        continue
+                    assert candidate.task_id is not None  # SA-0161 mints one
+                    unrun_task_ids.append(candidate.task_id)
+        if finish is not None:
+            finish(batch_id, unrun_task_ids)
         stopped = _stop(ledger, batch_id, reason, in_flight, emit)
         return stopped
     finally:

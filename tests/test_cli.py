@@ -6563,3 +6563,97 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     assert not out_dir.exists()
 
     ledger.close()
+
+
+def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack` passes `run_stack_batch` the `finish` closure
+    `cli._stack_finish` builds. It calls `finish.commit_finish` through the
+    module, with the pinned mirror and a workdir under `out_dir`. It prints
+    one line naming the outcome, and never lets a raise out of it reach
+    `main`."""
+    from saffron import finish as finish_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    captured_finish = {}
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        captured_finish["finish"] = kwargs["finish"]
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    commit_calls = []
+
+    def _recording_commit_finish(ledger, batch_id, unrun, *, mirror, workdir, **kw):
+        commit_calls.append(
+            {
+                "ledger": ledger,
+                "batch_id": batch_id,
+                "unrun": unrun,
+                "mirror": mirror,
+                "workdir": workdir,
+            }
+        )
+        return "c" * 40
+
+    monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
+
+    _readiness_passes(monkeypatch)
+    home = tmp_path / "home"
+    assert main(["--home", str(home), "batch", "--stack"]) == 0
+
+    assert len(commit_calls) == 1
+    call = commit_calls[0]
+    assert call["batch_id"] == 3
+    assert call["unrun"] == [5, 6]
+    assert call["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "tree"
+    printed = capsys.readouterr().out
+    assert f"finish: committed {'c' * 40}, not pushed" in printed
+
+    # A `GitError`, then a `ValueError`, from `commit_finish`. Each prints
+    # its own line and the night still exits 0.
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "commit_finish",
+            lambda *a, **k: (_ for _ in ()).throw(GitError("mirror gone")),
+        )
+        assert main(["--home", str(tmp_path / "home-git"), "batch", "--stack"]) == 0
+        printed = capsys.readouterr().out
+        assert "finish: GitError: mirror gone" in printed
+
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "commit_finish",
+            lambda *a, **k: (_ for _ in ()).throw(ValueError("path off")),
+        )
+        assert main(["--home", str(tmp_path / "home-value"), "batch", "--stack"]) == 0
+        printed = capsys.readouterr().out
+        assert "finish: ValueError: path off" in printed
+
+    # `None` with no layer, then `None` with one. Each prints its own line.
+    with monkeypatch.context() as m:
+        m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
+        m.setattr(Ledger, "stack_layers", lambda self, batch_id: [])
+        assert main(["--home", str(tmp_path / "home-nolayer"), "batch", "--stack"]) == 0
+        printed = capsys.readouterr().out
+        assert "finish: no layer, so nothing committed" in printed
+
+    with monkeypatch.context() as m:
+        m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
+        m.setattr(Ledger, "stack_layers", lambda self, batch_id: [{"position": 1}])
+        assert (
+            main(["--home", str(tmp_path / "home-unchanged"), "batch", "--stack"]) == 0
+        )
+        printed = capsys.readouterr().out
+        assert "finish: the tree is unchanged, so nothing committed" in printed
