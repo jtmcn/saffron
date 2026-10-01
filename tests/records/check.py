@@ -619,6 +619,38 @@ def check_awaiting(
     return out
 
 
+def head_commits(root: Path) -> frozenset[str]:
+    """Every commit HEAD contains, as full shas. Needs CI's full clone."""
+    log = subprocess.run(
+        ["git", "-C", str(root), "rev-list", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return frozenset(log.split())
+
+
+def check_commits_reachable(
+    records: list[Record], reachable: frozenset[str] | None
+) -> list[Violation]:
+    """A cited commit is in HEAD's history. A rebase or a squash replaces a
+    commit, and the record then names one `main` never held (stack #617).
+    `None` means no history was read, which says nothing about any commit."""
+    if reachable is None:
+        return []
+    return [
+        Violation(
+            r.path,
+            "commits",
+            f"{sha} is not in HEAD's history: a rebase or a squash replaced it. "
+            "Cite the pull request in prs, or the commit that landed",
+        )
+        for r in records
+        for sha in _backlog(r).commits
+        if not any(full.startswith(str(sha)) for full in reachable)
+    ]
+
+
 def check_no_old_path(root: Path) -> list[Violation]:
     # tests/records/ quotes the old path as data; .saffron/specs/done/ is dated history.
     skip = (root / "tests" / "records", root / ".saffron" / "specs" / "done")
@@ -637,6 +669,7 @@ def check_all(
     principles: set[int],
     merged: frozenset[int] = frozenset(),
     building: int | None = None,
+    reachable: frozenset[str] | None = None,
 ) -> list[Violation]:
     records = load(KINDS["backlog"], root)
     appendices = load(KINDS["appendix"], root)
@@ -654,6 +687,7 @@ def check_all(
         + check_priority(records, priority)
         + check_no_old_path(root)
         + check_awaiting(records, merged, building)
+        + check_commits_reachable(records, reachable)
         + check_appendix_letters(appendices)
         + check_adr_ids(adrs)
         + check_adr_supersession(adrs)

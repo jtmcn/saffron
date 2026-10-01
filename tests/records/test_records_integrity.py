@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from ontology import design_record
-from tests.records.check import building_pr, check_all, merged_prs
+from tests.records.check import building_pr, check_all, head_commits, merged_prs
 from tests.test_citations import addresses
 
 REPO = Path(__file__).resolve().parents[2]
@@ -25,6 +25,7 @@ def test_the_backlog_records_hold():
         principles=PRINCIPLES,
         merged=merged_prs(ROOT),
         building=building_pr(os.environ.get("GITHUB_REF")),
+        reachable=head_commits(ROOT),
     )
     assert violations == [], "\n".join(str(v) for v in violations)
 
@@ -32,3 +33,8 @@ def test_the_backlog_records_hold():
 def test_the_merge_history_reads_a_pull_request_this_repo_merged():
     # An empty set passes every `awaiting` silently, so pin one known merge.
     assert 287 in merged_prs(ROOT)
+
+
+def test_the_history_read_holds_a_commit_this_repo_merged():
+    # An empty set would flag every citation, so pin one known commit.
+    assert any(sha.startswith("3f8775f2") for sha in head_commits(ROOT))

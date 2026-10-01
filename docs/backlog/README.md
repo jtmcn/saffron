@@ -62,6 +62,12 @@ this merges". The record lands only if the pull request merges, so the item is a
 by the time anyone reads it. #287 did this in five records, and four of them stayed open on
 `main` until #296.
 
+**Cite the pull request, not its commits.** A rebase or a squash replaces a commit. `gh stack
+merge` rebases a whole stack whenever `main` moved under it, and stack #617 left fifteen records
+citing commits `main` never held. Put a commit in `commits:` only once it is on `main`.
+`tests/records` checks that every cited commit is in HEAD's history, so a citation a merge
+replaced fails on `main` rather than passing in silence.
+
 **An item waiting on a *different* pull request lists it in `awaiting:`**, and the record
 says "open as PR #N". `tests/records` enforces the rest:
 

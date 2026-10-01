@@ -20,6 +20,7 @@ from tests.records.check import (
     check_appendix_letters,
     check_awaiting,
     check_cites_resolve,
+    check_commits_reachable,
     check_done_specs_are_done,
     check_ids,
     check_item_citations,
@@ -461,6 +462,24 @@ def test_an_item_awaiting_the_pull_request_that_carries_it_is_a_violation(broken
     records = _with_record(broken, "A fix is open as PR #296.", "awaiting: [296]\n")
     [v] = check_awaiting(records, frozenset(), building=296)
     assert "#296 is this pull request" in v.message
+
+
+def test_a_cited_commit_missing_from_head_is_a_violation(broken):
+    # Stack #617: `gh stack merge` rebased twelve commits, and fifteen records
+    # kept citing the originals while `main` stayed green.
+    records = _with_record(broken, "Fixed.", 'commits: ["91f56c69"]\n')
+    [v] = check_commits_reachable(records, frozenset({"b20f42d7" + "0" * 32}))
+    assert v.field == "commits" and "91f56c69" in v.message
+
+
+def test_a_cited_commit_head_contains_holds_by_prefix(broken):
+    records = _with_record(broken, "Fixed.", 'commits: ["b20f42d7"]\n')
+    assert check_commits_reachable(records, frozenset({"b20f42d7" + "0" * 32})) == []
+
+
+def test_no_history_to_read_checks_no_commit(broken):
+    records = _with_record(broken, "Fixed.", 'commits: ["91f56c69"]\n')
+    assert check_commits_reachable(records, None) == []
 
 
 def test_a_record_saying_a_pull_request_is_open_must_await_it(broken):
