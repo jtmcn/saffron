@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
+from typing import Literal
 
 from saffron.gates.contract import Failure, GateResult
 from saffron.intake import Criterion, Mutant
@@ -93,14 +94,17 @@ def _named(criterion: Criterion, reason: str) -> str:
     return f"{criterion.witness} ({reason})"
 
 
+# What a summary calls the edit. A criterion probe is no mutant (b-37924b).
+EditNoun = Literal["mutant", "criterion probe", "wrong version"]
+
+
 def witness_gate(
     *,
     acceptance: Sequence[Criterion],
     mutate: Mutated,
     run_tests: RunTests,
     collected: Sequence[str] | None = None,
-    # What a summary calls the edit. A criterion probe is no mutant (b-37924b).
-    edit_noun: str = "mutant",
+    edit_noun: EditNoun = "mutant",
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
     undone.

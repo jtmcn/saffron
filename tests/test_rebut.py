@@ -386,6 +386,19 @@ def test_a_post_rebuttal_patch_that_will_not_apply_ends_exhausted():
     assert "did not apply" in result.why
 
 
+def test_a_post_rebuttal_patch_with_no_change_ends_exhausted_and_says_so():
+    # Backlog item 132's REBUT half: an empty patch is not one that did not apply.
+    from saffron.cell.session import CriticPatchEmpty
+
+    def _critic_container():
+        raise CriticPatchEmpty("the attempt's commits net to no change")
+
+    result = _run("Fixed.", _rebuttals(_fixed()), critic_container=_critic_container)
+    assert result.state == "EXHAUSTED"
+    assert "net to no change" in result.why
+    assert "did not apply" not in result.why
+
+
 def test_a_post_rebuttal_binary_change_ends_gate_error():
     """§5.5's one carve-out: a binary change the export cannot carry is
     Saffron's own ceiling, charged to nobody."""

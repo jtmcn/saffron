@@ -1107,17 +1107,17 @@ class CriticPatchRejected(RuntimeError):
     so `EXHAUSTED` is the state that fits, the same one four red gate
     attempts would reach."""
 
+    def reason(self, where: str, what: str = "the exported patch") -> str:
+        return f"{what} did not apply in {where} — {self}"
+
 
 class CriticPatchEmpty(CriticPatchRejected):
     """The attempt's commits net to no change, so there was no patch to apply.
     Still the agent's `EXHAUSTED`, but its reason must not say "did not apply"
     (backlog item 132)."""
 
-
-def _apply_reason(rejected: CriticPatchRejected, where: str) -> str:
-    if isinstance(rejected, CriticPatchEmpty):
-        return str(rejected)
-    return f"the exported patch did not apply in {where} — {rejected}"
+    def reason(self, where: str, what: str = "the exported patch") -> str:
+        return str(self)
 
 
 class CriticPatchUnrepresentable(RuntimeError):
@@ -2617,7 +2617,7 @@ def _drive_cell(
                 _phase_start(
                     "REVIEW",
                     "REVIEW",
-                    _apply_reason(rejected, "the Gate-only cell"),
+                    rejected.reason("the Gate-only cell"),
                 )
             except CriticPatchUnrepresentable as binary:
                 gate_comparison = None
@@ -2741,7 +2741,7 @@ def _drive_cell(
                     _phase_start(
                         "REVIEW",
                         "REVIEW",
-                        _apply_reason(rejected, "the critic cell"),
+                        rejected.reason("the critic cell"),
                     )
                 except CriticPatchUnrepresentable as binary:
                     outcome = "GATE_ERROR"

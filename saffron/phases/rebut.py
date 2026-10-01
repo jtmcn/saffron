@@ -735,9 +735,7 @@ def run_rebut(
         # the rebuttal turn plus the gate re-run are already paid for either
         # way — produced here, not left to escape uncharged.
         result.state = "EXHAUSTED"
-        result.why = (
-            f"the post-rebuttal patch did not apply in a critic cell — {rejected}"
-        )
+        result.why = rejected.reason("a critic cell", "the post-rebuttal patch")
         return result
     except CriticPatchUnrepresentable as binary:
         # §5.5's one carve-out: a binary change the export cannot carry is
