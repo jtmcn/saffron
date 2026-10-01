@@ -1,13 +1,13 @@
 ---
 id: 163
 title: The sentence limit and the CLAUDE.md line budget move the same text in opposite directions
-status: open
+status: partial
 tier: 3
 filed: 2026-09-17
 by_hand: true
 specs: []
 prs: [317]
-commits: []
+commits: [61bcbcb5]
 cites: [§5.4, §8]
 related: [161, 162]
 ---
@@ -47,3 +47,6 @@ record that the conflict is rare enough to leave.
 **Filed 2026-09-17** from the review of PR #317, which hit the conflict and
 resolved it by hand. By hand because both bounds live in `DESIGN.md`, which
 `.saffron/policy.yaml` protects, so no cell can edit it.
+- 2026-09-30: the cheap arm. §8's cut names the sentence limit, and
+  Appendix R names the line budget. The measurement arm was not run, so
+  the item stays partial.
