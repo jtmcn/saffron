@@ -50,12 +50,15 @@ infrastructure failure. Two spec PRs merged mid-loop: #612 for `SA-0173` and
      `SA-0173`'s `SY-90` test. The operator handed `SA-0162` to the next
      loop.
 8. **The seats found a witness hole the critic passed on every PR.** That is
-   9 blockers across four pull requests, besides doc fixes. `SA-0165`'s
+   10 blockers across four pull requests, besides doc fixes. `SA-0165`'s
    in-cell REVIEW was fully clean, and its Spec seat found four.
-9. **`main` moved six times mid-loop.** It took #607, #609, #611, #613 to
+9. **`SA-0165`'s implementer used 129 of its 130 turns.** Its peak
+   IMPLEMENT session finished one turn under the ceiling. `SA-0173` used 104
+   of 130. The chain's next children carry similar ceilings.
+10. **`main` moved six times mid-loop.** It took #607, #609, #611, #613 to
    #616, #620 and #621, as well as the two spec PRs. The order never went
    stale, and every branch merged cleanly onto the result.
-10. **Auto mode refused `gh pr merge` on both spec PRs** (`Merge Without
+11. **Auto mode refused `gh pr merge` on both spec PRs** (`Merge Without
     Review`), with the operator's yes. The operator merged each by hand.
 
 ## Run 22's items, checked
@@ -81,7 +84,7 @@ Each item moves a step the delegate did by hand into a gate, a lens or a
 phase. The rejection lines in `.saffron/rejections.md` are the evidence.
 
 1. **REVIEW's adequacy lens misses most witness holes the Spec seat finds.**
-   Nine seat blockers on four PRs, and a fully clean in-cell REVIEW on
+   Ten seat blockers on four PRs, and a fully clean in-cell REVIEW on
    `SA-0165`. Every one was found the same way: mutate the line, run the
    named witness, watch it survive. That is mechanical. The host already
    runs criterion probes for declared wrong versions. A host pass that
