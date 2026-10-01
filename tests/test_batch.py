@@ -4915,7 +4915,16 @@ def test_a_revised_spec_meets_gate_0s_open_pull_request_refusals_before_its_cell
         open_pr_log.append(len(doubles.order))
         return pull_requests
 
-    order = [_candidate(f"TE-14{n}", budget_usd=1) for n in range(1, 9)]
+    # `TE-146` touches only `d.py`, so checking an unrevised spec refuses it.
+    order = [
+        dataclasses.replace(
+            c,
+            spec=c.spec.model_copy(
+                update={"touches": ["d.py"] if c.spec.id == "TE-146" else ["m.py"]}
+            ),
+        )
+        for c in (_candidate(f"TE-14{n}", budget_usd=1) for n in range(1, 9))
+    ]
     lines: list[str] = []
 
     reason = run_stack_batch(
@@ -4963,29 +4972,15 @@ def test_a_revised_spec_meets_gate_0s_open_pull_request_refusals_before_its_cell
         "TE-148",
     ]
     assert len(open_pr_log) == 4
-
-
-class _MutableClock:
-    """A clock an end review or a fake sleep can move forward by hand, for
-    the `--until` witnesses below."""
-
-    def __init__(self, start: datetime):
-        self.now = start
-
-    def __call__(self) -> datetime:
-        return self.now
+    # Each read comes right after that spec's last review, never earlier.
+    for at, spec_id in zip(
+        open_pr_log, ["TE-143", "TE-144", "TE-145", "TE-147"], strict=True
+    ):
+        assert doubles.order[at - 1] == f"review:{spec_id}"
 
 
 def _fail_sleep(seconds: float) -> None:
     raise AssertionError(f"should not sleep for {seconds}")
-
-
-def _advancing_sleep(clock: _MutableClock, calls: list[float]):
-    def sleep(seconds: float) -> None:
-        calls.append(seconds)
-        clock.now += timedelta(seconds=seconds)
-
-    return sleep
 
 
 def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
@@ -5094,10 +5089,10 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
     # follow-up it returns meets the same deadline check and is unrun.
     start4 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
     until4 = start4 + timedelta(hours=1)
-    clock4 = _MutableClock(start4)
+    clock4 = AdvancingClock(start4)
 
     def _move_clock_past_until() -> None:
-        clock4.now = until4 + timedelta(minutes=1)
+        clock4.advance((until4 + timedelta(minutes=1) - clock4()).total_seconds())
 
     open_pr_calls4: list[int] = []
 
@@ -5292,8 +5287,7 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
     start9 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
     until9 = start9 + timedelta(hours=1)
     resets_at9 = int((start9 + timedelta(minutes=10)).timestamp())
-    clock9 = _MutableClock(start9)
-    sleep_calls9: list[float] = []
+    clock9 = AdvancingClock(start9)
     rows9 = {
         "TE-122": {"route": "raise"},
         "TE-123": {"route": "error"},
@@ -5325,7 +5319,7 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
         end_review=doubles9.end_review,
         follow_ups=doubles9.follow_ups,
         clock=clock9,
-        sleep=_advancing_sleep(clock9, sleep_calls9),
+        sleep=clock9.sleep,
         emit=lines9.append,
     )
     assert reason9 == "DRAINED"
@@ -5336,7 +5330,7 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
         ("TE-126", "TE-125"),
         ("TE-127", "TE-125"),
     ]
-    assert len(sleep_calls9) == 1
+    assert len(clock9.sleeps) == 1
     assert any(
         line.startswith("TE-122") and "RuntimeError: review" in line for line in lines9
     )

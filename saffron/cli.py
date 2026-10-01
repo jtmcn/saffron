@@ -1021,17 +1021,13 @@ def _stack_open_prs(repo_slug: str | None) -> Callable[[], list[dict]]:
     """
 
     def run() -> list[dict]:
-        if repo_slug is None:
-            _print_skipped(
-                "no GitHub slug could be read from the remote", _GH_REFUSALS_SKIPPED
-            )
-            return []
         gh_failures: list[str] = []
-        found = scheduler._open_prs(repo_slug, _guarded_gh(gh_failures))
-        if gh_failures:
-            _print_skipped(
-                f"gh could not be run ({gh_failures[0]})", _GH_REFUSALS_SKIPPED
-            )
+        found = (
+            []
+            if repo_slug is None
+            else scheduler._open_prs(repo_slug, _guarded_gh(gh_failures))
+        )
+        _print_scan_gaps(repo_slug, gh_failures)
         return found
 
     return run

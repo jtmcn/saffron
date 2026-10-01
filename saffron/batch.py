@@ -276,10 +276,8 @@ def _drive(
             # never gets, so its spend still counts against the budget gate
             # rather than vanishing behind a NULL `batch_id` forever.
             consecutive_aborts += 1
-            # Bound and reported: by the time `run_batch` returns the
-            # exception is gone, and an unattended night that died from a
-            # runtime that would not start otherwise leaves the operator a
-            # stop reason and no traceback anywhere.
+            # Printed now, because the exception is gone once the caller returns.
+            # Otherwise a night that died here leaves a stop reason and no cause.
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
         else:
@@ -404,8 +402,8 @@ def run_stack_batch(
     # stack-batch design's section 3, Money). `SA-0165` passes `--budget * WRITER_SHARE`.
     writer_usd: float = 0.0,
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
-    # Runs once, right after `end_review`, when both are given, and its
-    # return is what runs next, one generation up. `SA-0165` passes the writer.
+    # Runs once, right after `end_review`, when both are given. Its return runs
+    # one generation up when the order drained. `SA-0165` passes the writer.
     follow_ups: Callable[[str, StackReview], list[Candidate]] | None = None,
     # A real default. `SA-0144`'s caller passes none (SA-0148).
     sleep: Callable[[float], None] = time.sleep,
@@ -436,8 +434,8 @@ def run_stack_batch(
 
     A candidate of the order is refused before its own call, when `depends_on` reaches a
     spec that missed. `reserve_usd` and `writer_usd` hold back only the order's own checks.
-    `end_review` then `follow_ups` run once the order drains, and its follow-ups run the
-    same way, one generation up."""
+    `end_review` then `follow_ups` run once the order's loop returns, whatever its stop.
+    The follow-ups run the same way, one generation up, only when it returned `DRAINED`."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     if follow_ups is not None and review is None:
@@ -466,11 +464,11 @@ def run_stack_batch(
     # `_branch` of every layer this batch recorded, either generation. The
     # exempt set a follow-up's and a revision's own open-pull-request check share.
     layer_branches: set[str] = set()
-    # Follow-up spec ids whose review reached a verdict (`run`, `escalate`,
-    # `revise`), never a raise, a wait, or a `Refused` return (escalate's too).
+    # Spec ids whose review routed `run`, `escalate` or `revise`, decided by the
+    # route alone, never by a raise, a wait or a `Refused` return.
     follow_up_reviewed: set[str] = set()
-    # The one read of `open_prs` the follow-ups share (see the docstring
-    # above): read once, before the first of them, never per follow-up.
+    # The one read of `open_prs` the follow-ups share: read once, before the
+    # first of them, never per follow-up.
     follow_up_prs: list[dict] = []
 
     # One `stack_layers` row per task that reaches `READY_FOR_REVIEW`, at this
@@ -511,7 +509,7 @@ def run_stack_batch(
     def wrapped(candidate: Candidate) -> CellOutcome | Refused:
         nonlocal predecessor
         pred = predecessor
-        # `remaining` holds the object `run_batch` offered, not the one
+        # `remaining` holds the object `_drive` offered, not the one
         # `dataclasses.replace` builds below. `list.remove` matches by value.
         original = candidate
         is_follow_up = generation == 1
@@ -593,8 +591,8 @@ def run_stack_batch(
                         block_sha256=read.block_sha256,
                         error=read.error,
                     )
-                    # A verdict route, whatever happens next: never a raise,
-                    # a wait, or the return below (an escalate is `Refused` too).
+                    # Decided by the route, whatever happens next: never a raise,
+                    # a wait, or the `Refused` return below.
                     if route not in ("wait", "error"):
                         follow_up_reviewed.add(candidate.spec.id)
                     if route == "wait":
