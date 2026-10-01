@@ -67,3 +67,4 @@ deadline plus one task plus its end review. Each cites ADR 7.
   `SA-0152` or `SA-0165`, so §6's queue source and the finish past `--until` still
   describe code that does not exist.
 - 2026-09-30: `SA-0165` has a task now (#622), unmerged. No sentence changes until it merges.
+- 2026-10-01: `SA-0162` (#626) and `SA-0151` (#628) merged. A night now runs follow-ups and a finishing commit after its deadline, so the sentence on ending at the deadline plus one task is false.

@@ -1,11 +1,11 @@
 ---
 id: b-ef8543
 title: A spec's wrong builds in prose never reach REVIEW's host run
-status: open
+status: partial
 tier: 2
 filed: 2026-09-29
 specs: [SA-0151, SA-0152, SA-0167]
-prs: [597]
+prs: [597, 627]
 commits: []
 cites: []
 related: [b-7e69d0]
@@ -37,3 +37,4 @@ a criterion declares no `wrong_versions:`.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-10-01: `SA-0151` declares its wrong builds now (#627), and its cell expressed all 23. `SA-0152` and `SA-0167` still list theirs in prose.

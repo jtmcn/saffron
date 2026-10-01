@@ -1,12 +1,12 @@
 ---
 id: b-df59f8
 title: A revision that widens a queued spec's touches meets no open pull request overlap refusal
-status: open
+status: done
 tier: 3
 filed: 2026-09-25
-closed:
+closed: 2026-10-01
 specs: [SA-0162]
-prs: []
+prs: [626]
 commits: []
 cites: [§4.2, §4.2.1]
 related: [b-792ab2]
@@ -29,3 +29,4 @@ A revised text meets the open pull request refusals before its cell, as a follow
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
 - 2026-09-25: `SA-0162` takes it. It runs the open pull request refusals on every revised spec before its runner call.
+- 2026-10-01: closed by #626. `SA-0162`'s criterion 6 runs the open pull request refusals on a revised spec of the order before its runner call.
