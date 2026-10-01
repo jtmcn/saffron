@@ -32,4 +32,6 @@ words. A cell reads that prose on every task. The `prose` gate now holds it
 **What it does not change.** Existing prose stays as written. Rewriting a
 document is a backlog record of its own. Rendered text is exempt, because its
 source is an appendix or `factory.ttl`.
+The gate does not see §8's line budget for `CLAUDE.md`. Splitting a sentence to
+clear a hit adds a line, and joining two to drop a line adds words (item 163).
 

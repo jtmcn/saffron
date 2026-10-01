@@ -1,13 +1,14 @@
 ---
 id: b-61127f
 title: The ADR layer above the record kind is unbuilt, so nothing loads, indexes or judges a real decision
-status: partial
+status: done
 tier: 3
 filed: 2026-09-19
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [1dd2a73c]
 cites: []
 related: [b-9ff0fd, b-27b9db, b-98dc4d]
 ---
@@ -50,3 +51,5 @@ against it, and the glossary says what an ADR is here.
   `check_adr_principles` reads the bullets. The ontology and `DESIGN.md`'s ADR
   index read ADRs, and "ADR N" is a citation that must resolve.
   `adr-reviewer` exists, and `CONTEXT.md` §11 defines Saffron's ADR.
+- 2026-09-30: `records show --kind adr 1` prints one ADR, and a bare number
+  stays a backlog item. Nothing of this item is left.

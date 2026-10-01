@@ -1,13 +1,14 @@
 ---
 id: 158
 title: The spec loop's watch pattern shows a cell's teardown and hides the error that ended it
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [c5dd5443]
 cites: []
 related: [139]
 ---
@@ -38,3 +39,5 @@ find. Every Monitor after that was armed with `|^saffron: ` added by hand.
 
 - 2026-09-19: still open in the spec loop's run 8. The Monitor was armed with
   `Error` added by hand, and that also matches agent lines (item b-4589be).
+- 2026-09-30: `pattern` matches the CLI's `saffron:` error line. A test
+  reads the prefix from `saffron/cli.py`, so the two cannot drift apart.

@@ -1107,6 +1107,18 @@ class CriticPatchRejected(RuntimeError):
     so `EXHAUSTED` is the state that fits, the same one four red gate
     attempts would reach."""
 
+    def reason(self, where: str, what: str = "the exported patch") -> str:
+        return f"{what} did not apply in {where} — {self}"
+
+
+class CriticPatchEmpty(CriticPatchRejected):
+    """The attempt's commits net to no change, so there was no patch to apply.
+    Still the agent's `EXHAUSTED`, but its reason must not say "did not apply"
+    (backlog item 132)."""
+
+    def reason(self, where: str, what: str = "the exported patch") -> str:
+        return str(self)
+
 
 class CriticPatchUnrepresentable(RuntimeError):
     """The patch could never have applied: `worktree.DIFF_FLAGS` carries no
@@ -1140,6 +1152,10 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
     def _ignore(_line: str) -> bool:
         return False
 
+    if not patch.strip():
+        raise CriticPatchEmpty(
+            "the attempt's commits net to no change, so there was no patch to review"
+        )
     applied = runtime.exec_stream(
         container,
         worktree.git_argv("apply", "--index"),
@@ -1682,6 +1698,9 @@ def _apply_criterion_probes(
                 mutate=_mutate,
                 run_tests=_run_tests,
                 collected=collected,
+                edit_noun="wrong version"
+                if entry.get("version")
+                else "criterion probe",
             )
             entry["outcome"] = review.criterion_probe_outcome(result.status)
             entry["summary"] = result.summary
@@ -2598,7 +2617,7 @@ def _drive_cell(
                 _phase_start(
                     "REVIEW",
                     "REVIEW",
-                    f"the exported patch did not apply in the Gate-only cell — {rejected}",
+                    rejected.reason("the Gate-only cell"),
                 )
             except CriticPatchUnrepresentable as binary:
                 gate_comparison = None
@@ -2722,8 +2741,7 @@ def _drive_cell(
                     _phase_start(
                         "REVIEW",
                         "REVIEW",
-                        "the exported patch did not apply in the critic cell — "
-                        f"{rejected}",
+                        rejected.reason("the critic cell"),
                     )
                 except CriticPatchUnrepresentable as binary:
                     outcome = "GATE_ERROR"

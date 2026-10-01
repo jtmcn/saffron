@@ -1,13 +1,13 @@
 ---
 id: 130
 title: The spec review's accuracy has only an in-sample measurement, and the reports step 1b now keeps were never pre-registered
-status: open
+status: partial
 tier: 3
 by_hand: true
 filed: 2026-09-15
 specs: []
 prs: []
-commits: []
+commits: [6855198e]
 cites: []
 related: [123, 124, 125, b-250dc7]
 ---
@@ -66,3 +66,6 @@ It showed only whether the fixes worked, for about $80.
   `not-a-defect` and 19 `unverified`. None of it was pre-registered, so it is a
   pilot for step 2 and not its measurement. The in-sample rerun is dropped
   with item 125, and steps renumber.
+- 2026-09-30: step 2 is set up, not measured.
+  `docs/evidence/2026-09-30-spec-review-out-of-sample-preregistration.md`
+  proposes the five values. They take effect when its pull request merges.

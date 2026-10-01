@@ -72,7 +72,9 @@ It applies three blocker rules and exits 1 on any of them. Two are check 4's
 turns and budget rules, applied to the rows `history` prints. The third
 prices a declared `estimated_lines` against the `size` ceiling of the spec's
 type. It first multiplies the estimate by the overrun landed specs measured,
-and prints the ratio and where it came from. At or above 80% of the ceiling
+and prints the ratio and where it came from. A spec that sets
+`estimate_measured: true` measured its estimate from a prototype, so `check`
+prices it at 1.0 and says so. At or above 80% of the ceiling
 it blocks where `size` blocks in the cell, which is `elevated`. The remedy is
 a split into a parent and children, not a raised ceiling. At `standard` it
 prints a concern instead. A spec with no estimate says so. A blocker here is
@@ -101,7 +103,8 @@ limits it to reading. Prompt
 each with its spec's path, `base: origin/main`, and
 `history: run it yourself`. `snapshot` reads the specs from the checkout, so
 run this step from an up-to-date `main`; a spec that exists only on a branch
-is reviewed at that branch's head.
+is reviewed at that branch's head. `history --spec <ref or path>` reads that
+spec from the branch or file instead of the checkout.
 
 Verify each blocker before acting on it: read its line at `origin/main`.
 `spec-reviewer` marks each blocker by what its fix changes, and that word routes it:
@@ -251,7 +254,8 @@ tail -F /tmp/SA-NNNN.log | grep -E --line-buffered "$(uv run .claude/skills/run-
 ```
 
 `pattern` prints the phase lines plus every terminal state in the ontology's
-closed set, anchored where the CLI prints one. A cell takes 30–60 minutes, and a
+closed set, anchored where the CLI prints one. It also matches the CLI's
+`saffron:` error line, which names what ended a cell that raised. A cell takes 30–60 minutes, and a
 Monitor expires after 30. Re-arm it with `tail -n 0 -F` so it doesn't replay the
 log. A silent Monitor ends nothing; only the process exit does (b).
 
@@ -394,6 +398,12 @@ committing. Each item a spec came from gets its frontmatter `status` / `closed`
 is merged. So it retires each spec to `.saffron/specs/done/`, updates the
 scheduler smoke test with `driver.py bookkeeping SA-NNNN`, and sets each origin
 item's status. An item whose origin spec is in `done/` cannot stay `open`.
+Neither can any other item whose `specs:` names it. `uv run python -m records
+show SA-NNNN` lists every record naming a spec, so set each one's status. It
+does not read `awaiting:`. So also run `grep -ln 'awaiting:.*\bNNN\b'
+docs/backlog/*.md` for each pull request, and move each hit's number to `prs`. Commit
+each move to `done/` before `make check`. An uncommitted move fails
+`test_queued_specs.py` with a message that names the test and not the move.
 
 Step 3 linked the stack before this PR existed. Once it is open, link it on
 top, so it reads back based on the last layer and is marked ready:

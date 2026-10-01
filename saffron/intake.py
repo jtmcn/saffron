@@ -192,6 +192,8 @@ class Spec(BaseModel):
     # Changed lines, as the author estimates them. Strict, since a lax `int`
     # read `true` as 1 (measured 2026-09-22).
     estimated_lines: int | None = Field(default=None, gt=0, strict=True)
+    # True when a prototype's diff was measured, so no hand overrun applies (b-b0a187).
+    estimate_measured: bool = Field(default=False, strict=True)
     # ponytail: not `RiskTier | None`, so no spec can declare no tier and
     # `create_task` files the record's "standard" as though one had.
     risk: RiskTier = "standard"

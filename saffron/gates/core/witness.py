@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
+from typing import Literal
 
 from saffron.gates.contract import Failure, GateResult
 from saffron.intake import Criterion, Mutant
@@ -93,12 +94,17 @@ def _named(criterion: Criterion, reason: str) -> str:
     return f"{criterion.witness} ({reason})"
 
 
+# What a summary calls the edit. A criterion probe is no mutant (b-37924b).
+EditNoun = Literal["mutant", "criterion probe", "wrong version"]
+
+
 def witness_gate(
     *,
     acceptance: Sequence[Criterion],
     mutate: Mutated,
     run_tests: RunTests,
     collected: Sequence[str] | None = None,
+    edit_noun: EditNoun = "mutant",
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
     undone.
@@ -188,9 +194,9 @@ def witness_gate(
             # it. `SA-0062`'s cell mutator enters through a container exec,
             # which can fail routinely, so the entry case is not a corner.
             verb = (
-                f"could not restore {mutant.file} after its mutant"
+                f"could not restore {mutant.file} after its {edit_noun}"
                 if applied
-                else f"could not apply {mutant.file}'s mutant"
+                else f"could not apply {mutant.file}'s {edit_noun}"
             )
             return GateResult(
                 gate="witness",
@@ -210,7 +216,7 @@ def witness_gate(
                 status="error",
                 summary=(
                     f"the `tests` gate could not be executed for "
-                    f"{criterion.witness}'s mutant — {failed_to_run}"
+                    f"{criterion.witness}'s {edit_noun} — {failed_to_run}"
                 ),
             )
         assert tests_result is not None  # both failure paths returned above
@@ -234,7 +240,7 @@ def witness_gate(
                 tool=tests_result.tool,
                 summary=(
                     f"the `tests` gate errored under {criterion.witness}'s "
-                    f"mutant — {tests_result.summary}"
+                    f"{edit_noun} — {tests_result.summary}"
                 ),
             )
         if tests_result.status == "fail":
@@ -249,7 +255,7 @@ def witness_gate(
                     file=criterion.witness,
                     code="survived-mutant",
                     message=(
-                        f"ran and passed with its mutant applied to "
+                        f"ran and passed with its {edit_noun} applied to "
                         f"{mutant.file} — {criterion.claim}"
                     ),
                 )
@@ -264,7 +270,7 @@ def witness_gate(
         )
 
     note = (
-        f" — {len(unproven)} mutant(s) not proven: {', '.join(unproven)}"
+        f" — {len(unproven)} {edit_noun}(s) not proven: {', '.join(unproven)}"
         if unproven
         else ""
     )
@@ -277,7 +283,7 @@ def witness_gate(
             failures=survived,
             summary=(
                 f"{len(survived)} of {len(declared)} witness(es) survived their "
-                f"own mutant{note}"
+                f"own {edit_noun}{note}"
             ),
         )
     if died:
@@ -287,11 +293,11 @@ def witness_gate(
             tool=tool,
             summary=(
                 f"{len(died)} of {len(declared)} witness(es) died under their "
-                f"own mutant{note}"
+                f"own {edit_noun}{note}"
             ),
         )
     return GateResult(
         gate="witness",
         status="skip",
-        summary=f"no declared mutant produced a trustworthy verdict{note}",
+        summary=f"no declared {edit_noun} produced a trustworthy verdict{note}",
     )

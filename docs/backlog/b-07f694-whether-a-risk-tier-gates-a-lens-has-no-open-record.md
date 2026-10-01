@@ -7,7 +7,7 @@ filed: 2026-09-22
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [61bcbcb5]
 cites: [§5.5.1, §5.6]
 related: [6]
 ---
@@ -32,3 +32,7 @@ The question is answered in §5.5.1 or §5.6, or a record holds it open, and
 ## Record
 
 - 2026-09-22: filed from ADR 4's review. ADR 4's Consequences records it.
+- 2026-09-30: §5.5.1 and §5.6 now point here, not at item 6. Re-measured
+  the same day: 100 of 179 specs run `elevated` once `elevate_on` applies,
+  so gating would skip the lens on 79 tasks, not six. The question stays
+  with the operator.

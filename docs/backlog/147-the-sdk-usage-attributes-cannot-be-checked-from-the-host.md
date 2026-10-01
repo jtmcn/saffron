@@ -1,9 +1,10 @@
 ---
 id: 147
 title: Nothing on the host can check the SDK attributes the token counts depend on, and the fakes cannot fail
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-09-30
 by_hand: true
 specs: [SA-0090]
 prs: [278]
@@ -38,3 +39,9 @@ from a read of nothing.
 One real event log read after the next base-image rebuild, with the counts
 present and non-null, recorded here — or a cell-marked test that asserts the
 counts on a real session rather than a fake.
+
+## Record
+- 2026-09-30: read off two real event logs, `SA-0161` and `SA-0196`. All 35
+  result events carry the four counts, none null. All 490 per-step events
+  carry the input and cache counts. Their `output_tokens` is null by design,
+  as `images/agent_runner.py` says. The fakes matched the SDK's shape.

@@ -1,13 +1,14 @@
 ---
 id: 132
 title: EXHAUSTED has no definition covering a patch that did not apply, and its reason misdescribes an empty one
-status: open
+status: done
 tier: 3
 filed: 2026-09-15
+closed: 2026-09-30
 by_hand: true
 specs: [SA-0087]
 prs: [274]
-commits: []
+commits: [61bcbcb5, f19d8e61]
 cites: [§3.3, §5.5]
 related: [118]
 ---
@@ -40,3 +41,8 @@ than reported.
 `CONTEXT.md` §6's `EXHAUSTED` entry and `DESIGN.md` §3.3's arrow naming the
 critic cell's apply as a third way in, and a distinct reason for an export that
 carried no patch at all.
+
+## Record
+- 2026-09-30: `CONTEXT.md` §6 and `DESIGN.md` §3.3 name the critic cell's
+  refused apply as a way into `EXHAUSTED`. An export with no change ends
+  `EXHAUSTED` with its own reason, at REVIEW and at REBUT.

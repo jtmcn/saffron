@@ -677,6 +677,8 @@ def test_a_rules_exemptions_are_the_named_files():
         # None, not an exemption for tests/conftest.py: that is the file SA-0077
         # aliased the skip in, so exempting it would reopen exactly that hole.
         "skip-is-spelled-in-full": None,
+        # None: an identity in saffron/ hides a type as well as one in tests/.
+        "no-unannotated-identity": None,
     }
 
 

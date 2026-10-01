@@ -1,13 +1,13 @@
 ---
 id: b-4589be
 title: Six spec-loop driver defects that run 8 worked around by hand
-status: open
+status: partial
 tier: 2
 filed: 2026-09-19
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [c5dd5443]
 cites: []
 related: [157, 158, b-36b551, b-65e7e2, b-792ab2]
 ---
@@ -54,3 +54,8 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
   `DONE_STATES`, so `record` leaves the spec pending. The other five bullets
   stand. ADR 7's stack batch retires `next` and `hold` once b-792ab2
   completes.
+- 2026-09-30: `probe` prints its verdict on its own line, with the last
+  stdout and stderr lines apart below it. `history --spec` reads the spec
+  from a file or ref. `pattern` matches the CLI's error line (item 158).
+  The `record` bullet closed with b-36b551 (#478). `next` and `hold` remain,
+  and ADR 7's stack batch retires both.
