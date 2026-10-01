@@ -201,16 +201,16 @@ lines in `saffron/batch.py` and `tests/test_batch.py`.
   A revision's path is the queued spec's own file at `base_sha`, whatever
   its name. A follow-up's path is `.saffron/specs/<id>-<slug>.md`.
   `spec_text` raises `ValueError` for an id that names no task.
-- `run_stack_batch` (`saffron/batch.py:392`) mints a fresh task for every
+- `run_stack_batch` (`saffron/batch.py:390`) mints a fresh task for every
   spec it reviews, and runs its cell on that task. A `revise` route revises
   the spec on its own task, up to three rounds. A review that raises, or
-  whose route is `error`, raises out of the review wrapper (`:555-567`,
-  `:618-626`).
+  whose route is `error`, raises out of the review wrapper (`:553-565`,
+  `:616-624`).
 - `_batch`'s `--stack` path builds `_stack_runner`, `_stack_end_review`
   (`saffron/cli.py:615`), `_stack_review`, `_stack_mint` and
   `_stack_follow_ups` where readiness passed and `pinned` is bound
-  (`:1451-1476`). It passes each to `run_stack_batch` (`:1512`). Each is
-  bound to `None` first (`:1388-1405`), so a night whose readiness or scan
+  (`:1447-1472`). It passes each to `run_stack_batch` (`:1508`). Each is
+  bound to `None` first (`:1384-1401`), so a night whose readiness or scan
   fails passes `end_review=None` and `follow_ups=None`.
 - From `SA-0161` and `SA-0165`: `run_stack_batch`'s `follow_ups` keyword
   returns a list of `Candidate`s. `write_follow_ups` mints each one's
@@ -229,7 +229,7 @@ lines in `saffron/batch.py` and `tests/test_batch.py`.
   raised or routed `error`. It holds each one whose review routed `wait`
   before the batch stopped, and each one the batch never reached. The
   list exists only inside the `end_review` and `follow_ups` branches.
-  The batch row closes once, after the follow-ups (`_stop`, `:809`). A
+  The batch row closes once, after the follow-ups (`_stop`, `:807`). A
   raise from `end_review` or `follow_ups` closes it `INFRASTRUCTURE` and
   leaves `run_stack_batch`.
 
@@ -299,7 +299,7 @@ Build four things.
    `saffron/cli.py`, beside `_stack_end_review`, as criterion 4 states.
    Name the returned closure `run_finish`, since `finish` is the module
    it calls. Build it where `_stack_end_review` is built, and pass it as
-   `finish`. Bind it to `None` beside the other defaults (`:1388-1405`),
+   `finish`. Bind it to `None` beside the other defaults (`:1384-1401`),
    so a night whose readiness or scan fails passes `finish=None`. Reach
    `finish.commit_finish` through the module at call time, since the
    witness replaces it there.
@@ -518,7 +518,7 @@ for REVIEW and not for the cell:
 **How criterion 3's list was worked.** It needs code the tree base lacks,
 so it was worked by hand against `saffron/batch.py` at `b6a701a6`. That
 covers `_drive` (`:181-331`), the review wrapper `wrapped` (`:511-736`),
-`_wait_out_rate_limit` (`:334-358`) and `_BREAKER_THRESHOLD = 2` (`:65`).
+`_wait_out_rate_limit` (`:332-356`) and `_BREAKER_THRESHOLD = 2` (`:65`).
 The first night stops `UNTIL` at task 44's wait, before task 45. So the
 right list is tasks 41, 48, 46, 44 and 45.
 
