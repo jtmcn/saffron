@@ -5840,6 +5840,117 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     assert run_stack_batch_calls[0]["writer_usd"] == 5.25
 
 
+_SA0162_PR = {
+    "number": 1,
+    "headRefName": "saffron/SY-1",
+    "url": "https://example.invalid/pull/1",
+    "files": [],
+}
+
+
+def test_a_stack_batch_reads_the_open_pull_requests_a_follow_up_meets(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack` passes `run_stack_batch` an `open_prs`
+    callable once readiness passed and the queue resolved, and `None`
+    where readiness failed. The callable reads nothing until it is called.
+    Called, it returns `scheduler._open_prs` of the resolved slug, through
+    `_guarded_gh`, so a `gh` that cannot start reads as no open pull
+    request. With no slug it returns an empty list and runs no `gh`. Either
+    way it prints the `note:` line `_print_skipped` prints, with
+    `_GH_REFUSALS_SKIPPED`, as `_print_scan_gaps` does for the plan."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    run_stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        run_stack_batch_calls.append(kwargs)
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    gh_calls: list[list[str]] = []
+
+    def _fake_run_gh(argv):
+        gh_calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps([_SA0162_PR]), "")
+
+    def _raising_gh(argv):
+        raise OSError("no gh")
+
+    # Case 1: slug `o/r`, a working `gh`.
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: replace(_fake_batch_resolution(tmp_path), repo_slug="o/r"),
+    )
+    monkeypatch.setattr("saffron.cli.run_gh", _fake_run_gh)
+    home1 = tmp_path / "home1"
+    assert main(["--home", str(home1), "batch", "--stack", "--budget", "40"]) == 0
+    capsys.readouterr()
+
+    assert len(run_stack_batch_calls) == 1
+    open_prs1 = run_stack_batch_calls[0]["open_prs"]
+    assert gh_calls == []  # nothing read until the callable itself is called
+    result1 = open_prs1()
+    assert result1 == [_SA0162_PR]
+    assert len(gh_calls) == 1
+    argv1 = gh_calls[0]
+    assert argv1[argv1.index("--repo") + 1] == "o/r"
+    out1 = capsys.readouterr().out
+    assert "note:" not in out1
+
+    # Case 2: slug `o/r`, `cli.run_gh` cannot start.
+    run_stack_batch_calls.clear()
+    gh_calls.clear()
+    monkeypatch.setattr("saffron.cli.run_gh", _raising_gh)
+    home2 = tmp_path / "home2"
+    assert main(["--home", str(home2), "batch", "--stack", "--budget", "40"]) == 0
+    capsys.readouterr()
+
+    open_prs2 = run_stack_batch_calls[0]["open_prs"]
+    result2 = open_prs2()
+    assert result2 == []
+    out2 = capsys.readouterr().out
+    assert out2.count("note:") == 1
+    assert "gh could not be run" in out2
+    assert cli._GH_REFUSALS_SKIPPED in out2
+
+    # Case 3: no slug.
+    run_stack_batch_calls.clear()
+    gh_calls.clear()
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+    monkeypatch.setattr("saffron.cli.run_gh", _fake_run_gh)
+    home3 = tmp_path / "home3"
+    assert main(["--home", str(home3), "batch", "--stack", "--budget", "40"]) == 0
+    capsys.readouterr()
+
+    open_prs3 = run_stack_batch_calls[0]["open_prs"]
+    result3 = open_prs3()
+    assert result3 == []
+    assert gh_calls == []
+    out3 = capsys.readouterr().out
+    assert out3.count("note:") == 1
+    assert "no GitHub slug could be read" in out3
+    assert cli._GH_REFUSALS_SKIPPED in out3
+
+    # Case 4: readiness fails. No callable is built at all.
+    run_stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home4 = tmp_path / "home4"
+    main(["--home", str(home4), "batch", "--stack", "--budget", "40"])
+    assert len(run_stack_batch_calls) == 1
+    assert run_stack_batch_calls[0]["open_prs"] is None
+
+
 def _exec_file(path, text="#!/bin/sh\nexit 0\n"):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)

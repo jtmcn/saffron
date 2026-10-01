@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
-from saffron import end_review, follow_up, preflight, qualify, spec_review
+from saffron import end_review, follow_up, preflight, qualify, scheduler, spec_review
 from saffron.agents import context
 from saffron.batch import run_batch, run_stack_batch
 from saffron.cell import runtime, worktree
@@ -1013,6 +1013,30 @@ def _stack_follow_ups(
     return run
 
 
+def _stack_open_prs(repo_slug: str | None) -> Callable[[], list[dict]]:
+    """`run_stack_batch`'s `open_prs` adapter (ADR 7, `SA-0162`). Reads
+    nothing until it is called. Reaches `scheduler._open_prs` through the
+    module, and `gh` through `_guarded_gh`, which calls `cli.run_gh` by
+    name. Both read fresh, never bound ahead of when the callable runs.
+    """
+
+    def run() -> list[dict]:
+        if repo_slug is None:
+            _print_skipped(
+                "no GitHub slug could be read from the remote", _GH_REFUSALS_SKIPPED
+            )
+            return []
+        gh_failures: list[str] = []
+        found = scheduler._open_prs(repo_slug, _guarded_gh(gh_failures))
+        if gh_failures:
+            _print_skipped(
+                f"gh could not be run ({gh_failures[0]})", _GH_REFUSALS_SKIPPED
+            )
+        return found
+
+    return run
+
+
 @dataclass
 class QueueResolution:
     """What resolving one repo's queue over the pinned base produced —
@@ -1377,6 +1401,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     ) = None
     # Same: no finding is turned into a follow-up until then.
     follow_ups: Callable[[str, end_review.StackReview], list[Candidate]] | None = None
+    # Same: nothing is refused on an open pull request until then.
+    open_prs: Callable[[], list[dict]] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1448,6 +1474,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                     cap_usd=writer_usd,
                     pooled=pooled,
                 )
+                open_prs = _stack_open_prs(resolved.repo_slug)
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`
                 # callable reads the latest answer, not the opening one.
@@ -1496,6 +1523,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 mint=stack_mint,
                 revise=stack_revise,
                 follow_ups=follow_ups,
+                open_prs=open_prs,
             )
         else:
             stop = run_batch(

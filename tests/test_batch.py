@@ -1,6 +1,6 @@
 import dataclasses
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -2292,6 +2292,13 @@ def _clean_review(**kwargs):
     return _review_session([], **kwargs)
 
 
+def _clean_run_review(candidate, predecessor=None, **kwargs):
+    """A `review` double that always routes `run`, at no cost. Every call
+    site in this file needs `review` only to satisfy `follow_ups`' own
+    check, not to drive a scripted route."""
+    return _clean_review(cost=0.0)
+
+
 def _blocker(fixes=None) -> dict:
     return {
         "severity": "blocker",
@@ -3972,7 +3979,9 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     design's section 3, Money). Both hold back the per-task check and the pre-revision check.
     `end_review` still keeps `reserve_usd` alone, and the batch row still
     records the whole budget given. `follow_ups` runs once, right after
-    `end_review`, with its return, only when both are given."""
+    `end_review`, with its return, whenever both are given, whatever the
+    order's own pass stopped on. A follow-up it returns runs only once that
+    pass drained. One it returns otherwise is unrun (`SA-0162`)."""
     from saffron.batch import run_stack_batch
 
     def _spending_runner(log: list):
@@ -4003,6 +4012,8 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     order = [_candidate("SY-1", budget_usd=12.0), _candidate("SY-2", budget_usd=12.25)]
     end_calls: list = []
     follow_calls: list = []
+    sy90_mint = MintDouble(ledger, repo_id)
+    sy90_task_id = sy90_mint(_candidate("SY-90"))
 
     def end_review(batch_key, reserve_usd, specs):
         end_calls.append((batch_key, reserve_usd))
@@ -4010,9 +4021,10 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
 
     def follow_ups(batch_key, stack_review):
         follow_calls.append((batch_key, stack_review))
-        return [_candidate("SY-90")]
+        return [dataclasses.replace(_candidate("SY-90"), task_id=sy90_task_id)]
 
     run_log: list = []
+    lines: list[str] = []
     reason = run_stack_batch(
         order,
         ledger,
@@ -4024,6 +4036,9 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
         writer_usd=4.5,
         end_review=end_review,
         follow_ups=follow_ups,
+        review=_clean_run_review,
+        mint=MintDouble(ledger, repo_id),
+        emit=lines.append,
     )
 
     assert reason == "BUDGET"
@@ -4032,6 +4047,9 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     assert end_calls == [(str(batch_id), 3.0)]
     assert follow_calls == [(str(batch_id), "stack-review-sentinel")]
     assert _batch_row(ledger, batch_id)["budget_usd"] == 20.0
+    # The order's own pass stopped `BUDGET`, not `DRAINED`, so `SY-90` is
+    # never driven, reviewed, minted or run, and is unrun on that account.
+    assert "follow-ups unrun  SY-90" in lines
 
     # With `follow_ups` given but no `end_review`, `follow_ups` never runs,
     # and the lone over-budget candidate never reaches the runner either.
@@ -4053,6 +4071,8 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
             reserve_usd=3.0,
             writer_usd=4.5,
             follow_ups=given,
+            review=_clean_run_review,
+            mint=MintDouble(ledger, repo_id),
         )
         assert reason2 == "BUDGET"
     assert lone_log == []
@@ -4077,6 +4097,8 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
             writer_usd=4.5,
             end_review=lambda *a: raised_end.append(a),
             follow_ups=lambda *a: raised_follow.append(a) or [],
+            review=_clean_run_review,
+            mint=MintDouble(ledger, repo_id),
         )
     assert raised_end == []
     assert raised_follow == []
@@ -4248,3 +4270,1076 @@ def test_a_stack_batch_hands_its_end_review_each_revised_specs_latest_text(
     assert specs["SY-1"] is not order[0].spec
     assert specs["SY-2"] is order[1].spec
     assert specs["SY-3"] is order[2].spec
+
+
+# SA-0162: follow-up layers, one close, gate 0 on a follow-up and on a
+# revised spec of the order. One shared arrangement drives criteria 1-6.
+
+
+def _spec_text(spec_id: str, *, touches: Sequence[str] = ()) -> str:
+    """A minimal parseable spec text for `StackDoubles` below: `feature`,
+    a `budget_usd` of 1, and the given `touches`."""
+    lines = ["---", f"id: {spec_id}", "title: t", "type: feature", "budget_usd: 1"]
+    if touches:
+        lines.append("touches:")
+        lines += [f"  - {t}" for t in touches]
+    lines += ["---", "body", ""]
+    return "\n".join(lines)
+
+
+def _lowest_layer_task_id(ledger: Ledger, batch_id: int) -> int:
+    row = ledger._db.execute(
+        "SELECT t.task_id AS task_id FROM stack_layers sl "
+        "JOIN tasks t ON t.record_key = sl.task_key "
+        "WHERE sl.batch_key = ? AND sl.position = 1",
+        (str(batch_id),),
+    ).fetchone()
+    return int(row["task_id"])
+
+
+class StackDoubles:
+    """The one arrangement every SA-0162 witness drives: a runner, a review,
+    a revise, a mint, an end review and a follow-ups double, each keyed by
+    spec id against one `rows` table. `order` logs every call by a short
+    tag, in the order it happened. It is shared across every double built
+    with the same list, so a witness that checks interleaving, not
+    membership alone, reads one list."""
+
+    def __init__(self, ledger: Ledger, repo_id: int, rows: dict, *, order=None):
+        self.ledger = ledger
+        self.repo_id = repo_id
+        self.rows = rows
+        self.order: list[str] = order if order is not None else []
+        self.runner_calls: list[tuple[str, str | None]] = []
+        self.review_calls: list[tuple[str, str | None]] = []
+        self.revise_calls: list[str] = []
+        self.mint_calls: list[str] = []
+        self._route_i: dict[str, int] = {}
+
+    def runner(self, candidate: Candidate, predecessor: Candidate | None = None):
+        spec_id = candidate.spec.id
+        self.runner_calls.append(
+            (spec_id, predecessor.spec.id if predecessor else None)
+        )
+        self.order.append(f"runner:{spec_id}")
+        run_id = self.ledger.create_run(self.repo_id, base_sha="a" * 40)
+        task_id = self.ledger.create_task(
+            run_id,
+            spec_id=spec_id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{spec_id}-run",
+        )
+        attempt_id = self.ledger.open_attempt(task_id, phase="IMPLEMENT")
+        self.ledger.close_attempt(
+            attempt_id,
+            session_id=None,
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=1.0,
+        )
+        state = self.rows.get(spec_id, {}).get("runner", "READY_FOR_REVIEW")
+        if state == "raise":
+            raise RuntimeError("runner")
+        self.ledger.set_task_state(task_id, state)
+        return _outcome(state=state, run_id=run_id, task_id=task_id)
+
+    def review(self, candidate: Candidate, predecessor: Candidate | None = None, **kw):
+        spec_id = candidate.spec.id
+        self.review_calls.append(
+            (spec_id, predecessor.spec.id if predecessor else None)
+        )
+        self.order.append(f"review:{spec_id}")
+        row = self.rows.get(spec_id, {})
+        route = row.get("route", "run")
+        if isinstance(route, list):
+            i = self._route_i.get(spec_id, 0)
+            this = route[i]
+            self._route_i[spec_id] = i + 1
+        else:
+            this = route
+        if this == "raise":
+            raise RuntimeError("review")
+        if this == "wait":
+            return _review_session(
+                [], cost=0.0, fenced=False, resets_at=row.get("resets_at")
+            )
+        if this == "error":
+            return _review_session([], cost=0.0, fenced=False)
+        if this == "escalate":
+            return _review_session([_blocker("scope")], cost=0.0)
+        if this == "revise":
+            return _review_session([_blocker("build")], cost=0.0)
+        return _review_session([], cost=0.0)
+
+    def revise(self, candidate: Candidate, predecessor, spec_text, review_text):
+        spec_id = candidate.spec.id
+        self.revise_calls.append(spec_id)
+        self.order.append(f"revise:{spec_id}")
+        touches = self.rows.get(spec_id, {}).get("revised_touches", [])
+        return _written(
+            _spec_text(spec_id, touches=touches), session_id=f"w-{spec_id}", cost=0.0
+        )
+
+    def mint(self, candidate: Candidate) -> int:
+        spec_id = candidate.spec.id
+        self.mint_calls.append(spec_id)
+        self.order.append(f"mint:{spec_id}")
+        run_id = self.ledger.create_run(self.repo_id, base_sha="a" * 40)
+        task_id = self.ledger.create_task(
+            run_id,
+            spec_id=spec_id,
+            spec_sha=candidate.spec_sha,
+            branch=f"saffron/{spec_id}",
+        )
+        follow_up_touches = self.rows.get(spec_id, {}).get("follow_up_text_touches")
+        if follow_up_touches is not None:
+            self.ledger.record_spec_text(
+                task_id,
+                origin="follow_up",
+                spec_id=spec_id,
+                path=f".saffron/specs/{spec_id}-f.md",
+                text=_spec_text(spec_id, touches=follow_up_touches),
+            )
+        return task_id
+
+    def end_review(self, batch_key: str, reserve_usd: float, specs):
+        self.order.append("end_review")
+        cfg = self.rows.get("__end_review__", {})
+        if "on_call" in cfg:
+            cfg["on_call"]()
+        cost = cfg.get("cost")
+        if cost is not None:
+            task_id = _lowest_layer_task_id(self.ledger, int(batch_key))
+            self.ledger.record_end_review(
+                task_id, lens="Spec", status="reviewed", cost_usd=cost, error=None
+            )
+        return "stack-review-sentinel"
+
+    def follow_ups(self, batch_key: str, stack_review) -> list[Candidate]:
+        self.order.append("follow_ups")
+        candidates = []
+        for entry in self.rows.get("__follow_ups__", []):
+            spec_id = entry["id"]
+            run_id = self.ledger.create_run(self.repo_id, base_sha="a" * 40)
+            task_id = self.ledger.create_task(
+                run_id, spec_id=spec_id, spec_sha="f" * 64, branch=f"saffron/{spec_id}"
+            )
+            self.ledger.attach_run_to_batch(run_id, int(batch_key))
+            touches = entry.get("touches", [])
+            self.ledger.record_spec_text(
+                task_id,
+                origin="follow_up",
+                spec_id=spec_id,
+                path=f".saffron/specs/{spec_id}-f.md",
+                text=_spec_text(spec_id, touches=touches),
+            )
+            built = dataclasses.replace(
+                _candidate(
+                    spec_id,
+                    budget_usd=entry.get("budget_usd", 1.0),
+                    priority=entry.get("priority", 1),
+                ),
+                task_id=task_id,
+            )
+            built = dataclasses.replace(
+                built, spec=built.spec.model_copy(update={"touches": touches})
+            )
+            candidates.append(built)
+        return candidates
+
+
+def test_a_stack_batch_runs_its_follow_ups_on_top_as_generation_one_layers(
+    ledger, repo_id
+):
+    """Follow-ups run after `end_review` and `follow_ups`, through the same
+    wrapper as the order, once the order's own pass drains. Each is reviewed
+    and run once, on the last layer, in the order `follow_ups` returned,
+    never resorted. `mint` runs for every spec of the order and never for a
+    follow-up. Each follow-up that reaches `READY_FOR_REVIEW` is a layer of
+    generation 1, positioned after the order's own layers."""
+    from saffron.batch import run_stack_batch
+
+    rows = {
+        "TE-2": {"runner": "EXHAUSTED"},
+        "TE-27": {"route": "escalate"},
+        "TE-35": {"runner": "EXHAUSTED"},
+        "__follow_ups__": [
+            {"id": "TE-31", "priority": 3},
+            {"id": "TE-27", "priority": 1},
+            {"id": "TE-35", "priority": 2},
+            {"id": "TE-29", "priority": 1},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    order = [
+        _candidate("TE-1"),
+        _candidate("TE-2"),
+        dataclasses.replace(_candidate("TE-3"), task_id=999),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert doubles.runner_calls == [
+        ("TE-1", None),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-1"),
+        ("TE-31", "TE-3"),
+        ("TE-35", "TE-31"),
+        ("TE-29", "TE-31"),
+    ]
+    assert doubles.review_calls == [
+        ("TE-1", None),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-1"),
+        ("TE-31", "TE-3"),
+        ("TE-27", "TE-31"),
+        ("TE-35", "TE-31"),
+        ("TE-29", "TE-31"),
+    ]
+    assert doubles.mint_calls == ["TE-1", "TE-2", "TE-3"]
+
+    te3_runner_i = doubles.order.index("runner:TE-3")
+    te31_review_i = doubles.order.index("review:TE-31")
+    end_review_i = doubles.order.index("end_review")
+    follow_ups_i = doubles.order.index("follow_ups")
+    assert end_review_i > te3_runner_i
+    assert follow_ups_i == end_review_i + 1
+    assert follow_ups_i < te31_review_i
+    assert doubles.order.count("end_review") == 1
+    assert doubles.order.count("follow_ups") == 1
+
+    layers = _stack_layers(ledger, batch_id=_latest_batch_id(ledger))
+    by_key = {row["task_key"]: row for row in layers}
+    got = [
+        (
+            row["spec_id"],
+            row["position"],
+            row["generation"],
+            by_key[row["predecessor_key"]]["spec_id"]
+            if row["predecessor_key"]
+            else None,
+        )
+        for row in layers
+    ]
+    assert got == [
+        ("TE-1", 1, 0, None),
+        ("TE-3", 2, 0, "TE-1"),
+        ("TE-31", 3, 1, "TE-3"),
+        ("TE-29", 4, 1, "TE-31"),
+    ]
+
+    escalated = [line for line in lines if "escalated" in line]
+    assert len(escalated) == 1
+    assert escalated[0].startswith("TE-27")
+    assert not any(line.startswith("follow-ups unrun") for line in lines)
+
+
+def test_a_stack_batch_closes_its_row_once_after_its_follow_ups_or_their_raise(
+    ledger, repo_id, monkeypatch
+):
+    """`run_stack_batch` checks readiness once and closes its batch row once,
+    after `end_review` and `follow_ups`, with the spend both of them left
+    behind included. A raise from either, or from readiness, closes the row
+    `INFRASTRUCTURE` and leaves `run_stack_batch`. `follow_ups` given
+    without `review` raises before any row opens, and so does `review`
+    without `mint`, the existing check unchanged."""
+    from saffron.batch import run_stack_batch
+
+    log: list[str] = []
+    real_close_batch = ledger.close_batch
+
+    def _logging_close(batch_id, status):
+        log.append(f"close:{status}")
+        return real_close_batch(batch_id, status)
+
+    monkeypatch.setattr(ledger, "close_batch", _logging_close)
+
+    readiness_calls: list[int] = []
+
+    def _counted_ready():
+        readiness_calls.append(1)
+        return _ready()
+
+    # A: a follow-up runs. One close, after it, with both spends counted.
+    rows_a = {"__end_review__": {"cost": 0.5}, "__follow_ups__": [{"id": "TE-72"}]}
+    doubles_a = StackDoubles(ledger, repo_id, rows_a, order=log)
+    reason_a = run_stack_batch(
+        [_candidate("TE-71", budget_usd=1)],
+        ledger,
+        30.0,
+        None,
+        doubles_a.runner,
+        readiness_check=_counted_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles_a.review,
+        mint=doubles_a.mint,
+        end_review=doubles_a.end_review,
+        follow_ups=doubles_a.follow_ups,
+    )
+    assert reason_a == "DRAINED"
+    assert log[-2:] == ["runner:TE-72", "close:DRAINED"]
+    batch_id_a = _latest_batch_id(ledger)
+    assert ledger.batch_spend(batch_id_a) == 2.5
+    assert len(readiness_calls) == 1
+
+    # B: `follow_ups` of `None`. One close, after `end_review` alone.
+    rows_b = {"__end_review__": {"cost": 0.5}}
+    doubles_b = StackDoubles(ledger, repo_id, rows_b, order=log)
+    reason_b = run_stack_batch(
+        [_candidate("TE-73", budget_usd=1)],
+        ledger,
+        30.0,
+        None,
+        doubles_b.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles_b.review,
+        mint=doubles_b.mint,
+        end_review=doubles_b.end_review,
+    )
+    assert reason_b == "DRAINED"
+    assert log[-2:] == ["end_review", "close:DRAINED"]
+    batch_id_b = _latest_batch_id(ledger)
+    assert ledger.batch_spend(batch_id_b) == 1.5
+
+    # C: ready at a budget of 1. `BUDGET`, and the row's own status matches.
+    rows_c = {"__follow_ups__": [{"id": "TE-75", "budget_usd": 40}]}
+    doubles_c = StackDoubles(ledger, repo_id, rows_c, order=log)
+    reason_c = run_stack_batch(
+        [_candidate("TE-74")],
+        ledger,
+        1.0,
+        None,
+        doubles_c.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles_c.review,
+        mint=doubles_c.mint,
+        end_review=doubles_c.end_review,
+        follow_ups=doubles_c.follow_ups,
+    )
+    assert reason_c == "BUDGET"
+    batch_id_c = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id_c)["status"] == "BUDGET"
+
+    # D: three raises, each closing `INFRASTRUCTURE`, logging nothing else.
+    def _raising_end_review(*a, **kw):
+        raise RuntimeError("end_review")
+
+    doubles_d1 = StackDoubles(ledger, repo_id, {}, order=log)
+    with pytest.raises(RuntimeError, match=r"^end_review$"):
+        run_stack_batch(
+            [_candidate("TE-76")],
+            ledger,
+            30.0,
+            None,
+            doubles_d1.runner,
+            readiness_check=_ready,
+            reserve_usd=6.0,
+            writer_usd=2.0,
+            review=doubles_d1.review,
+            mint=doubles_d1.mint,
+            end_review=_raising_end_review,
+        )
+    batch_id_d1 = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id_d1)["status"] == "INFRASTRUCTURE"
+    assert _batch_row(ledger, batch_id_d1)["ended_at"] is not None
+
+    def _raising_follow_ups(*a, **kw):
+        raise RuntimeError("follow_ups")
+
+    doubles_d2 = StackDoubles(ledger, repo_id, {"__end_review__": {}}, order=log)
+    with pytest.raises(RuntimeError, match=r"^follow_ups$"):
+        run_stack_batch(
+            [_candidate("TE-77")],
+            ledger,
+            30.0,
+            None,
+            doubles_d2.runner,
+            readiness_check=_ready,
+            reserve_usd=6.0,
+            writer_usd=2.0,
+            review=doubles_d2.review,
+            mint=doubles_d2.mint,
+            end_review=doubles_d2.end_review,
+            follow_ups=_raising_follow_ups,
+        )
+    batch_id_d2 = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id_d2)["status"] == "INFRASTRUCTURE"
+
+    def _raising_readiness():
+        raise RuntimeError("readiness")
+
+    before_d3 = len(log)
+    doubles_d3 = StackDoubles(ledger, repo_id, {}, order=log)
+    with pytest.raises(RuntimeError, match=r"^readiness$"):
+        run_stack_batch(
+            [_candidate("TE-78")],
+            ledger,
+            30.0,
+            None,
+            doubles_d3.runner,
+            readiness_check=_raising_readiness,
+            reserve_usd=6.0,
+            writer_usd=2.0,
+            review=doubles_d3.review,
+            mint=doubles_d3.mint,
+        )
+    batch_id_d3 = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id_d3)["status"] == "INFRASTRUCTURE"
+    assert log[before_d3:] == ["close:INFRASTRUCTURE"]
+
+    # E: `follow_ups` without `review` raises, with `mint` alone or with
+    # neither. `review` without `mint` keeps its own unchanged message.
+    before_count = ledger._db.execute("SELECT COUNT(*) AS n FROM batches").fetchone()[
+        "n"
+    ]
+    before_e = len(log)
+    doubles_e = StackDoubles(ledger, repo_id, {"__end_review__": {}}, order=log)
+    with pytest.raises(ValueError, match="follow_ups"):
+        run_stack_batch(
+            [_candidate("TE-791")],
+            ledger,
+            30.0,
+            None,
+            doubles_e.runner,
+            readiness_check=_ready,
+            end_review=doubles_e.end_review,
+            follow_ups=doubles_e.follow_ups,
+        )
+    with pytest.raises(ValueError, match="follow_ups"):
+        run_stack_batch(
+            [_candidate("TE-792")],
+            ledger,
+            30.0,
+            None,
+            doubles_e.runner,
+            readiness_check=_ready,
+            mint=doubles_e.mint,
+            end_review=doubles_e.end_review,
+            follow_ups=doubles_e.follow_ups,
+        )
+    with pytest.raises(ValueError, match="needs mint whenever review is given"):
+        run_stack_batch(
+            [_candidate("TE-793")],
+            ledger,
+            30.0,
+            None,
+            doubles_e.runner,
+            readiness_check=_ready,
+            review=doubles_e.review,
+            end_review=doubles_e.end_review,
+            follow_ups=doubles_e.follow_ups,
+        )
+    after_count = ledger._db.execute("SELECT COUNT(*) AS n FROM batches").fetchone()[
+        "n"
+    ]
+    assert after_count == before_count
+    assert log[before_e:] == []
+
+
+def _pr(number: int, branch: str, path: str) -> dict:
+    return {
+        "number": number,
+        "headRefName": branch,
+        "url": f"https://example.invalid/pull/{number}",
+        "files": [{"path": path}],
+    }
+
+
+def test_a_follow_up_meets_gate_0_with_only_this_batchs_layers_exempt(ledger, repo_id):
+    """`open_prs` is called once, right after `follow_ups` returns at least
+    one follow-up to run. Each follow-up then meets gate 0's own refusals
+    before its review. Exempt only for its own branch and this batch's own
+    recorded layers, either generation. A refused follow-up is never
+    reviewed or run, adds no layer, counts as no abort, and is named on the
+    unrun line."""
+    from saffron.batch import run_stack_batch
+
+    pull_requests = [
+        _pr(1, "saffron/TE-81", "a.py"),
+        _pr(2, "saffron/TE-82", "b.py"),
+        _pr(3, "saffron/TE-83", "c.py"),
+        _pr(4, "saffron/SA-9000", "d.py"),
+        _pr(5, "saffron/TE-79", "e.py"),
+        _pr(6, "saffron/TE-91", "a.py"),
+    ]
+    open_pr_log: list[int] = []
+
+    def open_prs(doubles) -> list[dict]:
+        open_pr_log.append(len(doubles.order))
+        return pull_requests
+
+    # An earlier batch: TE-79 alone, ready. Its `follow_ups` returns no
+    # candidate, so `open_prs` is never reached.
+    doubles0 = StackDoubles(ledger, repo_id, {"__follow_ups__": []})
+    reason0 = run_stack_batch(
+        [_candidate("TE-79", budget_usd=1)],
+        ledger,
+        30.0,
+        None,
+        doubles0.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles0.review,
+        mint=doubles0.mint,
+        end_review=doubles0.end_review,
+        follow_ups=doubles0.follow_ups,
+        open_prs=lambda: open_prs(doubles0),
+    )
+    assert reason0 == "DRAINED"
+    assert open_pr_log == []
+
+    rows = {
+        "TE-82": {"runner": "MERGE_FAILED"},
+        "__follow_ups__": [
+            {"id": "TE-91", "touches": ["a.py"]},
+            {"id": "TE-96", "touches": ["e.py"]},
+            {"id": "TE-92", "touches": ["b.py"]},
+            {"id": "TE-93", "touches": ["d.py"]},
+            {"id": "TE-94", "touches": ["c.py"]},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    order = [
+        _candidate("TE-81", budget_usd=1),
+        _candidate("TE-82", budget_usd=1),
+        _candidate("TE-83", budget_usd=1),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        open_prs=lambda: open_prs(doubles),
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    follow_up_runner_pairs = [
+        pair
+        for pair in doubles.runner_calls
+        if pair[0] not in ("TE-81", "TE-82", "TE-83")
+    ]
+    assert follow_up_runner_pairs == [("TE-91", "TE-83"), ("TE-94", "TE-91")]
+    follow_up_review_ids = [
+        sid
+        for sid, _pred in doubles.review_calls
+        if sid not in ("TE-81", "TE-82", "TE-83")
+    ]
+    assert follow_up_review_ids == ["TE-91", "TE-94"]
+
+    refused = {
+        line.split()[0]: line
+        for line in lines
+        if "refused" in line and "/pull/" in line
+    }
+    assert set(refused) == {"TE-96", "TE-92", "TE-93"}
+    assert "/pull/5" in refused["TE-96"]
+    assert "/pull/2" in refused["TE-92"]
+    assert "/pull/4" in refused["TE-93"]
+
+    assert "follow-ups unrun  TE-96 TE-92 TE-93" in lines
+    # Called once, right after `follow_ups`, which is the log's own last
+    # entry at that moment.
+    assert len(open_pr_log) == 1
+    assert doubles.order[open_pr_log[0] - 1] == "follow_ups"
+
+
+def test_a_revised_spec_meets_gate_0s_open_pull_request_refusals_before_its_cell(
+    ledger, repo_id, monkeypatch
+):
+    """A spec of the order whose latest `spec_texts` row is a revision meets
+    gate 0's open-pull-request refusals again, on that text's `touches`.
+    This happens once its review routes `run`, exempt for this batch's own
+    recorded layers. An unrevised spec, and one whose latest text is a
+    `follow_up`, meet no check. `open_prs` is read fresh for each one
+    checked."""
+    from saffron import spec_review as spec_review_module
+    from saffron.batch import run_stack_batch
+
+    monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 1.0)
+    monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 1.0)
+
+    pull_requests = [
+        _pr(1, "saffron/TE-141", "a.py"),
+        _pr(2, "saffron/TE-142", "b.py"),
+        _pr(3, "saffron/SA-9000", "d.py"),
+    ]
+    open_pr_log: list[int] = []
+
+    rows = {
+        "TE-142": {"runner": "MERGE_FAILED"},
+        "TE-143": {"route": ["revise", "run"], "revised_touches": ["m.py", "n.py"]},
+        "TE-144": {"route": ["revise", "run"], "revised_touches": ["m.py", "b.py"]},
+        "TE-145": {"route": ["revise", "run"], "revised_touches": ["m.py", "d.py"]},
+        "TE-147": {"route": ["revise", "run"], "revised_touches": ["m.py", "a.py"]},
+        "TE-148": {"follow_up_text_touches": ["m.py", "d.py"]},
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+
+    def open_prs() -> list[dict]:
+        open_pr_log.append(len(doubles.order))
+        return pull_requests
+
+    order = [_candidate(f"TE-14{n}", budget_usd=1) for n in range(1, 9)]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        revise=doubles.revise,
+        open_prs=open_prs,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert doubles.runner_calls == [
+        ("TE-141", None),
+        ("TE-142", "TE-141"),
+        ("TE-143", "TE-141"),
+        ("TE-146", "TE-143"),
+        ("TE-147", "TE-146"),
+        ("TE-148", "TE-147"),
+    ]
+    assert doubles.revise_calls == ["TE-143", "TE-144", "TE-145", "TE-147"]
+
+    refused = {
+        line.split()[0]: line
+        for line in lines
+        if "refused" in line and "/pull/" in line
+    }
+    assert set(refused) == {"TE-144", "TE-145"}
+    assert "/pull/2" in refused["TE-144"]
+    assert "/pull/3" in refused["TE-145"]
+
+    layers = _stack_layers(ledger, batch_id=_latest_batch_id(ledger))
+    assert [row["spec_id"] for row in layers] == [
+        "TE-141",
+        "TE-143",
+        "TE-146",
+        "TE-147",
+        "TE-148",
+    ]
+    assert len(open_pr_log) == 4
+
+
+class _MutableClock:
+    """A clock an end review or a fake sleep can move forward by hand, for
+    the `--until` witnesses below."""
+
+    def __init__(self, start: datetime):
+        self.now = start
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def _fail_sleep(seconds: float) -> None:
+    raise AssertionError(f"should not sleep for {seconds}")
+
+
+def _advancing_sleep(clock: _MutableClock, calls: list[float]):
+    def sleep(seconds: float) -> None:
+        calls.append(seconds)
+        clock.now += timedelta(seconds=seconds)
+
+    return sleep
+
+
+def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
+    ledger, repo_id, monkeypatch
+):
+    """Follow-ups run only when generation 0's loop drained. Before each
+    follow-up the batch checks `--until`, the budget and the breaker, as it
+    does for a spec of the order. Neither `reserve_usd` nor `writer_usd` is
+    held back. The breaker's count and the in-flight list carry over from
+    generation 0. A follow-up the batch stops before is unrun. So is one
+    whose review raised, routed `error`, or waited before the batch
+    stopped. One whose review waited and then routed `run` is not."""
+    from saffron import spec_review as spec_review_module
+    from saffron.batch import run_stack_batch
+
+    # Batch 1: the reserve and the writer's share are released for a
+    # follow-up that needed them.
+    rows1 = {
+        "__end_review__": {"cost": 3.0},
+        "__follow_ups__": [{"id": "TE-42", "budget_usd": 25}],
+    }
+    doubles1 = StackDoubles(ledger, repo_id, rows1)
+    reason1 = run_stack_batch(
+        [_candidate("TE-41", budget_usd=5)],
+        ledger,
+        30.0,
+        None,
+        doubles1.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles1.review,
+        mint=doubles1.mint,
+        end_review=doubles1.end_review,
+        follow_ups=doubles1.follow_ups,
+        sleep=_fail_sleep,
+    )
+    assert reason1 == "DRAINED"
+    assert doubles1.runner_calls == [("TE-41", None), ("TE-42", "TE-41")]
+
+    # Batch 2: the follow-up loop's own budget check, past the order's.
+    open_pr_calls2: list[int] = []
+
+    def _open_prs2() -> list[dict]:
+        open_pr_calls2.append(1)
+        return [_pr(7, "saffron/SA-9001", "x.py")]
+
+    rows2 = {
+        "__end_review__": {"cost": 3.0},
+        "__follow_ups__": [
+            {"id": "TE-44", "budget_usd": 27, "touches": ["y.py"]},
+            {"id": "TE-40", "budget_usd": 1, "touches": ["x.py"]},
+        ],
+    }
+    doubles2 = StackDoubles(ledger, repo_id, rows2)
+    lines2: list[str] = []
+    reason2 = run_stack_batch(
+        [_candidate("TE-43", budget_usd=5)],
+        ledger,
+        30.0,
+        None,
+        doubles2.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles2.review,
+        mint=doubles2.mint,
+        end_review=doubles2.end_review,
+        follow_ups=doubles2.follow_ups,
+        open_prs=_open_prs2,
+        sleep=_fail_sleep,
+        emit=lines2.append,
+    )
+    assert reason2 == "BUDGET"
+    assert doubles2.runner_calls == [("TE-43", None)]
+    assert len(open_pr_calls2) == 1
+    assert not any("refused" in line for line in lines2)
+    assert "follow-ups unrun  TE-44 TE-40" in lines2
+
+    # Batch 3: the order's own pass stopped `BUDGET`, so the follow-up
+    # `follow_ups` returns is never driven, and is unrun on that account.
+    rows3 = {"__follow_ups__": [{"id": "TE-47", "budget_usd": 1}]}
+    doubles3 = StackDoubles(ledger, repo_id, rows3)
+    lines3: list[str] = []
+    reason3 = run_stack_batch(
+        [_candidate("TE-45", budget_usd=5), _candidate("TE-46", budget_usd=24)],
+        ledger,
+        30.0,
+        None,
+        doubles3.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles3.review,
+        mint=doubles3.mint,
+        end_review=doubles3.end_review,
+        follow_ups=doubles3.follow_ups,
+        sleep=_fail_sleep,
+        emit=lines3.append,
+    )
+    assert reason3 == "BUDGET"
+    assert doubles3.runner_calls == [("TE-45", None)]
+    assert "follow-ups unrun  TE-47" in lines3
+
+    # Batch 4: the end review moves the clock past `--until`, so the
+    # follow-up it returns meets the same deadline check and is unrun.
+    start4 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    until4 = start4 + timedelta(hours=1)
+    clock4 = _MutableClock(start4)
+
+    def _move_clock_past_until() -> None:
+        clock4.now = until4 + timedelta(minutes=1)
+
+    open_pr_calls4: list[int] = []
+
+    def _open_prs4() -> list[dict]:
+        open_pr_calls4.append(1)
+        return [_pr(7, "saffron/SA-9001", "x.py")]
+
+    rows4 = {
+        "__end_review__": {"on_call": _move_clock_past_until},
+        "__follow_ups__": [{"id": "TE-49", "budget_usd": 1, "touches": ["x.py"]}],
+    }
+    doubles4 = StackDoubles(ledger, repo_id, rows4)
+    lines4: list[str] = []
+    reason4 = run_stack_batch(
+        [_candidate("TE-48", budget_usd=5)],
+        ledger,
+        30.0,
+        until4,
+        doubles4.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles4.review,
+        mint=doubles4.mint,
+        end_review=doubles4.end_review,
+        follow_ups=doubles4.follow_ups,
+        open_prs=_open_prs4,
+        clock=clock4,
+        sleep=_fail_sleep,
+        emit=lines4.append,
+    )
+    assert reason4 == "UNTIL"
+    assert doubles4.runner_calls == [("TE-48", None)]
+    assert len(open_pr_calls4) == 1
+    assert not any("refused" in line for line in lines4)
+    assert "follow-ups unrun  TE-49" in lines4
+
+    # Batch 5: the breaker's own count carries over, and fires before the
+    # follow-up on `x.py` is ever reached.
+    open_pr_calls5: list[int] = []
+
+    def _open_prs5() -> list[dict]:
+        open_pr_calls5.append(1)
+        return [_pr(7, "saffron/SA-9001", "x.py")]
+
+    rows5 = {
+        "TE-52": {"runner": "GATE_ERROR"},
+        "TE-53": {"runner": "GATE_ERROR"},
+        "__end_review__": {},
+        "__follow_ups__": [
+            {"id": "TE-53", "budget_usd": 1, "touches": ["y.py"]},
+            {"id": "TE-54", "budget_usd": 1, "touches": ["x.py"]},
+        ],
+    }
+    doubles5 = StackDoubles(ledger, repo_id, rows5)
+    lines5: list[str] = []
+    reason5 = run_stack_batch(
+        [_candidate("TE-51", budget_usd=1), _candidate("TE-52", budget_usd=1)],
+        ledger,
+        30.0,
+        None,
+        doubles5.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles5.review,
+        mint=doubles5.mint,
+        end_review=doubles5.end_review,
+        follow_ups=doubles5.follow_ups,
+        open_prs=_open_prs5,
+        sleep=_fail_sleep,
+        emit=lines5.append,
+    )
+    assert reason5 == "INFRASTRUCTURE"
+    assert doubles5.runner_calls == [
+        ("TE-51", None),
+        ("TE-52", "TE-51"),
+        ("TE-53", "TE-51"),
+    ]
+    assert len(open_pr_calls5) == 1
+    assert "follow-ups unrun  TE-54" in lines5
+
+    # Batch 6: the in-flight list carries over, turning a clean drain of
+    # both passes into `INCOMPLETE`.
+    rows6 = {
+        "TE-62": {"runner": "REVIEWING"},
+        "__end_review__": {},
+        "__follow_ups__": [{"id": "TE-63", "budget_usd": 1}],
+    }
+    doubles6 = StackDoubles(ledger, repo_id, rows6)
+    lines6: list[str] = []
+    reason6 = run_stack_batch(
+        [_candidate("TE-61", budget_usd=1), _candidate("TE-62", budget_usd=1)],
+        ledger,
+        30.0,
+        None,
+        doubles6.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles6.review,
+        mint=doubles6.mint,
+        end_review=doubles6.end_review,
+        follow_ups=doubles6.follow_ups,
+        sleep=_fail_sleep,
+        emit=lines6.append,
+    )
+    assert reason6 == "INCOMPLETE"
+    assert doubles6.runner_calls == [
+        ("TE-61", None),
+        ("TE-62", "TE-61"),
+        ("TE-63", "TE-61"),
+    ]
+    assert not any(line.startswith("follow-ups unrun") for line in lines6)
+    assert any(line.startswith("TE-62") and "in flight" in line for line in lines6)
+
+    # Batch 7: a revision's own check holds `reserve_usd` and `writer_usd`
+    # for a spec of the order, and holds neither for a follow-up's.
+    monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 10.0)
+    monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 8.0)
+    rows7 = {
+        "TE-103": {"route": "revise", "revised_touches": []},
+        "TE-102": {"route": ["revise", "run"], "revised_touches": []},
+        "__end_review__": {},
+        "__follow_ups__": [{"id": "TE-102", "budget_usd": 10}],
+    }
+    doubles7 = StackDoubles(ledger, repo_id, rows7)
+    lines7: list[str] = []
+    reason7 = run_stack_batch(
+        [
+            _candidate("TE-101", budget_usd=1),
+            dataclasses.replace(_candidate("TE-103", budget_usd=4), task_id=424242),
+        ],
+        ledger,
+        30.0,
+        None,
+        doubles7.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles7.review,
+        mint=doubles7.mint,
+        revise=doubles7.revise,
+        end_review=doubles7.end_review,
+        follow_ups=doubles7.follow_ups,
+        sleep=_fail_sleep,
+        emit=lines7.append,
+    )
+    assert reason7 == "DRAINED"
+    assert doubles7.runner_calls == [("TE-101", None), ("TE-102", "TE-101")]
+    assert doubles7.revise_calls == ["TE-102"]
+    assert any(line.startswith("TE-103") and "unrevised" in line for line in lines7)
+    assert not any(line.startswith("follow-ups unrun") for line in lines7)
+
+    # Batch 8: a follow-up's own wait meets `--until` exactly as a task's
+    # own `RATE_LIMITED` wait does (`SA-0148`).
+    start8 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    until8 = start8 + timedelta(hours=1)
+    resets_at8 = int((start8 + timedelta(hours=2)).timestamp())
+    rows8 = {
+        "TE-112": {"route": "wait", "resets_at": resets_at8},
+        "__end_review__": {},
+        "__follow_ups__": [{"id": "TE-112", "budget_usd": 1}],
+    }
+    doubles8 = StackDoubles(ledger, repo_id, rows8)
+    sleep_calls8: list[float] = []
+    lines8: list[str] = []
+    reason8 = run_stack_batch(
+        [_candidate("TE-111", budget_usd=1)],
+        ledger,
+        30.0,
+        until8,
+        doubles8.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles8.review,
+        mint=doubles8.mint,
+        end_review=doubles8.end_review,
+        follow_ups=doubles8.follow_ups,
+        clock=lambda: start8,
+        sleep=sleep_calls8.append,
+        emit=lines8.append,
+    )
+    assert reason8 == "UNTIL"
+    assert doubles8.runner_calls == [("TE-111", None)]
+    assert sleep_calls8 == []
+    assert "follow-ups unrun  TE-112" in lines8
+
+    # Batch 9: a raise, a clean `error` route, and a wait that retries into
+    # `run` each settle the breaker and the unrun line their own way.
+    start9 = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+    until9 = start9 + timedelta(hours=1)
+    resets_at9 = int((start9 + timedelta(minutes=10)).timestamp())
+    clock9 = _MutableClock(start9)
+    sleep_calls9: list[float] = []
+    rows9 = {
+        "TE-122": {"route": "raise"},
+        "TE-123": {"route": "error"},
+        "TE-126": {"runner": "raise"},
+        "TE-127": {"route": ["wait", "run"], "resets_at": resets_at9},
+        "__end_review__": {},
+        "__follow_ups__": [
+            {"id": "TE-122", "budget_usd": 1},
+            {"id": "TE-124", "budget_usd": 1},
+            {"id": "TE-123", "budget_usd": 1},
+            {"id": "TE-125", "budget_usd": 1},
+            {"id": "TE-126", "budget_usd": 1},
+            {"id": "TE-127", "budget_usd": 1},
+        ],
+    }
+    doubles9 = StackDoubles(ledger, repo_id, rows9)
+    lines9: list[str] = []
+    reason9 = run_stack_batch(
+        [_candidate("TE-121", budget_usd=1)],
+        ledger,
+        30.0,
+        until9,
+        doubles9.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles9.review,
+        mint=doubles9.mint,
+        end_review=doubles9.end_review,
+        follow_ups=doubles9.follow_ups,
+        clock=clock9,
+        sleep=_advancing_sleep(clock9, sleep_calls9),
+        emit=lines9.append,
+    )
+    assert reason9 == "DRAINED"
+    assert doubles9.runner_calls == [
+        ("TE-121", None),
+        ("TE-124", "TE-121"),
+        ("TE-125", "TE-124"),
+        ("TE-126", "TE-125"),
+        ("TE-127", "TE-125"),
+    ]
+    assert len(sleep_calls9) == 1
+    assert any(
+        line.startswith("TE-122") and "RuntimeError: review" in line for line in lines9
+    )
+    assert any(line.startswith("TE-123") and "unreviewed" in line for line in lines9)
+    assert any(
+        line.startswith("TE-126") and "RuntimeError: runner" in line for line in lines9
+    )
+    assert "follow-ups unrun  TE-122 TE-123" in lines9
