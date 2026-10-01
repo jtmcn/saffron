@@ -28,20 +28,24 @@ type is not importing the driver that builds it.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from saffron import spec_review
 from saffron.cell.session import CellOutcome
-from saffron.intake import Spec
+from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate
 from saffron.task import Refused
+
+if TYPE_CHECKING:
+    from saffron.end_review import StackReview
 
 # The loop returns `INCOMPLETE` for a night that left a task in flight — a
 # task that came back mid-phase, having reached no end state, which is not
@@ -368,7 +372,13 @@ def run_stack_batch(
     clock: Callable[[], datetime] = datetime.now,
     emit: Callable[[str], None] = print,
     reserve_usd: float = 0.0,
+    # The spec writer's own share, held back beside `reserve_usd` (ADR 7's
+    # Money paragraph). `SA-0165` passes `--budget * WRITER_SHARE`.
+    writer_usd: float = 0.0,
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
+    # Runs once, right after `end_review`, only when both are given. Its
+    # return is discarded here. `SA-0165` passes the production writer.
+    follow_ups: Callable[[str, StackReview], list[Candidate]] | None = None,
     # A real default. `SA-0144`'s caller passes none (SA-0148).
     sleep: Callable[[float], None] = time.sleep,
     # `None` means no review runs, and nothing here changes. `SA-0156` passes
@@ -395,8 +405,8 @@ def run_stack_batch(
     `MAX_REVISE_ROUNDS` rounds.
 
     A candidate is refused before `run_batch` sees it, when `depends_on` reaches a spec
-    that ran and missed, direct or through a refused spec. `reserve_usd` holds back the
-    budget check, and `end_review` runs once, given the batch id, reserve and specs."""
+    that ran and missed, direct or through a refused spec. `reserve_usd` and `writer_usd`
+    hold back the budget check, and `end_review` then `follow_ups` run once when given."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     order = list(order)
@@ -570,6 +580,7 @@ def run_stack_batch(
                 budget_left = (
                     budget_usd
                     - reserve_usd
+                    - writer_usd
                     - ledger.batch_spend(ledger.latest_batch_id())
                 )
                 if budget_left < needed:
@@ -650,12 +661,25 @@ def run_stack_batch(
         readiness_check=readiness_check,
         emit=emit,
         after_attach=record_layer,
-        reserve_usd=reserve_usd,
+        reserve_usd=reserve_usd + writer_usd,
         sleep=sleep,
     )
     if end_review is not None:
-        specs = {c.spec.id: c.spec for c in order}
-        end_review(str(ledger.latest_batch_id()), reserve_usd, specs)
+        specs: dict[str, Spec] = {}
+        for candidate in order:
+            resolved = candidate.spec
+            task_id = task_ids.get(candidate.spec.id)
+            if task_id is not None:
+                text_row = ledger.spec_text(task_id)
+                if text_row is not None:
+                    with contextlib.suppress(SpecError):
+                        resolved = parse_spec(text_row["text"])
+            specs[candidate.spec.id] = resolved
+        review_result = end_review(str(ledger.latest_batch_id()), reserve_usd, specs)
+        if follow_ups is not None:
+            follow_ups(
+                str(ledger.latest_batch_id()), cast("StackReview", review_result)
+            )
     return stopped
 
 

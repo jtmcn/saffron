@@ -3946,3 +3946,290 @@ def test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task(ledger, r
     assert routes["TE-9"] == ["revise", "revise"]
 
     assert ledger.batch_spend(ledger.latest_batch_id()) == pytest.approx(29.125)
+
+
+def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_share(
+    ledger, repo_id
+):
+    """`writer_usd` sits beside `reserve_usd`, never inside it (ADR 7's Money
+    paragraph). Both hold back the per-task check and the pre-revision check.
+    `end_review` still keeps `reserve_usd` alone, and the batch row still
+    records the whole budget given. `follow_ups` runs once, right after
+    `end_review`, with its return, only when both are given."""
+    from saffron.batch import run_stack_batch
+
+    def _spending_runner(log: list):
+        def runner(candidate, predecessor=None):
+            log.append(
+                (candidate.spec.id, predecessor.spec.id if predecessor else None)
+            )
+            run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+            task_id = ledger.create_task(
+                run_id,
+                spec_id=candidate.spec.id,
+                spec_sha="s" * 64,
+                branch=f"saffron/{candidate.spec.id}",
+            )
+            attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
+            ledger.close_attempt(
+                attempt_id,
+                session_id="sess",
+                subtype="success",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=0.5,
+            )
+            return _outcome(state="READY_FOR_REVIEW", run_id=run_id, task_id=task_id)
+
+        return runner
+
+    order = [_candidate("SY-1", budget_usd=12.0), _candidate("SY-2", budget_usd=12.25)]
+    end_calls: list = []
+    follow_calls: list = []
+
+    def end_review(batch_key, reserve_usd, specs):
+        end_calls.append((batch_key, reserve_usd))
+        return "stack-review-sentinel"
+
+    def follow_ups(batch_key, stack_review):
+        follow_calls.append((batch_key, stack_review))
+        return [_candidate("SY-90")]
+
+    run_log: list = []
+    reason = run_stack_batch(
+        order,
+        ledger,
+        20.0,
+        None,
+        _spending_runner(run_log),
+        readiness_check=_ready,
+        reserve_usd=3.0,
+        writer_usd=4.5,
+        end_review=end_review,
+        follow_ups=follow_ups,
+    )
+
+    assert reason == "BUDGET"
+    assert run_log == [("SY-1", None)]
+    batch_id = _latest_batch_id(ledger)
+    assert end_calls == [(str(batch_id), 3.0)]
+    assert follow_calls == [(str(batch_id), "stack-review-sentinel")]
+    assert _batch_row(ledger, batch_id)["budget_usd"] == 20.0
+
+    # `end_review` given `reserve_usd` plus `writer_usd` fails the assertion
+    # above, and a shrunk `budget_usd` fails the one after it.
+
+    # With `follow_ups` given but no `end_review`, `follow_ups` never runs,
+    # and the lone over-budget candidate never reaches the runner either.
+    lone_log: list = []
+    lone_follow: list = []
+
+    def lone_follow_ups(batch_key, stack_review):
+        lone_follow.append((batch_key, stack_review))
+        return []
+
+    reason2 = run_stack_batch(
+        [_candidate("SY-4", budget_usd=12.75)],
+        ledger,
+        20.0,
+        None,
+        _spending_runner(lone_log),
+        readiness_check=_ready,
+        reserve_usd=3.0,
+        writer_usd=4.5,
+        follow_ups=lone_follow_ups,
+    )
+    assert reason2 == "BUDGET"
+    assert lone_log == []
+    assert lone_follow == []
+
+    # A raise leaving the loop calls neither `end_review` nor `follow_ups`.
+    raised_end: list = []
+    raised_follow: list = []
+
+    def _raising_readiness():
+        raise RuntimeError("token expired")
+
+    with pytest.raises(RuntimeError, match="token expired"):
+        run_stack_batch(
+            [_candidate("SY-6")],
+            ledger,
+            20.0,
+            None,
+            _spending_runner([]),
+            readiness_check=_raising_readiness,
+            reserve_usd=3.0,
+            writer_usd=4.5,
+            end_review=lambda *a: raised_end.append(a),
+            follow_ups=lambda *a: raised_follow.append(a) or [],
+        )
+    assert raised_end == []
+    assert raised_follow == []
+
+    # `writer_usd` is held back before each round too. `need` is the
+    # writer's session, the reviewer's session and the spec's own budget.
+    from saffron.spec_review import SPEC_REVIEW_SESSION_USD, SPEC_WRITER_SESSION_USD
+
+    need = SPEC_WRITER_SESSION_USD + SPEC_REVIEW_SESSION_USD + 12.0
+    revision_budget = 3.0 + need + 2.0
+
+    def _build_blocker_review(candidate, predecessor=None, **kwargs):
+        return _review_session([_blocker("build")], cost=0.0)
+
+    class _RecordingRevise:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, candidate, predecessor, spec_text, review_text):
+            self.calls += 1
+            return _written(f"rev{self.calls}\n", session_id=f"w-{self.calls}")
+
+    # `writer_usd` of 4.0 leaves `need` less 2: too little for the first
+    # round, so `revise` is never called.
+    revise_never = _RecordingRevise()
+    reason3 = run_stack_batch(
+        [_candidate_x("SY-3", budget_usd=12.0)],
+        ledger,
+        revision_budget,
+        None,
+        FakeStackRunner({}),
+        readiness_check=_ready,
+        reserve_usd=3.0,
+        writer_usd=4.0,
+        review=_build_blocker_review,
+        mint=MintDouble(ledger, repo_id),
+        revise=revise_never,
+    )
+    assert reason3 == "DRAINED"
+    assert revise_never.calls == 0
+
+    # `writer_usd` of 1.5 leaves `need` plus 0.5 for the first round, which
+    # admits one `revise` call. The second round leaves `need` less 0.5.
+    revise_once = _RecordingRevise()
+    end_calls2: list = []
+    follow_calls2: list = []
+    reason4 = run_stack_batch(
+        [_candidate_x("SY-3", budget_usd=12.0)],
+        ledger,
+        revision_budget,
+        None,
+        FakeStackRunner({}),
+        readiness_check=_ready,
+        reserve_usd=3.0,
+        writer_usd=1.5,
+        review=_build_blocker_review,
+        mint=MintDouble(ledger, repo_id),
+        revise=revise_once,
+        end_review=lambda key, reserve, specs: (
+            end_calls2.append((key, reserve)) or "stack-review-sentinel-2"
+        ),
+        follow_ups=lambda key, stack_review: (
+            follow_calls2.append((key, stack_review)) or []
+        ),
+    )
+    assert reason4 == "DRAINED"
+    assert revise_once.calls == 1
+    batch_id4 = _latest_batch_id(ledger)
+    assert end_calls2 == [(str(batch_id4), 3.0)]
+    assert follow_calls2 == [(str(batch_id4), "stack-review-sentinel-2")]
+
+
+_REV_ONE = "---\nid: SY-1\ntitle: t\ntype: chore\n---\nrev one\n"
+_REV_TWO = (
+    "---\n"
+    "id: SY-1\n"
+    "title: t\n"
+    "type: chore\n"
+    "touches: [src/two.py]\n"
+    "acceptance:\n"
+    "  - claim: two holds\n"
+    "    witness: tests/test_two.py::test_two\n"
+    "---\n"
+    "rev two\n"
+)
+
+
+def test_a_stack_batch_hands_its_end_review_each_revised_specs_latest_text(
+    ledger, repo_id
+):
+    """`end_review`'s mapping reads a minted task's latest recorded text
+    through `intake.parse_spec`, in place of the order's own queued `Spec`,
+    for a spec that holds one. A spec whose latest text is no spec, or
+    whose task was never minted, keeps its queued `Spec`."""
+    from saffron.batch import run_stack_batch
+    from saffron.intake import parse_spec
+
+    class _TextMint(MintDouble):
+        def __call__(self, candidate: Candidate) -> int:
+            task_id = super().__call__(candidate)
+            if candidate.spec.id == "SY-1":
+                self._ledger.record_spec_text(
+                    task_id,
+                    origin="revision",
+                    spec_id="SY-1",
+                    path=".saffron/specs/SY-1.md",
+                    text=_REV_ONE,
+                )
+                self._ledger.record_spec_text(
+                    task_id,
+                    origin="revision",
+                    spec_id="SY-1",
+                    path=".saffron/specs/SY-1.md",
+                    text=_REV_TWO,
+                )
+            elif candidate.spec.id == "SY-3":
+                self._ledger.record_spec_text(
+                    task_id,
+                    origin="revision",
+                    spec_id="SY-3",
+                    path=".saffron/specs/SY-3.md",
+                    text="not a spec",
+                )
+            return task_id
+
+    def _runner(candidate: Candidate, predecessor: Candidate | None = None):
+        assert candidate.task_id is not None
+        run_id = ledger.task_run(candidate.task_id)
+        attempt_id = ledger.open_attempt(candidate.task_id, phase="IMPLEMENT")
+        ledger.close_attempt(
+            attempt_id,
+            session_id="sess",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=1.0,
+        )
+        return _outcome(
+            state="READY_FOR_REVIEW", run_id=run_id, task_id=candidate.task_id
+        )
+
+    order = [
+        _candidate("SY-1", budget_usd=1.0),
+        _candidate("SY-2", budget_usd=1.0),
+        _candidate("SY-3", budget_usd=1.0),
+    ]
+    captured: dict = {}
+
+    def end_review(batch_key, reserve_usd, specs):
+        captured["specs"] = specs
+        return None
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        20.0,
+        None,
+        _runner,
+        readiness_check=_ready,
+        review=lambda candidate, predecessor=None, **kw: _clean_review(),
+        mint=_TextMint(ledger, repo_id),
+        end_review=end_review,
+    )
+
+    assert reason == "DRAINED"
+    specs = captured["specs"]
+    assert set(specs) == {"SY-1", "SY-2", "SY-3"}
+    assert specs["SY-1"] == parse_spec(_REV_TWO)
+    assert specs["SY-1"] is not order[0].spec
+    assert specs["SY-2"] is order[1].spec
+    assert specs["SY-3"] is order[2].spec
