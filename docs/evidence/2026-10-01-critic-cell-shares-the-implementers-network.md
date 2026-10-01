@@ -66,3 +66,20 @@ On a podman host no VM wraps each cell, so this separation carries more weight
 there. Both options assume one task at a time, `saffron-cells` and `PROXY_NAME`
 are fixed names, and K above one needs per-task names. Option A should derive
 its names from the task now.
+
+## After the fix
+
+Taken 2026-10-01 with the same script and no flag, after `eb7840c0` moved the
+critic cell to `saffron-critic-net`. `--shared` reproduces the table above.
+
+| Connect | Result |
+|---|---|
+| control: implementer to its own address | connected |
+| control: critic to the proxy on its critic leg | connected |
+| control: critic to its own address | connected |
+| critic to the implementer's listener | timed out |
+| implementer to the critic's listener | timed out |
+
+`tests/test_review_cells.py` now asserts these and two more. The proxy refuses
+a `CONNECT` to the implementer with 403 and allows one to the API with 200.
+

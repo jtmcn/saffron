@@ -1,13 +1,14 @@
 ---
 id: 131
 title: No cell-marked test starts the gate-only cell the way production does
-status: open
+status: done
 tier: 3
 filed: 2026-09-15
+closed: 2026-10-01
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [eb7840c0]
 cites: [§5.5]
 related: [118, 127]
 ---
@@ -52,3 +53,7 @@ live REVIEW on this runtime had ended `ORPHANED` since #285. Fixed by hand in
 #298, whose stub now refuses an uppercase network name the way the runtime
 does. That is one measured rule copied into a stub, not this item's probe,
 which is still open.
+**2026-10-01, done by hand** in `eb7840c0`, beside item 135's fix.
+`tests/test_review_cells.py` starts the cell as REVIEW does and probes from
+inside it. `uv run pytest -m cell tests/test_review_cells.py` passed, and
+the gate-only cell handed `CLAUDE_CODE_OAUTH_TOKEN` turned it red.

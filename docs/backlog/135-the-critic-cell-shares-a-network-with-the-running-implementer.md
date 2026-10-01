@@ -1,13 +1,14 @@
 ---
 id: 135
 title: The critic cell shares a network with the implementer's container, which is still running
-status: open
+status: done
 tier: 2
 filed: 2026-09-15
+closed: 2026-10-01
 by_hand: true
 specs: [SA-0087]
 prs: [274]
-commits: []
+commits: [a19e3b27, eb7840c0]
 cites: [§5.5, §2]
 related: [108, 118, 127, 131]
 ---
@@ -58,3 +59,9 @@ network with the proxy reachable from both.
   time (§4.2.1). A cloud host with no VM per cell leans harder on this split.
 - The test that lands it covers 127 and 131 in the same module. It also asserts
   that the proxy refuses a `CONNECT` to the other internal network.
+- 2026-10-01: done by hand in `eb7840c0`. Critic cells join
+  `saffron-critic-net`, and the proxy is the one container on both internal
+  networks. `uv run pytest -m cell tests/test_review_cells.py` passed. Moving
+  the critic cell back onto `saffron-cells` turned its test red. Per-task names
+  stay open: every network name and subnet is still a constant.
+
