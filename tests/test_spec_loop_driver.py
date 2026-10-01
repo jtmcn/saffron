@@ -1683,6 +1683,13 @@ def test_history_reads_its_target_from_a_given_path_or_ref(
     assert "max_turns=75" in header(branch)
     assert "max_turns=90" in header(str(edited))
 
+    # A path to another spec must not price that spec under this id.
+    other = tmp_path / "other.md"
+    other.write_text(_spec_text(90).replace("SA-0001", "SA-0002"))
+    args = SimpleNamespace(spec_id="SA-0001", before=None, limit=12, spec=str(other))
+    assert driver.cmd_history(args) == 1
+    assert "SA-0002" in capsys.readouterr().err
+
 
 def test_commit_time_is_utc_in_the_ledgers_own_format(tmp_path):
     env = {

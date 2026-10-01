@@ -1783,12 +1783,15 @@ def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
 def _spec_given(spec_id: str, given: str) -> Spec | None:
     """The spec at `given`: a file when one exists there, else a ref. A review
     from `main` of a spec edited on a branch needs one or the other (run 8)."""
-    from saffron.intake import parse_spec
+    from saffron.intake import SpecError, parse_spec
 
     path = Path(given)
-    if path.is_file():
-        return parse_spec(path.read_text())
-    return _spec_at(spec_id, given)
+    if not path.is_file():
+        return _spec_at(spec_id, given)
+    spec = parse_spec(path.read_text())
+    if spec.id != spec_id:
+        raise SpecError(f"the file declares {spec.id}, not {spec_id}")
+    return spec
 
 
 def _specs_at(commit: str, specs: dict[str, Spec], cwd: Path = REPO) -> dict[str, Spec]:
@@ -2162,23 +2165,26 @@ def cmd_history(args) -> int:
     from saffron.intake import SpecError
 
     specs = _known_specs()
+    target = None
     before = None
     if args.before:
         try:
-            target = _spec_at(args.spec_id, args.before)
+            if not args.spec:
+                target = _spec_at(args.spec_id, args.before)
             before = _commit_time(args.before)
         except (GitError, SpecError) as err:
             return _fail(f"--before {args.before}: {err}")
         specs = _specs_at(args.before, specs)
-    else:
-        target = specs.get(args.spec_id)
     if args.spec:
         try:
             target = _spec_given(args.spec_id, args.spec)
         except (GitError, SpecError, OSError) as err:
             return _fail(f"--spec {args.spec}: {err}")
+    elif not args.before:
+        target = specs.get(args.spec_id)
     if target is None:
-        at = f" at {args.spec or args.before}" if args.spec or args.before else ""
+        source = args.spec or args.before
+        at = f" at {source}" if source else ""
         return _fail(f"no spec declares {args.spec_id}{at}")
     ledger, repo_id, _url = _ledger_and_repo()
     try:

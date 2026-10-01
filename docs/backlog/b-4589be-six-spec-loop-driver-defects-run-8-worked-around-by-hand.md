@@ -57,4 +57,5 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
 - 2026-09-30: `probe` prints its verdict on its own line, with the last
   stdout and stderr lines apart below it. `history --spec` reads the spec
   from a file or ref. `pattern` matches the CLI's error line (item 158).
-  `next` and `hold` remain, and ADR 7's stack batch retires both.
+  The `record` bullet closed with b-36b551 (#478). `next` and `hold` remain,
+  and ADR 7's stack batch retires both.

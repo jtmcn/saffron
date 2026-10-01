@@ -65,3 +65,5 @@ stack's own merge.
 - 2026-09-30: step 5 now names both traps. It sets the status of every item
   whose `specs:` names a retired spec, found with `records show SA-NNNN`. It
   commits each move to `done/` before `make check`.
+- 2026-09-30: step 5 also greps `awaiting:` for each pull request, since
+  `records show` reads only `specs:`.

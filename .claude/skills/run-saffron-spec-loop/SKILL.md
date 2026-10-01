@@ -399,7 +399,9 @@ is merged. So it retires each spec to `.saffron/specs/done/`, updates the
 scheduler smoke test with `driver.py bookkeeping SA-NNNN`, and sets each origin
 item's status. An item whose origin spec is in `done/` cannot stay `open`.
 Neither can any other item whose `specs:` names it. `uv run python -m records
-show SA-NNNN` lists every record naming a spec, so set each one's status. Commit
+show SA-NNNN` lists every record naming a spec, so set each one's status. It
+does not read `awaiting:`. So also run `grep -ln 'awaiting:.*\bNNN\b'
+docs/backlog/*.md` for each pull request, and move each hit's number to `prs`. Commit
 each move to `done/` before `make check`. An uncommitted move fails
 `test_queued_specs.py` with a message that names the test and not the move.
 
