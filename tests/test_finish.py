@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from types import SimpleNamespace
 
@@ -249,6 +250,8 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_retires_eac
     assert _git(stack.mirror, "rev-parse", f"{sha}^1") == stack.heads["TE-20"]
     author = _git(stack.mirror, "show", "-s", "--format=%an <%ae>", sha)
     assert author == "Saffron <saffron@localhost>"
+    subject = _git(stack.mirror, "show", "-s", "--format=%s", sha)
+    assert subject == f"saffron batch {stack.batch_b}: finishing layer"
 
     assert _git(stack.mirror, "for-each-ref") == before
     assert len(_git(stack.mirror, "worktree", "list").splitlines()) == 1
@@ -322,7 +325,9 @@ def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_befor
 
         return _stand_in
 
-    def _assert_refused(task_id: int, is_unrun: bool, i: int, **overrides) -> None:
+    def _assert_refused(
+        task_id: int, is_unrun: bool, i: int, match: str, **overrides
+    ) -> None:
         with monkeypatch.context() as m:
             m.setattr(stack.ledger, "spec_text", _bad_row(task_id, **overrides))
             calls: list[tuple] = []
@@ -332,7 +337,8 @@ def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_befor
                 lambda mirror, sha, dest: calls.append((mirror, sha, dest)),
             )
             before = _git(stack.mirror, "count-objects", "-v")
-            with pytest.raises(ValueError):
+            # The message names this row, so a raise on another row fails it.
+            with pytest.raises(ValueError, match=match):
                 commit_finish(
                     stack.ledger,
                     stack.batch_b,
@@ -343,10 +349,14 @@ def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_befor
             assert calls == []
             assert _git(stack.mirror, "count-objects", "-v") == before
 
-    for task_id, is_unrun in [
-        (stack.tasks["TE-7"], False),
-        (stack.tasks["TE-21"], True),
-    ]:
+    for spec_id, is_unrun in [("TE-7", False), ("TE-21", True)]:
+        task_id = stack.tasks[spec_id]
         for i, bad_path in enumerate(bad_paths):
-            _assert_refused(task_id, is_unrun, i, path=bad_path)
-        _assert_refused(task_id, is_unrun, len(bad_paths), spec_sha="0" * 64)
+            _assert_refused(task_id, is_unrun, i, re.escape(bad_path), path=bad_path)
+        _assert_refused(
+            task_id,
+            is_unrun,
+            len(bad_paths),
+            f"{spec_id}.*does not match its hash",
+            spec_sha="0" * 64,
+        )

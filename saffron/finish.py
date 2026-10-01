@@ -25,7 +25,9 @@ _SPEC_PATH_RE = re.compile(r"\A\.saffron/specs/[^/]+\.md\Z")
 def _checked(row) -> tuple[str, str]:
     path = row["path"]
     if _SPEC_PATH_RE.match(path) is None:
-        raise ValueError(f"spec text path {path!r} is not under .saffron/specs/")
+        raise ValueError(
+            f"spec text path {path!r} is not a .md file directly in .saffron/specs/"
+        )
     text = row["text"]
     if hashlib.sha256(text.encode("utf-8")).hexdigest() != row["spec_sha"]:
         raise ValueError(f"spec text for {row['spec_id']!r} does not match its hash")
