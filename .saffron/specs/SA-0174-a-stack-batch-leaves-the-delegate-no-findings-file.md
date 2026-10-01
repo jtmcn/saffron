@@ -50,7 +50,7 @@ forbidden:
 budget_usd: 23
 max_attempts: 3
 max_turns: 130
-estimated_lines: 350
+estimated_lines: 490
 estimate_measured: true
 acceptance:
   - claim: >-
@@ -103,56 +103,21 @@ acceptance:
       revised queued spec and on another batch's follow-up.
     witness: tests/test_finish.py::test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_no_layer
     wrong_versions:
-      - A read of `layer["task_key"]` against the `stack_layers` SELECT at the tree base, which raises `IndexError`.
-      - A killed finding kept.
       - Pool membership checked before the outcome, which pools the killed and unverified rows.
-      - A follow-up's qualified rows dropped.
-      - A follow-up's qualified rows left `qualified`.
+      - A `qualified` row matched by no `Pooled` left `qualified` rather than `follow_up`.
       - A pooled finding matched by its layer and file alone.
       - A pooled finding matched by the finding alone, whatever the group's layer and file.
       - A match through `group.findings[0]` alone.
-      - A match that drops the line.
-      - A match that drops the lens.
-      - A match that drops the claim.
-      - A match that drops the file.
       - A match that compares the severity too, so the promoted finding matches no row.
       - The last `Pooled`'s reason winning.
-      - A pooled finding's reason taken from its row.
-      - A pooled finding's outcome left `qualified`.
       - Each entry's head taken from its layer's `predecessor_head`.
-      - Each entry's head taken from the top layer.
       - A generation 0 layer's in-cell concern kept.
-      - A follow-up's in-cell finding with a verdict dropped.
-      - A follow-up's in-cell finding with a rebuttal dropped.
-      - A follow-up's in-cell blockers dropped.
-      - A follow-up's in-cell notes dropped.
-      - A follow-up's in-cell concerns alone kept.
-      - A follow-up's unanchored in-cell finding dropped.
-      - A verdict left out of the reason.
-      - A rebuttal put in the reason when there is no verdict.
-      - The reason fixed at `confirmed` for any verdict.
-      - A `withdrawn` blocker dropped.
-      - A follow-up that added no layer left without its critic's findings.
-      - Critic findings added only for follow-ups not ended `EXHAUSTED`, which drops `TE-22`'s concern.
       - A lens set hard-coded to `correctness`, `contract` and `adequacy` rather than read from `review.LENSES`, which drops the `conventions` concern.
-      - A group's `Qualified` compared to the row directly, not through its `finding`.
-      - The findings of a task that is no follow-up kept.
-      - The findings of another batch's follow-up kept.
-      - A follow-up with no push given the last layer's head.
-      - An end-review lens's in-cell concern kept.
+      - A rebuttal put in the reason when there is no verdict.
+      - Critic findings added only for follow-ups not ended `EXHAUSTED`, which drops `TE-22`'s concern.
       - A follow-up's kind read off its latest `spec_texts` row, which drops `TE-22`.
-      - A follow-up's first text listed, not its latest.
-      - The layers listed as follow-ups too.
-      - The unrun follow-ups listed as follow-ups too.
-      - The follow-ups of every batch listed.
-      - Every task off the stack listed as a follow-up.
-      - A qualification row's reason dropped.
-      - The qualifications newest first.
       - The layers in the order recorded, not by position.
-      - No file written for a batch with no layer.
       - Follow-ups, and their critic findings, ordered by spec id.
-      - The batch id written as a string.
-      - The directory of `dest` left unmade.
   - claim: >-
       `cli._stack_finish` takes `pooled`, and `saffron batch --stack` passes
       it the very list it passes `_stack_follow_ups`. Given a batch id and
@@ -214,13 +179,10 @@ it at the end of the batch. This spec writes `findings.json` beside it.
 the commit to the finishing layer's own branch, and opens its pull
 request. `SA-0170` links the stack.
 
-**What the tree base holds.** This spec's tree base is `SA-0151`'s head.
-Only `depends_on[0]` stacks (`saffron/task.py:197`, `:245`). Line numbers
-below were read at `219511a3`, the head of pull request #628. A second
-review commit on #628 rewords docstrings in `saffron/finish.py`,
-`saffron/cli.py` and `Ledger.stack_layers`. So those three are cited by
-symbol, and `saffron/ledger.py` lines past `stack_layers` can move a few
-lines. This spec consumes these.
+**What the tree base holds.** `SA-0151` merged in #628, so the tree base
+is `main` at `2538699c`. Only `depends_on[0]` stacks
+(`saffron/task.py:197`, `:245`). Line numbers below were read at
+`2538699c`. This spec consumes these.
 
 - From `SA-0145`: the `stack_layers` table (`saffron/ledger.py:220`)
   and `Ledger.record_stack_layer`.
@@ -257,9 +219,11 @@ lines. This spec consumes these.
   docstring's column list, so `saffron/ledger.py` is in `touches`. No test
   at the tree base asserts that row's column set. Also from `SA-0151`:
   `finish.commit_finish`, and `cli._stack_finish(*, pinned, ledger,
-  out_dir)`. Its callable takes the batch id as an `int` and `unrun`,
-  commits, and prints one line. It catches `GitError` and `ValueError`
-  from `commit_finish` alone. `run_stack_batch` calls it once, after the
+  out_dir)` (`saffron/cli.py:679-703`). Its callable takes the batch id
+  as an `int` and `unrun`, commits, and prints one line. It catches
+  `GitError` and `ValueError` from `commit_finish` alone, and its
+  docstring says any other raise reaches `main` (`:682-684`).
+  `run_stack_batch` calls it once, after the
   follow-ups, as `finish(batch_id, unrun_task_ids)`
   (`saffron/batch.py:817-818`). It does so on each stop reason the drive
   returns. A raise out of `_drive` skips `finish` and closes the batch
@@ -304,6 +268,9 @@ Build three things.
    `finish.FINDINGS_NAME`, which is that name's reader. In `_batch`'s
    `--stack` path, pass `_stack_finish` the list `SA-0165` creates there.
    Leave the commit's own guard on `GitError` and `ValueError` as it is.
+   Reword `_stack_finish`'s docstring so it names the findings call and
+   its guard. Reword `saffron/finish.py`'s module docstring, which names
+   the commit alone, so it names the findings file too.
 
 **Why `batch_follow_ups` reads `runs.batch_id`.** A stack batch mints a
 fresh task for every spec each night. `SA-0161` attaches each
@@ -323,7 +290,14 @@ learned something, so the delegate reads its state here.
 - **A raise before `qualify` runs.** `SA-0165` names it. No
   `qualifications` row and no `Pooled` exist, so the file lists nothing
   for the batch's layers.
-- **A raise out of `_drive`.** It skips `finish`, so no file is written.
+- **A raise that skips `finish`.** A raise out of `_drive`, `end_review`
+  or `follow_ups` skips `finish` (`saffron/batch.py:437-440`), so no file
+  is written. The command-line closures for the last two catch
+  `Exception`, so in production only `_drive` raises past them.
+- **A batch with no layer but with follow-ups.** Follow-ups come from the
+  layers' end review, so a batch with no layer has none. The witness's
+  empty batch therefore holds neither, and does not tell apart a build
+  that lists follow-ups whatever the layer count.
 - **Why a follow-up is `QUEUED`.** The round 1 review of this spec found
   four causes that leave a listed follow-up `QUEUED`. The file carries the
   state alone, so it does not tell them apart.
@@ -441,18 +415,54 @@ come `TE-23` `QUEUED`, `TE-29` `GATE_ERROR`, `TE-27` `REVIEWING` and
 `TE-28` `REBUTTING`, each with its path and text. Last, a fresh batch
 with no layer writes both lists empty.
 
-**Criterion 1 is measured.** A run on 2026-10-01 at `219511a3` built a
-prototype of the three reads and of `write_findings` outside the
-repository. It ran criterion 1's witness as written above, on the
-`stack` fixture extended as above. The right build passed. Each of
-criterion 1's wrong versions was applied as a text edit to the
-prototype, and each failed the witness. The same run checked the two
-holes the parent-branch review found. With one `Qualified` in "cap", a
-match through `group.findings[0]` alone passed. With `TE-27` created
-first, follow-ups ordered by spec id passed. Both fail the arrangement
-above. A build ordering the layers by `(generation, task_id)` passes,
-since that order is position order here. The review judged that build
-harmless, so no row drives it.
+**Wrong builds for review only.** These are not declared, so REVIEW opens
+no session on them. Each one fails criterion 1's witness, as measured
+below:
+
+- a read of `layer["task_key"]` against the `stack_layers` SELECT at the
+  tree base, which raises `IndexError`
+- a killed finding kept
+- a `qualified` row matched by no `Pooled` dropped
+- a match that drops the line, the lens, the claim, the file or the layer
+- a pooled finding's reason taken from its row, or its outcome left
+  `qualified`
+- each entry's head taken from the top layer
+- a follow-up's in-cell finding with a verdict, or with a rebuttal,
+  dropped
+- a follow-up's in-cell blockers or notes dropped, or its concerns alone
+  kept
+- a follow-up's unanchored in-cell finding dropped
+- a verdict left out of the reason, or the reason fixed at `confirmed`
+  for any verdict
+- a `withdrawn` blocker dropped
+- a follow-up that added no layer left without its critic's findings
+- the findings of a task that is no follow-up, or of another batch's
+  follow-up, kept
+- a follow-up with no push given the last layer's head
+- an end-review lens's in-cell concern kept
+- a follow-up's first text listed, not its latest
+- the layers, or the unrun follow-ups, listed as follow-ups too
+- the follow-ups of every batch listed, or every task off the stack
+- a qualification row's reason dropped
+- the qualifications newest first
+- no file written for a batch with no layer
+- the batch id written as a string
+- the directory of `dest` left unmade
+
+**Criterion 1 is measured.** A run on 2026-10-01 at `2538699c` built a
+prototype of the three reads and of `write_findings`. It lives outside
+the repository, in `measure-174/` under the session scratchpad. It ran
+criterion 1's witness as written above, on the `stack` fixture extended
+as above. Its output is `measure-174/out-c1.txt`, one row per build,
+labelled in this spec's own words. The right build passed. Each declared
+wrong version, and each one in the review-only list, failed the witness.
+`out-c1-old-arrangement.txt` reruns the two holes the parent-branch
+review found against that review's arrangement. With one `Qualified` in
+"cap", a match through `group.findings[0]` alone passed. With `TE-27`
+created first, follow-ups ordered by spec id passed. Both fail the
+arrangement above. A build ordering the layers by `(generation,
+task_id)` passes, since that order is position order here. The review
+judged that build harmless, so no row drives it.
 
 **Criterion 2's witness** follows `SA-0151`'s command-line witness, with
 `_readiness_passes` and `_fake_batch_resolution` from
@@ -473,11 +483,12 @@ message, and still records the commit. Last, `commit_finish` raises
 `GitError("gone")`, and the findings call is still recorded.
 
 **Criterion 2 is measured.** The same run copied `saffron/` at
-`219511a3` outside the repository and applied the change to the copy. It
+`2538699c` outside the repository and applied the change to the copy. It
 ran criterion 2's witness and `SA-0151`'s command-line witness against
-it. The right build passed both. Each of criterion 2's wrong versions
-failed criterion 2's witness. A guard on `(GitError, OSError,
-ValueError)` failed `SA-0151`'s witness too, on its `KeyError` case.
+it. Its output is `measure-174/out-c2.txt`. The right build passed both.
+Each of criterion 2's wrong versions failed criterion 2's witness. A
+guard on `(GitError, OSError, ValueError)` failed `SA-0151`'s witness
+too, on its `KeyError` case.
 
 **What the witnesses leave undriven.** A `Pooled` whose finding matches no
 row of its layer at all. It adds no entry, and no row changes outcome.
@@ -491,15 +502,24 @@ ten lines.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). The
-prototype of the whole change, with both witnesses and short docstrings,
-was formatted with `ruff` and measured with `size_gate` at `219511a3`. It
-came to 1365 tokens. Full docstrings add a few lines, so the estimate is
-350 lines, 1400 tokens, 47% of the ceiling.
+prototype of the whole change, with both witnesses and both docstring
+rewordings, was formatted with `ruff` and measured with `size_gate` at
+`2538699c`. Its output is `measure-174/out-size.txt`. It came to 1381
+tokens over 490 changed lines. `estimated_lines` is that line count, and
+`estimate_measured` prices it at 1960 tokens, 65% of the ceiling.
 
 | part | lines | tokens |
 |---|---|---|
-| `write_findings` and its helpers in `saffron/finish.py` | 85 | 258 |
+| `write_findings`, its helpers and the module docstring in `saffron/finish.py` | 86 | 268 |
 | the `task_key` column and the two reads in `saffron/ledger.py` | 28 | 108 |
-| `_stack_finish`'s findings call and its wiring in `saffron/cli.py` | 21 | 56 |
-| the fixture's `task` and criterion 1's witness in `tests/test_finish.py` | 274 | 687 |
+| `_stack_finish`'s findings call, docstring and wiring in `saffron/cli.py` | 21 | 64 |
+| the fixture's `task` and criterion 1's witness in `tests/test_finish.py` | 273 | 685 |
 | criterion 2's witness in `tests/test_cli.py` | 82 | 256 |
+
+**Budget.** REVIEW ran $9 to $18 on this chain's cells. `SA-0151` spent
+$9.21 with 23 wrong versions, and `SA-0162` spent $17.64 with 35. REVIEW
+opens one wrong-version session per criterion
+(`saffron/phases/review.py:577-597`). A session at the $2.00 floor can
+run out and leave its versions unproven. So criterion 1 declares 15
+wrong versions and criterion 2 declares 10, which keeps each session's
+load small. The rest sit in the review-only list above.
