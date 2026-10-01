@@ -591,7 +591,7 @@ builds.
   (`:408-409`). After the change, that holds for generation 0 only. A
   follow-up's checks hold neither back.
 - The comment over `record_layer` says each task's row is at generation 0
-  (`:431-432`). Follow-ups now record generation 1 rows.
+  (`:431-433`). Follow-ups now record generation 1 rows.
 - The comment that starts "Runs once, right after `end_review`" says the
   follow-ups' return "is discarded here" (`:379-380`). The batch now runs
   that return.
