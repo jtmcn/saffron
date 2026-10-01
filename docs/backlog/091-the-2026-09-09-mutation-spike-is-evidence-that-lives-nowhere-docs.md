@@ -6,7 +6,7 @@ tier: 3
 closed: 2026-09-09
 specs: []
 prs: []
-commits: [91f56c69, f76931df, f9f007c4]
+commits: [b20f42d7, f76931df, b8b2ce9e]
 cites: []
 related: [87]
 ---
@@ -45,3 +45,5 @@ depends on it is a claim, not a record.
 `f9f007c4` pair reproduces to the recorded `1250 passed` exactly; the
 `f76931df`/`91f56c69` pair is transcribed from the review reproduction, not
 re-run, and the file says so.
+- 2026-09-30: `commits:` re-pointed from `91f56c69`, `f9f007c4` to `b20f42d7`, `b8b2ce9e`, the same patches
+  as they landed on `main`. A rebase had replaced the originals.

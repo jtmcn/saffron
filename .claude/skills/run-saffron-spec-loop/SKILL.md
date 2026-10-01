@@ -392,10 +392,11 @@ the push run.
 Findings kept in step 2 become a new `docs/backlog/b-xxxxxx-slug.md` record each — the
 frontmatter shape of any open item, id from `uv run python -m records new-id` — placed in
 `PRIORITY.md`'s tier index, with `uv run pytest tests/records -q` green before
-committing. Each item a spec came from gets its frontmatter `status` / `closed`
-/ `prs` (and `specs`/`commits` as applicable) set and a dated line added to
-`## Record`. The PR sits on top of the stack and assumes every PR below it
-is merged. So it retires each spec to `.saffron/specs/done/`, updates the
+committing. Each item a spec came from gets its `status`, `closed` and `prs` set,
+and `specs` where it applies. Add a dated line to its `## Record`. The PR sits on top of the stack and assumes every PR below it
+is merged. Cite each layer by its PR number, never its commits. The stack's
+merge can rebase them off `main` (`docs/backlog/README.md`, Closing an item).
+So it retires each spec to `.saffron/specs/done/`, updates the
 scheduler smoke test with `driver.py bookkeeping SA-NNNN`, and sets each origin
 item's status. An item whose origin spec is in `done/` cannot stay `open`.
 Neither can any other item whose `specs:` names it. `uv run python -m records

@@ -8,7 +8,7 @@ closed: 2026-09-21
 by_hand: true
 specs: []
 prs: []
-commits: [436c6e88]
+commits: [c1747d6a]
 cites: [§2, §5.5]
 related: [b-a70ec1]
 ---
@@ -41,3 +41,5 @@ does and probes its environment from inside.
   the probe cell through `_probe_adequacy` and reads its environment from
   inside. `uv run pytest -m cell tests/test_probe_cell.py` passed, and
   `env=dict(os.environ)` at `saffron/cell/session.py:1371` turned it red.
+- 2026-09-30: `commits:` re-pointed from `436c6e88` to `c1747d6a`, the same patches
+  as they landed on `main`. A rebase had replaced the originals.
