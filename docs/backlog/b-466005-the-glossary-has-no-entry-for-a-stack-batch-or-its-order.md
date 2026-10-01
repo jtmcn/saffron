@@ -124,3 +124,4 @@ The **Refusal** entry names the stack order's refusal. This lands after
   `SA-0161`, `SA-0162`, `SA-0167`, `SA-0170`, `SA-0174` or `SA-0177`.
 - 2026-09-30: `SA-0161` has a task now (#610), unmerged. Its terms become writable once #610 merges.
 - 2026-10-01: `SA-0162` (#626) and `SA-0151` (#628) merged. Their terms, the follow-up generation and the finishing layer, are now writable.
+- 2026-10-01: #626's and #628's seats found four entries now false. They are Stack batch, Revision, Predecessor and Recorded spec text. Each names a rule a follow-up now breaks.

@@ -198,6 +198,11 @@ went green died seeding its gate cell on a transient `Permission denied`. It
 was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
 again.
 
+**Placed 2026-10-01**, from the spec loop's run 24: **b-4c5dc7**, then
+**b-038aef**. Two cells went green, ran REVIEW past their budget, and were
+refused REBUT on one-line witness fixes. Each ended `EXHAUSTED` with no pull
+request, and the delegate opened both by hand.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -341,6 +346,12 @@ spec's wrong builds listed in prose reach no host run.
 reads an unreadable mirror path as an absent one, so a broken read becomes a
 finding's verdict.
 
+**Placed 2026-10-01**, from the spec loop's run 24: **b-426db4**,
+**b-dc5212**, **b-8d654b**, then **b-3d2aa1**. A Problem-item obligation no
+criterion drove was dropped. `next` held back a child of a merged parent. The
+finishing commit writes through a symlink, unverified, and drops parse
+failures.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -399,6 +410,10 @@ fixture head or clean up after a kill, and `labels` reads no cell round.
 **b-979dbe**, **b-4ddb5b**, then **b-2dc561**. The first two are gaps the
 seats left in `SA-0196` and `SA-0161`. `terms` fails at base on a disavowal.
 Preflight names a listener's address but not its process.
+
+**Placed 2026-10-01**, from the spec loop's run 24: **b-115f9b**, then
+**b-3590be**. The stack batch reads its batch id three ways, and a refused
+revised spec gets no task state.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
