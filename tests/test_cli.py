@@ -5847,9 +5847,9 @@ def _exec_file(path, text="#!/bin/sh\nexit 0\n"):
 
 
 def _follow_ups_mirror(tmp_path):
-    """`broken`, `base` and `head`: three commits of one mirror, each with
-    its own `.saffron/gates/tests` executable, so the pinned base is the
-    only one `_stack_follow_ups` ever reads."""
+    """`broken`, `base` and `head`: three commits of one mirror. Each has
+    its own `.saffron/gates/tests` executable. A read at any sha but the
+    pinned one then shows in what the callable gets."""
     mirror = tmp_path / "follow-ups-mirror"
     mirror.mkdir()
     _git(mirror, "init", "-q")
@@ -5919,7 +5919,8 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
 ):
     """`cli._stack_follow_ups` reads every input at the pinned base, not the
     mirror's own `HEAD` and not `repo`'s own policy, before it writes
-    anything. A later raise still pools whatever its walk never reached."""
+    anything. A raise after `qualify` returns still pools each unaccepted
+    finding its walk never reached."""
     rig = _follow_ups_mirror(tmp_path)
     mirror, broken_sha, base_sha = rig.mirror, rig.broken_sha, rig.base_sha
 
@@ -6062,7 +6063,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         )
         agent(container, prompt=prompt)
         writer_counter[0] += 1
-        return spec_review.SpecWriterSession(
+        made = spec_review.SpecWriterSession(
             text="draft\n",
             cost_usd=0.0,
             error=None,
@@ -6071,6 +6072,8 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
             num_turns=1,
             spec_sha="s" * 64,
         )
+        writer_calls[-1]["session"] = made
+        return made
 
     monkeypatch.setattr(cli.spec_review, "run_spec_writer", _fake_run_spec_writer)
 
@@ -6089,6 +6092,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
 
     write_follow_ups_calls: list[dict] = []
+    written_sessions: list = []
 
     def _fake_write_follow_ups(
         ledger_arg,
@@ -6122,8 +6126,8 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         qualification = qualify(stack_arg.layers, stack_arg.join)
         kbot, ktop = qualification.groups
         pooled.append(follow_up.Pooled(group=kbot, reason="p1"))
-        write(kbot, "prompt k-bot")
-        write(ktop, "prompt k-top")
+        written_sessions.append(write(kbot, "prompt k-bot"))
+        written_sessions.append(write(ktop, "prompt k-top"))
         candidate = Candidate(
             path=Path(".saffron/specs/SY-3-x.md"),
             spec=intake.Spec(
@@ -6229,8 +6233,17 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         assert c["repo"] == checkout
         assert c["mirror"] == mirror
         assert c["thread_env"] == {"X": "base"}
+        assert "X: base" in (c["gates_dir"] / ".saffron" / "policy.yaml").read_text()
 
     assert [c["prompt"] for c in writer_calls] == ["prompt k-bot", "prompt k-top"]
+    assert [c["container"] for c in writer_calls] == [
+        u["container"] for u in cell_up_calls
+    ]
+    assert len(written_sessions) == 2
+    assert all(
+        got is c["session"]
+        for got, c in zip(written_sessions, writer_calls, strict=True)
+    )
     exported_policy, _ = load_policy(qcall["gates_dir"])
     expected_prompt = spec_review.spec_writer_system_prompt(
         exported_policy, prompts_dir=context.PROMPTS_DIR
@@ -6343,7 +6356,11 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         ):
             qualification = qualify(stack_arg.layers, stack_arg.join)
             a, b, c, d, _e = qualification.groups
-            pooled.append(follow_up.Pooled(group=a, reason="own a"))
+            pooled.append(
+                follow_up.Pooled(
+                    group=replace(a, findings=(a.findings[0],)), reason="own a"
+                )
+            )
             pooled.append(
                 follow_up.Pooled(
                     group=replace(b, findings=(b.findings[0],)), reason="moved"
@@ -6411,14 +6428,10 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         assert outcome == []
         reasons = [p.reason for p in pooled_case]
         assert reasons[:4] == ["pre-existing", "own a", "moved", "own c"]
-        assert reasons[4:] == ["RuntimeError: record broke"] * 3
-        groups_by_claims = {
-            tuple(sorted(f.finding.claim for f in p.group.findings)): p.reason
-            for p in pooled_case[4:]
-        }
-        assert groups_by_claims[("c1",)] == "RuntimeError: record broke"
-        assert groups_by_claims[("d0", "d1")] == "RuntimeError: record broke"
-        assert groups_by_claims[("e0", "e1")] == "RuntimeError: record broke"
+        assert reasons[4:] == ["RuntimeError: record broke"] * 4
+        assert [
+            tuple(f.finding.claim for f in p.group.findings) for p in pooled_case[4:]
+        ] == [("a1",), ("c1",), ("d0", "d1"), ("e0", "e1")]
         assert "follow-ups: stopped, RuntimeError: record broke" in printed
 
     # --- an empty stack short-circuits before any export ---
