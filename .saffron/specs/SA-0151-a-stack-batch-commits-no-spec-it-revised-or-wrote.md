@@ -50,7 +50,7 @@ forbidden:
 budget_usd: 25
 max_attempts: 3
 max_turns: 200
-estimated_lines: 515
+estimated_lines: 558
 acceptance:
   - claim: >-
       `finish.commit_finish(ledger, batch_id, unrun, *, mirror, workdir,
@@ -72,7 +72,8 @@ acceptance:
       review. Another batch's layer and follow-up are among them too. It drives a file
       whose name does not carry its id and a file whose id shares a layer's
       prefix. It drives the top layer's branch moved after its push, and a
-      later task of the top layer's spec outside the batch.
+      later task of the top layer's spec outside the batch. For a batch
+      with no layer, it passes an unrun task that holds a text.
     witness: tests/test_finish.py::test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_retires_each_layers_spec
     wrong_versions:
       - A task's first `spec_texts` text written, not its latest.
@@ -98,18 +99,22 @@ acceptance:
       `run_stack_batch` takes `finish`, `None` by default. Given one, it
       calls it once as `finish(batch_id, unrun)`, positionally, with the
       batch's id as an `int`. It calls it after the follow-ups and while
-      the batch row is still open. `unrun` is the list `SA-0162` keeps,
-      passed on as it stands: the task of each follow-up whose review never
-      reached a verdict route (`run`, `escalate` or `revise`), in the order
-      the batch met them. A review that routed `error` or raised reached
-      none. It calls `finish` after an `UNTIL`, a `DRAINED` and a `BUDGET`
-      stop. The witness drives a follow-up that became a layer, one refused
-      on the open pull request overlap, and one whose review escalated. It
-      drives one whose review raised and one whose review routed `error`.
-      It drives one that ran and missed, and one refused by `run_task`'s
-      gate 0 after its review. It drives one whose review routed `wait`
-      before the batch stopped, one the batch never reached, and a night
-      whose `follow_ups` returns none.
+      the batch row is still open. `unrun` is a list of task ids, each an
+      `int`, one for each follow-up whose review never reached a verdict
+      route (`run`, `escalate` or `revise`). A review that routed `error`
+      or raised reached none. The list keeps the order the batch met them
+      in. Each id is the `task_id` its candidate carries. With no
+      `end_review` or no `follow_ups`, `unrun` is `[]`. It calls `finish`
+      after an `UNTIL`, a `DRAINED` and a `BUDGET` stop. The witness drives
+      a follow-up that became a layer, one refused on the open pull request
+      overlap, and one whose review escalated. It drives one whose review
+      raised and one whose review routed `error`. It drives one that ran
+      and missed, and one refused by `run_task`'s gate 0 after its review.
+      It drives one whose review routed `wait` before the batch stopped,
+      one the batch never reached, and a night whose `follow_ups` returns
+      none. It drives a night given `end_review` and no `follow_ups`, and
+      one given neither. The follow-ups' task ids do not ascend in the order the batch meets
+      them.
     witness: tests/test_batch.py::test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open
     wrong_versions:
       - '`finish` called before the follow-ups run, so it sees an empty `unrun`.'
@@ -117,6 +122,10 @@ acceptance:
       - '`finish` called on a `DRAINED` stop alone.'
       - '`unrun` recomputed as each follow-up that added no layer.'
       - '`unrun` sorted by task id before the call.'
+      - '`unrun` passed as the spec ids the `follow-ups unrun` line prints, not task ids.'
+      - 'Each task id read from `task_ids`, which a `BUDGET` stop never seeds, not from its candidate.'
+      - '`finish` called only inside the `follow_ups is not None` branch.'
+      - '`unrun` passed by keyword.'
   - claim: >-
       `saffron batch --stack` passes `run_stack_batch` the `finish` that
       `cli._stack_finish` builds. Given a batch id and `unrun`, it calls
@@ -173,56 +182,62 @@ stack link`. So nothing this spec builds pushes or opens anything.
 
 **What the tree base holds.** This spec's tree base is `SA-0162`'s head.
 Only `depends_on[0]` stacks (`saffron/task.py:197`). Line numbers below
-were read at `a1148c1e`. That base already holds these.
+were read at `071dc384`, `main` once pull request 626 merged. Each is
+named by its symbol too.
 
-- The `stack_layers` table (`saffron/ledger.py:191-199`), keyed on
+- The `stack_layers` table (`saffron/ledger.py:220-228`), keyed on
   `task_key`, with `batch_key` (the batch id as text), `position`,
   `spec_id`, `predecessor_key`, `predecessor_head` and `generation`.
-  The writer `record_stack_layer` (`:1357`) takes the batch key from the
+  The writer `record_stack_layer` (`:1386`) takes the batch key from the
   task's own run. No `Ledger` method reads a batch's layers. `end_review.py`'s
   `_BATCH_LAYERS` (`saffron/end_review.py:92-98`) is a private query.
-- The `spec_texts` table (`saffron/ledger.py:243-252`), and these
-  `Ledger` methods: `record_spec_text` (`:1432`), `spec_text` (`:1488`),
+- The `spec_texts` table (`saffron/ledger.py:272-281`), and these
+  `Ledger` methods: `record_spec_text` (`:1461`), `spec_text` (`:1517`),
   which returns a task's latest row or `None`, and `spec_texts`
-  (`:1501`). A row's `spec_sha` is the
-  SHA-256 of its text (`:1482`). `record_spec_text` refuses a path its
-  origin's pattern refuses (`_FOLLOW_UP_PATH`, `_REVISION_PATH`, `:43-44`).
+  (`:1530`). A row's `spec_sha` is the
+  SHA-256 of its text (`:1511`). `record_spec_text` refuses a path its
+  origin's pattern refuses (`_FOLLOW_UP_PATH`, `_REVISION_PATH`, `:72-73`).
   A revision's path is the queued spec's own file at `base_sha`, whatever
   its name. A follow-up's path is `.saffron/specs/<id>-<slug>.md`.
-- `run_stack_batch` (`saffron/batch.py:360`) mints a fresh task for every
+  `spec_text` raises `ValueError` for an id that names no task.
+- `run_stack_batch` (`saffron/batch.py:390`) mints a fresh task for every
   spec it reviews, and runs its cell on that task. A `revise` route revises
   the spec on its own task, up to three rounds. A review that raises, or
-  whose route is `error`, raises out of the review wrapper (`:487-501`,
-  `:548-554`).
-- `_batch`'s `--stack` path builds `_stack_runner`, `_stack_review`,
-  `_stack_mint` and `_stack_end_review` (`saffron/cli.py:614`) where
-  readiness passed and `pinned` is bound. It passes each to
-  `run_stack_batch` (`:1325`), and passes `end_review=None` when readiness
-  fails.
-
-These come from the ancestors and are absent at `a1148c1e`.
-
+  whose route is `error`, raises out of the review wrapper (`:553-565`,
+  `:616-624`).
+- `_batch`'s `--stack` path builds `_stack_runner`, `_stack_end_review`
+  (`saffron/cli.py:615`), `_stack_review`, `_stack_mint` and
+  `_stack_follow_ups` where readiness passed and `pinned` is bound
+  (`:1447-1472`). It passes each to `run_stack_batch` (`:1508`). Each is
+  bound to `None` first (`:1384-1401`), so a night whose readiness or scan
+  fails passes `end_review=None` and `follow_ups=None`.
 - From `SA-0161` and `SA-0165`: `run_stack_batch`'s `follow_ups` keyword
-  returns a list of `Candidate`s, each with a minted task and a
-  `spec_text` row of origin `follow_up`. `SA-0165`'s callable catches
-  every raise, so `follow_ups` never raises in production.
+  returns a list of `Candidate`s. `write_follow_ups` mints each one's
+  task, records its `spec_text` row of origin `follow_up`, and sets the
+  candidate's `task_id` (`saffron/follow_up.py:386`). `_stack_follow_ups`
+  catches every raise and returns `[]` (`saffron/cli.py:990-1011`), so
+  `follow_ups` never raises in production.
 - From `SA-0162`: the follow-ups run on top, as generation 1 layers, only
-  after generation 0 drained. Before its review, each meets gate 0's open
-  pull request overlap refusal, and a refused one is never reviewed. Its
-  Problem step 4 keeps `unrun`. That is the task id of each follow-up
-  whose review never reached a verdict route, as an `int`, in the order
-  met. It holds each one the overlap refused, and each one whose review
+  after generation 0 drained. Only then does it seed `task_ids` from the
+  candidates (`saffron/batch.py:777-779`). Before its review, each meets
+  gate 0's open pull request overlap refusal, and a refused one is never
+  reviewed. It builds a local `unrun` (`:800-806`) of **spec ids**, as
+  `str`, and prints them on one `follow-ups unrun` line. The ids are each
+  follow-up's whose review never reached a verdict route, in the order
+  met. That holds each one the overlap refused, and each one whose review
   raised or routed `error`. It holds each one whose review routed `wait`
   before the batch stopped, and each one the batch never reached. The
-  batch row closes once, after the follow-ups. A raise from `end_review`
-  or `follow_ups` closes it `INFRASTRUCTURE` and leaves `run_stack_batch`.
+  list exists only inside the `end_review` and `follow_ups` branches.
+  The batch row closes once, after the follow-ups (`_stop`, `:807`). A
+  raise from `end_review` or `follow_ups` closes it `INFRASTRUCTURE` and
+  leaves `run_stack_batch`.
 
 **What the base already offers.** `RETIRED_DIRNAME` is `"done"`
-(`saffron/scheduler.py:505`). A retired spec's work is in `main`
+(`saffron/scheduler.py:516`). A retired spec's work is in `main`
 (`.saffron/specs/done/README.md:3`). A retired spec's id
-is read from its frontmatter, never its filename (`saffron/scheduler.py:517`).
+is read from its frontmatter, never its filename (`saffron/scheduler.py:528`).
 `discover_specs` globs `*.md` in one directory, not below it
-(`saffron/intake.py:386`, `:415`). `add_worktree` checks a detached tree out
+(`saffron/intake.py:388`, `:417`). `add_worktree` checks a detached tree out
 of the mirror at a sha, and `remove_worktree` removes it
 (`saffron/repos/mirror.py:122-133`). `_git` raises `GitError` on a non-zero
 exit (`:60-63`). PACKAGE commits with its identity on the command line,
@@ -231,7 +246,7 @@ because a `--mirror` clone inherits none (`saffron/phases/package.py:342-349`).
 `<home>/batches/v0` by default (`saffron/cli.py:196`).
 
 **Why the parent is remembered, not fetched.** §5.7 says a parent's head is
-fetched, never remembered (`DESIGN.md:1136`). The finish departs from it on
+fetched, never remembered (`DESIGN.md:1159`). The finish departs from it on
 purpose. Its parent is the top layer's recorded `pushed_sha`, because
 `SA-0167` compares the top layer's branch with that sha before any push.
 A branch moved since then escalates in place of a push. ADR 7 records the
@@ -264,18 +279,29 @@ Build four things.
    Reach `git_mirror.add_worktree` through its module at call time, since
    the witness spies on it there.
 3. **The call in the batch.** Add `finish=None` to `run_stack_batch`, as
-   criterion 3 states. Pass it `SA-0162`'s `unrun` list as it stands, once
-   the follow-ups settle, and never recompute it. Call `finish(batch_id,
-   unrun)` positionally then, and before the row closes, so the row's `spent_usd_est` and `ended_at` come
-   after it. A raise out of the loop propagates, and `finish` does not run,
-   as `end_review` does not.
+   criterion 3 states. `SA-0162`'s `unrun` holds spec ids, and
+   `commit_finish` reads task ids, so build the task ids here. Bind an
+   empty `list[int]` before the `end_review` block. Beside `SA-0162`'s
+   `unrun`, fill it with `c.task_id for c in follow_up_candidates if
+   c.spec.id not in follow_up_reviewed`, in the same order. Fill it in a
+   loop that asserts each `task_id` is not `None`, as the seeding loop
+   does (`saffron/batch.py:778`). A filter that drops a `None` hides one.
+   Take each id from its candidate, never from `task_ids`, which only a
+   `DRAINED` stop seeds. Keep the `follow-ups unrun` line in spec ids,
+   since `SA-0162`'s witnesses assert it, as in `"follow-ups unrun  TE-96
+   TE-92 TE-93"` (`tests/test_batch.py:4875`). Call `finish(batch_id,
+   <the task ids>)` positionally after the `end_review` block and before
+   `_stop`. So the row's `spent_usd_est` and `ended_at` come after it. A
+   raise out of the loop propagates, and `finish` does not run, as
+   `end_review` does not.
 4. **The callable.** Add `_stack_finish(*, pinned, ledger, out_dir)` to
    `saffron/cli.py`, beside `_stack_end_review`, as criterion 4 states.
    Name the returned closure `run_finish`, since `finish` is the module
    it calls. Build it where `_stack_end_review` is built, and pass it as
-   `finish`.
-   Pass `finish=None` when readiness fails. Reach `finish.commit_finish`
-   through the module at call time, since the witness replaces it there.
+   `finish`. Bind it to `None` beside the other defaults (`:1384-1401`),
+   so a night whose readiness or scan fails passes `finish=None`. Reach
+   `finish.commit_finish` through the module at call time, since the
+   witness replaces it there.
 
 **Why the layers are read by `batch_key` alone.** A stack batch mints a
 fresh task for every spec each night. So every run, attempt and layer
@@ -351,7 +377,7 @@ the new `finish` keyword, through `**kwargs` or by name. The file is in
 
 **Criteria 1 and 2 share one fixture, `stack`,** in `tests/test_finish.py`. Point
 `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` at
-nothing, as `tests/test_package.py:1650-1653` does. Build an origin repo
+nothing, as `tests/test_package.py:1696-1699` does. Build an origin repo
 whose base commit holds `a.py` and these files in `.saffron/specs/`:
 `TE-1-one.md` (id `TE-1`), `ten.md` (`TE-10`), `TE-7-seven.md` (`TE-7`),
 `TE-5-five.md` (`TE-5`), `TE-6-six.md` (`TE-6`) and `done/README.md`.
@@ -394,13 +420,15 @@ from that head is exactly six lines. `ten.md` and `TE-7-seven.md` are
 deleted. `done/ten.md`, `done/TE-7-seven.md`, `done/TE-20-follow.md` and
 `TE-21-other.md` are added. It asserts `done/TE-7-seven.md` holds Seven
 r2, `done/TE-20-follow.md` holds Twenty r1, and each other file its own
-text. Then it creates an empty batch and asserts `None` and the refs
-unchanged. Beyond its `wrong_versions:`, these fail it too. They are
-for REVIEW and the Spec seat, not for the cell to run.
+text. Then it creates an empty batch and calls `commit_finish` for it
+with `unrun` of `TE-21`'s task. It asserts `None` and the refs unchanged.
+Beyond its `wrong_versions:`, these fail it too. They are for REVIEW and
+the Spec seat, not for the cell to run.
 
 - the texts of every task in the ledger
 - the specs retired before the texts are written
-- a spec found by a filename prefix
+- a file's id matched as a prefix of a layer's id, so `TE-1` retires
+  with `TE-10`
 - the top taken as the last layer recorded, the highest task id, or the
   bottom
 - a commit made on a branch
@@ -422,26 +450,37 @@ each once on `TE-7`'s row, a layer's, and once on `TE-21`'s, the unrun
 one's. It wraps `git_mirror.add_worktree` in a spy that records each call
 and passes it on. Before each call it keeps `git count-objects -v`. It
 asserts `ValueError`, the same count, and no call to `add_worktree`. Its
-`wrong_versions:` list the builds it must kill, and so does "no path check".
+`wrong_versions:` list the builds it must kill. So do "no path check" and
+"the checks made on the layers' rows alone".
 
-**How the lists were measured.** A throwaway run on 2026-09-24 at
-`68892367` stood in for `SA-0145`'s and `SA-0182`'s tables and writers.
-The stand-in `record_spec_text` refused a path by its origin, as
-`SA-0182` does. It loaded a prototype of the read and of
-`saffron/finish.py`. It ran prototypes of criteria 1 and 2's witnesses on
-the host's git, 2.54.0. The right build passed both. Each wrong build
-listed for criteria 1 and 2 was applied as a text edit to the prototype,
-and each failed its witness. The real writers at `a1148c1e` differ from
-the stand-ins. `record_stack_layer` takes `batch_key` from the task's
-run, and the cell's git is 2.39.5. So the arrangement is unmeasured
-against the real writers. The re-review at `SA-0162`'s head measures it.
+**How criteria 1 and 2 were measured.** On 2026-10-01 a prototype of the
+read and of `saffron/finish.py` ran at `b6a701a6`. It used the real
+`Ledger`, `record_stack_layer` and `record_spec_text` there, and the real
+`add_worktree`, `discover_specs` and `RETIRED_DIRNAME`. It built the
+`stack` fixture above in a scratch directory outside the repository. It
+ran both witnesses as plain functions, under `uv run python`. The right
+build passed both. Each wrong build in criteria 1 and 2's
+`wrong_versions:` and in the two lists above was applied as a text edit.
+Each failed its witness.
+
+The first run used the host's git, 2.54.0. A second run used the cell
+image `saffron/cell:saffron` at `071dc384`, with its git 2.47.3 and Python
+3.12. Both runs gave the same verdicts. One kill turns on the version.
+With no identity of its own, git 2.54.0 committed under a name it derived,
+and the author assertion failed. Git 2.47.3 refused to commit and raised
+`GitError`, and the witness failed there too.
 
 **Criterion 3's witness** reuses the tree base's fakes of the runner,
-`review`, `mint`, `sleep`, `end_review`, `follow_ups` and `open_prs` in
-`tests/test_batch.py`. Its fake `finish` records its arguments and reads
-the batch row's `status` and `ended_at` when called. It takes exactly two
-positional parameters. The first night runs `SP-1` to `READY_FOR_REVIEW`.
-`follow_ups` returns nine candidates in this order.
+`review`, `mint`, `sleep`, `end_review` and `open_prs` in
+`tests/test_batch.py`. `StackDoubles.runner` cannot return a `Refused`,
+so the witness gives task 47 a runner of its own. Its fake `finish` is written `def finish(batch_id,
+unrun, /)`. It records its arguments and reads the batch row's `status`
+and `ended_at` when called. The first night runs `SP-1` to
+`READY_FOR_REVIEW`. Its own `follow_ups` creates nine tasks in the order
+of their labels, 40 to 48, then returns their candidates in the order
+below. The labels name tasks, not ids. Each list it asserts holds the
+real ids its candidates carry, so task 48's id sits above task 46's and
+task 44's.
 
 - Task 40 reaches `READY_FOR_REVIEW`.
 - Task 41 touches a file an open pull request of another branch holds,
@@ -458,12 +497,15 @@ positional parameters. The first night runs `SP-1` to `READY_FOR_REVIEW`.
 
 Tasks 48 and 46 each count one abort. Task 43's `EXHAUSTED` resets the
 breaker's count between them, so the breaker does not fire. It asserts
-`UNTIL`, one call with the batch's id and `[41, 48, 46, 44, 45]` while the
-row was open, and the row `UNTIL` afterwards. A second night drains,
-and its `follow_ups` returns none. It asserts `DRAINED` and one call with
-`[]`. A third night's budget is below its only spec's. Its `follow_ups`
-returns task 60. It asserts `BUDGET` and one call with `[60]`. Beyond its
-`wrong_versions:`, these fail it too, for REVIEW and not for the cell:
+`UNTIL` and one call, made while the row was open. The call carries the
+batch's id and the ids of tasks 41, 48, 46, 44 and 45, in that order. It
+asserts the row `UNTIL` afterwards. A second night drains, and its `follow_ups` returns none. It
+asserts `DRAINED` and one call with `[]`. A third night's budget is below
+its only spec's. Its `follow_ups` returns one follow-up, task 60. It
+asserts `BUDGET` and one call with task 60's id. A fourth night drains one
+spec, given `end_review` and no `follow_ups`. A fifth is the same, given
+neither. Each asserts `DRAINED` and one call with `[]`. Beyond its `wrong_versions:`, these fail it too,
+for REVIEW and not for the cell:
 
 - a night whose `follow_ups` returns none left with no call
 - `unrun` as every follow-up
@@ -471,11 +513,35 @@ returns task 60. It asserts `BUDGET` and one call with `[60]`. Beyond its
   `run_task`'s gate 0 refused, kept
 - a follow-up whose review routed `wait` or `error`, or raised, left out
 - a `None` kept in `unrun`
-- the batch id passed as text, or `unrun` passed by keyword
+- the batch id passed as text
+- `finish` called only inside the `end_review is not None` branch
+
+**How criterion 3's list was worked.** It needs code the tree base lacks,
+so it was worked by hand against `saffron/batch.py` at `b6a701a6`. That
+covers `_drive` (`:181-331`), the review wrapper `wrapped` (`:509-734`),
+`_wait_out_rate_limit` (`:332-357`) and `_BREAKER_THRESHOLD = 2` (`:65`).
+The first night stops `UNTIL` at task 44's wait, before task 45. So the
+right list is tasks 41, 48, 46, 44 and 45.
+
+- Sorted by id, the list reads 41, 44, 45, 46, 48, which fails the first
+  night.
+- Spec ids are `str`, and the first and third nights compare `int`s.
+- A `BUDGET` stop never seeds `task_ids`. So the third night reads `None`
+  through `.get`, and a `KeyError` through `[]` leaves the batch.
+- The fourth and fifth nights get no call from a build that calls
+  `finish` inside the `follow_ups` branch alone. The fifth gets none from
+  one that calls it inside the `end_review` branch alone.
+- A keyword call raises `TypeError` against the positional-only fake, and
+  the batch leaves with it.
+- The other wrong builds fail as this spec's review at `b6a701a6`
+  worked them. A call before the follow-ups sees `[]`. A call after the close
+  reads `status` set. A `DRAINED`-only call skips the first and third
+  nights. A list of the follow-ups that added no layer holds tasks 42, 43
+  and 47.
 
 **Criterion 4's witness** follows `SA-0157`'s witness for `saffron batch
---stack`, with `_readiness_passes` (`tests/test_cli.py:2939-2957`) and
-`_fake_batch_resolution` (`:2960-2976`). The mirror is the one
+--stack`, with `_readiness_passes` (`tests/test_cli.py:2951-2969`) and
+`_fake_batch_resolution` (`:2972-2988`). The mirror is the one
 `_readiness_passes` pins. Its fake `run_stack_batch` calls `finish` with
 the `int` 3 and `[5, 6]`, positionally, and returns `UNTIL`. It replaces
 `finish.commit_finish` with a recorder returning `"c" * 40`. It asserts
@@ -485,12 +551,10 @@ printed line. Then, under `monkeypatch.context()`, the commit raises
 and prints the raise. Last, the commit returns `None`, once with
 `Ledger.stack_layers` replaced to return no row and once one row. Each run
 prints its own line. Its `wrong_versions:` list the builds it must kill,
-and so does a raise that reaches `main`, which exits 2.
-
-Criteria 3 and 4 are unmeasured. The helpers criterion 3's witness reuses,
-`follow_ups`, `open_prs` and `unrun`, are the ancestors' and absent at
-`a1148c1e`. The re-review at `SA-0162`'s head runs both witnesses against
-their `wrong_versions:`.
+and so does a raise that reaches `main`, which exits 2. Its list was
+worked by reading at `b6a701a6`, since `_stack_finish` does not exist
+there. No kill turns on the arrangement. Each wrong build fails an
+assertion named above.
 
 **What the witnesses leave undriven.** They drive no `INFRASTRUCTURE` or
 `INCOMPLETE` stop, and no raise out of the loop. They drive no top layer
@@ -511,7 +575,7 @@ read stays in `saffron/ledger.py`, since `SA-0152`, `SA-0167`, `SA-0170`
 and `SA-0174` consume `Ledger.stack_layers`. A prototype of criteria 1 and
 2's part, formatted with `ruff`, was measured with `size_gate` at
 `68892367`. No ancestor takes any of it, so those rows hold at
-`a1148c1e`. The other rows are estimates, priced at the gate's 4.19
+`b6a701a6`. The other rows are estimates, priced at the gate's 4.19
 tokens a line.
 
 | part | lines | tokens | how |
@@ -519,15 +583,15 @@ tokens a line.
 | `saffron/finish.py` | 89 | 367 | measured |
 | the read in `saffron/ledger.py` | 15 | 57 | measured |
 | `tests/test_finish.py` | 220 | 845 | measured |
-| `run_stack_batch` in `saffron/batch.py` | 7 | 30 | estimated |
-| criterion 3's witness | 95 | 400 | estimated |
+| `run_stack_batch` in `saffron/batch.py` | 24 | 101 | measured |
+| criterion 3's witness | 120 | 500 | estimated |
 | `_stack_finish` and its wiring in `saffron/cli.py` | 32 | 134 | estimated |
 | criterion 4's witness | 54 | 226 | estimated |
 
-That totals about 2060 tokens, 69% of the ceiling, and `estimated_lines`
-is that over four. The measured `batch.py` row came to 101 tokens for a
-version that built `unrun` itself. `SA-0162` now keeps the list, so the
-row shrinks to a keyword and one call. The spec review's own estimate ran
-to 2480 tokens, 83%, still under the ceiling. The whole finish with
+That totals about 2230 tokens, 74% of the ceiling, and `estimated_lines`
+is that over four. The `batch.py` row was measured at `68892367` for a
+version that built its own `unrun` list, as this one now does. The
+witness row adds two nights and its own `follow_ups`. The spec
+review's own estimate ran to 2500 tokens, 83%, still under the ceiling. The whole finish with
 `findings.json` measured 2718 tokens, past 80% of the ceiling. So
 `findings.json` is `SA-0174`'s.
