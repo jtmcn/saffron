@@ -24,7 +24,22 @@ rule:
             field: body
             all:
               - has: { kind: return_statement, has: { pattern: $X } }
-              - not: { has: { nthChild: 2 } }
+              # A docstring or a comment beside the return hides nothing.
+              - not:
+                  has:
+                    not:
+                      any:
+                        - kind: return_statement
+                        - kind: comment
+                        - { kind: expression_statement, has: { kind: string } }
+    # `same = lambda v: v`: an identity lambda bound to a name, to be called later.
+    - kind: assignment
+      has:
+        field: right
+        kind: lambda
+        all:
+          - has: { field: parameters, has: { kind: identifier, pattern: $Z } }
+          - has: { field: body, pattern: $Z }
     # `(lambda x: x)(value)`: an identity lambda applied, not one stored as a stub.
     - kind: call
       has:

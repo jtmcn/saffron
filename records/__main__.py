@@ -114,41 +114,27 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _show_one(kind: str, records: list[Record], ident: str, section: str | None) -> int:
+    found = [r for r in records if r.model.id == as_id(ident)]
+    if not found:
+        label = "backlog item" if kind == "backlog" else kind
+        print(f"no {label} {ident}", file=sys.stderr)
+        return 1
+    text = _render(found[0], section)
+    if text is None:
+        return 1
+    print(text, end="")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
-    if args.kind is not None:
-        # A bare number stays a backlog item, so another kind is asked for by name.
-        found = [
-            r for r in load(KINDS[args.kind], args.root) if r.model.id == as_id(args.id)
-        ]
-        if not found:
-            print(f"no {args.kind} {args.id}", file=sys.stderr)
-            return 1
-        text = _render(found[0], args.section)
-        if text is None:
-            return 1
-        print(text, end="")
-        return 0
-    if re.fullmatch(APPENDIX_ID, args.id):
-        found = [r for r in load(KINDS["appendix"], args.root) if r.model.id == args.id]
-        if not found:
-            print(f"no appendix {args.id}", file=sys.stderr)
-            return 1
-        text = _render(found[0], args.section)
-        if text is None:
-            return 1
-        print(text, end="")
-        return 0
+    # A bare number stays a backlog item, so another kind is asked for by name.
+    kind = args.kind or ("appendix" if re.fullmatch(APPENDIX_ID, args.id) else None)
+    if kind is not None:
+        return _show_one(kind, load(KINDS[kind], args.root), args.id, args.section)
     records = load(KINDS["backlog"], args.root)
     if args.id.isdigit() or re.fullmatch(RANDOM_ID, args.id):
-        wanted = [r for r in records if r.model.id == as_id(args.id)]
-        if not wanted:
-            print(f"no backlog item {args.id}", file=sys.stderr)
-            return 1
-        text = _render(wanted[0], args.section)
-        if text is None:
-            return 1
-        print(text, end="")
-        return 0
+        return _show_one("backlog", records, args.id, args.section)
     if args.section is not None:
         print(
             f"--section needs an item number; {args.id} lists the items naming it",

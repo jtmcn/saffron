@@ -25,3 +25,10 @@ invalid:
     def _as_is(x):
         return x
   - 'reset = (lambda v: v)("soon")'
+  # A docstring before the return still hands the argument straight back.
+  - |
+    def _as_is(x):
+        """Pass it through."""
+        return x
+  # An identity lambda bound to a name, then called.
+  - 'same = lambda v: v'
