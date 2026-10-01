@@ -47,9 +47,9 @@ def _qual(
 
 @pytest.fixture
 def stack(tmp_path, monkeypatch):
-    """The one arrangement both `commit_finish` witnesses drive: an origin
-    repo on three stacked branches, its bare mirror, and a ledger carrying
-    two batches' tasks, layers and texts."""
+    """The arrangement the `commit_finish` and `write_findings` witnesses
+    drive: an origin repo on three stacked branches, its bare mirror, and a
+    ledger carrying two batches' tasks, layers and texts."""
     empty = tmp_path / "empty-home"
     empty.mkdir()
     monkeypatch.setenv("HOME", str(empty))
@@ -539,8 +539,8 @@ def test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_
             )
         ],
     )
-    # Decoys on tasks this call must never read: another batch's layer and
-    # a revised queued spec with no layer.
+    # Decoys on tasks this call must never read: another batch's layer, another
+    # batch's follow-up, and a revised queued spec with no layer.
     ledger.record_findings(
         stack.tasks["TE-6"],
         [
@@ -563,6 +563,19 @@ def test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_
                 file="decoy.py",
                 line=1,
                 claim="te5 decoy",
+                anchored=True,
+            )
+        ],
+    )
+    ledger.record_findings(
+        stack.tasks["TE-26"],
+        [
+            Finding(
+                lens="correctness",
+                severity="concern",
+                file="decoy.py",
+                line=1,
+                claim="te26 decoy",
                 anchored=True,
             )
         ],

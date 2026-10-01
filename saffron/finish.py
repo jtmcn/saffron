@@ -22,7 +22,7 @@ from saffron.phases import review
 from saffron.repos import mirror as git_mirror
 from saffron.scheduler import RETIRED_DIRNAME
 
-# What a stack batch's end review writes beside the commit (`SA-0151`).
+# The backlog pool file the finish writes beside its tree (`SA-0174`).
 FINDINGS_NAME = "findings.json"
 
 
@@ -194,9 +194,9 @@ def write_findings(
     pooled: Sequence[Pooled] = (),
 ) -> Path:
     """The batch's own backlog pool, one object of `batch`, `findings` and
-    `follow_ups` (`CONTEXT.md`, design section 4). `findings` walks each
-    layer in position order, then each follow-up that added no layer, in
-    task order. `follow_ups` names each such follow-up's latest spec text.
+    `follow_ups` (design section 4). `findings` walks each layer in position
+    order, then each follow-up that ran and added no layer, in task order.
+    `follow_ups` names each such follow-up's latest spec text.
     Writes `dest`, making its directory, and returns it."""
     layers = ledger.stack_layers(batch_id)
     layer_task_ids = {layer["task_id"] for layer in layers}
