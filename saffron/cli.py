@@ -677,13 +677,28 @@ def _stack_end_review(
 
 
 def _stack_finish(
-    *, pinned: PinnedBase, ledger: Ledger, out_dir: Path
+    *,
+    pinned: PinnedBase,
+    ledger: Ledger,
+    out_dir: Path,
+    pooled: Sequence[follow_up.Pooled],
 ) -> Callable[[int, list[int]], object]:
-    """`run_stack_batch`'s `finish` callable (ADR 7). A `GitError` or
-    `ValueError` from `finish.commit_finish` is printed and swallowed here, so
-    the night's exit code stays its stop reason's. Any other raise reaches `main`."""
+    """`run_stack_batch`'s `finish` callable (ADR 7). Writes `findings.json`
+    first, in its own `try` guarding `Exception`, with the same `pooled`
+    `_stack_follow_ups` filled. A `GitError` or `ValueError` from
+    `finish.commit_finish` is printed and swallowed here too, so the
+    night's exit code stays its stop reason's. Any other raise from the
+    commit reaches `main`."""
 
     def run_finish(batch_id: int, unrun: list[int]) -> object:
+        dest = out_dir / "finish" / str(batch_id) / finish.FINDINGS_NAME
+        try:
+            finish.write_findings(ledger, batch_id, unrun, dest, pooled=pooled)
+        except Exception as exc:
+            print(f"finish: {type(exc).__name__}: {exc}")
+        else:
+            print(f"finish: findings at {dest}")
+
         workdir = out_dir / "finish" / str(batch_id) / "tree"
         try:
             sha = finish.commit_finish(
@@ -1509,7 +1524,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 )
                 open_prs = _stack_open_prs(resolved.repo_slug)
                 stack_finish = _stack_finish(
-                    pinned=pinned, ledger=ledger, out_dir=out_dir
+                    pinned=pinned, ledger=ledger, out_dir=out_dir, pooled=pooled
                 )
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`

@@ -6657,3 +6657,107 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
         )
         printed = capsys.readouterr().out
         assert "finish: the tree is unchanged, so nothing committed" in printed
+
+
+def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_filled(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_finish` takes `pooled`, and `saffron batch --stack` passes
+    it the same list it passes `_stack_follow_ups`. The findings call runs
+    in its own `try`, guarding `Exception`, before the commit's own guard
+    on `GitError` and `ValueError`."""
+    from saffron import finish as finish_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    sentinel = follow_up.Pooled(
+        group=qualify.FollowUpGroup(task_key="k", file="f.py", findings=()),
+        reason="sentinel",
+    )
+    seen_pooled: dict[str, list] = {}
+    real_follow_ups = cli._stack_follow_ups
+    real_finish = cli._stack_finish
+
+    def _spy_follow_ups(**kwargs):
+        seen_pooled["follow_ups"] = kwargs["pooled"]
+        return real_follow_ups(**kwargs)
+
+    def _spy_finish(**kwargs):
+        seen_pooled["finish"] = kwargs["pooled"]
+        return real_finish(**kwargs)
+
+    monkeypatch.setattr(cli, "_stack_follow_ups", _spy_follow_ups)
+    monkeypatch.setattr(cli, "_stack_finish", _spy_finish)
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        seen_pooled["follow_ups"].append(sentinel)
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    calls: list[tuple] = []
+
+    def _recording_write_findings(ledger, batch_id, unrun, dest, *, pooled=()):
+        calls.append(("findings", batch_id, unrun, dest, list(pooled)))
+
+    def _recording_commit_finish(ledger, batch_id, unrun, *, mirror, workdir, **kw):
+        calls.append(("commit", batch_id, unrun))
+        return "c" * 40
+
+    monkeypatch.setattr(finish_module, "write_findings", _recording_write_findings)
+    monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
+
+    _readiness_passes(monkeypatch)
+    home = tmp_path / "home"
+    assert main(["--home", str(home), "batch", "--stack"]) == 0
+
+    assert seen_pooled["follow_ups"] is seen_pooled["finish"]
+    expected_dest = (
+        home / "batches" / "v0" / "finish" / "3" / finish_module.FINDINGS_NAME
+    )
+    assert calls == [
+        ("findings", 3, [5, 6], expected_dest, [sentinel]),
+        ("commit", 3, [5, 6]),
+    ]
+    printed = capsys.readouterr().out
+    assert f"finish: findings at {expected_dest}" in printed
+
+    # A `GitError`, then a `ValueError`, then a `KeyError` from
+    # `write_findings`. Each prints its own line, and the commit still runs.
+    for exc, label in [
+        (GitError("disk"), "GitError: disk"),
+        (ValueError("bad row"), "ValueError: bad row"),
+        (KeyError("task_id"), "KeyError: 'task_id'"),
+    ]:
+        calls.clear()
+        with monkeypatch.context() as m:
+            m.setattr(
+                finish_module,
+                "write_findings",
+                lambda *a, _exc=exc, **k: (_ for _ in ()).throw(_exc),
+            )
+            home_i = tmp_path / f"home-{type(exc).__name__}"
+            assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+            printed = capsys.readouterr().out
+            assert f"finish: {label}" in printed
+            assert calls == [("commit", 3, [5, 6])]
+
+    # `commit_finish` raising still leaves the findings call recorded.
+    calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(finish_module, "write_findings", _recording_write_findings)
+        m.setattr(
+            finish_module,
+            "commit_finish",
+            lambda *a, **k: (_ for _ in ()).throw(GitError("gone")),
+        )
+        home_commit = tmp_path / "home-commit-raise"
+        assert main(["--home", str(home_commit), "batch", "--stack"]) == 0
+        printed = capsys.readouterr().out
+        assert "finish: GitError: gone" in printed
+    assert calls[0][0] == "findings"

@@ -1441,3 +1441,52 @@ taken by hand, so no critic ran on it and it has no lines here.
 - `SA-0165` (#622): two docstrings said a raise pools what the walk never
   reached, which holds only after `qualify` returns.
   **Bucket 3**, contract. **Landed:** a review commit on #622.
+
+## 2026-10-01, `SA-0162` and `SA-0151` (the spec loop's run 24, #626 and #628)
+
+Both cells ended `EXHAUSTED` in REVIEW and were adopted by hand. The in-cell
+critic's own blockers are not listed here. Each line below is a seat finding
+the critic did not raise.
+
+- `SA-0162` (#626): criterion 6's order carried no `touches`, so checking
+  every spec of the order passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #626.
+- `SA-0162` (#626): `_stack_open_prs` copied `_print_scan_gaps`' two note
+  lines instead of calling it.
+  **Bucket 3**, conventions. **Landed:** a review commit on #626.
+- `SA-0162` (#626): comments called a spec review's route a "verdict", the
+  critic's word at REBUT.
+  **Bucket 1**, `terms` has no rule for it. **Open.**
+- `SA-0162` (#626): the `run_stack_batch` docstring said the end review waits
+  for `DRAINED`, and three comments still named `run_batch`.
+  **Bucket 3**, contract. **Landed:** a review commit on #626.
+- `SA-0162` (#626): the tests rebuilt `AdvancingClock` as `_MutableClock`.
+  **Bucket 3**, conventions. **Landed:** a review commit on #626.
+- `SA-0162` (#626): a refused revised spec of the order gets no task state.
+  **Bucket 3**, contract. **Open:** b-3590be.
+- `SA-0151` (#628): criterion 3's witness never read the batch id `finish`
+  received.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #628.
+- `SA-0151` (#628): dropping the path pattern's end anchor passed criterion
+  2, a build that writes outside `.saffron/specs/`.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #628.
+- `SA-0151` (#628): two test docstrings cited `SA-0171`, which no spec is.
+  **Bucket 1**, no gate reads cited spec ids. **Open.**
+- `SA-0151` (#628): `finish.py` restated the ledger's path pattern, more
+  loosely, and `cli.py`'s git runner, unchecked.
+  **Bucket 3**, conventions. **Landed:** a review commit on #628.
+- `SA-0151` (#628): `_stack_finish`'s docstring said every raise is
+  swallowed. It catches two types.
+  **Bucket 3**, contract. **Landed:** a review commit on #628.
+- `SA-0151` (#628): `commit_finish` drops parse failures, and it writes
+  through a symlink a cell committed.
+  **Bucket 3**, correctness. **Open:** b-3d2aa1 and b-8d654b.
+- `SA-0162` and `SA-0151`: the batch id read three ways, and the layer query
+  and git runner restated.
+  **Bucket 3**, conventions. **Open:** b-115f9b.
+- `SA-0174` (#630): criterion 1's witness put no finding on another batch's
+  follow-up, so reading every batch's follow-ups passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #630.
+- `SA-0174` (#630): the comment over `FINDINGS_NAME` named the end review and
+  `SA-0151` as its writer, and two docstrings left out a case they cover.
+  **Bucket 3**, contract. **Landed:** a review commit on #630.

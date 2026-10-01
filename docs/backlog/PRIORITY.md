@@ -198,6 +198,11 @@ went green died seeding its gate cell on a transient `Permission denied`. It
 was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
 again.
 
+**Placed 2026-10-01**, from the spec loop's run 24: **b-4c5dc7**, then
+**b-038aef**. Two cells went green, ran REVIEW past their budget, and were
+refused REBUT on one-line witness fixes. Each ended `EXHAUSTED` with no pull
+request, and the delegate opened both by hand.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -341,12 +346,18 @@ spec's wrong builds listed in prose reach no host run.
 reads an unreadable mirror path as an absent one, so a broken read becomes a
 finding's verdict.
 
+**Placed 2026-10-01**, from the spec loop's run 24: **b-426db4**,
+**b-dc5212**, **b-8d654b**, then **b-3d2aa1**. A Problem-item obligation no
+criterion drove was dropped. `next` held back a child of a merged parent. The
+finishing commit writes through a symlink, unverified, and drops parse
+failures.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.
 ~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, ~~**87**~~, ~~**89**~~, **90**, **92**, **96**, **99**, **100**, **101**, ~~**105**~~, **106**, ~~**107**~~, **108**. ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, ~~**124**~~, ~~**125**~~, **127**, **130**, **131**, **132**, ~~**133**~~, **134**, ~~**139**~~. **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, ~~**b-e0bbbf**~~, and from run 9: **b-0e20e9**, ~~**b-e403c1**~~, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: ~~**b-5fa523**~~, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**, and from run 13: ~~**b-542beb**~~, **b-37924b**,
-**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, ~~**b-111c56**~~, ~~**b-2dea1c**~~, and from ADR 4's review: ~~**b-26315b**~~, **b-e40d09**, ~~**b-ac97c0**~~, **b-07f694**, **b-032c3e**, **b-7c88f8**, and from ADR 5: ~~**b-0adc85**~~, and from comparing Saffron with the superpowers skills: **b-e1afbb**, **b-3732ef**, and from run 15: **b-f4eb52**, **b-f30189**, **b-a90136**, **b-e06dbc**, and from `SA-0135`'s review: **b-32f492**, **b-50b566**, and from run 16: **b-8fb227**, **b-79d951**, **b-9ead75**, **b-e88930**, **b-1e5572**, and from run 17: **b-04d4c2**, and from the stack batch's spec reviews: **b-6a692d**, **b-2d9ae9**, **b-223244**, **b-df59f8**, **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5**, **b-22ff3f**, **b-589cf6**, and from the 2026-09-27 size pricing: **b-41664e**.
+**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, ~~**b-111c56**~~, ~~**b-2dea1c**~~, and from ADR 4's review: ~~**b-26315b**~~, **b-e40d09**, ~~**b-ac97c0**~~, **b-07f694**, **b-032c3e**, **b-7c88f8**, and from ADR 5: ~~**b-0adc85**~~, and from comparing Saffron with the superpowers skills: **b-e1afbb**, **b-3732ef**, and from run 15: **b-f4eb52**, **b-f30189**, **b-a90136**, **b-e06dbc**, and from `SA-0135`'s review: **b-32f492**, **b-50b566**, and from run 16: **b-8fb227**, **b-79d951**, **b-9ead75**, **b-e88930**, **b-1e5572**, and from run 17: **b-04d4c2**, and from the stack batch's spec reviews: **b-6a692d**, **b-2d9ae9**, **b-223244**, ~~**b-df59f8**~~, **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5**, **b-22ff3f**, **b-589cf6**, and from the 2026-09-27 size pricing: **b-41664e**.
 Item 52's review adds **b-cec9a7**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which
@@ -399,6 +410,10 @@ fixture head or clean up after a kill, and `labels` reads no cell round.
 **b-979dbe**, **b-4ddb5b**, then **b-2dc561**. The first two are gaps the
 seats left in `SA-0196` and `SA-0161`. `terms` fails at base on a disavowal.
 Preflight names a listener's address but not its process.
+
+**Placed 2026-10-01**, from the spec loop's run 24: **b-115f9b**, then
+**b-3590be**. The stack batch reads its batch id three ways, and a refused
+revised spec gets no task state.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
