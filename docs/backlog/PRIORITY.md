@@ -193,6 +193,11 @@ outside the diff.
 `NOT_IMPLEMENTED`, and the loop passed its spec over. Its calls were refused
 though preflight's egress check passed, and no log says why.
 
+**Placed 2026-09-30**, from the spec loop's run 23: **b-f582ee**. A cell that
+went green died seeding its gate cell on a transient `Permission denied`. It
+was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
+again.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -323,7 +328,7 @@ merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 **Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
 session transcript, so a strange PR shows what the agent did but not what it read.
 
-**Placed 2026-09-29**, from the spec loop's run 21: **b-66d1c3**, **b-78ccc7**,
+**Placed 2026-09-29**, from the spec loop's run 21: ~~**b-66d1c3**~~, **b-78ccc7**,
 ~~**b-47659f**~~, then **b-38d45f**. The first is REVIEW running from `main`, so a
 stack's new lens runs in none of its cells. The second is what the conventions
 prompt misses. The last two are a witness and an anchor that pass too much.
@@ -331,6 +336,10 @@ prompt misses. The last two are a witness and an anchor that pass too much.
 **Placed 2026-09-29**, from the spec loop's run 22: ~~**b-7a70fd**~~, then
 **b-ef8543**. Four tests fail in every cell, and subtraction hides them. A
 spec's wrong builds listed in prose reach no host run.
+
+**Placed 2026-09-30**, from the spec loop's run 23: **b-00534f**. `qualify`
+reads an unreadable mirror path as an absent one, so a broken read becomes a
+finding's verdict.
 
 ### Tier 3 — real, not urgent
 
@@ -385,6 +394,11 @@ The first three are defects in REVIEW and REBUT that the run's seats found.
 The last three are gaps in the spec chain's own tools. **b-9529e9** and
 **b-91ead2** came from closing the run. The scoring driver cannot reach a
 fixture head or clean up after a kill, and `labels` reads no cell round.
+
+**Placed 2026-09-30**, from the spec loop's run 23: **b-a09d30**,
+**b-979dbe**, **b-4ddb5b**, then **b-2dc561**. The first two are gaps the
+seats left in `SA-0196` and `SA-0161`. `terms` fails at base on a disavowal.
+Preflight names a listener's address but not its process.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",

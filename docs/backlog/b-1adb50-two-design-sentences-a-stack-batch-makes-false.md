@@ -66,3 +66,4 @@ deadline plus one task plus its end review. Each cites ADR 7.
 - 2026-09-29: checked, and nothing more is writable. No task exists for `SA-0151`,
   `SA-0152` or `SA-0165`, so §6's queue source and the finish past `--until` still
   describe code that does not exist.
+- 2026-09-30: `SA-0165` has a task now (#622), unmerged. No sentence changes until it merges.
