@@ -103,7 +103,7 @@ def main() -> int:
         body="",
     )
     network = "saffron-cells"
-    critic_network = network if shared else "saffron-critic-net"
+    critic_network = network if shared else session.CRITIC_NETWORK
     own_critic_network = None if shared else critic_network
     volume, state = f"saffron-wt-{SPEC_ID}", f"saffron-st-{SPEC_ID}"
     impl = f"saffron-cell-{SPEC_ID}"
@@ -127,7 +127,9 @@ def main() -> int:
         proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
         if proxy_ip is None:
             raise runtime.CellRuntimeError("the proxy has no address")
-        critic_proxy_ip = proxy_ip if shared else session.critic_proxy_address()
+        critic_proxy_ip = (
+            proxy_ip if shared else session.proxy_address(runtime.SUBNETS["critic"])
+        )
         impl_ip = _py(impl, OWN_IP, proxy_ip)
         print(f"implementer {impl_ip}, proxy {proxy_ip}")
         _listen(impl)

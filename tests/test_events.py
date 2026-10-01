@@ -1701,6 +1701,8 @@ def test_findings_name_what_the_table_could_not_type():
 # --- The fixture's normaliser -----------------------------------------------
 
 _IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+# Each declared network's gateway is stable, so the probe line keeps them.
+_GATEWAYS = {_runtime.gateway(subnet) for subnet in _runtime.SUBNETS.values()}
 _PATCH_PATH = re.compile(r"\S*/patch\.diff\b")
 _PROMPT_CHARS = re.compile(r"system prompt \d+ chars")
 
@@ -1712,7 +1714,7 @@ def _normalise(line: str) -> str:
     is left alone), pytest's absolute `tmp_path` ahead of `patch.diff`, and a
     system prompt's `CONTEXT.md`-dependent character count."""
     line = _IPV4.sub(
-        lambda m: m.group(0) if m.group(0) == _runtime.GATEWAY else "<LAN-ADDR>", line
+        lambda m: m.group(0) if m.group(0) in _GATEWAYS else "<LAN-ADDR>", line
     )
     line = _PATCH_PATH.sub("<TASK_DIR>/patch.diff", line)
     return _PROMPT_CHARS.sub("system prompt <N> chars", line)

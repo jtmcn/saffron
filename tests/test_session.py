@@ -5204,7 +5204,8 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
     monkeypatch, tmp_path
 ):
     """The proxy is the one container on both internal networks. Its route out
-    is probed from each, because a third leg is a new mechanism on both runtimes."""
+    is probed from each, because a third leg is a new mechanism on both runtimes.
+    The host is probed from each too, at that network's own gateway."""
     cell = _stub_the_runtime(monkeypatch)
     started: list[tuple] = []
     probed: list[tuple[str, str]] = []
@@ -5217,8 +5218,14 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
         probed.append((network, proxy_ip))
         return "401"
 
+    host_probed: list[tuple[str, str]] = []
+
+    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY):
+        host_probed.append((network, gateway))
+
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
     monkeypatch.setattr("saffron.preflight.assert_proxy_reaches_upstream", _upstream)
+    monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", _host)
     monkeypatch.setattr(
         "saffron.cell.runtime.container_ip",
         lambda name, subnet_prefix=runtime.SUBNET_PREFIX: f"{subnet_prefix}2",
@@ -5245,6 +5252,11 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
     assert started == [("net", "cnet")]
     critic_prefix = runtime.subnet_prefix(runtime.SUBNETS["critic"])
     assert probed == [("net", "10.88.0.2"), ("cnet", f"{critic_prefix}2")]
+    # The host from each network, at that network's own gateway.
+    assert host_probed == [
+        ("net", runtime.GATEWAY),
+        ("cnet", runtime.gateway(runtime.SUBNETS["critic"])),
+    ]
 
 
 def test_a_fired_bound_applying_the_patch_is_saffrons_own_not_the_agents(
@@ -6296,7 +6308,7 @@ def test_an_unreadable_proxy_address_at_review_is_infrastructure(monkeypatch, tm
         "saffron.cell.runtime.container_ip",
         lambda *a, **k: None if len(cell.turns) >= 2 else "10.88.0.9",
     )
-    with pytest.raises(runtime.CellRuntimeError, match="no address on the critic"):
+    with pytest.raises(runtime.CellRuntimeError, match="proxy has no address on"):
         _drive(
             monkeypatch,
             tmp_path,

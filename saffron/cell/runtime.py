@@ -187,8 +187,13 @@ def subnet_prefix(subnet: str) -> str:
     return str(ipaddress.ip_network(subnet).network_address).rsplit(".", 1)[0] + "."
 
 
+def gateway(subnet: str) -> str:
+    """The host's address on a network, where a cell would reach a host listener."""
+    return str(next(ipaddress.ip_network(subnet).hosts()))
+
+
 SUBNET_PREFIX = subnet_prefix(DEFAULT_SUBNET)
-GATEWAY = str(next(_NETWORK.hosts()))
+GATEWAY = gateway(DEFAULT_SUBNET)
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@ preflight: proxy at <LAN-ADDR>
 preflight: proxy reaches api.anthropic.com (401)
 preflight: proxy reaches api.anthropic.com from the critic network (401)
 preflight: building saffron/cell:repo
-preflight: probing 1 host ports at 10.88.0.1, <LAN-ADDR>; tolerating rapportd:49152
+preflight: probing 1 host ports at 10.88.0.1, 10.91.0.1, <LAN-ADDR>; tolerating rapportd:49152
 cell: saffron-cell-SY-1 up, worktree at bbbbbbbb
 baseline: scope=pass, integrity=skip, size=pass, committed=pass, census=skip, criteria=skip
 gates: scope=pass
@@ -40,7 +40,7 @@ preflight: proxy at <LAN-ADDR>
 preflight: proxy reaches api.anthropic.com (401)
 preflight: proxy reaches api.anthropic.com from the critic network (401)
 preflight: building saffron/cell:repo
-preflight: probing 1 host ports at 10.88.0.1, <LAN-ADDR>; tolerating rapportd:49152
+preflight: probing 1 host ports at 10.88.0.1, 10.91.0.1, <LAN-ADDR>; tolerating rapportd:49152
 cell: saffron-cell-SY-1 up, worktree at bbbbbbbb
 baseline: scope=pass, integrity=skip, size=pass, committed=pass, census=skip, criteria=skip
 gates: scope=pass

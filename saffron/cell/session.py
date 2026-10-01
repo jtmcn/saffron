@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from saffron.agents.findings import Finding, anchor
 from saffron.cell import runtime
@@ -875,6 +875,32 @@ def run_one_cell(
     return outcome
 
 
+# The critic cells' own network: the proxy joins it and the implementer never
+# does (item 135). Its subnet is drawn from the one declaration, like every one.
+CRITIC_NETWORK = "saffron-critic-net"
+_CRITIC_SUBNET = runtime.SUBNETS["critic"]
+
+
+class _Leg(NamedTuple):
+    """One internal network the proxy joins, and how its preflight line reads."""
+
+    network: str
+    subnet: str
+    step: str
+    where: str
+
+
+def proxy_address(subnet: str) -> str:
+    """The proxy's address on one of its internal networks."""
+    from saffron.cell import proxy
+
+    address = runtime.container_ip(proxy.PROXY_NAME, runtime.subnet_prefix(subnet))
+    if address is None:
+        # Infrastructure, not a task outcome: `cell_env` cannot take `None`.
+        raise runtime.CellRuntimeError(f"the proxy has no address on {subnet}")
+    return address
+
+
 def cell_up(
     *,
     repo: Path,
@@ -918,41 +944,40 @@ def cell_up(
     from saffron.cell import proxy, runtime, worktree
     from saffron.repos import image
 
+    legs = [_Leg(network, runtime.DEFAULT_SUBNET, "egress", "")]
+    if critic_network is not None:
+        legs.append(
+            _Leg(
+                critic_network,
+                _CRITIC_SUBNET,
+                "critic_egress",
+                " from the critic network",
+            )
+        )
+
     # Inside the guarantee, not above it: a leftover network from a SIGKILLed
     # run makes `create_network` the first thing that raises on a re-run.
-    runtime.remove_network(network)
-    if critic_network is not None:
-        runtime.remove_network(critic_network)
+    for leg in legs:
+        runtime.remove_network(leg.network)
     runtime.remove_volume(volume)
     runtime.remove_volume(state)
-    created.add(network)
-    runtime.create_network(network)
-    if critic_network is not None:
-        created.add(critic_network)
-        runtime.create_network(critic_network, subnet=_CRITIC_SUBNET)
+    for leg in legs:
+        created.add(leg.network)
+        runtime.create_network(leg.network, subnet=leg.subnet)
 
     # First of everything: on apple/container 1.3.0 a container on the
     # internal network before the proxy leaves it no route out (evidence
     # 2026-08-28), and a dead route found here costs one container start
     # rather than an image build and an attempt (§5.1.1).
     note("proxy_starting", "starting the proxy")
-    internal = (network,) if critic_network is None else (network, critic_network)
-    proxy_ip = proxy.start_proxy(*internal)
+    proxy_ip = proxy.start_proxy(*(leg.network for leg in legs))
     note("proxy_addr", f"proxy at {proxy_ip}")
-    answered = preflight.assert_proxy_reaches_upstream(
-        image.BASE_TAG, network, proxy_ip
-    )
-    note("egress", f"proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
-    if critic_network is not None:
-        # A third leg is unmeasured on either runtime, so its route is probed too.
-        critic_proxy_ip = critic_proxy_address()
+    # Per leg: a third one is unmeasured on either runtime.
+    for leg in legs:
         answered = preflight.assert_proxy_reaches_upstream(
-            image.BASE_TAG, critic_network, critic_proxy_ip
+            image.BASE_TAG, leg.network, proxy_address(leg.subnet)
         )
-        note(
-            "critic_egress",
-            f"proxy reaches {proxy.UPSTREAM_HOST} from the critic network ({answered})",
-        )
+        note(leg.step, f"proxy reaches {proxy.UPSTREAM_HOST}{leg.where} ({answered})")
 
     # The cell runs the repo's own image, never the base: the base carries
     # no toolchain, so every gate would error before the agent is reached.
@@ -969,16 +994,20 @@ def cell_up(
     # tolerated listeners print every run, including when there are none —
     # an exception that goes quiet is the invisibility it was granted around.
     ports, tolerated = preflight.host_probe_ports()
+    gateways = [runtime.gateway(leg.subnet) for leg in legs]
+    # Every gateway, then the LAN address each probe shares.
+    addresses = dict.fromkeys([*gateways, *preflight.probe_addresses(gateways[0])])
     note(
         "ports",
         f"probing {len(ports)} host ports at "
-        + ", ".join(preflight.probe_addresses())
+        + ", ".join(addresses)
         + "; tolerating "
         + (", ".join(tolerated) or "nothing"),
     )
-    # The list the operator was just shown, not a second one taken now. No
-    # cell exists yet, and none will until this returns.
-    preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
+    # The ports printed above, probed from each network at its own
+    # gateway. No cell exists yet, and none will until this returns.
+    for leg, gw in zip(legs, gateways, strict=True):
+        preflight.assert_host_is_unreachable(image.BASE_TAG, leg.network, ports, gw)
 
     created.add(volume)
     runtime.create_volume(volume)
@@ -1227,20 +1256,6 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
 # `saffron-egress` (the proxy's) is torn down first, so this has to be a value
 # nothing else holds — see runtime.py for every subnet Saffron allocates.
 _GATE_CELL_SUBNET = runtime.SUBNETS["gate"]
-_CRITIC_SUBNET = runtime.SUBNETS["critic"]
-
-
-def critic_proxy_address() -> str:
-    """The proxy's address on the critic network, where a critic cell reaches it."""
-    from saffron.cell import proxy
-
-    address = runtime.container_ip(
-        proxy.PROXY_NAME, runtime.subnet_prefix(_CRITIC_SUBNET)
-    )
-    if address is None:
-        # Infrastructure, not a task outcome: `cell_env` cannot take `None`.
-        raise runtime.CellRuntimeError("the proxy has no address on the critic network")
-    return address
 
 
 @contextlib.contextmanager
@@ -1804,8 +1819,7 @@ def _drive_cell(
         )
 
     network = "saffron-cells"
-    # The critic cells' own, so none shares a network with the implementer (item 135).
-    critic_network = "saffron-critic-net"
+    critic_network = CRITIC_NETWORK
     volume = f"saffron-wt-{spec.spec_id}"
     state = f"saffron-st-{spec.spec_id}"
     container = f"saffron-cell-{spec.spec_id}"
@@ -2600,7 +2614,7 @@ def _drive_cell(
             ledger.set_task_state(task_id, "REVIEWING")
 
             # Read once: REVIEW's and REBUT's critic cells share this env.
-            critic_env = cell_env(critic_proxy_address(), policy.thread_env)
+            critic_env = cell_env(proxy_address(_CRITIC_SUBNET), policy.thread_env)
 
             def _critic_teardown(step: str, ok: bool, detail: str) -> None:
                 emit(

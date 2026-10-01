@@ -10,7 +10,7 @@ specs: [SA-0087]
 prs: [274]
 commits: [a19e3b27, eb7840c0]
 cites: [§5.5, §2]
-related: [108, 118, 127, 131]
+related: [108, 118, 127, 131, b-ca3bc6]
 ---
 
 ## Problem
@@ -62,6 +62,8 @@ network with the proxy reachable from both.
 - 2026-10-01: done by hand in `eb7840c0`. Critic cells join
   `saffron-critic-net`, and the proxy is the one container on both internal
   networks. `uv run pytest -m cell tests/test_review_cells.py` passed. Moving
-  the critic cell back onto `saffron-cells` turned its test red. Per-task names
-  stay open: every network name and subnet is still a constant.
+  the critic cell back onto `saffron-cells` turned its test red.
+- 2026-10-01: the third entry above said the fix derives its names from the
+  task. It does not. Every network name, subnet and the proxy's name is still
+  a constant, and b-ca3bc6 carries that work.
 

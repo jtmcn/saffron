@@ -16,6 +16,7 @@ import pytest
 
 from saffron.cell import proxy, runtime, session, worktree
 from saffron.gates.suite import GateSuite, SuiteRun
+from saffron.repos import image as repo_image
 from saffron.repos import mirror as mirror_ops
 from saffron.repos.policy import load_policy
 
@@ -24,6 +25,16 @@ pytestmark = pytest.mark.cell
 _SPEC_ID = "SA-9127"
 _PORT = 8127
 _MARKER = "/usr/local/saffron-implementer-marker"
+_TAMPERED = "Python tampered"
+# The implementer, as root, swaps the `python3` on its PATH for one that lies
+# about its version and still runs everything else.
+_TAMPER = (
+    'p=$(command -v python3); real=$(readlink -f "$p"); rm -f "$p"; '
+    'printf \'#!/bin/sh\\n[ "$1" = --version ] && { echo "%s"; exit 0; }'
+    '\\nexec %s "$@"\\n\' '
+    f'"{_TAMPERED}" "$real" > "$p"; chmod 755 "$p"'
+)
+_ENV_NAMES = "import json, os; print(json.dumps(sorted(os.environ)))"
 _OUTSIDE = "1.1.1.1"
 
 # One program for every probe: argv is a JSON list of (label, kind, args).
@@ -57,6 +68,8 @@ out = {}
 for label, kind, args in json.loads(sys.argv[1]):
     if kind == "env":
         out[label] = "present" if os.environ.get(args[0]) else "absent"
+    elif kind == "env_names":
+        out[label] = sorted(os.environ)
     elif kind == "file":
         out[label] = "present" if os.path.exists(args[0]) else "absent"
     elif kind == "own_ip":
@@ -106,7 +119,7 @@ def _git(repo: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def _probe(container: str, plan: list) -> dict[str, str]:
+def _probe(container: str, plan: list) -> dict:
     done = runtime.exec_(
         container, ["python3", "-c", _PROBE, json.dumps(plan)], timeout_s=120
     )
@@ -154,7 +167,7 @@ def task(tmp_path_factory):
     )
     names = dict(
         network="saffron-cells",
-        critic_network="saffron-critic-net",
+        critic_network=session.CRITIC_NETWORK,
         volume=f"saffron-wt-{_SPEC_ID}",
         state=f"saffron-st-{_SPEC_ID}",
         container=f"saffron-cell-{_SPEC_ID}",
@@ -181,6 +194,7 @@ def task(tmp_path_factory):
         assert proxy_ip
         runtime.exec_(impl, ["sh", "-c", _LISTEN], timeout_s=30)
         runtime.exec_(impl, ["sh", "-c", f"echo x > {_MARKER}"], timeout_s=30)
+        runtime.exec_(impl, ["sh", "-c", _TAMPER], timeout_s=30)
         found = _probe(
             impl,
             [
@@ -189,9 +203,21 @@ def task(tmp_path_factory):
             ],
         )
         found |= _probe(impl, [["listener", "connect", [found["ip"], _PORT, 5]]])
-        # Controls on the implementer's side: its listener answers, its file exists.
+        impl_version = runtime.exec_(impl, ["python3", "--version"], timeout_s=30)
+        # Controls on the implementer's side: its listener answers, its file
+        # exists, and its `python3` lies.
         assert found["listener"] == "connected", found
         assert found["marker"] == "present", found
+        assert impl_version.stdout.strip() == _TAMPERED, impl_version
+        # What the bare image carries, so a cell's env is read as a difference.
+        bare = runtime.run_ephemeral(
+            repo_image.cell_tag(repo),
+            ["sh", "-c", f"python3 --version; python3 -c '{_ENV_NAMES}'"],
+            network=session.CRITIC_NETWORK,
+            env={},
+        )
+        assert bare.returncode == 0, bare.stderr
+        image_version, image_env = bare.stdout.strip().splitlines()
         yield {
             "spec": spec,
             "repo": repo,
@@ -202,7 +228,9 @@ def task(tmp_path_factory):
             "created": created,
             "impl_ip": found["ip"],
             "proxy_ip": proxy_ip,
-            "critic_network": names["critic_network"],
+            "critic_proxy": session.proxy_address(runtime.SUBNETS["critic"]),
+            "image_version": image_version,
+            "image_env": set(json.loads(image_env)),
         }
     finally:
         session.cell_down(
@@ -226,8 +254,8 @@ def _critic(task):
         spec=task["spec"],
         repo=task["repo"],
         mirror=task["mirror"],
-        network=task["critic_network"],
-        env=session.cell_env(session.critic_proxy_address(), task["policy"].thread_env),
+        network=session.CRITIC_NETWORK,
+        env=session.cell_env(task["critic_proxy"], task["policy"].thread_env),
         gates_dir=task["gates_dir"],
         patch=task["patch"],
         created=task["created"],
@@ -239,7 +267,7 @@ def test_the_critic_cell_and_the_implementer_cannot_reach_each_other(task):
     """Item 135. On the shared task network both directions connected
     (2026-09-30). The critic cell reaches the proxy and nothing of the
     implementer's, and the implementer reaches nothing of the critic's."""
-    critic_proxy = session.critic_proxy_address()
+    critic_proxy = task["critic_proxy"]
     port = proxy.PROXY_PORT
     with _critic(task) as critic:
         mine = _probe(critic, [["ip", "own_ip", [critic_proxy]]])["ip"]
@@ -276,41 +304,46 @@ def test_the_critic_cell_and_the_implementer_cannot_reach_each_other(task):
 
 
 def test_the_critic_cell_holds_the_token_alone_and_the_images_rootfs(task):
-    """Item 127. The critic cell carries `CLAUDE_CODE_OAUTH_TOKEN` and no host
-    `ANTHROPIC_API_KEY`, and a file the implementer wrote as root is absent."""
+    """Item 127. The critic cell's env is the bare image's plus what `cell_env`
+    puts there, the token among it. Nothing else arrives from the host. What
+    the implementer changed as root is absent."""
+    # Spelled out, not read off `cell_env`: a leak there would read as expected.
+    expected = {
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "NO_PROXY",
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        *task["policy"].thread_env,
+    }
     with _critic(task) as critic:
         seen = _probe(
             critic,
             [
+                ["names", "env_names", []],
                 ["token", "env", ["CLAUDE_CODE_OAUTH_TOKEN"]],
-                ["api_key", "env", ["ANTHROPIC_API_KEY"]],
-                ["mark", "env", ["SAFFRON_PROBE_MARK"]],
                 ["marker", "file", [_MARKER]],
                 ["outside", "connect", [_OUTSIDE, 443]],
             ],
         )
-    assert seen == {
-        "token": "present",
-        "api_key": "absent",
-        "mark": "present",
-        "marker": "absent",
-        "outside": seen["outside"],
-    }, seen
+        version = runtime.exec_(critic, ["python3", "--version"], timeout_s=30)
+    assert set(seen["names"]) - task["image_env"] == expected, seen
+    assert seen["token"] == "present", seen
+    assert seen["marker"] == "absent", seen
+    assert version.stdout.strip() == task["image_version"], version
     assert seen["outside"] != "connected", seen
 
 
 def test_the_gate_only_cell_holds_no_credential_and_reaches_nothing(task):
     """Item 131, through `_gate_cell_suite` as REVIEW calls it. Its gate reports
-    from inside: no credential and no proxy env, no route to either proxy leg
-    or outside, and none of the implementer's files. Its own listener is the
-    control."""
-    critic_proxy = session.critic_proxy_address()
+    from inside: the image's env plus the declared gate env alone, no route to
+    either proxy leg or outside, and none of the implementer's files. Its `tool`
+    is the image's `python3`, not the one the implementer swapped. Its own
+    listener is the control. It reaches no proxy, by design."""
+    critic_proxy = task["critic_proxy"]
     port = proxy.PROXY_PORT
     plan = [
-        ["token", "env", ["CLAUDE_CODE_OAUTH_TOKEN"]],
-        ["api_key", "env", ["ANTHROPIC_API_KEY"]],
-        ["https_proxy", "env", ["HTTPS_PROXY"]],
-        ["mark", "env", ["SAFFRON_PROBE_MARK"]],
+        ["names", "env_names", []],
         ["marker", "file", [_MARKER]],
         ["own", "connect", ["127.0.0.1", _PORT, 5]],
         ["proxy_cells_leg", "connect", [task["proxy_ip"], port]],
@@ -319,6 +352,7 @@ def test_the_gate_only_cell_holds_no_credential_and_reaches_nothing(task):
         ["outside", "connect", [_OUTSIDE, 443]],
     ]
     policy = task["policy"]
+    gate_env = {**policy.thread_env, "SAFFRON_PROBE_PLAN": json.dumps(plan)}
     suite = GateSuite(
         gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
         spec=task["spec"],
@@ -330,7 +364,7 @@ def test_the_gate_only_cell_holds_no_credential_and_reaches_nothing(task):
         repo=task["repo"],
         mirror=task["mirror"],
         gates_dir=task["gates_dir"],
-        thread_env={**policy.thread_env, "SAFFRON_PROBE_PLAN": json.dumps(plan)},
+        thread_env=gate_env,
         patch=task["patch"],
         suite=suite,
         baseline=SuiteRun(
@@ -340,15 +374,10 @@ def test_the_gate_only_cell_holds_no_credential_and_reaches_nothing(task):
         note=lambda *a: None,
     )
     (tests,) = [r for r in comparison.run.results if r.gate == "tests"]
-    assert tests.tool and tests.tool.startswith("Python 3"), tests
+    assert tests.tool == task["image_version"], tests
     seen = json.loads(base64.b64decode(tests.summary))
-    assert seen["mark"] == "present", seen
     assert seen["own"] == "connected", seen
-    assert {k: seen[k] for k in ("token", "api_key", "https_proxy", "marker")} == {
-        "token": "absent",
-        "api_key": "absent",
-        "https_proxy": "absent",
-        "marker": "absent",
-    }, seen
+    assert set(seen["names"]) - task["image_env"] == set(gate_env), seen
+    assert seen["marker"] == "absent", seen
     for target in ("proxy_cells_leg", "proxy_critic_leg", "implementer", "outside"):
         assert seen[target] != "connected", (target, seen)

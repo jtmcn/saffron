@@ -57,3 +57,6 @@ which is still open.
 `tests/test_review_cells.py` starts the cell as REVIEW does and probes from
 inside it. `uv run pytest -m cell tests/test_review_cells.py` passed, and
 the gate-only cell handed `CLAUDE_CODE_OAUTH_TOKEN` turned it red.
+
+The criterion above predates the Gate-only cell's own network. That cell has
+no proxy, so the test asserts it reaches nothing, the proxy included.
