@@ -208,9 +208,9 @@ and `SA-0173`. All of them are cited by symbol.
   `SpecWriterSession`. `mint` takes a `Candidate` and returns a task id.
   For an accepted group it mints, then opens the attempt, then attaches
   the run, and records the spec text last. `follow_up.Pooled` holds a
-  group and a reason. `follow_up.WRITER_SHARE` is 0.25. Any raise inside
-  `write_follow_ups` propagates out of it, a mirror read's `GitError`
-  included. `SA-0161` leaves it to this spec to catch.
+  group and a reason. `follow_up.WRITER_SHARE` is 0.25. A raise from `write` is
+  pooled. Any other raise inside `write_follow_ups` propagates out of it,
+  a mirror read's `GitError` included. `SA-0161` leaves it to this spec to catch.
 - From `SA-0173`: `run_stack_batch` takes `writer_usd` and `follow_ups`.
   It calls `follow_ups` once after its end review, with the batch's key and
   the `StackReview`.
@@ -534,14 +534,15 @@ Then come `C[1]`, `D` and `E`, each with `RuntimeError: record broke`.
 The output holds the line `follow-ups: stopped, RuntimeError: record
 broke`.
 
-The first round alone fails every build listed below. The second alone
-passes a group counted accepted at its mint, measured. It is there for
-the raise before a group's session. The prototype placed `A` to `E` on
-five distinct layers and files. The table above came after the first
-review, and is unmeasured. The re-review at `SA-0173`'s branch traced
-this list over it by hand, since `_stack_follow_ups` does not exist there.
-Every item fails the first round except one, which the list no longer
-holds. Pooling every group after the last accepted one equals the right
+The first round alone fails every build listed below but one. The groups
+past the count of mints pass it, and the second round fails them. The
+second alone passes a group counted accepted at its mint, measured. So
+the second round is there for that cut and for the raise before a
+group's session. The prototype placed `A` to `E` on five distinct layers
+and files. The table above came after the first review, and is
+unmeasured. The re-review at `SA-0173`'s branch traced this list over it
+by hand, since `_stack_follow_ups` does not exist there. It dropped one
+item. Pooling every group after the last accepted one equals the right
 build under `SA-0161`'s walk, so no witness can fail it.
 
 Last, it removes `out_dir` and calls a fresh callable with an empty
