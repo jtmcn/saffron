@@ -4621,13 +4621,13 @@ def test_a_stack_batch_closes_its_row_once_after_its_follow_ups_or_their_raise(
     batch_id_b = _latest_batch_id(ledger)
     assert ledger.batch_spend(batch_id_b) == 1.5
 
-    # C: ready at a budget of 1. `BUDGET`, and the row's own status matches.
+    # C: generation 0 drains, so only the follow-up's own stop can say `BUDGET`.
     rows_c = {"__follow_ups__": [{"id": "TE-75", "budget_usd": 40}]}
     doubles_c = StackDoubles(ledger, repo_id, rows_c, order=log)
     reason_c = run_stack_batch(
-        [_candidate("TE-74")],
+        [_candidate("TE-74", budget_usd=1)],
         ledger,
-        1.0,
+        30.0,
         None,
         doubles_c.runner,
         readiness_check=_ready,
@@ -4639,6 +4639,8 @@ def test_a_stack_batch_closes_its_row_once_after_its_follow_ups_or_their_raise(
         follow_ups=doubles_c.follow_ups,
     )
     assert reason_c == "BUDGET"
+    assert "runner:TE-74" in log
+    assert "runner:TE-75" not in log
     batch_id_c = _latest_batch_id(ledger)
     assert _batch_row(ledger, batch_id_c)["status"] == "BUDGET"
 

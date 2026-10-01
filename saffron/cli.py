@@ -621,7 +621,7 @@ def _stack_end_review(
     Every read below, and the review itself, run inside one guard. A raise
     from any of them is recorded as an `error` for every lens of every
     layer, through `_end_review_error_reviews`. That keeps the raise from
-    reaching `run_stack_batch`, which already closed its loop.
+    reaching `run_stack_batch`, whose row stays open until the follow-ups end.
     """
 
     def run(batch_key: str, reserve_usd: float, specs: Mapping[str, Spec]) -> object:
