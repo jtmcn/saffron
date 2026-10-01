@@ -679,9 +679,9 @@ def _stack_end_review(
 def _stack_finish(
     *, pinned: PinnedBase, ledger: Ledger, out_dir: Path
 ) -> Callable[[int, list[int]], object]:
-    """`run_stack_batch`'s `finish` callable (ADR 7). A raise from
-    `finish.commit_finish` is printed and swallowed here, so the night's
-    exit code stays its stop reason's rather than `main`'s `2`."""
+    """`run_stack_batch`'s `finish` callable (ADR 7). A `GitError` or
+    `ValueError` from `finish.commit_finish` is printed and swallowed here, so
+    the night's exit code stays its stop reason's. Any other raise reaches `main`."""
 
     def run_finish(batch_id: int, unrun: list[int]) -> object:
         workdir = out_dir / "finish" / str(batch_id) / "tree"

@@ -1,4 +1,4 @@
-"""The stack batch's finishing layer commit (ADR 7, SA-0171)."""
+"""The stack batch's finishing layer commit (ADR 7, SA-0151)."""
 
 from __future__ import annotations
 
@@ -311,6 +311,7 @@ def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_befor
         ".saffron/specs/done/x.md",
         "CLAUDE.md",
         ".saffron/specs/x.txt",
+        ".saffron/specs/x.md/../../CLAUDE.md",
     ]
     real_spec_text = stack.ledger.spec_text
 

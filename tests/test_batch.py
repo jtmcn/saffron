@@ -5346,7 +5346,7 @@ def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
 ):
     """`finish` runs once, after the follow-ups, while the batch row is open.
     It carries the task ids of every follow-up whose review never reached a
-    route (ADR 7, `SA-0171`). Driven across five nights: `UNTIL` mid
+    route (ADR 7, `SA-0151`). Driven across five nights: `UNTIL` mid
     follow-up, a drain with no follow-ups offered, a `BUDGET` stop before
     any candidate starts, and two drains with `follow_ups` then `end_review`
     left out."""
@@ -5354,8 +5354,13 @@ def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
 
     finish_calls: list[tuple[int, list[int]]] = []
     status_at_call: list[tuple[object, object]] = []
+    # Each night's id must be that night's own batch, as an `int`.
+    id_is_this_batch: list[bool] = []
 
     def finish(batch_id, unrun, /):
+        id_is_this_batch.append(
+            type(batch_id) is int and batch_id == _latest_batch_id(ledger)
+        )
         row = ledger._db.execute(
             "SELECT status, ended_at FROM batches WHERE batch_id = ?", (batch_id,)
         ).fetchone()
@@ -5546,3 +5551,4 @@ def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
     assert reason5 == "DRAINED"
     assert len(finish_calls) == 5
     assert finish_calls[4][1] == []
+    assert id_is_this_batch == [True] * 5

@@ -13,18 +13,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 from saffron.intake import discover_specs
-from saffron.ledger import Ledger
+from saffron.ledger import _REVISION_PATH, Ledger
 from saffron.repos import mirror as git_mirror
 from saffron.scheduler import RETIRED_DIRNAME
-
-# A text's own path, exactly: under `.saffron/specs/`, one segment, `.md`.
-# One pattern, so `.saffron/specs/done/x.md` is refused too (ADR 7).
-_SPEC_PATH_RE = re.compile(r"\A\.saffron/specs/[^/]+\.md\Z")
 
 
 def _checked(row) -> tuple[str, str]:
     path = row["path"]
-    if _SPEC_PATH_RE.match(path) is None:
+    # The writer's own pattern, so this last check is never looser than it.
+    if re.fullmatch(_REVISION_PATH, path) is None:
         raise ValueError(
             f"spec text path {path!r} is not a .md file directly in .saffron/specs/"
         )
@@ -81,11 +78,14 @@ def commit_finish(
             if found is not None:
                 found.rename(done_dir / found.name)
 
-        _run_git(workdir, "add", "-A")
-        unchanged = _run_git(workdir, "diff", "--cached", "--quiet")
+        git_mirror._git(workdir, "add", "-A")
+        # Its exit code is the answer, so it alone runs unchecked.
+        unchanged = git_mirror._run(
+            ["git", "-C", str(workdir), "diff", "--cached", "--quiet"]
+        )
         if unchanged.returncode == 0:
             return None
-        done = _run_git(
+        git_mirror._git(
             workdir,
             "-c",
             "user.email=saffron@localhost",
@@ -96,12 +96,6 @@ def commit_finish(
             "-m",
             f"saffron batch {batch_id}: finishing layer",
         )
-        if done.returncode != 0:
-            raise git_mirror.GitError(f"commit failed: {done.stderr.strip()[:200]}")
-        return _run_git(workdir, "rev-parse", "HEAD").stdout.strip()
+        return git_mirror._git(workdir, "rev-parse", "HEAD")
     finally:
         git_mirror.remove_worktree(mirror, workdir)
-
-
-def _run_git(cwd: Path, *args: str):
-    return git_mirror._run(["git", "-C", str(cwd), *args])

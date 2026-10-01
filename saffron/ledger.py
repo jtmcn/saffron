@@ -1429,7 +1429,7 @@ class Ledger:
         """One batch's own `stack_layers` rows, lowest position first, each
         joined to its task for `task_id`, `state`, `budget_usd`, `pr_url`,
         `branch` and `pushed_sha` (ADR 7, `saffron/finish.py`). `SA-0152`,
-        `SA-0167`, `SA-0170` and `SA-0174` read these same rows."""
+        `SA-0167`, `SA-0170` and `SA-0174` will read these same rows."""
         return list(
             self._db.execute(
                 """SELECT sl.position, sl.spec_id, sl.predecessor_key,

@@ -434,10 +434,10 @@ def run_stack_batch(
     of refusing (`sleep`, SA-0148). `review`, when given, runs first and can refuse, raise,
     or wait (`SpecReviewWait`, ADR 7), with `revise` run up to `MAX_REVISE_ROUNDS` times.
 
-    A candidate of the order is refused before its own call, when `depends_on` reaches a
-    spec that missed. `reserve_usd` and `writer_usd` hold back only the order's own checks.
-    `end_review` then `follow_ups` run once the order's loop returns, whatever its stop,
-    the follow-ups one generation up, only when it returned `DRAINED`. `finish` runs last, whether or not `end_review` ran, before the batch row closes."""
+    An order candidate whose `depends_on` reaches a missed spec is refused. `reserve_usd` and
+    `writer_usd` hold back only the order's checks. `end_review`, `follow_ups` (run one
+    generation up only on `DRAINED`) and then `finish` run before the row closes, unless one
+    of the first two raises."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     if follow_ups is not None and review is None:
