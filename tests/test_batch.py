@@ -409,6 +409,23 @@ def test_the_budget_gate_is_one_comparison_before_each_task(ledger, repo_id):
     batch_id = _latest_batch_id(ledger)
     assert _batch_row(ledger, batch_id)["status"] == "BUDGET"
 
+    # A candidate at exactly the budget runs, so any default hold stops it.
+    exact = [_candidate("TE-0002", budget_usd=5.0)]
+    exact_runner = FakeRunner(
+        [_outcome(state="READY_FOR_REVIEW", run_id=_spend(ledger, repo_id, 0.0))]
+    )
+    reason = run_batch(
+        exact,
+        ledger,
+        budget_usd=5.0,
+        until=None,
+        runner=exact_runner,
+        rescan=lambda: exact,
+        readiness_check=_ready,
+    )
+    assert reason == "DRAINED"
+    assert exact_runner.calls == exact
+
 
 def test_a_task_overshooting_its_own_budget_does_not_stop_the_batch(ledger, repo_id):
     overshooting = _candidate("TE-0001", budget_usd=5.0)
@@ -3951,8 +3968,8 @@ def test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task(ledger, r
 def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_share(
     ledger, repo_id
 ):
-    """`writer_usd` sits beside `reserve_usd`, never inside it (ADR 7's Money
-    paragraph). Both hold back the per-task check and the pre-revision check.
+    """`writer_usd` sits beside `reserve_usd`, never inside it (the stack-batch
+    design's section 3, Money). Both hold back the per-task check and the pre-revision check.
     `end_review` still keeps `reserve_usd` alone, and the batch row still
     records the whole budget given. `follow_ups` runs once, right after
     `end_review`, with its return, only when both are given."""
@@ -4016,9 +4033,6 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     assert follow_calls == [(str(batch_id), "stack-review-sentinel")]
     assert _batch_row(ledger, batch_id)["budget_usd"] == 20.0
 
-    # `end_review` given `reserve_usd` plus `writer_usd` fails the assertion
-    # above, and a shrunk `budget_usd` fails the one after it.
-
     # With `follow_ups` given but no `end_review`, `follow_ups` never runs,
     # and the lone over-budget candidate never reaches the runner either.
     lone_log: list = []
@@ -4028,18 +4042,19 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
         lone_follow.append((batch_key, stack_review))
         return []
 
-    reason2 = run_stack_batch(
-        [_candidate("SY-4", budget_usd=12.75)],
-        ledger,
-        20.0,
-        None,
-        _spending_runner(lone_log),
-        readiness_check=_ready,
-        reserve_usd=3.0,
-        writer_usd=4.5,
-        follow_ups=lone_follow_ups,
-    )
-    assert reason2 == "BUDGET"
+    for given in (lone_follow_ups, None):
+        reason2 = run_stack_batch(
+            [_candidate("SY-4", budget_usd=12.75)],
+            ledger,
+            20.0,
+            None,
+            _spending_runner(lone_log),
+            readiness_check=_ready,
+            reserve_usd=3.0,
+            writer_usd=4.5,
+            follow_ups=given,
+        )
+        assert reason2 == "BUDGET"
     assert lone_log == []
     assert lone_follow == []
 
@@ -4155,7 +4170,7 @@ def test_a_stack_batch_hands_its_end_review_each_revised_specs_latest_text(
     """`end_review`'s mapping reads a minted task's latest recorded text
     through `intake.parse_spec`, in place of the order's own queued `Spec`,
     for a spec that holds one. A spec whose latest text is no spec, or
-    whose task was never minted, keeps its queued `Spec`."""
+    whose minted task holds no text, keeps its queued `Spec`."""
     from saffron.batch import run_stack_batch
     from saffron.intake import parse_spec
 

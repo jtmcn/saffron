@@ -372,8 +372,8 @@ def run_stack_batch(
     clock: Callable[[], datetime] = datetime.now,
     emit: Callable[[str], None] = print,
     reserve_usd: float = 0.0,
-    # The spec writer's own share, held back beside `reserve_usd` (ADR 7's
-    # Money paragraph). `SA-0165` passes `--budget * WRITER_SHARE`.
+    # The spec writer's own share, held back beside `reserve_usd` (the
+    # stack-batch design's section 3, Money). `SA-0165` passes `--budget * WRITER_SHARE`.
     writer_usd: float = 0.0,
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
     # Runs once, right after `end_review`, only when both are given. Its
