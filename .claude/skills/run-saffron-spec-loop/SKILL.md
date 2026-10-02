@@ -433,7 +433,7 @@ For each finding id, record these four facts:
 - `recurred_in`: any of `cell-review`, `pr-spec-seat` and `pr-standards-seat`.
 - `item`: the backlog id it went to, if any.
 
-For the round, record `blocker_followed` and set `"schema": 2`. Each key says
+For the review round, record `blocker_followed` and set `"schema": 2`. Each key says
 whether a later stage found a blocker, or holds `null` for a stage that never
 ran. `cell_review` is the in-cell REVIEW. On a spec review round,
 `next_spec_round` is the next spec review and `pr_seats` is the first PR seat

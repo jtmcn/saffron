@@ -6,11 +6,15 @@ module holds no I/O, so the part that decides the result is the part with tests.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import re
 from dataclasses import dataclass
 
 CUTOFF = 0.5
+# The day after the pre-registration was written. A round.json carries
+# `saved_at` only from its merge, so an earlier merge excludes review rounds and admits none.
+STARTS = "2026-10-03T00:00:00+00:00"
 ENOUGH_NOISE = 40
 _Q2 = re.compile(
     r"earl:subject <urn:software-factory:jev:[^:]+:[^:]+:([^>]+)> ;\s*"
@@ -49,6 +53,14 @@ def noise_scores(ttl: str) -> dict[str, float]:
         fid: json.loads(json.loads(literal)).get("0", 0.0)
         for fid, literal in _Q2.findall(ttl)
     }
+
+
+def counts(round_json: str) -> bool:
+    """A review round counts when it was saved on or after `STARTS`."""
+    saved_at = json.loads(round_json).get("saved_at")
+    return saved_at is not None and dt.datetime.fromisoformat(
+        saved_at
+    ) >= dt.datetime.fromisoformat(STARTS)
 
 
 def round_notes(findings: str, labels: str, ttl: str | None) -> list[Note]:

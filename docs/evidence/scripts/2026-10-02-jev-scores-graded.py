@@ -2,7 +2,7 @@
 
 `usage: python <this>`
 
-Reads every round under `~/.saffron/batches/spec-loop/` that holds a `jev.ttl`,
+Reads every review round under `~/.saffron/batches/spec-loop/` that holds a `jev.ttl`,
 a `labels.json` and a `findings.json`. Read-only, and it makes no call.
 AUC is the chance a score ranks a positive case above a negative one.
 """
@@ -145,7 +145,7 @@ def per_round(rounds: list[dict[str, Any]]) -> None:
                 if r["kind"] == kind and isinstance(r[target], bool) and r["q6"] is not None
             ]
             if not rows:
-                print(f"{kind} vs {target}: no labelled rounds")
+                print(f"{kind} vs {target}: no labelled review rounds")
                 continue
             base = sum(r[target] for r in rows) / len(rows)
             brier = sum((r["q6"] - r[target]) ** 2 for r in rows) / len(rows)

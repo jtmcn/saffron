@@ -4,6 +4,7 @@ the loop."""
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -39,6 +40,7 @@ type: feature
 - [ ] it parses
 - [ ] it saves
 """
+STARTED = "2026-10-05T00:00:00+00:00"
 FINDING = {
     "severity": "blocker",
     "criterion": 1,
@@ -621,6 +623,24 @@ def test_noise_grades_only_schema_2_notes(monkeypatch, loop, capsys):
     assert "noise 0, caught 0" in capsys.readouterr().out
     _follow(base / "round-1", 2)
     assert _run(monkeypatch, "noise") == 0
+    assert "noise 0, caught 0" in capsys.readouterr().out
+    saved = base / "round-1" / "round.json"
+    saved.write_text(json.dumps({**json.loads(saved.read_text()), "saved_at": STARTED}))
+    assert _run(monkeypatch, "noise") == 0
     out = capsys.readouterr().out
     assert "noise 1, caught 0" in out
     assert "inconclusive" in out
+    assert _run(monkeypatch, "noise", "--count") == 0
+    assert capsys.readouterr().out == "noise notes 1\n"
+
+
+def test_a_review_round_records_when_it_was_saved_and_a_rescore_keeps_it(
+    monkeypatch, loop
+):
+    base = _two_rounds(monkeypatch, loop)
+    saved = base / "round-1" / "round.json"
+    doc = json.loads(saved.read_text())
+    assert dt.datetime.fromisoformat(doc["saved_at"]).tzinfo is not None
+    saved.write_text(json.dumps({**doc, "saved_at": STARTED}))
+    assert _review(monkeypatch, loop, "--round", "1") == 0
+    assert json.loads(saved.read_text())["saved_at"] == STARTED

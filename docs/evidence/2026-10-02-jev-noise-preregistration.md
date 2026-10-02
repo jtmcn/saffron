@@ -39,19 +39,26 @@ Both counts are required.
 
 ## 4. Which review rounds count
 
-A spec review or PR review round counts when its `labels.json` carries
-`"schema": 2`. Schema 2 exists only from the merge of this file, so every
-counted label postdates it. A cell review round never counts. A spec
-reviewed on both sides of the merge counts its schema-2 review rounds only.
-The labeller writes `labels.json` without reading `jev.ttl`. Nothing in the
-loop prints a score, so this rests on that rule alone.
+A spec review or PR review round counts when two things hold.
+
+- Its `round.json` carries a `saved_at` time on or after 2026-10-03 UTC. The
+  driver writes `saved_at` only from the merge of this file. It records when
+  the review round was saved, before Jev is called.
+- Its `labels.json` carries `"schema": 2`.
+
+A cell review round never counts. A spec reviewed on both sides of the merge
+counts its later review rounds only. The labeller writes `labels.json`
+without reading `jev.ttl`. Nothing in the loop prints a score, so this rests
+on that rule alone.
 
 ## 5. The scorer and the stopping rule
 
 `harness/jev_grade.py` is the scorer, and `driver.py noise` runs it over every
-review round on disk. Its tests pin each rule above. It runs once, on the
-first day it reports 40 noise notes or more, over every counted review round
-on disk that day. On 2026-12-31 it runs regardless. Under 40 noise notes it
+review round on disk. Its tests pin each rule above.
+`driver.py noise --count` prints the noise count alone, with no result, and
+is the only check of the stopping rule. The full `driver.py noise` runs once,
+on the first day the count reaches 40, over every counted review round on
+disk that day. On 2026-12-31 it runs regardless. Under 40 noise notes it
 reports `inconclusive`, and that decides nothing.
 
 ## What the result decides

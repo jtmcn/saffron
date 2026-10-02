@@ -86,3 +86,9 @@ def test_a_round_jev_never_scored_yields_its_notes_unscored():
     assert jg.round_notes(findings, labels, None) == [
         jg.Note("not-a-defect", "no-action", None)
     ]
+
+
+def test_a_review_round_counts_only_when_saved_on_or_after_the_start():
+    assert not jg.counts(json.dumps({"commit": "abc"}))
+    assert not jg.counts(json.dumps({"saved_at": "2026-10-02T23:59:59+00:00"}))
+    assert jg.counts(json.dumps({"saved_at": jg.STARTS}))

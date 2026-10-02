@@ -1371,7 +1371,10 @@ def cmd_noise(args) -> int:
         if directory.parent.name not in LABEL_LATER:
             continue
         labels, findings = directory / "labels.json", directory / "findings.json"
-        if not (labels.is_file() and findings.is_file()):
+        saved = directory / "round.json"
+        if not (labels.is_file() and findings.is_file() and saved.is_file()):
+            continue
+        if not jev_grade.counts(saved.read_text()):
             continue
         ttl = directory / "jev.ttl"
         notes += jev_grade.round_notes(
@@ -1379,10 +1382,13 @@ def cmd_noise(args) -> int:
             labels.read_text(),
             ttl.read_text() if ttl.is_file() else None,
         )
-    g = jev_grade.grade(notes)
+    grade = jev_grade.grade(notes)
+    if args.count:
+        print(f"noise notes {grade.noise}")
+        return 0
     print(
-        f"noise {g.noise}, caught {g.caught}, acted on {g.acted}, "
-        f"flagged {g.flagged_acted}: {g.verdict}"
+        f"noise {grade.noise}, caught {grade.caught}, acted on {grade.acted}, "
+        f"flagged {grade.flagged_acted}: {grade.verdict}"
     )
     return 0
 
@@ -1422,6 +1428,7 @@ def _jev_review(
             return _fail(f"no saved review round {number} at {base}")
         saved = json.loads((directory / "round.json").read_text())
         commit, since = saved["commit"], saved["since"]
+        saved_at = saved.get("saved_at")
         base_ref, merge_base = saved["base_ref"], saved["base"]
         reports = [p.read_text() for p in sorted(directory.glob("report-*.md"))]
     else:
@@ -1444,6 +1451,7 @@ def _jev_review(
             return _fail(f"{base_ref} has no merge base with {commit}: {exc}")
         since = _jev_since(prev, commit, merge_base, args.root) if prev else merge_base
         reports = [Path(p).read_text() for p in args.report]
+        saved_at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     try:
         findings = [f for text in reports for f in jev_observe.parse_block(text)]
     except jev_observe.BlockError as exc:
@@ -1467,6 +1475,8 @@ def _jev_review(
         (directory / f"report-{i}.md").write_text(text)
     (directory / "spec.md").write_text(spec_text)
     saved = {"commit": commit, "since": since, "base_ref": base_ref, "base": merge_base}
+    if saved_at is not None:
+        saved["saved_at"] = saved_at
     (directory / "round.json").write_text(json.dumps(saved) + "\n")
     (directory / "findings.json").write_text(jev_observe.dump_findings(pairs))
     return directory, jev_observe.ReviewRound(
@@ -3136,6 +3146,11 @@ def main() -> int:
     p.set_defaults(func=cmd_labels)
 
     p = sub.add_parser("noise", help="grade Jev's noise score on schema-2 review notes")
+    p.add_argument(
+        "--count",
+        action="store_true",
+        help="print only the noise count, so the stopping rule reveals no result",
+    )
     p.set_defaults(func=cmd_noise)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
