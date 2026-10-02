@@ -1,7 +1,7 @@
 ---
 id: b-ef334d
 title: Jev's noise score sorts a reviewer's notes, and its stop signal adds nothing over a blocker count
-status: open
+status: partial
 tier: 3
 filed: 2026-10-02
 specs: []
@@ -38,7 +38,10 @@ loop reads `jev.ttl`, so the one useful score helps nobody yet.
    stays.
 3. `labels.json` gives `pr_seats` a meaning a PR review round cannot answer
    from its own findings.
+4. The pre-registered measurement is scored, and its result is recorded here.
 
 ## Record
 
 - 2026-10-02: filed from the evidence record of the same date.
+- 2026-10-02: Q6 dropped, schema-2 labels defined and the pre-registration
+  proposed. Point 4 waits on the stopping rule.
