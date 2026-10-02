@@ -1,10 +1,11 @@
-"""The stack batch's finishing layer commit (ADR 7, SA-0151)."""
+"""The stack batch's finishing layer commit and its publish (ADR 7, SA-0151, SA-0167)."""
 
 from __future__ import annotations
 
 import json
 import re
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,210 @@ def _git(repo, *args):
 
 def _spec_md(spec_id: str, title: str) -> str:
     return f"---\nid: {spec_id}\ntitle: {title}\ntype: chore\n---\nBody.\n"
+
+
+def _isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The env `commit_finish`'s own fixture isolates git under, reused by
+    `publish_finish`'s tests so a hand push below finds no operator config."""
+    empty = tmp_path / "empty-home"
+    empty.mkdir()
+    monkeypatch.setenv("HOME", str(empty))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+
+
+def _refs(repo: Path) -> dict[str, str]:
+    out = _git(repo, "for-each-ref", "--format=%(objectname) %(refname)")
+    refs: dict[str, str] = {}
+    for line in out.splitlines():
+        sha, ref = line.split(" ", 1)
+        refs[ref] = sha
+    return refs
+
+
+def _stack(root: Path, count: int) -> SimpleNamespace:
+    """A linear stack of `count` layers (criterion 1 and 2's own fixture,
+    reused by `SA-0170`). A work repository on `trunk`, its bare remote and
+    its mirror. A `Ledger` whose tasks and layers are recorded top first,
+    out of both task id and position order.
+    """
+    origin = root / "origin"
+    origin.mkdir(parents=True)
+    _git(origin, "init", "-q", "-b", "trunk")
+    (origin / "a.py").write_text("a = 0\n")
+    _git(origin, "add", "-A")
+    _git(origin, "-c", "user.email=o@o", "-c", "user.name=O", "commit", "-qm", "base")
+
+    heads: dict[int, str] = {}
+    for n in range(1, count + 1):
+        branch = f"saffron/TE-{n}"
+        start = "trunk" if n == 1 else f"saffron/TE-{n - 1}"
+        _git(origin, "checkout", "-q", "-b", branch, start)
+        (origin / "a.py").write_text(f"a = {n}\n")
+        _git(origin, "add", "-A")
+        _git(
+            origin,
+            "-c",
+            "user.email=o@o",
+            "-c",
+            "user.name=O",
+            "commit",
+            "-qm",
+            branch,
+        )
+        heads[n] = _git(origin, "rev-parse", "HEAD")
+    _git(origin, "checkout", "-q", "trunk")
+
+    remote = root / "remote.git"
+    _git(root, "clone", "-q", "--bare", str(origin), str(remote))
+    mirror = root / "mirror.git"
+    _git(root, "clone", "-q", "--mirror", str(remote), str(mirror))
+
+    ledger_path = root / "ledger.db"
+    ledger = Ledger(ledger_path)
+    base_sha = _git(origin, "rev-parse", "trunk")
+    repo_id = ledger.upsert_repo(
+        "r", "https://example.invalid/o/r.git", str(mirror), policy_sha=None
+    )
+    batch_id = ledger.create_batch(100.0)
+
+    task_ids: dict[int, int] = {}
+    for n in range(count, 0, -1):
+        spec_id = f"TE-{n}"
+        run_id = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_id)
+        task_id = ledger.create_task(
+            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+        )
+        task_ids[n] = task_id
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            f"saffron/{spec_id}",
+            heads[n],
+            f"https://github.com/o/r/pull/{100 + n}",
+        )
+    for n in range(count, 0, -1):
+        ledger.record_stack_layer(
+            task_ids[n],
+            position=n,
+            predecessor_task_id=task_ids[n - 1] if n > 1 else None,
+            generation=0,
+        )
+
+    layers = [
+        {
+            "position": n,
+            "spec_id": f"TE-{n}",
+            "branch": f"saffron/TE-{n}",
+            "head": heads[n],
+            "pr_url": f"https://github.com/o/r/pull/{100 + n}",
+            "task_id": task_ids[n],
+        }
+        for n in range(1, count + 1)
+    ]
+
+    return SimpleNamespace(
+        root=root,
+        origin=origin,
+        remote=remote,
+        mirror=mirror,
+        ledger=ledger,
+        ledger_path=ledger_path,
+        batch_id=batch_id,
+        layers=layers,
+        url=str(remote),
+        slug="o/r",
+    )
+
+
+def _finishing_commit(mirror: Path, parent: str) -> str:
+    tree = _git(mirror, "rev-parse", f"{parent}^{{tree}}")
+    return _git(
+        mirror,
+        "-c",
+        "user.email=saffron@localhost",
+        "-c",
+        "user.name=Saffron",
+        "commit-tree",
+        tree,
+        "-p",
+        parent,
+        "-m",
+        "finish",
+    )
+
+
+def _hand_push(remote: Path, branch: str, dest: Path) -> None:
+    """Clone `remote` at `branch`, commit an intruder's file, and push it
+    back. This is the moved-head half of criterion 2's escalation table."""
+    _git(dest.parent, "clone", "-q", "-b", branch, str(remote), str(dest))
+    (dest / "intruder.txt").write_text("hand pushed\n")
+    _git(dest, "add", "-A")
+    _git(
+        dest, "-c", "user.email=h@h", "-c", "user.name=H", "commit", "-qm", "hand push"
+    )
+    _git(dest, "push", "-q", "origin", branch)
+
+
+def _seed_finish_branch(
+    remote: Path, batch_id: int, head_branch: str, dest: Path
+) -> None:
+    """Pushes `saffron/batch-<batch_id>-finish` to `remote` at `head_branch`'s
+    own head, standing in for an earlier finish the lease must refuse."""
+    _git(dest.parent, "clone", "-q", "-b", head_branch, str(remote), str(dest))
+    _git(
+        dest, "push", "-q", "origin", f"HEAD:refs/heads/saffron/batch-{batch_id}-finish"
+    )
+
+
+class _FakeGh:
+    """Answers `pr view <url> --json baseRefName` from `bases`, and `pr
+    create` with `create`, recording every call it is given in order."""
+
+    def __init__(
+        self,
+        bases: dict[str, str],
+        *,
+        create: tuple[int, str, str] = (
+            0,
+            "https://github.com/o/r/pull/200\n",
+            "",
+        ),
+        view_existing: tuple[int, str, str] | None = None,
+    ) -> None:
+        self.bases = bases
+        self.create = create
+        self.view_existing = view_existing
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        if argv[:3] == ["gh", "pr", "view"] and "baseRefName" in argv:
+            base = self.bases.get(argv[3])
+            if base is None:
+                return subprocess.CompletedProcess(argv, 1, "", "no such pull request")
+            return subprocess.CompletedProcess(argv, 0, base + "\n", "")
+        if argv[:3] == ["gh", "pr", "create"]:
+            code, out, err = self.create
+            return subprocess.CompletedProcess(argv, code, out, err)
+        if argv[:3] == ["gh", "pr", "view"]:
+            if self.view_existing is None:
+                return subprocess.CompletedProcess(argv, 1, "", "no such pull request")
+            code, out, err = self.view_existing
+            return subprocess.CompletedProcess(argv, code, out, err)
+        if argv[:3] == ["gh", "pr", "ready"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        raise AssertionError(f"unexpected gh call: {argv}")
+
+
+def _bases(layers: list[dict]) -> dict[str, str]:
+    """Each layer's own pull request answered against its predecessor's
+    branch, or `trunk` for the bottom layer."""
+    return {
+        layer["pr_url"]: (layers[i - 1]["branch"] if i > 0 else "trunk")
+        for i, layer in enumerate(layers)
+    }
 
 
 def _qual(
@@ -1019,3 +1224,473 @@ def test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_
     write_findings(ledger, empty_batch, [], empty_dest)
     empty_data = json.loads(empty_dest.read_text())
     assert empty_data == {"batch": empty_batch, "findings": [], "follow_ups": []}
+
+
+def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
+    tmp_path, monkeypatch
+):
+    from saffron.finish import PUSHED, publish_finish
+    from saffron.repos import mirror as git_mirror
+
+    _isolate_git(tmp_path, monkeypatch)
+
+    def _run(count: int) -> None:
+        s = _stack(tmp_path / f"stack-{count}", count)
+        top = s.layers[-1]
+        sha = _finishing_commit(s.mirror, top["head"])
+        branch = f"saffron/batch-{s.batch_id}-finish"
+        ref = f"refs/heads/saffron-finish/{s.batch_id}"
+        gh = _FakeGh(_bases(s.layers))
+        verify_calls: list[tuple[str, str]] = []
+
+        def verify(sha_arg: str, base_arg: str) -> int:
+            verify_calls.append((sha_arg, base_arg))
+            assert git_mirror._git(s.mirror, "rev-parse", ref) == sha_arg
+            return 0
+
+        before_remote = _refs(s.remote)
+        before_mirror = _refs(s.mirror)
+        workdir = tmp_path / f"push-{count}"
+        lines = publish_finish(
+            s.ledger,
+            s.batch_id,
+            sha,
+            mirror=s.mirror,
+            url=s.url,
+            slug=s.slug,
+            verify=verify,
+            gh=gh,
+            workdir=workdir,
+        )
+
+        assert verify_calls == [(sha, top["head"])]
+
+        after_remote = dict(before_remote)
+        after_remote[f"refs/heads/{branch}"] = sha
+        assert _refs(s.remote) == after_remote
+        assert _refs(s.mirror) == before_mirror
+        assert len(_git(s.mirror, "worktree", "list").splitlines()) == 1
+
+        fresh = Ledger(s.ledger_path)
+        rows = {row["spec_id"]: row for row in fresh.stack_layers(s.batch_id)}
+        for layer in s.layers:
+            assert rows[layer["spec_id"]]["pushed_sha"] == layer["head"]
+
+        expected_calls = [
+            [
+                "gh",
+                "pr",
+                "view",
+                layer["pr_url"],
+                "--json",
+                "baseRefName",
+                "--jq",
+                ".baseRefName",
+            ]
+            for layer in s.layers
+        ] + [
+            [
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                s.slug,
+                "--draft",
+                "--base",
+                top["branch"],
+                "--head",
+                branch,
+                "--title",
+                f"saffron batch {s.batch_id}: finishing layer",
+                "--body-file",
+                str(workdir.parent / "pr-body.md"),
+            ]
+        ]
+        assert gh.calls == expected_calls
+        assert str(s.batch_id) in (workdir.parent / "pr-body.md").read_text()
+
+        finish_row = fresh.stack_finish(s.batch_id)
+        assert finish_row is not None
+        assert finish_row["branch"] == branch
+        assert finish_row["head_sha"] == sha
+        assert finish_row["pr_url"] == "https://github.com/o/r/pull/200"
+        assert fresh.stack_finish(s.batch_id + 1000) is None
+
+        # The literal text, not the symbol: `SA-0170` decides a line is
+        # pushed by its exact spelling, not by importing `PUSHED` itself.
+        assert PUSHED == "pushed "
+        assert lines == [
+            f"pushed {sha[:12]} to {branch}, draft pull request "
+            "https://github.com/o/r/pull/200"
+        ]
+        assert lines[0].startswith("pushed ")
+
+    _run(3)
+    _run(1)
+
+    # The worktree's removal raises after the push returns, so the pushed
+    # line comes first and a second line names the leftover worktree.
+    s = _stack(tmp_path / "stack-worktree-raises", 3)
+    top = s.layers[-1]
+    sha = _finishing_commit(s.mirror, top["head"])
+    branch = f"saffron/batch-{s.batch_id}-finish"
+    gh = _FakeGh(_bases(s.layers))
+    real_remove = git_mirror.remove_worktree
+
+    def _raising_remove(mirror: Path, dest: Path) -> None:
+        real_remove(mirror, dest)
+        raise git_mirror.GitError("busy")
+
+    workdir = tmp_path / "push-worktree-raises"
+    with monkeypatch.context() as m:
+        m.setattr(git_mirror, "remove_worktree", _raising_remove)
+        lines = publish_finish(
+            s.ledger,
+            s.batch_id,
+            sha,
+            mirror=s.mirror,
+            url=s.url,
+            slug=s.slug,
+            verify=lambda sha_arg, base_arg: 0,
+            gh=gh,
+            workdir=workdir,
+        )
+    assert lines == [
+        f"pushed {sha[:12]} to {branch}, draft pull request "
+        "https://github.com/o/r/pull/200",
+        f"worktree left at {workdir}: GitError: busy",
+    ]
+    fresh = Ledger(s.ledger_path)
+    row = fresh.stack_finish(s.batch_id)
+    assert row is not None
+    assert row["branch"] == branch
+    assert row["head_sha"] == sha
+    assert row["pr_url"] == "https://github.com/o/r/pull/200"
+
+    # `gh` fails to open a pull request, and the fallback `pr view` finds
+    # none either, so `open_draft_pr`'s own `PackageError` propagates.
+    s = _stack(tmp_path / "stack-gh-fails", 3)
+    top = s.layers[-1]
+    sha = _finishing_commit(s.mirror, top["head"])
+    branch = f"saffron/batch-{s.batch_id}-finish"
+    gh = _FakeGh(
+        _bases(s.layers),
+        create=(1, "", "denied"),
+        view_existing=(1, "", "still denied"),
+    )
+    from saffron.phases.package import PackageError
+
+    with pytest.raises(PackageError):
+        publish_finish(
+            s.ledger,
+            s.batch_id,
+            sha,
+            mirror=s.mirror,
+            url=s.url,
+            slug=s.slug,
+            verify=lambda sha_arg, base_arg: 0,
+            gh=gh,
+            workdir=tmp_path / "push-gh-fails",
+        )
+    assert _refs(s.remote)[f"refs/heads/{branch}"] == sha
+    fresh = Ledger(s.ledger_path)
+    row = fresh.stack_finish(s.batch_id)
+    assert row is not None
+    assert row["branch"] == branch
+    assert row["head_sha"] == sha
+    assert row["pr_url"] is None
+    assert len(_git(s.mirror, "worktree", "list").splitlines()) == 1
+
+
+def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
+    from saffron.cell.runtime import CellRuntimeError
+    from saffron.finish import ESCALATE, publish_finish
+    from saffron.phases import package as package_phase
+
+    # Pinned once here: every case below checks the literal text instead,
+    # so a change to this constant cannot move expectation and output together.
+    assert ESCALATE == "escalate: "
+
+    _isolate_git(tmp_path, monkeypatch)
+
+    def _fresh(name: str) -> tuple[SimpleNamespace, str, dict]:
+        s = _stack(tmp_path / name, 3)
+        top = s.layers[-1]
+        sha = _finishing_commit(s.mirror, top["head"])
+        return s, sha, top
+
+    def _assert_untouched(
+        s: SimpleNamespace, before_remote: dict, before_mirror: dict
+    ) -> None:
+        assert _refs(s.remote) == before_remote
+        assert _refs(s.mirror) == before_mirror
+        assert len(_git(s.mirror, "worktree", "list").splitlines()) == 1
+        fresh = Ledger(s.ledger_path)
+        rows = {row["spec_id"]: row for row in fresh.stack_layers(s.batch_id)}
+        for layer in s.layers:
+            assert rows[layer["spec_id"]]["pushed_sha"] == layer["head"]
+        assert fresh.stack_finish(s.batch_id) is None
+
+    def _run_case(
+        name,
+        *,
+        verify,
+        wrong_base_fn=None,
+        missing_base_specs=(),
+        hand_push_branch=None,
+        seed_finish=False,
+        expected_prefix_fn,
+        expected_pr_view_count,
+        expected_line_fn=None,
+    ):
+        s, sha, top = _fresh(name)
+        branch = f"saffron/batch-{s.batch_id}-finish"
+        if hand_push_branch is not None:
+            _hand_push(s.remote, hand_push_branch, tmp_path / f"{name}-hand")
+        if seed_finish:
+            _seed_finish_branch(
+                s.remote, s.batch_id, top["branch"], tmp_path / f"{name}-seed"
+            )
+        bases = _bases(s.layers)
+        if wrong_base_fn is not None:
+            bases.update(wrong_base_fn(s.layers))
+        for spec_id in missing_base_specs:
+            for layer in s.layers:
+                if layer["spec_id"] == spec_id:
+                    bases.pop(layer["pr_url"], None)
+        gh = _FakeGh(bases)
+        before_remote = _refs(s.remote)
+        before_mirror = _refs(s.mirror)
+        verify_calls: list[tuple[str, str]] = []
+
+        def _verify_wrap(sha_arg: str, base_arg: str) -> int:
+            verify_calls.append((sha_arg, base_arg))
+            return verify(sha_arg, base_arg)
+
+        lines = publish_finish(
+            s.ledger,
+            s.batch_id,
+            sha,
+            mirror=s.mirror,
+            url=s.url,
+            slug=s.slug,
+            verify=_verify_wrap,
+            gh=gh,
+            workdir=tmp_path / f"{name}-push",
+        )
+        expected_prefix = expected_prefix_fn(s, branch)
+        assert len(lines) == 1
+        # The literal text, not the symbol: an escalation is read by its
+        # exact spelling, never by re-importing `ESCALATE` itself.
+        assert lines[0].startswith("escalate: ")
+        assert lines[0].startswith(expected_prefix)
+        if expected_line_fn is not None:
+            assert lines[0] == expected_line_fn(s, branch)
+        assert verify_calls == [(sha, top["head"])]
+        assert len(gh.calls) == expected_pr_view_count
+        _assert_untouched(s, before_remote, before_mirror)
+
+    _run_case(
+        "red",
+        verify=lambda sha_arg, base_arg: 2,
+        expected_prefix_fn=lambda s, branch: "escalate: red suite, 2 new failure",
+        # The exact word, plural at 2: pins the suffix `_pull` picks, not
+        # the prefix the two counts share.
+        expected_line_fn=lambda s, branch: "escalate: red suite, 2 new failures",
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "red-one",
+        verify=lambda sha_arg, base_arg: 1,
+        expected_prefix_fn=lambda s, branch: "escalate: red suite, 1 new failure",
+        expected_line_fn=lambda s, branch: "escalate: red suite, 1 new failure",
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "suite-broke",
+        verify=lambda sha_arg, base_arg: (_ for _ in ()).throw(
+            package_phase.PackageError("boom")
+        ),
+        expected_prefix_fn=(
+            lambda s, branch: "escalate: the finishing suite did not finish"
+        ),
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "cell-broke",
+        verify=lambda sha_arg, base_arg: (_ for _ in ()).throw(
+            CellRuntimeError("boom")
+        ),
+        expected_prefix_fn=(
+            lambda s, branch: "escalate: the finishing suite did not finish"
+        ),
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "red-and-moved",
+        verify=lambda sha_arg, base_arg: 2,
+        hand_push_branch="saffron/TE-2",
+        expected_prefix_fn=lambda s, branch: "escalate: red suite, 2 new failure",
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "bottom-moved",
+        verify=lambda sha_arg, base_arg: 0,
+        hand_push_branch="saffron/TE-1",
+        expected_prefix_fn=lambda s, branch: "escalate: saffron/TE-1 is at",
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "middle-moved",
+        verify=lambda sha_arg, base_arg: 0,
+        hand_push_branch="saffron/TE-2",
+        expected_prefix_fn=lambda s, branch: "escalate: saffron/TE-2 is at",
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "top-moved",
+        verify=lambda sha_arg, base_arg: 0,
+        hand_push_branch="saffron/TE-3",
+        expected_prefix_fn=lambda s, branch: "escalate: saffron/TE-3 is at",
+        expected_pr_view_count=0,
+    )
+    _run_case(
+        "bottom-base",
+        verify=lambda sha_arg, base_arg: 0,
+        wrong_base_fn=lambda layers: {layers[0]["pr_url"]: "saffron/TE-9"},
+        expected_prefix_fn=lambda s, branch: (
+            "escalate: TE-1's pull request targets saffron/TE-9, not trunk"
+        ),
+        expected_pr_view_count=1,
+    )
+    _run_case(
+        "middle-base",
+        verify=lambda sha_arg, base_arg: 0,
+        wrong_base_fn=lambda layers: {layers[1]["pr_url"]: "trunk"},
+        expected_prefix_fn=lambda s, branch: (
+            "escalate: TE-2's pull request targets trunk, not saffron/TE-1"
+        ),
+        expected_pr_view_count=2,
+    )
+    _run_case(
+        "top-unread",
+        verify=lambda sha_arg, base_arg: 0,
+        missing_base_specs=("TE-3",),
+        expected_prefix_fn=lambda s, branch: (
+            "escalate: TE-3's pull request targets nothing readable, not saffron/TE-2"
+        ),
+        expected_pr_view_count=3,
+    )
+    _run_case(
+        "finish-exists",
+        verify=lambda sha_arg, base_arg: 0,
+        seed_finish=True,
+        expected_prefix_fn=lambda s, branch: f"escalate: {branch} already exists",
+        expected_pr_view_count=3,
+    )
+
+    # `push_with_lease` itself fails for a reason that is not the lease, so
+    # its own `PackageError` propagates with nothing pushed or recorded.
+    s, sha, top = _fresh("push-denied")
+    gh = _FakeGh(_bases(s.layers))
+    before_remote = _refs(s.remote)
+    before_mirror = _refs(s.mirror)
+    verify_calls: list[tuple[str, str]] = []
+
+    def _verify(sha_arg: str, base_arg: str) -> int:
+        verify_calls.append((sha_arg, base_arg))
+        return 0
+
+    with monkeypatch.context() as m:
+        m.setattr(
+            package_phase,
+            "push_with_lease",
+            lambda *a, **k: (_ for _ in ()).throw(
+                package_phase.PackageError("push failed: denied")
+            ),
+        )
+        with pytest.raises(package_phase.PackageError, match="denied"):
+            publish_finish(
+                s.ledger,
+                s.batch_id,
+                sha,
+                mirror=s.mirror,
+                url=s.url,
+                slug=s.slug,
+                verify=_verify,
+                gh=gh,
+                workdir=tmp_path / "push-denied-push",
+            )
+    assert verify_calls == [(sha, top["head"])]
+    assert len(gh.calls) == 3
+    _assert_untouched(s, before_remote, before_mirror)
+
+
+def _file_diff(path: str, added: list[str]) -> str:
+    hunk = "\n".join(f"+{line}" for line in added)
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        "index 1111111..2222222 100644\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        f"@@ -1,0 +1,{len(added)} @@\n"
+        f"{hunk}\n"
+    )
+
+
+def test_the_finishing_suite_passes_the_spec_directory_and_fails_every_other_path():
+    from saffron.finish import FINISH_TOUCHES, finish_suite
+    from saffron.gates.suite import GateSuite
+    from saffron.repos.policy import load_policy
+    from tests.test_suite import _Tree
+
+    repo_root = Path(__file__).resolve().parents[1]
+    policy, _policy_sha = load_policy(repo_root)
+    assert policy.protected
+    assert policy.integrity.suppressions
+
+    spec, finishing_policy = finish_suite(policy)
+    assert spec.type == "chore"
+    assert spec.touches == list(FINISH_TOUCHES)
+    assert spec.forbidden == []
+    assert spec.acceptance == []
+
+    expected = policy.model_dump()
+    expected["protected"] = []
+    expected["integrity"]["suppressions"] = []
+    assert finishing_policy.model_dump() == expected
+
+    token = policy.integrity.suppressions[0]
+    suite = GateSuite(gates={}, spec=spec, policy=finishing_policy, diff_base="base")
+    baseline = suite.baseline(_Tree())
+
+    def _comparison(extra: tuple[str, list[str]] | None):
+        files = [
+            (".saffron/specs/example.md", [f"See {token} for its own context."]),
+            (".saffron/specs/done/retired.md", ["Retired."]),
+        ]
+        if extra is not None:
+            files.append(extra)
+        changed = [path for path, _ in files]
+        diff = "".join(_file_diff(path, lines) for path, lines in files)
+        return suite.against(_Tree(changed=changed, patch=diff), baseline)
+
+    base_comparison = _comparison(None)
+    assert base_comparison.aborted == ()
+    assert base_comparison.drift == ()
+    assert base_comparison.new_failures == ()
+
+    for extra_path in (
+        ".saffron/policy.yaml",
+        ".saffron/specs/sub/x.md",
+        ".saffron/specs/x.txt",
+        "CLAUDE.md",
+        "docs/adr/0008-x.md",
+    ):
+        comparison = _comparison((extra_path, ["an extra, undeclared line"]))
+        assert comparison.aborted == ()
+        assert comparison.drift == ()
+        files_hit = {nf.failure.file for nf in comparison.new_failures}
+        assert files_hit == {extra_path}
+        codes_hit = {nf.failure.code for nf in comparison.new_failures}
+        assert "out-of-scope" in codes_hit
