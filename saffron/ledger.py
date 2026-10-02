@@ -861,8 +861,8 @@ class Ledger:
             )
             return None
         if fact.kind == "stack_finish":
-            # Keyed on the fact's own `batch_key`, not the run's.
-            # A re-fold onto another batch's run still files it correctly.
+            # Keyed on the fact's own `batch_key`, not the run's, so a re-fold
+            # that hangs the task on another batch's run keeps this batch's row.
             self._db.execute(
                 "INSERT OR REPLACE INTO stack_finishes "
                 "(batch_key, task_key, branch, head_sha, pr_url) "

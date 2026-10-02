@@ -1625,7 +1625,7 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
         finally:
             reader.close()
 
-    # 1.
+    # A first write commits a row a second ledger reads.
     writer.record_stack_finish(
         b1, branch=f"saffron/batch-{b1}-finish", head_sha="a" * 40
     )
@@ -1635,7 +1635,7 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     assert row["head_sha"] == "a" * 40
     assert row["pr_url"] is None
 
-    # 2.
+    # A second write replaces the row whole.
     writer.record_stack_finish(
         b1,
         branch=f"saffron/batch-{b1}-finish-2",
@@ -1647,7 +1647,7 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     assert row["head_sha"] == "b" * 40
     assert row["pr_url"] == "https://github.com/o/r/pull/200"
 
-    # 3.
+    # A URL returns to None, so no column keeps its old value.
     writer.record_stack_finish(
         b1, branch=f"saffron/batch-{b1}-finish", head_sha="c" * 40
     )
@@ -1656,7 +1656,7 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     assert row["head_sha"] == "c" * 40
     assert row["pr_url"] is None
 
-    # 4.
+    # Another batch gets its own row, and b1's stays.
     writer.record_stack_finish(
         b2,
         branch=f"saffron/batch-{b2}-finish",
@@ -1670,25 +1670,25 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     row_b1 = read(b1)
     assert row_b1["head_sha"] == "c" * 40
 
-    # 5.
+    # Each row is filed under its batch's top layer.
     rows = _raw_stack_finishes(path)
     assert [(r[0], r[1]) for r in rows] == [
         (str(b1), keys["TE-3"]),
         (str(b2), keys["TE-4"]),
     ]
 
-    # 6.
+    # A batch with no row, and an unknown id, read None.
     assert read(b3) is None
     assert read(999) is None
 
-    # 7.
+    # No layer means no row and no fact.
     with pytest.raises(ValueError, match="no stack layer"):
         writer.record_stack_finish(b3, branch="x", head_sha="e" * 40)
     with pytest.raises(ValueError, match="no stack layer"):
         writer.record_stack_finish(999, branch="x", head_sha="e" * 40)
     assert len(_raw_stack_finishes(path)) == 2
 
-    # 8.
+    # The facts sit under the top layers alone.
     for spec_id in ("TE-1", "TE-2"):
         facts = [f for f in record.read(keys[spec_id]) if f.kind == "stack_finish"]
         assert facts == []
@@ -1701,7 +1701,7 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     assert [f.payload["head_sha"] for f in te3_facts] == ["a" * 40, "b" * 40, "c" * 40]
     assert te4_facts[0].payload["head_sha"] == "d" * 40
 
-    # 9.
+    # The record rebuilds the rows, and an empty fold removes them.
     fresh = Ledger(tmp_path / "fresh.db")
     fold(record, fresh)
     assert _raw_stack_finishes(tmp_path / "fresh.db") == _raw_stack_finishes(path)
@@ -1711,7 +1711,11 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     assert fresh.stack_finish(b1) is None
     fresh_b2_row = fresh.stack_finish(b2)
     assert fresh_b2_row is not None
-    assert fresh_b2_row["head_sha"] == "d" * 40
+    assert tuple(fresh_b2_row[c] for c in ("branch", "head_sha", "pr_url")) == (
+        f"saffron/batch-{b2}-finish",
+        "d" * 40,
+        "https://github.com/o/r/pull/201",
+    )
     fresh.close()
 
     writer.close()
@@ -1726,7 +1730,11 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     )
     reopened_row = reopened.stack_finish(b2)
     assert reopened_row is not None
-    assert reopened_row["head_sha"] == "e" * 40
+    assert tuple(reopened_row[c] for c in ("branch", "head_sha", "pr_url")) == (
+        f"saffron/batch-{b2}-finish-2",
+        "e" * 40,
+        None,
+    )
     assert reopened.stack_finish(b1) is None
     last_te4_fact = [f for f in record.read(keys["TE-4"]) if f.kind == "stack_finish"][
         -1
@@ -1738,5 +1746,9 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     fold(record, third)
     third_row = third.stack_finish(b2)
     assert third_row is not None
-    assert third_row["head_sha"] == "e" * 40
+    assert tuple(third_row[c] for c in ("branch", "head_sha", "pr_url")) == (
+        f"saffron/batch-{b2}-finish-2",
+        "e" * 40,
+        None,
+    )
     third.close()
