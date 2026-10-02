@@ -1,14 +1,15 @@
 ---
 id: b-d4e015
 title: 'The idle bound kills a PLAN session that is still writing, and the ledger reads $0.00'
-status: open
+status: done
+closed: 2026-10-02
 tier: 1
 filed: 2026-10-02
 specs: [SA-0167]
-prs: [638]
+prs: [638, 642]
 commits: []
 cites: [§5.1, §5.3]
-related: [b-4c5dc7]
+related: [b-4c5dc7, b-209696]
 ---
 
 ## Problem
@@ -40,3 +41,7 @@ reached.
 ## Record
 
 - 2026-10-02: filed from the spec loop's run 25.
+- 2026-10-02: done in #642. The runner asks the SDK for partial messages and
+  emits a `progress` event at most once a minute. Measured live, the base
+  runner was silent for 47 s while one reply streamed. The cost half moved to
+  b-209696.

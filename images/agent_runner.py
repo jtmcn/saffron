@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +44,10 @@ _STEP_USAGE_KEYS = (
 # message_id, each reporting the same usage. Module state on purpose: one
 # runner process is one run_agent call, so this outlives nothing it shouldn't.
 _seen_assistant_message_ids: set[str] = set()
+
+# A whole message is silent until it lands, so the host's idle bound killed a
+# PLAN still writing one (b-d4e015). Deltas show tokens flowing, throttled.
+_PROGRESS_EVERY_S = 60.0
 
 # Whether `query()` yielded a message this session: tells a never-started session
 # apart from one that ran and produced nothing usable (reset in `main()`).
@@ -117,6 +123,10 @@ def events(message: Any) -> list[dict[str, Any]]:
                 "resets_at": getattr(info, "resets_at", None),
             }
         ]
+    # A partial message: the raw API stream event, sent only for its liveness.
+    if hasattr(message, "event") and hasattr(message, "uuid"):
+        raw = message.event if isinstance(message.event, dict) else {}
+        return [{"type": "progress", "kind": str(raw.get("type", "unknown"))}]
     # Result first: it also carries `subtype`, which every system message has.
     if hasattr(message, "num_turns") and hasattr(message, "session_id"):
         event = {
@@ -169,6 +179,7 @@ async def _run(request: dict[str, Any]) -> int:
     from claude_agent_sdk import ClaudeAgentOptions, query
 
     options = dict(request.get("options") or {})
+    options["include_partial_messages"] = True
     if request.get("resume"):
         options["resume"] = request["resume"]
 
@@ -180,12 +191,18 @@ async def _run(request: dict[str, Any]) -> int:
         options["system_prompt"] = {"type": "file", "path": prompt_path}
 
     saw_result = False
+    last_progress = -math.inf
     try:
         async for message in query(
             prompt=request["prompt"], options=ClaudeAgentOptions(**options)
         ):
             _query_yielded = True
             for event in events(message):
+                if event["type"] == "progress":
+                    now = time.monotonic()
+                    if now - last_progress < _PROGRESS_EVERY_S:
+                        continue
+                    last_progress = now
                 _emit(event)
                 saw_result = saw_result or event["type"] == "result"
     finally:
