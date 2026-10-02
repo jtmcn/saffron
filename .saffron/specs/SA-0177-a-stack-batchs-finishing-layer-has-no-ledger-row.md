@@ -63,9 +63,9 @@ acceptance:
       batch with no row. A fold of the record into a fresh ledger rebuilds
       every row, and so does a fold into the ledger that wrote them.
       `fold_task` with no facts removes the row its key filed. A ledger file
-      whose table was dropped gains it again on open. The witness writes
-      through one `Ledger` and reads through a fresh `Ledger` on the same
-      path, with the writer still open. It drives a three-layer batch whose
+      whose table was dropped gains it again on open. Until its last step
+      the witness writes through one `Ledger` and reads through a fresh
+      `Ledger` on the same path, with the writer still open. It drives a three-layer batch whose
       top layer is neither first nor last by task id or by recording. It
       writes that batch with no URL, then with a URL, then with none again.
       It drives a one-layer batch, a batch with no layer, and an id no
@@ -274,7 +274,9 @@ as the reader, reads, and closes the reader. The writer calls
 batch_id=<batch>)`, then `create_task`. Every run takes that same
 `base_sha`. Do not vary it. The shared value is what lets the re-fold in
 step 9 hang `TE-4` on a `b1` run. That needs run 1 to be `TE-1`'s, in
-`b1`, so create no run ahead of its task. Each layer is
+`b1`, so create no run ahead of its task. Keep each task's key from
+`record_key` right after `create_task`. Step 9's re-fold gives every task
+a new id, so a later lookup by the old id returns `None`. Each layer is
 `record_stack_layer` with `generation=0`.
 
 Batch `b1` has `TE-1` at position 1, `TE-2` at 2 and `TE-3` at 3, each
@@ -344,9 +346,10 @@ Last, it closes every ledger and drops `stack_finishes` with `sqlite3`
 directly. It opens a fresh `Ledger` on the writer's path with
 `record=record` and records `b2` with `saffron/batch-<b2>-finish-2`,
 `e`×40 and no URL. `stack_finish(b2)` then holds those values, and
-`stack_finish(b1)` is `None`. The newest `stack_finish` fact under
-`TE-4`'s key carries `batch_key` `str(b2)`. Folding the record into a
-third fresh `Ledger` gives a `stack_finish(b2)` holding the `e`×40 values.
+`stack_finish(b1)` is `None`. The last `stack_finish` fact in
+`record.read(<TE-4's key>)` carries `batch_key` `str(b2)`. Folding the
+record into `Ledger(tmp_path / "third.db")` gives a `stack_finish(b2)`
+holding the `e`×40 values.
 The re-fold of step 9 hung `TE-4` on run 1, a `b1` run. So a write that
 kept `_build_fact`'s `batch_key` files this row under `str(b1)`. A write
 that keys the live row on an argument, as `_apply`'s `run_id` does, still
