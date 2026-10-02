@@ -581,7 +581,8 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
     assert Path(path1).is_absolute()
     assert not Path(path1).is_relative_to(cwd)
     assert record1["kwargs"] == before1 | {
-        "system_prompt": {"type": "file", "path": path1}
+        "system_prompt": {"type": "file", "path": path1},
+        "include_partial_messages": True,
     }
     assert record1["bytes_while_running"].decode("utf-8") == big_prompt
     assert not Path(path1).exists()
@@ -606,11 +607,12 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
     assert record2["kwargs"] == before2 | {
         "system_prompt": {"type": "file", "path": path2},
         "resume": "sess-old",
+        "include_partial_messages": True,
     }
     assert record2["bytes_while_running"].decode("utf-8") == "é"
     assert not Path(path2).exists()
 
-    # Session 3: no system prompt at all. Nothing new reaches the SDK.
+    # Session 3: no system prompt at all. Only the partial-messages flag is added.
     options3 = {k: v for k, v in options.items() if k != "system_prompt"}
     record3, query3 = _recorder()
     before3 = copy.deepcopy(options3)
@@ -622,7 +624,7 @@ def test_the_runner_hands_the_sdk_a_system_prompt_file_never_a_string(
         exec_stream=_exec_stream_via_runner(monkeypatch, _stub_module(query3)),
     )
     assert options3 == before3
-    assert record3["kwargs"] == before3
+    assert record3["kwargs"] == before3 | {"include_partial_messages": True}
     assert "system_prompt" not in record3["kwargs"]
 
 
@@ -855,3 +857,57 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
     assert "correctness" not in result_c.why
     assert len(raised_paths) == 5
     assert not any(Path(p).exists() for p in raised_paths)
+
+
+# --- backlog b-d4e015: a session still writing a long message is not idle ---
+
+
+def _stream_event(kind="content_block_delta"):
+    return SimpleNamespace(
+        uuid="u1", session_id="s1", event={"type": kind}, parent_tool_use_id=None
+    )
+
+
+def test_a_partial_message_is_progress_not_a_passthrough():
+    (event,) = runner.events(_stream_event())
+    assert event == {"type": "progress", "kind": "content_block_delta"}
+
+
+def _run_stream(monkeypatch, messages):
+    recorded: dict = {}
+
+    async def _query(prompt, options):
+        recorded.update(options.kwargs)
+        for message in messages:
+            yield message
+
+    lines: list[dict] = []
+    _run_runner_in_process(
+        monkeypatch,
+        _stub_module(_query),
+        json.dumps({"prompt": "p", "options": {}}),
+        lambda line: lines.append(json.loads(line)),
+    )
+    return recorded, [e["type"] for e in lines]
+
+
+def test_the_runner_asks_the_sdk_for_partial_messages(monkeypatch):
+    """Without them a plan written in one message is silent until it lands,
+    and the idle bound reads that silence as a stall."""
+    recorded, _types = _run_stream(monkeypatch, [])
+    assert recorded.get("include_partial_messages") is True
+
+
+def test_a_burst_of_deltas_is_one_progress_line_per_window(monkeypatch):
+    """One line per delta would put every token in the event log."""
+    monkeypatch.setattr(runner, "_PROGRESS_EVERY_S", 3600.0, raising=False)
+    _recorded, types = _run_stream(monkeypatch, [_stream_event()] * 50)
+    assert types == ["progress"]
+
+
+def test_deltas_a_window_apart_each_reach_the_host(monkeypatch):
+    """At a window of zero the throttle drops nothing, so a long message keeps
+    resetting the host's idle bound."""
+    monkeypatch.setattr(runner, "_PROGRESS_EVERY_S", 0.0, raising=False)
+    _recorded, types = _run_stream(monkeypatch, [_stream_event()] * 3)
+    assert types == ["progress"] * 3
