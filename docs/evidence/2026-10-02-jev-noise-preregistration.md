@@ -17,9 +17,10 @@ Q2's probability of severity 0:
 
 ## 1. What is scored
 
-Every finding a reviewer marks `note` in a counted spec review or PR review
-round. A cell review round is out, since nothing labels it. A note is
-flagged when Q2's probability of severity 0 in `jev.ttl` is at least 0.5.
+Every finding a reviewer marks `note` in a counted review round. A note is
+flagged when Q2's probability of severity 0 in `jev.ttl` is at least 0.5. A
+note with no Q2 answer counts unflagged. A counted review round Jev never
+scored still counts, and each of its notes counts unflagged.
 
 ## 2. The two classes
 
@@ -36,21 +37,25 @@ Both counts are required.
 - **Catch.** At least half of the noise is flagged.
 - **Cost.** At most one acted-on note in twenty is flagged.
 
-## 4. The cutoff
+## 4. Which review rounds count
 
-A review round counts when the commit in its `round.json` descends from the
-merge commit of this file. `git merge-base --is-ancestor` decides it. Its
-`labels.json` carries `"schema": 2` and is written before anyone reads its
-`jev.ttl`.
+A spec review or PR review round counts when its `labels.json` carries
+`"schema": 2`. Schema 2 exists only from the merge of this file, so every
+counted label postdates it. A cell review round never counts. A spec
+reviewed on both sides of the merge counts its schema-2 review rounds only.
+The labeller writes `labels.json` without reading `jev.ttl`. Nothing in the
+loop prints a score, so this rests on that rule alone.
 
-## 5. The stopping rule
+## 5. The scorer and the stopping rule
 
-Scoring ends at 40 noise notes. A hard stop falls on 2026-12-31 in case they
-never arrive. The scorer copies the 2026-10-02 script, adds the cutoff filter
-and changes nothing else.
+`harness/jev_grade.py` is the scorer, and `driver.py noise` runs it over every
+review round on disk. Its tests pin each rule above. It runs once, on the
+first day it reports 40 noise notes or more, over every counted review round
+on disk that day. On 2026-12-31 it runs regardless. Under 40 noise notes it
+reports `inconclusive`, and that decides nothing.
 
 ## What the result decides
 
 A pass files an item to let step 1b and step 2c leave a flagged note
-unanswered, still saved and labelled. A fail keeps Q2 as an observation and
-closes b-ef334d.
+unanswered, still saved and labelled. A fail or an `inconclusive` keeps Q2 as
+an observation and closes b-ef334d.

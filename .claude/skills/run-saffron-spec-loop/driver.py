@@ -1360,6 +1360,33 @@ def cmd_labels(args) -> int:
     return 0
 
 
+def cmd_noise(args) -> int:
+    """Grade Q2's noise score over every schema-2 labelled review round on disk."""
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    from harness import jev_grade
+
+    notes = []
+    for directory in sorted((JEV_ROOT / "spec-loop").glob("*/*/round-*")):
+        if directory.parent.name not in LABEL_LATER:
+            continue
+        labels, findings = directory / "labels.json", directory / "findings.json"
+        if not (labels.is_file() and findings.is_file()):
+            continue
+        ttl = directory / "jev.ttl"
+        notes += jev_grade.round_notes(
+            findings.read_text(),
+            labels.read_text(),
+            ttl.read_text() if ttl.is_file() else None,
+        )
+    g = jev_grade.grade(notes)
+    print(
+        f"noise {g.noise}, caught {g.caught}, acted on {g.acted}, "
+        f"flagged {g.flagged_acted}: {g.verdict}"
+    )
+    return 0
+
+
 def _jev_base(args) -> Path:
     return JEV_ROOT / "spec-loop" / args.spec_id / args.kind
 
@@ -3107,6 +3134,9 @@ def main() -> int:
     )
     p.add_argument("spec_ids", nargs="*", help="default: every spec in the order")
     p.set_defaults(func=cmd_labels)
+
+    p = sub.add_parser("noise", help="grade Jev's noise score on schema-2 review notes")
+    p.set_defaults(func=cmd_noise)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.

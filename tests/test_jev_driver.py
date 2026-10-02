@@ -606,3 +606,21 @@ def test_a_schema_1_label_keeps_its_old_reading(monkeypatch, loop):
         _label_all(base / f"round-{n}")
     _follow(base / "round-2", None, pr_seats=True)
     assert _run(monkeypatch, "labels", "SA-0901") == 0
+
+
+def test_noise_grades_only_schema_2_notes(monkeypatch, loop, capsys):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(
+            base / f"round-{n}", verified="not-a-defect", disposition="no-action"
+        )
+    findings = base / "round-1" / "findings.json"
+    rows = json.loads(findings.read_text())
+    findings.write_text(json.dumps([{**f, "severity": "note"} for f in rows]))
+    assert _run(monkeypatch, "noise") == 0
+    assert "noise 0, caught 0" in capsys.readouterr().out
+    _follow(base / "round-1", 2)
+    assert _run(monkeypatch, "noise") == 0
+    out = capsys.readouterr().out
+    assert "noise 1, caught 0" in out
+    assert "inconclusive" in out
