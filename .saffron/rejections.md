@@ -1490,3 +1490,30 @@ the critic did not raise.
 - `SA-0174` (#630): the comment over `FINDINGS_NAME` named the end review and
   `SA-0151` as its writer, and two docstrings left out a case they cover.
   **Bucket 3**, contract. **Landed:** a review commit on #630.
+
+## 2026-10-02, `SA-0177` and `SA-0167` (the spec loop's run 25, #636 and #638)
+
+- `SA-0177` (#636): the last step and the third fold read `head_sha` alone,
+  though the claim is the row's whole write.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #636.
+- `SA-0177` (#636): the witness carried nine bare `# 1.` to `# 9.` comments
+  that named no why and pointed at the spec's step numbers.
+  **Bucket 3**, conventions. **Landed:** a review commit on #636.
+- `SA-0177` (#636): the `_apply` comment said the row "files" under the batch,
+  where the diff uses "filed under" for the task key.
+  **Bucket 3**, conventions. **Landed:** a review commit on #636.
+- `SA-0167` (#638): a comment REBUT left said `SA-0170` reads the pushed line
+  by its spelling. `SA-0170` matches `finish.PUSHED`.
+  **Bucket 3**, contract. **Landed:** a review commit on #638.
+- `SA-0167` (#638): the prefix comment named every line of `publish_finish`,
+  though its second line starts with neither prefix.
+  **Bucket 3**, contract. **Landed:** a review commit on #638.
+- `SA-0167` (#638): the plural helper `_pull` read as "pull request" in a
+  module about pull requests.
+  **Bucket 3**, conventions. **Landed:** a review commit on #638.
+- `SA-0167` (#638): the publish-stopped loop gave `KeyError` an empty label
+  and asserted its line in a separate branch.
+  **Bucket 3**, conventions. **Landed:** a review commit on #638.
+- `SA-0167` (#638): an existing finishing branch drops the worktree removal's
+  error, so a leftover worktree goes unreported.
+  **Bucket 3**, correctness. **Open:** b-7430c1.
