@@ -3,7 +3,7 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the sixteen kinds
+by `saffron/record/fold.py`, deletable at any time. Only the seventeen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
@@ -13,10 +13,12 @@ to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
 `qualifications`, `spec_reviews` and `spec_texts` are a tenth, an eleventh, a
 twelfth, a thirteenth, a fourteenth and a fifteenth table, outside that
 count: `DESIGN.md` §4.1 does not list any of them.
+`stack_finishes` is a sixteenth table, also outside that count.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -280,6 +282,16 @@ CREATE TABLE IF NOT EXISTS spec_texts (
     PRIMARY KEY (task_key, n)
 );
 
+-- The finishing layer's own row, filed under the batch's top layer.
+-- Keyed on the batch itself, so a fold places it with no `batches` row.
+CREATE TABLE IF NOT EXISTS stack_finishes (
+    batch_key TEXT PRIMARY KEY,
+    task_key  TEXT NOT NULL,
+    branch    TEXT NOT NULL,
+    head_sha  TEXT NOT NULL,
+    pr_url    TEXT
+);
+
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
 CREATE INDEX IF NOT EXISTS gate_results_by_run ON gate_results(run_id);
 CREATE INDEX IF NOT EXISTS gate_results_by_attempt ON gate_results(attempt_id);
@@ -530,14 +542,15 @@ class Ledger:
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
         `fold_task` an upsert, and a no-op on a task with no row yet.
-        `stack_layers`, `end_reviews`, `qualifications`, `spec_reviews` and
-        `spec_texts` are keyed on `key` itself, so all five deletes run
-        first."""
+        `stack_layers`, `end_reviews`, `qualifications`, `spec_reviews`,
+        `spec_texts` and `stack_finishes` are filed under `key`, so all six
+        deletes run first."""
         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM spec_reviews WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM spec_texts WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM stack_finishes WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -844,6 +857,22 @@ class Ledger:
                     payload["path"],
                     payload["text"],
                     payload["spec_sha"],
+                ),
+            )
+            return None
+        if fact.kind == "stack_finish":
+            # Keyed on the fact's own `batch_key`, not the run's, so a re-fold
+            # that hangs the task on another batch's run keeps this batch's row.
+            self._db.execute(
+                "INSERT OR REPLACE INTO stack_finishes "
+                "(batch_key, task_key, branch, head_sha, pr_url) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    fact.batch_key,
+                    fact.task_key,
+                    payload["branch"],
+                    payload["head_sha"],
+                    payload["pr_url"],
                 ),
             )
             return None
@@ -1444,6 +1473,42 @@ class Ledger:
                 (str(batch_id),),
             )
         )
+
+    def record_stack_finish(
+        self,
+        batch_id: int,
+        *,
+        branch: str,
+        head_sha: str,
+        pr_url: str | None = None,
+    ) -> None:
+        """The finishing layer's own fact, filed under the batch's top layer
+        (ADR 7). Raises `ValueError` for a batch with no layer, writing no
+        row and no fact."""
+        top = self._db.execute(
+            """SELECT t.task_id FROM stack_layers sl
+                 JOIN tasks t ON t.record_key = sl.task_key
+                WHERE sl.batch_key = ?
+                ORDER BY sl.position DESC LIMIT 1""",
+            (str(batch_id),),
+        ).fetchone()
+        if top is None:
+            raise ValueError(f"no stack layer in batch {batch_id}")
+        fact = self._build_fact(
+            top["task_id"],
+            "stack_finish",
+            {"branch": branch, "head_sha": head_sha, "pr_url": pr_url},
+        )
+        fact = dataclasses.replace(fact, batch_key=str(batch_id))
+        self._commit_and_append(fact)
+
+    def stack_finish(self, batch_id: int) -> sqlite3.Row | None:
+        """The finishing layer's own row for one batch, or `None` for a
+        batch that never recorded one (ADR 7)."""
+        return self._db.execute(
+            "SELECT * FROM stack_finishes WHERE batch_key = ?",
+            (str(batch_id),),
+        ).fetchone()
 
     def qualifications(self, task_id: int) -> list[sqlite3.Row]:
         """One task's own `qualifications` rows, in the order recorded

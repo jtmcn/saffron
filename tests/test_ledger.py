@@ -1544,3 +1544,211 @@ def test_two_tasks_cannot_share_one_record_key(tmp_path):
             "UPDATE tasks SET record_key = ? WHERE task_id = ?", ("a" * 32, second)
         )
     ledger.close()
+
+
+def _build_finishing_fixture(writer, repo_id):
+    """Three batches, four tasks and four layers, in the exact creation and
+    recording order the witness needs. Returns `(b1, b2, b3, keys)`, `keys`
+    a dict from spec id to record key, read right after each task is made."""
+    b1 = writer.create_batch(budget_usd=100.0)
+    b2 = writer.create_batch(budget_usd=100.0)
+    b3 = writer.create_batch(budget_usd=100.0)
+
+    keys = {}
+    task_ids = {}
+    for spec_id, batch_id in (
+        ("TE-1", b1),
+        ("TE-3", b1),
+        ("TE-2", b1),
+        ("TE-4", b2),
+    ):
+        run_id = writer.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+        task_id = writer.create_task(
+            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+        )
+        task_ids[spec_id] = task_id
+        keys[spec_id] = writer.record_key(task_id)
+
+    writer.record_stack_layer(
+        task_ids["TE-2"],
+        position=2,
+        predecessor_task_id=task_ids["TE-1"],
+        generation=0,
+    )
+    writer.record_stack_layer(
+        task_ids["TE-3"],
+        position=3,
+        predecessor_task_id=task_ids["TE-2"],
+        generation=0,
+    )
+    writer.record_stack_layer(
+        task_ids["TE-1"], position=1, predecessor_task_id=None, generation=0
+    )
+    writer.record_stack_layer(
+        task_ids["TE-4"], position=1, predecessor_task_id=None, generation=0
+    )
+    return b1, b2, b3, keys
+
+
+def _raw_stack_finishes(path):
+    """Every `stack_finishes` row, read with a connection of the test's own
+    rather than through any `Ledger`, ordered by `batch_key`."""
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute(
+            "SELECT batch_key, task_key, branch, head_sha, pr_url "
+            "FROM stack_finishes ORDER BY batch_key"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
+    tmp_path,
+):
+    """`record_stack_finish` files one fact under the batch's top layer.
+    It stamps the batch's own key on the fact, so a fold places the row
+    correctly even onto another batch's run."""
+    from saffron.record.fold import fold
+    from saffron.record.memory import MemoryRecord
+
+    path = tmp_path / "ledger.db"
+    record = MemoryRecord()
+    writer = Ledger(path, record=record)
+    repo_id = writer.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    b1, b2, b3, keys = _build_finishing_fixture(writer, repo_id)
+
+    def read(batch_id):
+        reader = Ledger(path)
+        try:
+            return reader.stack_finish(batch_id)
+        finally:
+            reader.close()
+
+    # A first write commits a row a second ledger reads.
+    writer.record_stack_finish(
+        b1, branch=f"saffron/batch-{b1}-finish", head_sha="a" * 40
+    )
+    row = read(b1)
+    assert isinstance(row, sqlite3.Row)
+    assert row["branch"] == f"saffron/batch-{b1}-finish"
+    assert row["head_sha"] == "a" * 40
+    assert row["pr_url"] is None
+
+    # A second write replaces the row whole.
+    writer.record_stack_finish(
+        b1,
+        branch=f"saffron/batch-{b1}-finish-2",
+        head_sha="b" * 40,
+        pr_url="https://github.com/o/r/pull/200",
+    )
+    row = read(b1)
+    assert row["branch"] == f"saffron/batch-{b1}-finish-2"
+    assert row["head_sha"] == "b" * 40
+    assert row["pr_url"] == "https://github.com/o/r/pull/200"
+
+    # A URL returns to None, so no column keeps its old value.
+    writer.record_stack_finish(
+        b1, branch=f"saffron/batch-{b1}-finish", head_sha="c" * 40
+    )
+    row = read(b1)
+    assert row["branch"] == f"saffron/batch-{b1}-finish"
+    assert row["head_sha"] == "c" * 40
+    assert row["pr_url"] is None
+
+    # Another batch gets its own row, and b1's stays.
+    writer.record_stack_finish(
+        b2,
+        branch=f"saffron/batch-{b2}-finish",
+        head_sha="d" * 40,
+        pr_url="https://github.com/o/r/pull/201",
+    )
+    row_b2 = read(b2)
+    assert row_b2["branch"] == f"saffron/batch-{b2}-finish"
+    assert row_b2["head_sha"] == "d" * 40
+    assert row_b2["pr_url"] == "https://github.com/o/r/pull/201"
+    row_b1 = read(b1)
+    assert row_b1["head_sha"] == "c" * 40
+
+    # Each row is filed under its batch's top layer.
+    rows = _raw_stack_finishes(path)
+    assert [(r[0], r[1]) for r in rows] == [
+        (str(b1), keys["TE-3"]),
+        (str(b2), keys["TE-4"]),
+    ]
+
+    # A batch with no row, and an unknown id, read None.
+    assert read(b3) is None
+    assert read(999) is None
+
+    # No layer means no row and no fact.
+    with pytest.raises(ValueError, match="no stack layer"):
+        writer.record_stack_finish(b3, branch="x", head_sha="e" * 40)
+    with pytest.raises(ValueError, match="no stack layer"):
+        writer.record_stack_finish(999, branch="x", head_sha="e" * 40)
+    assert len(_raw_stack_finishes(path)) == 2
+
+    # The facts sit under the top layers alone.
+    for spec_id in ("TE-1", "TE-2"):
+        facts = [f for f in record.read(keys[spec_id]) if f.kind == "stack_finish"]
+        assert facts == []
+    te3_facts = [f for f in record.read(keys["TE-3"]) if f.kind == "stack_finish"]
+    te4_facts = [f for f in record.read(keys["TE-4"]) if f.kind == "stack_finish"]
+    assert len(te3_facts) == 3
+    assert len(te4_facts) == 1
+    assert all(f.batch_key == str(b1) for f in te3_facts)
+    assert all(f.batch_key == str(b2) for f in te4_facts)
+    assert [f.payload["head_sha"] for f in te3_facts] == ["a" * 40, "b" * 40, "c" * 40]
+    assert te4_facts[0].payload["head_sha"] == "d" * 40
+
+    # The record rebuilds the rows, and an empty fold removes them.
+    fresh = Ledger(tmp_path / "fresh.db")
+    fold(record, fresh)
+    assert _raw_stack_finishes(tmp_path / "fresh.db") == _raw_stack_finishes(path)
+    fold(record, writer)
+    assert _raw_stack_finishes(path) == rows
+    fresh.fold_task(keys["TE-3"], [])
+    assert fresh.stack_finish(b1) is None
+    fresh_b2_row = fresh.stack_finish(b2)
+    assert fresh_b2_row is not None
+    assert tuple(fresh_b2_row[c] for c in ("branch", "head_sha", "pr_url")) == (
+        f"saffron/batch-{b2}-finish",
+        "d" * 40,
+        "https://github.com/o/r/pull/201",
+    )
+    fresh.close()
+
+    writer.close()
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE stack_finishes")
+    conn.commit()
+    conn.close()
+
+    reopened = Ledger(path, record=record)
+    reopened.record_stack_finish(
+        b2, branch=f"saffron/batch-{b2}-finish-2", head_sha="e" * 40
+    )
+    reopened_row = reopened.stack_finish(b2)
+    assert reopened_row is not None
+    assert tuple(reopened_row[c] for c in ("branch", "head_sha", "pr_url")) == (
+        f"saffron/batch-{b2}-finish-2",
+        "e" * 40,
+        None,
+    )
+    assert reopened.stack_finish(b1) is None
+    last_te4_fact = [f for f in record.read(keys["TE-4"]) if f.kind == "stack_finish"][
+        -1
+    ]
+    assert last_te4_fact.batch_key == str(b2)
+    reopened.close()
+
+    third = Ledger(tmp_path / "third.db")
+    fold(record, third)
+    third_row = third.stack_finish(b2)
+    assert third_row is not None
+    assert tuple(third_row[c] for c in ("branch", "head_sha", "pr_url")) == (
+        f"saffron/batch-{b2}-finish-2",
+        "e" * 40,
+        None,
+    )
+    third.close()

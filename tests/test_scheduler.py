@@ -2827,13 +2827,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
 
     # A fresh ledger filters nothing, so a glob that recursed would offer every
     # spec in `done/` here as well. That is what makes the exact list a check.
-    assert [c.spec.id for c in candidates] == ["SA-0177"]
-    assert [r.path.name[:7] for r in refusals] == [
-        "SA-0152",
-        "SA-0167",
-        "SA-0170",
-        "SA-0183",
-    ]
+    assert [c.spec.id for c in candidates] == ["SA-0170"]
+    assert [r.path.name[:7] for r in refusals] == ["SA-0152", "SA-0183"]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30

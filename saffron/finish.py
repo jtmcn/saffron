@@ -3,8 +3,8 @@
 Reads a batch's layers and every spec text it will write. Checks each one
 before touching git, then commits them atop the top layer's own head. It
 also writes the batch's own `findings.json`, the backlog pool a delegate
-files by hand. No ref moves and no gate executes here: that is `SA-0167`'s
-own job.
+files by hand. `publish_finish` then moves a ref for the gate suite's own
+span, runs that suite, and pushes the commit to its own branch.
 """
 
 from __future__ import annotations
@@ -15,15 +15,51 @@ import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from saffron.cell.runtime import CellRuntimeError
 from saffron.follow_up import Pooled
-from saffron.intake import discover_specs
+from saffron.intake import Spec, discover_specs
 from saffron.ledger import _REVISION_PATH, Ledger
+from saffron.phases import package as package_phase
 from saffron.phases import review
 from saffron.repos import mirror as git_mirror
+from saffron.repos.policy import Policy
 from saffron.scheduler import RETIRED_DIRNAME
 
 # The backlog pool file the finish writes beside its tree (`SA-0174`).
 FINDINGS_NAME = "findings.json"
+
+# ADR 7's one exception to the repo's own `protected` list: the finishing
+# commit touches only a spec directly in the spec directory or in `done/`.
+FINISH_TOUCHES = (".saffron/specs/*.md", ".saffron/specs/done/*.md")
+
+# The prefixes of `publish_finish`'s first line. `SA-0170` links a pushed
+# stack only once a line starts with `PUSHED`.
+ESCALATE = "escalate: "
+PUSHED = "pushed "
+
+
+def finish_suite(policy: Policy) -> tuple[Spec, Policy]:
+    """The spec and policy the finishing commit's own gate suite runs under.
+
+    The spec is a `chore` whose only allowed paths are `FINISH_TOUCHES`
+    (`DESIGN.md` §5.4, ADR 7). The policy is the repo's own, copied with its
+    `protected` list emptied and its suppression scan turned off for this
+    commit alone. Every other field, including its declared gates, stays as
+    the repo declared it.
+    """
+    spec = Spec(
+        id="FINISH-0",
+        title="the finishing layer",
+        type="chore",
+        touches=list(FINISH_TOUCHES),
+    )
+    finishing_policy = policy.model_copy(
+        update={
+            "protected": [],
+            "integrity": policy.integrity.model_copy(update={"suppressions": []}),
+        }
+    )
+    return spec, finishing_policy
 
 
 def _checked(row) -> tuple[str, str]:
@@ -238,3 +274,107 @@ def write_findings(
         )
     )
     return dest
+
+
+def _new_failures(n: int) -> str:
+    return f"{n} new failure" + ("" if n == 1 else "s")
+
+
+def publish_finish(
+    ledger: Ledger,
+    batch_id: int,
+    sha: str,
+    *,
+    mirror: Path,
+    url: str,
+    slug: str,
+    verify: Callable[[str, str], int],
+    gh: package_phase.GhRunner,
+    workdir: Path,
+) -> list[str]:
+    """Judge `sha` with the finishing suite, then push it and open its draft
+    pull request (ADR 7). Every check below runs before the one push, in
+    order, and each returns one line starting `ESCALATE` on its own failure.
+
+    A temporary ref names `sha` for `verify`'s own span, since a gate-only
+    cell's seed can only fetch a branch. Every layer's remote head is then
+    read against its own `pushed_sha`, and every pull request's base against
+    its predecessor's branch, bottom to top. Only then is `sha` pushed to
+    its own branch, recorded, and handed to `gh pr create`.
+    """
+    layers = ledger.stack_layers(batch_id)
+    top = layers[-1]
+    ref = f"refs/heads/saffron-finish/{batch_id}"
+    git_mirror._git(mirror, "update-ref", ref, sha)
+    try:
+        new_failures = verify(sha, top["pushed_sha"])
+    except (package_phase.PackageError, CellRuntimeError) as exc:
+        return [f"{ESCALATE}the finishing suite did not finish: {exc}"]
+    finally:
+        git_mirror._git(mirror, "update-ref", "-d", ref)
+    if new_failures > 0:
+        return [f"{ESCALATE}red suite, {_new_failures(new_failures)}"]
+
+    default = package_phase.default_branch(url, cwd=mirror)
+    for layer in layers:
+        head = package_phase.remote_sha(url, layer["branch"], cwd=mirror)
+        if head != layer["pushed_sha"]:
+            got = head if head else "nothing"
+            return [
+                f"{ESCALATE}{layer['branch']} is at {got}, not {layer['pushed_sha']}"
+            ]
+
+    by_key = {layer["task_key"]: layer for layer in layers}
+    for layer in layers:
+        predecessor = by_key.get(layer["predecessor_key"])
+        wanted = predecessor["branch"] if predecessor is not None else default
+        view = gh(
+            [
+                "gh",
+                "pr",
+                "view",
+                layer["pr_url"],
+                "--json",
+                "baseRefName",
+                "--jq",
+                ".baseRefName",
+            ]
+        )
+        base = view.stdout.strip() if view.returncode == 0 else None
+        if base != wanted:
+            got = base if base is not None else "nothing readable"
+            return [
+                f"{ESCALATE}{layer['spec_id']}'s pull request targets {got}, "
+                f"not {wanted}"
+            ]
+
+    branch = f"saffron/batch-{batch_id}-finish"
+    git_mirror.add_worktree(mirror, sha, workdir)
+    worktree_error: git_mirror.GitError | None = None
+    try:
+        try:
+            package_phase.push_with_lease(workdir, url=url, branch=branch, expect="")
+        except package_phase.LeaseRejected:
+            return [f"{ESCALATE}{branch} already exists"]
+        ledger.record_stack_finish(batch_id, branch=branch, head_sha=sha)
+        body_path = workdir.parent / "pr-body.md"
+        body_path.write_text(f"Batch {batch_id}'s finishing layer.\n")
+        pr_url = package_phase.open_draft_pr(
+            slug=slug,
+            branch=branch,
+            base=top["branch"],
+            title=f"saffron batch {batch_id}: finishing layer",
+            body_path=body_path,
+            gh=gh,
+        )
+        ledger.record_stack_finish(batch_id, branch=branch, head_sha=sha, pr_url=pr_url)
+    finally:
+        try:
+            git_mirror.remove_worktree(mirror, workdir)
+        except git_mirror.GitError as exc:
+            worktree_error = exc
+
+    lines = [f"{PUSHED}{sha[:12]} to {branch}, draft pull request {pr_url}"]
+    if worktree_error is not None:
+        lines.append(f"worktree left at {workdir}: GitError: {worktree_error}")
+    return lines

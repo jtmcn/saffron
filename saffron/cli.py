@@ -40,6 +40,7 @@ from saffron.reconcile import ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
+from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import Policy, PolicyError, load_policy
 from saffron.scheduler import (
@@ -676,19 +677,52 @@ def _stack_end_review(
     return run
 
 
+def _finish_verify(
+    *, pinned: PinnedBase, repo: Path, gates_dir: Path
+) -> Callable[[str, str], int]:
+    """The `verify` callable `finish.publish_finish` runs the suite with.
+
+    Exports `.saffron/` from the pinned mirror at the pinned base. Builds
+    the finishing suite over the policy it finds there, and runs
+    `package_phase.reverify` in the repo's own cell image. Returns the
+    count of new failures.
+    """
+
+    def verify(sha: str, base: str) -> int:
+        git_mirror.export_saffron_dir(pinned.mirror, pinned.base_sha, gates_dir)
+        policy, _policy_sha = load_policy(gates_dir)
+        spec, finishing_policy = finish.finish_suite(policy)
+        comparison = package_phase.reverify(
+            mirror=pinned.mirror,
+            packaged_sha=sha,
+            new_base_sha=base,
+            policy=finishing_policy,
+            gates_dir=gates_dir,
+            image=repo_image.cell_tag(repo),
+            spec=spec,
+        )
+        return len(comparison.new_failures)
+
+    return verify
+
+
 def _stack_finish(
     *,
     pinned: PinnedBase,
     ledger: Ledger,
     out_dir: Path,
     pooled: Sequence[follow_up.Pooled],
+    repo: Path,
 ) -> Callable[[int, list[int]], object]:
     """`run_stack_batch`'s `finish` callable (ADR 7). Writes `findings.json`
     first, in its own `try` guarding `Exception`, with the same `pooled`
     `_stack_follow_ups` filled. A `GitError` or `ValueError` from
     `finish.commit_finish` is printed and swallowed here too, so the
     night's exit code stays its stop reason's. Any other raise from the
-    commit reaches `main`."""
+    commit reaches `main`. A real commit is then judged and pushed through
+    `finish.publish_finish`, inside its own `try` guarding `Exception`,
+    since a push can come before a raise.
+    """
 
     def run_finish(batch_id: int, unrun: list[int]) -> object:
         dest = out_dir / "finish" / str(batch_id) / finish.FINDINGS_NAME
@@ -707,12 +741,37 @@ def _stack_finish(
         except (git_mirror.GitError, ValueError) as exc:
             print(f"finish: {type(exc).__name__}: {exc}")
             return None
-        if sha is not None:
-            print(f"finish: committed {sha}, not pushed")
-        elif ledger.stack_layers(batch_id):
-            print("finish: the tree is unchanged, so nothing committed")
+        if sha is None:
+            if ledger.stack_layers(batch_id):
+                print("finish: the tree is unchanged, so nothing committed")
+            else:
+                print("finish: no layer, so nothing committed")
+            return None
+
+        print(f"finish: committed {sha}")
+        try:
+            slug = package_phase.github_slug(pinned.url)
+            verify = _finish_verify(
+                pinned=pinned,
+                repo=repo,
+                gates_dir=out_dir / "finish" / str(batch_id) / "gates",
+            )
+            lines = finish.publish_finish(
+                ledger,
+                batch_id,
+                sha,
+                mirror=pinned.mirror,
+                url=pinned.url,
+                slug=slug,
+                verify=verify,
+                gh=_guarded_gh([]),
+                workdir=out_dir / "finish" / str(batch_id) / "push",
+            )
+        except Exception as exc:
+            print(f"finish: publish stopped: {type(exc).__name__}: {exc}")
         else:
-            print("finish: no layer, so nothing committed")
+            for line in lines:
+                print(f"finish: {line}")
         return sha
 
     return run_finish
@@ -1524,7 +1583,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 )
                 open_prs = _stack_open_prs(resolved.repo_slug)
                 stack_finish = _stack_finish(
-                    pinned=pinned, ledger=ledger, out_dir=out_dir, pooled=pooled
+                    pinned=pinned,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                    pooled=pooled,
+                    repo=repo,
                 )
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`

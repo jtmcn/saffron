@@ -1,7 +1,7 @@
 ---
 id: b-b1a7d4
 title: '`driver.py cite` takes a path, not an id, and flags correct citations'
-status: open
+status: partial
 tier: 3
 filed: 2026-09-29
 specs: [SA-0152, SA-0167]
@@ -30,3 +30,4 @@ symbol alone.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-10-02: `SA-0167` retired as #638. `driver.py cite` still takes a path, and its quoted-text warnings still flag correct citations (18 on `SA-0167`).

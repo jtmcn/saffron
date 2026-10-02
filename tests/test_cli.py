@@ -6614,6 +6614,7 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
         return "c" * 40
 
     monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
+    monkeypatch.setattr(finish_module, "publish_finish", lambda *a, **k: [])
 
     _readiness_passes(monkeypatch)
     home = tmp_path / "home"
@@ -6626,7 +6627,7 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
     assert call["mirror"] == Path("/tmp/pinned-mirror.git")
     assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "tree"
     printed = capsys.readouterr().out
-    assert f"finish: committed {'c' * 40}, not pushed" in printed
+    assert f"finish: committed {'c' * 40}" in printed.splitlines()
 
     # A `GitError`, then a `ValueError`, from `commit_finish`. Each prints
     # its own line and the night still exits 0.
@@ -6720,6 +6721,7 @@ def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_fille
 
     monkeypatch.setattr(finish_module, "write_findings", _recording_write_findings)
     monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
+    monkeypatch.setattr(finish_module, "publish_finish", lambda *a, **k: [])
 
     _readiness_passes(monkeypatch)
     home = tmp_path / "home"
@@ -6770,3 +6772,164 @@ def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_fille
         printed = capsys.readouterr().out
         assert "finish: GitError: gone" in printed
     assert calls[0][0] == "findings"
+
+
+def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_finish` judges a real commit with `_finish_verify` and
+    publishes it through `finish.publish_finish`, inside its own `try`
+    guarding `Exception`. A raise from `publish_finish`, or from
+    `package_phase.github_slug` before it, prints one line and keeps the
+    night's own exit code."""
+    import shutil
+
+    from saffron import finish as finish_module
+    from saffron.phases import package as package_phase
+    from saffron.repos import image as repo_image
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    monkeypatch.setattr(finish_module, "write_findings", lambda *a, **k: Path("x"))
+    monkeypatch.setattr(finish_module, "commit_finish", lambda *a, **k: "c" * 40)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    export_calls: list[tuple] = []
+
+    def _fake_export(mirror, sha, dest):
+        export_calls.append((mirror, sha, dest))
+        dest_saffron = dest / ".saffron"
+        dest_saffron.mkdir(parents=True, exist_ok=True)
+        shutil.copy(
+            repo_root / ".saffron" / "policy.yaml", dest_saffron / "policy.yaml"
+        )
+        shutil.copytree(repo_root / ".saffron" / "gates", dest_saffron / "gates")
+        return dest
+
+    monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _fake_export)
+
+    reverify_calls: list[dict] = []
+
+    class _Comparison:
+        new_failures = ("a", "b")
+
+    def _fake_reverify(**kwargs):
+        reverify_calls.append(kwargs)
+        return _Comparison()
+
+    monkeypatch.setattr(package_phase, "reverify", _fake_reverify)
+
+    publish_calls: list[dict] = []
+    verify_result: dict[str, int] = {}
+
+    def _fake_publish_finish(
+        ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir
+    ):
+        publish_calls.append(
+            {
+                "ledger": ledger,
+                "batch_id": batch_id,
+                "sha": sha,
+                "mirror": mirror,
+                "url": url,
+                "slug": slug,
+                "gh": gh,
+                "workdir": workdir,
+            }
+        )
+        verify_result["value"] = verify("c" * 40, "d" * 40)
+        return ["a published line"]
+
+    monkeypatch.setattr(finish_module, "publish_finish", _fake_publish_finish)
+
+    _readiness_passes(monkeypatch)
+    home = tmp_path / "home"
+    assert main(["--home", str(home), "batch", "--stack"]) == 0
+
+    printed = capsys.readouterr().out.splitlines()
+    assert f"finish: committed {'c' * 40}" in printed
+    assert "finish: a published line" in printed
+
+    assert len(publish_calls) == 1
+    call = publish_calls[0]
+    gates_dir = home / "batches" / "v0" / "finish" / "3" / "gates"
+    assert call["batch_id"] == 3
+    assert call["sha"] == "c" * 40
+    assert call["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert call["url"] == "https://github.com/o/r.git"
+    assert call["slug"] == "o/r"
+    assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "push"
+    assert verify_result["value"] == 2
+    assert export_calls == [(Path("/tmp/pinned-mirror.git"), "a" * 40, gates_dir)]
+
+    assert len(reverify_calls) == 1
+    rcall = reverify_calls[0]
+    assert rcall["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert rcall["packaged_sha"] == "c" * 40
+    assert rcall["new_base_sha"] == "d" * 40
+    assert rcall["gates_dir"] == gates_dir
+    assert rcall["image"] == repo_image.cell_tag(tmp_path)
+
+    export_policy, _policy_sha = load_policy(gates_dir)
+    expected_spec, expected_policy = finish_module.finish_suite(export_policy)
+    assert rcall["policy"].model_dump() == expected_policy.model_dump()
+    assert rcall["spec"] == expected_spec
+
+    # `gh` cannot start, so the guarded callable it was handed still answers.
+    with monkeypatch.context() as m:
+        m.setattr(cli, "run_gh", lambda argv: (_ for _ in ()).throw(OSError("no gh")))
+        assert main(["--home", str(tmp_path / "home-gh127"), "batch", "--stack"]) == 0
+        assert publish_calls[-1]["gh"](["gh", "--version"]).returncode == 127
+
+    # `publish_finish` raising `GitError`, then `KeyError`: each prints its
+    # own line, and the night still exits 0.
+    for exc, label in [
+        (GitError("gone"), "GitError: gone"),
+        (KeyError("x"), "KeyError: 'x'"),
+    ]:
+        with monkeypatch.context() as m:
+            m.setattr(
+                finish_module,
+                "publish_finish",
+                lambda *a, _exc=exc, **k: (_ for _ in ()).throw(_exc),
+            )
+            home_i = tmp_path / f"home-{type(exc).__name__}"
+            assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+            printed = capsys.readouterr().out
+            assert f"finish: publish stopped: {label}" in printed.splitlines()
+
+    # `github_slug` raising before `publish_finish` is ever reached.
+    before = len(publish_calls)
+    with monkeypatch.context() as m:
+        m.setattr(
+            package_phase,
+            "github_slug",
+            lambda *a, **k: (_ for _ in ()).throw(
+                package_phase.PackageError("no slug")
+            ),
+        )
+        home_slug = tmp_path / "home-slug"
+        assert main(["--home", str(home_slug), "batch", "--stack"]) == 0
+        printed = capsys.readouterr().out
+        assert "finish: publish stopped: PackageError: no slug" in printed
+    assert len(publish_calls) == before
+
+    # A `None` commit calls no publish.
+    before = len(publish_calls)
+    with monkeypatch.context() as m:
+        m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
+        m.setattr(Ledger, "stack_layers", lambda self, batch_id: [])
+        home_none = tmp_path / "home-none"
+        assert main(["--home", str(home_none), "batch", "--stack"]) == 0
+        printed = capsys.readouterr().out
+        assert "finish: no layer, so nothing committed" in printed
+    assert len(publish_calls) == before
