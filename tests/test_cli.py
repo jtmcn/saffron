@@ -6892,7 +6892,10 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
 
     # `publish_finish` raising `GitError`, then `KeyError`: each prints its
     # own line, and the night still exits 0.
-    for exc, label in [(GitError("gone"), "GitError: gone"), (KeyError("x"), "")]:
+    for exc, label in [
+        (GitError("gone"), "GitError: gone"),
+        (KeyError("x"), "KeyError: 'x'"),
+    ]:
         with monkeypatch.context() as m:
             m.setattr(
                 finish_module,
@@ -6902,10 +6905,7 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
             home_i = tmp_path / f"home-{type(exc).__name__}"
             assert main(["--home", str(home_i), "batch", "--stack"]) == 0
             printed = capsys.readouterr().out
-            if label:
-                assert f"finish: publish stopped: {label}" in printed
-            else:
-                assert "finish: publish stopped: KeyError: 'x'" in printed
+            assert f"finish: publish stopped: {label}" in printed.splitlines()
 
     # `github_slug` raising before `publish_finish` is ever reached.
     before = len(publish_calls)

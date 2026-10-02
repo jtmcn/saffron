@@ -32,8 +32,8 @@ FINDINGS_NAME = "findings.json"
 # commit touches only a spec directly in the spec directory or in `done/`.
 FINISH_TOUCHES = (".saffron/specs/*.md", ".saffron/specs/done/*.md")
 
-# The two prefixes `publish_finish`'s lines start with. `SA-0170` links a
-# pushed stack only once a line starts with `PUSHED`.
+# The prefixes of `publish_finish`'s first line. `SA-0170` links a pushed
+# stack only once a line starts with `PUSHED`.
 ESCALATE = "escalate: "
 PUSHED = "pushed "
 
@@ -276,7 +276,7 @@ def write_findings(
     return dest
 
 
-def _pull(n: int) -> str:
+def _new_failures(n: int) -> str:
     return f"{n} new failure" + ("" if n == 1 else "s")
 
 
@@ -313,7 +313,7 @@ def publish_finish(
     finally:
         git_mirror._git(mirror, "update-ref", "-d", ref)
     if new_failures > 0:
-        return [f"{ESCALATE}red suite, {_pull(new_failures)}"]
+        return [f"{ESCALATE}red suite, {_new_failures(new_failures)}"]
 
     default = package_phase.default_branch(url, cwd=mirror)
     for layer in layers:

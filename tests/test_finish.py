@@ -1316,8 +1316,8 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
         assert finish_row["pr_url"] == "https://github.com/o/r/pull/200"
         assert fresh.stack_finish(s.batch_id + 1000) is None
 
-        # The literal text, not the symbol: `SA-0170` decides a line is
-        # pushed by its exact spelling, not by importing `PUSHED` itself.
+        # The literal text, not the symbol, so a change to `PUSHED` cannot
+        # move expectation and output together.
         assert PUSHED == "pushed "
         assert lines == [
             f"pushed {sha[:12]} to {branch}, draft pull request "
@@ -1480,8 +1480,6 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
         )
         expected_prefix = expected_prefix_fn(s, branch)
         assert len(lines) == 1
-        # The literal text, not the symbol: an escalation is read by its
-        # exact spelling, never by re-importing `ESCALATE` itself.
         assert lines[0].startswith("escalate: ")
         assert lines[0].startswith(expected_prefix)
         if expected_line_fn is not None:
@@ -1494,7 +1492,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
         "red",
         verify=lambda sha_arg, base_arg: 2,
         expected_prefix_fn=lambda s, branch: "escalate: red suite, 2 new failure",
-        # The exact word, plural at 2: pins the suffix `_pull` picks, not
+        # The exact word, plural at 2: pins the suffix `_new_failures` picks, not
         # the prefix the two counts share.
         expected_line_fn=lambda s, branch: "escalate: red suite, 2 new failures",
         expected_pr_view_count=0,
