@@ -565,3 +565,44 @@ def test_labels_skips_a_round_jev_never_scored(monkeypatch, loop, capsys):
     (base / "round-2" / "jev.ttl").unlink()
     assert _run(monkeypatch, "labels", "SA-0901") == 0
     assert "1 scored review round(s)" in capsys.readouterr().out
+
+
+def _follow(round_dir: Path, schema: int | None, **followed) -> None:
+    path = round_dir / "labels.json"
+    doc = json.loads(path.read_text())
+    if schema is not None:
+        doc["schema"] = schema
+    doc["blocker_followed"].update(followed)
+    path.write_text(json.dumps(doc))
+
+
+def test_a_schema_2_label_about_a_later_review_round_needs_that_review_round(
+    monkeypatch, loop, capsys
+):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(base / f"round-{n}")
+        _follow(base / f"round-{n}", 2, pr_seats=True)
+    # A killed run leaves an empty folder with no round.json.
+    (base / "round-3").mkdir()
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    out = capsys.readouterr().out
+    assert "pr-review round-2  pr_seats reads review round 3, which never ran" in out
+    assert "round-1  pr_seats" not in out
+
+
+def test_a_schema_2_null_on_the_last_review_round_is_no_gap(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(base / f"round-{n}")
+    _follow(base / "round-1", 2, pr_seats=False)
+    _follow(base / "round-2", 2, pr_seats=None)
+    assert _run(monkeypatch, "labels", "SA-0901") == 0
+
+
+def test_a_schema_1_label_keeps_its_old_reading(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(base / f"round-{n}")
+    _follow(base / "round-2", None, pr_seats=True)
+    assert _run(monkeypatch, "labels", "SA-0901") == 0

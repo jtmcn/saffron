@@ -1297,9 +1297,11 @@ LABEL_VALUES = {
 }
 LABEL_RECURRED = {"cell-review", "pr-spec-seat", "pr-standards-seat"}
 LABEL_FOLLOWED = ("next_spec_round", "cell_review", "pr_seats")
+# Which `blocker_followed` key names the next review round of the same kind.
+LABEL_LATER = {"spec-review": "next_spec_round", "pr-review": "pr_seats"}
 
 
-def _label_gaps(directory: Path) -> list[str]:
+def _label_gaps(directory: Path, kind: str) -> list[str]:
     """Why one scored review round's `labels.json` does not grade its Jev answers."""
     path = directory / "labels.json"
     if not path.is_file():
@@ -1313,6 +1315,12 @@ def _label_gaps(directory: Path) -> list[str]:
     followed = doc.get("blocker_followed")
     if not isinstance(followed, dict) or any(k not in followed for k in LABEL_FOLLOWED):
         gaps.append(f"blocker_followed needs {', '.join(LABEL_FOLLOWED)}")
+    if doc.get("schema") == 2 and isinstance(followed, dict):
+        key = LABEL_LATER[kind]
+        later = int(directory.name.removeprefix("round-")) + 1
+        ran = (directory.parent / f"round-{later}" / "round.json").is_file()
+        if followed.get(key) is not None and not ran:
+            gaps.append(f"{key} reads review round {later}, which never ran")
     labels = doc.get("findings") or {}
     for fid in ids:
         label = labels.get(fid)
@@ -1343,7 +1351,7 @@ def cmd_labels(args) -> int:
                 if not (directory / "jev.ttl").is_file():
                     continue
                 scored += 1
-                for gap in _label_gaps(directory):
+                for gap in _label_gaps(directory, kind):
                     bad += 1
                     print(f"{spec_id}  {kind} {directory.name}  {gap}")
     if bad:

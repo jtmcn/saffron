@@ -433,18 +433,24 @@ For each finding id, record these four facts:
 - `recurred_in`: any of `cell-review`, `pr-spec-seat` and `pr-standards-seat`.
 - `item`: the backlog id it went to, if any.
 
-For the round, record `blocker_followed`. It says whether the next spec review,
-the in-cell REVIEW and the PR seats each found a blocker, or `null` for one that
-never ran. A defect no findings block carried, such as one you found yourself,
-goes in `run-NN-unscored.json` beside the spec folders. Run 13's files show the
-shape.
+For the round, record `blocker_followed` and set `"schema": 2`. Each key says
+whether a later stage found a blocker, or holds `null` for a stage that never
+ran. `cell_review` is the in-cell REVIEW. On a spec review round,
+`next_spec_round` is the next spec review and `pr_seats` is the first PR seat
+review. On a PR review round, `pr_seats` is the next PR seat review of the same
+pull request, and `next_spec_round` is `null`. A label never reads the review
+round it sits in. Schema 1 read `pr_seats` that way, and it graded nothing
+(`docs/evidence/2026-10-02-jev-scores-graded.md`). A defect no findings block
+carried, such as one you found yourself, goes in `run-NN-unscored.json`
+beside the spec folders. Run 13's files show the shape.
 
 ```bash
 uv run .claude/skills/run-saffron-spec-loop/driver.py labels   # every spec in the order
 ```
 
 It exits 1 and names each gap: a scored round with no `labels.json`, a finding
-with no label or an unknown value, or a missing `blocker_followed` field.
+with no label or an unknown value, or a missing `blocker_followed` field. It
+names a schema-2 label that reads a later review round which never ran.
 
 **Done when** every kept finding has an item, every spec's origin item names
 its PR, every fixed or kept finding the critic missed has a rejection line, and
