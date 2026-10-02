@@ -3391,6 +3391,7 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
         tree_base,
         branch,
         network,
+        critic_network,
         volume,
         state,
         container,
@@ -3410,7 +3411,9 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
         )
         note("cell_up", "cell up")
 
-    def _fake_cell_down(*, network, volume, state, container, created, note):
+    def _fake_cell_down(
+        *, network, critic_network, volume, state, container, created, note
+    ):
         cell_down_calls.append({"container": container})
         note("cell_down", True, "cell down")
 
@@ -5238,6 +5241,7 @@ def _spec_session_rig(tmp_path, monkeypatch, spec_file=None):
         tree_base,
         branch,
         network,
+        critic_network,
         volume,
         state,
         container,
@@ -5264,7 +5268,9 @@ def _spec_session_rig(tmp_path, monkeypatch, spec_file=None):
 
     cell_down_calls: list[dict] = []
 
-    def _fake_cell_down(*, network, volume, state, container, created, note):
+    def _fake_cell_down(
+        *, network, critic_network, volume, state, container, created, note
+    ):
         cell_down_calls.append({"container": container})
         note("cell_down", True, "cell down")
 
@@ -6089,6 +6095,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         tree_base,
         branch,
         network,
+        critic_network,
         volume,
         state,
         container,
@@ -6114,7 +6121,9 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         )
         note("cell_up", "cell up")
 
-    def _fake_cell_down(*, network, volume, state, container, created, note):
+    def _fake_cell_down(
+        *, network, critic_network, volume, state, container, created, note
+    ):
         log.append("down")
         cell_down_calls.append({"container": container})
         note("cell_down", True, "cell down")

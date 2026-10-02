@@ -148,9 +148,9 @@ def _lan_address() -> str:
         ) from exc
 
 
-def probe_addresses() -> list[str]:
+def probe_addresses(gateway: str = runtime.GATEWAY) -> list[str]:
     """What the probe covers: the cell's gateway and the host on its LAN."""
-    return [runtime.GATEWAY, _lan_address()]
+    return [gateway, _lan_address()]
 
 
 def _probe_script(addresses: list[str], ports: list[int]) -> str:
@@ -174,7 +174,10 @@ def _probe_script(addresses: list[str], ports: list[int]) -> str:
 
 
 def probe_host_bindings(
-    image_tag: str, network: str, ports: list[int] | None = None
+    image_tag: str,
+    network: str,
+    ports: list[int] | None = None,
+    gateway: str = runtime.GATEWAY,
 ) -> list[str]:
     """Addresses at which a host service answered from inside a cell.
 
@@ -185,7 +188,7 @@ def probe_host_bindings(
     Anything else is a service a cell can reach, and the fix is on the host —
     bind it to 127.0.0.1, or stop it — never in the cell.
     """
-    addresses = probe_addresses()
+    addresses = probe_addresses(gateway)
     if ports is None:
         ports = host_probe_ports()[0]
     done = runtime.run_ephemeral(
@@ -203,9 +206,12 @@ def probe_host_bindings(
 
 
 def assert_host_is_unreachable(
-    image_tag: str, network: str, ports: list[int] | None = None
+    image_tag: str,
+    network: str,
+    ports: list[int] | None = None,
+    gateway: str = runtime.GATEWAY,
 ) -> None:
-    reachable = probe_host_bindings(image_tag, network, ports)
+    reachable = probe_host_bindings(image_tag, network, ports, gateway)
     if reachable:
         raise runtime.CellRuntimeError(
             "host services answered from inside a cell at "

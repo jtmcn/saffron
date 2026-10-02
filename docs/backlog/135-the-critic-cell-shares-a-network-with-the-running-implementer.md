@@ -1,15 +1,16 @@
 ---
 id: 135
 title: The critic cell shares a network with the implementer's container, which is still running
-status: open
+status: done
 tier: 2
 filed: 2026-09-15
+closed: 2026-10-01
 by_hand: true
 specs: [SA-0087]
 prs: [274]
-commits: []
+commits: [a19e3b27, eb7840c0]
 cites: [§5.5, §2]
-related: [118, 127]
+related: [108, 118, 127, 131, b-ca3bc6]
 ---
 
 ## Problem
@@ -41,3 +42,28 @@ a `cell`-marked test that backgrounds a listener in the implementer's container,
 starts the critic cell the way production does, and probes from inside it —
 either showing nothing is reachable, or moving the critic cell to its own
 network with the proxy reachable from both.
+
+## Record
+
+- 2026-09-30: measured by hand, and the property fails. Both cells were started
+  as production starts them, and each reached a listener in the other. Every
+  probe had a positive control. The record is
+  `docs/evidence/2026-10-01-critic-cell-shares-the-implementers-network.md`.
+  So the first outcome above is ruled out, and the critic cell moves to its own
+  network.
+- The proxy joins the new network as a third leg (option A). `start_proxy`
+  already creates it on two networks, and item 108 measured the same shape on
+  podman. A proxy per critic cell (option B) costs a VM boot per lens cell here.
+- The fix derives its network and proxy names from the task. Today's fixed
+  `saffron-cells` and `PROXY_NAME` hold only while a batch runs one task at a
+  time (§4.2.1). A cloud host with no VM per cell leans harder on this split.
+- The test that lands it covers 127 and 131 in the same module. It also asserts
+  that the proxy refuses a `CONNECT` to the other internal network.
+- 2026-10-01: done by hand in `eb7840c0`. Critic cells join
+  `saffron-critic-net`, and the proxy is the one container on both internal
+  networks. `uv run pytest -m cell tests/test_review_cells.py` passed. Moving
+  the critic cell back onto `saffron-cells` turned its test red.
+- 2026-10-01: the third entry above said the fix derives its names from the
+  task. It does not. Every network name, subnet and the proxy's name is still
+  a constant, and b-ca3bc6 carries that work.
+

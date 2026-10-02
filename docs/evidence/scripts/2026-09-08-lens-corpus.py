@@ -427,6 +427,7 @@ def main() -> int:
                 tree_base=fixture.head_sha,
                 branch=f"lens-corpus/{fixture.spec_id}",
                 network=network,
+                critic_network=None,
                 volume=volume,
                 state=state,
                 container=container,
@@ -492,6 +493,7 @@ def main() -> int:
             # docstring and `session.cell_down`'s own.
             session.cell_down(
                 network=network,
+                critic_network=None,
                 volume=volume,
                 state=state,
                 container=container,

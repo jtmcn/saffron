@@ -600,6 +600,7 @@ def layer_cell(
                 tree_base=fields.head,
                 branch=fields.branch,
                 network=network,
+                critic_network=None,
                 volume=volume,
                 state=state,
                 container=container,
@@ -617,6 +618,7 @@ def layer_cell(
                 tree_base=fields.head,
                 branch=fields.branch,
                 network=network,
+                critic_network=None,
                 volume=volume,
                 state=state,
                 container=container,
@@ -629,6 +631,7 @@ def layer_cell(
     finally:
         session.cell_down(
             network=network,
+            critic_network=None,
             volume=volume,
             state=state,
             container=container,

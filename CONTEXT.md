@@ -477,9 +477,10 @@ probe's session is shown no list.
 implementer's transcript.
 _Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
 
-**Critic cell**: The cell a critic runs in: a new container from the repo's cell
-image, on the task's network and proxy, whose worktree is the task's base with
-the exported patch applied by that cell's own git. It is never the implementer's
+**Critic cell**: The cell a critic runs in. It is a new container from the repo's
+cell image. Its worktree is the task's base with the exported patch applied by
+that cell's own git. It sits on a critic network the task's proxy joins and the
+implementer does not. It is never the implementer's
 cell. A fresh session in the container the implementer had root in re-execs a
 runner that container could have rewritten, and reads the tree through a `.git`
 the implementer wrote (Appendix Q, `DESIGN.md` §5.5). REVIEW's lenses and

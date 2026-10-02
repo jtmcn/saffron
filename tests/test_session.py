@@ -1425,11 +1425,15 @@ def test_the_proxy_starts_before_anything_the_probe_reads(monkeypatch, tmp_path)
     described, because a comment is not a boundary."""
     cell = _stub_the_runtime(monkeypatch)
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
-    assert cell.preflight[:4] == ["proxy", "egress", "enumerate", "probe"]
+    # The second `egress` is the critic network's (item 135).
+    assert cell.preflight[:5] == ["proxy", "egress", "egress", "enumerate", "probe"]
     # What answered, not merely that something did — the same reason the port
     # count is on the line beside it.
-    (reaches,) = [x for x in cell.watched if "proxy reaches" in x]
-    assert reaches == "preflight: proxy reaches api.anthropic.com (401)"
+    reaches = [x for x in cell.watched if "proxy reaches" in x]
+    assert reaches == [
+        "preflight: proxy reaches api.anthropic.com (401)",
+        "preflight: proxy reaches api.anthropic.com from the critic network (401)",
+    ]
 
 
 def test_a_proxy_that_reaches_nothing_aborts_before_the_cell_is_built(
@@ -1475,6 +1479,7 @@ def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_pat
     # And the sibling it did start does not survive the failure.
     assert cell.preflight == [
         "proxy",
+        "egress",
         "egress",
         "enumerate",
         "probe",
@@ -1533,7 +1538,8 @@ def test_teardown_reports_only_what_this_run_created(monkeypatch, tmp_path):
         _drive(monkeypatch, tmp_path, cell=cell, turns=[])
 
     assert [line for line in cell.watched if "survived" in line] == [
-        "teardown: network saffron-cells survived — no such network"
+        "teardown: network saffron-cells survived — no such network",
+        "teardown: network saffron-critic-net survived — no such network",
     ]
 
 
@@ -5171,6 +5177,88 @@ def test_the_critic_cell_is_built_from_the_repos_image_at_the_tasks_tree_base(
     assert "ANTHROPIC_API_KEY" not in critic["env"]
 
 
+def test_the_critic_cell_is_not_on_the_implementers_network(monkeypatch, tmp_path):
+    """Measured 2026-09-30: on the task network the critic cell and the
+    still-running implementer each reached a listener in the other (item 135).
+    The critic cell joins a network the implementer is not on, and reaches the
+    proxy at the address it holds there."""
+    cell = _stub_the_runtime(monkeypatch)
+    critic_prefix = runtime.subnet_prefix(runtime.SUBNETS["critic"])
+
+    def _container_ip(name, subnet_prefix=runtime.SUBNET_PREFIX):
+        return f"{subnet_prefix}9"
+
+    monkeypatch.setattr("saffron.cell.runtime.container_ip", _container_ip)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    networks = {w["container"]: w["network"] for w in cell.worktrees}
+    assert networks[_CRITIC_CONTAINER] == "saffron-critic-net"
+    assert networks[_IMPLEMENTER_CONTAINER] == "saffron-cells"
+    (critic,) = [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
+    assert critic["env"]["HTTPS_PROXY"] == f"http://{critic_prefix}9:3128"
+
+
+def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
+    monkeypatch, tmp_path
+):
+    """The proxy is the one container on both internal networks. Its route out
+    is probed from each, because a third leg is a new mechanism on both runtimes.
+    The host is probed from each too, at that network's own gateway."""
+    cell = _stub_the_runtime(monkeypatch)
+    started: list[tuple] = []
+    probed: list[tuple[str, str]] = []
+
+    def _start_proxy(*networks, **_k):
+        started.append(networks)
+        return "10.88.0.2"
+
+    def _upstream(image_tag, network, proxy_ip, **_k):
+        probed.append((network, proxy_ip))
+        return "401"
+
+    host_probed: list[tuple[str, str]] = []
+
+    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY):
+        host_probed.append((network, gateway))
+
+    monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
+    monkeypatch.setattr("saffron.preflight.assert_proxy_reaches_upstream", _upstream)
+    monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", _host)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_ip",
+        lambda name, subnet_prefix=runtime.SUBNET_PREFIX: f"{subnet_prefix}2",
+    )
+    session.cell_up(
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        tree_base="a" * 40,
+        branch="saffron/SY-1",
+        network="net",
+        critic_network="cnet",
+        volume="vol",
+        state="state",
+        container="c",
+        gates_dir=tmp_path / "gates",
+        thread_env={},
+        created=set(),
+        note=lambda *a: None,
+    )
+    assert ("cnet", runtime.SUBNETS["critic"]) in cell.networks_created
+    assert cell.order.index("removed:network:cnet") < cell.order.index(
+        "created:network:cnet"
+    )
+    assert started == [("net", "cnet")]
+    critic_prefix = runtime.subnet_prefix(runtime.SUBNETS["critic"])
+    assert probed == [("net", "10.88.0.2"), ("cnet", f"{critic_prefix}2")]
+    # The host from each network, at that network's own gateway.
+    assert host_probed == [
+        ("net", runtime.GATEWAY),
+        ("cnet", runtime.gateway(runtime.SUBNETS["critic"])),
+    ]
+
+
 def test_a_fired_bound_applying_the_patch_is_saffrons_own_not_the_agents(
     monkeypatch, tmp_path
 ):
@@ -5762,6 +5850,7 @@ def test_no_cell_a_task_brings_up_is_granted_a_capability(monkeypatch, tmp_path)
         tree_base="a" * 40,
         branch="saffron/SY-1",
         network="net",
+        critic_network=None,
         volume="vol",
         state="state",
         container="c-2",
@@ -6219,7 +6308,7 @@ def test_an_unreadable_proxy_address_at_review_is_infrastructure(monkeypatch, tm
         "saffron.cell.runtime.container_ip",
         lambda *a, **k: None if len(cell.turns) >= 2 else "10.88.0.9",
     )
-    with pytest.raises(runtime.CellRuntimeError, match="proxy's address"):
+    with pytest.raises(runtime.CellRuntimeError, match="proxy has no address on"):
         _drive(
             monkeypatch,
             tmp_path,
@@ -8061,9 +8150,9 @@ def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_sp
     edit_wrong = {"file": "src/x.py", "find": "assert x == 1", "replace": "w"}
 
     rows = [
-        ("both", edit_probe, edit_wrong, [None, "saffron-cells", None]),
-        ("wrong_only", None, edit_wrong, [None, "saffron-cells", None]),
-        ("neither", None, None, [None, "saffron-cells"]),
+        ("both", edit_probe, edit_wrong, [None, "saffron-critic-net", None]),
+        ("wrong_only", None, edit_wrong, [None, "saffron-critic-net", None]),
+        ("neither", None, None, [None, "saffron-critic-net"]),
     ]
 
     real_critic_cell = session.critic_cell
@@ -8467,8 +8556,18 @@ def test_cell_down_stops_the_proxy_before_removing_its_network(monkeypatch):
     for name in ("remove_container", "remove_network", "remove_volume"):
         monkeypatch.setattr(f"saffron.cell.runtime.{name}", record(name))
 
+    removed_networks: list[str] = []
+
+    def _remove_network(name):
+        calls.append("remove_network")
+        removed_networks.append(name)
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.remove_network", _remove_network)
+
     session.cell_down(
         network="n",
+        critic_network="cn",
         volume="v",
         state="s",
         container="c",
@@ -8478,6 +8577,8 @@ def test_cell_down_stops_the_proxy_before_removing_its_network(monkeypatch):
 
     assert calls.index("stop_proxy") < calls.index("remove_network")
     assert calls.index("remove_container") < calls.index("stop_proxy")
+    # The proxy is on the critic network too, so that one waits for it as well.
+    assert removed_networks == ["n", "cn"]
 
 
 def _spec_export(tmp_path, name: str, text: str):

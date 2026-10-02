@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial, wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from saffron.agents.findings import Finding, anchor
 from saffron.cell import runtime
@@ -875,6 +875,32 @@ def run_one_cell(
     return outcome
 
 
+# The critic cells' own network: the proxy joins it and the implementer never
+# does (item 135). Its subnet is drawn from the one declaration, like every one.
+CRITIC_NETWORK = "saffron-critic-net"
+_CRITIC_SUBNET = runtime.SUBNETS["critic"]
+
+
+class _Leg(NamedTuple):
+    """One internal network the proxy joins, and how its preflight line reads."""
+
+    network: str
+    subnet: str
+    step: str
+    where: str
+
+
+def proxy_address(subnet: str) -> str:
+    """The proxy's address on one of its internal networks."""
+    from saffron.cell import proxy
+
+    address = runtime.container_ip(proxy.PROXY_NAME, runtime.subnet_prefix(subnet))
+    if address is None:
+        # Infrastructure, not a task outcome: `cell_env` cannot take `None`.
+        raise runtime.CellRuntimeError(f"the proxy has no address on {subnet}")
+    return address
+
+
 def cell_up(
     *,
     repo: Path,
@@ -882,6 +908,7 @@ def cell_up(
     tree_base: str,
     branch: str,
     network: str,
+    critic_network: str | None,
     volume: str,
     state: str,
     container: str,
@@ -900,10 +927,10 @@ def cell_up(
     describes: every mechanism reports success and applies to a different
     container. One copy, and the callers differ only in what they do after it.
 
-    `critic_cell` is the one sanctioned second path (SA-0087). It joins the
-    network this call already built, so the host-port probe and the proxy
-    reachability assert are properties it inherits rather than repeats; it
-    starts, stops and removes neither the network nor the proxy.
+    `critic_cell` is the one sanctioned second path (SA-0087). It joins
+    `critic_network`, which only the proxy shares with `network` (item 135).
+    It starts, stops and removes neither network nor the proxy. `None` builds
+    no critic network, for a caller that starts no critic cell.
 
     `created` is the caller's leak ledger, appended to in place, so a failure
     part-way leaves the caller holding exactly what may survive. `note` takes
@@ -917,25 +944,40 @@ def cell_up(
     from saffron.cell import proxy, runtime, worktree
     from saffron.repos import image
 
+    legs = [_Leg(network, runtime.DEFAULT_SUBNET, "egress", "")]
+    if critic_network is not None:
+        legs.append(
+            _Leg(
+                critic_network,
+                _CRITIC_SUBNET,
+                "critic_egress",
+                " from the critic network",
+            )
+        )
+
     # Inside the guarantee, not above it: a leftover network from a SIGKILLed
     # run makes `create_network` the first thing that raises on a re-run.
-    runtime.remove_network(network)
+    for leg in legs:
+        runtime.remove_network(leg.network)
     runtime.remove_volume(volume)
     runtime.remove_volume(state)
-    created.add(network)
-    runtime.create_network(network)
+    for leg in legs:
+        created.add(leg.network)
+        runtime.create_network(leg.network, subnet=leg.subnet)
 
     # First of everything: on apple/container 1.3.0 a container on the
     # internal network before the proxy leaves it no route out (evidence
     # 2026-08-28), and a dead route found here costs one container start
     # rather than an image build and an attempt (§5.1.1).
     note("proxy_starting", "starting the proxy")
-    proxy_ip = proxy.start_proxy(network)
+    proxy_ip = proxy.start_proxy(*(leg.network for leg in legs))
     note("proxy_addr", f"proxy at {proxy_ip}")
-    answered = preflight.assert_proxy_reaches_upstream(
-        image.BASE_TAG, network, proxy_ip
-    )
-    note("egress", f"proxy reaches {proxy.UPSTREAM_HOST} ({answered})")
+    # Per leg: a third one is unmeasured on either runtime.
+    for leg in legs:
+        answered = preflight.assert_proxy_reaches_upstream(
+            image.BASE_TAG, leg.network, proxy_address(leg.subnet)
+        )
+        note(leg.step, f"proxy reaches {proxy.UPSTREAM_HOST}{leg.where} ({answered})")
 
     # The cell runs the repo's own image, never the base: the base carries
     # no toolchain, so every gate would error before the agent is reached.
@@ -952,16 +994,20 @@ def cell_up(
     # tolerated listeners print every run, including when there are none —
     # an exception that goes quiet is the invisibility it was granted around.
     ports, tolerated = preflight.host_probe_ports()
+    gateways = [runtime.gateway(leg.subnet) for leg in legs]
+    # Every gateway, then the LAN address each probe shares.
+    addresses = dict.fromkeys([*gateways, *preflight.probe_addresses(gateways[0])])
     note(
         "ports",
         f"probing {len(ports)} host ports at "
-        + ", ".join(preflight.probe_addresses())
+        + ", ".join(addresses)
         + "; tolerating "
         + (", ".join(tolerated) or "nothing"),
     )
-    # The list the operator was just shown, not a second one taken now. No
-    # cell exists yet, and none will until this returns.
-    preflight.assert_host_is_unreachable(image.BASE_TAG, network, ports)
+    # The ports printed above, probed from each network at its own
+    # gateway. No cell exists yet, and none will until this returns.
+    for leg, gw in zip(legs, gateways, strict=True):
+        preflight.assert_host_is_unreachable(image.BASE_TAG, leg.network, ports, gw)
 
     created.add(volume)
     runtime.create_volume(volume)
@@ -989,6 +1035,7 @@ def cell_up(
 def cell_down(
     *,
     network: str,
+    critic_network: str | None,
     volume: str,
     state: str,
     container: str,
@@ -1025,6 +1072,10 @@ def cell_down(
         note("proxy_failed", False, f"proxy FAILED {failed}")
     proxy.stop_proxy()
     removed.append(("network", network, runtime.remove_network(network)))
+    if critic_network is not None:
+        removed.append(
+            ("network", critic_network, runtime.remove_network(critic_network))
+        )
     # Volumes go too, or the same spec_id cannot be re-run.
     removed.append(("volume", volume, runtime.remove_volume(volume)))
     removed.append(("volume", state, runtime.remove_volume(state)))
@@ -1233,9 +1284,9 @@ def critic_cell(
     copies of it (backlog item 140).
 
     `network` decides the names and who owns the network; the caller's `env`
-    is what keeps a Gate-only cell off the proxy. Given a name, this joins it — the pieces `cell_up` already brought up for
-    the task, the network and the proxy behind it — and neither starts, stops
-    nor removes it; the container and its two volumes are named
+    is what keeps a Gate-only cell off the proxy. Given a name, this joins it:
+    the critic network `cell_up` built for the task, with the proxy on it and
+    the implementer not. It neither starts, stops nor removes it; the container and its two volumes are named
     `saffron-critic-*`. Given `None`, this makes a network of its own, on
     `_GATE_CELL_SUBNET` rather than the task's own `saffron-cells`, and pre-
     cleans and tears it down itself, in the same `finally` as everything
@@ -1743,7 +1794,7 @@ def _drive_cell(
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron.agents import artifacts, context
-    from saffron.cell import proxy, runtime, worktree
+    from saffron.cell import runtime, worktree
     from saffron.gates.core.criteria import witnesses_green_at_base
     from saffron.gates.suite import CellTree, GateSuite
     from saffron.repos import mirror as mirror_ops
@@ -1768,6 +1819,7 @@ def _drive_cell(
         )
 
     network = "saffron-cells"
+    critic_network = CRITIC_NETWORK
     volume = f"saffron-wt-{spec.spec_id}"
     state = f"saffron-st-{spec.spec_id}"
     container = f"saffron-cell-{spec.spec_id}"
@@ -1884,6 +1936,7 @@ def _drive_cell(
             tree_base=spec.tree_base,
             branch=spec.branch,
             network=network,
+            critic_network=critic_network,
             volume=volume,
             state=state,
             container=container,
@@ -2561,15 +2614,7 @@ def _drive_cell(
             ledger.set_task_state(task_id, "REVIEWING")
 
             # Read once: REVIEW's and REBUT's critic cells share this env.
-            proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
-            if proxy_ip is None:
-                # Infrastructure, not a task outcome: the proxy this task
-                # already started is unreadable, which `cell_env` cannot turn
-                # into a `str`.
-                raise runtime.CellRuntimeError(
-                    "the critic cell could not read the proxy's address"
-                )
-            critic_env = cell_env(proxy_ip, policy.thread_env)
+            critic_env = cell_env(proxy_address(_CRITIC_SUBNET), policy.thread_env)
 
             def _critic_teardown(step: str, ok: bool, detail: str) -> None:
                 emit(
@@ -2663,7 +2708,7 @@ def _drive_cell(
                         spec=spec,
                         repo=repo,
                         mirror=mirror,
-                        network=network,
+                        network=critic_network,
                         env=critic_env,
                         gates_dir=gates_dir,
                         patch=patch_to_review,
@@ -2914,7 +2959,7 @@ def _drive_cell(
                                 spec=spec,
                                 repo=repo,
                                 mirror=mirror,
-                                network=network,
+                                network=critic_network,
                                 env=critic_env,
                                 gates_dir=gates_dir,
                                 patch=rebuttal_patch,
@@ -3083,6 +3128,7 @@ def _drive_cell(
             )
         cell_down(
             network=network,
+            critic_network=critic_network,
             volume=volume,
             state=state,
             container=container,

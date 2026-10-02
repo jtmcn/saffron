@@ -672,11 +672,16 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
     assert runtime.SUBNETS["cells"] == runtime.DEFAULT_SUBNET
     assert runtime.SUBNETS["egress"] == proxy_module.EGRESS_SUBNET
     assert runtime.SUBNETS["gate"] == session_module._GATE_CELL_SUBNET
+    assert runtime.SUBNETS["critic"] == session_module._CRITIC_SUBNET
 
     # Equal is not drawn: `"10.89.0.0" + "/24"` passes both checks above.
     import ast
 
-    for src, name in [(proxy_src, "EGRESS_SUBNET"), (session_src, "_GATE_CELL_SUBNET")]:
+    for src, name in [
+        (proxy_src, "EGRESS_SUBNET"),
+        (session_src, "_GATE_CELL_SUBNET"),
+        (session_src, "_CRITIC_SUBNET"),
+    ]:
         (value,) = [
             node.value
             for node in ast.parse(src).body

@@ -154,6 +154,7 @@ def main() -> int:
             tree_base=fixture.head_sha,
             branch=f"lens-scoring/{fixture.spec_id}",
             network=network,
+            critic_network=None,
             volume=volume,
             state=state,
             container=container,
@@ -214,6 +215,7 @@ def main() -> int:
         # finding about the harness.
         session.cell_down(
             network=network,
+            critic_network=None,
             volume=volume,
             state=state,
             container=container,

@@ -1,13 +1,14 @@
 ---
 id: 127
 title: No cell-marked test starts the critic cell the way production does
-status: open
+status: done
 tier: 3
 filed: 2026-09-15
+closed: 2026-10-01
 by_hand: true
 specs: []
 prs: []
-commits: []
+commits: [eb7840c0]
 cites: [§5.5]
 related: [118, 131]
 ---
@@ -36,3 +37,7 @@ implementer's cell is absent from it.
 **Filed 2026-09-15**, to land after `SA-0087` merges. By hand, because a cell
 cannot run `cell`-marked tests: they need the cell runtime and its images on
 the host.
+**2026-10-01, done by hand** in `eb7840c0`, beside item 135's fix.
+`tests/test_review_cells.py` starts the cell as REVIEW does and probes from
+inside it. `uv run pytest -m cell tests/test_review_cells.py` passed, and
+`cell_env` forwarding `ANTHROPIC_API_KEY` turned it red.
