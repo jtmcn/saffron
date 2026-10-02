@@ -43,3 +43,28 @@ head of #630. That review found two blockers. Run 25 revised the spec after
 reaches the top layer. A plain scan reads `stack_layers` and picks the first
 recorded layer. The re-fold hangs all four tasks on run 1, which belongs to
 `b1`. The output is in the run 25 summary.
+
+## SA-0167, revised in the same run
+
+`SA-0167` had no review in run 24. Its first round ran at `main`, before its
+parent existed. The second ran at the parent's pushed branch.
+
+| Round | Base | Blockers | Concerns | Notes | Fixed by |
+|---|---|---|---|---|---|
+| 1, at `main` | `4e8dd982` | 1 witness | 4 | 5 | writer (#635) |
+| 2, parent branch | `61231745` | 1 witness | 1 | 2 | delegate (#637) |
+| 3 | `61231745` | 0 | 1 | 1 | delegate (#637) |
+| 4 | `4e66195d` | 0 | 0 | 0 | none |
+
+Every finding that changed the spec was one class, a set the witness drove
+one member of. That is pre-flight check 1, the largest class in the corpus:
+
+- the commit line matched as a substring, which passes the old line;
+- the publish raise driven with only the two types a narrow catch names;
+- the policy checked on `protected` alone, which passes a build that keeps
+  the suppression scan.
+
+One concern rested on a false premise. It said the cell image runs git
+2.39.5. The image runs 2.47.3. Both that git and the host's reject an
+empty-expect lease on an existing branch with `stale info`
+(`measure-167/lease.sh`).
