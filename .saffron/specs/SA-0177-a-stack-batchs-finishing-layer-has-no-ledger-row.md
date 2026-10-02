@@ -272,9 +272,10 @@ as the reader, reads, and closes the reader. The writer calls
 `upsert_repo` once and `create_batch` three times, for `b1`, `b2` and
 `b3`. Each task is `create_run(repo_id, base_sha="a" * 40,
 batch_id=<batch>)`, then `create_task`. Every run takes that same
-`base_sha`, as every test in `tests/test_ledger.py` does. Do not vary it.
-The shared value is what lets the re-fold in step 9 hang `TE-4` on a `b1`
-run. Each layer is `record_stack_layer` with `generation=0`.
+`base_sha`. Do not vary it. The shared value is what lets the re-fold in
+step 9 hang `TE-4` on a `b1` run. That needs run 1 to be `TE-1`'s, in
+`b1`, so create no run ahead of its task. Each layer is
+`record_stack_layer` with `generation=0`.
 
 Batch `b1` has `TE-1` at position 1, `TE-2` at 2 and `TE-3` at 3, each
 the next one's predecessor. Batch `b2` has `TE-4` at position 1. Batch
@@ -340,11 +341,16 @@ as `tests/test_ledger_qualifications.py` does, never through `_db`.
    `None` and `b2`'s row as it was.
 
 Last, it closes every ledger and drops `stack_finishes` with `sqlite3`
-directly. It opens a fresh `Ledger` on the writer's path and records `b2`
-with `saffron/batch-<b2>-finish-2`, `e`×40 and no URL. `stack_finish(b2)`
-then holds those values, and `stack_finish(b1)` is `None`. The re-fold of
-step 9 hung `TE-4` on run 1, a `b1` run. So a write that kept
-`_build_fact`'s `batch_key` files this row under `str(b1)`.
+directly. It opens a fresh `Ledger` on the writer's path with
+`record=record` and records `b2` with `saffron/batch-<b2>-finish-2`,
+`e`×40 and no URL. `stack_finish(b2)` then holds those values, and
+`stack_finish(b1)` is `None`. The newest `stack_finish` fact under
+`TE-4`'s key carries `batch_key` `str(b2)`. Folding the record into a
+third fresh `Ledger` gives a `stack_finish(b2)` holding the `e`×40 values.
+The re-fold of step 9 hung `TE-4` on run 1, a `b1` run. So a write that
+kept `_build_fact`'s `batch_key` files this row under `str(b1)`. A write
+that keys the live row on an argument, as `_apply`'s `run_id` does, still
+appends its fact under `str(b1)`. The last two reads fail it.
 
 Step 1b runs these against the witness too, beyond the declared seven:
 
@@ -362,6 +368,10 @@ Step 1b runs these against the witness too, beyond the declared seven:
 - the top layer taken as the last layer recorded, which files under
   `TE-1`
 - an upsert by `COALESCE`, which keeps step 2's URL in step 3
+- the live row keyed on a `batch_id` keyword to `_apply`, with the fact
+  left on the run's batch (the last step's two reads fail it)
+- the top layer taken by `ORDER BY sl.task_key` (random hex, so it
+  reaches `TE-3` one time in three and a reviewer reads for it)
 
 This criterion is unmeasured. A prototype was not run. Only the picks in
 the table and the re-fold onto run 1 were probed. A table created outside
