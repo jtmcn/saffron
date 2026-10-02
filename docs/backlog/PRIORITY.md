@@ -209,6 +209,10 @@ An unattended night would lose the task.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-02**, from the spec loop's run 26: **b-209696**. A session
+a bound cuts still records $0.00. Run 26 split it from b-d4e015, which fixed
+the kill itself.
+
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
 landed within 25 lines of the `refactor` ceiling, and the second crossed it.
 `driver.py check` reads no size estimate, so nothing asks for the split.
