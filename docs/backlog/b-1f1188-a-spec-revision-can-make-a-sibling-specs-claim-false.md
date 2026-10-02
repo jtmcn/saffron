@@ -1,7 +1,7 @@
 ---
 id: b-1f1188
 title: A spec revision can make a sibling spec's claim false with no check
-status: open
+status: partial
 tier: 3
 filed: 2026-09-29
 specs: [SA-0167, SA-0177]
@@ -28,3 +28,4 @@ for a reread.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-10-02: `SA-0177` and `SA-0167` retired as #636 and #638. No check yet compares a sibling spec's claims after a revision. Run 25's three revisions were checked by hand in parent-branch reviews.

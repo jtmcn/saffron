@@ -5,7 +5,7 @@ status: partial
 tier: 2
 filed: 2026-09-29
 specs: [SA-0151, SA-0152, SA-0167]
-prs: [597, 627]
+prs: [597, 627, 635, 637]
 commits: []
 cites: []
 related: [b-7e69d0]
@@ -38,3 +38,4 @@ a criterion declares no `wrong_versions:`.
 
 - 2026-09-29: filed from the spec loop's run 22.
 - 2026-10-01: `SA-0151` declares its wrong builds now (#627), and its cell expressed all 23. `SA-0152` and `SA-0167` still list theirs in prose.
+- 2026-10-02: `SA-0167` declares its 16 wrong builds now (#635, #637), and its cell expressed all 16. `SA-0152` still lists its builds in prose.

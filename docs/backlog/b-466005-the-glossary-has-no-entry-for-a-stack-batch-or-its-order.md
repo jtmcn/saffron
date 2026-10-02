@@ -126,3 +126,4 @@ The **Refusal** entry names the stack order's refusal. This lands after
 - 2026-10-01: `SA-0162` (#626) and `SA-0151` (#628) merged. Their terms, the follow-up generation and the finishing layer, are now writable.
 - 2026-10-01: #626's and #628's seats found four entries now false. They are Stack batch, Revision, Predecessor and Recorded spec text. Each names a rule a follow-up now breaks.
 - 2026-10-01: `SA-0174` (#630) adds `findings.json`, the backlog pool. The glossary has no entry for either.
+- 2026-10-02: `SA-0167` (#638) prints `escalate:` lines for a red or unfinished finishing suite, a moved head, a wrong or unreadable base and an existing finishing branch. The **Escalation** entry still means only a spec review withholding a spec. Widen it to the stack batch design's list (section 4, "These escalate"), as a printed line that pushes nothing.

@@ -203,6 +203,10 @@ again.
 refused REBUT on one-line witness fixes. Each ended `EXHAUSTED` with no pull
 request, and the delegate opened both by hand.
 
+**Placed 2026-10-02**, from the spec loop's run 25: **b-d4e015**. The idle bound
+killed a PLAN session that was still writing, and the ledger read $0.00.
+An unattended night would lose the task.
+
 ### Tier 2 — the morning after
 
 **From the spec loop's run 14** (2026-09-22): **b-db95e1**. Two cells in a row
@@ -418,6 +422,12 @@ revised spec gets no task state.
 **Placed 2026-10-01**, from the review of #633: **b-ca3bc6**. Every cell
 network and the proxy have one fixed name, so two tasks at once would share
 them.
+
+**Placed 2026-10-02**, from the spec loop's run 25: **b-006372**,
+**b-7430c1**, **b-1068ea**, **b-8a6f43**, then **b-a7e315**. The finish is
+judged at the pinned base. One escalation hides a leftover worktree. A
+child's tree carries an older spec than it runs. `snapshot --force` drops
+holds, and `status` has no one-line form.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
