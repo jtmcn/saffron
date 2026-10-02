@@ -148,8 +148,9 @@ acceptance:
       new failures. The `gh` returns exit 127 when `run_gh` cannot start the
       program. A raise from `publish_finish`, or from `github_slug` before
       it, prints one line naming its type and message, and the exit code
-      stays the stop reason's. A `None` commit calls no publish. The witness
-      drives a sha, a raise from each, and a `None` commit. It matches the
+      stays the stop reason's, whatever the raise's type. A `None` commit
+      calls no publish. The witness drives a sha, a raise from each, a
+      `KeyError` from `publish_finish`, and a `None` commit. It matches the
       commit line against the printed lines whole, never as a substring.
     witness: tests/test_cli.py::test_a_stack_batch_publishes_its_finish_through_the_finishing_suite
     wrong_versions:
@@ -157,6 +158,7 @@ acceptance:
       - The gates exported at another commit, or read from the operator's repository.
       - The slug computed outside the try, so its raise reaches main and exits 2.
       - SA-0151's not pushed line kept after a commit, which a substring match of the commit line passes.
+      - A catch of `GitError` and `PackageError` alone, so a `KeyError` from publish reaches main and exits 2.
   - claim: >-
       `saffron batch` without `--stack` still hands `run_batch` its budget
       and its defaults.
@@ -697,9 +699,11 @@ policy has an empty `protected` list and the repo's gates, and its spec's
 `touches` is `FINISH_TOUCHES`. It finds `finish: committed <sha>` among
 `printed.splitlines()`, never with `in printed`. Then, under `monkeypatch.context()`, it
 makes `cli.run_gh` raise `OSError`, and the kept `gh` returns exit 127.
-Three more runs follow, each with its own `--home`. A `publish_finish`
+Four more runs follow, each with its own `--home`. A `publish_finish`
 raising `GitError("gone")` prints `finish: publish stopped: GitError:
-gone` and exits 0. A `package_phase.github_slug` raising
+gone` and exits 0. A `publish_finish` raising `KeyError("x")` prints
+`finish: publish stopped: KeyError: 'x'` and exits 0, as SA-0174's
+witness does for `write_findings` (`tests/test_cli.py:6744`). A `package_phase.github_slug` raising
 `PackageError("no slug")` prints `finish: publish stopped: PackageError:
 no slug`, exits 0, and calls no publish. A `None` commit calls no publish.
 
