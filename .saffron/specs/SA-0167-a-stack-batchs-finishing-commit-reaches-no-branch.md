@@ -695,7 +695,9 @@ The first run asserts exit 0, the commit line, and the returned line after
 `verify`'s 2, and one export of the pinned mirror at `a`×40 into
 `<out>/finish/3/gates`. It asserts `reverify`'s arguments: the mirror,
 `c`×40 over `d`×40, that directory, and `saffron/cell:<repo name>`. Its
-policy has an empty `protected` list and the repo's gates, and its spec's
+policy's `model_dump()` equals that of `finish_suite`'s policy for the
+export's own policy, and its spec equals `finish_suite`'s spec. So
+`protected` is empty and the suppression scan is off, and its spec's
 `touches` is `FINISH_TOUCHES`. It finds `finish: committed <sha>` among
 `printed.splitlines()`, never with `in printed`. Then, under `monkeypatch.context()`, it
 makes `cli.run_gh` raise `OSError`, and the kept `gh` returns exit 127.
@@ -713,6 +715,8 @@ Step 1b's builds for criterion 4, beyond its `wrong_versions:`:
 - `verify` returning the comparison, or whether it is red, not the count
 - a publish on a `None` commit
 - a raise that reaches `main`, which exits 2
+- a policy that empties `protected` around `finish_suite` and keeps the
+  suppression scan, which the `model_dump()` equality kills
 
 Criterion 4 is unmeasured. `_stack_finish` did not exist at `68892367`.
 
