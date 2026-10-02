@@ -1263,6 +1263,10 @@ def cmd_jev(args) -> int:
     directory, round_ = prepared
     # So a failed call below does not leave an earlier score looking current (item F7).
     (directory / "jev.ttl").unlink(missing_ok=True)
+    # A first review round with no findings asks Jev nothing, and an empty request is refused.
+    if not jev_observe.build_asks(round_):
+        print(f"{spec.id}  {args.kind} review round {round_.number}  nothing to ask")
+        return 0
     try:
         model, answers = jev_observe.observe(round_, _jev_client())
     # KeyError is an answer missing from the response, which is Jev failing too.

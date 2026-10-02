@@ -159,7 +159,6 @@ def build_asks(r: ReviewRound) -> dict[str, dict]:
             asks[f"Q5_{pid}"] = _noul(
                 f"Does this round's diff address earlier finding {pid}?"
             )
-    asks["Q6_round"] = _noul("Would another review round surface a blocking finding?")
     if r.kind == "spec-review":
         for label in labels:
             asks[f"Q7_{label}"] = _noul(f"Is criterion {label} testable as written?")
@@ -263,11 +262,10 @@ def to_turtle(r: ReviewRound, model: str, answers: list[Answer]) -> str:
     for prop in ("distribution", "model", "reviewRound", "commit"):
         parts.append(f"jev:{prop} a rdf:Property .\n")
     for a in answers:
-        subject = f"round-{r.number}" if a.subject == "round" else a.subject
         parts.append(
             "[] a earl:Assertion ;\n"
             "  earl:assertedBy jev:jev ;\n"
-            f"  earl:subject <urn:software-factory:jev:{r.kind}:{r.spec_id}:{subject}> ;\n"
+            f"  earl:subject <urn:software-factory:jev:{r.kind}:{r.spec_id}:{a.subject}> ;\n"
             f"  earl:test jev:{a.question} ;\n"
             "  earl:mode earl:automatic ;\n"
             "  earl:result [ a earl:TestResult ; earl:outcome earl:cantTell ;\n"

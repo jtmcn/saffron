@@ -147,6 +147,18 @@ def test_the_first_round_diffs_from_base(monkeypatch, loop):
     )
 
 
+def test_a_review_round_with_nothing_to_ask_makes_no_call(monkeypatch, loop, capsys):
+    first, second, _ = loop.commits
+    empty = _report(loop, "r1.md", [])
+    argv = ("--report", empty, "--commit", second, "--base", first)
+    assert _review(monkeypatch, loop, *argv) == 0
+    round_dir = loop.batches / "spec-loop" / "SA-0901" / "pr-review" / "round-1"
+    assert (round_dir / "round.json").is_file()
+    assert not (round_dir / "jev.ttl").exists()
+    assert loop.client.questions == {}
+    assert "nothing to ask" in capsys.readouterr().out
+
+
 def test_scoring_a_round_again_keeps_its_ids_and_its_diff(monkeypatch, loop):
     base = _two_rounds(monkeypatch, loop)
     ids = [
@@ -369,7 +381,6 @@ def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
         "Q1",
         "Q2",
         "Q3",
-        "Q6",
     }
 
 
