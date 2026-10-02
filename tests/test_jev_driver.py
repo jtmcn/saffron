@@ -4,6 +4,7 @@ the loop."""
 
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -39,6 +40,7 @@ type: feature
 - [ ] it parses
 - [ ] it saves
 """
+STARTED = "2026-10-05T00:00:00+00:00"
 FINDING = {
     "severity": "blocker",
     "criterion": 1,
@@ -145,6 +147,18 @@ def test_the_first_round_diffs_from_base(monkeypatch, loop):
     assert (
         "a.py" in loop.client.state["diff"] and "b.py" not in loop.client.state["diff"]
     )
+
+
+def test_a_review_round_with_nothing_to_ask_makes_no_call(monkeypatch, loop, capsys):
+    first, second, _ = loop.commits
+    empty = _report(loop, "r1.md", [])
+    argv = ("--report", empty, "--commit", second, "--base", first)
+    assert _review(monkeypatch, loop, *argv) == 0
+    round_dir = loop.batches / "spec-loop" / "SA-0901" / "pr-review" / "round-1"
+    assert (round_dir / "round.json").is_file()
+    assert not (round_dir / "jev.ttl").exists()
+    assert loop.client.questions == {}
+    assert "nothing to ask" in capsys.readouterr().out
 
 
 def test_scoring_a_round_again_keeps_its_ids_and_its_diff(monkeypatch, loop):
@@ -369,7 +383,6 @@ def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
         "Q1",
         "Q2",
         "Q3",
-        "Q6",
     }
 
 
@@ -554,3 +567,80 @@ def test_labels_skips_a_round_jev_never_scored(monkeypatch, loop, capsys):
     (base / "round-2" / "jev.ttl").unlink()
     assert _run(monkeypatch, "labels", "SA-0901") == 0
     assert "1 scored review round(s)" in capsys.readouterr().out
+
+
+def _follow(round_dir: Path, schema: int | None, **followed) -> None:
+    path = round_dir / "labels.json"
+    doc = json.loads(path.read_text())
+    if schema is not None:
+        doc["schema"] = schema
+    doc["blocker_followed"].update(followed)
+    path.write_text(json.dumps(doc))
+
+
+def test_a_schema_2_label_about_a_later_review_round_needs_that_review_round(
+    monkeypatch, loop, capsys
+):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(base / f"round-{n}")
+        _follow(base / f"round-{n}", 2, pr_seats=True)
+    # A killed run leaves an empty folder with no round.json.
+    (base / "round-3").mkdir()
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    out = capsys.readouterr().out
+    assert "pr-review round-2  pr_seats reads review round 3, which never ran" in out
+    assert "round-1  pr_seats" not in out
+
+
+def test_a_schema_2_null_on_the_last_review_round_is_no_gap(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(base / f"round-{n}")
+    _follow(base / "round-1", 2, pr_seats=False)
+    _follow(base / "round-2", 2, pr_seats=None)
+    assert _run(monkeypatch, "labels", "SA-0901") == 0
+
+
+def test_a_schema_1_label_keeps_its_old_reading(monkeypatch, loop):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(base / f"round-{n}")
+    _follow(base / "round-2", None, pr_seats=True)
+    assert _run(monkeypatch, "labels", "SA-0901") == 0
+
+
+def test_noise_grades_only_schema_2_notes(monkeypatch, loop, capsys):
+    base = _two_rounds(monkeypatch, loop)
+    for n in (1, 2):
+        _label_all(
+            base / f"round-{n}", verified="not-a-defect", disposition="no-action"
+        )
+    findings = base / "round-1" / "findings.json"
+    rows = json.loads(findings.read_text())
+    findings.write_text(json.dumps([{**f, "severity": "note"} for f in rows]))
+    assert _run(monkeypatch, "noise") == 0
+    assert "noise 0, caught 0" in capsys.readouterr().out
+    _follow(base / "round-1", 2)
+    assert _run(monkeypatch, "noise") == 0
+    assert "noise 0, caught 0" in capsys.readouterr().out
+    saved = base / "round-1" / "round.json"
+    saved.write_text(json.dumps({**json.loads(saved.read_text()), "saved_at": STARTED}))
+    assert _run(monkeypatch, "noise") == 0
+    out = capsys.readouterr().out
+    assert "noise 1, caught 0" in out
+    assert "inconclusive" in out
+    assert _run(monkeypatch, "noise", "--count") == 0
+    assert capsys.readouterr().out == "noise notes 1\n"
+
+
+def test_a_review_round_records_when_it_was_saved_and_a_rescore_keeps_it(
+    monkeypatch, loop
+):
+    base = _two_rounds(monkeypatch, loop)
+    saved = base / "round-1" / "round.json"
+    doc = json.loads(saved.read_text())
+    assert dt.datetime.fromisoformat(doc["saved_at"]).tzinfo is not None
+    saved.write_text(json.dumps({**doc, "saved_at": STARTED}))
+    assert _review(monkeypatch, loop, "--round", "1") == 0
+    assert json.loads(saved.read_text())["saved_at"] == STARTED

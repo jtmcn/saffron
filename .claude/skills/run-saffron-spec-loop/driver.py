@@ -1263,6 +1263,10 @@ def cmd_jev(args) -> int:
     directory, round_ = prepared
     # So a failed call below does not leave an earlier score looking current (item F7).
     (directory / "jev.ttl").unlink(missing_ok=True)
+    # A first review round with no findings asks Jev nothing, and an empty request is refused.
+    if not jev_observe.build_asks(round_):
+        print(f"{spec.id}  {args.kind} review round {round_.number}  nothing to ask")
+        return 0
     try:
         model, answers = jev_observe.observe(round_, _jev_client())
     # KeyError is an answer missing from the response, which is Jev failing too.
@@ -1293,9 +1297,11 @@ LABEL_VALUES = {
 }
 LABEL_RECURRED = {"cell-review", "pr-spec-seat", "pr-standards-seat"}
 LABEL_FOLLOWED = ("next_spec_round", "cell_review", "pr_seats")
+# Which `blocker_followed` key names the next review round of the same kind.
+LABEL_LATER = {"spec-review": "next_spec_round", "pr-review": "pr_seats"}
 
 
-def _label_gaps(directory: Path) -> list[str]:
+def _label_gaps(directory: Path, kind: str) -> list[str]:
     """Why one scored review round's `labels.json` does not grade its Jev answers."""
     path = directory / "labels.json"
     if not path.is_file():
@@ -1309,6 +1315,12 @@ def _label_gaps(directory: Path) -> list[str]:
     followed = doc.get("blocker_followed")
     if not isinstance(followed, dict) or any(k not in followed for k in LABEL_FOLLOWED):
         gaps.append(f"blocker_followed needs {', '.join(LABEL_FOLLOWED)}")
+    if doc.get("schema") == 2 and isinstance(followed, dict):
+        key = LABEL_LATER[kind]
+        later = int(directory.name.removeprefix("round-")) + 1
+        ran = (directory.parent / f"round-{later}" / "round.json").is_file()
+        if followed.get(key) is not None and not ran:
+            gaps.append(f"{key} reads review round {later}, which never ran")
     labels = doc.get("findings") or {}
     for fid in ids:
         label = labels.get(fid)
@@ -1339,12 +1351,45 @@ def cmd_labels(args) -> int:
                 if not (directory / "jev.ttl").is_file():
                     continue
                 scored += 1
-                for gap in _label_gaps(directory):
+                for gap in _label_gaps(directory, kind):
                     bad += 1
                     print(f"{spec_id}  {kind} {directory.name}  {gap}")
     if bad:
         return _fail(f"{bad} label gap(s) across {scored} scored review round(s)")
     print(f"labels: {scored} scored review round(s), each labelled")
+    return 0
+
+
+def cmd_noise(args) -> int:
+    """Grade Q2's noise score over every schema-2 labelled review round on disk."""
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    from harness import jev_grade
+
+    notes = []
+    for directory in sorted((JEV_ROOT / "spec-loop").glob("*/*/round-*")):
+        if directory.parent.name not in LABEL_LATER:
+            continue
+        labels, findings = directory / "labels.json", directory / "findings.json"
+        saved = directory / "round.json"
+        if not (labels.is_file() and findings.is_file() and saved.is_file()):
+            continue
+        if not jev_grade.counts(saved.read_text()):
+            continue
+        ttl = directory / "jev.ttl"
+        notes += jev_grade.round_notes(
+            findings.read_text(),
+            labels.read_text(),
+            ttl.read_text() if ttl.is_file() else None,
+        )
+    grade = jev_grade.grade(notes)
+    if args.count:
+        print(f"noise notes {grade.noise}")
+        return 0
+    print(
+        f"noise {grade.noise}, caught {grade.caught}, acted on {grade.acted}, "
+        f"flagged {grade.flagged_acted}: {grade.verdict}"
+    )
     return 0
 
 
@@ -1383,6 +1428,7 @@ def _jev_review(
             return _fail(f"no saved review round {number} at {base}")
         saved = json.loads((directory / "round.json").read_text())
         commit, since = saved["commit"], saved["since"]
+        saved_at = saved.get("saved_at")
         base_ref, merge_base = saved["base_ref"], saved["base"]
         reports = [p.read_text() for p in sorted(directory.glob("report-*.md"))]
     else:
@@ -1405,6 +1451,7 @@ def _jev_review(
             return _fail(f"{base_ref} has no merge base with {commit}: {exc}")
         since = _jev_since(prev, commit, merge_base, args.root) if prev else merge_base
         reports = [Path(p).read_text() for p in args.report]
+        saved_at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
     try:
         findings = [f for text in reports for f in jev_observe.parse_block(text)]
     except jev_observe.BlockError as exc:
@@ -1428,6 +1475,8 @@ def _jev_review(
         (directory / f"report-{i}.md").write_text(text)
     (directory / "spec.md").write_text(spec_text)
     saved = {"commit": commit, "since": since, "base_ref": base_ref, "base": merge_base}
+    if saved_at is not None:
+        saved["saved_at"] = saved_at
     (directory / "round.json").write_text(json.dumps(saved) + "\n")
     (directory / "findings.json").write_text(jev_observe.dump_findings(pairs))
     return directory, jev_observe.ReviewRound(
@@ -3095,6 +3144,14 @@ def main() -> int:
     )
     p.add_argument("spec_ids", nargs="*", help="default: every spec in the order")
     p.set_defaults(func=cmd_labels)
+
+    p = sub.add_parser("noise", help="grade Jev's noise score on schema-2 review notes")
+    p.add_argument(
+        "--count",
+        action="store_true",
+        help="print only the noise count, so the stopping rule reveals no result",
+    )
+    p.set_defaults(func=cmd_noise)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.

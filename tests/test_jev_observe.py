@@ -160,7 +160,7 @@ def _codes(asks: dict) -> set[str]:
 
 def test_a_spec_review_with_an_earlier_round_asks_every_question():
     assert _codes(jo.build_asks(_round("spec-review", prior=1))) == {
-        f"Q{n}" for n in range(1, 10)
+        f"Q{n}" for n in range(1, 10) if n != 6
     }
 
 
@@ -171,12 +171,11 @@ def test_a_pr_review_asks_no_criterion_questions():
         "Q3",
         "Q4",
         "Q5",
-        "Q6",
     }
 
 
 def test_a_cell_asks_nothing_about_earlier_rounds():
-    assert _codes(jo.build_asks(_round("cell"))) == {"Q1", "Q2", "Q3", "Q6"}
+    assert _codes(jo.build_asks(_round("cell"))) == {"Q1", "Q2", "Q3"}
 
 
 def test_the_first_round_asks_nothing_about_newness():

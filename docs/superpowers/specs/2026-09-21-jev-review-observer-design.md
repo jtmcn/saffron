@@ -230,3 +230,12 @@ The source note's exit criteria stand, with two additions from its review.
 2. Hand-labelling needs review rounds run past the stop point. A loop that
    stopped never shows whether one more review round would have found a
    blocker.
+
+## Changed after measuring
+
+1. **Q6 is no longer asked.** Graded on 2026-10-02 against 153 labelled
+   review rounds, it lost to a constant answer in three of five rows. The
+   review round's own blocker count beat it for the next spec review round
+   (`docs/evidence/2026-10-02-jev-scores-graded.md`, item b-ef334d).
+2. **A review round with nothing to ask makes no call.** Without Q6, a first
+   review round with no findings has no question left.
