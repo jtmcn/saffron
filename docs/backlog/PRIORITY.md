@@ -429,6 +429,9 @@ judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
 
+**Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
+sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
+
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
 `records/`, "index" and "projection". One was caught before code. The `terms`
