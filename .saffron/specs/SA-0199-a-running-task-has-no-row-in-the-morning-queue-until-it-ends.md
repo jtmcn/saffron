@@ -175,6 +175,7 @@ acceptance:
       - The rewrite names every task in the repo, so the unstamped task's row reads `ORPHANED`.
       - "`orphan_rows` called with no `header`, so the page after the scan has no trailing accept rate."
       - "`orphan_rows` called with a placeholder header such as `—` in place of the ledger's rate."
+      - "`orphan_rows` called with the fixed text `no settled task yet`, or a rate read from a fresh ledger."
       - "The raise left to the scan's own `try`, so the night prints `batch: the queue could not be resolved:` and exits 2."
       - The raise left uncaught, so it reaches `main` and prints `saffron:` instead.
   - claim: >-
@@ -393,9 +394,10 @@ after each `k["on_state"]` call. Compare each read with the whole list of
 row dicts, not one field. The entry read holds only the other spec's row.
 After each call, also assert `index.html` holds `<code>STATE</code>` for
 that state and `trailing accept rate <strong>100% of 1</strong>`. Before
-`run_task`, seed the ledger with one task of another spec set to `MERGED`.
-An empty ledger reads `no settled task yet`, which a key check alone
-cannot tell from a placeholder. For the packaged end, replace `package_phase.package` the way
+`run_task`, seed each run's ledger with one task of another spec set to
+`MERGED`, and let the fake write no ledger state. An empty ledger reads
+`no settled task yet`, which a key check alone cannot tell from a
+placeholder. For the packaged end, replace `package_phase.package` the way
 `test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link`
 (`tests/test_task.py:211-270`) does.
 
@@ -442,9 +444,12 @@ defaults to (`saffron/cli.py:133`). When told to stamp, the fake
 It returns `_fake_batch_resolution` with that `repo_id` and a
 `ReconcileResult` naming the task. Replace `run_batch` and
 `run_stack_batch` with one fake that calls `readiness_check`, records
-the stored states, and returns `DRAINED`. After the scan, assert the
-store's `index.html` holds `trailing accept rate <strong>R</strong>`,
-where `R` is what `trailing_accept_rate` returns for that night's ledger. For the raise, replace
+the stored states, and returns `DRAINED`. Seed a third task of a third
+spec as `MERGED` with `_seed_task`, with no store row and not stamped.
+Inside the fake loop, assert the store's `index.html` holds
+`trailing accept rate <strong>100% of 1</strong>`. Neither stamped nor
+`REVIEWING` tasks are settled, so without the third task the right value
+would be the fixed `no settled task yet`. For the raise, replace
 `cli.orphan_rows` with a function raising `OSError`. Assert the printed
 `batch: the queue page could not be rewritten:` line, that the fake loop
 ran, and that no line reads `batch: the queue could not be resolved:`.
