@@ -661,10 +661,15 @@ train and does not merge it. No train exists yet, so today the operator merges b
 _Avoid_: "accept", "merge" (merging is what the train does, later, if green), and
 "approve" for GitHub's review approval, which an author cannot give.
 
-**Trailing accept rate**: Merged over completed tasks across a rolling window of
-recent batches. The number that says whether this is working.
+**Trailing accept rate**: The share of the last twenty settled tasks that are
+`MERGED`. The number that says whether this is working.
 > Always "trailing". A batch's own accept rate is unknowable when the batch ends,
 > because nothing has been merged yet — that is the next morning's work.
+
+**Settled task**: A task whose outcome can no longer change. Its state is
+`MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`,
+`PLAN_REJECTED` or `SPEC_WITHHELD`. A task the scheduler re-queues has not settled,
+and neither has one whose outcome still waits on the operator.
 
 **Merge train**: The serial post-approval process — rebase onto current `main`,
 re-run the full gate suite on the merged result, merge only if green.
@@ -774,7 +779,8 @@ _Avoid_: "origin" (that's the real remote, reachable only from the host).
 viewer — the diffs live in GitHub.
 _Avoid_: "dashboard", "the queue UI", "the report", "dossier".
 
-**Queue line**: One task's entry in the index. Its outcome summary — never a
+**Queue line**: One task's entry in the index. While the task runs, it is a live row
+holding the phase state. Once the task ends, it is the outcome summary. It is never a
 "verdict", which belongs to findings.
 
 ---
