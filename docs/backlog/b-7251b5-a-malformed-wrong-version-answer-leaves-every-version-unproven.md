@@ -4,7 +4,7 @@ title: A malformed wrong-version answer leaves every declared version unproven, 
 status: open
 tier: 1
 filed: 2026-10-03
-specs: [SA-0183]
+specs: [SA-0183, SA-0202]
 prs: [648]
 commits: []
 cites: [§4.3, §5.5]
