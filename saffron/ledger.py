@@ -52,6 +52,7 @@ TaskState = Literal[
     "NOT_IMPLEMENTED",
     "GATE_ERROR",
     "RATE_LIMITED",
+    "PROVIDER_UNREACHABLE",
     "SPEC_WITHHELD",
     "APPROVED",
     "CHANGES_REQUESTED",

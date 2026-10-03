@@ -137,7 +137,7 @@ factory:TaskState a owl:Class ; rdfs:label "task state" ;
 factory:InFlightState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "in-flight state" ;
     rdfs:comment "A state in which the task is Saffron's to advance, tonight or now (§4.2.1)." .
 factory:EndState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "end state" ;
-    rdfs:comment "A state in which the task is not Saffron's to advance. It waits on the operator, GitHub, the merge train or saffron gc. A re-queue resumes the same row from five of them, so an end state need not be final. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
+    rdfs:comment "A state in which the task is not Saffron's to advance. It waits on the operator, GitHub, the merge train or saffron gc. A re-queue resumes the same row from six of them, so an end state need not be final. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
 factory:TerminalState a owl:Class ; rdfs:subClassOf factory:EndState ;
     rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal. CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists nine; §3.3 governs, see RATIONALE.md." .
 
@@ -146,6 +146,7 @@ factory:EXHAUSTED a factory:TerminalState . factory:READY_FOR_REVIEW a factory:T
 factory:MERGE_FAILED a factory:TerminalState . factory:PREFLIGHT_FAILED a factory:TerminalState .
 factory:NOT_IMPLEMENTED a factory:TerminalState . factory:GATE_ERROR a factory:TerminalState .
 factory:RATE_LIMITED a factory:TerminalState . factory:SPEC_WITHHELD a factory:TerminalState .
+factory:PROVIDER_UNREACHABLE a factory:TerminalState .
 
 # What the operator's decision produces, plus the state a crash produces. None of
 # these reaches the operator — they are downstream of a judgement they already made.

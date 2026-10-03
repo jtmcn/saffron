@@ -602,9 +602,9 @@ it to the vocabulary.
 **End state**: A state the task waits in, on the operator, GitHub, the merge train or
 the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
-`GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `APPROVED`, `CHANGES_REQUESTED`,
-`REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
-A re-queue resumes the same row from five end states, so an end state need not be
+`GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `APPROVED`,
+`CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
+A re-queue resumes the same row from six end states, so an end state need not be
 final. Every terminal state is an end state.
 
 **In-flight state**: A state in which Saffron advances the task, tonight or now: `DRAFT`,
@@ -615,7 +615,7 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
-`SPEC_WITHHELD`.
+`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you* —
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -639,6 +639,12 @@ window reopens.
 _Avoid_: "exhausted", "out of budget".
 _Avoid_: "failed", "gave up", "errored". Reserve "failed" for gates and
 infrastructure, and "errored" for gate status `error`.
+
+**`PROVIDER_UNREACHABLE`**: A task whose plan turn ended `api_error` with no token
+served. No turn of the task completed, so nothing was learned about the spec. It is
+infrastructure, exits 2 and re-queues. A rejected window stays `RATE_LIMITED`. A turn
+that fails after an earlier turn completed never ends here.
+_Avoid_: "offline", "network failure".
 
 **`SPEC_WITHHELD`**: A task whose spec review in a stack batch escalated, so no cell
 ran its spec. It escalates a `blocker` it could not revise, or a spec still unclean
