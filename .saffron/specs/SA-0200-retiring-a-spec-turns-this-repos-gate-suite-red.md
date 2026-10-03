@@ -73,6 +73,7 @@ acceptance:
       - Every top-level file copied as well as the measured ones, so the new spec joins the candidates.
       - The smoke test reading the live directory through its own path rather than `REAL_SPECS`, so the second half never fails.
       - A helper that moves a measured file out of the source's `done/`, so the source loses it.
+      - A helper that moves a measured file out of the source's top level, so the source loses it.
 ---
 
 ## Context
@@ -196,11 +197,16 @@ Call the smoke test function with a fresh scratch directory and the
 `ledger` fixture, and it returns. The source's sorted file list, recursive,
 is the same before and after the call. Then point `REAL_SPECS` at a directory
 holding only an empty `done/`. Call it again with another fresh directory,
-inside `pytest.raises(AssertionError)`.
+inside `pytest.raises(AssertionError)`. Last, point `REAL_SPECS` at an
+unmodified copy of the live specs, where the measured ids sit at the top.
+Call it with a third fresh directory, and compare that source's recursive
+file list before and after.
 
 **Measured on a prototype, 2026-10-03.** All of this was written against
 `04222f69`, and both files passed. Each wrong version listed above was
-applied to the prototype and failed its own criterion's witness. No
+applied to the prototype and failed its own criterion's witness. The two
+that move a file out of the source came after it, and are driven by
+reading alone. No
 existing test needed an edit. `ruff`, `ty` and the `structure` gate passed.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
