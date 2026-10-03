@@ -3,7 +3,7 @@ id: SA-0198
 title: The batch header shows no trailing accept rate, though `reconcile` now records `MERGED`
 type: feature
 priority: 2
-depends_on: [SA-0152]
+depends_on: [SA-0197]
 estimated_lines: 360
 touches:
   - saffron/scheduler.py
@@ -74,8 +74,8 @@ acceptance:
       with one task in each of the 17 states not settled, both of which
       return that text. It drives one task in each of the seven settled
       states, which reads `14% of 7`. It drives one `MERGED` and seven
-      `EXHAUSTED`, which reads `13% of 8`. It drives five tasks with no
-      `MERGED`, which reads `0% of 5`. It drives fifteen `MERGED` and five
+      `EXHAUSTED`, which reads `13% of 8`. It drives five `EXHAUSTED`
+      tasks and no `MERGED`, which reads `0% of 5`. It drives fifteen `MERGED` and five
       `EXHAUSTED`, which reads `75%`.
     witness: tests/test_accept_rate.py::test_the_rate_is_merged_over_settled_and_names_the_count_below_twenty
     wrong_versions:
@@ -138,37 +138,34 @@ acceptance:
 Backlog item **b-49a2f7**. It cites `DESIGN.md` §6 and §8.
 
 §6 names the trailing accept rate as the batch header's one number that says
-whether Saffron works (`DESIGN.md:1279`). Its next paragraphs say the field had
-no source, because nothing recorded a merge (`DESIGN.md:1281`). Item 52 made
+whether Saffron works (`DESIGN.md:1281`). Its next paragraphs say the field had
+no source, because nothing recorded a merge (`DESIGN.md:1283`). Item 52 made
 `reconcile` the writer of `MERGED`. It calls `set_task_state` with the state
 GitHub reports (`saffron/reconcile.py:186-188`).
 
 The operator's hand edit at this spec's base adds a paragraph to §6
-(`DESIGN.md:1285`). It reads: "**The window holds settled tasks.** The rate is
+(`DESIGN.md:1287`). It reads: "**The window holds settled tasks.** The rate is
 the share of them that merged." It lists seven settled states. It says a task
 the scheduler re-queues on its own `task_id` has not settled, and neither has
 one whose outcome still waits on the operator. That paragraph is the rule this spec builds.
 
 **What writes the page today.** `append_queue_line` counts `tasks` and
 `spend` itself and merges a caller's `header` after them
-(`saffron/report/index.py:257-261`). Three places call it. `saffron/replay.py:143`
+(`saffron/report/index.py:274-275`). Three places call it. `saffron/replay.py:143`
 passes `{"trailing accept rate": "—"}`. `run_task` calls it for a task that
 never reached PACKAGE (`saffron/task.py:611`). PACKAGE's `_finish` calls it
 after `set_task_package` (`saffron/phases/package.py:968-977`). Neither of the
 last two passes a `header`, so the field is absent from every page a cell
-writes. Line numbers in `saffron/report/index.py` and `saffron/cli.py` are at
-this spec's base, and `SA-0152` moves them. Find each by the function named
-beside it.
+writes. Line numbers are at `fee8e2be`. `SA-0197`, this spec's parent, moves
+those in `saffron/cli.py`. Find each by the function named beside it.
 
-**What this spec relies on from its parent.** `SA-0152` adds
-`saffron/report/stack.py`, which does not exist at this spec's base. So
-these citations are to `SA-0152`'s spec, not to code. Its criterion 3 and
-its build step 3 say `write_stack_view(out_dir, ledger, specs)` renders the
-newest batch's view, with `tasks` and `spend` counted as
-`append_queue_line` counts them. With no layer in the newest batch it writes
-nothing. Its Out of scope says it drops replay's header field. Its step 4
-calls it after every `--stack` batch, so a stack night's last page write is
-`write_stack_view`'s.
+**What this spec relies on from `SA-0152`.** `SA-0152` merged and added
+`saffron/report/stack.py`. `write_stack_view(out_dir, ledger, specs)`
+renders the newest batch's view (`saffron/report/stack.py:223-242`). Its
+header is `counted_header(rows)`, `tasks` and `spend` alone (`:238`). With
+no layer in the newest batch it writes nothing (`:231-233`). `saffron batch
+--stack` calls it after every stack batch (`saffron/cli.py:1696`), so a
+stack night's last page write is `write_stack_view`'s.
 
 **The state sets.** `DONE_STATES` holds eleven states
 (`saffron/scheduler.py:69-83`). `DEPENDENCY_WAITING_STATES` holds
@@ -202,7 +199,7 @@ one second.
 - **The header's one number is missing.** §6 calls it the number that says
   whether this works. No page a cell writes carries it.
 - **Replay's field is a confident em-dash.** §6 says a field with no
-  source renders exactly that (`DESIGN.md:1281`). Replay is v0 and stays
+  source renders exactly that (`DESIGN.md:1283`). Replay is v0 and stays
   as it is.
 - **Nothing names which tasks count.** `DONE_STATES` mixes four states whose
   outcome still waits on the operator with seven that settled. A rate over `DONE_STATES`
@@ -280,7 +277,7 @@ for one in eight.
 
 **Criterion 2's ledgers.** Use a fresh `Ledger` under `tmp_path` per case.
 `upsert_repo`, `create_run`, `create_task`, then `set_task_state`, are the
-public writers (`saffron/ledger.py:893`, `:1007`, `:1197`, `:1264`). The
+public writers (`saffron/ledger.py:893`, `:1007`, `:1239`, `:1306`). The
 17-state case creates one task per state that criterion 1's table marks
 not settled. Read that set off the table rather than from `SETTLED_STATES`,
 so a wrong set cannot hide in its own test.
@@ -343,11 +340,11 @@ to that expected header. Change nothing else in
 either file.
 
 **Pass the field as `header=`.** `append_queue_line` already merges a
-caller's header after its own counts (`saffron/report/index.py:261`). Keep
+caller's header after its own counts (`saffron/report/index.py:275`). Keep
 its signature, so its nineteen test calls stay as they are.
 
 **A raise from the read is not caught.** `_finish` puts no catch around
-`append_queue_line` (`saffron/phases/package.py:964-990`). A raise there
+`append_queue_line` (`saffron/phases/package.py:964-995`). A raise there
 reaches `main`'s catch-all, which prints one line and exits 2
 (`saffron/cli.py:245-252`). The read sits beside that call and follows the
 same rule.
