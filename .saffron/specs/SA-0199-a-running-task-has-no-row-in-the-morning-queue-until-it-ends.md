@@ -157,17 +157,21 @@ acceptance:
       `stamp_orphaned=True`, before the night's loop runs. They pass
       `out_dir`, the repo's name, and the spec id of each task the scan's
       `reconciled.orphaned` names. A row of a spec the scan did not stamp
-      stays. When `orphan_rows` raises, the night prints the line `_batch`
-      prints for a scan that raised and exits 2. The witness drives both
-      forms, one stamped task beside one unstamped, and a raising
+      stays. The page it writes carries `trailing accept rate` in its
+      header. The queue page is a rendered convenience, so a failed rewrite
+      never stops the night. When `orphan_rows` raises an `Exception`, the
+      night prints one line starting `batch: the queue page could not be
+      rewritten:` with the error, then runs its loop. The witness drives
+      both forms, one stamped task beside one unstamped, and a raising
       `orphan_rows` on the form without `--stack`.
     witness: tests/test_cli.py::test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps
     wrong_versions:
       - The rewrite runs only on the form without `--stack`.
       - The rewrite runs after the loop returns, so the loop sees the row at `REVIEWING`.
       - The rewrite names every task in the repo, so the unstamped task's row reads `ORPHANED`.
-      - The call sits outside the scan's `try`, so its raise reaches `main` and prints `saffron:` instead.
-      - A catch around the call goes on with the night after a raise.
+      - "`orphan_rows` called with no `header`, so the page after the scan has no trailing accept rate."
+      - "The raise left to the scan's own `try`, so the night prints `batch: the queue could not be resolved:` and exits 2."
+      - The raise left uncaught, so it reaches `main` and prints `saffron:` instead.
   - claim: >-
       A live row's write never stops the cell. When `append_queue_line`
       raises an `Exception` inside `on_state`, the callback prints one line
@@ -189,22 +193,23 @@ acceptance:
 
 Backlog item **b-0703c8**. It cites `DESIGN.md` §5.7 and §6. The operator
 decided the change on 2026-10-02 and wrote it into `DESIGN.md` at
-`8ca7cba0`. §5.7 step 4 now reads "The line replaces the task's live row,
-the one written as each phase started (§6)". §6 has a new paragraph
+`8ca7cba0`, restacked onto `main` as `8294e413`. §5.7 step 4 now reads
+"The line replaces the task's live row, the one written as each phase started (§6)". §6 has a new paragraph
 headed "**A running task has a live row.**" The row is written as each
 phase starts. The end-of-task line replaces it under the same repo and
 spec key, and so does the row of a task that ends before PACKAGE. A batch
 scan that stamps a task `ORPHANED` rewrites its row to `ORPHANED`. The
 page refreshes itself.
 
-**Line numbers.** Every line number below was read at `8ca7cba0`, before
-`SA-0152` and `SA-0198` land. The cell's base carries both, so the lines
-cited in `task.py`, `index.py`, `cli.py`, `package.py`, `test_task.py` and
-`test_cli.py` move once they land. Each citation names its function or test
+**Line numbers.** Every line number below was read at `8ca7cba0`, which is
+not on `main`, before `SA-0152`, `SA-0197` and `SA-0198` landed. The cell's
+base carries all three, so the lines cited in `task.py`, `index.py`,
+`cli.py`, `package.py`, `test_task.py` and `test_cli.py` sit elsewhere in it. Each citation names its function or test
 beside the line. Find it by that name.
 
-**Where rows come from today.** Two calls write a row, and both run once
-the task is over. PACKAGE's `_finish` calls `append_queue_line`
+**Where rows come from today.** Two calls write a batch's row, and both run
+once the task is over. Replay's call (`saffron/replay.py:143`) is v0's
+and stays as it is. PACKAGE's `_finish` calls `append_queue_line`
 (`saffron/phases/package.py:964-995`, the call at `:977`). `run_task`
 calls it for a task that never packaged (`saffron/task.py:611-628`).
 `append_queue_line` upserts on repo and spec id, then renders
@@ -286,20 +291,24 @@ reloads it.
    seconds (`saffron/cell/session.py:63`). So the page shows each phase
    start within a minute of its write. A page read in ten seconds is
    seldom reloaded under its reader.
-5. **The scan.** `_batch` wraps the opening `_resolve_queue` call in a
-   `try`. Inside it, after that call returns, map the task ids in
+5. **The scan.** The opening `_resolve_queue` call already sits in a `try`
+   (`saffron/cli.py:1579-1591`). In its `else` branch, map the task ids in
    `resolved.reconciled.orphaned` to spec ids. Read them from
    `ledger.tasks_by_repo(resolved.repo_id)`. Call `orphan_rows` with
-   `out_dir`, `repo.name` and those ids. Skip the call when no task was
-   stamped or `resolved.repo_id` is `None`. Import `orphan_rows` by name
+   `out_dir`, `repo.name`, those ids and the header. Give that call its
+   own `try`, which catches `Exception`, prints the
+   `batch: the queue page could not be rewritten:` line, and goes on. Skip
+   the call when no task was stamped or `resolved.repo_id` is `None`. Import `orphan_rows` by name
    into `saffron/cli.py`, so a test can replace `cli.orphan_rows`.
 
 **The header.** `SA-0198`, this spec's parent, makes `run_task`'s
 end-of-task call pass `header={"trailing accept rate": ...}`, read with
 its `trailing_accept_rate(ledger)`. The live and `ORPHANED` writes in
 `run_task` pass the same header inside their catch. Each write reads the
-rate again at that moment. A header built once before `run_one_cell` is
-`SA-0198` criterion 4's wrong version, and its witness turns red.
+rate again at that moment. A header built once before `run_one_cell` and
+reused for the end-of-task write is `SA-0198` criterion 4's wrong version,
+and its witness turns red. One cached for the live writes alone passes
+both witnesses, so build the header inside each write.
 `_batch` builds it the same way and passes it to `orphan_rows`. Otherwise
 each live write would drop the field from the page until the task ends.
 Criterion 2's witness checks the field on each live write.
@@ -424,9 +433,11 @@ defaults to (`saffron/cli.py:133`). When told to stamp, the fake
 It returns `_fake_batch_resolution` with that `repo_id` and a
 `ReconcileResult` naming the task. Replace `run_batch` and
 `run_stack_batch` with one fake that calls `readiness_check`, records
-the stored states, and returns `DRAINED`. For the raise, replace
-`cli.orphan_rows` with a function raising `OSError`, and assert the exit
-code 2 and the printed `batch: the queue could not be resolved:` line.
+the stored states, and returns `DRAINED`. After the scan, assert
+`trailing accept rate` in the store's `index.html`. For the raise, replace
+`cli.orphan_rows` with a function raising `OSError`. Assert the printed
+`batch: the queue page could not be rewritten:` line, that the fake loop
+ran, and that no line reads `batch: the queue could not be resolved:`.
 
 **Criterion 8's witness.** Replace `index_report.append_queue_line` with
 a wrapper. It raises `OSError` for a row whose state is in a set the test
@@ -448,8 +459,10 @@ from `8ca7cba0`, passed all eight witnesses described above. Each of the
 eight failed on an assertion with its source reverted. It passed the rest
 of the suite, apart from tests that read this repository's git history,
 which the prototype's copy did not carry. `types`, `dead` and `structure`
-passed on it. Then 29 of the 34 wrong versions below the criteria were
-applied to it as edits, and each failed its own criterion's witness.
+passed on it. Then 29 of the 34 wrong versions listed then were applied to
+it as edits, and each failed its own criterion's witness. The header
+clauses of criteria 2 and 7 and criterion 7's go-on-after-a-raise came
+later and are unmeasured.
 
 Its source and witnesses measured 1615 tokens under `size_gate`'s counter,
 with few docstrings and comments. `estimated_lines` is 480: that figure
