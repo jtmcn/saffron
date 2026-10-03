@@ -428,8 +428,9 @@ for it. These fail it:
 - a `size` summary read from the last attempt's results alone, which
   `TE-7` leaves empty
 - a layer's task joined by spec id, alone, as that spec's newest task, or
-  as its newest task within the batch.
-  It brings in the second `TE-7` or the `RATE_LIMITED` `TE-6`.
+  as its newest task within the batch. The first two bring in the second
+  `TE-7` or the `RATE_LIMITED` `TE-6`. The last brings in run 8's
+  `RATE_LIMITED` `TE-4`, measured.
 - an order entry's position looked up by spec id, which gives the
   `RATE_LIMITED` `TE-6` position 3
 - spend read off `tasks.spent_usd_est`, which is 0 on three layers
@@ -502,10 +503,10 @@ at least seven times, one each for the title, budget, peak turns,
 - a layer number taken from the entry's index, which gives `TE-4` 4
 - an unescaped title, or an unescaped size summary
 - a `None` printed, or an empty string where the placeholder belongs
-- the end-review status left out of a layer's section, reasoned
+- the end-review status left out of a layer's section
 
-Measured by the same run: each of these failed criterion 2's witness, but
-the one marked reasoned, which is unmeasured.
+Measured by the same run: each of these failed criterion 2's witness. The
+end-review status was measured at `c6d61282`, the head of `SA-0183`.
 
 **Criterion 3's witness** uses the arrangement above and an `out_dir` in
 `tmp_path`. It appends two `QueueLine`s with `append_queue_line`, for
@@ -514,7 +515,7 @@ the one marked reasoned, which is unmeasured.
 they wrote holds `</header>` then a newline then `<table>`, as the
 template does today (`saffron/report/index.py:166-167`). It calls
 `write_stack_view(out_dir, ledger, specs)`. It asserts `index.html` holds
-`render_stack(stack_view(ledger, B, specs))` after `</header>` and before
+`render_stack` of `stack_view(ledger, B, specs)` after `</header>` and before
 `<table>`, holds no `TE-2`, and says `tasks` 2 and `spend` $10.50. It
 asserts the page holds `_row` of `TE-7`'s `QueueLine`, which kills a page
 rendered as `render_index([], header=counted)`. It asserts `queue.json`'s
@@ -542,8 +543,9 @@ a touch of `.queue.lock` before the view is read. That run's rewrite of
 `queue.json` changed its bytes. On 2026-10-02 at `39864aea`, a scratch
 probe wrote two lines with `append_queue_line`. A rewrite through
 `_atomic_write` of `json.dumps` over `_existing_queue_rows` kept the bytes
-and changed the inode. Leaving the file alone kept both. The row
-assertion is reasoned, and the parent-branch re-review measures it.
+and changed the inode. Leaving the file alone kept both. At `c6d61282`
+a scratch build measured the row assertion and the inode assertion: each
+killed its wrong build.
 
 **Criterion 4's witness** follows `SA-0144`'s witness for `saffron batch
 --stack`, `test_saffron_batch_stack_plans_once_and_runs_that_order`
@@ -558,7 +560,7 @@ open, on the ledger it is handed: a batch, a run in that batch, a task for
 `UNTIL`, `INFRASTRUCTURE` and `INCOMPLETE`, each with its own `--home`. It
 asserts the exit code `_batch` maps each to. It reopens that home's
 ledger, and asserts `<home>/batches/v0/index.html` holds
-`render_stack(stack_view(ledger, <that batch>, specs))`, with `specs`
+`render_stack` of `stack_view(ledger, <that batch>, specs)`, with `specs`
 mapping `SY-2` and `SY-1` to the specs the fake returned. Then it runs
 `saffron batch` without `--stack`, with a fake `run_batch` that writes the
 same rows. That run takes a fresh `--home` of its own, since a stack
@@ -573,11 +575,21 @@ full`. These fail it:
 - `specs` left empty, which renders no title
 - a broad catch around the call that keeps exit 0
 
-Criterion 4's arrangement is unmeasured. Its four wrong builds die by
-reading alone. `--stack` and its test helpers exist at `39864aea`, but
-`SA-0183`'s reads do not. The re-review at `SA-0183`'s head measures this
-witness. It measures criterion 2's reasoned end-review build in the same
-run.
+Measured at `c6d61282`, the head of `SA-0183`, on a scratch build that
+was then discarded. The arrangement ran cleanly on `main`'s open ledger,
+and each stop reason exited as `_batch` maps it. Each of the four wrong
+builds failed the witness.
+
+**Two of a witness's needs the scratch build found.** `stack_view` returns
+`StackView | None`, so `render_stack(stack_view(...))` fails the `types`
+gate. Bind the view, assert it is not `None`, then render it. Two existing
+tests in `tests/test_cli.py` patch `Ledger.stack_layers` to return
+`[{"position": 1}]`. They are `test_a_stack_batch_commits_its_finish_and_survives_a_raise`
+and `test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh`.
+The real `write_stack_view` raises `KeyError` on that row, so `main` exits
+2 where each expects 0. In each, replace `cli.write_stack_view` with a stub
+that writes nothing, inside the context that patches `stack_layers`.
+Change nothing else in them.
 
 **The call's place.** `SA-0151`'s `finish` runs inside
 `run_stack_batch`, after the follow-ups and before the batch row closes.
@@ -605,7 +617,8 @@ this spec's own part 1768 tokens. `stack.py` took 516, `render_index`
 and the call in `cli.py` 42, `tests/test_stack_view.py` 954, and
 criterion 4's witness 256. The end-review status, test docstrings and
 comments add about 540, unmeasured. Criterion 3's row and inode
-assertions add about 4 lines. That is about 2330 tokens, and 3260,
+assertions add about 4 lines. A scratch build at `c6d61282`, with almost
+no docstrings, measured 1930 tokens with `size`'s own count. That is about 2330 tokens, and 3260,
 109% of the ceiling, at the 1.4 times sibling cells landed at. The
 operator accepts that advisory `fail` and settled on no split. Keep one
 fixture helper that every witness in `tests/test_stack_view.py` shares,
