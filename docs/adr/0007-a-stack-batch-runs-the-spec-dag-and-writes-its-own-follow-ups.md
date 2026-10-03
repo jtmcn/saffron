@@ -126,7 +126,10 @@ takes the recorded `pushed_sha` of the batch's highest layer. That stays safe
 because the batch compares each layer's remote head with its record before
 the push, and escalates a moved branch (`SA-0167`).
 
-**Nothing merges.** The batch links the stack, and `--ready` marks it ready.
+**Nothing merges.** The batch links the stack, and leaves every layer a draft.
+Amended 2026-10-03, `SA-0170`: `--ready` is withdrawn. A ready, open pull
+request reconciles as `APPROVED`, so marking ready stays the operator's
+approval.
 Merging stays the operator's, as §1.4 says of every version.
 
 This ADR narrows §1.4's refusal, and §1.4's entry says so. An agent writes a

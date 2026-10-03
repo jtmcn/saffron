@@ -4,7 +4,7 @@ title: '`snapshot --force` drops every hold, so a scoped loop re-holds its specs
 status: open
 tier: 3
 filed: 2026-10-02
-specs: [SA-0170, SA-0183, SA-0152]
+specs: []
 prs: []
 commits: []
 cites: []
@@ -29,3 +29,6 @@ order records once.
 ## Record
 
 - 2026-10-02: filed from the spec loop's run 25.
+- 2026-10-03: `SA-0170`, `SA-0183` and `SA-0152` left `specs`. They were the
+  specs run 25 held, never a fix for this item. Run 26 held `SA-0152` once,
+  and the `snapshot --force` after its spec merged released it, as intended.

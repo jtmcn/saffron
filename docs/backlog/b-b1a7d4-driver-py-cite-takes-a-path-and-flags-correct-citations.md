@@ -31,3 +31,4 @@ symbol alone.
 
 - 2026-09-29: filed from the spec loop's run 22.
 - 2026-10-02: `SA-0167` retired as #638. `driver.py cite` still takes a path, and its quoted-text warnings still flag correct citations (18 on `SA-0167`).
+- 2026-10-03: `SA-0152` retired as #650. `cite` is unchanged.

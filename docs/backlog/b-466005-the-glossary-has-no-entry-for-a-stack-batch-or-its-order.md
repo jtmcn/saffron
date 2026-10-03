@@ -127,3 +127,8 @@ The **Refusal** entry names the stack order's refusal. This lands after
 - 2026-10-01: #626's and #628's seats found four entries now false. They are Stack batch, Revision, Predecessor and Recorded spec text. Each names a rule a follow-up now breaks.
 - 2026-10-01: `SA-0174` (#630) adds `findings.json`, the backlog pool. The glossary has no entry for either.
 - 2026-10-02: `SA-0167` (#638) prints `escalate:` lines for a red or unfinished finishing suite, a moved head, a wrong or unreadable base and an existing finishing branch. The **Escalation** entry still means only a spec review withholding a spec. Widen it to the stack batch design's list (section 4, "These escalate"), as a printed line that pushes nothing.
+- 2026-10-03: `SA-0152` (#650) renders one end-review status per layer, rolled up
+  from its two lenses. **End-review status** is defined per lens, where
+  `not_reached` means no cell opened. The page prints `not_reached` for a layer
+  whose Spec lens reviewed. Add an entry for the layer's roll-up. `SA-0170`
+  (#647) links the stack, and the glossary has no entry for linking.
