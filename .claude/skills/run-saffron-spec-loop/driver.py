@@ -2813,6 +2813,30 @@ def _step_ordinal(word: str) -> str | None:
     return _ORDINAL_WORDS[idx + 1]
 
 
+# A smoke test that binds `measured` reads a retired id from `done/`. So a
+# retirement leaves its lists as they are (SA-0200).
+RETIREMENT_OWES_NOTHING = (
+    "case: the smoke test reads its measured ids, so a retirement owes no change"
+)
+
+
+def _binds_measured(path: Path) -> bool:
+    """Whether the smoke test assigns a name `measured` anywhere in its body."""
+    try:
+        tree = ast.parse(path.read_text())
+    except (OSError, SyntaxError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == SMOKE_TEST_NAME:
+            return any(
+                isinstance(target, ast.Name) and target.id == "measured"
+                for stmt in ast.walk(node)
+                if isinstance(stmt, ast.Assign)
+                for target in stmt.targets
+            )
+    return False
+
+
 def _smoke_docstring(path: Path) -> tuple[bool, str | None]:
     """Whether `path` holds a function named `SMOKE_TEST_NAME`, and its
     docstring if it does. `False` covers a missing file, one that does not
@@ -2849,9 +2873,9 @@ def _next_ordinal(root: Path) -> tuple[str | None, str]:
 
 def _queue(root: Path):
     """`build_queue` over `root`'s `.saffron/specs`, under an empty scratch
-    ledger and a `gh` that reports no open pull request. That is the queue
-    smoke test's own arrangement (`tests/test_scheduler.py:2105-2112`), so the
-    printed lines equal what it asserts. A fresh ledger filters nothing, so
+    ledger and a `gh` that reports no open pull request, as the queue smoke
+    test builds it. The smoke test reads only its measured ids, which at the
+    commit adding a spec are the live tree. A fresh ledger filters nothing, so
     `repo_id` is `None`."""
     from saffron.ledger import Ledger
     from saffron.scheduler import build_queue
@@ -2941,20 +2965,26 @@ def _paragraph_lines(
     return lines
 
 
-def _block3_lines(candidates, refusals) -> list[str]:
+def _block3_lines(candidates, refusals, *, measured: bool) -> list[str]:
     ids = ", ".join(f'"{c.spec.id}"' for c in candidates)
     names = ", ".join(f'"{r.path.name[:7]}"' for r in refusals)
-    return [
+    lines = [
         f"assert [c.spec.id for c in candidates] == [{ids}]",
         f"assert [r.path.name[:7] for r in refusals] == [{names}]",
     ]
+    if measured:
+        every = sorted(
+            [*(c.spec.id for c in candidates), *(r.path.name[:7] for r in refusals)]
+        )
+        lines.append("measured = {" + ", ".join(f'"{i}"' for i in every) + "}")
+    return lines
 
 
 def cmd_bookkeeping(args) -> int:
     """Three of the four edits `docs/agents/issue-tracker.md` asks of the
     commit that adds a spec (item b-7d3810). They are the origin item's
     `specs:` line, a draft paragraph for the queue smoke test's docstring,
-    and its two pinned `assert` lines. The fourth, `PRIORITY.md`, is out of scope.
+    and its pinned lines. The fourth, `PRIORITY.md`, is out of scope.
     `check_priority` already reports it on every `make check`. Writes no
     file, stages nothing, and runs no git.
     """
@@ -2982,10 +3012,14 @@ def cmd_bookkeeping(args) -> int:
 
     candidates, refusals = _queue(REPO)
     retired = path.parent.name == "done"
-    block2 = _paragraph_lines(
-        REPO, args.spec_id, spec, item_id, retired, candidates, refusals
-    )
-    block3 = _block3_lines(candidates, refusals)
+    measured = _binds_measured(REPO / "tests" / "test_scheduler.py")
+    if retired and measured:
+        block2 = block3 = [RETIREMENT_OWES_NOTHING]
+    else:
+        block2 = _paragraph_lines(
+            REPO, args.spec_id, spec, item_id, retired, candidates, refusals
+        )
+        block3 = _block3_lines(candidates, refusals, measured=measured)
 
     for heading, lines in zip(_HEADINGS, (block1, block2, block3), strict=True):
         print(heading)

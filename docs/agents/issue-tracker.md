@@ -61,8 +61,11 @@ GitHub issues remain in use only for research/evidence records under
   `tests/test_scheduler.py::test_saffron_queue_smoke_reproduces_this_repos_measured_queue`
   pins the exact candidates and refusals the live `.saffron/specs/` produces.
   So the commit that adds a spec updates that list and adds a "Re-measured"
-  paragraph to the top of its docstring, and so does the commit that retires one
-  to `done/`. Run `make check` before pushing a spec: `SA-0078` reached CI
+  paragraph to the top of its docstring. Once the test binds a `measured` set
+  (`SA-0200`), that commit adds the new id to the set too. A retirement then
+  changes nothing, since the test reads each measured spec from `done/` as
+  well. Until then, the commit that retires one re-measures as well.
+  `driver.py bookkeeping` drafts whichever edits apply. Run `make check` before pushing a spec: `SA-0078` reached CI
   without it and failed there. The commit that adds a spec also lists it in its
   origin item's `specs:` — the item its `## Context` cites first.
 - **A spec that introduces a term files its vocabulary follow-up when it is
