@@ -9,6 +9,7 @@ author imagined the writer emits.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -550,3 +551,225 @@ def test_the_no_follow_poll_stops_after_one_pass(tmp_path):
     lines = list(watch.follow(task_dir, sleep=watch.once))
 
     assert lines == [describe(event) for event in events]
+
+
+def test_following_every_task_prints_only_lines_appended_after_it_starts(tmp_path):
+    """Seven task directories exist before the follower starts, in an order
+    that is neither name order nor its reverse. A listing in creation order
+    would not pass by accident. One of them (`SY-2`) has no log yet, and two
+    plain files sit beside them and must be passed over. The first poll
+    renders nothing, since every offset starts at the log's own size (or
+    `0` with no log). Once new events land, the second poll renders all of
+    them, in name order, `SY-1` first."""
+    root = tmp_path / "root"
+    root.mkdir()
+    names = ["SY-4", "SY-1", "SY-6", "SY-3", "SY-7", "SY-2", "SY-5"]
+    for name in names:
+        if name == "SY-2":
+            (root / name).mkdir()
+            continue
+        log = EventLog(root / name)
+        log.append(Teardown(timestamp=1.0, spec_id=name, step="start", ok=True))
+        log.append(Teardown(timestamp=2.0, spec_id=name, step="network", ok=True))
+    (root / "index.html").write_text("<html></html>")
+    (root / "queue.json").write_text("{}")
+
+    new_events = {
+        name: (
+            Teardown(timestamp=3.0, spec_id=name, step="proxy", ok=True),
+            Teardown(timestamp=4.0, spec_id=name, step="package", ok=True),
+        )
+        for name in names
+    }
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            for name in names:
+                first_new, second_new = new_events[name]
+                log = EventLog(root / name)
+                log.append(first_new)
+                log.append(second_new)
+            return True
+        return False
+
+    lines = list(watch.follow_every_task(root, sleep=sleep))
+
+    expected = []
+    for name in sorted(names):
+        first_new, second_new = new_events[name]
+        expected.append(f"{name} {describe(first_new)}")
+        expected.append(f"{name} {describe(second_new)}")
+
+    assert lines == expected
+    assert len(lines) == 14
+    assert lines[0].startswith("SY-1 ")
+
+
+def test_a_task_directory_created_after_the_start_joins_from_its_first_line(tmp_path):
+    """`SY-0` does not exist when the follower starts. It is created during
+    the first sleep, with two events already in its log. It joins on the
+    next poll, from its own first line, sorted beside `SY-5` rather than
+    after it. A third event lands on `SY-0` during the second sleep, and
+    the follower stops after the third poll."""
+    root = tmp_path / "root"
+    root.mkdir()
+    sy5_log = EventLog(root / "SY-5")
+    first_sy5 = Teardown(timestamp=1.0, spec_id="SY-5", step="start", ok=True)
+    sy5_log.append(first_sy5)
+
+    sy0_first = Teardown(timestamp=2.0, spec_id="SY-0", step="start", ok=True)
+    sy0_second = Teardown(timestamp=3.0, spec_id="SY-0", step="network", ok=True)
+    sy5_second = Teardown(timestamp=4.0, spec_id="SY-5", step="proxy", ok=True)
+    sy0_third = Teardown(timestamp=5.0, spec_id="SY-0", step="package", ok=True)
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            sy0_log = EventLog(root / "SY-0")
+            sy0_log.append(sy0_first)
+            sy0_log.append(sy0_second)
+            sy5_log.append(sy5_second)
+            return True
+        if len(polls) == 2:
+            EventLog(root / "SY-0").append(sy0_third)
+            return True
+        return False
+
+    lines = list(watch.follow_every_task(root, sleep=sleep))
+
+    assert lines == [
+        f"SY-0 {describe(sy0_first)}",
+        f"SY-0 {describe(sy0_second)}",
+        f"SY-5 {describe(sy5_second)}",
+        f"SY-0 {describe(sy0_third)}",
+    ]
+    assert len(polls) == 3
+
+
+def _noise_triplet(spec_id: str) -> tuple[Agent, Agent, Agent]:
+    """One real line and the two noisy shapes `_is_noise` names, for one
+    task's log. The single-task filter tests use the same three payloads,
+    reused here so both followers are proven against one fixture."""
+    real_work = Agent(
+        timestamp=1.0,
+        spec_id=spec_id,
+        raw=False,
+        event={"type": "text", "text": "reading the spec"},
+    )
+    token_counter = Agent(
+        timestamp=2.0,
+        spec_id=spec_id,
+        raw=False,
+        event={
+            "type": "system",
+            "subtype": "thinking_tokens",
+            "data": {"estimated_tokens": 16300},
+        },
+    )
+    bare_ack = Agent(
+        timestamp=3.0,
+        spec_id=spec_id,
+        raw=False,
+        event={"type": "tool_result", "is_error": False},
+    )
+    return real_work, token_counter, bare_ack
+
+
+def _drive_every_task(
+    root: Path, verbose: bool
+) -> tuple[list[str], tuple[Agent, Agent, Agent], tuple[Agent, Agent, Agent]]:
+    """Build one `SY-1` present at the start, with no log yet, and one
+    `SY-9` that joins during the first sleep. Append the noise triplet to
+    both and return what `follow_every_task` yields at one `verbose`."""
+    root.mkdir()
+    (root / "SY-1").mkdir()
+    present = _noise_triplet("SY-1")
+    joined = _noise_triplet("SY-9")
+
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            present_log = EventLog(root / "SY-1")
+            for event in present:
+                present_log.append(event)
+            joined_log = EventLog(root / "SY-9")
+            for event in joined:
+                joined_log.append(event)
+            return True
+        return False
+
+    return (
+        list(watch.follow_every_task(root, verbose=verbose, sleep=sleep)),
+        present,
+        joined,
+    )
+
+
+def test_following_every_task_filters_each_line_as_one_task_does(tmp_path):
+    """By default the token counter and the bare tool acknowledgement are
+    dropped and the agent's real text is kept. This holds for a directory
+    present at the start and for one that joins later alike.
+    `verbose=True` keeps all three, for both."""
+    default_lines, default_present, default_joined = _drive_every_task(
+        tmp_path / "default", verbose=False
+    )
+    assert default_lines == [
+        f"SY-1 {describe(default_present[0])}",
+        f"SY-9 {describe(default_joined[0])}",
+    ]
+
+    verbose_lines, verbose_present, verbose_joined = _drive_every_task(
+        tmp_path / "verbose", verbose=True
+    )
+    assert verbose_lines == [f"SY-1 {describe(event)}" for event in verbose_present] + [
+        f"SY-9 {describe(event)}" for event in verbose_joined
+    ]
+
+
+def test_following_every_task_parses_no_line_written_before_it_started(
+    tmp_path, monkeypatch
+):
+    """Two logs hold three events each before the follower starts. Starting
+    it parses none of them: the first poll reads nothing new, and only the
+    one event appended during the first sleep costs a parse."""
+    from saffron import events
+
+    root = tmp_path / "root"
+    root.mkdir()
+    for name in ("SY-1", "SY-2"):
+        log = EventLog(root / name)
+        for index, step in enumerate(("start", "network", "proxy")):
+            log.append(
+                Teardown(timestamp=float(index + 1), spec_id=name, step=step, ok=True)
+            )
+
+    appended = Teardown(timestamp=4.0, spec_id="SY-1", step="package", ok=True)
+
+    parsed: list[str] = []
+    real_parse = events._parse_line
+
+    def counting_parse(line: str):
+        parsed.append(line)
+        return real_parse(line)
+
+    monkeypatch.setattr(events, "_parse_line", counting_parse)
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            EventLog(root / "SY-1").append(appended)
+            return True
+        return False
+
+    lines = list(watch.follow_every_task(root, sleep=sleep))
+
+    assert lines == [f"SY-1 {describe(appended)}"]
+    assert len(parsed) == 1

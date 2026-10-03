@@ -2164,6 +2164,87 @@ def test_watch_refuses_a_poll_interval_that_never_waits(tmp_path, interval, caps
     assert "--interval" in capsys.readouterr().err
 
 
+def test_watch_with_no_spec_id_follows_the_batch_tree_with_its_flags(
+    tmp_path, monkeypatch, capsys
+):
+    """With no spec id, `saffron watch` follows `out_dir` through
+    `follow_every_task`, passing `--all` as `verbose` and `--interval` as
+    `interval`, and prints every line it yields.
+    """
+    out_dir = tmp_path / "batches" / "v0"
+    out_dir.mkdir(parents=True)
+    seen = []
+
+    def fake_follow_every_task(root, verbose, interval):
+        seen.append((root, verbose, interval))
+        yield "SY-1 line one"
+        yield "SY-2 line two"
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
+
+    try:
+        exit_code = cli.main(
+            ["--home", str(tmp_path), "watch", "--all", "--interval", "0.25"]
+        )
+    except KeyboardInterrupt:
+        pytest.fail("KeyboardInterrupt reached main's own caller")
+    assert exit_code == 0
+    assert capsys.readouterr().out.splitlines() == ["SY-1 line one", "SY-2 line two"]
+
+    try:
+        exit_code = cli.main(["--home", str(tmp_path), "watch"])
+    except KeyboardInterrupt:
+        pytest.fail("KeyboardInterrupt reached main's own caller")
+    assert exit_code == 0
+    assert capsys.readouterr().out.splitlines() == ["SY-1 line one", "SY-2 line two"]
+
+    assert seen == [(out_dir, True, 0.25), (out_dir, False, 1.0)]
+
+
+def test_watch_with_no_spec_id_exits_one_without_a_batch_tree(
+    tmp_path, monkeypatch, capsys
+):
+    """With no spec id, `saffron watch` exits 1 and names `out_dir` when that
+    directory does not exist, never reaching the follower."""
+    calls = []
+
+    def fake_follow_every_task(*args, **kwargs):
+        calls.append((args, kwargs))
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
+
+    assert cli.main(["--home", str(tmp_path), "watch"]) == 1
+
+    out_dir = tmp_path / "batches" / "v0"
+    assert capsys.readouterr().out == f"watch: no batch tree at {out_dir}\n"
+    assert calls == []
+
+
+def test_watch_with_no_spec_id_refuses_the_flags_that_read_one_log(
+    tmp_path, monkeypatch, capsys
+):
+    """`--whole-log` and `--no-follow` each need a spec id and are refused
+    at parse time. Argparse's own usage exit names the flag on the last
+    line of stderr, and the follower is never reached."""
+    calls = []
+
+    def fake_follow_every_task(*args, **kwargs):
+        calls.append((args, kwargs))
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
+
+    for flag in ("--whole-log", "--no-follow"):
+        with pytest.raises(SystemExit):
+            cli.main(["--home", str(tmp_path), "watch", flag])
+
+        assert flag in capsys.readouterr().err.splitlines()[-1]
+
+    assert calls == []
+
+
 @pytest.mark.parametrize("command", ["queue", "reconcile"])
 def test_an_in_flight_task_survives_being_looked_at(tmp_path, command):
     """`ORPHANED` is in `scheduler.REQUEUE_STATES`, so a row stamped while

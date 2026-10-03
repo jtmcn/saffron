@@ -11,10 +11,12 @@ polls for what is new since the last poll and renders it through `describe`,
 plus a filter over the two agent payloads that carry no operator signal.
 
 Deliberately narrow, per the spec this ships under (`SA-0053`): no detection
-of a task having finished (a follower here runs until interrupted, the way
-`tail -f` does — the teardown event is not a reliable end marker, since a
-killed cell never reaches it), and no rendering of a night's worth of tasks
-(that is the batch index, `saffron/report/**`, forbidden to this spec).
+of a task having finished. A follower here runs until interrupted, the way
+`tail -f` does. The teardown event is not a reliable end marker, since a
+killed cell never reaches it. `follow_every_task`, added under `b-2d09de`,
+follows every task directory under one root at once. It still answers only
+what is running now, never the batch index's record of what finished
+(`saffron/report/**`, forbidden to this spec).
 
 backlog item 64 named a second way one task's log reads as
 another's: a spec driven twice writes both tasks into one `events.jsonl`,
@@ -217,5 +219,51 @@ def follow(
             line = render_line(event, verbose=verbose)
             if line is not None:
                 yield line
+        if not sleep(interval):
+            return
+
+
+def _log_size(task_dir: Path) -> int:
+    """The byte size of one task's `events.jsonl`, or `0` with no log yet.
+
+    The starting offset for a directory new to this follower, so a
+    half-written line at that size is dropped, not replayed once the write
+    finishes.
+    """
+    path = Path(task_dir) / "events.jsonl"
+    return path.stat().st_size if path.is_file() else 0
+
+
+def follow_every_task(
+    root: Path,
+    *,
+    verbose: bool = False,
+    interval: float = 1.0,
+    sleep: Callable[[float], bool] = _sleep_and_continue,
+) -> Iterator[str]:
+    """Yield rendered lines from every task directory under `root` at once,
+    prefixed with the directory's own name, until `sleep` says stop.
+
+    A directory present at the start reads from its log's size then, so only
+    lines appended after this call begins ever render. A directory that joins
+    later starts at offset `0`, since everything already in its log arrived
+    after the call began. `root` is relisted on every poll. A plain file
+    beside the task directories is passed over, and every poll renders
+    directories in name order, never the order they were created in.
+    """
+    root = Path(root)
+    offsets: dict[str, int] = {
+        child.name: _log_size(child) for child in root.iterdir() if child.is_dir()
+    }
+    while True:
+        for child in root.iterdir():
+            if child.is_dir() and child.name not in offsets:
+                offsets[child.name] = 0
+        for name in sorted(offsets):
+            events, offsets[name] = read_log_since(root / name, offsets[name])
+            for event in events:
+                line = render_line(event, verbose=verbose)
+                if line is not None:
+                    yield f"{name} {line}"
         if not sleep(interval):
             return
