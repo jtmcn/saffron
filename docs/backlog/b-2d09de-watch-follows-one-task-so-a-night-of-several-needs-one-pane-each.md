@@ -3,7 +3,7 @@ id: b-2d09de
 title: '`saffron watch` follows one task, so a night of several tasks needs one pane per spec id'
 status: open
 filed: 2026-10-02
-specs: []
+specs: [SA-0197]
 prs: []
 commits: []
 cites: [§6]
