@@ -4,7 +4,7 @@ title: A malformed wrong-version answer leaves every version unproven, and REVIE
 type: feature
 priority: 1
 depends_on: [SA-0201]
-estimated_lines: 317
+estimated_lines: 342
 estimate_measured: true
 touches:
   - saffron/phases/review.py
@@ -45,8 +45,9 @@ acceptance:
   - claim: >-
       A wrong-version session whose first answer is not the schema is resumed
       once, in that same session, with a prompt carrying that answer's own
-      error. The re-prompt keeps the first turn's system prompt and tools, and
-      its budget is what the first turn left of the ceiling. Its answer is the
+      error. The re-prompt keeps the first turn's system prompt and tools,
+      its budget is what the first turn left of the ceiling, and it passes the
+      first turn's cost as `last_cost_usd`. Its answer is the
       record, and the entry's cost is both turns'. That holds for four first
       answers: one with no `<output>` block, one whose JSON does not parse, one
       the schema refuses, and one with the wrong number of answers.
@@ -59,13 +60,17 @@ acceptance:
       - The entry's cost is the re-prompt's alone.
       - The re-prompt is given the whole ceiling, not what the first turn left.
       - The re-prompt's answer is read from the first turn's text.
+      - The re-prompt passes no `last_cost_usd`.
   - claim: >-
       The re-prompt fires once, and only where `run_lens` would fire its own.
-      A second bad answer ends the criterion with an error that says a
-      re-prompt was made. A re-prompt that fails ends it too, charged both
-      turns. No re-prompt follows a first turn that left less of the ceiling
-      than it spent, one that carries no session id, one that failed, or one
-      whose answer is the schema.
+      A second bad answer ends the criterion with an error that opens
+      `not the schema, even after a re-prompt: ` and carries its own cause.
+      That holds for a second answer with no block, one with the wrong
+      number of answers, and one whose JSON does not parse. A re-prompt that
+      fails ends it too, charged both turns. A first turn that left exactly
+      what it spent is re-prompted. No re-prompt follows a first turn that
+      left less of the ceiling than it spent, one that carries no session id,
+      one that failed, or one whose answer is the schema.
     witness: tests/test_review.py::test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would
     wrong_versions:
       - A second bad answer is re-prompted again.
@@ -74,6 +79,9 @@ acceptance:
       - A first turn that failed is re-prompted too.
       - A re-prompt that fails is charged the first turn alone.
       - The error after a second bad answer reads as a first-answer error, with no word of the re-prompt.
+      - The retry's count check is copied from the first answer's, so a second wrong count files `not the schema` with no word of the re-prompt.
+      - A second answer whose JSON does not parse is filed as a first-answer error.
+      - The re-prompt is refused when the ceiling left equals what the first turn spent.
   - claim: >-
       A criterion whose wrong-version entry still carries an error is an
       `error`, never a silent pass. `wrong-versions.json` records each of its
@@ -82,8 +90,9 @@ acceptance:
       answered criterion's. The task still reaches `READY_FOR_REVIEW`, and
       its cell outcome carries the entries. The witness drives three such
       criteria, one whose session failed, one that twice answered with no
-      block, and one that twice answered the wrong count. Beside them is one
-      that answered with no edit.
+      block, and one that twice answered the wrong count, whose error opens
+      `not the schema, even after a re-prompt: `. Beside them is one that
+      answered with no edit.
     witness: tests/test_session.py::test_a_criterion_whose_wrong_versions_no_session_answered_is_an_error_the_review_line_names
     mutant:
       file: saffron/cell/session.py
@@ -97,6 +106,7 @@ acceptance:
       - Only a criterion whose error starts with "not the schema" is named, so a failed session is not.
       - An errored criterion stops the task at `REVIEWING`, as an errored lens does.
       - The cell outcome carries no wrong-version entries.
+      - The retry's count check is copied from the first answer's, so a second wrong count files `not the schema` with no word of the re-prompt.
   - claim: >-
       The pull request body's `Not covered` section names the witness of each
       criterion whose wrong-version entry carries an error. It names no
@@ -122,7 +132,10 @@ acceptance:
 
 Backlog item **b-7251b5**, found in the spec loop's run 26 on `SA-0183`'s
 cell. It cites `DESIGN.md` §4.3 and §5.5. Every line number below was read at
-`0fecec0c`.
+`0fecec0c`. Your base will also carry `SA-0198`, `SA-0199` and `SA-0201`.
+`SA-0199` and `SA-0201` both edit `saffron/cell/session.py` and
+`tests/test_session.py`, so those line numbers will not match. Follow the
+function and test names given beside each one, not the numbers.
 
 **What the cell did.** `~/.saffron/batches/v0/SA-0183/wrong-versions.json`
 holds one entry. Its `error` is
@@ -248,21 +261,24 @@ as a removed one. Add the four new tests beside the existing ones.
 **Two existing tests assert the old behaviour.** Change their bodies, not
 their names.
 
-- `tests/test_review.py:1299` scripts one bad reply and two wrong counts,
+- `test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version`
+  (`tests/test_review.py:1299`) scripts one bad reply and two wrong counts,
   none re-prompted. Script each bad turn twice, so seven calls are recorded.
   Each of those three entries then costs 0.2, and its error opens
   `not the schema, even after a re-prompt: `. Update the docstring's
   sentence that says none of the four re-prompts.
-- The test at `tests/test_session.py:7964` scripts one bad turn for its
-  fourth criterion (`tests/test_session.py:8022`). Add a second bad turn
+- `test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes`
+  (`tests/test_session.py:7964`) asserts the old record. Its one bad turn
+  for the fourth criterion is at `tests/test_session.py:8022`. Add a second bad turn
   after it. That entry then costs 0.2, its error is the after-a-re-prompt
   one, and both its versions read `error`. It pins the line
   `REVIEW: wrong versions: 6 declared, 3 expressed`
   (`tests/test_session.py:8114`), which gains `t.py::d` in your wording.
 
-**Two fakes the packager reads.** The outcomes built at
-`tests/test_package.py:773` and `tests/test_session.py:8429` are each a
-namespace. Give each `wrong_versions=[]`, or `package()` raises
+**Two fakes the packager reads.** The outcome `_cell_outcome` builds
+(`tests/test_package.py:773`) and `pkg_outcome` inside
+`test_a_protected_path_alone_asks_for_notes` (`tests/test_session.py:8429`)
+are each a namespace. Give each `wrong_versions=[]`, or `package()` raises
 `AttributeError` on them.
 
 **Criterion 1's witness** calls `run_wrong_versions` over four criteria,
@@ -283,26 +299,38 @@ witness asserts eight calls. Each first call has no `resume`. Each second
 resumes its own criterion's session id. Its prompt contains a fragment of
 that criterion's error, in order: `no <output> block in the response`,
 `Expecting ',' delimiter`, `reason`, `1 answers for 2 wrong versions`. Its
-system prompt equals the first call's, its tools are `REVIEW_TOOLS`, and its
-`max_budget_usd` is 1.7. Each entry equals a literal dict with `error`
+system prompt equals the first call's, its tools are `REVIEW_TOOLS`, its
+`max_budget_usd` is 1.7, and its `last_cost_usd` keyword is 0.3. Each entry equals a literal dict with `error`
 `None`, `cost_usd` 0.5, and the second answer's versions.
 
-**Criterion 2's witness** uses the same scripted agent over six criteria
+**Criterion 2's witness** uses the same scripted agent over eight criteria
 with one version each, on a 2.0 ceiling. A bad turn is plain text with no
-block, and a good answer is a block of one answer.
+block, and a good answer is a block of one answer. Each turn's session id is
+its criterion's, `s-a` to `s-h`, except where the list says otherwise.
 
-1. `a`: a bad turn at 0.3, then a bad turn at 0.2.
+1. `a`: a bad turn at 1.0, then a bad turn at 0.2. The 1.0 left equals the
+   spend, so the re-prompt fires.
 2. `b`: a bad turn at 1.5.
 3. `c`: a bad turn at 0.3 whose session id is `None`.
-4. `d`: `implement.AgentFailed` carrying a turn at 0.4.
+4. `d`: `implement.AgentFailed` carrying a turn at 0.4 with session id
+   `s-d`, so only the failure can refuse the re-prompt.
 5. `e`: a good answer at 0.1.
 6. `f`: a bad turn at 0.3, then `AgentFailed` carrying a turn at 0.25.
+7. `g`: two turns at 0.3 and 0.2, each a block of two answers.
+8. `h`: two turns at 0.3 and 0.2, each a block whose JSON leaves a quote
+   unescaped.
 
-It asserts eight calls, with `resume` set on the second and eighth alone.
-Its errors are, in order: one opening `not the schema, even after a
-re-prompt`, then `not the schema: no <output> block in the response` twice,
-then the failure's own text, `None`, and `re-prompted once, then ` with the
-failure's text. Its costs are 0.5, 1.5, 0.3, 0.4, 0.1 and 0.55.
+It asserts twelve calls, with `resume` set on the second, eighth, tenth and
+twelfth alone. Its errors are, in order, these.
+
+- `not the schema, even after a re-prompt: no <output> block in the response`
+- `not the schema: no <output> block in the response`, twice
+- the first failure's own text, then `None`
+- `re-prompted once, then ` with the second failure's text
+- `not the schema, even after a re-prompt: 2 answers for 1 wrong versions`
+- one opening `not the schema, even after a re-prompt: Expecting ',' delimiter`
+
+Its costs are 1.2, 1.5, 0.3, 0.4, 0.1, 0.55, 0.5 and 0.5.
 
 **Criterion 3's witness** follows `tests/test_session.py:7964`. It drives
 `_drive` with `_stub_the_runtime(monkeypatch)` and four criteria, `a` to `d`,
@@ -320,6 +348,8 @@ It asserts these.
 - In `wrong-versions.json`, `a`'s outcomes are `unproven` twice, and `b`'s,
   `c`'s and `d`'s are `error` twice. Each errored version's summary is its
   entry's error.
+- `d`'s error equals
+  `not the schema, even after a re-prompt: 1 answers for 2 wrong versions`.
 - Exactly one REVIEW line starts `REVIEW: wrong versions:`. It contains
   `t.py::b`, `t.py::c` and `t.py::d`, and not `t.py::a`.
 - `outcome.wrong_versions` equals the file's entries.
@@ -339,23 +369,29 @@ witnesses and the two updated tests. The whole suite passed but the queue
 smoke test, which this spec's own commit re-measures. With its source
 reverted to `0fecec0c`, all four new witnesses failed. Each wrong version
 above was applied to the prototype, and its own criterion's witness failed
-on every one.
+on every one. After the review, the revised witnesses ran again over the
+prototype and every wrong version was applied again. Each one failed again.
 
 **What criterion 3's witness leaves out.** It drives no re-prompt refused on
 the lens rule and no re-prompt that failed. Both entries carry an error the
 same way, and criterion 2 drives each of them.
 
-**Three docstrings go stale.** `run_wrong_versions`'s says nothing of the
+**Four docstrings go stale.** `run_wrong_versions`'s says nothing of the
 re-prompt. `describe_wrong_versions`'s says the line counts versions and
 edits alone. `_not_covered`'s says every line derives from a section above,
-and the new one derives from the wrong-version record. Make each say what
-the code now does.
+and the new one derives from the wrong-version record.
+`test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes`
+(`tests/test_session.py:7964`) has one too. It says, at
+`tests/test_session.py:7970`, that its third declaring criterion's session
+fails outright and its versions are unproven. That session answers with no
+block, and its versions now read `error`. Make each say what the code now
+does.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks here. The
-prototype, counted by `size_gate`, came to 1269 tokens against the
+prototype, counted by `size_gate`, came to 1369 tokens against the
 `feature` ceiling of 3000. `estimated_lines` is that over four, with no
 overrun added. About a fifth of it is `saffron/`, and the rest is tests.
