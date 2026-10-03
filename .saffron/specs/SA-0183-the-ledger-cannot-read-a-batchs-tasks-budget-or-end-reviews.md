@@ -82,23 +82,22 @@ where `size` blocks a plan over the ceiling. So the reads are this spec,
 and `SA-0152` runs at `standard` on top of it.
 
 **What the tree base holds.** This spec's tree base is `SA-0170`'s head.
-Every line number below was read at `a1148c1e`, `origin/main`. The
-chain between edits `saffron/ledger.py`, so read it by symbol at the tree
-base.
+`SA-0170` lists `saffron/ledger.py` under `forbidden`, so that head leaves
+the file as `origin/main` holds it. Each claim below was read at
+`39864aea`. Read each by symbol, since line numbers move.
 
 - `SA-0145`'s `stack_layers` table keys each layer on its `task_key`, with
-  `batch_key`, the batch id as text (`saffron/ledger.py:191-199`).
-  `record_stack_layer` writes it (`:1357`).
+  `batch_key`, the batch id as text. `record_stack_layer` writes it.
 - `SA-0153`'s `end_reviews` table keys a lens's outcome on `task_key` and
-  `lens` (`:204-211`). `record_end_review` writes it (`:1515`), and holds
-  no check that the task is a layer.
+  `lens`. `record_end_review` writes it, and holds no check that the task
+  is a layer.
 - `batch_spend` already joins `end_reviews` to `stack_layers` on
-  `task_key` and filters on `batch_key` (`:1102-1125`). This spec's
-  `end_reviews` read uses the same join.
-- The `batches` table holds a batch's `budget_usd` (`:66-75`), and no
-  read method returns it.
-- `latest_batch_id` already exists (`:1075-1083`). `SA-0152` reads it,
-  and this spec adds no second one.
+  `task_key` and filters on `batch_key`. This spec's `end_reviews` read
+  uses the same join.
+- The `batches` table holds a batch's `budget_usd`, and no read method
+  returns it.
+- `latest_batch_id` already exists. `SA-0152` reads it, and this spec
+  adds no second one.
 
 ## Problem
 
@@ -130,8 +129,8 @@ float, and writes nothing.
   `standards` rows into one status. This spec returns the rows alone.
 - **The dead code.** No code in `saffron/` calls the three reads until
   `SA-0152`. So each is a `pending_symbols` entry, and the `dead` gate
-  defers it while this spec is open (`.saffron/gates/dead.py:4-6`). Its
-  `pending` reads each open spec's entries (`:113-127`). A prototype's
+  defers it while this spec is open (`.saffron/gates/dead.py`'s
+  docstring). Its `pending` reads each open spec's entries. A prototype's
   `dead` gate reported all three.
 
 ## Notes for the agent
@@ -171,34 +170,32 @@ list. `batch_budget` gives 50.0, 100.0 and `None`. `end_reviews(b)`,
 sorted, equals `TE-7`'s two rows as whole `(task_key, lens, status)`
 tuples, so a row carrying more columns fails. `end_reviews(a)` is
 `TE-2`'s one row, compared the same way, and a batch id past both gives
-an empty list. These fail it, and the first five are the criterion's
-`wrong_versions`:
+an empty list.
 
-- `batch_tasks` with no batch filter, which brings in `TE-2`
-- `batch_tasks` ordered by spec id, by task id alone, or by run id then
-  spec id
-- `batch_tasks` with no `ORDER BY`, which the host's SQLite returned in
-  task id order, measured
-- `batch_budget` giving 0.0 for a batch with no row
-- `end_reviews` with no batch filter, which brings in `TE-2`'s row
-- `end_reviews` matched on a layer's spec id, which brings in the second
-  `TE-7`'s row
-- `end_reviews` with no join to `stack_layers`, which brings in `TE-3`'s
-  row
+**How the list was measured.** A first prototype ran on 2026-09-27 at
+`f492629e`, before `TE-5` joined the arrangement. A spec revision rebuilt
+the witness with `TE-5` on 2026-10-02 at `39864aea`. It ran on the host's
+Python `sqlite3`, SQLite 3.53.1. The three reads and the witness followed
+these notes. Each variant was a text edit to `saffron/ledger.py`, run with
+no bytecode cache. The scratch code was then discarded. Measured:
 
-**How the list was measured.** A prototype ran on 2026-09-27 at
-`f492629e`, with no `TE-5`. The witness passed, and `ty` stayed green.
-Each wrong version above was applied as a text edit, with no bytecode
-cache, and each failed the witness. With `saffron/ledger.py` reverted,
-the witness failed on a missing method, not at collection.
+| Variant | Witness |
+| --- | --- |
+| the three reads as the criterion states | passed |
+| `wrong_versions` 1, order by task id alone | failed, `TE-5` first |
+| `wrong_versions` 2, order by run id then spec id | failed, `TE-3` before `TE-5` |
+| `wrong_versions` 3, `batch_budget` 0.0 for no row | failed, `0.0 is None` |
+| `wrong_versions` 4, `end_reviews` matched on spec id | failed, extra `standards` row |
+| `wrong_versions` 5, `end_reviews` with no layer join | failed, `TE-3`'s row |
+| `batch_tasks` with no batch filter | failed |
+| `batch_tasks` ordered by spec id | failed |
+| `batch_tasks` with no `ORDER BY` | failed, `TE-5` first |
+| `end_reviews` with no batch filter | failed |
+| `batch_tasks` ordered by `run_id` alone | passed |
+| `saffron/ledger.py` as `39864aea` holds it | failed on a missing method |
 
-A second review round added `TE-5`. On 2026-09-29 at `a1148c1e`, the
-`batch_tasks` query ran bare against that arrangement on SQLite 3.53.1,
-through `Ledger._db`. `ORDER BY r.run_id, t.task_id` gave `TE-7`, `TE-5`,
-`TE-3`, `TE-9`. Order by task id and no `ORDER BY` both put `TE-5`
-first. Order by run id then spec id puts `TE-3` before `TE-5`. The
-witness itself was not rebuilt with `TE-5`. The re-review at the parent
-branch reruns the list against it there.
+The no `ORDER BY` row holds for the host's SQLite alone. The cell image's
+SQLite was not measured, so that variant is no `wrong_versions` entry.
 
 **What the witness cannot kill.** `ORDER BY run_id` alone returned the
 right rows, measured, with `reverse_unordered_selects` both off and on.
@@ -206,21 +203,18 @@ SQLite breaks the tie in task id order, which is the order the criterion
 asks for. So no arrangement of rows tells it apart, and it is no
 `wrong_versions` entry. Write `task_id` as the second key all the same.
 
-**For the parent-branch re-review.** The witness calls `create_batch`,
-`create_run`, `create_task`, `set_task_state`, `record_stack_layer` and
-`record_end_review` as `a1148c1e` spells them. Confirm those signatures
-and the two tables' columns at `SA-0170`'s head.
-
 **The `prose` gate** counts every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 changed tokens (`saffron/gates/core/size.py:26`).
+`feature` ceiling of 3000 changed tokens (`_CEILINGS` in
+`saffron/gates/core/size.py`).
 The prototype, formatted with `ruff format`, measured 417 changed tokens
 with `size_gate`'s own count: 135 tokens in `ledger.py` and 282 in the
 test. `TE-5` adds about 30 tokens to the test, so about 447 in all. The
-checkpoint prices each line at 4 tokens (`saffron/gates/core/size.py:39`).
+checkpoint prices each line at 4 tokens (`_TOKENS_PER_LINE` in the same
+file).
 So `estimated_lines` is 112, which is 447 tokens divided by 4, with no
 overrun added. `driver.py check` applies the measured overrun itself.
 Sibling cells landed at 1.4 times their authors' estimates, so about
