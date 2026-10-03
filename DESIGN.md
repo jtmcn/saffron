@@ -1282,6 +1282,8 @@ Batch header: counts by terminal state, total spend, wall clock, per-repo prefli
 
 *Trailing*, and the qualifier is not pedantry. This batch's accept rate is unknowable when the batch ends: nothing has been merged yet, because merging is what you do next. The header can only show the rate over prior batches — a rolling window of about the last twenty completed tasks, which is also roughly the smallest n at which the number means anything (§8). A header field that claimed to score the night it was printed would be reporting on work that hadn't happened.
 
+**The window holds settled tasks.** The rate is the share of them that merged. A settled task is in a `DONE_STATES` state that waits on nobody: `MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`, `PLAN_REJECTED` or `SPEC_WITHHELD`. A task the scheduler re-queues on its own `task_id` has not settled. Neither has a task that waits on the operator. Item 52 made `reconcile` the writer of `MERGED`, so the field has a source (backlog item b-49a2f7).
+
 Inside the PR body, the ordering that matters is: **disagreements first.** Anywhere the critic and implementer diverged goes above the gate table, because that's where your judgment is worth the most.
 
 ### 6.1 Merge train
