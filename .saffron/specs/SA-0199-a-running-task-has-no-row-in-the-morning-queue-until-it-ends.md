@@ -434,9 +434,10 @@ empty directory and assert the directory is still empty.
 **Criterion 7's witness.** Build each night the way
 `test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans`
 (`tests/test_cli.py:3042-3108`) does: `_readiness_passes`, a fake
-`_resolve_queue`, and a stubbed `real_remote`. Give each form its own
-home. Seed its ledger with `_seed_repo` on `https://github.com/o/r.git`
-and two tasks. Seed its `batches/v0` store with a `REVIEWING` row for
+`_resolve_queue`, and a stubbed `real_remote`. Drive three nights, each
+in its own home: the plain form, the `--stack` form, and the plain form
+with a raising `orphan_rows`. Seed each ledger with `_seed_repo` on
+`https://github.com/o/r.git` and two tasks in `REVIEWING`. Seed its `batches/v0` store with a `REVIEWING` row for
 each spec under the repo `tmp_path.resolve().name`. After
 `monkeypatch.chdir(tmp_path)`, that is the name of the path `--repo`
 defaults to (`saffron/cli.py:133`). When told to stamp, the fake
@@ -446,11 +447,13 @@ It returns `_fake_batch_resolution` with that `repo_id` and a
 `run_stack_batch` with one fake that calls `readiness_check`, records
 the stored states, and returns `DRAINED`. Seed a third task of a third
 spec as `MERGED` with `_seed_task`, with no store row and not stamped.
-Inside the fake loop, assert the store's `index.html` holds
-`trailing accept rate <strong>100% of 1</strong>`. Neither stamped nor
-`REVIEWING` tasks are settled, so without the third task the right value
-would be the fixed `no settled task yet`. For the raise, replace
-`cli.orphan_rows` with a function raising `OSError`. Assert the printed
+On the two nights that rewrite, assert inside the fake loop that the
+store's `index.html` holds `trailing accept rate <strong>100% of 1</strong>`.
+Neither stamped nor `REVIEWING` tasks are settled, so without the third
+task the right value would be the fixed `no settled task yet`. On the
+raising night, replace `cli.orphan_rows` with a function raising
+`OSError`. Inside the fake loop, assert both rows still read `REVIEWING`
+and `index.html` holds the bytes its seed wrote. Assert the printed
 `batch: the queue page could not be rewritten:` line, that the fake loop
 ran, and that no line reads `batch: the queue could not be resolved:`.
 
