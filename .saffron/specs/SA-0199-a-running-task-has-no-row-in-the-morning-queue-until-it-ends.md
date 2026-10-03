@@ -83,7 +83,10 @@ acceptance:
       blockers and unkept fixes, zero lines added and removed, and an
       empty link and note.
       `index.html` names the state as soon as the call returns, and its
-      header holds `trailing accept rate`. No row for
+      header holds the rate `trailing_accept_rate` returns for the ledger.
+      The witness's ledger holds one `MERGED` task of another spec, so
+      each live page's trailing accept rate reads `100% of 1`.
+      No row for
       the task exists before the first call. Each later call replaces the
       row, and the task's end replaces it last, leaving one row: the
       early-end row for a task that never packaged, and PACKAGE's row for
@@ -98,6 +101,7 @@ acceptance:
       - The row is written to `queue.json` and `index.html` is not rendered again.
       - Only the first state reaches the row.
       - A live write that passes no header, so the page drops the rate until the task ends.
+      - "A live write whose header holds a fixed placeholder such as `—`, as `saffron/replay.py:143` writes."
   - claim: >-
       When `run_one_cell` raises after `on_state` wrote a row, `run_task`
       writes that row again with the state `ORPHANED` and every other field
@@ -157,8 +161,8 @@ acceptance:
       `stamp_orphaned=True`, before the night's loop runs. They pass
       `out_dir`, the repo's name, and the spec id of each task the scan's
       `reconciled.orphaned` names. A row of a spec the scan did not stamp
-      stays. The page it writes carries `trailing accept rate` in its
-      header. The queue page is a rendered convenience, so a failed rewrite
+      stays. The page it writes carries, in its header, the rate
+      `trailing_accept_rate` returns for the night's ledger. The queue page is a rendered convenience, so a failed rewrite
       never stops the night. When `orphan_rows` raises an `Exception`, the
       night prints one line starting `batch: the queue page could not be
       rewritten:` with the error, then runs its loop. The witness drives
@@ -170,6 +174,7 @@ acceptance:
       - The rewrite runs after the loop returns, so the loop sees the row at `REVIEWING`.
       - The rewrite names every task in the repo, so the unstamped task's row reads `ORPHANED`.
       - "`orphan_rows` called with no `header`, so the page after the scan has no trailing accept rate."
+      - "`orphan_rows` called with a placeholder header such as `—` in place of the ledger's rate."
       - "The raise left to the scan's own `try`, so the night prints `batch: the queue could not be resolved:` and exits 2."
       - The raise left uncaught, so it reaches `main` and prints `saffron:` instead.
   - claim: >-
@@ -292,11 +297,12 @@ reloads it.
    start within a minute of its write. A page read in ten seconds is
    seldom reloaded under its reader.
 5. **The scan.** The opening `_resolve_queue` call already sits in a `try`
-   (`saffron/cli.py:1579-1591`). In its `else` branch, map the task ids in
-   `resolved.reconciled.orphaned` to spec ids. Read them from
-   `ledger.tasks_by_repo(resolved.repo_id)`. Call `orphan_rows` with
-   `out_dir`, `repo.name`, those ids and the header. Give that call its
-   own `try`, which catches `Exception`, prints the
+   (`saffron/cli.py:1579-1591` at `04222f69`). In its `else` branch, map
+   the task ids in `resolved.reconciled.orphaned` to spec ids. Read them
+   from `ledger.tasks_by_repo(resolved.repo_id)`. Call `orphan_rows` with
+   `out_dir`, `repo.name`, those ids and the header. Give the mapping, the
+   header read and that call one `try` of their own. It catches
+   `Exception`, prints the
    `batch: the queue page could not be rewritten:` line, and goes on. Skip
    the call when no task was stamped or `resolved.repo_id` is `None`. Import `orphan_rows` by name
    into `saffron/cli.py`, so a test can replace `cli.orphan_rows`.
@@ -386,7 +392,10 @@ with a fake that reads `queue.json` on entry, before any call, and again
 after each `k["on_state"]` call. Compare each read with the whole list of
 row dicts, not one field. The entry read holds only the other spec's row.
 After each call, also assert `index.html` holds `<code>STATE</code>` for
-that state. For the packaged end, replace `package_phase.package` the way
+that state and `trailing accept rate <strong>100% of 1</strong>`. Before
+`run_task`, seed the ledger with one task of another spec set to `MERGED`.
+An empty ledger reads `no settled task yet`, which a key check alone
+cannot tell from a placeholder. For the packaged end, replace `package_phase.package` the way
 `test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link`
 (`tests/test_task.py:211-270`) does.
 
@@ -433,8 +442,9 @@ defaults to (`saffron/cli.py:133`). When told to stamp, the fake
 It returns `_fake_batch_resolution` with that `repo_id` and a
 `ReconcileResult` naming the task. Replace `run_batch` and
 `run_stack_batch` with one fake that calls `readiness_check`, records
-the stored states, and returns `DRAINED`. After the scan, assert
-`trailing accept rate` in the store's `index.html`. For the raise, replace
+the stored states, and returns `DRAINED`. After the scan, assert the
+store's `index.html` holds `trailing accept rate <strong>R</strong>`,
+where `R` is what `trailing_accept_rate` returns for that night's ledger. For the raise, replace
 `cli.orphan_rows` with a function raising `OSError`. Assert the printed
 `batch: the queue page could not be rewritten:` line, that the fake loop
 ran, and that no line reads `batch: the queue could not be resolved:`.
