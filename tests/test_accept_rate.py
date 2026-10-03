@@ -90,15 +90,7 @@ def test_the_rate_is_merged_over_settled_and_names_the_count_below_twenty(tmp_pa
     ledger_not_settled = _ledger_with(tmp_path, "not-settled", not_settled)
     assert trailing_accept_rate(ledger_not_settled) == "no settled task yet"
 
-    settled = [
-        "MERGED",
-        "REJECTED",
-        "MERGE_FAILED",
-        "EXHAUSTED",
-        "NOT_IMPLEMENTED",
-        "PLAN_REJECTED",
-        "SPEC_WITHHELD",
-    ]
+    settled = [name for name, is_settled in _SETTLED_TABLE.items() if is_settled]
     ledger_seven = _ledger_with(tmp_path, "seven-settled", settled)
     assert trailing_accept_rate(ledger_seven) == "14% of 7"
 
@@ -109,6 +101,12 @@ def test_the_rate_is_merged_over_settled_and_names_the_count_below_twenty(tmp_pa
 
     ledger_none_of_five = _ledger_with(tmp_path, "none-of-five", ["EXHAUSTED"] * 5)
     assert trailing_accept_rate(ledger_none_of_five) == "0% of 5"
+
+    # Nineteen is the last count below a full window, so it still names the count.
+    ledger_nineteen = _ledger_with(
+        tmp_path, "nineteen", ["MERGED"] * 14 + ["EXHAUSTED"] * 5
+    )
+    assert trailing_accept_rate(ledger_nineteen) == "74% of 19"
 
     ledger_full_window = _ledger_with(
         tmp_path, "full-window", ["MERGED"] * 15 + ["EXHAUSTED"] * 5
@@ -121,40 +119,46 @@ def test_the_window_is_the_twenty_latest_settled_tasks_by_update_then_task_id(
 ):
     from saffron.report.index import trailing_accept_rate
 
-    ledger = Ledger(tmp_path / "window.db")
-    repo_a = ledger.upsert_repo("a", "https://github.com/o/a.git", "/a.git", None)
-    repo_b = ledger.upsert_repo("b", "https://github.com/o/b.git", "/b.git", None)
-    run_a = ledger.create_run(repo_a, base_sha="a" * 40)
-    run_b = ledger.create_run(repo_b, base_sha="a" * 40)
+    def _window(name: str, tie_states: tuple[str, str]) -> Ledger:
+        ledger = Ledger(tmp_path / f"{name}.db")
+        repo_a = ledger.upsert_repo("a", "https://github.com/o/a.git", "/a.git", None)
+        repo_b = ledger.upsert_repo("b", "https://github.com/o/b.git", "/b.git", None)
+        run_a = ledger.create_run(repo_a, base_sha="a" * 40)
+        run_b = ledger.create_run(repo_b, base_sha="a" * 40)
 
-    def _task(spec_id: str, state: str, updated_at: str, repo: str) -> int:
-        run_id = run_a if repo == "a" else run_b
-        task_id = ledger.create_task(
-            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
-        )
-        ledger.set_task_state(task_id, state)
-        ledger._db.execute(
-            "UPDATE tasks SET updated_at = ? WHERE task_id = ?",
-            (updated_at, task_id),
-        )
-        return task_id
+        def _task(spec_id: str, state: str, updated_at: str, repo: str) -> None:
+            run_id = run_a if repo == "a" else run_b
+            task_id = ledger.create_task(
+                run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+            )
+            ledger.set_task_state(task_id, state)
+            ledger._db.execute(
+                "UPDATE tasks SET updated_at = ? WHERE task_id = ?",
+                (updated_at, task_id),
+            )
 
-    _task("TE-1", "MERGED", "2026-10-02 12:00:00", "a")
-    _task("TE-2", "EXHAUSTED", "2026-10-01 00:00:00", "a")
-    for n in range(3, 16):
-        _task(f"TE-{n}", "MERGED", f"2026-10-01 01:{n:02d}:00", "b" if n % 2 else "a")
-    for n in range(16, 21):
-        _task(
-            f"TE-{n}",
-            "NOT_IMPLEMENTED",
-            f"2026-10-01 01:{n:02d}:00",
-            "b" if n % 2 else "a",
-        )
-    _task("TE-21", "REJECTED", "2026-10-01 00:30:00", "b")
-    _task("TE-22", "MERGED", "2026-10-01 00:30:00", "a")
-    _task("TE-23", "READY_FOR_REVIEW", "2026-10-02 13:00:00", "a")
+        _task("TE-1", "MERGED", "2026-10-02 12:00:00", "a")
+        _task("TE-2", "EXHAUSTED", "2026-10-01 00:00:00", "a")
+        for n in range(3, 16):
+            _task(
+                f"TE-{n}", "MERGED", f"2026-10-01 01:{n:02d}:00", "b" if n % 2 else "a"
+            )
+        for n in range(16, 21):
+            _task(
+                f"TE-{n}",
+                "NOT_IMPLEMENTED",
+                f"2026-10-01 01:{n:02d}:00",
+                "b" if n % 2 else "a",
+            )
+        _task("TE-21", tie_states[0], "2026-10-01 00:30:00", "b")
+        _task("TE-22", tie_states[1], "2026-10-01 00:30:00", "a")
+        _task("TE-23", "READY_FOR_REVIEW", "2026-10-02 13:00:00", "a")
+        return ledger
 
-    assert trailing_accept_rate(ledger) == "75%"
+    assert trailing_accept_rate(_window("window", ("REJECTED", "MERGED"))) == "75%"
+    # Mirrored, so a sort with no tie-break fails one arrangement in either
+    # scan order SQLite picks, by rowid or by the state index.
+    assert trailing_accept_rate(_window("mirrored", ("MERGED", "REJECTED"))) == "70%"
 
 
 def test_the_stack_view_page_carries_the_trailing_accept_rate(tmp_path):
