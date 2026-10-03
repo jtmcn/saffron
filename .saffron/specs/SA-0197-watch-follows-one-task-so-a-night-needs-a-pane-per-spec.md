@@ -40,7 +40,7 @@ forbidden:
   - saffron/agents/**
   - tests/test_events.py
   - tests/test_scheduler.py
-budget_usd: 20
+budget_usd: 23
 max_attempts: 3
 max_turns: 180
 estimated_lines: 380
@@ -68,15 +68,19 @@ acceptance:
   - claim: >-
       A task directory created after the follower starts joins on the next
       poll, from its first line, without a restart. Its log is then read past
-      its own offset, so no line renders twice. The witness creates `SY-9`
-      with two events during the first sleep. It appends a third during the
-      second sleep and stops after the third poll. It asserts the three
-      prefixed lines, each once, in order.
+      its own offset, so no line renders twice. A joined directory takes its
+      name-order place in the poll it joins on. The witness starts with
+      `SY-5` holding one event. During the first sleep it creates `SY-0`
+      with two events and appends one event to `SY-5`. It appends a third
+      event to `SY-0` during the second sleep and stops after the third
+      poll. It asserts exactly four prefixed lines in this order: the first
+      two `SY-0` lines, the new `SY-5` line, then the third `SY-0` line.
     witness: tests/test_watch.py::test_a_task_directory_created_after_the_start_joins_from_its_first_line
     wrong_versions:
       - The set of directories listed once, at the start, and never again.
       - A directory first seen on a later poll started at its size then, which drops its first two lines.
       - A new directory read from byte 0 on every poll, which repeats its first two lines.
+      - Offsets kept in an insertion-ordered dict, so a late joiner renders last.
   - claim: >-
       The follower filters each line as `follow` does. By default the token
       counter and the bare tool acknowledgement are dropped and the agent's
@@ -204,6 +208,12 @@ So the order check no longer depends on the cell's filesystem.
 A prototype of the follower passed criteria 1 to 4 on the host. Each wrong
 version under them failed at least one, measured on 2026-10-02.
 
+**A late joiner keeps name order.** Criterion 2's `SY-0` joins beside an
+existing `SY-5` and sorts before it. On the prototype the correct follower
+passed criterion 2's witness. A follower that iterates an insertion-ordered
+offsets dict failed it, at index 0: `'SY-5 teardown: ' != 'SY-0 teardown: '`
+(measured 2026-10-02).
+
 **The follower.** Add `follow_every_task` to `saffron/watch.py` beside
 `follow`. Reuse `read_log_since`, `render_line` and `_sleep_and_continue`.
 Write no second parser and no second formatter. Record each directory's
@@ -235,8 +245,10 @@ positional too. New prose takes no em-dash, semicolon, contraction or perfect
 tense.
 
 **The turn ceiling.** `max_turns` is 180 because `SA-0025`, the costliest
-cell of this shape, stopped at its own ceiling of 141 turns. That 141 is a
-floor on what it needed, not a measured use.
+cell of this shape, ran into its own ceiling. Commit `9c8f84b9` set that
+ceiling at 140 turns, and its recorded peak is 141. That peak is a floor on
+what it needed, not a measured use. `budget_usd` is 23 to pay for those turns
+and still cover one review and rebuttal.
 
 **Commit as each witness passes.** Write any helper as a `def`, not a
 `lambda` bound to a name.
