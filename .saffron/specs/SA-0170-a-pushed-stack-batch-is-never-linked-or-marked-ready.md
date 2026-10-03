@@ -214,7 +214,10 @@ Build three things.
    prints `finish: linked nothing, the finish did not push` once and
    returns. Those paths are a `None` commit, a commit raising `GitError` or
    `ValueError`, a raising publish and an escalation. Leave the commit's
-   `except` as narrow as it is. The link runs inside its own `try`
+   `except` as narrow as it is. The link goes in the publish block's
+   `else`, after its print loop, where `slug` is always bound. A link
+   placed after the whole `try` reads `slug` as possibly unbound, which
+   fails the blocking `types` gate. The link runs inside its own `try`
    guarding `Exception`. It calls `finish.link_stack` with `gh` of
    `_finish_gh(slug, repo)`, reusing the `slug` the publish block computed.
    It prints each returned line after `finish: `. A raise prints `finish:
@@ -260,6 +263,10 @@ it. Under launchd the batch runs with the repository as its
 - **A missing gh-stack extension.** `gh` then starts and exits with its
   own code, which reads as a refused link. Which code it exits with is
   unmeasured.
+- **What a successful link writes on the host.** No run here linked a
+  real stack. A successful link from the operator's checkout is
+  unmeasured, and so is any state it writes there. The operator probes it
+  once on a scratch stack before the first unattended `--stack` night.
 - **Merging.** Nothing merges, and merging stays the operator's.
 - **The vocabulary.** `CONTEXT.md` has no entry for linking a stack.
   Backlog item b-466005 files it by hand.
