@@ -82,7 +82,7 @@ acceptance:
       line falls. It prints each line `link_stack` returns after `finish: `.
       No link runs when the publish escalates or raises, when the commit
       raises `GitError` or `ValueError`, or when the commit returns `None`.
-      Each of those prints `finish: linked nothing, the finish did not push`
+      Each of those prints `finish: linked nothing, no pushed finish`
       once, and a linked finish never prints it. It passes the pinned mirror
       and url, and `_finish_gh`'s runner as `gh`. That runner runs its argv
       in the repository `_batch` resolves. It sets `GH_REPO` to the slug the
@@ -211,9 +211,11 @@ Build three things.
    cannot reuse `run_gh`, which takes no environment and no directory.
 3. **The wiring.** After `_stack_finish` prints the publish lines, it links
    only when one of them starts with `finish.PUSHED`. Every other path
-   prints `finish: linked nothing, the finish did not push` once and
+   prints `finish: linked nothing, no pushed finish` once and
    returns. Those paths are a `None` commit, a commit raising `GitError` or
-   `ValueError`, a raising publish and an escalation. Leave the commit's
+   `ValueError`, a raising publish and an escalation. A publish can raise
+   after its push, when `open_draft_pr` fails, so the line never claims
+   nothing pushed. Leave the commit's
    `except` as narrow as it is. The link goes in the publish block's
    `else`, after its print loop, where `slug` is always bound. A link
    placed after the whole `try` reads `slug` as possibly unbound, which
@@ -282,8 +284,8 @@ body, so the reverted run fails rather than failing to collect. Criterion
 **Tests at the tree base that assert `_stack_finish`'s printed lines** are
 these three, all in `tests/test_cli.py`. Each stubs `publish_finish` with
 no `PUSHED` line, so none reaches a real `link_stack`. Each asserts by
-membership. In each, add an assertion that `finish: linked nothing, the
-finish did not push` is printed after its first `main` call. Change nothing
+membership. In each, add an assertion that `finish: linked nothing, no
+pushed finish` is printed after its first `main` call. Change nothing
 else in them.
 
 - `SA-0151`'s `test_a_stack_batch_commits_its_finish_and_survives_a_raise`
@@ -352,7 +354,7 @@ with its own `--home`:
   linked: GitError: gone` and exits 0
 
 Each of the six runs that call no link asserts that the printed lines hold
-`finish: linked nothing, the finish did not push` exactly once.
+`finish: linked nothing, no pushed finish` exactly once.
 
 **How the arrangement was measured.** On 2026-10-02, at `39864aea`, a
 throwaway build of the change ran against both witnesses as written above.
