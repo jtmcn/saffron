@@ -207,6 +207,11 @@ request, and the delegate opened both by hand.
 killed a PLAN session that was still writing, and the ledger read $0.00.
 An unattended night would lose the task.
 
+**Placed 2026-10-03**, from the spec loop's run 26: **b-7251b5**, then
+**b-031ac2**. A malformed wrong-version answer leaves every version
+unproven, and REVIEW still passes. A refused API connection ends a task
+`NOT_IMPLEMENTED`, exit 1, as if the task failed.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-02**, from the spec loop's run 26: **b-209696**. A session
@@ -360,6 +365,10 @@ criterion drove was dropped. `next` held back a child of a merged parent. The
 finishing commit writes through a symlink, unverified, and drops parse
 failures.
 
+**Placed 2026-10-03**, from the spec loop's run 26: **b-23a149**, then
+**b-60ff2e**. The wall bound cut a session in a suite run GATE repeats. A
+layer's peak turns counts attempts its `max_turns` does not bound.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -432,6 +441,11 @@ them.
 judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
+
+**Placed 2026-10-03**, from the spec loop's run 26: **b-cc8099**,
+**b-81e109**, then **b-14ccc7**. A finish's narrow `except` has no witness.
+`GhRunner` is defined three times. A live-cell test fails when two suites
+run at once.
 
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.

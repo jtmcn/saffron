@@ -6,6 +6,7 @@ import functools
 import hashlib
 import inspect
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -3256,6 +3257,132 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
     ledger.close()
     assert row["status"] == "INFRASTRUCTURE"
     assert row["ended_at"] is not None
+
+
+def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack` writes the stack view of the batch it ran
+    into the queue page, after `run_stack_batch` returns any of the five
+    stop reasons. `saffron batch` without `--stack` writes no stack view."""
+    sy2_spec = intake.Spec(
+        id="SY-2", title="Second layer", type="chore", priority=3, max_turns=77
+    )
+    sy1_spec = intake.Spec(
+        id="SY-1", title="t", type="chore", priority=1, depends_on=["SY-2"]
+    )
+    sy2 = Candidate(
+        path=Path("SY-2.md"), spec=sy2_spec, spec_sha="s" * 64, task_id=None
+    )
+    sy1 = Candidate(
+        path=Path("SY-1.md"), spec=sy1_spec, spec_sha="r" * 64, task_id=None
+    )
+
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
+        return _fake_batch_resolution(tmp_path, repo_id=None, candidates=[sy2, sy1])
+
+    recorded: dict = {}
+
+    def _make_fake_run_stack_batch(stop_reason):
+        def _fake_run_stack_batch(
+            candidates, ledger, budget_usd, until, runner, **kwargs
+        ):
+            batch_id = ledger.create_batch(budget_usd)
+            repo_id = ledger.upsert_repo(
+                "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+            )
+            run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+            task_id = ledger.create_task(
+                run_id, spec_id="SY-2", spec_sha="s" * 64, branch="saffron/SY-2"
+            )
+            ledger.set_task_package(
+                task_id,
+                "READY_FOR_REVIEW",
+                "saffron/SY-2",
+                "c" * 40,
+                "https://github.com/o/r/pull/501",
+            )
+            ledger.record_stack_layer(
+                task_id, position=1, predecessor_task_id=None, generation=0
+            )
+            recorded["batch_id"] = batch_id
+            return stop_reason
+
+        return _fake_run_stack_batch
+
+    exit_for = {
+        "DRAINED": 0,
+        "BUDGET": 0,
+        "UNTIL": 0,
+        "INFRASTRUCTURE": 2,
+        "INCOMPLETE": 2,
+    }
+    for stop_reason, expected_exit in exit_for.items():
+        from saffron.ledger import Ledger as _Ledger
+        from saffron.report.stack import render_stack, stack_view
+
+        monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+        monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+        monkeypatch.setattr(
+            cli, "run_stack_batch", _make_fake_run_stack_batch(stop_reason)
+        )
+        _readiness_passes(monkeypatch)
+        home = tmp_path / f"home-{stop_reason}"
+        assert main(["--home", str(home), "batch", "--stack"]) == expected_exit
+
+        reopened = _Ledger(home / "ledger.db")
+        view = stack_view(
+            reopened, recorded["batch_id"], {"SY-2": sy2_spec, "SY-1": sy1_spec}
+        )
+        assert view is not None
+        page = (home / "batches" / "v0" / "index.html").read_text()
+        assert render_stack(view) in page
+        reopened.close()
+
+    def _fake_run_batch(
+        candidates, ledger, budget_usd, until, runner, *, rescan, **kwargs
+    ):
+        batch_id = ledger.create_batch(budget_usd)
+        repo_id = ledger.upsert_repo(
+            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+        )
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+        task_id = ledger.create_task(
+            run_id, spec_id="SY-2", spec_sha="s" * 64, branch="saffron/SY-2"
+        )
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            "saffron/SY-2",
+            "c" * 40,
+            "https://github.com/o/r/pull/501",
+        )
+        ledger.record_stack_layer(
+            task_id, position=1, predecessor_task_id=None, generation=0
+        )
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+    _readiness_passes(monkeypatch)
+    home_plain = tmp_path / "home-plain"
+    assert main(["--home", str(home_plain), "batch"]) == 0
+    assert not (home_plain / "batches" / "v0" / "index.html").exists()
+
+    monkeypatch.setattr(cli, "run_stack_batch", _make_fake_run_stack_batch("DRAINED"))
+    monkeypatch.setattr(
+        cli,
+        "write_stack_view",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    _readiness_passes(monkeypatch)
+    home_raise = tmp_path / "home-write-raises"
+    assert main(["--home", str(home_raise), "batch", "--stack"]) == 2
+    printed = capsys.readouterr().out
+    assert "saffron: OSError: disk full" in printed
 
 
 def _raises(exc):
@@ -6628,6 +6755,7 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
     assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "tree"
     printed = capsys.readouterr().out
     assert f"finish: committed {'c' * 40}" in printed.splitlines()
+    assert "finish: linked nothing, no line reported a push" in printed.splitlines()
 
     # A `GitError`, then a `ValueError`, from `commit_finish`. Each prints
     # its own line and the night still exits 0.
@@ -6662,6 +6790,9 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
     with monkeypatch.context() as m:
         m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
         m.setattr(Ledger, "stack_layers", lambda self, batch_id: [{"position": 1}])
+        # `stack_view` would raise `KeyError` on that bare row: this test is
+        # about `commit_finish`'s own outcome, not the queue page.
+        m.setattr(cli, "write_stack_view", lambda *a, **k: None)
         assert (
             main(["--home", str(tmp_path / "home-unchanged"), "batch", "--stack"]) == 0
         )
@@ -6737,6 +6868,7 @@ def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_fille
     ]
     printed = capsys.readouterr().out
     assert f"finish: findings at {expected_dest}" in printed
+    assert "finish: linked nothing, no line reported a push" in printed.splitlines()
 
     # A `GitError`, then a `ValueError`, then a `KeyError` from
     # `write_findings`. Each prints its own line, and the commit still runs.
@@ -6858,6 +6990,7 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
     printed = capsys.readouterr().out.splitlines()
     assert f"finish: committed {'c' * 40}" in printed
     assert "finish: a published line" in printed
+    assert "finish: linked nothing, no line reported a push" in printed
 
     assert len(publish_calls) == 1
     call = publish_calls[0]
@@ -6933,3 +7066,216 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
         printed = capsys.readouterr().out
         assert "finish: no layer, so nothing committed" in printed
     assert len(publish_calls) == before
+
+
+def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_finish` links its pushed stack only once some published
+    line starts with `pushed `. The runner it hands `link_stack` carries
+    the batch's own repository and `GH_REPO`, and turns a `gh` that
+    cannot start into exit 127. Every other path prints one line saying
+    no push was reported, and calls no link."""
+    from saffron import finish as finish_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    monkeypatch.setattr(finish_module, "write_findings", lambda *a, **k: Path("x"))
+    monkeypatch.setattr(finish_module, "commit_finish", lambda *a, **k: "c" * 40)
+
+    pushed_lines = [
+        "pushed cccccccccccc to saffron/batch-3-finish, draft pull request "
+        "https://github.com/o/r/pull/200",
+        "worktree left at /p: GitError: busy",
+    ]
+    monkeypatch.setattr(
+        finish_module, "publish_finish", lambda *a, **k: list(pushed_lines)
+    )
+
+    link_calls: list[dict] = []
+
+    def _fake_link_stack(ledger, batch_id, *, mirror, url, gh):
+        link_calls.append(
+            {
+                "ledger": ledger,
+                "batch_id": batch_id,
+                "mirror": mirror,
+                "url": url,
+                "gh": gh,
+            }
+        )
+        return ["linked line one", "linked line two"]
+
+    monkeypatch.setattr(finish_module, "link_stack", _fake_link_stack)
+
+    _readiness_passes(monkeypatch)
+    home = tmp_path / "home"
+    # A `--repo` apart from the process's own directory, so a runner that
+    # reads `Path.cwd()` in place of the repository fails.
+    repo_dir = tmp_path / "target"
+    repo_dir.mkdir()
+    argv = ["--home", str(home), "batch", "--stack", "--repo", str(repo_dir)]
+    assert main(argv) == 0
+
+    printed = capsys.readouterr().out.splitlines()
+    expected = [
+        f"finish: {pushed_lines[0]}",
+        f"finish: {pushed_lines[1]}",
+        "finish: linked line one",
+        "finish: linked line two",
+    ]
+    start = printed.index(expected[0])
+    assert printed[start : start + 4] == expected
+    assert "finish: linked nothing, no line reported a push" not in printed
+
+    assert len(link_calls) == 1
+    call = link_calls[0]
+    assert call["batch_id"] == 3
+    assert call["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert call["url"] == "https://github.com/o/r.git"
+
+    gh = call["gh"]
+    with monkeypatch.context() as m:
+        recorded: dict = {}
+
+        def _recorder(argv, **kwargs):
+            recorded["argv"] = list(argv)
+            recorded.update(kwargs)
+            return subprocess.CompletedProcess(argv, 0, "linked\n", "")
+
+        m.setattr(cli.subprocess, "run", _recorder)
+        result = gh(["gh", "stack", "link", "--base", "trunk"])
+    assert recorded["argv"] == ["gh", "stack", "link", "--base", "trunk"]
+    assert recorded["cwd"] == repo_dir.resolve()
+    assert recorded["env"]["GH_REPO"] == "o/r"
+    assert recorded["env"]["PATH"] == os.environ.get("PATH")
+    assert result.returncode == 0
+
+    with monkeypatch.context() as m:
+
+        def _raiser(argv, **kwargs):
+            raise OSError("no gh")
+
+        m.setattr(cli.subprocess, "run", _raiser)
+        result = gh(["gh", "stack", "link"])
+    assert result.returncode == 127
+
+    # The worktree line first, the pushed line second: a link still runs
+    # once, since every line is checked, not only the first.
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "publish_finish",
+            lambda *a, **k: [pushed_lines[1], pushed_lines[0]],
+        )
+        home_i = tmp_path / "home-worktree-first"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert len(link_calls) == 1
+    assert "finish: linked nothing, no line reported a push" not in printed
+
+    # An escalation line holding `pushed` as a substring, never at its
+    # start, calls no link.
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "publish_finish",
+            lambda *a, **k: ["escalate: nothing pushed to x"],
+        )
+        home_i = tmp_path / "home-escalate"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert link_calls == []
+    assert printed.count("finish: linked nothing, no line reported a push") == 1
+
+    # A raising publish calls no link.
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "publish_finish",
+            lambda *a, **k: (_ for _ in ()).throw(GitError("gone")),
+        )
+        home_i = tmp_path / "home-publish-raise"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert link_calls == []
+    assert printed.count("finish: linked nothing, no line reported a push") == 1
+
+    # A raising commit calls no publish and no link.
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "commit_finish",
+            lambda *a, **k: (_ for _ in ()).throw(GitError("gone")),
+        )
+        home_i = tmp_path / "home-commit-giterror"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert link_calls == []
+    assert printed.count("finish: linked nothing, no line reported a push") == 1
+
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "commit_finish",
+            lambda *a, **k: (_ for _ in ()).throw(ValueError("off")),
+        )
+        home_i = tmp_path / "home-commit-valueerror"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert link_calls == []
+    assert printed.count("finish: linked nothing, no line reported a push") == 1
+
+    # A `None` commit calls no publish and no link, with no layer and
+    # with one.
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
+        m.setattr(Ledger, "stack_layers", lambda self, batch_id: [])
+        home_i = tmp_path / "home-none-norow"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert link_calls == []
+    assert printed.count("finish: linked nothing, no line reported a push") == 1
+
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
+        m.setattr(Ledger, "stack_layers", lambda self, batch_id: [{"position": 1}])
+        # `stack_view` would raise `KeyError` on that bare row: this test is
+        # about `link_stack`'s own outcome, not the queue page.
+        m.setattr(cli, "write_stack_view", lambda *a, **k: None)
+        home_i = tmp_path / "home-none-onerow"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert link_calls == []
+    assert printed.count("finish: linked nothing, no line reported a push") == 1
+
+    # A raising `link_stack` prints its own line and keeps the night's
+    # own exit code.
+    link_calls.clear()
+    with monkeypatch.context() as m:
+        m.setattr(
+            finish_module,
+            "link_stack",
+            lambda *a, **k: (_ for _ in ()).throw(GitError("gone")),
+        )
+        home_i = tmp_path / "home-link-raise"
+        assert main(["--home", str(home_i), "batch", "--stack"]) == 0
+    printed = capsys.readouterr().out.splitlines()
+    assert "finish: nothing linked: GitError: gone" in printed
+    assert "finish: linked nothing, no line reported a push" not in printed

@@ -10,6 +10,7 @@ import html
 import json
 import os
 import tempfile
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -139,7 +140,11 @@ def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
     )
 
 
-def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
+def render_index(
+    lines: list[QueueLine], *, header: dict[str, str], stack: str = ""
+) -> str:
+    """`stack` sits between the header and the table, empty by default, so a
+    page `write_stack_view` has never touched renders exactly as before."""
     rows = "\n".join(_row(line) for line in sorted(lines, key=sort_key))
     header_html = " · ".join(
         f"{html.escape(k)} <strong>{html.escape(v)}</strong>" for k, v in header.items()
@@ -164,14 +169,26 @@ def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
   }}
 </style>
 <header>{header_html}</header>
-<table>
+{stack}<table>
 {rows}
 </table>
 """
 
 
+# The page's one mark for a value it does not have.
+PLACEHOLDER = "—"
+
+
+def counted_header(lines: Sequence[QueueLine]) -> dict[str, str]:
+    """The header fields the page counts from its own rows."""
+    return {
+        "tasks": str(len(lines)),
+        "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
+    }
+
+
 def _row(line: QueueLine) -> str:
-    cost = f"${line.cost_usd_est:.2f}" if line.cost_usd_est is not None else "—"
+    cost = f"${line.cost_usd_est:.2f}" if line.cost_usd_est is not None else PLACEHOLDER
     concerns = f"{line.concerns} concern" + ("s" if line.concerns != 1 else "")
     # Worded distinctly from `concerns`, deliberately: the two are summed by
     # different rules over different severities (§6), and a cell that merely
@@ -254,10 +271,7 @@ def append_queue_line(
         # Counted here, and a caller cannot override either: `out_dir` is shared
         # and rows accumulate, so a caller's one-task spend would report only the
         # last one.
-        counted = {
-            "tasks": str(len(lines)),
-            "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
-        }
+        counted = counted_header(lines)
         header = counted | {k: v for k, v in (header or {}).items() if k not in counted}
         # Compute all outputs before any write, so render failures leave nothing
         # behind.
