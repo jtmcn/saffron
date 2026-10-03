@@ -24,9 +24,10 @@ page omits the number.
 
 ## Done looks like
 
-The header of `index.html` shows the accept rate over the last twenty completed
-tasks, read from the ledger. It says how many tasks the window holds when that is
-fewer than twenty. §6's sentence about the missing source is gone.
+The header of `index.html` shows the accept rate over the last twenty settled
+tasks, read from the ledger. §6 defines settled, as the operator decided on
+2026-10-02. The header says how many tasks the window holds when that is fewer
+than twenty.
 
 ## Record
 
