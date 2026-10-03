@@ -128,8 +128,9 @@ files.
    A measured id with no file fails an `assert` naming it. The smoke test passes
    `REAL_SPECS` to it, read at call time.
 4. **The measured ids.** Name them in one set literal in the smoke test,
-   above the helper call. It holds exactly the ids its two assert lines
-   name at your base. Keep those two lines byte for byte, so the spec
+   above the helper call, as `measured = {"SA-0197", ...}` with the ids
+   sorted. The spec loop's driver finds the set by that name. It holds
+   exactly the ids its two assert lines name at your base. Keep those two lines byte for byte, so the spec
    loop's driver still drafts them.
 5. **The docstring.** Replace the docstring's topmost `Re-measured`
    paragraph with one of no more lines. It names this change and both
@@ -139,14 +140,11 @@ files.
 
 - **A finishing commit that edits a measured spec's `depends_on`.** That
   still moves the split. The smoke test then fails, and a person re-measures it.
-- **The spec loop's driver.** `bookkeeping` drafts the two assert lines
-  but not the new set literal. `.claude/**` is out of a cell's reach
-  (b-e471bd), so that line is a follow-up made by hand. Until it lands, the
-  draft is wrong for a commit that retires a measured spec. Such a commit
-  leaves both lists as they are.
-- **`docs/agents/issue-tracker.md`.** Its rule that each new or retired
-  spec re-measures the smoke test changes meaning. The commit that adds a
-  spec now adds its id to the set. A retirement no longer changes the lists. That edit is also a follow-up by hand.
+- **The spec loop's driver and `docs/agents/issue-tracker.md`.** Both
+  change by hand in the pull request stacked on this spec's. `.claude/**`
+  is out of a cell's reach (b-e471bd). Once the smoke test binds
+  `measured`, `bookkeeping` drafts that line too. For a retirement it
+  drafts no change to either list.
 - **`census`, `integrity` and `finish.py`.** The fix is test-side only.
 
 ## Notes for the agent
