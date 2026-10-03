@@ -4,7 +4,7 @@ title: A blocker REVIEW leaves past the budget ends the task EXHAUSTED, unrebutt
 type: feature
 priority: 1
 depends_on: [SA-0202]
-estimated_lines: 200
+estimated_lines: 257
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -89,8 +89,8 @@ acceptance:
       cost, a failed session's cost included. That holds for the rebuttal
       turn, its extraction turn and a verdict session, at or past the
       budget. Once those sessions have cost $7.00 or more, no further session
-      starts, so the rebuttal is unjudged and the task ends `REBUTTING`. The
-      witness drives a cap spent by a rebuttal turn that succeeds, by one
+      starts, and the fifth criterion says how the task ends. The witness
+      drives a cap spent by a rebuttal turn that succeeds, by one
       that fails, and by the extraction turn. A REBUT that starts under the
       budget is unchanged: each session keeps `critic_budget`'s ceiling, and
       no `Budget` event is emitted.
@@ -118,6 +118,26 @@ acceptance:
     wrong_versions:
       - The stopping line rendered for every `Budget` event.
       - REBUT's figure typed so `read_log` drops the field or the line.
+  - claim: >-
+      A REBUT the cap cut short ends `EXHAUSTED`, a decided state, with its
+      anchored blockers standing and no `rebut_result` on the outcome. That
+      holds where `run_rebut` would have halted at `REBUTTING` because the cap
+      refused a session. The ledger's task row reads `EXHAUSTED`,
+      `rebuttal.json` is still written, and the budget line still carries
+      REBUT's figure. The witness drives a cap spent by a rebuttal turn that
+      succeeds, by one that fails, and by the extraction turn. Two shapes
+      keep their base outcome. A fix claimed and never committed, with the
+      cap not spent, halts at `REBUTTING` with its `rebut_result`. A refused
+      extraction turn followed by a red gate re-run ends `EXHAUSTED` with its
+      `rebut_result` kept.
+    witness: tests/test_session.py::test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing
+    wrong_versions:
+      - A cut-short REBUT left halted at `REBUTTING`.
+      - A cut-short REBUT ends `EXHAUSTED` and keeps its `rebut_result`.
+      - Every REBUT past the budget that would halt at `REBUTTING` ends `EXHAUSTED`, cap refusal or not.
+      - A cap refusal also discards the `rebut_result` of a red gate re-run.
+      - A cut-short REBUT ends `GATE_ERROR`, charged to nobody.
+      - A cut-short REBUT emits no budget line.
 ---
 
 ## Context
@@ -220,24 +240,38 @@ REBUT past the budget instead. REVIEW runs as it does today.
    session that would get nothing or less is not started. Refuse it the way
    a failed turn reads to its caller, with `implement.AgentFailed`. Then
    `run_rebuttal` and `run_verdict` treat it as they treat any failed
-   session, so the rebuttal is unjudged and `rebut_state` gives `REBUTTING`
+   session, so the rebuttal is unjudged. `rebut_state` then gives
+   `REBUTTING`, either because nothing was recorded
+   (`saffron/phases/rebut.py:500-508`) or because a verdict errored
    (`saffron/phases/rebut.py:516-517`). The cell enforces `max_budget_usd`
    itself, so one session can still run a turn past its own ceiling
    (`DESIGN.md` §4.3). The cap bounds which sessions start, not REBUT's
    spend to the cent.
 3. **One REBUT.** REBUT already runs at most once per task, and stays so.
-4. **The record.** Every REBUT session still goes through `record_attempts`,
+4. **A cut-short REBUT is decided.** `REBUTTING` is an in-flight state. A
+   task that stops there after its process exits is a halt, and a stack
+   batch escalates a halt that nothing then decides. So the host records
+   which sessions the cap refused. Suppose the cap refused one, and
+   `run_rebut` returned `REBUTTING`. The task ends `EXHAUSTED`, and the
+   outcome's `rebut_result` is `None`, as if REBUT had not run. The
+   blockers stand unanswered. `rebuttal.json` and the ledger's rebuttal
+   rows are still written, because the sessions ran and were paid for.
+   The `why` line names the cap. Every other `run_rebut` result keeps its
+   state and its `rebut_result`. That covers a red gate re-run after a
+   refused extraction turn, which `run_rebut` already ends `EXHAUSTED`
+   (`saffron/phases/rebut.py:716-724`).
+5. **The record.** Every REBUT session still goes through `record_attempts`,
    so its cost lands on an attempt row. After `run_rebut` returns, the host
    adds its cost to the task's spend as it does today. It then emits one
    `Budget` event: `ceiling` `budget_usd`, `value` the spend after REBUT,
    `limit` `budget_usd`, and REBUT's own spend in a new optional field
    defaulting to `None`. REBUT's own spend is the sum of its sessions' costs,
    the figure `run_rebut` reports.
-5. **The line.** `describe` renders a `Budget` event whose new field is set
+6. **The line.** `describe` renders a `Budget` event whose new field is set
    as the line in the notes. One whose field is `None` keeps the base's
    stopping line. Add one `FAMILIES` row for the new line, citing
    `cell/session.py:_drive_cell`.
-6. **Under the budget, nothing changes.** A REBUT that starts under
+7. **Under the budget, nothing changes.** A REBUT that starts under
    `budget_usd` keeps `critic_budget(spec.budget_usd, spent)` and emits no
    `Budget` event.
 
@@ -257,13 +291,15 @@ includes at most one REBUT, held to the cap. The reserve is untouched.
 - **`DESIGN.md`.** §4.3 and §5.6 said REBUT checks the ceiling before its
   turn. The operator edits both by hand in this spec's pull request.
 - **An `EXHAUSTED` task with green gates opening a pull request.** That is
-  b-038aef.
+  b-038aef. Its spec routes on the shape step 4 leaves: `EXHAUSTED`, an
+  anchored blocker and no `rebut_result`.
 
 ## Notes for the agent
 
 **New or edit.** Criteria 1 and 4 declare a mutant on text the base already
-determines, and the change keeps it. Criteria 2 and 3 build new code. This
-spec cannot know its spelling, so each declares a witness and no mutant.
+determines, and the change keeps it. Criteria 2, 3 and 5 build new code.
+This spec cannot know its spelling, so each declares a witness and no
+mutant.
 `witness` reports `skip` for them.
 
 **The line** for a `Budget` event whose spend after REBUT is $63.10, whose
@@ -273,10 +309,12 @@ budget is $37.00, and whose REBUT spent $5.74 is exactly this.
 budget: $63.10 of $37.00 — REBUT ran past it, spending $5.74
 ```
 
-**One helper for the three session witnesses.** Put it in
+**One helper for the four session witnesses.** Put it in
 `tests/test_session.py` beside `_through_rebut` (`:3508`). It takes the
 three REBUT turn costs in order (rebuttal, extraction, verdict) and a
-`budget_usd`. It builds the turns itself rather than through
+`budget_usd`. Three more keywords default to the common case. They are the
+commits after the rebuttal (one), the extraction turn's output (the argued
+answer) and the stub's `suites` (none). It builds the turns itself rather than through
 `_through_rebut`. The plan turn, the implement turn and all four lens turns
 each cost $0.125, so REBUT starts at exactly $0.75. The first lens files
 `_BLOCKER`, and the other three file no findings. The rebuttal turn says
@@ -285,7 +323,7 @@ verdict turn withdraws it.
 
 - Build the cell with `_stub_the_runtime` (`tests/test_session.py:909`).
 - Pass it `_ANCHORING_DIFF` as its patch (`tests/test_session.py:3479`).
-- Call `_rebuttable` with one commit after the rebuttal
+- Call `_rebuttable` with the commits after the rebuttal
   (`tests/test_session.py:3490`).
 - Drive it with `_drive` and a `capture` list (`tests/test_session.py:1229`).
 - The double appends each turn's prompt to `cell.turns`
@@ -334,14 +372,14 @@ sessions' `max_budget_usd` values in order, and the state.
   `READY_FOR_REVIEW`.
 - The same costs at a budget of exactly $0.75: the same three values, and
   `READY_FOR_REVIEW`.
-- Costs $7.25, $0.50 and $0.75, budget $0.25: $7.00 alone, and `REBUTTING`.
+- Costs $7.25, $0.50 and $0.75, budget $0.25: $7.00 alone, and `EXHAUSTED`.
   The extraction turn never starts.
 - A rebuttal turn that raises `implement.AgentFailed` carrying a $7.25
-  attempt, budget $0.25: $7.00 alone, and `REBUTTING`. `run_rebuttal` buys
+  attempt, budget $0.25: $7.00 alone, and `EXHAUSTED`. `run_rebuttal` buys
   no extraction turn after a failed one, so the verdict is the session the
   cap refuses.
 - Costs $3.00, $4.50 and $0.75, budget $0.25: $7.00 and $4.00, and
-  `REBUTTING`.
+  `EXHAUSTED`.
 - Costs $1.50, $0.50 and $0.75, budget $20.00: $19.25 three times. The
   capture holds no `Budget` event.
 
@@ -358,6 +396,26 @@ the cap across them.
 line exactly, appends both to an `EventLog`, and asserts `read_log` returns
 both, equal.
 
+**Criterion 5's witness** runs the helper five times at a budget of $0.25.
+The first three are criterion 3's three cut-short runs. Each asserts all of
+these.
+
+- The state is `EXHAUSTED`, and `outcome.rebut_result` is `None`.
+- `review.anchored_blockers(outcome.reviews)` returns one finding.
+- The ledger's one queue line reads `EXHAUSTED`.
+- The capture holds one `Budget` event, and it carries REBUT's figure.
+- `rebuttal.json` exists in the task's directory.
+
+The fourth run costs $1.50, $0.50 and $0.75, with no commit after the
+rebuttal. Its extraction turn returns `_CLAIMED_FIX`
+(`tests/test_session.py:3487`). It asserts `REBUTTING` and a
+`rebut_result` that is not `None`.
+
+The fifth run costs $7.25, $0.50 and $0.75, with `suites` green, green,
+then one failure. That is the shape
+`test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff` uses. It
+asserts `EXHAUSTED` and a `rebut_result` that is not `None`.
+
 **Keep what other tests read.** `tests/test_events.py:1215-1216` pins
 `FAMILIES` at 69 rows. The new row makes it 70, and its docstring names this
 spec beside the others that moved it.
@@ -372,6 +430,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks here. A
-prototype with all four witnesses, counted by `size_gate`, came to 797
+prototype with all five witnesses, counted by `size_gate`, came to 1025
 tokens against the `feature` ceiling of 3000. Re-indenting the REBUT branch
 counts no tokens. `estimated_lines` is those tokens over four.
