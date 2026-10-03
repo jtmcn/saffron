@@ -3,7 +3,7 @@ id: b-49a2f7
 title: The batch header shows no trailing accept rate, though `reconcile` now records `MERGED`
 status: open
 filed: 2026-10-02
-specs: []
+specs: [SA-0198]
 prs: []
 commits: []
 cites: [§6, §8]
