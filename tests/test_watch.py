@@ -653,8 +653,7 @@ def test_a_task_directory_created_after_the_start_joins_from_its_first_line(tmp_
 
 def _noise_triplet(spec_id: str) -> tuple[Agent, Agent, Agent]:
     """One real line and the two noisy shapes `_is_noise` names, for one
-    task's log. The single-task filter tests use the same three payloads,
-    reused here so both followers are proven against one fixture."""
+    task's log. The payloads copy the single-task filter tests' three."""
     real_work = Agent(
         timestamp=1.0,
         spec_id=spec_id,
@@ -683,11 +682,18 @@ def _noise_triplet(spec_id: str) -> tuple[Agent, Agent, Agent]:
 def _drive_every_task(
     root: Path, verbose: bool
 ) -> tuple[list[str], tuple[Agent, Agent, Agent], tuple[Agent, Agent, Agent]]:
-    """Build one `SY-1` present at the start, with no log yet, and one
-    `SY-9` that joins during the first sleep. Append the noise triplet to
-    both and return what `follow_every_task` yields at one `verbose`."""
+    """Build one `SY-1` whose log holds a line at the start, and one `SY-9`
+    that joins during the first sleep. Append the noise triplet to both and
+    return what `follow_every_task` yields at one `verbose`."""
     root.mkdir()
-    (root / "SY-1").mkdir()
+    EventLog(root / "SY-1").append(
+        Agent(
+            timestamp=0.5,
+            spec_id="SY-1",
+            raw=False,
+            event={"type": "text", "text": "written before the start"},
+        )
+    )
     present = _noise_triplet("SY-1")
     joined = _noise_triplet("SY-9")
 

@@ -226,9 +226,8 @@ def follow(
 def _log_size(task_dir: Path) -> int:
     """The byte size of one task's `events.jsonl`, or `0` with no log yet.
 
-    The starting offset for a directory new to this follower, so a
-    half-written line at that size is dropped, not replayed once the write
-    finishes.
+    The starting offset for a directory present when the follower starts.
+    A half-written line at that size is dropped, not replayed later.
     """
     path = Path(task_dir) / "events.jsonl"
     return path.stat().st_size if path.is_file() else 0

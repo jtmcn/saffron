@@ -2206,7 +2206,8 @@ def test_watch_with_no_spec_id_exits_one_without_a_batch_tree(
     tmp_path, monkeypatch, capsys
 ):
     """With no spec id, `saffron watch` exits 1 and names `out_dir` when that
-    directory does not exist, never reaching the follower."""
+    path is not a directory, never reaching the follower. Both a missing
+    path and a plain file there are refused."""
     calls = []
 
     def fake_follow_every_task(*args, **kwargs):
@@ -2218,6 +2219,11 @@ def test_watch_with_no_spec_id_exits_one_without_a_batch_tree(
     assert cli.main(["--home", str(tmp_path), "watch"]) == 1
 
     out_dir = tmp_path / "batches" / "v0"
+    assert capsys.readouterr().out == f"watch: no batch tree at {out_dir}\n"
+
+    out_dir.parent.mkdir(parents=True)
+    out_dir.write_text("")
+    assert cli.main(["--home", str(tmp_path), "watch"]) == 1
     assert capsys.readouterr().out == f"watch: no batch tree at {out_dir}\n"
     assert calls == []
 
@@ -2237,9 +2243,11 @@ def test_watch_with_no_spec_id_refuses_the_flags_that_read_one_log(
     monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
 
     for flag in ("--whole-log", "--no-follow"):
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exited:
             cli.main(["--home", str(tmp_path), "watch", flag])
 
+        # Argparse's usage exit is 2. A hand-rolled refusal exiting 1 or 0 is not it.
+        assert exited.value.code == 2
         assert flag in capsys.readouterr().err.splitlines()[-1]
 
     assert calls == []

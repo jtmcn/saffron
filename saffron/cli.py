@@ -1843,7 +1843,8 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
             for line in follow_every_task(
                 out_dir, verbose=args.all, interval=args.interval
             ):
-                # Flushed, for the same reason the single-task branch below is.
+                # Flushed: stdout is block-buffered off a tty, so a piped
+                # follower would show nothing until 8 KB accumulate.
                 print(line, flush=True)
         except KeyboardInterrupt:
             # The documented way this ends, the way `tail -f` ends.
