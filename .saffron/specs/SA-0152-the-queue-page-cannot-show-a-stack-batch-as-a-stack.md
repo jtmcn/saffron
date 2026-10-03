@@ -192,7 +192,7 @@ and `SA-0183`'s `batch_budget` returns it. `max_turns` bounds each attempt, not 
 table.
 
 **§6 and the ledger.** §6 says the queue reads `queue.json`, not the
-ledger. It also records item 170's decision (`DESIGN.md:1252`). The record
+ledger. It also records item 170's decision (`DESIGN.md:1275`). The record
 on `refs/saffron/*` is authoritative, the ledger is folded from it, and
 `queue.json` becomes its render. So reading the ledger follows that
 decision. The stack view reads it because `stack_layers` has no other home.
@@ -369,8 +369,10 @@ layers in this order, never in position order: `TE-6` at 3 on `TE-9`,
 on `TE-7`. `TE-4`'s predecessor is not the layer at position 3, so a
 predecessor read from the position below fails. Then `record_push`
 `TE-7`'s task with `e`×40, and `set_task_state` `TE-9`'s task to
-`REJECTED`. Then create run 8 in B, with a second `TE-4` task of one
-attempt (4, 0.20), ended `RATE_LIMITED`. Last, create a run with no batch
+`REJECTED`. Then create run 8 in B, with a second `TE-4` task of budget 5
+and one attempt (4, 0.20), ended `RATE_LIMITED`. The eight task budgets
+then sum to 104, never to B's 100, so a budget summed from the tasks
+fails. Last, create a run with no batch
 and a second `TE-7` task on it, packaged `READY_FOR_REVIEW` at `8`×40, as
 a later `saffron cell` would.
 
@@ -522,7 +524,9 @@ with one `EXHAUSTED` task and no layer. It appends one more line, keeps the
 bytes of `index.html`, and asserts the same header and table join there.
 It calls `write_stack_view` again and asserts the bytes are unchanged.
 Last it calls `write_stack_view` on an empty directory and asserts the
-directory is still empty. These fail it:
+directory is still empty. Keep that last step. A rewrite with no layer
+writes the same bytes to a page that exists, so only the empty directory
+kills it. These fail it:
 
 - the newest batch that has layers, which renders B over C
 - a page written with no view
