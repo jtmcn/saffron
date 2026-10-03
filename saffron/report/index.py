@@ -8,6 +8,7 @@ from __future__ import annotations
 import fcntl
 import html
 import json
+import math
 import os
 import tempfile
 from collections.abc import Sequence
@@ -16,7 +17,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-from saffron.ledger import TaskState
+from saffron.ledger import Ledger, TaskState
+from saffron.scheduler import SETTLED_STATES
 
 # A row is a task or a skipped repo (§6). `SKIPPED` waits on multi-repo, which is v2.
 RowState = TaskState | Literal["SKIPPED"]
@@ -185,6 +187,18 @@ def counted_header(lines: Sequence[QueueLine]) -> dict[str, str]:
         "tasks": str(len(lines)),
         "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
     }
+
+
+def trailing_accept_rate(ledger: Ledger) -> str:
+    """§6's one number: the merged share of the twenty newest settled tasks,
+    pooled across every repo the ledger holds. Half rounds up, and the
+    count joins the percent below a full window of twenty."""
+    rows = ledger.newest_tasks_in_states(SETTLED_STATES, 20)
+    if not rows:
+        return "no settled task yet"
+    merged = sum(1 for row in rows if row["state"] == "MERGED")
+    pct = math.floor(100 * merged / len(rows) + 0.5)
+    return f"{pct}%" if len(rows) == 20 else f"{pct}% of {len(rows)}"
 
 
 def _row(line: QueueLine) -> str:

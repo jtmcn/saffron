@@ -625,6 +625,7 @@ def run_task(
                 sustained=sustained_blockers(outcome.rebut_result),
                 unkept=unkept_fixes(outcome.rebut_result),
             ),
+            header={"trailing accept rate": index_report.trailing_accept_rate(ledger)},
         )
         print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     return outcome

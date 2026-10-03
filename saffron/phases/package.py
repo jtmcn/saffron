@@ -991,6 +991,7 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             sustained=sustained_blockers(outcome.rebut_result),
             unkept=unkept_fixes(outcome.rebut_result),
         ),
+        header={"trailing accept rate": index_report.trailing_accept_rate(ledger)},
     )
     return result
 

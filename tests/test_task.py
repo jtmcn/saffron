@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -37,6 +37,7 @@ def _drive(
     spent_usd: float = 1.0,
     attempts: int = 0,
     events: Sequence[Event] | None = None,
+    on_cell: Callable[[dict], None] | None = None,
     **outcome_fields,
 ) -> CellOutcome:
     """One `run_task` call whose cell ends in `state`.
@@ -44,7 +45,11 @@ def _drive(
     `events`, when given, are emitted through the `emit` the `run_one_cell`
     double is handed, before it returns — the only way to drive the
     default `emit` closure `run_task` builds when a caller passes none, since
-    that closure lives inside `run_task` itself and is never returned."""
+    that closure lives inside `run_task` itself and is never returned.
+
+    `on_cell`, when given, runs on the keyword arguments `run_task` hands
+    the double, before it returns. It is the one way to write to the
+    `ledger` `run_task` passes, as the real cell does."""
     outcome = CellOutcome(
         state=state,
         task_id=task_id,
@@ -58,6 +63,8 @@ def _drive(
     def _run_one_cell(*a, **k):
         for event in events or ():
             k["emit"](event)
+        if on_cell is not None:
+            on_cell(k)
         return outcome
 
     monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
@@ -206,6 +213,89 @@ def test_an_unpackaged_row_carries_no_pull_request_link(tmp_path, monkeypatch):
     assert rows[0]["link"] == ""
     assert rows[0]["note"] == note
     assert rows[0]["repo"] == (tmp_path / "target-repo").name
+
+
+def test_both_queue_writers_put_the_trailing_accept_rate_in_the_header(
+    tmp_path, monkeypatch
+):
+    """`run_task`'s unpackaged branch and `PACKAGE._finish` each read
+    `trailing_accept_rate` off their own ledger. Each reads it after that
+    ledger's own task reaches its final state, then passes it through
+    `append_queue_line`'s `header` kwarg (`DESIGN.md` §6)."""
+    out_dir = tmp_path / "out"
+    spec_id = "SY-9"
+    seed = Ledger(tmp_path / f"{spec_id}.db")
+    repo_id = seed.upsert_repo("r", "https://github.com/o/r.git", "/m.git", None)
+    run_id = seed.create_run(repo_id, base_sha="a" * 40)
+    for n in range(2):
+        merged = seed.create_task(
+            run_id, spec_id=f"X-{n}", spec_sha="s" * 64, branch=f"saffron/X-{n}"
+        )
+        seed.set_task_state(merged, "MERGED")
+    not_implemented = seed.create_task(
+        run_id, spec_id="X-2", spec_sha="s" * 64, branch="saffron/X-2"
+    )
+    seed.set_task_state(not_implemented, "NOT_IMPLEMENTED")
+    fourth = seed.create_task(
+        run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+    )
+    seed.set_task_state(fourth, "IMPLEMENTING")
+    seed.close()
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    def _set_exhausted(kwargs: dict) -> None:
+        kwargs["ledger"].set_task_state(fourth, "EXHAUSTED")
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id=spec_id,
+        state="EXHAUSTED",
+        task_id=fourth,
+        out_dir=out_dir,
+        on_cell=_set_exhausted,
+    )
+
+    page = (out_dir / "index.html").read_text()
+    assert "trailing accept rate <strong>50% of 4</strong>" in page
+
+    finish_ledger = Ledger(tmp_path / "finish.db")
+    finish_repo_id = finish_ledger.upsert_repo(
+        "r2", "https://github.com/o/r2.git", "/m2.git", None
+    )
+    finish_run_id = finish_ledger.create_run(finish_repo_id, base_sha="a" * 40)
+    for n in range(3):
+        merged = finish_ledger.create_task(
+            finish_run_id, spec_id=f"Y-{n}", spec_sha="s" * 64, branch=f"saffron/Y-{n}"
+        )
+        finish_ledger.set_task_state(merged, "MERGED")
+    reviewing = finish_ledger.create_task(
+        finish_run_id, spec_id="Y-9", spec_sha="s" * 64, branch="saffron/Y-9"
+    )
+    finish_ledger.set_task_state(reviewing, "REVIEWING")
+
+    finish_out_dir = tmp_path / "finish-out"
+    outcome = CellOutcome(
+        state="REVIEWING",
+        task_id=reviewing,
+        run_id=reviewing,
+        task_dir=finish_out_dir / "Y-9",
+        spent_usd=1.0,
+        attempts=1,
+    )
+    spec = Spec(
+        id="Y-9",
+        title="A spec",
+        type="feature",
+        touches=["src/**"],
+        acceptance_criteria=["it works"],
+    )
+    result = package_phase.PackageResult(state="MERGE_FAILED", branch="saffron/Y-9")
+    package_phase._finish(finish_ledger, outcome, finish_out_dir, spec, "r2", result)
+
+    finish_page = (finish_out_dir / "index.html").read_text()
+    assert "trailing accept rate <strong>75% of 4</strong>" in finish_page
 
 
 def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(

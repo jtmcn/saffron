@@ -23,7 +23,7 @@ import hashlib
 import json
 import re
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -1001,6 +1001,24 @@ class Ledger:
                     WHERE r.repo_id = ? AND t.spec_id = ?
                     ORDER BY t.task_id""",
                 (repo_id, spec_id),
+            )
+        )
+
+    def newest_tasks_in_states(
+        self, states: Collection[str], limit: int
+    ) -> list[sqlite3.Row]:
+        """The `limit` newest tasks whose state is in `states`, across every
+        repo (§6's trailing accept rate pools them). Ordered by `updated_at`
+        descending, then `task_id` descending, so a tie within one
+        `reconcile` sweep still breaks the same way every time."""
+        placeholders = ", ".join("?" for _ in states)
+        return list(
+            self._db.execute(
+                f"""SELECT task_id, state FROM tasks
+                     WHERE state IN ({placeholders})
+                     ORDER BY updated_at DESC, task_id DESC
+                     LIMIT ?""",
+                (*states, limit),
             )
         )
 

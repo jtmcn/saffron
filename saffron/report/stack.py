@@ -23,6 +23,7 @@ from saffron.report.index import (
     _locked,
     counted_header,
     render_index,
+    trailing_accept_rate,
 )
 
 
@@ -234,9 +235,10 @@ def write_stack_view(
     out_dir.mkdir(parents=True, exist_ok=True)
     with _locked(out_dir):
         rows = _existing_queue_rows(out_dir / "queue.json")
-        index_html = render_index(
-            rows, header=counted_header(rows), stack=render_stack(view)
-        )
+        header = counted_header(rows) | {
+            "trailing accept rate": trailing_accept_rate(ledger)
+        }
+        index_html = render_index(rows, header=header, stack=render_stack(view))
         index = out_dir / "index.html"
         _atomic_write(index, index_html)
     return index
