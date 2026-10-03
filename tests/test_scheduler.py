@@ -2226,9 +2226,8 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
     """Re-measured 2026-10-03, a hundred-and-fourteenth time: run 26 retired
-    `SA-0170`, `SA-0183` and `SA-0152`. `SA-0198` and `SA-0197` queued for
-    backlog items b-49a2f7 and b-2d09de, both candidates. `SA-0199` is refused
-    on them, its parents.
+    `SA-0170`, `SA-0183` and `SA-0152`. `SA-0198` and `SA-0197` are both
+    candidates, and `SA-0199` is refused on them, its parents.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
