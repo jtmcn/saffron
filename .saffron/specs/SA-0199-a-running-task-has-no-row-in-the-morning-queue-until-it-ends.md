@@ -4,7 +4,7 @@ title: A running task has no row in the morning queue until it ends, and the pag
 type: feature
 priority: 2
 depends_on: [SA-0198]
-estimated_lines: 410
+estimated_lines: 480
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -54,7 +54,7 @@ forbidden:
   - tests/test_ledger.py
   - tests/test_stack_view.py
   - tests/test_queued_specs.py
-budget_usd: 31
+budget_usd: 33
 max_attempts: 3
 max_turns: 200
 acceptance:
@@ -63,16 +63,18 @@ acceptance:
       hands it to `_drive_cell`. `_drive_cell` calls it once with
       `IMPLEMENTING`, `REPAIRING`, `REVIEWING` or `REBUTTING` each time it
       writes that state to the ledger, in the order it writes them. The
-      witness drives a cell through all four. It drives three more cells,
-      and `on_state` hears none of their end states: a green cell that
-      ends `READY_FOR_REVIEW`, a cell that ends `REBUTTING`, and a cell
-      that ends `EXHAUSTED` after one repair turn.
+      witness drives a cell through all four, and a cell that repairs
+      twice and hears `REPAIRING` twice. It drives three more cells, and
+      `on_state` hears none of their end states: a green cell that ends
+      `READY_FOR_REVIEW`, a cell that ends `REBUTTING`, and a cell that
+      ends `EXHAUSTED` after one repair turn.
     witness: tests/test_session.py::test_a_cell_reports_each_phase_state_as_it_enters_it
     wrong_versions:
       - "`on_state` is called only at `IMPLEMENTING`."
       - "`on_state` is called at the end state too, so a cell ending `REBUTTING` hears it twice."
       - "`on_state` is called at `READY_FOR_REVIEW` or `EXHAUSTED`."
       - "`on_state` is called from `_phase_start`, so a phase is heard once per progress line."
+      - Only the first `REPAIRING` of a task is reported, so a second repair turn is not heard.
   - claim: >-
       `run_task` passes `run_one_cell` an `on_state` that upserts the task's
       row through `append_queue_line` with the state it was given. The row
@@ -99,7 +101,8 @@ acceptance:
       writes that row again with the state `ORPHANED` and every other field
       unchanged, then re-raises the same exception object. The witness
       drives a `RuntimeError` and a `KeyboardInterrupt`. A raise before any
-      `on_state` call writes no row.
+      `on_state` call writes no row and no page, and re-raises that same
+      exception object.
     witness: tests/test_task.py::test_a_cell_that_raises_leaves_its_running_row_orphaned
     wrong_versions:
       - The handler catches `Exception` only, so a `KeyboardInterrupt` leaves the row at `REVIEWING`.
@@ -163,6 +166,21 @@ acceptance:
       - The rewrite names every task in the repo, so the unstamped task's row reads `ORPHANED`.
       - The call sits outside the scan's `try`, so its raise reaches `main` and prints `saffron:` instead.
       - A catch around the call goes on with the night after a raise.
+  - claim: >-
+      A live row's write never stops the cell. When `append_queue_line`
+      raises an `Exception` inside `on_state`, the callback prints one line
+      naming the spec, the state and the error, and returns. The cell goes
+      on, `run_task` returns its outcome, and the end-of-task row is
+      written as before. A state whose write failed does not count as
+      written, so a cell that raises after only failed writes leaves no
+      row. When the `ORPHANED` write raises, the row keeps its last live
+      state and `run_task` re-raises the cell's own exception object.
+    witness: tests/test_task.py::test_a_failed_live_row_write_never_stops_the_cell
+    wrong_versions:
+      - The live write is not caught, so its `OSError` escapes `on_state` and orphans a running cell.
+      - The written flag is set before the write, so a cell that raises after a failed write gets an `ORPHANED` row.
+      - The `ORPHANED` write is not caught, so its `OSError` replaces the cell's exception.
+      - The failure is swallowed with no line printed.
 ---
 
 ## Context
@@ -175,7 +193,13 @@ headed "**A running task has a live row.**" The row is written as each
 phase starts. The end-of-task line replaces it under the same repo and
 spec key, and so does the row of a task that ends before PACKAGE. A batch
 scan that stamps a task `ORPHANED` rewrites its row to `ORPHANED`. The
-page refreshes itself. Every line number below was read at `8ca7cba0`.
+page refreshes itself.
+
+**Line numbers.** Every line number below was read at `8ca7cba0`, before
+`SA-0152` and `SA-0198` land. The cell's base carries both, so the lines
+cited in `task.py`, `index.py`, `cli.py`, `package.py`, `test_task.py` and
+`test_cli.py` move once they land. Each citation names its function or test
+beside the line. Find it by that name.
 
 **Where rows come from today.** Two calls write a row, and both run once
 the task is over. PACKAGE's `_finish` calls `append_queue_line`
@@ -230,20 +254,29 @@ reloads it.
    already makes.
 2. **`run_task` writes the live row.** It passes an `on_state` that calls
    `append_queue_line` with the row the second criterion's claim describes.
-   When `run_one_cell` raises after at least one such call, it writes the
-   same row with the state `ORPHANED` and re-raises. Catch
-   `BaseException`, as `_drive_cell`'s own handler does at
+   When `run_one_cell` raises after at least one such write succeeded, it
+   writes the same row with the state `ORPHANED` and re-raises. Catch
+   `BaseException` there, as `_drive_cell`'s own handler does at
    `saffron/cell/session.py:3096-3106`.
+
+   A live row is a convenience and never stops a running cell. `on_state`
+   runs inside `_drive_cell`'s `try`, so a raise from it would orphan the
+   task. Wrap each live write, the `ORPHANED` one included, in a catch of
+   `Exception`. On a failure, print one line naming the spec, the state and
+   the error, and return. Record a state as written only after its write
+   returns. So the `ORPHANED` write is skipped when no write succeeded, and
+   its own failure never replaces the cell's exception. The end-of-task
+   row keeps today's behaviour, uncaught.
 3. **`orphan_rows`.** Add it to `saffron/report/index.py` with the
    signature the fourth criterion names, plus the keyword `header`
    `append_queue_line` takes. Return early when `queue.json` is absent,
    before taking the lock. Read rows through `_existing_queue_rows`.
    Write through the same code `append_queue_line` writes through, so the
    counted header is computed in one place. Factor that code out of
-   `append_queue_line` rather than copying it. Use
-   `reconcile.IN_FLIGHT_STATES` for the states a rewrite applies to. It
-   holds all four `LiveState` members, and the sixth criterion holds it
-   to that.
+   `append_queue_line` rather than copying it. Rewrite a row only when its
+   state is one of `get_args(LiveState)`, the four states criterion 4
+   names. Import `LiveState` from `saffron.cell.session` at module scope.
+   The prototype measured no import cycle there.
 4. **The refresh.** `render_index` puts
    `<meta http-equiv="refresh" content="60">` on the line after
    `<meta charset="utf-8">`. Sixty seconds, because a phase lasts
@@ -259,11 +292,14 @@ reloads it.
    stamped or `resolved.repo_id` is `None`. Import `orphan_rows` by name
    into `saffron/cli.py`, so a test can replace `cli.orphan_rows`.
 
-**The header.** Read `run_task`'s end-of-task call to `append_queue_line`
-at the tree base. If it passes a `header`, the live and `ORPHANED` writes
-in `run_task` pass the same one. `_batch` then builds one the same way and
-passes it to `orphan_rows`. If it passes none, none of the three does.
-`SA-0198`, this spec's parent, is the change that would add one.
+**The header.** `SA-0198`, this spec's parent, makes `run_task`'s
+end-of-task call pass `header={"trailing accept rate": ...}`, read with
+its `trailing_accept_rate(ledger)`. The live and `ORPHANED` writes in
+`run_task` pass the same header, built the same way, inside their catch.
+`_batch` builds it the same way and passes it to `orphan_rows`. Otherwise
+each live write would drop the field from the page until the task ends.
+No criterion checks this field, because the prototype predates
+`SA-0198`.
 
 ## Out of scope
 
@@ -277,9 +313,13 @@ passes it to `orphan_rows`. If it passes none, none of the three does.
   until `_finish` replaces it.
 - **The live row's cost and attempts.** The row carries neither. The end
   row carries both.
-- **A failed write.** A raise from `append_queue_line` inside `on_state`
-  escapes the cell like any other raise, as a raise from `_finish`'s
-  write does today. Catching it is a separate decision.
+- **A failed end-of-task write.** Only live writes are caught. A raise
+  from the end-of-task `append_queue_line`, in `run_task` or in
+  `_finish`, still reaches `main` as it does today.
+- **The header's spend while a spec runs again.** A live row has no cost,
+  and it replaces the spec's previous end row. So the counted `spend`
+  drops by that row's cost until the task ends. The operator accepted
+  this. Sorting under §6 is unaffected.
 - **Rows written before this change.** A task that ended before this
   change has no live row, so a scan that stamps it rewrites nothing.
 - **The `saffron cell` path.** It runs no scan, so it never stamps a task
@@ -303,7 +343,7 @@ assertion or call.
 
 **Criterion 1's witness.** Add a keyword `on_state=None` to `_drive` in
 `tests/test_session.py` (`:1229`) and pass it to `run_one_cell` on the
-path that passes `emit` (`:1400-1407`). Drive four cells, each under its
+path that passes `emit` (`:1400-1407`). Drive five cells, each under its
 own `tmp_path` subdirectory, with `on_state=heard.append`.
 
 - All four states. Copy the stub and turns of
@@ -319,17 +359,30 @@ own `tmp_path` subdirectory, with `on_state=heard.append`.
 - An `EXHAUSTED` end. Suites `([], _results(failing), _results(failing))`
   and turns `[_turn(_block(_PLAN)), _turn(), _turn()]`. Expect
   `["IMPLEMENTING", "REPAIRING"]`.
+- Two repairs. Two failures that differ, such as `a.py` and `b.py`, so the
+  second attempt is not read as no progress. Suites
+  `([], _results(first), _results(second), [])` and turns
+  `[_turn(_block(_PLAN)), _turn(), _turn(), _turn()]`. Assert the end is
+  `READY_FOR_REVIEW` and expect
+  `["IMPLEMENTING", "REPAIRING", "REPAIRING", "REVIEWING"]`.
 
 **Criteria 2 and 3's witnesses.** Call `task_module.run_task` directly,
 shaped like `_drive` in `tests/test_task.py:29-95`. Give its `Spec`
 `risk="elevated"`, so the row's `risk` is not the default.
-Replace `run_one_cell` with a fake that calls `k["on_state"]` and reads
-`queue.json` after each call. Seed the store first with a row of another
-spec. Compare each read with the whole list of row dicts, not one field.
-For the packaged end, replace `package_phase.package` the way
-`tests/test_task.py:211-270` does. For criterion 3, raise each exception
-from the fake after one `on_state("REVIEWING")`, and assert
-`raised.value is error`.
+Seed the store first with a row of another spec. Replace `run_one_cell`
+with a fake that reads `queue.json` on entry, before any call, and again
+after each `k["on_state"]` call. Compare each read with the whole list of
+row dicts, not one field. The entry read holds only the other spec's row.
+After each call, also assert `index.html` holds `<code>STATE</code>` for
+that state. For the packaged end, replace `package_phase.package` the way
+`test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link`
+(`tests/test_task.py:211-270`) does.
+
+For criterion 3, raise each exception from the fake after one
+`on_state("REVIEWING")`, and assert `raised.value is error`. Then, in a
+fresh `out_dir`, raise from the fake before any `on_state` call. Assert
+the same exception object is raised and neither `queue.json` nor
+`index.html` exists there. The task's own `events.jsonl` directory does.
 
 **Criterion 4's witness.** Upsert nine rows with `append_queue_line`, in
 this order.
@@ -372,16 +425,31 @@ the stored states, and returns `DRAINED`. For the raise, replace
 `cli.orphan_rows` with a function raising `OSError`, and assert the exit
 code 2 and the printed `batch: the queue could not be resolved:` line.
 
+**Criterion 8's witness.** Replace `index_report.append_queue_line` with
+a wrapper. It raises `OSError` for a row whose state is in a set the test
+controls, and calls the real one otherwise. Drive three cases.
+
+- `IMPLEMENTING` fails. The fake calls `on_state("IMPLEMENTING")`, notes
+  that it went on, and returns an `EXHAUSTED` outcome. Assert `run_task`
+  returns it and the fake went on. The store holds one `EXHAUSTED` row.
+  Exactly one printed line holds the spec id, `IMPLEMENTING` and the
+  error text.
+- `ORPHANED` fails. The fake calls `on_state("REVIEWING")` and raises.
+  Assert the same exception object is raised and the store holds the
+  `REVIEWING` live row.
+- `REVIEWING` fails. The same fake. Assert the same exception object is
+  raised and the store holds no row.
+
 **Measured on a prototype, 2026-10-02.** A prototype of this change, cut
-from `8ca7cba0`, passed all seven witnesses described above. Each of the
-seven failed on an assertion with its source reverted. It passed the rest
+from `8ca7cba0`, passed all eight witnesses described above. Each of the
+eight failed on an assertion with its source reverted. It passed the rest
 of the suite, apart from tests that read this repository's git history,
 which the prototype's copy did not carry. `types`, `dead` and `structure`
-passed on it. Then 25 of the 29 wrong versions below the criteria were
+passed on it. Then 29 of the 34 wrong versions below the criteria were
 applied to it as edits, and each failed its own criterion's witness.
 
-Its source and witnesses measured 1336 tokens under `size_gate`'s counter,
-with few docstrings and comments. `estimated_lines` is 410: that figure
+Its source and witnesses measured 1615 tokens under `size_gate`'s counter,
+with few docstrings and comments. `estimated_lines` is 480: that figure
 plus about 300 tokens for them, over four.
 
 **The prose gate** counts every new comment and docstring. Write none with
