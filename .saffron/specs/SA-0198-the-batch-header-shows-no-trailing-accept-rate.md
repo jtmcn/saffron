@@ -15,6 +15,7 @@ touches:
   - tests/test_accept_rate.py
   - tests/test_task.py
   - tests/test_stack_view.py
+  - tests/test_cli.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -43,7 +44,6 @@ forbidden:
   - tests/test_ledger.py
   - tests/test_package.py
   - tests/test_replay.py
-  - tests/test_cli.py
 budget_usd: 31
 max_attempts: 3
 max_turns: 180
@@ -325,21 +325,22 @@ second ledger with three `MERGED` tasks and one `REVIEWING` task. Call
 whose state is `MERGE_FAILED`. Its page's header then holds
 `trailing accept rate <strong>75% of 4</strong>`.
 
-**Criterion 5's case.** Build the batch as `run_stack_batch` records one.
-Call `create_batch`, then `create_run` with that `batch_id`, then
-`record_stack_layer` on one of its tasks (`saffron/batch.py:483-488`, in
-`run_stack_batch`). The batch holds a `MERGED` layer and an `EXHAUSTED`
+**Criterion 5's case.** Build the batch so each task belongs to it when
+created. Call `create_batch`, then `create_run` with that `batch_id`.
+Production attaches a run later instead (`attach_orphan_runs_to_batch`),
+and both reach the same rows. Then call `record_stack_layer` on one task,
+as `run_stack_batch` does (`saffron/batch.py:483-488`). The batch holds a `MERGED` layer and an `EXHAUSTED`
 task. A run outside every batch holds two `MERGED` tasks. First append one
 `QueueLine` in `EXHAUSTED` with `append_queue_line`. Then call
 `write_stack_view(out_dir, ledger, {})`. Its page's header holds
 `trailing accept rate <strong>75% of 4</strong>`. Call
 `trailing_accept_rate` there rather than a second copy of the read.
 
-**`tests/test_stack_view.py` is in `touches` for one reason.** If `SA-0152`'s
-witness asserts the whole header `write_stack_view` writes, add the new
-field to that expected header. Change nothing else in the file.
-`tests/test_cli.py` stays `forbidden`. If one of its tests breaks, stop and
-say so in the pull request body.
+**Two test files are in `touches` for one reason.** They are
+`tests/test_stack_view.py` and `tests/test_cli.py`. Where an `SA-0152`
+witness asserts the whole header `write_stack_view` writes, add the new field
+to that expected header. Change nothing else in
+either file.
 
 **Pass the field as `header=`.** `append_queue_line` already merges a
 caller's header after its own counts (`saffron/report/index.py:261`). Keep
