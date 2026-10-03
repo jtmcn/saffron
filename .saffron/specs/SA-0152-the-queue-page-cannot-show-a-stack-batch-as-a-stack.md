@@ -47,7 +47,7 @@ forbidden:
 budget_usd: 27
 max_attempts: 3
 max_turns: 200
-estimated_lines: 578
+estimated_lines: 582
 acceptance:
   - claim: >-
       `stack_view(ledger, batch_id, specs)` returns `None` for a batch with
@@ -80,11 +80,11 @@ acceptance:
       `reviewed` Spec row, and a layer of a second batch with no row.
     witness: tests/test_stack_view.py::test_the_stack_view_reads_each_layer_of_one_batch_in_position_order
     wrong_versions:
-      - A layer's task is found as its spec's newest task, which brings in the second `TE-7`.
       - A layer's head is its predecessor's live `pushed_sha`, which gives `TE-9` the head `e`×40.
       - A layer's predecessor is the layer at the position below, which names `TE-6` under `TE-4`.
       - A layer with one `reviewed` lens and no `error` row reads `reviewed`, which misreads `TE-9`.
       - The `join` row counts toward a layer's status, which reads `TE-4` as `error`.
+      - An order entry's position is looked up by spec id, which gives the `RATE_LIMITED` `TE-6` position 3.
   - claim: >-
       `render_stack(view)` renders one `<section>` for the batch, then one
       for each layer in the order the view lists them. The batch section
@@ -104,12 +104,11 @@ acceptance:
       - An order entry's layer number is its index in the order, which gives `TE-4` layer 4.
       - The title or the size summary is written unescaped.
       - A missing value is written as `None`, or as an empty string in place of the placeholder.
-      - An order entry leaves out its state.
-      - A layer's section leaves out its end-review status.
   - claim: >-
       `write_stack_view(out_dir, ledger, specs)` renders the newest batch's
       view into `index.html`, between the header and the table, over the
-      rows `queue.json` holds, and leaves `queue.json` as it was. When the
+      rows `queue.json` holds, and leaves `queue.json` as it was, its inode
+      included. When the
       newest batch has no `stack_layers` row, it writes nothing, so a page
       `append_queue_line` wrote stays byte for byte as it was, and an empty
       directory stays empty. A page `append_queue_line` writes still has its
@@ -120,7 +119,8 @@ acceptance:
     wrong_versions:
       - The view is of the newest batch that has layers, which renders B over the newer C.
       - The page is written again when the newest batch has no layer.
-      - The write also rewrites `queue.json`.
+      - The write also rewrites `queue.json`, even byte for byte, which gives it a new inode.
+      - The page holds the view and the counted header but no queue row, as `render_index([], header=counted)` writes it.
       - Given an empty `stack`, `render_index` adds a line or a wrapper.
       - The lock file is taken before the view is known, which leaves a file in an empty directory.
   - claim: >-
@@ -136,7 +136,6 @@ acceptance:
       - The view is written only when the batch exits 0.
       - The view is written on the path without `--stack` too.
       - The `specs` passed is empty, so no layer has a title.
-      - The view is written before `run_stack_batch` runs, so it finds no layer.
       - A broad catch around the call keeps exit 0 when the write raises.
 ---
 
@@ -153,43 +152,43 @@ section per layer and one for the batch.
 **The chain this spec sits on.** `SA-0142` to `SA-0145` built the stack
 batch. `SA-0143` added `run_stack_batch` to `saffron/batch.py`. `SA-0144`
 made `saffron batch --stack` call it from `cli._batch`
-(`saffron/cli.py:1323-1337`). `SA-0145` added the `stack_layers` table
-(`saffron/ledger.py:191`) and `Ledger.record_stack_layer` (`:1357`). That table holds one
+(`saffron/cli.py:1626-1642`). `SA-0145` added the `stack_layers` table
+(`saffron/ledger.py:222`) and `Ledger.record_stack_layer` (`:1415`). That table holds one
 row per layer: `task_key`, `batch_key` (the batch id as text), `position`,
 `spec_id`, `predecessor_key`, `predecessor_head` and `generation`.
-`SA-0153` added the `end_reviews` table (`:204`) and
+`SA-0153` added the `end_reviews` table (`:235`) and
 `Ledger.record_end_review(task_id, *, lens, status, cost_usd, error)`
-(`:1515`). It writes one row per lens of each layer, keyed on `(task_key, lens)`, with a
+(`:1662`). It writes one row per lens of each layer, keyed on `(task_key, lens)`, with a
 `status` of `reviewed`, `error` or `not_reached`. `SA-0154` writes a `join`
 row under the top layer's task. `SA-0153` also widened `batch_spend` to add
-each layer's end-review cost (`:1102-1125`). This spec reads those names,
-`SA-0151`'s `Ledger.stack_layers` and `SA-0183`'s three reads, and no
-other name the chain adds. Every line number here was read at
-`a1148c1e`. The names above are merged there, and `SA-0151`'s and
-`SA-0183`'s reads are not. Read `cli.py` and `ledger.py` by symbol at the
-tree base.
+each layer's end-review cost (`:1160-1184`). `SA-0151` added
+`Ledger.stack_layers` (`:1457`). This spec reads those names and
+`SA-0183`'s three reads, and no other name the chain adds. Every line
+number here was read at `39864aea`. The names above are merged there, and
+`SA-0183`'s reads are not. Read `cli.py`, `ledger.py` and
+`saffron/report/index.py` by symbol at the tree base.
 
 **How the page is written today.** `append_queue_line` upserts one
 `QueueLine` into `queue.json`, then re-renders `index.html` from every row
-the store holds (`saffron/report/index.py:196-239`). It counts two header
-fields itself, `tasks` and `spend` (`:227-230`). It renders under a lock
-file (`:215`, `:242-253`) and writes each file through `_atomic_write`
-(`:300-310`). `render_index` puts the header, then the table
-(`:112-140`). PACKAGE calls it once per task (`saffron/phases/package.py:968`),
+the store holds (`saffron/report/index.py:226-269`). It counts two header
+fields itself, `tasks` and `spend` (`:257-260`). It renders under a lock
+file (`:245`, `:272-283`) and writes each file through `_atomic_write`
+(`:330-340`). `render_index` puts the header, then the table
+(`:142-170`). PACKAGE calls it once per task (`saffron/phases/package.py:977`),
 and so does `run_task` for a task that never packaged
 (`saffron/task.py:611`). `saffron batch` writes to
-`<home>/batches/v0` (`saffron/cli.py:196`).
+`<home>/batches/v0` (`saffron/cli.py:205`).
 
 **What the ledger already reads.** `batch_spend` sums a batch's attempts
 through `runs.batch_id`, plus its layers' end-review cost
-(`saffron/ledger.py:1102-1125`). `task_spend` sums one task's attempts
-(`:1268-1278`). `attempts` lists them in order (`:1280-1286`), each with
+(`saffron/ledger.py:1160-1184`). `task_spend` sums one task's attempts
+(`:1326`). `attempts` lists them in order (`:1338`), each with
 `num_turns`. `task_results` lists a task's gate results in attempt order
-(`:1681-1686`). `tasks.spent_usd_est` is rolled up only by the
-`task_state` fold (`:690`), and `set_task_package` leaves it alone
-(`:1323`). `batches.budget_usd` holds a batch's budget (`:66`),
+(`:1828-1833`). `tasks.spent_usd_est` is rolled up only by the
+`task_state` fold (`:732`), and `set_task_package` leaves it alone
+(`:1381`). `batches.budget_usd` holds a batch's budget (`:101`),
 and `SA-0183`'s `batch_budget` returns it. `max_turns` bounds each attempt, not a task
-(`saffron/cell/session.py:1954`). A spec's title and `max_turns` are in no
+(`saffron/cell/session.py:2026`). A spec's title and `max_turns` are in no
 table.
 
 **§6 and the ledger.** §6 says the queue reads `queue.json`, not the
@@ -221,7 +220,7 @@ Build four things.
 
    `latest_batch_id()` is already on `Ledger`. It returns the highest
    `batch_id`, or 0 before the first batch, never `None`
-   (`saffron/ledger.py:1075-1083`). No batch has the id 0,
+   (`saffron/ledger.py:1133`). No batch has the id 0,
    so `stack_view` of it returns `None`.
 2. **The view.** A new module, `saffron/report/stack.py`, holds two frozen
    dataclasses and three functions. It imports from
@@ -254,14 +253,14 @@ Build four things.
      as a clean one (principles 34 and 36). Write an order entry as its spec id, its
      state in `<code>`, and `layer <n>` or `no layer`. Write an outcome as
      its state in `<code>`, a space and its count. Render the pull request
-     through `_link` (`saffron/report/index.py:184-193`).
+     through `_link` (`saffron/report/index.py:214`).
 3. **The page.** `render_index` takes a keyword `stack: str = ""` and puts
    it between the header and the table. With `stack` empty, its output is
    what it is today. Add `write_stack_view(out_dir, ledger, specs)` to
    `saffron/report/stack.py`. It reads `latest_batch_id()` and builds that
    batch's view, 0 included. With no view it returns `None` and writes nothing. With
    one, it creates `out_dir` as `append_queue_line` does, then takes the
-   lock `_locked` holds (`saffron/report/index.py:242-253`). It reads the
+   lock `_locked` holds (`saffron/report/index.py:272-283`). It reads the
    rows through `_existing_queue_rows`, counts `tasks` and `spend` as
    `append_queue_line` does, and writes `index.html` through
    `_atomic_write`. It writes nothing to `queue.json`.
@@ -270,9 +269,9 @@ Build four things.
    `specs` maps each candidate of the order to its `spec`. Import it by
    name, so a test can replace `cli.write_stack_view`. Put no catch
    around it. A raise reaches `main`'s catch-all
-   (`saffron/cli.py:236-242`) and exits 2, as a raise from `_finish`'s
+   (`saffron/cli.py:245-252`) and exits 2, as a raise from `_finish`'s
    `append_queue_line` does in `saffron cell`
-   (`saffron/phases/package.py:955-984`). Otherwise map the stop reason to
+   (`saffron/phases/package.py:964-995`). Otherwise map the stop reason to
    an exit code as `_batch` does now. The path without `--stack` gains no
    call.
 
@@ -300,13 +299,18 @@ Build four things.
   recorded spec text (`SA-0182`), which a later spec can parse for both.
 - **Keeping the view across a later write.** `append_queue_line`
   re-renders `index.html` from `queue.json` alone
-  (`saffron/report/index.py:213-238`). So a `saffron cell` after the
+  (`saffron/report/index.py:243-268`). So a `saffron cell` after the
   batch writes a page with no stack view, and nothing re-renders it. The ledger still holds every layer.
 - **A spec refused by the stack loop.** It has no task, so it is in no
   order entry.
-- **`DESIGN.md` §6.** It says the queue reads `queue.json` today, and
-  item 170 moves the source to the record. It is protected, so any line on
-  the stack view's reading of the ledger is left to a hand edit.
+- **`DESIGN.md` §6.** `DESIGN.md:1275` says the queue reads `queue.json`,
+  not the ledger. Once this spec lands, the stack view reads the ledger.
+  `DESIGN.md` is forbidden here, so the delegate edits that line by hand
+  in the loop-close pull request.
+- **Revised layer titles.** `specs` comes from each candidate's own
+  `spec`. `run_stack_batch` hands its end review the revised spec text
+  where one exists (`saffron/batch.py:762-773`). So a revised layer shows
+  its original title and `max_turns`.
 - **The finishing layer.** `SA-0177` records it in its own
   `stack_finishes` table and as a record fact, never in `stack_layers`. So
   the view shows no section for it.
@@ -354,7 +358,7 @@ Batch B, budget 100, tasks in this run order:
 | 7 | `TE-4` | 12 | (10, 0.75, `size` "300 ...") | `READY_FOR_REVIEW` | `4`×40, `/pull/204` |
 
 `TE-7`'s last attempt records no gate result, as a lens or rebuttal turn
-records none (`record_attempts`, `saffron/cell/session.py:188`). `TE-6` ran twice in B,
+records none (`record_attempts`, `saffron/cell/session.py:189`). `TE-6` ran twice in B,
 and its peak is in its second attempt.
 
 Each `size` summary is the gate's own shape, such as `1180 changed tokens
@@ -484,7 +488,7 @@ asserts each order entry whole, in order, such as
 `TE-9 <code>READY_FOR_REVIEW</code> layer 1` and
 `TE-5 <code>EXHAUSTED</code> no layer`. It asserts the escaped title and
 size summary, and no raw `<b>` or `<a>`. It asserts no `None` anywhere. With `<P>` read from `_row`'s placeholder
-(`saffron/report/index.py:144`), it asserts `TE-4`'s section holds
+(`saffron/report/index.py:174`), it asserts `TE-4`'s section holds
 `of <P>`, `<P> of <P> turns` and `on <P>`. It asserts `<P>` appears there
 at least seven times, one each for the title, budget, peak turns,
 `max_turns`, pull request, size and predecessor. It asserts
@@ -503,13 +507,17 @@ the one marked reasoned, which is unmeasured.
 
 **Criterion 3's witness** uses the arrangement above and an `out_dir` in
 `tmp_path`. It appends two `QueueLine`s with `append_queue_line`, for
-`TE-7` costing 5.50 and `TE-9` costing 5.00, and keeps the bytes of `queue.json`. It asserts the page
+`TE-7` costing 5.50 and `TE-9` costing 5.00. It keeps the bytes of
+`queue.json` and its `stat().st_ino`. It asserts the page
 they wrote holds `</header>` then a newline then `<table>`, as the
-template does today (`saffron/report/index.py:136-137`). It calls
+template does today (`saffron/report/index.py:166-167`). It calls
 `write_stack_view(out_dir, ledger, specs)`. It asserts `index.html` holds
 `render_stack(stack_view(ledger, B, specs))` after `</header>` and before
 `<table>`, holds no `TE-2`, and says `tasks` 2 and `spend` $10.50. It
-asserts `queue.json` is unchanged. Then it creates batch C, the newest,
+asserts the page holds `_row` of `TE-7`'s `QueueLine`, which kills a page
+rendered as `render_index([], header=counted)`. It asserts `queue.json`'s
+bytes and inode are unchanged. The inode kills a byte-identical rewrite,
+since `_atomic_write` replaces the file through `os.replace`. Then it creates batch C, the newest,
 with one `EXHAUSTED` task and no layer. It appends one more line, keeps the
 bytes of `index.html`, and asserts the same header and table join there.
 It calls `write_stack_view` again and asserts the bytes are unchanged.
@@ -519,17 +527,23 @@ directory is still empty. These fail it:
 - the newest batch that has layers, which renders B over C
 - a page written with no view
 - a header left out
-- a rewrite of `queue.json`
+- a rewrite of `queue.json`, byte for byte, caught by its inode
+- a page with the view and header but no queue row
 - a `render_index` that, given an empty `stack`, adds a line or a wrapper
 - a lock file taken before the view is known, which leaves a file behind
 
-Measured by the same run: each of the six failed criterion 3's witness.
-The five without a lock file were modelled as text edits. The lock file
-was modelled as a touch of `.queue.lock` before the view is read.
+Measured by the same run: each of the first six failed criterion 3's
+witness. Five were modelled as text edits. The lock file was modelled as
+a touch of `.queue.lock` before the view is read. That run's rewrite of
+`queue.json` changed its bytes. On 2026-10-02 at `39864aea`, a scratch
+probe wrote two lines with `append_queue_line`. A rewrite through
+`_atomic_write` of `json.dumps` over `_existing_queue_rows` kept the bytes
+and changed the inode. Leaving the file alone kept both. The row
+assertion is reasoned, and the parent-branch re-review measures it.
 
 **Criterion 4's witness** follows `SA-0144`'s witness for `saffron batch
 --stack`, `test_saffron_batch_stack_plans_once_and_runs_that_order`
-(`tests/test_cli.py:3099`). It uses `_readiness_passes` (`:2939`) and fakes
+(`tests/test_cli.py:3111`). It uses `_readiness_passes` (`:2951`) and fakes
 `_resolve_queue` to return the order `SY-2` (title `Second layer`,
 `max_turns` 77), then `SY-1`. It fakes `cli._stack_runner` to return a
 sentinel. It fakes `cli.run_stack_batch` to write, while `main`'s ledger is
@@ -553,12 +567,13 @@ full`. These fail it:
 - a view written only on exit 0
 - a view written on the plain path too
 - `specs` left empty, which renders no title
-- a view written before `run_stack_batch`, which finds no layer
 - a broad catch around the call that keeps exit 0
 
-This half is unmeasured. `--stack` and its test helpers exist at
-`a1148c1e`, but `SA-0151`'s and `SA-0183`'s reads do not. The re-review at
-`SA-0183`'s branch measures it, and criterion 2's reasoned build with it.
+Criterion 4's arrangement is unmeasured. Its four wrong builds die by
+reading alone. `--stack` and its test helpers exist at `39864aea`, but
+`SA-0183`'s reads do not. The re-review at `SA-0183`'s head measures this
+witness. It measures criterion 2's reasoned end-review build in the same
+run.
 
 **The call's place.** `SA-0151`'s `finish` runs inside
 `run_stack_batch`, after the follow-ups and before the batch row closes.
@@ -585,8 +600,9 @@ advisory at the `feature` ceiling of 3000 changed tokens
 this spec's own part 1768 tokens. `stack.py` took 516, `render_index`
 and the call in `cli.py` 42, `tests/test_stack_view.py` 954, and
 criterion 4's witness 256. The end-review status, test docstrings and
-comments add about 540, unmeasured. That is about 2310 tokens, and 3230,
-108% of the ceiling, at the 1.4 times sibling cells landed at. The
+comments add about 540, unmeasured. Criterion 3's row and inode
+assertions add about 4 lines. That is about 2330 tokens, and 3260,
+109% of the ceiling, at the 1.4 times sibling cells landed at. The
 operator accepts that advisory `fail` and settled on no split. Keep one
 fixture helper that every witness in `tests/test_stack_view.py` shares,
 and one tuple for each expected layer. Build its rows from one loop over
