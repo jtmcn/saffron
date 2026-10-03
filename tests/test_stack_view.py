@@ -9,13 +9,13 @@ import pytest
 from saffron.gates.contract import GateResult
 from saffron.intake import Spec
 from saffron.ledger import Ledger
-from saffron.report.index import QueueLine, _row, append_queue_line
+from saffron.report.index import PLACEHOLDER, QueueLine, _row, append_queue_line
 
 SIZE_900 = "900 changed tokens within the feature ceiling of 3000"
 SIZE_2410 = "2410 changed tokens within the feature ceiling of 3000"
 SIZE_1180 = "1180 changed tokens within the feature ceiling of 3000 <a>"
 SIZE_300 = "300 changed tokens within the feature ceiling of 3000"
-P = "—"  # `_row`'s own missing-value mark (`saffron/report/index.py:174`).
+P = PLACEHOLDER
 
 REPO_URL = "https://github.com/o/r.git"
 
@@ -363,9 +363,9 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
         end_review="error",
     )
     four = StackLayer(
-        # 3, not 2: a gap this hand-built order leaves, so a layer number
-        # counted rather than read from this field reads wrong.
-        position=3,
+        # 5 matches no index into the order and no count of its layers, so
+        # a layer number taken from either reads wrong.
+        position=5,
         spec_id="TE-4",
         title=None,
         state="READY_FOR_REVIEW",
@@ -386,7 +386,7 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
             ("TE-3", "GATE_ERROR", None),
             ("TE-9", "READY_FOR_REVIEW", 1),
             ("TE-5", "EXHAUSTED", None),
-            ("TE-4", "READY_FOR_REVIEW", 3),
+            ("TE-4", "READY_FOR_REVIEW", 5),
         ],
         spent_usd=12.25,
         budget_usd=100.0,
@@ -399,15 +399,24 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
     assert len(sections) == 4
     _, batch_section, nine_section, four_section = sections
 
+    assert "batch 9" in batch_section
     assert "$12.25 of $100.00" in batch_section
-    assert "TE-3 <code>GATE_ERROR</code> no layer" in batch_section
-    assert "TE-9 <code>READY_FOR_REVIEW</code> layer 1" in batch_section
-    assert "TE-5 <code>EXHAUSTED</code> no layer" in batch_section
-    assert "TE-4 <code>READY_FOR_REVIEW</code> layer 3" in batch_section
+    entries = [
+        "TE-3 <code>GATE_ERROR</code> no layer",
+        "TE-9 <code>READY_FOR_REVIEW</code> layer 1",
+        "TE-5 <code>EXHAUSTED</code> no layer",
+        "TE-4 <code>READY_FOR_REVIEW</code> layer 5",
+    ]
+    for entry in entries:
+        assert entry in batch_section
+    positions = [batch_section.index(entry) for entry in entries]
+    assert positions == sorted(positions)
     assert "<code>GATE_ERROR</code> 1" in batch_section
     assert "<code>READY_FOR_REVIEW</code> 2" in batch_section
     assert "<code>EXHAUSTED</code> 1" in batch_section
 
+    assert "TE-9" in nine_section
+    assert "<code>READY_FOR_REVIEW</code> layer 1" in nine_section
     assert "&lt;b&gt;Nine&lt;/b&gt;" in nine_section
     assert "<b>Nine</b>" not in nine_section
     assert "$7.25 of $20.00" in nine_section
@@ -421,6 +430,8 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
     )
     assert "<a>" not in nine_section
 
+    assert "TE-4" in four_section
+    assert "<code>READY_FOR_REVIEW</code> layer 5" in four_section
     assert four_section.count(P) >= 7
     assert f"of {P}" in four_section
     assert f"{P} of {P} turns" in four_section

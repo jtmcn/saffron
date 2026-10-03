@@ -11,24 +11,19 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from saffron.end_review import END_LENSES
 from saffron.gates.contract import GateResult
 from saffron.intake import Spec
 from saffron.ledger import Ledger
 from saffron.report.index import (
+    PLACEHOLDER,
     _atomic_write,
     _existing_queue_rows,
     _link,
     _locked,
+    counted_header,
     render_index,
 )
-
-# `_row`'s own missing-value mark (`saffron/report/index.py:174`), reused
-# so one page never shows two different "unknown" marks.
-_PLACEHOLDER = "—"
-
-# `end_reviews` lenses this view reads. `join` plays no part (ADR 7, item 164).
-_SPEC_LENS = "spec"
-_STANDARDS_LENS = "standards"
 
 
 @dataclass(frozen=True)
@@ -149,19 +144,16 @@ def _last_size_summary(results: list[GateResult]) -> str | None:
 def _end_review_lenses(rows: list[sqlite3.Row]) -> dict[str, dict[str, str]]:
     by_key: dict[str, dict[str, str]] = {}
     for row in rows:
-        if row["lens"] == "join":
+        if row["lens"] not in END_LENSES:
             continue
         by_key.setdefault(row["task_key"], {})[row["lens"]] = row["status"]
     return by_key
 
 
 def _end_review_status(lenses: dict[str, str]) -> str:
-    if lenses.get(_SPEC_LENS) == "error" or lenses.get(_STANDARDS_LENS) == "error":
+    if any(lenses.get(lens) == "error" for lens in END_LENSES):
         return "error"
-    if (
-        lenses.get(_SPEC_LENS) == "reviewed"
-        and lenses.get(_STANDARDS_LENS) == "reviewed"
-    ):
+    if all(lenses.get(lens) == "reviewed" for lens in END_LENSES):
         return "reviewed"
     return "not_reached"
 
@@ -169,9 +161,9 @@ def _end_review_status(lenses: dict[str, str]) -> str:
 def render_stack(view: StackView) -> str:
     """One `<section>` for the batch, then one for each layer in order."""
     budget = _money(view.budget_usd)
-    order_items = "\n".join(_order_entry(entry) for entry in view.order)
+    order_items = "\n".join(f"<li>{_order_entry(entry)}</li>" for entry in view.order)
     outcome_items = "\n".join(
-        f"<code>{html.escape(state)}</code> {count}"
+        f"<li><code>{html.escape(state)}</code> {count}</li>"
         for state, count in view.outcomes.items()
     )
     batch_section = f"""<section>
@@ -195,17 +187,18 @@ def _order_entry(entry: tuple[str, str, int | None]) -> str:
 
 
 def _layer_section(layer: StackLayer) -> str:
-    title = html.escape(layer.title) if layer.title is not None else _PLACEHOLDER
+    title = html.escape(layer.title) if layer.title is not None else PLACEHOLDER
     budget = _money(layer.budget_usd)
     turns = (
-        f"{layer.peak_turns if layer.peak_turns is not None else _PLACEHOLDER} of "
-        f"{layer.max_turns if layer.max_turns is not None else _PLACEHOLDER} turns"
+        f"{layer.peak_turns if layer.peak_turns is not None else PLACEHOLDER} of "
+        f"{layer.max_turns if layer.max_turns is not None else PLACEHOLDER} turns"
     )
-    size = html.escape(layer.size) if layer.size is not None else _PLACEHOLDER
-    pr_html = _link(layer.pr_url) if layer.pr_url else _PLACEHOLDER
+    size = html.escape(layer.size) if layer.size is not None else PLACEHOLDER
+    pr_html = _link(layer.pr_url) if layer.pr_url else PLACEHOLDER
     predecessor = _predecessor_text(layer.predecessor, layer.predecessor_head)
     return f"""<section>
 <h2>{layer.spec_id}</h2>
+<p><code>{html.escape(layer.state)}</code> layer {layer.position}</p>
 <p>{title}</p>
 <p>${layer.spent_usd:.2f} of {budget}</p>
 <p>{turns}</p>
@@ -218,13 +211,13 @@ def _layer_section(layer: StackLayer) -> str:
 
 
 def _money(amount: float | None) -> str:
-    return f"${amount:.2f}" if amount is not None else _PLACEHOLDER
+    return f"${amount:.2f}" if amount is not None else PLACEHOLDER
 
 
 def _predecessor_text(predecessor: str | None, head: str | None) -> str:
     if predecessor is None:
-        return f"on {_PLACEHOLDER}"
-    return f"on {predecessor} at {head if head is not None else _PLACEHOLDER}"
+        return f"on {PLACEHOLDER}"
+    return f"on {predecessor} at {head if head is not None else PLACEHOLDER}"
 
 
 def write_stack_view(
@@ -241,11 +234,9 @@ def write_stack_view(
     out_dir.mkdir(parents=True, exist_ok=True)
     with _locked(out_dir):
         rows = _existing_queue_rows(out_dir / "queue.json")
-        counted = {
-            "tasks": str(len(rows)),
-            "spend": f"${sum(ln.cost_usd_est or 0 for ln in rows):.2f}",
-        }
-        index_html = render_index(rows, header=counted, stack=render_stack(view))
+        index_html = render_index(
+            rows, header=counted_header(rows), stack=render_stack(view)
+        )
         index = out_dir / "index.html"
         _atomic_write(index, index_html)
     return index
