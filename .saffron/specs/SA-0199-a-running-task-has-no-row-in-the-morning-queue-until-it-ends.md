@@ -3,7 +3,7 @@ id: SA-0199
 title: A running task has no row in the morning queue until it ends, and the page never refreshes
 type: feature
 priority: 2
-depends_on: [SA-0198]
+depends_on: [SA-0198, SA-0197]
 estimated_lines: 480
 estimate_measured: true
 touches:
@@ -82,7 +82,8 @@ acceptance:
       `attempts` 0, `cost_usd_est` `None`, zero concerns, zero sustained
       blockers and unkept fixes, zero lines added and removed, and an
       empty link and note.
-      `index.html` names the state as soon as the call returns. No row for
+      `index.html` names the state as soon as the call returns, and its
+      header holds `trailing accept rate`. No row for
       the task exists before the first call. Each later call replaces the
       row, and the task's end replaces it last, leaving one row: the
       early-end row for a task that never packaged, and PACKAGE's row for
@@ -96,6 +97,7 @@ acceptance:
       - "`run_task` writes a row before calling `run_one_cell`, such as `QUEUED`."
       - The row is written to `queue.json` and `index.html` is not rendered again.
       - Only the first state reaches the row.
+      - A live write that passes no header, so the page drops the rate until the task ends.
   - claim: >-
       When `run_one_cell` raises after `on_state` wrote a row, `run_task`
       writes that row again with the state `ORPHANED` and every other field
@@ -295,11 +297,12 @@ reloads it.
 **The header.** `SA-0198`, this spec's parent, makes `run_task`'s
 end-of-task call pass `header={"trailing accept rate": ...}`, read with
 its `trailing_accept_rate(ledger)`. The live and `ORPHANED` writes in
-`run_task` pass the same header, built the same way, inside their catch.
+`run_task` pass the same header inside their catch. Each write reads the
+rate again at that moment. A header built once before `run_one_cell` is
+`SA-0198` criterion 4's wrong version, and its witness turns red.
 `_batch` builds it the same way and passes it to `orphan_rows`. Otherwise
 each live write would drop the field from the page until the task ends.
-No criterion checks this field, because the prototype predates
-`SA-0198`.
+Criterion 2's witness checks the field on each live write.
 
 ## Out of scope
 
