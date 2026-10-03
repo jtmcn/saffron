@@ -3259,6 +3259,132 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
     assert row["ended_at"] is not None
 
 
+def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack` writes the stack view of the batch it ran
+    into the queue page, after `run_stack_batch` returns any of the five
+    stop reasons. `saffron batch` without `--stack` writes no stack view."""
+    sy2_spec = intake.Spec(
+        id="SY-2", title="Second layer", type="chore", priority=3, max_turns=77
+    )
+    sy1_spec = intake.Spec(
+        id="SY-1", title="t", type="chore", priority=1, depends_on=["SY-2"]
+    )
+    sy2 = Candidate(
+        path=Path("SY-2.md"), spec=sy2_spec, spec_sha="s" * 64, task_id=None
+    )
+    sy1 = Candidate(
+        path=Path("SY-1.md"), spec=sy1_spec, spec_sha="r" * 64, task_id=None
+    )
+
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
+        return _fake_batch_resolution(tmp_path, repo_id=None, candidates=[sy2, sy1])
+
+    recorded: dict = {}
+
+    def _make_fake_run_stack_batch(stop_reason):
+        def _fake_run_stack_batch(
+            candidates, ledger, budget_usd, until, runner, **kwargs
+        ):
+            batch_id = ledger.create_batch(budget_usd)
+            repo_id = ledger.upsert_repo(
+                "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+            )
+            run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+            task_id = ledger.create_task(
+                run_id, spec_id="SY-2", spec_sha="s" * 64, branch="saffron/SY-2"
+            )
+            ledger.set_task_package(
+                task_id,
+                "READY_FOR_REVIEW",
+                "saffron/SY-2",
+                "c" * 40,
+                "https://github.com/o/r/pull/501",
+            )
+            ledger.record_stack_layer(
+                task_id, position=1, predecessor_task_id=None, generation=0
+            )
+            recorded["batch_id"] = batch_id
+            return stop_reason
+
+        return _fake_run_stack_batch
+
+    exit_for = {
+        "DRAINED": 0,
+        "BUDGET": 0,
+        "UNTIL": 0,
+        "INFRASTRUCTURE": 2,
+        "INCOMPLETE": 2,
+    }
+    for stop_reason, expected_exit in exit_for.items():
+        from saffron.ledger import Ledger as _Ledger
+        from saffron.report.stack import render_stack, stack_view
+
+        monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+        monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+        monkeypatch.setattr(
+            cli, "run_stack_batch", _make_fake_run_stack_batch(stop_reason)
+        )
+        _readiness_passes(monkeypatch)
+        home = tmp_path / f"home-{stop_reason}"
+        assert main(["--home", str(home), "batch", "--stack"]) == expected_exit
+
+        reopened = _Ledger(home / "ledger.db")
+        view = stack_view(
+            reopened, recorded["batch_id"], {"SY-2": sy2_spec, "SY-1": sy1_spec}
+        )
+        assert view is not None
+        page = (home / "batches" / "v0" / "index.html").read_text()
+        assert render_stack(view) in page
+        reopened.close()
+
+    def _fake_run_batch(
+        candidates, ledger, budget_usd, until, runner, *, rescan, **kwargs
+    ):
+        batch_id = ledger.create_batch(budget_usd)
+        repo_id = ledger.upsert_repo(
+            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+        )
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+        task_id = ledger.create_task(
+            run_id, spec_id="SY-2", spec_sha="s" * 64, branch="saffron/SY-2"
+        )
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            "saffron/SY-2",
+            "c" * 40,
+            "https://github.com/o/r/pull/501",
+        )
+        ledger.record_stack_layer(
+            task_id, position=1, predecessor_task_id=None, generation=0
+        )
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+    _readiness_passes(monkeypatch)
+    home_plain = tmp_path / "home-plain"
+    assert main(["--home", str(home_plain), "batch"]) == 0
+    assert not (home_plain / "batches" / "v0" / "index.html").exists()
+
+    monkeypatch.setattr(cli, "run_stack_batch", _make_fake_run_stack_batch("DRAINED"))
+    monkeypatch.setattr(
+        cli,
+        "write_stack_view",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    _readiness_passes(monkeypatch)
+    home_raise = tmp_path / "home-write-raises"
+    assert main(["--home", str(home_raise), "batch", "--stack"]) == 2
+    printed = capsys.readouterr().out
+    assert "saffron: OSError: disk full" in printed
+
+
 def _raises(exc):
     def _raise(*_a, **_k):
         raise exc
@@ -6664,6 +6790,9 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
     with monkeypatch.context() as m:
         m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
         m.setattr(Ledger, "stack_layers", lambda self, batch_id: [{"position": 1}])
+        # `stack_view` would raise `KeyError` on that bare row: this test is
+        # about `commit_finish`'s own outcome, not the queue page.
+        m.setattr(cli, "write_stack_view", lambda *a, **k: None)
         assert (
             main(["--home", str(tmp_path / "home-unchanged"), "batch", "--stack"]) == 0
         )
@@ -7127,6 +7256,9 @@ def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
     with monkeypatch.context() as m:
         m.setattr(finish_module, "commit_finish", lambda *a, **k: None)
         m.setattr(Ledger, "stack_layers", lambda self, batch_id: [{"position": 1}])
+        # `stack_view` would raise `KeyError` on that bare row: this test is
+        # about `link_stack`'s own outcome, not the queue page.
+        m.setattr(cli, "write_stack_view", lambda *a, **k: None)
         home_i = tmp_path / "home-none-onerow"
         assert main(["--home", str(home_i), "batch", "--stack"]) == 0
     printed = capsys.readouterr().out.splitlines()

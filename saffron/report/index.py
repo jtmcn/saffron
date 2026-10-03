@@ -139,7 +139,11 @@ def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
     )
 
 
-def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
+def render_index(
+    lines: list[QueueLine], *, header: dict[str, str], stack: str = ""
+) -> str:
+    """`stack` sits between the header and the table, empty by default, so a
+    page `write_stack_view` has never touched renders exactly as before."""
     rows = "\n".join(_row(line) for line in sorted(lines, key=sort_key))
     header_html = " · ".join(
         f"{html.escape(k)} <strong>{html.escape(v)}</strong>" for k, v in header.items()
@@ -164,7 +168,7 @@ def render_index(lines: list[QueueLine], *, header: dict[str, str]) -> str:
   }}
 </style>
 <header>{header_html}</header>
-<table>
+{stack}<table>
 {rows}
 </table>
 """
