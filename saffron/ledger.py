@@ -1183,6 +1183,48 @@ class Ledger:
         ).fetchone()
         return float(row["spent"])
 
+    def batch_tasks(self, batch_id: int) -> list[sqlite3.Row]:
+        """Every task whose run belongs to this batch, lowest run id first,
+        then lowest task id. Each row carries `task_id`, `spec_id`, `state`
+        and `record_key`. Run id sorts first because a batch mints each run as
+        it drives that candidate, so run order is the order the night ran."""
+        return list(
+            self._db.execute(
+                """SELECT t.task_id, t.spec_id, t.state, t.record_key
+                     FROM tasks t
+                     JOIN runs r ON r.run_id = t.run_id
+                    WHERE r.batch_id = ?
+                    ORDER BY r.run_id, t.task_id""",
+                (batch_id,),
+            )
+        )
+
+    def batch_budget(self, batch_id: int) -> float | None:
+        """The batch's own `budget_usd`, or `None` for a batch id with no
+        row. Never `0.0` for a missing batch: a batch that spent nothing
+        and a batch that never existed are not the same thing."""
+        row = self._db.execute(
+            "SELECT budget_usd FROM batches WHERE batch_id = ?", (batch_id,)
+        ).fetchone()
+        return None if row is None else float(row["budget_usd"])
+
+    def end_reviews(self, batch_id: int) -> list[sqlite3.Row]:
+        """Every end-review row whose `task_key` names a `stack_layers` row
+        filed under this batch's key, as `task_key`, `lens` and `status`.
+        The same join `batch_spend` sums through. Matched on the record key,
+        never on `spec_id`: a task that is no layer brings in nothing, and a
+        later task reusing a spec id brings in none of an earlier one's
+        rows."""
+        return list(
+            self._db.execute(
+                """SELECT e.task_key, e.lens, e.status
+                     FROM end_reviews e
+                     JOIN stack_layers sl ON sl.task_key = e.task_key
+                    WHERE sl.batch_key = ?""",
+                (str(batch_id),),
+            )
+        )
+
     def batch_runs(self, batch_id: int) -> list[sqlite3.Row]:
         """Every run a batch is made of, so a night can be walked from its own
         row. The column already round-trips through `create_run`, but no
