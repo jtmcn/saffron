@@ -41,6 +41,8 @@ type: feature
 - [ ] it saves
 """
 STARTED = "2026-10-05T00:00:00+00:00"
+# Before `jev_grade.STARTS`, so a review round saved now does not decide the case.
+BEFORE = "2026-10-01T00:00:00+00:00"
 FINDING = {
     "severity": "blocker",
     "criterion": 1,
@@ -616,6 +618,8 @@ def test_noise_grades_only_schema_2_notes(monkeypatch, loop, capsys):
         _label_all(
             base / f"round-{n}", verified="not-a-defect", disposition="no-action"
         )
+    saved = base / "round-1" / "round.json"
+    saved.write_text(json.dumps({**json.loads(saved.read_text()), "saved_at": BEFORE}))
     findings = base / "round-1" / "findings.json"
     rows = json.loads(findings.read_text())
     findings.write_text(json.dumps([{**f, "severity": "note"} for f in rows]))
@@ -624,7 +628,6 @@ def test_noise_grades_only_schema_2_notes(monkeypatch, loop, capsys):
     _follow(base / "round-1", 2)
     assert _run(monkeypatch, "noise") == 0
     assert "noise 0, caught 0" in capsys.readouterr().out
-    saved = base / "round-1" / "round.json"
     saved.write_text(json.dumps({**json.loads(saved.read_text()), "saved_at": STARTED}))
     assert _run(monkeypatch, "noise") == 0
     out = capsys.readouterr().out
