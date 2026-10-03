@@ -4,15 +4,17 @@ title: The batch header shows no trailing accept rate, though `reconcile` now re
 type: feature
 priority: 2
 depends_on: [SA-0152]
-estimated_lines: 300
+estimated_lines: 360
 touches:
   - saffron/scheduler.py
   - saffron/ledger.py
   - saffron/report/index.py
   - saffron/task.py
   - saffron/phases/package.py
+  - saffron/report/stack.py
   - tests/test_accept_rate.py
   - tests/test_task.py
+  - tests/test_stack_view.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -29,7 +31,6 @@ forbidden:
   - harness/**
   - records/**
   - saffron/replay.py
-  - saffron/report/stack.py
   - saffron/report/pr_body.py
   - saffron/cli.py
   - saffron/batch.py
@@ -42,11 +43,10 @@ forbidden:
   - tests/test_ledger.py
   - tests/test_package.py
   - tests/test_replay.py
-  - tests/test_stack_view.py
   - tests/test_cli.py
 budget_usd: 31
 max_attempts: 3
-max_turns: 170
+max_turns: 180
 acceptance:
   - claim: >-
       `saffron.scheduler.SETTLED_STATES` holds exactly `MERGED`,
@@ -55,12 +55,14 @@ acceptance:
       holds a table that marks each of the 24 `TaskState` values settled or
       not. It asserts the table's keys equal the whole `TaskState` set, so a
       state added later fails it until someone marks that state. It asserts
-      `SETTLED_STATES` equals the states the table marks settled.
+      the states the table marks settled equal the seven names above, each
+      spelled out in the test. It asserts `SETTLED_STATES` equals them too.
     witness: tests/test_accept_rate.py::test_every_task_state_is_marked_settled_or_not_and_the_set_agrees
     wrong_versions:
       - "`SETTLED_STATES` as `DONE_STATES` minus `DEPENDENCY_WAITING_STATES`, which keeps `SCOPE_REVIEW`."
-      - "`SETTLED_STATES` as `DONE_STATES` whole, which keeps the four states that wait on the operator."
+      - "`SETTLED_STATES` as `DONE_STATES` whole, which keeps the four states whose outcome waits on the operator."
       - "`SETTLED_STATES` that also holds `ORPHANED`, a state the scheduler re-queues on its own `task_id`."
+      - "`SETTLED_STATES` and the table both marking `SCOPE_REVIEW` or `ORPHANED` settled, which the seven spelled-out names refuse."
       - A table compared to `TaskState` as a subset, so a state missing from the table passes.
   - claim: >-
       `trailing_accept_rate(ledger)` in `saffron/report/index.py` returns
@@ -101,17 +103,33 @@ acceptance:
       - The twenty latest tasks cut first and filtered to settled after, which reads `74% of 19`.
       - A window of one repo's tasks, which reads `67% of 12` or `70% of 10`.
   - claim: >-
-      Both writers of the queue page put the rate in its header, under the
-      key `trailing accept rate`, read from the task's own ledger. The first
-      is `run_task` for a task that never reached PACKAGE. The second is
-      PACKAGE's `_finish`, which reads the rate after it writes the task's
-      own state. The witness drives each one.
+      Both callers of `append_queue_line` that hold a ledger put the rate in
+      the page's header, under the key `trailing accept rate`, read from that
+      ledger. The first is `run_task` for a task that never reached PACKAGE,
+      which reads the rate after the cell wrote the task's own state. The
+      second is PACKAGE's `_finish`, which reads the rate after it writes the
+      task's own state. The witness drives each one, and in each the task's
+      own state changes the rate.
     witness: tests/test_task.py::test_both_queue_writers_put_the_trailing_accept_rate_in_the_header
     wrong_versions:
       - Only `_finish` passes the field, so the unpackaged task's page has none.
+      - "`run_task` reads the rate before `run_one_cell` returns, which reads `67% of 3` where `50% of 4` is right."
       - Only `run_task` passes the field, so the packaged task's page has none.
       - "`_finish` reads the rate before `set_task_package`, which reads `100% of 3` where `75% of 4` is right."
       - The rate counted from the rows in `queue.json`, which reads the unpackaged page as `0% of 1`.
+      - The field under another key, such as `accept rate`.
+  - claim: >-
+      `write_stack_view(out_dir, ledger, specs)` puts the rate in the page's
+      header beside `tasks` and `spend`, under the key `trailing accept
+      rate`, read from its ledger over every settled task, not only the
+      batch's. The witness drives a ledger whose newest batch has a layer,
+      with settled tasks inside and outside that batch, over a page that
+      already holds one `EXHAUSTED` row. Its header reads `75% of 4`.
+    witness: tests/test_accept_rate.py::test_the_stack_view_page_carries_the_trailing_accept_rate
+    wrong_versions:
+      - "`write_stack_view` keeps its header to `tasks` and `spend`, so a stack night's page has no rate."
+      - The rate read over the newest batch's tasks only, which reads `50% of 2`.
+      - The rate counted from the rows in `queue.json`, which reads `0% of 1`.
       - The field under another key, such as `accept rate`.
 ---
 
@@ -129,7 +147,7 @@ The operator's hand edit at this spec's base adds a paragraph to §6
 (`DESIGN.md:1285`). It reads: "**The window holds settled tasks.** The rate is
 the share of them that merged." It lists seven settled states. It says a task
 the scheduler re-queues on its own `task_id` has not settled, and neither has
-one that waits on the operator. That paragraph is the rule this spec builds.
+one whose outcome still waits on the operator. That paragraph is the rule this spec builds.
 
 **What writes the page today.** `append_queue_line` counts `tasks` and
 `spend` itself and merges a caller's `header` after them
@@ -138,7 +156,19 @@ passes `{"trailing accept rate": "—"}`. `run_task` calls it for a task that
 never reached PACKAGE (`saffron/task.py:611`). PACKAGE's `_finish` calls it
 after `set_task_package` (`saffron/phases/package.py:968-977`). Neither of the
 last two passes a `header`, so the field is absent from every page a cell
-writes.
+writes. Line numbers in `saffron/report/index.py` and `saffron/cli.py` are at
+this spec's base, and `SA-0152` moves them. Find each by the function named
+beside it.
+
+**What this spec relies on from its parent.** `SA-0152` adds
+`saffron/report/stack.py`, which does not exist at this spec's base. So
+these citations are to `SA-0152`'s spec, not to code. Its criterion 3 and
+its build step 3 say `write_stack_view(out_dir, ledger, specs)` renders the
+newest batch's view, with `tasks` and `spend` counted as
+`append_queue_line` counts them. With no layer in the newest batch it writes
+nothing. Its Out of scope says it drops replay's header field. Its step 4
+calls it after every `--stack` batch, so a stack night's last page write is
+`write_stack_view`'s.
 
 **The state sets.** `DONE_STATES` holds eleven states
 (`saffron/scheduler.py:69-83`). `DEPENDENCY_WAITING_STATES` holds
@@ -174,19 +204,19 @@ one second.
 - **Replay's field is a confident em-dash.** §6 says a field with no
   source renders exactly that (`DESIGN.md:1281`). Replay is v0 and stays
   as it is.
-- **Nothing names which tasks count.** `DONE_STATES` mixes four states that
-  wait on the operator with seven that settled. A rate over `DONE_STATES`
+- **Nothing names which tasks count.** `DONE_STATES` mixes four states whose
+  outcome still waits on the operator with seven that settled. A rate over `DONE_STATES`
   counts a pull request still in review as a miss.
 
 ## Out of scope
 
-- **`saffron/replay.py`.** It is v0, agent-free, and `forbidden`. It keeps
-  its em-dash.
-- **The stack view's page write.** `SA-0152` adds `write_stack_view`, which
-  renders the page with `tasks` and `spend` only (its spec's own Out of
-  scope says so). A page it writes drops
-  this field until the next `append_queue_line`. `saffron/report/stack.py`
-  is `forbidden`.
+- **`saffron/replay.py`.** It is v0, agent-free, and `forbidden`, and v1
+  deletes it (`saffron/replay.py:3`). It keeps its em-dash. It also writes
+  its task's state into the same ledger, `READY_FOR_REVIEW` or `EXHAUSTED`
+  (`saffron/replay.py:107-108`, the one `Ledger` `saffron/cli.py:216` opens).
+  So a replay that ends `EXHAUSTED` enters the window as a settled miss. The
+  real ledger held no task with a `REPLAY` attempt on 2026-10-02, so this
+  spec does not filter one out.
 - **A per-repo rate.** The window spans every repo in the ledger, because
   the header scores Saffron rather than one repo. A page per repo waits on
   multi-repo, which is v2.
@@ -208,9 +238,9 @@ one second.
 ## Notes for the agent
 
 **Every criterion is new code.** The set, the read and the function do not
-exist, and the two calls gain an argument they never had. No text pins
+exist. The three page writes gain a field they never had. No text pins
 honestly, so each criterion declares a witness and no mutant. Expect
-`witness` to report `skip` for all four.
+`witness` to report `skip` for all five.
 
 **Derive the set, with one named exception.** Build `SETTLED_STATES` in
 `saffron/scheduler.py` from `DONE_STATES` minus `DEPENDENCY_WAITING_STATES`,
@@ -221,7 +251,8 @@ table is what forces a decision when `TaskState` grows.
 
 **Criterion 1's table is the witness's own.** Write it as a dict from each
 of the 24 states to `True` or `False`. Assert its keys equal
-`set(get_args(TaskState))`, not a subset. Import `SETTLED_STATES` inside the
+`set(get_args(TaskState))`, not a subset. Assert the keys it marks `True`
+equal a set literal of the seven names, spelled in the test. Import `SETTLED_STATES` inside the
 test body.
 
 **Put the read in `Ledger`.** `saffron/report/index.py` imports from
@@ -271,18 +302,44 @@ in this order, so `task_id` follows it. Repo `a` and repo `b` are two
 
 The right window is tasks 1, 3 to 20 and 22: fifteen `MERGED` of twenty,
 `75%`. Each wrong version under criterion 3 reads the figure it names. A
-script over this table produced each figure on 2026-10-02.
+script over this table produced each figure on 2026-10-02. It also ran
+`ORDER BY updated_at DESC` with no tie-break, against a real `Ledger` built
+as above. SQLite returned the tied tasks 21 and 22 in `task_id` order, so
+that version took task 21 and read `70%`. A Python sort on `updated_at`
+alone is stable over rows fetched in `task_id` order, and read `70%` too.
 
 **Criterion 4's two cases.** Seed the ledger `_drive` opens
 (`tests/test_task.py:88`) before calling it. Open a `Ledger` at
-`tmp_path / f"{spec_id}.db"`, write two `MERGED` tasks and one
-`NOT_IMPLEMENTED`, and close it. Drive an `EXHAUSTED` cell, with
-`push_unpackaged_work` replaced as `_push` does. The page's header then holds
-`trailing accept rate <strong>67% of 3</strong>`. For `_finish`, seed a
+`tmp_path / f"{spec_id}.db"`, write two `MERGED` tasks, one
+`NOT_IMPLEMENTED` and a fourth task in `IMPLEMENTING`, and close it. Drive
+an `EXHAUSTED` cell on that fourth task, with `push_unpackaged_work`
+replaced as `_push` does. The `run_one_cell` double in `_drive`
+(`tests/test_task.py:58-61`) writes no state today. Have the double set the
+fourth task to `EXHAUSTED` through the `ledger` keyword `run_task` hands it
+(`saffron/task.py:566-573`, in `run_task`), as the real cell does. Give
+`_drive` an optional hook for it, or write the double in the test. The
+page's header then holds `trailing accept rate <strong>50% of 4</strong>`.
+A rate read before `run_one_cell` returns holds `67% of 3`. For `_finish`, seed a
 second ledger with three `MERGED` tasks and one `REVIEWING` task. Call
 `package_phase._finish` directly on the `REVIEWING` task, with a result
 whose state is `MERGE_FAILED`. Its page's header then holds
 `trailing accept rate <strong>75% of 4</strong>`.
+
+**Criterion 5's case.** Build the batch as `run_stack_batch` records one.
+Call `create_batch`, then `create_run` with that `batch_id`, then
+`record_stack_layer` on one of its tasks (`saffron/batch.py:483-488`, in
+`run_stack_batch`). The batch holds a `MERGED` layer and an `EXHAUSTED`
+task. A run outside every batch holds two `MERGED` tasks. First append one
+`QueueLine` in `EXHAUSTED` with `append_queue_line`. Then call
+`write_stack_view(out_dir, ledger, {})`. Its page's header holds
+`trailing accept rate <strong>75% of 4</strong>`. Call
+`trailing_accept_rate` there rather than a second copy of the read.
+
+**`tests/test_stack_view.py` is in `touches` for one reason.** If `SA-0152`'s
+witness asserts the whole header `write_stack_view` writes, add the new
+field to that expected header. Change nothing else in the file.
+`tests/test_cli.py` stays `forbidden`. If one of its tests breaks, stop and
+say so in the pull request body.
 
 **Pass the field as `header=`.** `append_queue_line` already merges a
 caller's header after its own counts (`saffron/report/index.py:261`). Keep
