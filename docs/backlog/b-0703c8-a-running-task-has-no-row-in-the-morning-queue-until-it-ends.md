@@ -3,7 +3,7 @@ id: b-0703c8
 title: A running task has no row in the morning queue until it ends, so the page cannot show what a night is doing
 status: open
 filed: 2026-10-02
-specs: []
+specs: [SA-0199]
 prs: []
 commits: []
 cites: [§5.7, §6]

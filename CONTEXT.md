@@ -779,7 +779,8 @@ _Avoid_: "origin" (that's the real remote, reachable only from the host).
 viewer — the diffs live in GitHub.
 _Avoid_: "dashboard", "the queue UI", "the report", "dossier".
 
-**Queue line**: One task's entry in the index. Its outcome summary — never a
+**Queue line**: One task's entry in the index. While the task runs, it is a live row
+holding the phase state. Once the task ends, it is the outcome summary. It is never a
 "verdict", which belongs to findings.
 
 ---
