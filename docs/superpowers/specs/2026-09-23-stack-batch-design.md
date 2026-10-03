@@ -253,8 +253,10 @@ it is measured.
 **Linking.** Each PR already targets the branch below it. The finish compares
 each layer's recorded predecessor head with that branch's current head. A hand
 push to a lower layer mid-batch shows as a mismatch and escalates (principle
-21). It then reads every base back and runs `gh stack link`. With `--ready` it marks each layer
-ready. A wrong base leaves every PR a draft. Nothing merges.
+21). It then reads every base back and runs `gh stack link`. It marks no layer
+ready, since a ready pull request reconciles as `APPROVED`, the operator's
+approval (amended 2026-10-03, `SA-0170`). A wrong base leaves every PR a draft.
+Nothing merges.
 
 **Escalations never pause the batch.** Each is a record fact and a line near
 the top of the queue page. These escalate:
