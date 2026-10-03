@@ -40,6 +40,7 @@ from saffron.reconcile import ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
+from saffron.report.stack import write_stack_view
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import Policy, PolicyError, load_policy
@@ -1690,6 +1691,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 open_prs=open_prs,
                 finish=stack_finish,
             )
+            # The fixed order this batch ran, not every ledger task. A
+            # follow-up's spec never joined it, so its layer shows no title.
+            write_stack_view(out_dir, ledger, {c.spec.id: c.spec for c in candidates})
         else:
             stop = run_batch(
                 candidates,
