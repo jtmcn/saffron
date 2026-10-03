@@ -59,7 +59,8 @@ acceptance:
       The queue smoke test reads its specs from the module's `REAL_SPECS`
       when it runs. It builds its scratch directory with only the measured
       ids' files at the top level, each taken from the top level or from
-      `done/`, and the rest of `done/` beneath. Over a copy of the live specs
+      `done/`, and the rest of `done/` beneath. It leaves its source
+      directory unchanged. Over a copy of the live specs
       in which every top-level spec is moved into `done/` and a new spec with
       no parent is written at the top, the smoke test still passes. Over a
       specs directory holding none of the measured ids, it fails with an
@@ -71,6 +72,7 @@ acceptance:
       - A measured file copied out of `done/` but left there too, so it reads as retired and its children become candidates.
       - Every top-level file copied as well as the measured ones, so the new spec joins the candidates.
       - The smoke test reading the live directory through its own path rather than `REAL_SPECS`, so the second half never fails.
+      - A helper that moves a measured file out of the source's `done/`, so the source loses it.
 ---
 
 ## Context
@@ -120,9 +122,9 @@ files.
    today.
 3. **The smoke test.** Factor the scratch arrangement into a helper that
    takes a source directory, a destination and the measured ids. It copies
-   the source's `done/`, then puts each measured id's one file at the top
-   level, moved out of `done/` or copied from the top. A measured id with
-   no file, or with two, fails an `assert` naming it. The smoke test passes
+   the source's `done/` first. Then each measured id's one file goes to the
+   top level, moved out of the destination's `done/` or copied from the top.
+   A measured id with no file fails an `assert` naming it. The smoke test passes
    `REAL_SPECS` to it, read at call time.
 4. **The measured ids.** Name them in one set literal in the smoke test,
    above the helper call. It holds exactly the ids its two assert lines
@@ -138,10 +140,12 @@ files.
   still moves the split. The smoke test then fails, and a person re-measures it.
 - **The spec loop's driver.** `bookkeeping` drafts the two assert lines
   but not the new set literal. `.claude/**` is out of a cell's reach
-  (b-e471bd), so that line is a follow-up made by hand.
+  (b-e471bd), so that line is a follow-up made by hand. Until it lands, the
+  draft is wrong for a commit that retires a measured spec. Such a commit
+  leaves both lists as they are.
 - **`docs/agents/issue-tracker.md`.** Its rule that each new or retired
   spec re-measures the smoke test changes meaning. The commit that adds a
-  spec now adds its id to the set. That edit is also a follow-up by hand.
+  spec now adds its id to the set. A retirement no longer changes the lists. That edit is also a follow-up by hand.
 - **`census`, `integrity` and `finish.py`.** The fix is test-side only.
 
 ## Notes for the agent
@@ -169,9 +173,9 @@ test's name and the filename ids. The prototype's collection at head was a
 superset of the base's.
 
 **Criterion 1's witness.** Write two minimal specs at a scratch top level,
-and a file reading `no frontmatter here` in its `done/`. Take the case
+a file reading `no frontmatter here` in its `done/`, and a `done/README.md`. Take the case
 names, move one spec into `done/`, and take them again. Assert both lists
-hold the same three names. Then request the module's `collected` fixture.
+hold the same three names, and neither names `README.md`. Then request the module's `collected` fixture.
 For each of the three tests and every `SA-*.md` in `SPECS / "done"`, assert
 `tests/test_queued_specs.py::<test>[<filename>]` is in it.
 
@@ -189,7 +193,8 @@ each again with the retired case. Each returns `None`.
 top-level `SA-*.md` there into its `done/`, and `_write` a new spec
 `SA-9999` at the top. Monkeypatch the module's `REAL_SPECS` to that source.
 Call the smoke test function with a fresh scratch directory and the
-`ledger` fixture, and it returns. Then point `REAL_SPECS` at a directory
+`ledger` fixture, and it returns. The source's sorted file list, recursive,
+is the same before and after the call. Then point `REAL_SPECS` at a directory
 holding only an empty `done/`. Call it again with another fresh directory,
 inside `pytest.raises(AssertionError)`.
 
