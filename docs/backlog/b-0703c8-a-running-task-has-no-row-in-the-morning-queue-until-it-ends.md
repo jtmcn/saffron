@@ -26,10 +26,10 @@ missing from it.
 
 ## Done looks like
 
-_Not stated in the original item._ One candidate: `run_task` upserts a row as
-each phase starts. PACKAGE's final row replaces it under the existing upsert key.
-That changes §5.7 step 4, which appends one row at the end. §6 and §5.7 would
-have to say so.
+Decided by the operator on 2026-10-02. A task writes its morning-queue row as
+each phase starts. The verdict line replaces it under the existing upsert key.
+When a batch scan stamps a task `ORPHANED`, it rewrites that row to `ORPHANED`.
+`index.html` refreshes itself. §5.7 step 4 and §6 say so.
 
 ## Record
 
