@@ -42,7 +42,7 @@ forbidden:
   - tests/test_scheduler.py
 budget_usd: 20
 max_attempts: 3
-max_turns: 150
+max_turns: 180
 estimated_lines: 380
 acceptance:
   - claim: >-
@@ -52,12 +52,12 @@ acceptance:
       task directory's name, one space, then what `render_line` returns for
       the event. Within one poll the directories go in name order, and each
       log's lines in file order. A plain file under `root` is passed over.
-      The witness starts with three task directories created in the order
-      `SY-3`, `SY-1`, `SY-2`. Two of them hold a log of two events, and
-      `SY-2` holds no log yet. `root` also holds `index.html` and
-      `queue.json`. Before the second poll it appends two events to each
-      log and writes the first two into `SY-2`. It asserts the exact list
-      of six prefixed lines.
+      The witness starts with seven task directories created in the order
+      `SY-4`, `SY-1`, `SY-6`, `SY-3`, `SY-7`, `SY-2`, `SY-5`. Six of them
+      hold a log of two events, and `SY-2` holds no log yet. `root` also
+      holds `index.html` and `queue.json`. Before the second poll it
+      appends two events to each log and writes the first two into `SY-2`.
+      It asserts the exact list of fourteen prefixed lines, `SY-1` first.
     witness: tests/test_watch.py::test_following_every_task_prints_only_lines_appended_after_it_starts
     wrong_versions:
       - A first poll that reads each log from byte 0, which replays every event already on disk.
@@ -145,10 +145,11 @@ acceptance:
 Backlog item **b-2d09de**, which cites `DESIGN.md` §6. Items 62 and 64 shaped
 `saffron/watch.py` and are done.
 
-`saffron watch` takes one spec id as a required positional
-(`saffron/cli.py:155`). `_watch` builds `task_dir = out_dir / args.task`
-(`saffron/cli.py:1777`). `out_dir` defaults to `<home>/batches/v0`
-(`saffron/cli.py:205`). Every task writes its log to `out_dir / spec.id`
+`saffron watch` takes one spec id as a required positional, in `main`'s
+watch subparser (`saffron/cli.py:155`). `_watch` builds `task_dir = out_dir
+/ args.task` (`saffron/cli.py:1777`). `out_dir` defaults to
+`<home>/batches/v0` in `main` (`saffron/cli.py:205`). These line numbers
+are at the spec's own base, and `SA-0152` moves them. Every task writes its log to `out_dir / spec.id`
 (`saffron/task.py:478`). So that one root holds every task ever run. On
 the operator's host on 2026-10-02 it held 169 directories, and 147 of them
 held an `events.jsonl`.
@@ -196,11 +197,12 @@ beside a spec id. Pass a spec id and `_watch` calls `follow` as it does today.
 lists both flags at the tree base, measured on 2026-10-02. So criterion 7's
 witness reads the last line of stderr, where argparse writes the message.
 
-**Name order.** On the host, directories created as `SY-3`, `SY-1`, `SY-2`
-listed as `SY-1`, `SY-3`, `SY-2` (measured 2026-10-02). Criterion 1's order
-check kills a follower that keeps the listing order wherever the two differ.
+**Name order.** Criterion 1 creates seven directories in an order that is
+neither name order nor its reverse. A listing in creation order or its
+reverse never matches name order. A hash order matches it about once in 5040.
+So the order check no longer depends on the cell's filesystem.
 A prototype of the follower passed criteria 1 to 4 on the host. Each wrong
-version under them failed at least one, measured the same day.
+version under them failed at least one, measured on 2026-10-02.
 
 **The follower.** Add `follow_every_task` to `saffron/watch.py` beside
 `follow`. Reuse `read_log_since`, `render_line` and `_sleep_and_continue`.
@@ -231,6 +233,10 @@ false. Replace that sentence in the paragraph. Add no paragraph after it.
 Update `_watch`'s docstring and the help text of the subcommand and its
 positional too. New prose takes no em-dash, semicolon, contraction or perfect
 tense.
+
+**The turn ceiling.** `max_turns` is 180 because `SA-0025`, the costliest
+cell of this shape, stopped at its own ceiling of 141 turns. That 141 is a
+floor on what it needed, not a measured use.
 
 **Commit as each witness passes.** Write any helper as a `def`, not a
 `lambda` bound to a name.
