@@ -3,7 +3,7 @@ id: b-49a2f7
 title: The batch header shows no trailing accept rate, though `reconcile` now records `MERGED`
 status: open
 filed: 2026-10-02
-specs: []
+specs: [SA-0198]
 prs: []
 commits: []
 cites: [§6, §8]
@@ -24,9 +24,10 @@ page omits the number.
 
 ## Done looks like
 
-The header of `index.html` shows the accept rate over the last twenty completed
-tasks, read from the ledger. It says how many tasks the window holds when that is
-fewer than twenty. §6's sentence about the missing source is gone.
+The header of `index.html` shows the accept rate over the last twenty settled
+tasks, read from the ledger. §6 defines settled, as the operator decided on
+2026-10-02. The header says how many tasks the window holds when that is fewer
+than twenty.
 
 ## Record
 
