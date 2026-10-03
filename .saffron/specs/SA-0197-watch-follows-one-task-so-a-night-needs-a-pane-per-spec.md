@@ -108,14 +108,16 @@ acceptance:
       The witness stubs `cli.follow_every_task` with a function that takes
       `verbose` and `interval` without defaults, yields two lines, then
       raises `KeyboardInterrupt`. It runs `--all --interval 0.25` and then
-      no flag. It asserts the root, both values of each argument, the two
-      printed lines, and that `main` returns 0 each time.
+      no flag. Each `main` call sits in a `try` whose `except
+      KeyboardInterrupt` calls `pytest.fail`. It asserts the root, both
+      values of each argument, the two printed lines, and that `main`
+      returns 0 each time.
     witness: tests/test_cli.py::test_watch_with_no_spec_id_follows_the_batch_tree_with_its_flags
     wrong_versions:
       - "`verbose=True` or `interval=1.0` passed whatever the flags say."
       - A root read from `--home` a second time, such as `args.home / "batches"`.
       - The lines yielded and never printed.
-      - The new branch outside the `try` that catches `KeyboardInterrupt`, so Ctrl-C raises out of `main`.
+      - The new branch outside the `try` that catches `KeyboardInterrupt`, so the witness fails on its `pytest.fail`.
   - claim: >-
       `saffron watch` with no spec id exits 1 when `out_dir` is not a
       directory. It prints `watch: no batch tree at <out_dir>` and never
@@ -200,7 +202,10 @@ beside a spec id. Pass a spec id and `_watch` calls `follow` as it does today.
 Put the new branch inside the same `try` as `follow`, with the same
 `except KeyboardInterrupt` and the same `print(line, flush=True)`. Ctrl-C is
 how a follow ends. `main` catches `Exception` only (`saffron/cli.py:246`), so
-a branch outside that `try` ends every Ctrl-C in a traceback.
+a branch outside that `try` ends every Ctrl-C in a traceback. Criterion 5's
+witness catches the interrupt itself. An uncaught one stops pytest's whole
+session with exit 2 and no `FAILED` line, which the `tests` gate reads as
+`error` (measured 2026-10-03).
 
 **The refusal.** Raise it through the watch subparser's own `error`, the way
 `_poll_interval` dies at parse time (`saffron/cli.py:1801`). The usage text
