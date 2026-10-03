@@ -182,8 +182,10 @@ def _seed_finish_branch(
 
 
 class _FakeGh:
-    """Answers `pr view <url> --json baseRefName` from `bases`, and `pr
-    create` with `create`, recording every call it is given in order."""
+    """Answers `pr view <url> --json baseRefName` from `bases`, another
+    `pr view` with `view_existing`, `pr create` with `create`, `pr ready`
+    with success, and `stack link` with `link`. It records every call it
+    is given in order."""
 
     def __init__(
         self,
@@ -1486,12 +1488,24 @@ def test_a_pushed_stack_is_linked_bottom_to_top_with_its_finishing_layer_last(
         ]
     ]
     assert lines == ["gh stack link failed, so every pull request stays a draft: boom"]
+    refused_calls = gh.calls
+
+    # gh-stack's measured exit 9 is refused too, so a check of exit 1 alone fails.
+    s = _stack(tmp_path / "stack-fail-9", 3)
+    _record(s)
+    gh = _FakeGh({}, link=(9, "", "not enabled\n"))
+    lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == refused_calls
+    assert lines == [
+        "gh stack link failed, so every pull request stays a draft: not enabled"
+    ]
 
     # `gh` could not start.
     s = _stack(tmp_path / "stack-127", 3)
     _record(s)
     gh = _FakeGh({}, link=(127, "", "boom\n"))
     lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == refused_calls
     assert lines == [
         "gh could not start, so nothing is linked and every pull request "
         "stays a draft: boom"

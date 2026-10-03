@@ -6990,7 +6990,12 @@ def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
 
     _readiness_passes(monkeypatch)
     home = tmp_path / "home"
-    assert main(["--home", str(home), "batch", "--stack"]) == 0
+    # A `--repo` apart from the process's own directory, so a runner that
+    # reads `Path.cwd()` in place of the repository fails.
+    repo_dir = tmp_path / "target"
+    repo_dir.mkdir()
+    argv = ["--home", str(home), "batch", "--stack", "--repo", str(repo_dir)]
+    assert main(argv) == 0
 
     printed = capsys.readouterr().out.splitlines()
     expected = [
@@ -7021,7 +7026,7 @@ def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
         m.setattr(cli.subprocess, "run", _recorder)
         result = gh(["gh", "stack", "link", "--base", "trunk"])
     assert recorded["argv"] == ["gh", "stack", "link", "--base", "trunk"]
-    assert recorded["cwd"] == tmp_path.resolve()
+    assert recorded["cwd"] == repo_dir.resolve()
     assert recorded["env"]["GH_REPO"] == "o/r"
     assert recorded["env"]["PATH"] == os.environ.get("PATH")
     assert result.returncode == 0
