@@ -4,7 +4,7 @@ title: A plan turn the provider served nothing ends NOT_IMPLEMENTED and exits 1,
 type: bug
 priority: 2
 depends_on: [SA-0199]
-estimated_lines: 204
+estimated_lines: 240
 estimate_measured: true
 touches:
   - saffron/phases/implement.py
@@ -106,8 +106,9 @@ acceptance:
       - '`NOT_IMPLEMENTED` mapped to 2 as well.'
   - claim: >-
       In `saffron batch`, a task that ends `PROVIDER_UNREACHABLE` counts
-      toward the breaker as `PREFLIGHT_FAILED` does. Two in a row end the
-      night `INFRASTRUCTURE` before a third task starts.
+      toward the breaker as `PREFLIGHT_FAILED` does, and is not offered
+      again. Two in a row end the night `INFRASTRUCTURE` before a third task
+      starts.
     witness: tests/test_batch.py::test_a_provider_that_served_nothing_counts_toward_the_breaker
     mutant:
       file: saffron/batch.py
@@ -115,20 +116,30 @@ acceptance:
       replace: 'if outcome.state in ABORT_STATES - {"PROVIDER_UNREACHABLE"}:'
     wrong_versions:
       - The breaker's abort set left without the state, so two in a row drain the night.
+      - The stack batch's re-offer applied to a plain batch too, so the same spec starts twice.
   - claim: >-
-      In a stack batch, a task that ends `PROVIDER_UNREACHABLE` is a miss as
-      `PREFLIGHT_FAILED` is. A spec that depends on it is refused, the spec is
-      not offered again, and two such tasks in a row end the night
-      `INFRASTRUCTURE` before the next spec starts.
-    witness: tests/test_batch.py::test_a_stack_batch_misses_and_counts_a_provider_that_served_nothing
+      In a stack batch, a task that ends `PROVIDER_UNREACHABLE` is not a miss.
+      The same spec is offered again at once, on the same predecessor, with
+      no wait, and nothing that depends on it is refused. It still counts
+      toward the breaker, and a success after it resets the count. So the
+      breaker bounds the re-offers: two in a row end the night
+      `INFRASTRUCTURE`, and the spec is not offered a third time. The
+      witness drives both halves. In the first order, two specs each end
+      `PROVIDER_UNREACHABLE` once and then reach review, and the night drains.
+      In the second, one spec ends `PROVIDER_UNREACHABLE` twice with a third
+      run queued that would reach review.
+    witness: tests/test_batch.py::test_a_stack_batch_offers_a_provider_that_served_nothing_again_until_the_breaker
     mutant:
       file: saffron/batch.py
       find: 'if outcome.state in ABORT_STATES:'
       replace: 'if outcome.state in ABORT_STATES - {"PROVIDER_UNREACHABLE"}:'
     wrong_versions:
-      - The breaker's abort set left without the state, so the stack batch runs on past two.
-      - The state re-offered as a `RATE_LIMITED` task is, so the same spec runs again.
-      - The state taken for a layer, so its dependent runs.
+      - The state counted as a miss, as the first draft of this spec had it, so its dependent is refused and it never runs again.
+      - The state re-offered on a fresh predecessor, the spec it ran on taken for a layer.
+      - The state re-offered at the back of the queue, so a later spec runs first and becomes its predecessor.
+      - The state routed through the `RATE_LIMITED` wait, so the batch sleeps for a reset time it was never given.
+      - The state re-offered but not counted, so a run of them never reaches the breaker.
+      - The breaker's abort set left without the state.
 ---
 
 ## Context
@@ -195,6 +206,15 @@ run `COMPLETE` (`saffron/cell/session.py:1990-2001`). The CLI exits 2
 are refused, and it is not offered again (`saffron/batch.py:726-737`). The
 scheduler re-queues it (`saffron/scheduler.py:109-117`).
 
+**What `RATE_LIMITED` gets in a stack batch.** `_drive` waits for the reset
+time (`saffron/batch.py:299-306`). It then drops the spec from the started
+set, so it can run again (`saffron/batch.py:307`). That branch neither counts nor resets the
+breaker. The wrapper keeps the spec queued without a miss, so it runs again
+on the same predecessor (`saffron/batch.py:726-729`). `_drive` takes the
+stack batch's mark from `sleep`: `run_batch` passes none
+(`saffron/batch.py:107-109`), and `run_stack_batch` defaults it
+(`saffron/batch.py:409`).
+
 **Already true at your base.** This spec's own pull request made
 `PROVIDER_UNREACHABLE` a terminal state in `ontology/factory.ttl`. It
 rendered `CONTEXT.md` and the shapes from it. It added the state to
@@ -222,8 +242,14 @@ cell must say so. Make these changes.
    `PREFLIGHT_FAILED`, `GATE_ERROR` and `RATE_LIMITED`.
 5. **The breaker.** Add the state to `batch.ABORT_STATES`, and change its
    comment's count from three to four. Update the set literal that
-   `tests/test_batch.py:507` pins. Add nothing else to `batch.py`. A stack
-   batch then treats it as it treats `PREFLIGHT_FAILED`, by the code above.
+   `tests/test_batch.py:507` pins. A plain batch then treats it as it
+   treats `PREFLIGHT_FAILED`.
+6. **The stack batch's re-offer.** In a stack batch the state is not a
+   miss. Keep it queued in the wrapper, as `RATE_LIMITED` is kept, so it
+   runs again on the same predecessor. In `_drive`, count it toward the
+   breaker as above, then drop it from the started set when `sleep` is
+   set, with no wait. Leave the `RATE_LIMITED` branch as it is. The breaker
+   is the only bound on the re-offers, so the count must rise on each one.
 
 ## Out of scope
 
@@ -280,15 +306,27 @@ Both completed first turns cost $0.00, so a check on spend cannot pass.
 `push_unpackaged_work` to return a `PushResult` with `pushed=False`. Script
 `run_one_cell` to return the two states in turn, and assert `[2, 1]`.
 
-**Criteria 5 and 6's witnesses.** Copy `test_two_consecutive_aborts_fire_the_breaker`
-and `test_a_stack_batch_counts_a_raise_as_an_abort`. For the stack batch,
-order `TE-1`, then `TE-2` depending on it, then `TE-3` and `TE-4`. `TE-1`
-and `TE-3` end `PROVIDER_UNREACHABLE` and `TE-4` reaches review. Assert the
-runner saw `TE-1` and `TE-3` only, and that the emitted lines hold
-`TE-2`'s refusal naming `TE-1`.
+**Criterion 5's witness.** Copy `test_two_consecutive_aborts_fire_the_breaker`.
+Three candidates, and a `FakeRunner` scripting two `PROVIDER_UNREACHABLE`
+outcomes. Assert `INFRASTRUCTURE` and that the runner saw the first two
+candidates once each.
+
+**Criterion 6's witness.** Copy the shape of
+`test_a_rate_limit_in_a_stack_batch_neither_counts_toward_the_breaker_nor_resets_it`.
+Use `RateLimitScript`, an `AdvancingClock` passed as both `clock` and
+`sleep`, and `_raise_on_real_sleep`. The first order is `TE-0`, `TE-1`,
+`TE-2` depending on `TE-1`, then `TE-3`. `TE-1` and `TE-3` each end
+`PROVIDER_UNREACHABLE` and then reach review. The others reach review.
+Assert `DRAINED`, no refused line, an empty `clock.sleeps`, and these calls
+in order: `(TE-0, None)`, `(TE-1, TE-0)` twice, `(TE-2, TE-1)`,
+`(TE-3, TE-2)` twice. The second order is `TE-5` then `TE-6`. `TE-5`
+scripts two `PROVIDER_UNREACHABLE` steps and then a review. Assert
+`INFRASTRUCTURE`, an empty `sleeps`, and calls `(TE-5, None)` twice only.
 
 **Measured on a prototype, 2026-10-03.** All six witnesses were written
-against `0fecec0c` with this pull request's hand edits, and passed. Each
+against `0fecec0c` with this pull request's hand edits, and passed.
+Criterion 6 was rewritten at `ed501943`, after review moved the stack batch
+off the miss. Each
 fails with the four source files reverted. Each wrong version listed above
 was applied to the prototype and failed its own criterion's witness. The
 four test modules passed whole, and `ruff` passed.
@@ -298,6 +336,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks. The
-prototype counted 816 changed tokens by `size_gate`, against the `bug`
+prototype counted 959 changed tokens by `size_gate`, against the `bug`
 ceiling of 1300. `estimated_lines` is those tokens over four. Keep comments
 to one or two lines, and the tests close to the shapes above.
