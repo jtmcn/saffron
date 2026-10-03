@@ -1186,9 +1186,8 @@ class Ledger:
     def batch_tasks(self, batch_id: int) -> list[sqlite3.Row]:
         """Every task whose run belongs to this batch, lowest run id first,
         then lowest task id. Each row carries `task_id`, `spec_id`, `state`
-        and `record_key`. Run id sorts ahead of task id: a stack batch mints
-        a layer's own run before its predecessor's, and a caller walking the
-        night wants that order, not insertion order."""
+        and `record_key`. Run id sorts first because a batch mints each run as
+        it drives that candidate, so run order is the order the night ran."""
         return list(
             self._db.execute(
                 """SELECT t.task_id, t.spec_id, t.state, t.record_key
