@@ -706,6 +706,36 @@ def _finish_verify(
     return verify
 
 
+# Printed once, in place of a link, on every path that reported no push.
+_NOTHING_LINKED = "linked nothing, no line reported a push"
+
+
+def _finish_gh(slug: str, repo: Path) -> package_phase.GhRunner:
+    """`gh`, bound to `repo`'s directory and `slug`'s `GH_REPO` (ADR 7).
+
+    gh-stack names the repository from the working directory's git remote
+    and takes no `--repo` flag, and `--repo` can name any path, so `cwd` is
+    `repo`. Outside a checkout it exits 4 unless `GH_REPO` is set (measured,
+    gh-stack 0.1.1), so `GH_REPO` is `slug`.
+    Turns a `gh` that cannot start into exit 127, like `_guarded_gh`.
+    """
+
+    def gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=repo,
+                env={**os.environ, "GH_REPO": slug},
+            )
+        except OSError as exc:
+            return subprocess.CompletedProcess(argv, 127, "", str(exc))
+
+    return gh
+
+
 def _stack_finish(
     *,
     pinned: PinnedBase,
@@ -721,7 +751,8 @@ def _stack_finish(
     night's exit code stays its stop reason's. Any other raise from the
     commit reaches `main`. A real commit is then judged and pushed through
     `finish.publish_finish`, inside its own `try` guarding `Exception`,
-    since a push can come before a raise.
+    since a push can come before a raise. Only a line that reports a push
+    leads to `finish.link_stack`, and every other path says it linked nothing.
     """
 
     def run_finish(batch_id: int, unrun: list[int]) -> object:
@@ -740,12 +771,14 @@ def _stack_finish(
             )
         except (git_mirror.GitError, ValueError) as exc:
             print(f"finish: {type(exc).__name__}: {exc}")
+            print(f"finish: {_NOTHING_LINKED}")
             return None
         if sha is None:
             if ledger.stack_layers(batch_id):
                 print("finish: the tree is unchanged, so nothing committed")
             else:
                 print("finish: no layer, so nothing committed")
+            print(f"finish: {_NOTHING_LINKED}")
             return None
 
         print(f"finish: committed {sha}")
@@ -769,9 +802,26 @@ def _stack_finish(
             )
         except Exception as exc:
             print(f"finish: publish stopped: {type(exc).__name__}: {exc}")
+            print(f"finish: {_NOTHING_LINKED}")
         else:
             for line in lines:
                 print(f"finish: {line}")
+            if any(line.startswith(finish.PUSHED) for line in lines):
+                try:
+                    linked = finish.link_stack(
+                        ledger,
+                        batch_id,
+                        mirror=pinned.mirror,
+                        url=pinned.url,
+                        gh=_finish_gh(slug, repo),
+                    )
+                except Exception as exc:
+                    print(f"finish: nothing linked: {type(exc).__name__}: {exc}")
+                else:
+                    for line in linked:
+                        print(f"finish: {line}")
+            else:
+                print(f"finish: {_NOTHING_LINKED}")
         return sha
 
     return run_finish

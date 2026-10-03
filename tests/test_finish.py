@@ -182,8 +182,10 @@ def _seed_finish_branch(
 
 
 class _FakeGh:
-    """Answers `pr view <url> --json baseRefName` from `bases`, and `pr
-    create` with `create`, recording every call it is given in order."""
+    """Answers `pr view <url> --json baseRefName` from `bases`, another
+    `pr view` with `view_existing`, `pr create` with `create`, `pr ready`
+    with success, and `stack link` with `link`. It records every call it
+    is given in order."""
 
     def __init__(
         self,
@@ -195,10 +197,12 @@ class _FakeGh:
             "",
         ),
         view_existing: tuple[int, str, str] | None = None,
+        link: tuple[int, str, str] = (0, "", ""),
     ) -> None:
         self.bases = bases
         self.create = create
         self.view_existing = view_existing
+        self.link = link
         self.calls: list[list[str]] = []
 
     def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -218,6 +222,9 @@ class _FakeGh:
             return subprocess.CompletedProcess(argv, code, out, err)
         if argv[:3] == ["gh", "pr", "ready"]:
             return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:3] == ["gh", "stack", "link"]:
+            code, out, err = self.link
+            return subprocess.CompletedProcess(argv, code, out, err)
         raise AssertionError(f"unexpected gh call: {argv}")
 
 
@@ -1400,6 +1407,124 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
     assert row["head_sha"] == sha
     assert row["pr_url"] is None
     assert len(_git(s.mirror, "worktree", "list").splitlines()) == 1
+
+
+def test_a_pushed_stack_is_linked_bottom_to_top_with_its_finishing_layer_last(
+    tmp_path, monkeypatch
+):
+    """`link_stack` passes gh-stack every pull request URL, bottom to top,
+    with the finishing layer's own URL last, and never a branch name
+    (`SA-0170`). A missing or url-less finishing row raises before any
+    `gh` call, and a refused link leaves every pull request a draft."""
+    from saffron.finish import link_stack
+
+    _isolate_git(tmp_path, monkeypatch)
+
+    def _record(s, *, pr_url: str | None = "https://github.com/o/r/pull/200") -> None:
+        top = s.layers[-1]
+        kwargs = {} if pr_url is None else {"pr_url": pr_url}
+        s.ledger.record_stack_finish(
+            s.batch_id,
+            branch=f"saffron/batch-{s.batch_id}-finish",
+            head_sha=top["head"],
+            **kwargs,
+        )
+
+    # Three layers: the finishing URL goes last, after each layer's own,
+    # bottom to top.
+    s = _stack(tmp_path / "stack-3", 3)
+    _record(s)
+    gh = _FakeGh({})
+    lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == [
+        [
+            "gh",
+            "stack",
+            "link",
+            "--base",
+            "trunk",
+            "https://github.com/o/r/pull/101",
+            "https://github.com/o/r/pull/102",
+            "https://github.com/o/r/pull/103",
+            "https://github.com/o/r/pull/200",
+        ]
+    ]
+    assert lines == ["linked 4 pull requests"]
+
+    # One layer: still the layer's own URL, then the finishing one.
+    s = _stack(tmp_path / "stack-1", 1)
+    _record(s)
+    gh = _FakeGh({})
+    lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == [
+        [
+            "gh",
+            "stack",
+            "link",
+            "--base",
+            "trunk",
+            "https://github.com/o/r/pull/101",
+            "https://github.com/o/r/pull/200",
+        ]
+    ]
+    assert lines == ["linked 2 pull requests"]
+
+    # A refused link, `stderr` stripped.
+    s = _stack(tmp_path / "stack-fail", 3)
+    _record(s)
+    gh = _FakeGh({}, link=(1, "", "boom\n"))
+    lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == [
+        [
+            "gh",
+            "stack",
+            "link",
+            "--base",
+            "trunk",
+            "https://github.com/o/r/pull/101",
+            "https://github.com/o/r/pull/102",
+            "https://github.com/o/r/pull/103",
+            "https://github.com/o/r/pull/200",
+        ]
+    ]
+    assert lines == ["gh stack link failed, so every pull request stays a draft: boom"]
+    refused_calls = gh.calls
+
+    # gh-stack's measured exit 9 is refused too, so a check of exit 1 alone fails.
+    s = _stack(tmp_path / "stack-fail-9", 3)
+    _record(s)
+    gh = _FakeGh({}, link=(9, "", "not enabled\n"))
+    lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == refused_calls
+    assert lines == [
+        "gh stack link failed, so every pull request stays a draft: not enabled"
+    ]
+
+    # `gh` could not start.
+    s = _stack(tmp_path / "stack-127", 3)
+    _record(s)
+    gh = _FakeGh({}, link=(127, "", "boom\n"))
+    lines = link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == refused_calls
+    assert lines == [
+        "gh could not start, so nothing is linked and every pull request "
+        "stays a draft: boom"
+    ]
+
+    # No finishing row at all: raises before any `gh` call.
+    s = _stack(tmp_path / "stack-norow", 3)
+    gh = _FakeGh({})
+    with pytest.raises(ValueError, match=str(s.batch_id)):
+        link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == []
+
+    # A finishing row recorded with no URL: raises the same way.
+    s = _stack(tmp_path / "stack-nourl", 3)
+    _record(s, pr_url=None)
+    gh = _FakeGh({})
+    with pytest.raises(ValueError, match=str(s.batch_id)):
+        link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
+    assert gh.calls == []
 
 
 def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
