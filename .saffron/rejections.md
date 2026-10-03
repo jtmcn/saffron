@@ -1517,3 +1517,45 @@ the critic did not raise.
 - `SA-0167` (#638): an existing finishing branch drops the worktree removal's
   error, so a leftover worktree goes unreported.
   **Bucket 3**, correctness. **Open:** b-7430c1.
+
+## 2026-10-03, `SA-0170`, `SA-0183` and `SA-0152` (the spec loop's run 26, #647, #648 and #650)
+
+- `SA-0170` (#647): the repo-bound runner's witness ran with `--repo` equal
+  to the process's own directory, so a runner using `Path.cwd()` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #647.
+- `SA-0170` (#647): only exit 1 was driven as a refused link, so a check of
+  `returncode == 1` passed and would read gh-stack's exit 9 as linked.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #647.
+- `SA-0170` (#647): the exit-127 case asserted its lines but not its `gh`
+  call, which the spec's notes require of every case.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #647.
+- `SA-0170` (#647): `_finish_gh`'s docstring gave a reason for `GH_REPO`
+  that names no fact, where the measured exit 4 is the reason.
+  **Bucket 3**, conventions. **Landed:** a review commit on #647.
+- `SA-0170` (#647): no test drives a commit raise other than `GitError` or
+  `ValueError`, so widening the `except` to `Exception` passes.
+  **Bucket 1**, `witness`. **Open:** b-cc8099.
+- `SA-0170` (#647): `GhRunner` is defined three times, word for word.
+  **Bucket 3**, conventions. **Open:** b-81e109.
+- `SA-0152` (#650): a layer's section left out its state and position, though
+  the criterion asks for every field of the layer.
+  **Bucket 3**, correctness. **Landed:** a review commit on #650.
+- `SA-0152` (#650): REBUT moved `TE-4` to the position equal to its index, so
+  a renderer numbering layers by index passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #650.
+- `SA-0152` (#650): the order entries were asserted one by one, so a
+  reversed order passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #650.
+- `SA-0152` (#650): no assertion read the batch id or a layer's spec id, so
+  a renderer dropping either passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #650.
+- `SA-0152` (#650): the order and the outcomes were bare text inside `<ul>`,
+  which a browser runs together into one line.
+  **Bucket 3**, correctness. **Landed:** a review commit on #650.
+- `SA-0152` (#650): the view restated the end-review lens names, the header
+  count and a wrong item number, where `end_review.py` and `index.py` hold
+  them.
+  **Bucket 3**, conventions. **Landed:** a review commit on #650.
+- `SA-0152` (#650): the page prints a per-lens term, `not_reached`, for a
+  layer whose Spec lens reviewed.
+  **Bucket 3**, conventions. **Open:** b-466005.
