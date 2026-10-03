@@ -82,7 +82,7 @@ acceptance:
       line falls. It prints each line `link_stack` returns after `finish: `.
       No link runs when the publish escalates or raises, when the commit
       raises `GitError` or `ValueError`, or when the commit returns `None`.
-      Each of those prints `finish: linked nothing, the publish reported no push`
+      Each of those prints `finish: linked nothing, no line reported a push`
       once, and a linked finish never prints it. It passes the pinned mirror
       and url, and `_finish_gh`'s runner as `gh`. That runner runs its argv
       in the repository `_batch` resolves. It sets `GH_REPO` to the slug the
@@ -211,12 +211,12 @@ Build three things.
    cannot reuse `run_gh`, which takes no environment and no directory.
 3. **The wiring.** After `_stack_finish` prints the publish lines, it links
    only when one of them starts with `finish.PUSHED`. Every other path
-   prints `finish: linked nothing, the publish reported no push` once and
+   prints `finish: linked nothing, no line reported a push` once and
    returns. Those paths are a `None` commit, a commit raising `GitError` or
    `ValueError`, a raising publish and an escalation. A publish can raise
-   after its push, when `open_draft_pr` fails. So the line says only that
-   no returned line reported a push, which holds on every one of these
-   paths. Leave the commit's
+   after its push, when `open_draft_pr` fails, and a commit that returns
+   `None` or raises runs no publish. So the line says only that no line
+   reported a push, which holds on every one of these paths. Leave the commit's
    `except` as narrow as it is. The link goes in the publish block's
    `else`, after its print loop, where `slug` is always bound. A link
    placed after the whole `try` reads `slug` as possibly unbound, which
@@ -285,8 +285,8 @@ body, so the reverted run fails rather than failing to collect. Criterion
 **Tests at the tree base that assert `_stack_finish`'s printed lines** are
 these three, all in `tests/test_cli.py`. Each stubs `publish_finish` with
 no `PUSHED` line, so none reaches a real `link_stack`. Each asserts by
-membership. In each, add an assertion that `finish: linked nothing, the
-publish reported no push` is printed after its first `main` call. Change nothing
+membership. In each, add an assertion that `finish: linked nothing, no
+line reported a push` is printed after its first `main` call. Change nothing
 else in them.
 
 - `SA-0151`'s `test_a_stack_batch_commits_its_finish_and_survives_a_raise`
@@ -297,8 +297,8 @@ else in them.
 keyword `link=(0, "", "")` to `_FakeGh`. It answers `gh stack link` with
 that exit code, stdout and stderr. In each case but the fifth, the witness
 records the finishing layer with `ledger.record_stack_finish`. The row
-holds `saffron/batch-<batch id>-finish`, the top head, and
-`https://github.com/o/r/pull/200`. Each case uses its own `_stack` root.
+holds `saffron/batch-<batch id>-finish` and the top head. In every case
+but the sixth it also holds `https://github.com/o/r/pull/200`. Each case uses its own `_stack` root.
 It runs six cases, and asserts in each that `gh.calls` and the lines are
 exactly as stated:
 
@@ -355,7 +355,7 @@ with its own `--home`:
   linked: GitError: gone` and exits 0
 
 Each of the six runs that call no link asserts that the printed lines hold
-`finish: linked nothing, the publish reported no push` exactly once.
+`finish: linked nothing, no line reported a push` exactly once.
 
 **How the arrangement was measured.** On 2026-10-02, at `39864aea`, a
 throwaway build of the change ran against both witnesses as written above.
