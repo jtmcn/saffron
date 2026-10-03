@@ -714,8 +714,9 @@ def _finish_gh(slug: str, repo: Path) -> package_phase.GhRunner:
     """`gh`, bound to `repo`'s directory and `slug`'s `GH_REPO` (ADR 7).
 
     gh-stack names the repository from the working directory's git remote
-    and takes no `--repo` flag, so this carries both: `cwd` for a batch
-    whose own working directory differs, `GH_REPO` for one that does not.
+    and takes no `--repo` flag, and `--repo` can name any path, so `cwd` is
+    `repo`. Outside a checkout it exits 4 unless `GH_REPO` is set (measured,
+    gh-stack 0.1.1), so `GH_REPO` is `slug`.
     Turns a `gh` that cannot start into exit 127, like `_guarded_gh`.
     """
 
@@ -750,7 +751,8 @@ def _stack_finish(
     night's exit code stays its stop reason's. Any other raise from the
     commit reaches `main`. A real commit is then judged and pushed through
     `finish.publish_finish`, inside its own `try` guarding `Exception`,
-    since a push can come before a raise.
+    since a push can come before a raise. Only a line that reports a push
+    leads to `finish.link_stack`, and every other path says it linked nothing.
     """
 
     def run_finish(batch_id: int, unrun: list[int]) -> object:

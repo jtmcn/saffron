@@ -5,6 +5,7 @@ before touching git, then commits them atop the top layer's own head. It
 also writes the batch's own `findings.json`, the backlog pool a delegate
 files by hand. `publish_finish` then moves a ref for the gate suite's own
 span, runs that suite, and pushes the commit to its own branch.
+`link_stack` links the pushed layers into one stack, and marks none ready.
 """
 
 from __future__ import annotations
