@@ -38,6 +38,41 @@ ESCALATE = "escalate: "
 PUSHED = "pushed "
 
 
+def link_stack(
+    ledger: Ledger,
+    batch_id: int,
+    *,
+    mirror: Path,
+    url: str,
+    gh: package_phase.GhRunner,
+) -> list[str]:
+    """Link a pushed stack with `gh stack link`, finishing layer included.
+
+    Raises `ValueError` naming the batch when the finishing row is missing
+    or carries no `pr_url`, before any `gh` call. Passes pull request URLs,
+    bottom to top, finishing layer last: gh-stack pushes a branch argument,
+    never a pull request's. Marks no pull request ready.
+    """
+    finishing = ledger.stack_finish(batch_id)
+    if finishing is None or finishing["pr_url"] is None:
+        raise ValueError(f"batch {batch_id} has no finishing pull request")
+    urls = [layer["pr_url"] for layer in ledger.stack_layers(batch_id)]
+    urls.append(finishing["pr_url"])
+    default = package_phase.default_branch(url, cwd=mirror)
+    done = gh(["gh", "stack", "link", "--base", default, *urls])
+    if done.returncode == 127:
+        return [
+            "gh could not start, so nothing is linked and every pull request "
+            f"stays a draft: {done.stderr.strip()}"
+        ]
+    if done.returncode != 0:
+        return [
+            "gh stack link failed, so every pull request stays a draft: "
+            f"{done.stderr.strip()}"
+        ]
+    return [f"linked {len(urls)} pull requests"]
+
+
 def finish_suite(policy: Policy) -> tuple[Spec, Policy]:
     """The spec and policy the finishing commit's own gate suite runs under.
 
