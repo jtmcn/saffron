@@ -4,7 +4,7 @@ title: A blocker REVIEW leaves past the budget ends the task EXHAUSTED, unrebutt
 type: feature
 priority: 1
 depends_on: [SA-0202]
-estimated_lines: 257
+estimated_lines: 289
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -86,14 +86,16 @@ acceptance:
   - claim: >-
       Past the budget, REBUT's sessions share one cap of $7.00. Each
       session's `max_budget_usd` is $7.00 less what REBUT's earlier sessions
-      cost, a failed session's cost included. That holds for the rebuttal
-      turn, its extraction turn and a verdict session, at or past the
-      budget. Once those sessions have cost $7.00 or more, no further session
-      starts, and the fifth criterion says how the task ends. The witness
-      drives a cap spent by a rebuttal turn that succeeds, by one
-      that fails, and by the extraction turn. A REBUT that starts under the
-      budget is unchanged: each session keeps `critic_budget`'s ceiling, and
-      no `Budget` event is emitted.
+      cost, a failed session's cost and an earlier verdict's cost included.
+      That holds for the rebuttal turn, its extraction turn and each verdict
+      session, at or past the budget. The witness drives one lens's verdict
+      and two lenses' verdicts. Once those sessions have cost $7.00 or more,
+      no further session starts, and the fifth criterion says how the task
+      ends. The witness drives a cap spent by a rebuttal turn that succeeds,
+      by one that fails, and by the extraction turn. A REBUT that starts
+      under the budget is unchanged: each session keeps `critic_budget`'s
+      ceiling, and no `Budget` event is emitted. That holds when REBUT's
+      own spend carries the task past its budget too.
     witness: tests/test_session.py::test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent
     wrong_versions:
       - Every REBUT session gets the whole $7.00, so the cap bounds one session rather than the phase.
@@ -105,6 +107,8 @@ acceptance:
       - The cap is checked only before the extraction turn, so a verdict session starts after the extraction turn spent it.
       - A cap of $6.40, the measured maximum before rounding.
       - A `Budget` event after every REBUT, under the budget too.
+      - The `Budget` event is emitted whenever the spend after REBUT is at or past the budget, so a REBUT that starts under it and crosses it says REBUT ran past it.
+      - The cap's remainder is never charged with an earlier verdict session's cost, so a second lens's verdict gets what the first verdict left uncharged.
   - claim: >-
       `describe` renders a `Budget` event that carries REBUT's figure as the
       line the notes give, and one that does not as the base's stopping line,
@@ -125,7 +129,11 @@ acceptance:
       refused a session. The ledger's task row reads `EXHAUSTED`,
       `rebuttal.json` is still written, and the budget line still carries
       REBUT's figure. The witness drives a cap spent by a rebuttal turn that
-      succeeds, by one that fails, and by the extraction turn. Two shapes
+      succeeds, by one that fails, and by the extraction turn, each with HEAD
+      moved, so a refused verdict leaves the rebuttal unjudged. It also
+      drives a rebuttal turn that spends the cap and commits nothing. There
+      `run_rebut` halts at `REBUTTING` because nothing was recorded, and no
+      verdict session starts. Two shapes
       keep their base outcome. A fix claimed and never committed, with the
       cap not spent, halts at `REBUTTING` with its `rebut_result`. A refused
       extraction turn followed by a red gate re-run ends `EXHAUSTED` with its
@@ -138,13 +146,15 @@ acceptance:
       - A cap refusal also discards the `rebut_result` of a red gate re-run.
       - A cut-short REBUT ends `GATE_ERROR`, charged to nobody.
       - A cut-short REBUT emits no budget line.
+      - The cut-short end is decided only from an errored verdict session, so a rebuttal that committed nothing and whose extraction the cap refused halts at `REBUTTING`.
 ---
 
 ## Context
 
 Backlog item **b-4c5dc7**, found in the spec loop's run 24 on 2026-10-01. It
 cites `DESIGN.md` §3 and §5.5. Every line number below was read at
-`0fecec0c`.
+`e7c2bbc9`. The parents edit `tests/test_session.py`, so each test line is
+named by its symbol too.
 
 **What happens past the budget today.** `_over_budget` returns `False`
 while the task's spend is under `budget_usd`. At or past it, it emits a
@@ -185,15 +195,15 @@ session per lens that filed a blocker. Each gets its own
 wrapped in `record_attempts` (`saffron/cell/session.py:2045-2055`).
 `record_attempts` opens one attempt row per turn, under the task's current
 state, and closes it with the turn's cost
-(`saffron/cell/session.py:189-212`, `saffron/ledger.py:1314-1336`). The REBUT
+(`saffron/cell/session.py:189-212`, `saffron/ledger.py:1315-1339`). The REBUT
 branch sets the state to `REBUTTING` before any turn
 (`saffron/cell/session.py:2918`). The host adds REBUT's cost to `spent` after
 `run_rebut` returns (`saffron/cell/session.py:3003-3004`).
 
 **How a batch sees a task's spend.** `ledger.task_spend` sums the task's
-attempt rows (`saffron/ledger.py:1368-1378`). `ledger.batch_spend` sums every
+attempt rows (`saffron/ledger.py:1369-1379`). `ledger.batch_spend` sums every
 attempt row of every run in the batch, with no filter on phase
-(`saffron/ledger.py:1160-1185`). The batch checks it before each task, against
+(`saffron/ledger.py:1161-1186`). The batch checks it before each task, against
 the budget less its reserve (`saffron/batch.py:239-243`).
 
 **The cap, measured.** The ledger at `~/.saffron/ledger.db` held 53 tasks
@@ -256,7 +266,9 @@ REBUT past the budget instead. REVIEW runs as it does today.
    outcome's `rebut_result` is `None`, as if REBUT had not run. The
    blockers stand unanswered. `rebuttal.json` and the ledger's rebuttal
    rows are still written, because the sessions ran and were paid for.
-   The `why` line names the cap. Every other `run_rebut` result keeps its
+   `rebuttal.json` keeps `run_rebut`'s own `state`, `REBUTTING`, and its
+   `head_moved` says whether the rebuttal committed
+   (`saffron/phases/rebut.py:136-139`). The `why` line names the cap. Every other `run_rebut` result keeps its
    state and its `rebut_result`. That covers a red gate re-run after a
    refused extraction turn, which `run_rebut` already ends `EXHAUSTED`
    (`saffron/phases/rebut.py:716-724`).
@@ -265,7 +277,8 @@ REBUT past the budget instead. REVIEW runs as it does today.
    adds its cost to the task's spend as it does today. It then emits one
    `Budget` event: `ceiling` `budget_usd`, `value` the spend after REBUT,
    `limit` `budget_usd`, and REBUT's own spend in a new optional field
-   defaulting to `None`. REBUT's own spend is the sum of its sessions' costs,
+   defaulting to `None`. The field's name ends in `_est`, as every other
+   estimated dollar figure in an event does (`DESIGN.md` §4.1). REBUT's own spend is the sum of its sessions' costs,
    the figure `run_rebut` reports.
 6. **The line.** `describe` renders a `Budget` event whose new field is set
    as the line in the notes. One whose field is `None` keeps the base's
@@ -288,8 +301,10 @@ includes at most one REBUT, held to the cap. The reserve is untouched.
   after it. It stays as it is.
 - **A REBUT that starts under the budget and crosses it.** Its sessions keep
   `critic_budget`'s ceiling, one remainder each, as today.
-- **`DESIGN.md`.** §4.3 and §5.6 said REBUT checks the ceiling before its
-  turn. The operator edits both by hand in this spec's pull request.
+- **`DESIGN.md` and ADR 4.** §4.3, §5.6 and ADR 4 said REBUT checks the
+  ceiling before its turn. §3.3 named only a red re-run on the edge from
+  `REBUTTING` to `EXHAUSTED`. The operator edits all four by hand in this
+  spec's pull request.
 - **An `EXHAUSTED` task with green gates opening a pull request.** That is
   b-038aef. Its spec routes on the shape step 4 leaves: `EXHAUSTED`, an
   anchored blocker and no `rebut_result`.
@@ -299,8 +314,12 @@ includes at most one REBUT, held to the cap. The reserve is untouched.
 **New or edit.** Criteria 1 and 4 declare a mutant on text the base already
 determines, and the change keeps it. Criteria 2, 3 and 5 build new code.
 This spec cannot know its spelling, so each declares a witness and no
-mutant.
-`witness` reports `skip` for them.
+mutant. `witness` reports `skip` for them.
+
+**Two texts the change makes false.** Correct the comment that says REBUT
+is gated before the rebuttal turn (`saffron/cell/session.py:77-78`).
+Correct the docstring's first line, which says the event names which
+ceiling stopped the task (`saffron/events.py:260`).
 
 **The line** for a `Budget` event whose spend after REBUT is $63.10, whose
 budget is $37.00, and whose REBUT spent $5.74 is exactly this.
@@ -311,15 +330,17 @@ budget: $63.10 of $37.00 — REBUT ran past it, spending $5.74
 
 **One helper for the four session witnesses.** Put it in
 `tests/test_session.py` beside `_through_rebut` (`:3508`). It takes the
-three REBUT turn costs in order (rebuttal, extraction, verdict) and a
-`budget_usd`. Three more keywords default to the common case. They are the
-commits after the rebuttal (one), the extraction turn's output (the argued
-answer) and the stub's `suites` (none). It builds the turns itself rather than through
+REBUT turn costs in order and a `budget_usd`. The costs are the rebuttal,
+the extraction, then one verdict per lens that filed a blocker. Three more
+keywords default to the common case. They are the commits after the
+rebuttal (one), the extraction turn's output (the argued answer) and the
+stub's `suites` (none). It builds the turns itself rather than through
 `_through_rebut`. The plan turn, the implement turn and all four lens turns
 each cost $0.125, so REBUT starts at exactly $0.75. The first lens files
-`_BLOCKER`, and the other three file no findings. The rebuttal turn says
-the blocker is intentional. The extraction turn argues finding 1, and the
-verdict turn withdraws it.
+`_BLOCKER`, and the other three file no findings. Given two verdict costs,
+the second lens files `_BLOCKER` as well. The rebuttal turn says the
+blocker is intentional. The extraction turn argues every finding, and each
+verdict turn withdraws its lens's finding.
 
 - Build the cell with `_stub_the_runtime` (`tests/test_session.py:909`).
 - Pass it `_ANCHORING_DIFF` as its patch (`tests/test_session.py:3479`).
@@ -365,7 +386,7 @@ exactly this.
 budget: $3.50 of $0.75 — REBUT ran past it, spending $2.75
 ```
 
-**Criterion 3's witness** runs six times, each asserting the REBUT
+**Criterion 3's witness** runs eight times, each asserting the REBUT
 sessions' `max_budget_usd` values in order, and the state.
 
 - Costs $3.00, $2.50 and $1.00, budget $0.25: $7.00, $4.00 and $1.50, and
@@ -380,6 +401,11 @@ sessions' `max_budget_usd` values in order, and the state.
   cap refuses.
 - Costs $3.00, $4.50 and $0.75, budget $0.25: $7.00 and $4.00, and
   `EXHAUSTED`.
+- Two lenses, costs $2.00, $1.00, $1.50 and $0.50, budget $0.25: $7.00,
+  $5.00, $4.00 and $2.50, and `READY_FOR_REVIEW`.
+- Costs $1.50, $0.50 and $0.75, budget $1.00: $2.00 three times, and
+  `READY_FOR_REVIEW`. REBUT starts under the budget and crosses it, and the
+  capture holds no `Budget` event.
 - Costs $1.50, $0.50 and $0.75, budget $20.00: $19.25 three times. The
   capture holds no `Budget` event.
 
@@ -387,18 +413,17 @@ Give the helper an exception in place of the rebuttal cost for the fourth
 run. The double records the turn's options first (`tests/test_session.py:1312`).
 Then it raises a scripted `BaseException` as that turn
 (`tests/test_session.py:1322-1323`). Compare dollar values with
-`pytest.approx`. The witness drives one lens's verdict session. Blockers
-from two or more lenses get one verdict session each, and no witness drives
-the cap across them.
+`pytest.approx`.
 
 **Criterion 4's witness** builds both events by hand, with the figures in
 **The line** above, and a stopping event at $9.00 of $9.00. It asserts each
 line exactly, appends both to an `EventLog`, and asserts `read_log` returns
 both, equal.
 
-**Criterion 5's witness** runs the helper five times at a budget of $0.25.
-The first three are criterion 3's three cut-short runs. Each asserts all of
-these.
+**Criterion 5's witness** runs the helper six times at a budget of $0.25.
+The first three are criterion 3's three cut-short runs. The fourth costs
+$7.25, $0.50 and $0.75 with no commit after the rebuttal. Each of the four
+asserts all of these.
 
 - The state is `EXHAUSTED`, and `outcome.rebut_result` is `None`.
 - `review.anchored_blockers(outcome.reviews)` returns one finding.
@@ -406,12 +431,15 @@ these.
 - The capture holds one `Budget` event, and it carries REBUT's figure.
 - `rebuttal.json` exists in the task's directory.
 
-The fourth run costs $1.50, $0.50 and $0.75, with no commit after the
+The fourth also asserts the REBUT sessions' `max_budget_usd` values are
+$7.00 alone, and that no verdict turn prompt is in `cell.turns`.
+
+The fifth run costs $1.50, $0.50 and $0.75, with no commit after the
 rebuttal. Its extraction turn returns `_CLAIMED_FIX`
 (`tests/test_session.py:3487`). It asserts `REBUTTING` and a
 `rebut_result` that is not `None`.
 
-The fifth run costs $7.25, $0.50 and $0.75, with `suites` green, green,
+The sixth run costs $7.25, $0.50 and $0.75, with `suites` green, green,
 then one failure. That is the shape
 `test_gates_red_after_the_rebuttal_exhausts_and_keeps_the_diff` uses. It
 asserts `EXHAUSTED` and a `rebut_result` that is not `None`.
@@ -430,6 +458,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks here. A
-prototype with all five witnesses, counted by `size_gate`, came to 1025
+prototype with all five witnesses, counted by `size_gate`, came to 1156
 tokens against the `feature` ceiling of 3000. Re-indenting the REBUT branch
 counts no tokens. `estimated_lines` is those tokens over four.
