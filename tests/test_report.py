@@ -2001,3 +2001,102 @@ def test_a_state_nobody_ranked_sorts_with_the_states_that_need_you():
         link="",
     )
     assert sort_key(line)[0] == _STATE_RANK["GATE_ERROR"]
+
+
+def _line(repo, spec_id, state, **fields):
+    fields.setdefault("attempts", 1)
+    fields.setdefault("cost_usd_est", None)
+    fields.setdefault("concerns", 0)
+    fields.setdefault("added", 0)
+    fields.setdefault("removed", 0)
+    fields.setdefault("link", "")
+    return QueueLine(repo=repo, spec_id=spec_id, state=state, **fields)
+
+
+def test_orphaning_rewrites_only_a_live_row_of_the_named_specs(tmp_path):
+    """`orphan_rows` moves only a named spec's own live row to `ORPHANED`.
+    Every other field, and every other row, stays as it was (DESIGN.md
+    §6)."""
+    from saffron.report.index import orphan_rows
+
+    rows = [
+        _line("r", "A-1", "IMPLEMENTING", risk="elevated", note="a note"),
+        _line("r", "A-2", "REPAIRING", cost_usd_est=1.5),
+        _line("r", "A-3", "REVIEWING"),
+        _line("r", "A-4", "REBUTTING"),
+        _line("r", "A-5", "READY_FOR_REVIEW"),
+        _line("r", "A-6", "EXHAUSTED"),
+        _line("r", "A-7", "ORPHANED"),
+        _line("r", "B-1", "REVIEWING"),
+        _line("s", "A-1", "REVIEWING"),
+    ]
+    for row in rows:
+        append_queue_line(tmp_path, row, header={})
+
+    index = orphan_rows(tmp_path, "r", {f"A-{n}" for n in range(1, 8)}, header={})
+    assert index is not None
+
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert [(row["repo"], row["spec_id"]) for row in stored] == [
+        (row.repo, row.spec_id) for row in rows
+    ]
+    for n, row in enumerate(stored):
+        if n < 4:
+            assert row["state"] == "ORPHANED"
+        else:
+            assert row["state"] == rows[n].state
+    # Every other field of a rewritten row survives.
+    assert stored[0]["risk"] == "elevated"
+    assert stored[0]["note"] == "a note"
+    assert stored[1]["cost_usd_est"] == 1.5
+
+    page = index.read_text()
+    assert page.count("<code>ORPHANED</code>") == 5
+    assert "tasks <strong>9</strong>" in page
+    assert "spend <strong>$1.50</strong>" in page
+    assert page.count('<meta http-equiv="refresh" content="60">') == 1
+
+    sentinel = "sentinel"
+    (tmp_path / "index.html").write_text(sentinel)
+    before = (tmp_path / "queue.json").read_bytes()
+    result = orphan_rows(tmp_path, "t", {"A-5", "A-6", "A-7"}, header={})
+    assert result is None
+    assert (tmp_path / "index.html").read_text() == sentinel
+    assert (tmp_path / "queue.json").read_bytes() == before
+
+    empty = tmp_path / "empty"
+    assert orphan_rows(empty, "r", {"A-1"}, header={}) is None
+    assert not empty.exists()
+
+
+def test_the_queue_page_refreshes_itself_every_minute(tmp_path):
+    """`render_index` itself, and every page `append_queue_line` and
+    `orphan_rows` write, carry the sixty-second meta refresh once, right
+    after the charset tag."""
+    from saffron.report.index import orphan_rows
+
+    html = render_index([], header={})
+    lines = html.splitlines()
+    assert lines[1] == '<meta charset="utf-8">'
+    assert lines[2] == '<meta http-equiv="refresh" content="60">'
+    assert html.count('<meta http-equiv="refresh" content="60">') == 1
+
+    row = _line("r", "A-1", "IMPLEMENTING")
+    index = append_queue_line(tmp_path, row, header={})
+    assert index.read_text().count('<meta http-equiv="refresh" content="60">') == 1
+
+    index = orphan_rows(tmp_path, "r", {"A-1"}, header={})
+    assert index is not None
+    assert index.read_text().count('<meta http-equiv="refresh" content="60">') == 1
+
+
+def test_every_live_state_is_ranked_and_in_flight():
+    """`LiveState`'s own four names are each a key of `_STATE_RANK` and a
+    member of `reconcile.IN_FLIGHT_STATES`."""
+    from saffron.cell.session import LiveState
+    from saffron.reconcile import IN_FLIGHT_STATES
+
+    names = set(get_args(LiveState))
+    assert names == {"IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"}
+    assert names <= set(_STATE_RANK)
+    assert names <= IN_FLIGHT_STATES

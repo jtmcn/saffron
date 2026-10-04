@@ -40,6 +40,7 @@ from saffron.reconcile import ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
+from saffron.report.index import orphan_rows, trailing_accept_rate
 from saffron.report.stack import write_stack_view
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
@@ -1616,6 +1617,25 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 writer_usd=writer_usd,
             )
             candidates = resolved.candidates
+
+            # A failed rewrite never stops the night (`DESIGN.md` §6).
+            # Skipped when nothing was stamped, or the repo is unseen.
+            if resolved.reconciled.orphaned and resolved.repo_id is not None:
+                try:
+                    stamped = set(resolved.reconciled.orphaned)
+                    spec_ids = {
+                        row["spec_id"]
+                        for row in ledger.tasks_by_repo(resolved.repo_id)
+                        if row["task_id"] in stamped
+                    }
+                    orphan_rows(
+                        out_dir,
+                        repo.name,
+                        spec_ids,
+                        header={"trailing accept rate": trailing_accept_rate(ledger)},
+                    )
+                except Exception as exc:
+                    print(f"batch: the queue page could not be rewritten: {exc}")
 
             if args.stack:
                 # A stack batch never rescans: the order is fixed right here.

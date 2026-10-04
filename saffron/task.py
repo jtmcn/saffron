@@ -47,7 +47,7 @@ from typing import get_args
 
 from saffron.agents import context
 from saffron.cell.session import _SHA as _RESOLVED_SHA
-from saffron.cell.session import CellOutcome, CellSpec, run_one_cell
+from saffron.cell.session import CellOutcome, CellSpec, LiveState, run_one_cell
 from saffron.events import (
     Ceiling,
     Ceilings,
@@ -564,14 +564,66 @@ def run_task(
             print(f"{spec.id:<10} refused  {reason}")
             return Refused(reason=reason)
 
-    outcome = run_one_cell(
-        cell_spec,
-        repo=repo,
-        mirror=base.mirror,
-        ledger=ledger,
-        out_dir=out_dir,
-        emit=emit,
-    )
+    def _live_row(state: str) -> index_report.QueueLine:
+        return index_report.QueueLine(
+            repo=repo.name,
+            spec_id=spec.id,
+            state=state,
+            attempts=0,
+            cost_usd_est=None,
+            concerns=0,
+            added=0,
+            removed=0,
+            link="",
+            risk=spec.risk,
+        )
+
+    # A live row never stops a running cell. `written` flips only on a
+    # landed write, so a raise past only failed ones stamps no row.
+    written = False
+
+    def _write_live(state: LiveState) -> None:
+        nonlocal written
+        try:
+            index_report.append_queue_line(
+                out_dir,
+                _live_row(state),
+                header={
+                    "trailing accept rate": index_report.trailing_accept_rate(ledger)
+                },
+            )
+        except Exception as exc:
+            print(f"{spec.id}: the live row for {state} could not be written: {exc}")
+            return
+        written = True
+
+    try:
+        outcome = run_one_cell(
+            cell_spec,
+            repo=repo,
+            mirror=base.mirror,
+            ledger=ledger,
+            out_dir=out_dir,
+            emit=emit,
+            on_state=_write_live,
+        )
+    except BaseException:
+        if written:
+            try:
+                index_report.append_queue_line(
+                    out_dir,
+                    _live_row("ORPHANED"),
+                    header={
+                        "trailing accept rate": index_report.trailing_accept_rate(
+                            ledger
+                        )
+                    },
+                )
+            except Exception as exc:
+                print(
+                    f"{spec.id}: the live row for ORPHANED could not be written: {exc}"
+                )
+        raise
     if outcome.state == "READY_FOR_REVIEW":
         result = package_phase.package(
             outcome,
