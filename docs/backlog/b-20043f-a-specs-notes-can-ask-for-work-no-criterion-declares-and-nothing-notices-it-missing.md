@@ -35,3 +35,7 @@ criterion. A test holds the floor.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-10-03: seen again in the spec loop's run 27. `SA-0199`'s witness notes
+  asked criterion 4's test for the nine rows whole, a no-change call on repo `r`
+  and an existing empty directory. The cell (#670) dropped all three, and no gate
+  or lens noticed. #670's Spec seat found each as a surviving wrong build.

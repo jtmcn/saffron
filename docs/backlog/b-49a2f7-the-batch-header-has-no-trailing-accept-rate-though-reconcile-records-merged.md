@@ -1,10 +1,11 @@
 ---
 id: b-49a2f7
 title: The batch header shows no trailing accept rate, though `reconcile` now records `MERGED`
-status: open
+status: done
 filed: 2026-10-02
+closed: 2026-10-03
 specs: [SA-0198]
-prs: []
+prs: [662]
 commits: []
 cites: [§6, §8]
 related: [52, 164]
@@ -32,3 +33,5 @@ than twenty.
 ## Record
 
 - 2026-10-02: filed from a session that surveyed the operator's views of the queue.
+- 2026-10-03: done by `SA-0198` (#662), in the spec loop's run 27. Every page
+  writer puts the trailing accept rate in the batch header.

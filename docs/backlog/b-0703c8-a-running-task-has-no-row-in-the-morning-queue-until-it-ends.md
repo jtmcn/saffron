@@ -1,10 +1,11 @@
 ---
 id: b-0703c8
 title: A running task has no row in the morning queue until it ends, so the page cannot show what a night is doing
-status: open
+status: done
 filed: 2026-10-02
+closed: 2026-10-03
 specs: [SA-0199]
-prs: []
+prs: [670]
 commits: []
 cites: [§5.7, §6]
 related: [b-2d09de]
@@ -34,3 +35,5 @@ When a batch scan stamps a task `ORPHANED`, it rewrites that row to `ORPHANED`.
 ## Record
 
 - 2026-10-02: filed from a session that surveyed the operator's views of the queue.
+- 2026-10-03: done by `SA-0199` (#670), in the spec loop's run 27. A running task
+  holds a live row, and the page refreshes every minute.
