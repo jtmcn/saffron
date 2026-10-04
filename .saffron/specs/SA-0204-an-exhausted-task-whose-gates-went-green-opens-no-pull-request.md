@@ -112,7 +112,7 @@ acceptance:
   - claim: >-
       `render_pr_body` takes a keyword, off by default. Set, `## Not
       covered` carries one line that says, with `EXHAUSTED` in backticks,
-      that the task ended `EXHAUSTED` before REBUT ran. The line names the
+      that the task ended `EXHAUSTED` with its blockers unanswered. The line names the
       `file:line` of each finding `anchored_blockers` returns, and of no
       other finding. Unset, no such line renders, even beside anchored
       blockers and no `rebut_result`. The witness renders two anchored
@@ -124,6 +124,7 @@ acceptance:
       - The line renders whenever anchored blockers stand with no `rebut_result`, keyword or not.
       - The line names an unanchored blocker too.
       - The line names every anchored finding, a concern included.
+      - The line says the task ended before REBUT ran and never says its blockers went unanswered, which is false where the cap cut a rebuttal short.
   - claim: >-
       When `package()` in the `EXHAUSTED` mode returns no `pr_url`,
       `run_task` then calls `push_unpackaged_work` as it does for any
@@ -165,6 +166,11 @@ saffron/SA-0162 @ aa47d09f6381` or `pushed saffron/SA-0151 @ 5fc63c668953`.
 The delegate opened #626 and #628 by hand and wrote both bodies without
 `saffron/report/pr_body.py`.
 
+After `SA-0203`, neither cell would end this way. Its REBUT runs once past
+the budget under a $7.00 cap, and both cells' REBUTs would likely fit it.
+A REBUT the cap cuts short still ends `EXHAUSTED` with its blockers
+unanswered, and that is the task this spec packages.
+
 The operator decided the scope. A task that ends `EXHAUSTED` in REVIEW or
 REBUT with green gates opens a draft pull request whose body names the
 unanswered blockers. Its state stays `EXHAUSTED`. Every other `EXHAUSTED`
@@ -176,28 +182,60 @@ linked into the stack.
 pay for is packaged too". It was written by hand in this spec's own pull
 request.
 
+**The base this spec's cell runs on carries five specs not yet built here.**
+`SA-0198`, `SA-0199`, `SA-0201`, `SA-0202` and `SA-0203` land first. Every
+line number below was read at `5d5d7480`, where none of them is built. So
+each citation names its function or test beside its line, and the line is
+where to start looking.
+
 ## Problem
 
 **Which `EXHAUSTED` tasks went green?** `_drive_cell` starts REVIEW only on
 `READY_FOR_REVIEW` (`saffron/cell/session.py:2613`). So a task that reached
-REVIEW had a green gate suite in its cell. Five paths after that end
-`EXHAUSTED`.
+REVIEW had a green gate suite in its cell. Once `SA-0203` lands, five paths
+after that end `EXHAUSTED`.
 
 | path | where | gates | review findings | REBUT result |
 |---|---|---|---|---|
 | the Gate-only cell refuses the patch | `saffron/cell/session.py:2661` | not measured | empty | none |
 | the critic cell refuses the patch | `saffron/cell/session.py:2785` | read by no critic | empty | none |
-| REBUT refused on budget | `saffron/cell/session.py:2920-2921` | green | an anchored blocker | none |
+| the cap cuts REBUT short | `saffron/cell/session.py:2917-2921` today | green | an anchored blocker | none |
 | red after the rebuttal | `saffron/phases/rebut.py:715-723` | red | an anchored blocker | set |
 | the critic cell refuses the post-rebuttal patch | `saffron/phases/rebut.py:731-738` | read by no critic | an anchored blocker | set |
 
-`reviews` starts empty (`saffron/cell/session.py:2597`). It is filled only
-once the critic cell is up (`saffron/cell/session.py:2727`). `review_state`
-routes to REBUT only on an anchored blocker
-(`saffron/phases/review.py:798-810`). So the third row is the one shape with
-an anchored blocker and no `rebut_result`, and both measured cells took it.
-A patch no critic read is not packaged. §5.5 makes that refusal the
-agent's, so a pull request from it would be a way past the critic.
+The first three rows sit in `_drive_cell`, the third in its REBUT branch.
+The last two sit in `run_rebut`.
+
+The third row is `SA-0203`'s. At this base its lines are still the budget
+refusal it replaces. `SA-0203` lets a REBUT that starts past the budget run
+once, its sessions sharing a $7.00 cap. When the cap refuses a session and
+`run_rebut` would halt at `REBUTTING`, the task ends `EXHAUSTED`. Its
+anchored blockers stand, and the outcome carries no `rebut_result`
+(`SA-0203`'s fifth criterion and its Problem step 4).
+
+The gates in that row are green either way. Both cases below are in `run_rebut`. A rebuttal that moved no
+commit and argued nothing returns before any re-run
+(`saffron/phases/rebut.py:710-714`), so HEAD is the tree REVIEW
+judged. Any other re-runs the gates first
+(`saffron/phases/rebut.py:716-724`). A red re-run ends
+`EXHAUSTED` and keeps its `rebut_result`, which `SA-0203` leaves alone, so
+it is the fourth row. A green re-run goes on to the verdict, where the cap
+can still cut it.
+
+So the patch this spec packages can carry the rebuttal's commits. Teardown
+exports it from the implementer's HEAD, whatever REBUT committed
+(`saffron/cell/session.py:3126`). PACKAGE re-verifies
+every packaged commit in a Gate-only cell of its own (`saffron/phases/package.py:819-827`). That covers those commits, and a
+new failure there opens no pull request.
+
+`reviews` starts empty (`saffron/cell/session.py:2597`). It
+is filled only once the critic cell is up
+(`saffron/cell/session.py:2727`). `review_state` routes to
+REBUT only on an anchored blocker (`saffron/phases/review.py:798-810`). So
+the third row is the one shape with an anchored blocker and no
+`rebut_result`. A patch no critic read is not packaged. §5.5 makes that
+refusal the agent's, so a pull request from it would be a way past the
+critic.
 
 **`run_task` packages only `READY_FOR_REVIEW`.** Its one condition is
 `saffron/task.py:575`. Every other state goes to `push_unpackaged_work`
@@ -236,8 +274,13 @@ layer, and the next candidate's predecessor does not move
   docstring's account of PACKAGE's last word (`saffron/reconcile.py:1-4`).
   The other is the list of states in `set_task_package`
   (`saffron/ledger.py:1423-1442`).
-- **Whether REBUT runs past the budget.** That is **b-4c5dc7**. This spec
-  packages whatever task still ends at the third row above.
+- **Whether REBUT runs past the budget.** That is **b-4c5dc7**, built by
+  `SA-0203`. This spec packages whatever task still ends at the third row
+  above.
+- **The cut-short rebuttal's own text.** `SA-0203` still writes
+  `rebuttal.json` and the ledger's rebuttal rows for it. The outcome
+  carries no `rebut_result`, so the body's Disagreements table shows `—`
+  for each blocker, and the operator reads `rebuttal.json` for the rest.
 - **The pull request's title.** It stays the spec's id and title
   (`saffron/phases/package.py:933`).
 - **Exit codes.** `CELL_EXIT` maps the state (`saffron/cli.py:488`), so
@@ -259,9 +302,11 @@ is the `parent_branch` argument of the `package()` call in `run_task`
 `witness` reports `skip` for them. Criterion 5 is `preserves`, and
 `saffron/batch.py` is `forbidden`.
 
-**Line numbers are at this spec's base.** `SA-0198` and `SA-0199` edit
-`saffron/task.py`, `saffron/phases/package.py` and `tests/test_task.py`
-first, so find each site by its function.
+**Line numbers are read at `5d5d7480`.** `SA-0198` and `SA-0199` edit
+`saffron/task.py`, `saffron/phases/package.py` and `tests/test_task.py`.
+`SA-0201` to `SA-0203` edit `saffron/cell/session.py` and
+`tests/test_session.py`. All five land before this cell, so find each site
+by the function or test named beside it.
 
 **The decision lives in `run_task`.** Make it once, after `run_one_cell`
 returns (`saffron/task.py:567-574`). Read `outcome.state`,
@@ -332,8 +377,8 @@ The single-path tests in `tests/test_package.py` show each setup.
 
 **Criterion 3's witness.** `_finding` (`tests/test_report.py:711-722`)
 builds each finding. Split the body at `## Not covered` and assert on the
-second half only. Check `EXHAUSTED` in backticks and each anchored
-blocker's `file:line`. Check that neither the unanchored blocker's nor the
+second half only. Check `EXHAUSTED` in backticks, the word `unanswered`
+and each anchored blocker's `file:line`. Check that neither the unanchored blocker's nor the
 concern's appears.
 
 **Criterion 4's witness.** Reuse criterion 1's helper. A refusing fake
