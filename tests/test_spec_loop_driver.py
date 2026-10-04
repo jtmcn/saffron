@@ -3308,3 +3308,55 @@ def test_bookkeeping_prints_the_two_assert_lines_the_smoke_test_pins(
     assert rc == 0
     assert recorded["repo_slug"] == "joel/saffron"
     assert recorded["gh"] is not scheduler.run_gh
+
+
+def _bk_measured_smoke(root):
+    # The smoke test once `SA-0200` lands: its queue reads the `measured` ids only.
+    (root / "tests" / "test_scheduler.py").write_text(
+        f"def {driver.SMOKE_TEST_NAME}(tmp_path, ledger):\n"
+        '    """Re-measured 2026-09-01, a ninth time: filler."""\n'
+        '    measured = {"SA-0201"}\n'
+    )
+
+
+def test_bookkeeping_drafts_the_measured_set_once_the_smoke_test_binds_one(
+    tmp_path, monkeypatch, capsys
+):
+    """A smoke test that binds `measured` gets a third pinned line: every id
+    the two asserts name, sorted. One that binds none gets the two lines alone."""
+    root = _bookkeeping_tree(tmp_path, monkeypatch)
+    driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    assert "measured = {" not in capsys.readouterr().out
+
+    _bk_measured_smoke(root)
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0201"))
+    block3 = capsys.readouterr().out.split(driver._HEADINGS[2])[1].splitlines()
+    assert rc == 0
+    assert block3[1:] == [
+        'assert [c.spec.id for c in candidates] == ["SA-0202", "SA-0201"]',
+        'assert [r.path.name[:7] for r in refusals] == ["SA-0203", "SA-0204"]',
+        'measured = {"SA-0201", "SA-0202", "SA-0203", "SA-0204"}',
+    ]
+
+
+def test_bookkeeping_drafts_no_change_for_a_retirement_once_the_set_is_bound(
+    tmp_path, monkeypatch, capsys
+):
+    """The smoke test moves a retired measured id back to the top, so a
+    retirement owes neither a paragraph nor a pinned line. Before the set is
+    bound, a retirement still drafts both."""
+    root = _bookkeeping_tree(tmp_path, monkeypatch)
+    driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0200"))
+    before = capsys.readouterr().out
+    assert "retired to done/" in before
+    assert "assert [c.spec.id for c in candidates]" in before
+
+    _bk_measured_smoke(root)
+    rc = driver.cmd_bookkeeping(SimpleNamespace(spec_id="SA-0200"))
+    out = capsys.readouterr().out
+    _assert_headings_in_order(out)
+    after_block1 = out.split(driver._HEADINGS[1])[1]
+    assert rc == 0
+    assert after_block1.count(driver.RETIREMENT_OWES_NOTHING) == 2
+    assert "Re-measured" not in after_block1
+    assert "assert [" not in after_block1
