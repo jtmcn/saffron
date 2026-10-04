@@ -4,7 +4,7 @@ title: A refused API connection ends the task `NOT_IMPLEMENTED`, exit 1, as if t
 status: open
 tier: 1
 filed: 2026-10-03
-specs: [SA-0152]
+specs: [SA-0152, SA-0201]
 prs: [650]
 commits: []
 cites: [§4.3, §5.1]

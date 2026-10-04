@@ -16,13 +16,13 @@ factory:TaskShape a sh:NodeShape ;
         sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
-            factory:SPEC_WITHHELD factory:APPROVED factory:CHANGES_REQUESTED
-            factory:REJECTED factory:MERGED factory:ORPHANED
-            factory:MERGE_TRAIN ) ] ;
+            factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:APPROVED
+            factory:CHANGES_REQUESTED factory:REJECTED factory:MERGED
+            factory:ORPHANED factory:MERGE_TRAIN ) ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] .
 
-# Ten states reach the operator and no others — set containment inside the end
+# Eleven states reach the operator and no others — set containment inside the end
 # states, which is the distinction §4.6 names as justifying the namespace. What
 # the operator's own decision produces is an end state and is not terminal: the
 # conflation is how MERGED read as reaching the operator and ORPHANED, which
@@ -33,7 +33,7 @@ factory:TerminalStateShape a sh:NodeShape ;
     sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
-            factory:SPEC_WITHHELD ) .
+            factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE ) .
 
 # Eight states in which Saffron advances the task, and no end state among them.
 # A batch scan stamps these ORPHANED, so one also typed an end state would read as done.

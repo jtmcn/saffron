@@ -4,7 +4,7 @@ title: An EXHAUSTED task whose gates went green opens no pull request
 status: open
 tier: 1
 filed: 2026-10-01
-specs: [SA-0162, SA-0151]
+specs: [SA-0162, SA-0151, SA-0204]
 prs: [626, 628]
 commits: []
 cites: [§5.7]

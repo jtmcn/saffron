@@ -111,6 +111,7 @@ REQUEUE_STATES = frozenset(
     {
         "CHANGES_REQUESTED",
         "RATE_LIMITED",
+        "PROVIDER_UNREACHABLE",
         "GATE_ERROR",
         "PREFLIGHT_FAILED",
         "ORPHANED",

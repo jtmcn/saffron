@@ -65,6 +65,10 @@ There is no vote. Any one anchored blocker goes to REBUT, unless the task is
 already over its budget. No ceiling check stops REVIEW. REBUT checks the spend
 ceiling before the rebuttal turn, and a task over it ends `EXHAUSTED` with its
 findings written.
+Amended 2026-10-03, `SA-0203`: a task at or past its budget still goes to
+REBUT, once. Its REBUT sessions share a fixed cap of $7.00, and a session the
+cap cannot cover does not start. A REBUT the cap cuts short ends `EXHAUSTED`
+with its blockers standing, never halted at `REBUTTING`.
 
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the

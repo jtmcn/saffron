@@ -4,7 +4,7 @@ title: A budget stop after green does not stop REVIEW, so REBUT is refused and a
 status: open
 tier: 1
 filed: 2026-10-01
-specs: [SA-0162, SA-0151]
+specs: [SA-0162, SA-0151, SA-0203]
 prs: [626, 628]
 commits: []
 cites: [§3, §5.5]

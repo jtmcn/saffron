@@ -43,6 +43,8 @@ _STATE_RANK: dict[RowState, int] = {
     # The provider's wall, not the task's: it needs you, and a retry is all it
     # needs. Absent, it sorted below green reviewable tasks.
     "RATE_LIMITED": 2,
+    # The provider served the plan turn nothing: infrastructure, retried as is.
+    "PROVIDER_UNREACHABLE": 2,
     # Withheld before any cell, for the operator to read (ADR 7).
     "SPEC_WITHHELD": 2,
     # A task the night left mid-phase, ranked with elevated risk (rev 17
