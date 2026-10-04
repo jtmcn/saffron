@@ -4,7 +4,7 @@ title: The ledger cannot say which model ran an attempt, because no writer of an
 type: feature
 priority: 3
 depends_on: [SA-0199]
-estimated_lines: 300
+estimated_lines: 297
 estimate_measured: true
 touches:
   - images/agent_runner.py
@@ -113,27 +113,33 @@ acceptance:
       `SpecReviewSession` has a field `model`, `None` by default. Every
       session `run_spec_review` returns names each distinct model its turns
       named, in first-seen order, joined with ",". A turn's own joined value
-      counts as each name in it. A session whose turns named none gives
-      `None`. The witness drives every return path, one row each. They are a
-      rejected window on the first turn and on the extraction turn, a failed
-      first turn, a first turn with no session, a failed extraction turn, a
-      clean extraction, a clean re-ask, and a re-ask still off the schema.
+      counts as each name in it, and an empty segment counts as none. A
+      session whose turns named none gives `None`. The witness drives every
+      return path, one row each, and each of those rows expects a model. They
+      are a rejected window on the first turn and on the extraction turn, a
+      failed first turn, a first turn with no session, a failed extraction
+      turn, a clean extraction, a clean re-ask, and a re-ask still off the
+      schema. A ninth row, a second clean extraction whose turns name
+      nothing, gives `None`.
     witness: tests/test_spec_review.py::test_a_spec_review_session_names_each_model_its_turns_named
     wrong_versions:
       - Only the last turn's model is kept.
       - Turn values are joined without splitting, so `m-a,m-b` then `m-b` gives `m-a,m-b,m-b`.
       - The model reaches the clean returns only, so a failed or rejected session carries `None`.
       - The names are sorted.
+      - An empty segment is kept, so `m-a,,m-b` gives `m-a,,m-b`.
   - claim: >-
       `SpecWriterSession` has a field `model`, `None` by default. Every
       session `run_spec_writer` returns names its turns' models by the same
-      rule as the review's. The witness drives the same return paths as the
-      review's witness, one row each.
+      rule as the review's. The witness drives the same nine rows as the
+      review's witness.
     witness: tests/test_spec_review.py::test_a_spec_writer_session_names_each_model_its_turns_named
     wrong_versions:
       - "`_writer_session` gains the field and one of its callers passes nothing, so that path carries `None`."
       - Only the last turn's model is kept.
       - Turn values are joined without splitting.
+      - The names are sorted.
+      - An empty segment is kept.
   - claim: >-
       `run_stack_batch` closes each `SPEC_REVIEW` attempt with its review
       session's `model`, and each spec-writing attempt with its writer
@@ -154,7 +160,7 @@ acceptance:
       charge a session. They are an accepted follow-up charged to its minted
       task, then four pooled groups charged to the layer's task. Those carry
       an error, text that does not parse, a spec whose id is wrong, and a
-      rate limit with no model.
+      rate limit. Each of the five sessions names its own model.
     witness: tests/test_follow_up.py::test_a_follow_up_writers_attempt_records_the_model_its_session_names
     mutant:
       file: saffron/follow_up.py
@@ -311,10 +317,10 @@ Send one assistant message's `message_id` twice. Put an
 `init` system message naming a different model first in each run. The
 `none` run sends `init`, a partial message and the result. In the
 several-models run, meet the names against alphabetical order, `m-b`
-before `m-a`, so a sorted join fails. Put a `<synthetic>` message and a
-message whose `model` is `""` between real ones there. A kept empty name
-then shows as a trailing ",", which a run of empty names alone can hide
-behind a `null`. The synthetic-alone run sends `init`, a
+before `m-a`, so a sorted join fails. Put a `<synthetic>` message between
+real ones there. Send a message whose `model` is `""` last among that
+run's assistant messages. A kept empty name then reads `m-b,m-a,`, which a
+run of empty names alone can hide behind a `null`. The synthetic-alone run sends `init`, a
 `<synthetic>` message, a message whose `model` is `""`, and the result.
 It gives `null`. Run the one-model run last, so a synthetic name kept
 from an earlier run would show there. Clear any
@@ -328,11 +334,17 @@ on unannotated identities is gated.
 **Criterion 2.** Use `_stream` and `_result_line`
 (`tests/test_implement.py:185-237`). Drive a joined value, a single name,
 `null`, an absent key, an `is_error` result with exit 1, and a stream with
-no result event.
+no result event. `_result_line` names no model, so pass one. The
+`is_error` row's result names a joined value, and the test asserts it on
+`AgentFailed.attempt.model`. Put an `init` event naming another model
+before the result in every row, the `null` and absent-key rows above all.
+A fallback to the `init` model then fails there.
 
 **Criterion 3.** Build a real `Ledger` under `tmp_path`, with one repo, run
 and task. Wrap a scripted agent in `session.record_attempts` and call it
-once per outcome. Read the rows back with `ledger.attempts`.
+once per outcome. Read the rows back with `ledger.attempts`. The returned
+attempt and the attempt on `AgentFailed` each name a distinct model, so a
+failed path that drops its model fails.
 
 **Criteria 4 and 5.** Use `_Agent`, `_first`, `_second`, `_draft` and
 `_write_extract` (`tests/test_spec_review.py:54-87`, `:190-204`,
@@ -340,12 +352,14 @@ once per outcome. Read the rows back with `ledger.attempts`.
 with no model, and `_KILLED` builds a failure with none. So give every
 row's first turn a model with `dataclasses.replace`. Raise a failed first
 turn as `AgentFailed(..., replace(_first(), model=...))`, never as
-`_KILLED`. Then every row expects a model but one deliberate row whose
-turns name none. That is how a return path that passes nothing shows,
-on the rejected, failed and no-session rows above all. In the clean row
-the first-seen order runs against alphabetical, `m-b` before `m-a`.
-Repeat a name across turns in another row. Use one turn whose own value
-is joined, followed by a turn naming a name already in it.
+`_KILLED`. All eight return-path rows expect a model. The ninth row, a
+second clean extraction whose turns name nothing, is the only one that
+expects `None`. That is how a return path that passes nothing shows, on
+the rejected, failed and no-session rows above all. In the clean row the
+first-seen order runs against alphabetical, `m-b` before `m-a`. Repeat a
+name across turns in the clean re-ask row. In the off-schema row, give
+the first turn a joined value with an empty segment, `m-a,,m-b`, then a
+turn naming `m-b` again.
 
 **Criterion 6.** Use `_RevisionMint`, `_RevisionWrite`, `_RevisionRunner`,
 `_written` and `_writer_error` (`tests/test_batch.py:3310-3457`), with a
@@ -361,5 +375,6 @@ distinct model, except one review left at `None`.
 writer session that met the rate limit pools every later group, so send it
 last. Pass every session as a `SpecWriterSession`, never as a string,
 since `_write_stub` turns a string into a session with no model. The
-accepted, error, parse-failure and wrong-id sessions each carry a
-distinct model. The rate-limit session keeps none.
+accepted, error, parse-failure, wrong-id and rate-limit sessions each
+carry a distinct model. A rate-limit session with no model would let its
+own path drop the model unseen.
