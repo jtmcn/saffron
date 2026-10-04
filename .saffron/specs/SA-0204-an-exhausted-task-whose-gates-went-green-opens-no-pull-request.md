@@ -4,7 +4,7 @@ title: An EXHAUSTED task whose gates went green opens no pull request
 type: feature
 priority: 2
 depends_on: [SA-0203, SA-0198]
-estimated_lines: 287
+estimated_lines: 428
 estimate_measured: true
 touches:
   - saffron/task.py
@@ -110,36 +110,48 @@ acceptance:
       - The pull request path still records `READY_FOR_REVIEW`.
       - The body is rendered without the third criterion's keyword, so it names no unanswered blocker.
   - claim: >-
-      `render_pr_body` takes a keyword, off by default. Set, `## Not
-      covered` carries one line that says, with `EXHAUSTED` in backticks,
-      that the task ended `EXHAUSTED` with its blockers unanswered. The line names the
-      `file:line` of each finding `anchored_blockers` returns, and of no
-      other finding. Unset, no such line renders, even beside anchored
-      blockers and no `rebut_result`. The witness renders two anchored
-      blockers from two lenses beside an unanchored blocker and an
-      anchored concern, once set and once unset.
+      `render_pr_body` takes two keywords, both off by default. With the
+      first set, `## Not covered` carries one line saying "the task ended
+      `EXHAUSTED` before the critics finished judging its rebuttal" and
+      that "its blockers stand". The line names the `file:line` of each
+      finding `anchored_blockers` returns, and of no other finding. With
+      the second set, `## Not covered` carries a line saying "HEAD moved
+      after REVIEW" and that the patch carries commits "no lens judged".
+      Unset, neither line renders, even beside anchored blockers and no
+      `rebut_result`. The witness renders two anchored blockers from two
+      lenses beside an unanchored blocker and an anchored concern, with the
+      first keyword alone, with both, and with neither.
     witness: tests/test_report.py::test_an_unrebutted_body_names_every_blocker_it_left_standing
     wrong_versions:
       - The line names only the first anchored blocker.
       - The line renders whenever anchored blockers stand with no `rebut_result`, keyword or not.
       - The line names an unanchored blocker too.
       - The line names every anchored finding, a concern included.
-      - The line says the task ended before REBUT ran and never says its blockers went unanswered, which is false where the cap cut a rebuttal short.
+      - The line says the blockers went unanswered, which is false where the cut-short rebuttal recorded answers and only a verdict is missing.
+      - The HEAD line renders whenever the first keyword is set, whatever the second says.
+      - The HEAD line never renders.
   - claim: >-
-      When `package()` in the `EXHAUSTED` mode returns no `pr_url`,
-      `run_task` then calls `push_unpackaged_work` as it does for any
-      `EXHAUSTED` task. The task's one queue row stays `EXHAUSTED` with an
-      empty link, and its note carries PACKAGE's note and the push's note
-      both. When `package()` returns a `pr_url`, no push runs and the row
-      is the one PACKAGE wrote. `run_task` returns the outcome in
-      `EXHAUSTED` either way. The witness drives a refusal and a pull
-      request.
+      When `package()` in the `EXHAUSTED` mode returns no `pr_url`, or
+      raises a `PackageError`, `run_task` then calls `push_unpackaged_work`
+      as it does for any `EXHAUSTED` task. It hands that call PACKAGE's note
+      or the error's text, as the seventh criterion's keyword. The task's
+      one queue row stays `EXHAUSTED` with an empty link, and its note
+      carries that text and the push's note both. `run_task` returns the
+      outcome in `EXHAUSTED` and raises nothing. When `package()` returns a
+      `pr_url`, no push runs and the row is the one PACKAGE wrote. A
+      `PackageError` from a `READY_FOR_REVIEW` cell's `package()` still
+      raises, and nothing is pushed. The witness drives a refusal, a
+      `PackageError` and a pull request in the `EXHAUSTED` mode, and a
+      `PackageError` from a `READY_FOR_REVIEW` cell.
     witness: tests/test_task.py::test_an_exhausted_package_that_opened_nothing_still_pushes_its_work
     wrong_versions:
       - A refused `EXHAUSTED` package pushes nothing and writes no row of its own.
       - The push runs after a pull request opened too.
       - The row's note carries the push's note alone, so it never says why no pull request opened.
       - The row's note carries PACKAGE's note alone, so it never says the branch was pushed.
+      - A `PackageError` in the `EXHAUSTED` mode still raises, so the branch is not pushed and the task exits 2.
+      - A `PackageError` is caught for a `READY_FOR_REVIEW` cell too.
+      - The push is not told PACKAGE refused, so its commit says PACKAGE never ran.
   - claim: >-
       A stack batch adds a layer only for an outcome in
       `READY_FOR_REVIEW` (`saffron/batch.py:360-364`), so a task that
@@ -149,6 +161,38 @@ acceptance:
       never linked into the stack.
     witness: tests/test_batch.py::test_a_stack_batch_records_one_layer_for_each_task_that_reached_review
     preserves: true
+  - claim: >-
+      In the `EXHAUSTED` mode, `package()` reads `head_moved` from
+      `rebuttal.json` in the task's directory, and sets the third
+      criterion's second keyword exactly when it is `true`. A missing file,
+      one that is not JSON, and JSON that is not an object holding the key
+      set nothing and raise nothing. Outside the mode, `package()` never
+      sets it. The witness opens the pull request six times: with
+      `head_moved` true and false, with no file, with a file that is not
+      JSON, with a JSON list, and with `head_moved` true outside the mode.
+    witness: tests/test_package.py::test_an_exhausted_body_says_when_the_rebuttal_moved_head
+    wrong_versions:
+      - The record is read outside the `EXHAUSTED` mode too.
+      - A missing `rebuttal.json` raises.
+      - A `rebuttal.json` that is not JSON raises.
+      - A JSON list raises.
+      - Any record present reads as moved, `head_moved` false included.
+  - claim: >-
+      `push_unpackaged_work` takes a keyword, off by default, naming why
+      PACKAGE refused the task. Set, its commit says PACKAGE refused it and
+      gives that text, and never says PACKAGE never ran. Unset, the commit
+      reads as it does today. It refuses to push while another task of the
+      spec is `EXHAUSTED` with a `pr_url`, as it refuses beside a
+      `READY_FOR_REVIEW` one. An `EXHAUSTED` row with an empty `pr_url` and
+      a `REJECTED` row with a `pr_url` do not stop it. The witness pushes
+      once with the keyword, then beside each of those three earlier rows.
+    witness: tests/test_package.py::test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft
+    wrong_versions:
+      - The guard still checks `READY_FOR_REVIEW` alone, so a re-run pushes over an open draft.
+      - The guard refuses beside any row with a `pr_url`, so a rejected pull request blocks every later push.
+      - The guard refuses beside any `EXHAUSTED` row, a refused package's included.
+      - The commit still says PACKAGE never ran when the keyword is set.
+      - The commit says PACKAGE refused it without the text.
 ---
 
 ## Context
@@ -225,8 +269,13 @@ can still cut it.
 So the patch this spec packages can carry the rebuttal's commits. Teardown
 exports it from the implementer's HEAD, whatever REBUT committed
 (`saffron/cell/session.py:3126`). PACKAGE re-verifies
-every packaged commit in a Gate-only cell of its own (`saffron/phases/package.py:819-827`). That covers those commits, and a
-new failure there opens no pull request.
+every packaged commit in a Gate-only cell of its own
+(`saffron/phases/package.py:819-827`). That covers those commits, and a
+new failure there opens no pull request. No lens read them, though. §5.5
+says the critic reads the patch that ships, and here it read the patch
+before the rebuttal. `rebuttal.json` records whether HEAD moved
+(`saffron/phases/rebut.py:136-139`). So the body says so whenever it did,
+and the operator knows which commits no lens judged.
 
 `reviews` starts empty (`saffron/cell/session.py:2597`). It
 is filled only once the critic cell is up
@@ -256,6 +305,17 @@ implementer and critic columns (`saffron/report/pr_body.py:274-347`).
 `_not_covered` starts at `saffron/report/pr_body.py:492`. Its one rebuttal
 gap is a turn that recorded nothing (`saffron/report/pr_body.py:563-573`).
 
+**The push after a refusal says PACKAGE never ran.** That sentence is
+written for every unpackaged push (`saffron/phases/package.py:321-326`). After an `EXHAUSTED` package that
+refused, that sentence is false.
+
+**The push guards a pull request only by its state.** It refuses beside
+another of the spec's tasks only when that task is `READY_FOR_REVIEW`
+(`saffron/phases/package.py:1106-1112`). A task left
+`EXHAUSTED` with a draft from this spec's mode would be pushed over by an
+attended re-run that ends unpackaged. `tasks_by_repo` already reads each
+task's `pr_url` (`saffron/ledger.py:955-971`).
+
 **A stack batch keys its layer on the state alone.** `_is_layer` reads
 `CellOutcome.state` (`saffron/batch.py:360-364`). `CellOutcome` carries no
 pull request field (`saffron/cell/session.py:313-353`). So the task adds no
@@ -284,8 +344,10 @@ layer, and the next candidate's predecessor does not move
 - **The pull request's title.** It stays the spec's id and title
   (`saffron/phases/package.py:933`).
 - **Exit codes.** `CELL_EXIT` maps the state (`saffron/cli.py:488`), so
-  the task still exits 1. A `PackageError` raised in the new mode reaches
-  `cli.main` as exit 2, as one from a `READY_FOR_REVIEW` cell does.
+  the task still exits 1. A `PackageError` in the new mode is the fourth
+  criterion's: the branch is pushed and the task stays `EXHAUSTED`. Only
+  a `PackageError` is caught. A `PolicyError` or `GitError` from PACKAGE
+  still raises, as it does for a `READY_FOR_REVIEW` cell.
 - **The scheduler's view of the open pull request.** `open_pr_refusal`
   reads GitHub's open pull requests (`saffron/scheduler.py:635-705`). A
   spec overlapping this one's files is refused while it is open, as for
@@ -293,16 +355,17 @@ layer, and the next candidate's predecessor does not move
 
 ## Notes for the agent
 
-**Mostly new code.** The two keywords and the line do not exist at base.
+**Mostly new code.** The keywords, the two lines and the guard's new half
+do not exist at base.
 Criteria 1 and 2 each pin one mutant on a line the change keeps. The first
 is the `parent_branch` argument of the `package()` call in `run_task`
 (`saffron/task.py:576-591`). The second is the `pr_url` argument of the
 `PackageResult` the pull request path returns
-(`saffron/phases/package.py:944-951`). Criteria 3 and 4 declare none, and
-`witness` reports `skip` for them. Criterion 5 is `preserves`, and
+(`saffron/phases/package.py:944-951`). Criteria 3, 4, 6 and 7 declare
+none, and `witness` reports `skip` for them. Criterion 5 is `preserves`, and
 `saffron/batch.py` is `forbidden`.
 
-**Line numbers are read at `5d5d7480`.** `SA-0198` and `SA-0199` edit
+**Line numbers are read at `f0af2ec5`.** `SA-0198` and `SA-0199` edit
 `saffron/task.py`, `saffron/phases/package.py` and `tests/test_task.py`.
 `SA-0201` to `SA-0203` edit `saffron/cell/session.py` and
 `tests/test_session.py`. All five land before this cell, so find each site
@@ -314,7 +377,21 @@ returns (`saffron/task.py:567-574`). Read `outcome.state`,
 `anchored_blockers` from `saffron.phases.review`, which defines it. Keep one
 `package()` call for both shapes. When it returns no `pr_url` in the new
 mode, run the existing `push_unpackaged_work` block, and join the two notes
-in that row's `note`.
+in that row's `note`. Catch `PackageError` around that call only in the new
+mode, and treat its text as PACKAGE's note. A `READY_FOR_REVIEW` cell's
+error still propagates. Pass the note to `push_unpackaged_work` as the
+seventh criterion's keyword, which hands it on to `commit_squash`.
+
+**Reading `head_moved`.** A small helper beside `_finish` reads
+`outcome.task_dir / "rebuttal.json"`. It returns `True` only for a JSON
+object whose `head_moved` is `True`. It treats `OSError`, `ValueError`,
+`KeyError` and `TypeError` as `False`. Call it only in the new mode.
+
+**The guard's new half.** `tasks_by_spec_id` reads no `pr_url`
+(`saffron/ledger.py:972-1006`), and `saffron/ledger.py` is forbidden. So
+take the spec's rows from `tasks_by_repo` (`saffron/ledger.py:955-971`),
+filtered by `spec_id`, and refuse beside one that is `EXHAUSTED` with a
+non-empty `pr_url`. Keep the refusal's existing note.
 
 **In `package()`, the keyword picks the two states** each `_finish` call
 site records. Pass the third criterion's keyword to `render_pr_body`
@@ -340,11 +417,14 @@ body is.
 line (`saffron/phases/package.py:1`). Update `push_unpackaged_work`'s first
 sentence (`saffron/phases/package.py:1011-1025`) and `run_task`'s first
 sentence (`saffron/task.py:434-454`). Update the comment above the
-`push_unpackaged_work` call (`saffron/task.py:595-598`).
+`push_unpackaged_work` call (`saffron/task.py:595-598`). Update the
+docstring sentence that says it never pushes beside a `READY_FOR_REVIEW`
+row (`saffron/phases/package.py:1037-1038`). Name the new keyword in
+`commit_squash`'s (`saffron/phases/package.py:294-319`).
 
 **Every test you add must fail with this diff's source reverted.** At base
-`package()` and `render_pr_body` refuse the new keyword with a
-`TypeError`. And `run_task` sends the `EXHAUSTED` cell to the push. Pass
+`package()`, `render_pr_body` and `push_unpackaged_work` refuse the new
+keywords with a `TypeError`. And `run_task` sends the `EXHAUSTED` cell to the push. Pass
 the new keyword at run time, never at module scope.
 
 **Criterion 1's witness.** `_drive` (`tests/test_task.py:29-95`) passes no
@@ -377,12 +457,29 @@ The single-path tests in `tests/test_package.py` show each setup.
 
 **Criterion 3's witness.** `_finding` (`tests/test_report.py:711-722`)
 builds each finding. Split the body at `## Not covered` and assert on the
-second half only. Check `EXHAUSTED` in backticks, the word `unanswered`
-and each anchored blocker's `file:line`. Check that neither the unanchored blocker's nor the
-concern's appears.
+second half only. Check the two quoted phrases, and each anchored blocker's
+`file:line`. Check that neither the unanchored blocker's nor the concern's
+appears, nor the word `unanswered`. Render once more with both keywords and
+check the HEAD line's two phrases. Check that neither line renders unset.
 
 **Criterion 4's witness.** Reuse criterion 1's helper. A refusing fake
 returns a `PackageResult` in `EXHAUSTED` whose note says it conflicts. An
 opening fake writes its own row with `append_queue_line` and returns a
-`pr_url`, as `tests/test_task.py:211-262` does. Assert the pushes, the one
-row's state, link and note, and the returned state.
+`pr_url`, as `tests/test_task.py:211-262` does. A raising fake raises
+`PackageError`. Record each push's state and its new keyword. Assert the
+pushes, the one row's state, link and note, and the returned state. Last,
+run a `READY_FOR_REVIEW` cell through the raising fake inside
+`pytest.raises`, and assert no push ran.
+
+**Criterion 6's witness.** One `packageable` fixture opens the pull request
+six times with a fake `gh` that prints a URL. Before each, write or remove
+`rebuttal.json` in `outcome.task_dir`. After each, read `pr_body.md` and
+look for "HEAD moved after REVIEW" in its `## Not covered` half.
+
+**Criterion 7's witness.** One `packageable` fixture. Push once with the
+new keyword and read the commit with `git log -1 --format=%B` on the
+remote branch, as `tests/test_package.py:3112-3131` does. Then add each
+earlier task with `create_run`, `create_task` and `set_task_package`,
+recording the remote head as its `pushed_sha`, so only the guard decides.
+Push beside the `REJECTED` row, then the empty-`pr_url` `EXHAUSTED` row,
+then the drafted one, and assert the branch did not move.
