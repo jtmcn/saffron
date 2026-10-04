@@ -139,3 +139,41 @@ a wrong version pass. Every caller blocker came from parallel drafting.
 - Every writer grew the smoke test's top paragraph to four lines, and the
   `prose` hook refused three of them. A scratchpad script rewrote the pin per
   branch during the restack. `driver.py bookkeeping` could own that pin.
+
+## SA-0205, from item b-3732ef
+
+The spec makes the ledger record which model ran each attempt. It covers
+the item's first half. The paid comparison of a stronger model stays a
+script run by hand.
+
+| Draft | Pre-flight revise | Review 1 | Revise 1 | Review 2 | Revise 2 |
+|---|---|---|---|---|---|
+| 17.0 min | 1.1 min | 4.7 min | 1.6 min | 4.3 min | 3.4 min |
+
+| Round | Blockers | Concerns | Notes |
+|---|---|---|---|
+| Pre-flight | 1 | 0 | 0 |
+| 1 | 1 | 3 | 4 |
+| 2 | 2 | 2 | 3 |
+
+- **A measured fact the writer could not see.** The pre-flight found the
+  CLI's `<synthetic>` model name in 15 host transcripts. The CLI writes it
+  for rate limits and API errors. As drafted, a walled turn would record it
+  as a model. Check 8 found it by asking what each value can hold.
+- **A set member no witness drives.** This is check 1, and it took every
+  blocker in both rounds. The Notes allowed row values that kill a wrong
+  version but did not force them. A row with no model at a return place
+  reached by no other row hides a caller that passes nothing.
+- **A stale claim about the tree.** An operator edit to `DESIGN.md` landed
+  in the spec's own commit, and the spec still called the sentence pending.
+  Check 5 should run after the delegate's hand edits, not before them.
+
+Round 2 repeated round 1's class, so no third review ran. The writer
+implemented every declared wrong version on its prototype instead. It
+reported 47 probes and 47 killed, after one survivor forced a row value.
+
+## For the skill, from SA-0205
+
+Check 1 should be a probe table, not a reading. For each wrong version,
+the writer implements it on the prototype and names the row that kills it.
+That table settled in one pass what two reviews found by reading.
