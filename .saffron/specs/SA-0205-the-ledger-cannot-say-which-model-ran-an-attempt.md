@@ -3,7 +3,7 @@ id: SA-0205
 title: The ledger cannot say which model ran an attempt, because no writer of an attempt row passes one
 type: feature
 priority: 3
-depends_on: [SA-0199]
+depends_on: [SA-0203]
 estimated_lines: 297
 estimate_measured: true
 touches:
@@ -53,7 +53,7 @@ forbidden:
   - tests/test_ledger.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 26
+budget_usd: 34
 max_attempts: 3
 max_turns: 190
 acceptance:
@@ -180,24 +180,27 @@ the second spends real money on live runs, so it runs by hand from
 `docs/evidence/scripts/`. This spec records the model and never chooses
 one. It adds no `model` option to `implement.agent_options`.
 
-Every line number below was read at `e79fef44`. This spec's parent chain,
-`SA-0197` to `SA-0199`, edits `saffron/ledger.py`, `saffron/cell/session.py`
-and `tests/test_session.py` first. So the lines cited in those three sit
-elsewhere at the cell's base. Each citation names its function. Find it by
-that name.
+Every line number below was read at `b698e484`. This spec's parent chain,
+`SA-0201` to `SA-0203`, edits `saffron/phases/implement.py`,
+`saffron/cell/session.py`, `saffron/batch.py` and their tests first. So
+the lines cited in those files sit elsewhere at the cell's base. Each
+citation names its function. Find it by that name. `SA-0201` gives
+`AttemptResult` a new boolean field, set where `run_agent` builds the
+attempt. It adds no place an attempt is built and no caller of
+`close_attempt`.
 
 **The ledger can already hold a model.** `Ledger.close_attempt` takes a
-keyword `model`, `None` by default (`saffron/ledger.py:1340-1365`). The fold
-writes it into `attempts.model` (`:687-700`). No writer passes a value.
+keyword `model`, `None` by default (`saffron/ledger.py:1359-1385`). The fold
+writes it into `attempts.model` (`:688-701`). No writer passes a value.
 
 **The writers.** Four call sites in three modules close an attempt row for
 an agent session.
 
 - `_close_attempt` passes `model=None` with a comment saying no model is
-  available (`saffron/cell/session.py:216-232`, the line at `:225`).
+  available (`saffron/cell/session.py:220-236`, the line at `:229`).
   `record_attempts` calls it on a returned turn and on `AgentFailed`
-  (`:189-213`). `_drive_cell` wraps every plan, implement, repair, review
-  and rebuttal turn in `record_attempts` (`:2045-2055`).
+  (`:193-217`). `_drive_cell` wraps every plan, implement, repair, review
+  and rebuttal turn in `record_attempts` (`:2054-2064`).
 - `run_stack_batch` closes a `SPEC_REVIEW` attempt from a
   `SpecReviewSession` (`saffron/batch.py:580-588`). It closes a spec-writing
   attempt from the writer's `turn` (`:686-695`). Neither passes `model`.
@@ -249,12 +252,12 @@ message.
    `run_agent` call, as the comment above `_seen_assistant_message_ids`
    says (`images/agent_runner.py:43-46`). Clear what you keep in `main`,
    beside `_query_yielded` (`:214-216`), so each run starts empty.
-2. **`AttemptResult` carries it.** Add `model: str | None = None` after
-   `structured_output` (`saffron/phases/implement.py:84-105`). Read it from
+2. **`AttemptResult` carries it.** Add `model: str | None = None` as the
+   last field (`saffron/phases/implement.py:84-105`). Read it from
    the result event where the clean or failed `attempt` is built
    (`:386-401`). The no-result path (`:350-364`) leaves it `None`, as it
    leaves `session_id`. `_failed_turn`'s own fallback stays `None` too
-   (`saffron/cell/session.py:731-741`).
+   (`saffron/cell/session.py:735-745`).
 3. **`_close_attempt` passes it.** Replace `model=None` and its comment.
    The value comes from the attempt, or `None` when there is no attempt.
 4. **The two session types carry it.** Add `model: str | None = None` to
@@ -263,7 +266,7 @@ message.
 5. **`batch.py` and `follow_up.py` pass it** to `close_attempt` from the
    session at each of the three sites above.
 6. **The schema comment.** In `saffron/ledger.py`, the comment above
-   `attempts` (`:147-150`) says the session's own call site still passes
+   `attempts` (`:148-151`) says the session's own call site still passes
    `None`. Rewrite it to say what `model` holds now. Change nothing
    else in `ledger.py`.
 
@@ -272,14 +275,14 @@ message.
 - **Choosing a model.** No `model` option reaches `agent_options`, and no
   turn starts a fresh session. That is the item's second half, by hand.
 - **`DESIGN.md` §4.1.** The operator already amended its sentence on
-  `attempts.model` in this spec's branch (`DESIGN.md:359`). It reads
+  `attempts.model` in this spec's branch (`DESIGN.md:365`). It reads
   "`attempts.model` names the models an attempt's assistant messages
   named, comma-joined in first-seen order. The CLI's own `<synthetic>`
   marker is no model and is skipped (SA-0205)." The file is protected.
   Do not touch it.
 - **`replay`.** Its attempt has no agent, so `None` is its true model.
 - **End review turns.** Their agent is `stop_on_rejected` over
-  `run_agent` with no `record_attempts` (`saffron/cli.py:644-650`). So
+  `run_agent` with no `record_attempts` (`saffron/cli.py:657-663`). So
   they write no attempt row today, and this spec adds none.
 - **Filtering names past `<synthetic>`.** The runner drops that one name
   and keeps every other name as sent. The operator measured it on
