@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -37,6 +37,7 @@ def _drive(
     spent_usd: float = 1.0,
     attempts: int = 0,
     events: Sequence[Event] | None = None,
+    on_cell: Callable[[dict], None] | None = None,
     **outcome_fields,
 ) -> CellOutcome:
     """One `run_task` call whose cell ends in `state`.
@@ -44,7 +45,11 @@ def _drive(
     `events`, when given, are emitted through the `emit` the `run_one_cell`
     double is handed, before it returns — the only way to drive the
     default `emit` closure `run_task` builds when a caller passes none, since
-    that closure lives inside `run_task` itself and is never returned."""
+    that closure lives inside `run_task` itself and is never returned.
+
+    `on_cell`, when given, runs on the keyword arguments `run_task` hands
+    the double, before it returns. It is the one way to write to the
+    `ledger` `run_task` passes, as the real cell does."""
     outcome = CellOutcome(
         state=state,
         task_id=task_id,
@@ -58,6 +63,8 @@ def _drive(
     def _run_one_cell(*a, **k):
         for event in events or ():
             k["emit"](event)
+        if on_cell is not None:
+            on_cell(k)
         return outcome
 
     monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
@@ -206,6 +213,89 @@ def test_an_unpackaged_row_carries_no_pull_request_link(tmp_path, monkeypatch):
     assert rows[0]["link"] == ""
     assert rows[0]["note"] == note
     assert rows[0]["repo"] == (tmp_path / "target-repo").name
+
+
+def test_both_queue_writers_put_the_trailing_accept_rate_in_the_header(
+    tmp_path, monkeypatch
+):
+    """`run_task`'s unpackaged branch and `PACKAGE._finish` each read
+    `trailing_accept_rate` off their own ledger. Each reads it after that
+    ledger's own task reaches its final state, then passes it through
+    `append_queue_line`'s `header` kwarg (`DESIGN.md` §6)."""
+    out_dir = tmp_path / "out"
+    spec_id = "SY-9"
+    seed = Ledger(tmp_path / f"{spec_id}.db")
+    repo_id = seed.upsert_repo("r", "https://github.com/o/r.git", "/m.git", None)
+    run_id = seed.create_run(repo_id, base_sha="a" * 40)
+    for n in range(2):
+        merged = seed.create_task(
+            run_id, spec_id=f"X-{n}", spec_sha="s" * 64, branch=f"saffron/X-{n}"
+        )
+        seed.set_task_state(merged, "MERGED")
+    not_implemented = seed.create_task(
+        run_id, spec_id="X-2", spec_sha="s" * 64, branch="saffron/X-2"
+    )
+    seed.set_task_state(not_implemented, "NOT_IMPLEMENTED")
+    fourth = seed.create_task(
+        run_id, spec_id=spec_id, spec_sha="s" * 64, branch=f"saffron/{spec_id}"
+    )
+    seed.set_task_state(fourth, "IMPLEMENTING")
+    seed.close()
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    def _set_exhausted(kwargs: dict) -> None:
+        kwargs["ledger"].set_task_state(fourth, "EXHAUSTED")
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id=spec_id,
+        state="EXHAUSTED",
+        task_id=fourth,
+        out_dir=out_dir,
+        on_cell=_set_exhausted,
+    )
+
+    page = (out_dir / "index.html").read_text()
+    assert "trailing accept rate <strong>50% of 4</strong>" in page
+
+    finish_ledger = Ledger(tmp_path / "finish.db")
+    finish_repo_id = finish_ledger.upsert_repo(
+        "r2", "https://github.com/o/r2.git", "/m2.git", None
+    )
+    finish_run_id = finish_ledger.create_run(finish_repo_id, base_sha="a" * 40)
+    for n in range(3):
+        merged = finish_ledger.create_task(
+            finish_run_id, spec_id=f"Y-{n}", spec_sha="s" * 64, branch=f"saffron/Y-{n}"
+        )
+        finish_ledger.set_task_state(merged, "MERGED")
+    reviewing = finish_ledger.create_task(
+        finish_run_id, spec_id="Y-9", spec_sha="s" * 64, branch="saffron/Y-9"
+    )
+    finish_ledger.set_task_state(reviewing, "REVIEWING")
+
+    finish_out_dir = tmp_path / "finish-out"
+    outcome = CellOutcome(
+        state="REVIEWING",
+        task_id=reviewing,
+        run_id=reviewing,
+        task_dir=finish_out_dir / "Y-9",
+        spent_usd=1.0,
+        attempts=1,
+    )
+    spec = Spec(
+        id="Y-9",
+        title="A spec",
+        type="feature",
+        touches=["src/**"],
+        acceptance_criteria=["it works"],
+    )
+    result = package_phase.PackageResult(state="MERGE_FAILED", branch="saffron/Y-9")
+    package_phase._finish(finish_ledger, outcome, finish_out_dir, spec, "r2", result)
+
+    finish_page = (finish_out_dir / "index.html").read_text()
+    assert "trailing accept rate <strong>75% of 4</strong>" in finish_page
 
 
 def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
@@ -1229,3 +1319,392 @@ def test_run_task_hands_the_cell_the_specs_own_estimate_in_lines(tmp_path, monke
             and "estimat" in s.lower().replace("estimated_lines", "")
             for s in sentences
         )
+
+
+def _ceilings() -> ResolvedCeilings:
+    return ResolvedCeilings(
+        budget_usd=12.0,
+        max_attempts=4,
+        max_turns=60,
+        budget_source="default",
+        attempts_source="default",
+        turns_source="default",
+    )
+
+
+def _pinned(tmp_path: Path) -> PinnedBase:
+    return PinnedBase(
+        mirror=tmp_path / "mirror.git",
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+
+
+def _one_spec(spec_id: str, **overrides) -> Spec:
+    return Spec(
+        id=spec_id,
+        title="t",
+        type="feature",
+        touches=["src/**"],
+        acceptance_criteria=["it works"],
+        **overrides,
+    )
+
+
+def _seed_one_merged(ledger: Ledger) -> None:
+    """One settled task, so `trailing_accept_rate` reads `100% of 1`.
+    An empty ledger reads a placeholder a bare key check cannot tell apart
+    from a real rate."""
+    repo_id = ledger.upsert_repo(
+        "other", "https://github.com/o/other.git", "/o.git", None
+    )
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    merged = ledger.create_task(
+        run_id, spec_id="M-1", spec_sha="s" * 64, branch="saffron/M-1"
+    )
+    ledger.set_task_state(merged, "MERGED")
+
+
+def test_a_running_task_holds_one_queue_row_that_its_end_replaces(
+    tmp_path, monkeypatch
+):
+    """Each phase start writes a live row under the task's own repo and
+    spec key. The task's end replaces it last, leaving one row (DESIGN.md
+    §6, §5.7 step 4)."""
+    from dataclasses import asdict
+
+    from saffron.report import index as index_report
+
+    def _expect_live(spec_id: str, state: str) -> dict:
+        return asdict(
+            index_report.QueueLine(
+                repo="target-repo",
+                spec_id=spec_id,
+                state=state,
+                attempts=0,
+                cost_usd_est=None,
+                concerns=0,
+                added=0,
+                removed=0,
+                link="",
+                risk="elevated",
+            )
+        )
+
+    def _run_case(name: str, spec_id: str, *, end_state: str, package_ok: bool):
+        out_dir = tmp_path / name
+        other = index_report.QueueLine(
+            repo="target-repo",
+            spec_id="OTHER-1",
+            state="READY_FOR_REVIEW",
+            attempts=1,
+            cost_usd_est=1.0,
+            concerns=0,
+            added=0,
+            removed=0,
+            link="",
+        )
+        index_report.append_queue_line(out_dir, other, header={})
+        other_row = asdict(other)
+        assert _rows(out_dir) == [other_row]
+
+        ledger = Ledger(tmp_path / f"{name}.db")
+        _seed_one_merged(ledger)
+        reads: list[list[dict]] = []
+        rates: list[str] = []
+
+        def _run_one_cell(*a, **k):
+            # Captured on entry, before any `on_state` call, so a row
+            # written early, such as `QUEUED`, still shows up here.
+            reads.append(_rows(out_dir))
+            for state in ("IMPLEMENTING", "REVIEWING"):
+                k["on_state"](state)
+                reads.append(_rows(out_dir))
+                page = (out_dir / "index.html").read_text()
+                assert f"<code>{state}</code>" in page
+                match = re.search(
+                    r"trailing accept rate <strong>([^<]+)</strong>", page
+                )
+                assert match is not None
+                rates.append(match.group(1))
+                # A second settled task lands between the two writes, so a
+                # header cached once would show the same rate twice.
+                if state == "IMPLEMENTING":
+                    _seed_one_merged(ledger)
+            return CellOutcome(
+                state=end_state,
+                task_id=1,
+                run_id=1,
+                task_dir=out_dir / spec_id,
+                spent_usd=2.0,
+                attempts=3,
+            )
+
+        monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+        if package_ok:
+
+            def _package_ok(outcome, *, spec, repo, **kwargs):
+                result = package_phase.PackageResult(
+                    state="READY_FOR_REVIEW",
+                    pr_url="https://github.com/o/r/pull/1",
+                    pushed_sha="c" * 40,
+                    branch=f"saffron/{spec.id}",
+                )
+                index_report.append_queue_line(
+                    out_dir,
+                    index_report.QueueLine(
+                        repo=repo.name,
+                        spec_id=spec.id,
+                        state=result.state,
+                        attempts=outcome.attempts,
+                        cost_usd_est=outcome.spent_usd,
+                        concerns=0,
+                        added=0,
+                        removed=0,
+                        link=result.pr_url,
+                    ),
+                )
+                return result
+
+            monkeypatch.setattr(package_phase, "package", _package_ok)
+        else:
+            monkeypatch.setattr(
+                package_phase,
+                "push_unpackaged_work",
+                lambda *a, **k: package_phase.PushResult(
+                    pushed=False, note=_NO_COMMITS
+                ),
+            )
+
+        result = task_module.run_task(
+            _one_spec(spec_id, risk="elevated"),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+        )
+        ledger.close()
+        assert isinstance(result, CellOutcome)
+        assert reads[0] == [other_row]
+        assert reads[1] == [other_row, _expect_live(spec_id, "IMPLEMENTING")]
+        assert reads[2] == [other_row, _expect_live(spec_id, "REVIEWING")]
+        assert rates == ["100% of 1", "100% of 2"]
+        return result, _rows(out_dir), other_row
+
+    result, final, _other = _run_case(
+        "exhausted", "SY-30", end_state="EXHAUSTED", package_ok=False
+    )
+    assert result.state == "EXHAUSTED"
+    assert [row["spec_id"] for row in final] == ["OTHER-1", "SY-30"]
+    assert final[1]["state"] == "EXHAUSTED"
+
+    result, final, other_row = _run_case(
+        "ready", "SY-31", end_state="READY_FOR_REVIEW", package_ok=True
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    assert final[0] == other_row
+    assert final[1]["spec_id"] == "SY-31"
+    assert final[1]["state"] == "READY_FOR_REVIEW"
+    assert final[1]["link"] == "https://github.com/o/r/pull/1"
+
+
+def test_a_cell_that_raises_leaves_its_running_row_orphaned(tmp_path, monkeypatch):
+    """A raise past at least one landed write orphans that row and
+    re-raises the same exception object. A raise before any write leaves no
+    row and no page behind (DESIGN.md §6)."""
+
+    live_rows: dict[str, list[dict]] = {}
+
+    def _drive(spec_id, out_dir, error, *, after_write):
+        ledger = Ledger(tmp_path / f"{spec_id}.db")
+        _seed_one_merged(ledger)
+
+        def _run_one_cell(*a, **k):
+            if after_write:
+                k["on_state"]("REVIEWING")
+                live_rows[spec_id] = json.loads((out_dir / "queue.json").read_text())
+            raise error
+
+        monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+
+        with pytest.raises(type(error)) as raised:
+            task_module.run_task(
+                _one_spec(spec_id, risk="elevated"),
+                "s" * 40,
+                ceilings=_ceilings(),
+                base=_pinned(tmp_path),
+                repo_id=1,
+                repo=tmp_path / "target-repo",
+                ledger=ledger,
+                out_dir=out_dir,
+                token=None,
+            )
+        assert raised.value is error
+        ledger.close()
+
+    # A write landed: the raise orphans that row. Every other field,
+    # the spec's declared `risk` included, stays as it was.
+    out_dir = tmp_path / "out-write"
+    error = RuntimeError("boom")
+    _drive("SY-40", out_dir, error, after_write=True)
+    rows = json.loads((out_dir / "queue.json").read_text())
+    assert [live["risk"] for live in live_rows["SY-40"]] == ["elevated"]
+    assert rows == [{**live, "state": "ORPHANED"} for live in live_rows["SY-40"]]
+    page = (out_dir / "index.html").read_text()
+    assert "trailing accept rate <strong>100% of 1</strong>" in page
+
+    # A `KeyboardInterrupt`, caught the same way.
+    out_dir2 = tmp_path / "out-write-interrupt"
+    interrupt = KeyboardInterrupt()
+    _drive("SY-41", out_dir2, interrupt, after_write=True)
+    rows2 = json.loads((out_dir2 / "queue.json").read_text())
+    assert rows2 == [{**live, "state": "ORPHANED"} for live in live_rows["SY-41"]]
+
+    # No write landed before the raise: no row, no page, but the task's own
+    # `events.jsonl` directory is there.
+    out_dir3 = tmp_path / "out-no-write"
+    error2 = RuntimeError("early")
+    _drive("SY-42", out_dir3, error2, after_write=False)
+    assert not (out_dir3 / "queue.json").exists()
+    assert not (out_dir3 / "index.html").exists()
+    assert (out_dir3 / "SY-42" / "events.jsonl").is_file()
+
+
+def test_a_failed_live_row_write_never_stops_the_cell(tmp_path, monkeypatch):
+    """A live row's own write never stops the cell. A state whose write
+    failed does not count as written, for `ORPHANED`'s own sake (DESIGN.md
+    §6)."""
+    from saffron.report import index as index_report
+
+    real_append = index_report.append_queue_line
+    printed: list[str] = []
+    monkeypatch.setattr(
+        "builtins.print", lambda *a, **k: printed.append(" ".join(str(x) for x in a))
+    )
+
+    def _flaky(fails_on: set[str]):
+        def _append(out, line, **kwargs):
+            # Not an `OSError`, so a catch narrowed to one fails this test.
+            if line.state in fails_on:
+                raise ValueError(f"disk full writing {line.state}")
+            return real_append(out, line, **kwargs)
+
+        return _append
+
+    def _prepare(spec_id, out_dir, *, fails_on):
+        ledger = Ledger(tmp_path / f"{spec_id}.db")
+        monkeypatch.setattr(
+            task_module.index_report, "append_queue_line", _flaky(fails_on)
+        )
+        monkeypatch.setattr(
+            package_phase,
+            "push_unpackaged_work",
+            lambda *a, **k: package_phase.PushResult(pushed=False, note=_NO_COMMITS),
+        )
+        return ledger
+
+    # `IMPLEMENTING` fails: the cell goes on, and the end row still lands.
+    out_dir = tmp_path / "out-implementing"
+    ledger = _prepare("SY-50", out_dir, fails_on={"IMPLEMENTING"})
+    went_on = False
+
+    def _run_one_cell_a(*a, **k):
+        nonlocal went_on
+        k["on_state"]("IMPLEMENTING")
+        went_on = True
+        return CellOutcome(
+            state="EXHAUSTED",
+            task_id=1,
+            run_id=1,
+            task_dir=out_dir / "SY-50",
+            spent_usd=1.0,
+            attempts=1,
+        )
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell_a)
+    result = task_module.run_task(
+        _one_spec("SY-50"),
+        "s" * 40,
+        ceilings=_ceilings(),
+        base=_pinned(tmp_path),
+        repo_id=1,
+        repo=tmp_path / "target-repo",
+        ledger=ledger,
+        out_dir=out_dir,
+        token=None,
+    )
+    ledger.close()
+    assert isinstance(result, CellOutcome)
+    assert result.state == "EXHAUSTED"
+    assert went_on is True
+    rows = json.loads((out_dir / "queue.json").read_text())
+    assert len(rows) == 1
+    assert rows[0]["state"] == "EXHAUSTED"
+    hits = [
+        p for p in printed if "SY-50" in p and "IMPLEMENTING" in p and "disk full" in p
+    ]
+    assert len(hits) == 1
+
+    # `ORPHANED` fails: the cell's own exception still propagates, and the
+    # store keeps the live `REVIEWING` row.
+    out_dir2 = tmp_path / "out-orphaned"
+    ledger2 = _prepare("SY-51", out_dir2, fails_on={"ORPHANED"})
+    error = RuntimeError("boom")
+
+    def _run_one_cell_b(*a, **k):
+        k["on_state"]("REVIEWING")
+        raise error
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell_b)
+    with pytest.raises(RuntimeError) as raised:
+        task_module.run_task(
+            _one_spec("SY-51"),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger2,
+            out_dir=out_dir2,
+            token=None,
+        )
+    ledger2.close()
+    assert raised.value is error
+    rows2 = json.loads((out_dir2 / "queue.json").read_text())
+    assert len(rows2) == 1
+    assert rows2[0]["state"] == "REVIEWING"
+    orphan_hits = [
+        p for p in printed if "SY-51" in p and "ORPHANED" in p and "disk full" in p
+    ]
+    assert len(orphan_hits) == 1
+
+    # `REVIEWING` fails mid-run: the exception still propagates, and the
+    # store holds no row at all.
+    out_dir3 = tmp_path / "out-reviewing"
+    ledger3 = _prepare("SY-52", out_dir3, fails_on={"REVIEWING"})
+    error2 = RuntimeError("boom2")
+
+    def _run_one_cell_c(*a, **k):
+        k["on_state"]("REVIEWING")
+        raise error2
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell_c)
+    with pytest.raises(RuntimeError) as raised2:
+        task_module.run_task(
+            _one_spec("SY-52"),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger3,
+            out_dir=out_dir3,
+            token=None,
+        )
+    ledger3.close()
+    assert raised2.value is error2
+    assert not (out_dir3 / "queue.json").exists()

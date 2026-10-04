@@ -2164,6 +2164,95 @@ def test_watch_refuses_a_poll_interval_that_never_waits(tmp_path, interval, caps
     assert "--interval" in capsys.readouterr().err
 
 
+def test_watch_with_no_spec_id_follows_the_batch_tree_with_its_flags(
+    tmp_path, monkeypatch, capsys
+):
+    """With no spec id, `saffron watch` follows `out_dir` through
+    `follow_every_task`, passing `--all` as `verbose` and `--interval` as
+    `interval`, and prints every line it yields.
+    """
+    out_dir = tmp_path / "batches" / "v0"
+    out_dir.mkdir(parents=True)
+    seen = []
+
+    def fake_follow_every_task(root, verbose, interval):
+        seen.append((root, verbose, interval))
+        yield "SY-1 line one"
+        yield "SY-2 line two"
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
+
+    try:
+        exit_code = cli.main(
+            ["--home", str(tmp_path), "watch", "--all", "--interval", "0.25"]
+        )
+    except KeyboardInterrupt:
+        pytest.fail("KeyboardInterrupt reached main's own caller")
+    assert exit_code == 0
+    assert capsys.readouterr().out.splitlines() == ["SY-1 line one", "SY-2 line two"]
+
+    try:
+        exit_code = cli.main(["--home", str(tmp_path), "watch"])
+    except KeyboardInterrupt:
+        pytest.fail("KeyboardInterrupt reached main's own caller")
+    assert exit_code == 0
+    assert capsys.readouterr().out.splitlines() == ["SY-1 line one", "SY-2 line two"]
+
+    assert seen == [(out_dir, True, 0.25), (out_dir, False, 1.0)]
+
+
+def test_watch_with_no_spec_id_exits_one_without_a_batch_tree(
+    tmp_path, monkeypatch, capsys
+):
+    """With no spec id, `saffron watch` exits 1 and names `out_dir` when that
+    path is not a directory, never reaching the follower. Both a missing
+    path and a plain file there are refused."""
+    calls = []
+
+    def fake_follow_every_task(*args, **kwargs):
+        calls.append((args, kwargs))
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
+
+    assert cli.main(["--home", str(tmp_path), "watch"]) == 1
+
+    out_dir = tmp_path / "batches" / "v0"
+    assert capsys.readouterr().out == f"watch: no batch tree at {out_dir}\n"
+
+    out_dir.parent.mkdir(parents=True)
+    out_dir.write_text("")
+    assert cli.main(["--home", str(tmp_path), "watch"]) == 1
+    assert capsys.readouterr().out == f"watch: no batch tree at {out_dir}\n"
+    assert calls == []
+
+
+def test_watch_with_no_spec_id_refuses_the_flags_that_read_one_log(
+    tmp_path, monkeypatch, capsys
+):
+    """`--whole-log` and `--no-follow` each need a spec id and are refused
+    at parse time. Argparse's own usage exit names the flag on the last
+    line of stderr, and the follower is never reached."""
+    calls = []
+
+    def fake_follow_every_task(*args, **kwargs):
+        calls.append((args, kwargs))
+        return iter(())
+
+    monkeypatch.setattr(cli, "follow_every_task", fake_follow_every_task)
+
+    for flag in ("--whole-log", "--no-follow"):
+        with pytest.raises(SystemExit) as exited:
+            cli.main(["--home", str(tmp_path), "watch", flag])
+
+        # Argparse's usage exit is 2. A hand-rolled refusal exiting 1 or 0 is not it.
+        assert exited.value.code == 2
+        assert flag in capsys.readouterr().err.splitlines()[-1]
+
+    assert calls == []
+
+
 @pytest.mark.parametrize("command", ["queue", "reconcile"])
 def test_an_in_flight_task_survives_being_looked_at(tmp_path, command):
     """`ORPHANED` is in `scheduler.REQUEUE_STATES`, so a row stamped while
@@ -3107,6 +3196,119 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
     assert resolve_calls[1]["pinned"] is resolve_calls[0]["pinned"]
     assert [call["stack"] for call in resolve_calls] == [False, False]
     assert recorded_repo_ids == [99]
+
+
+def test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch`, in both forms, rewrites the queue page for every
+    task the opening scan stamps `ORPHANED`, before the night's loop runs
+    (DESIGN.md §6). A failed rewrite prints its own line and never stops
+    the night."""
+    from saffron.report import index as index_report
+
+    monkeypatch.chdir(tmp_path)
+    repo_name = tmp_path.resolve().name
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    _readiness_passes(monkeypatch)
+
+    def _seed_night(home: Path):
+        ledger = Ledger(home / "ledger.db")
+        repo_id = _seed_repo(ledger, "https://github.com/o/r.git")
+        first = _seed_task(ledger, repo_id, spec_id="SY-1", state="REVIEWING")
+        _seed_task(ledger, repo_id, spec_id="SY-2", state="REVIEWING")
+        _seed_task(ledger, repo_id, spec_id="SY-3", state="MERGED")
+        ledger.close()
+
+        out_dir = home / "batches" / "v0"
+        for spec_id in ("SY-1", "SY-2"):
+            index_report.append_queue_line(
+                out_dir,
+                index_report.QueueLine(
+                    repo=repo_name,
+                    spec_id=spec_id,
+                    state="REVIEWING",
+                    attempts=0,
+                    cost_usd_est=None,
+                    concerns=0,
+                    added=0,
+                    removed=0,
+                    link="",
+                ),
+                header={},
+            )
+        return repo_id, first, out_dir
+
+    def _states(out_dir: Path) -> dict[str, str]:
+        rows = json.loads((out_dir / "queue.json").read_text())
+        return {row["spec_id"]: row["state"] for row in rows}
+
+    def _run_night(label: str, *, stack: bool, raising_orphan: bool) -> Path:
+        home = tmp_path / f"home-{label}"
+        home.mkdir()
+        repo_id, first, out_dir = _seed_night(home)
+        sentinel = (out_dir / "index.html").read_bytes()
+
+        def _fake_resolve_queue(
+            repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+        ):
+            if stamp_orphaned:
+                ledger.set_task_state(first, "ORPHANED")
+                reconciled = cli.ReconcileResult(orphaned=[first])
+            else:
+                reconciled = cli.ReconcileResult()
+            return cli.QueueResolution(
+                repo_id=repo_id,
+                mirror=tmp_path / "m.git",
+                base_sha="a" * 40,
+                repo_slug=None,
+                exported=tmp_path,
+                candidates=[],
+                refusals=[],
+                reconciled=reconciled,
+                gh_failures=[],
+                policy_unread=[],
+            )
+
+        ran = {"value": False}
+
+        def _fake_loop(candidates, ledger, budget_usd, until, runner, **kwargs):
+            kwargs["readiness_check"]()
+            ran["value"] = True
+            states = _states(out_dir)
+            if raising_orphan:
+                assert states == {"SY-1": "REVIEWING", "SY-2": "REVIEWING"}
+                assert (out_dir / "index.html").read_bytes() == sentinel
+            else:
+                assert states == {"SY-1": "ORPHANED", "SY-2": "REVIEWING"}
+                page = (out_dir / "index.html").read_text()
+                assert "trailing accept rate <strong>100% of 1</strong>" in page
+            return "DRAINED"
+
+        monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+        monkeypatch.setattr(cli, "run_batch", _fake_loop)
+        monkeypatch.setattr(cli, "run_stack_batch", _fake_loop)
+        if raising_orphan:
+            # Not an `OSError`, so a catch narrowed to one fails this test.
+            def _raising_orphan(*a, **k):
+                raise ValueError("disk full")
+
+            monkeypatch.setattr(cli, "orphan_rows", _raising_orphan)
+
+        args = ["--home", str(home), "batch"]
+        if stack:
+            args.append("--stack")
+        assert main(args) == 0
+        assert ran["value"] is True
+        return out_dir
+
+    _run_night("plain", stack=False, raising_orphan=False)
+    _run_night("stack", stack=True, raising_orphan=False)
+    _run_night("raising", stack=False, raising_orphan=True)
+
+    printed = capsys.readouterr().out
+    assert "batch: the queue page could not be rewritten:" in printed
+    assert "batch: the queue could not be resolved:" not in printed
 
 
 def test_saffron_batch_stack_plans_once_and_runs_that_order(

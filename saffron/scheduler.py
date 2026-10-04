@@ -117,6 +117,10 @@ REQUEUE_STATES = frozenset(
     }
 )
 
+# Done, and not waiting on the operator (§6): `DONE_STATES` minus the
+# three dependent-stacking states, minus `SCOPE_REVIEW`, which still waits.
+SETTLED_STATES = (DONE_STATES - DEPENDENCY_WAITING_STATES) - {"SCOPE_REVIEW"}
+
 
 @dataclass(frozen=True)
 class Candidate:

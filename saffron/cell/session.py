@@ -55,6 +55,10 @@ if TYPE_CHECKING:
 # one locator in `context.PROMPTS_DIR`.
 _SAFFRON_ROOT = Path(__file__).resolve().parents[2]
 
+# The four phase states a running task's live row can hold (DESIGN.md §6).
+# Never an end state: those replace the live row rather than joining it.
+LiveState = Literal["IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"]
+
 # §4.3's wall clock, per turn, set here rather than inherited: this is the bound
 # the operator sits through, so it belongs where the task is driven. Fifteen
 # minutes is long enough for a turn that runs a real gate suite between tool
@@ -839,6 +843,7 @@ def run_one_cell(
     ledger: Ledger,
     out_dir: Path,
     emit: Callable[[Event], None] | None = None,
+    on_state: Callable[[LiveState], None] | None = None,
 ) -> CellOutcome:
     """Create a cell, drive one IMPLEMENT session in it, and gate the result.
 
@@ -869,6 +874,7 @@ def run_one_cell(
         out_dir=out_dir,
         emit=emit,
         exported=exported,
+        on_state=on_state,
     )
     outcome.cell_head_sha = exported.get("head_sha")
     outcome.agent_subjects = exported.get("subjects", [])
@@ -1791,6 +1797,7 @@ def _drive_cell(
     out_dir: Path,
     emit: Callable[[Event], None],
     exported: dict,
+    on_state: Callable[[LiveState], None] | None = None,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron.agents import artifacts, context
@@ -2030,6 +2037,8 @@ def _drive_cell(
             "IMPLEMENT", "IMPLEMENT", f"system prompt {len(system_prompt)} chars"
         )
         ledger.set_task_state(task_id, "IMPLEMENTING")
+        if on_state is not None:
+            on_state("IMPLEMENTING")
 
         # Scaled to this spec's own turn ceiling, floored and capped by the
         # constants above.
@@ -2492,6 +2501,8 @@ def _drive_cell(
             if _over_budget():
                 return "EXHAUSTED"
             ledger.set_task_state(task_id, "REPAIRING")
+            if on_state is not None:
+                on_state("REPAIRING")
             try:
                 repaired = agent(
                     container,
@@ -2612,6 +2623,8 @@ def _drive_cell(
 
         if outcome == "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, "REVIEWING")
+            if on_state is not None:
+                on_state("REVIEWING")
 
             # Read once: REVIEW's and REBUT's critic cells share this env.
             critic_env = cell_env(proxy_address(_CRITIC_SUBNET), policy.thread_env)
@@ -2916,6 +2929,8 @@ def _drive_cell(
 
         if outcome == "REBUTTING":
             ledger.set_task_state(task_id, "REBUTTING")
+            if on_state is not None:
+                on_state("REBUTTING")
             blockers = review.anchored_blockers(reviews)
             if _over_budget():
                 outcome = "EXHAUSTED"

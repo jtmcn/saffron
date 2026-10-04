@@ -369,6 +369,10 @@ failures.
 **b-60ff2e**. The wall bound cut a session in a suite run GATE repeats. A
 layer's peak turns counts attempts its `max_turns` does not bound.
 
+**Placed 2026-10-03**, from the spec loop's run 27: **b-970f53**, then
+**b-c94a2f**. The `tests` gate reads an interrupted pytest session as
+`error`. A second `depends_on` entry carries no code into the cell.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -446,6 +450,13 @@ holds, and `status` has no one-line form.
 **b-81e109**, then **b-14ccc7**. A finish's narrow `except` has no witness.
 `GhRunner` is defined three times. A live-cell test fails when two suites
 run at once.
+
+**Placed 2026-10-03**, from the spec loop's run 27: **b-3b8eb2**,
+**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then **b-348114**.
+The host never sees which criterion failed. REVIEW counts a test-side wrong
+version as unproven. A host listener that starts mid-loop is caught only at
+preflight. The rate's header key is spelled at seven sites. `SETTLED_STATES`
+has no vocabulary test. Four documentation lines lag the stack.
 
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.

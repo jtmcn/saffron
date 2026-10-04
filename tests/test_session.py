@@ -1247,6 +1247,7 @@ def _drive(
     # Seconds a modelled turn's own `num_turns` is scaled by, opt-in for the
     # wall-scaling witness below. `None` leaves every prior caller unchanged.
     turn_seconds=None,
+    on_state=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1404,8 +1405,114 @@ def _drive(
         ledger=ledger,
         out_dir=tmp_path / "out",
         emit=_emit,
+        on_state=on_state,
     )
     return outcome, ledger
+
+
+def test_a_cell_reports_each_phase_state_as_it_enters_it(monkeypatch, tmp_path):
+    """`on_state` hears `IMPLEMENTING`, `REPAIRING`, `REVIEWING` and
+    `REBUTTING` exactly where `_drive_cell` writes them to the ledger, and
+    never an end state (DESIGN.md §6)."""
+    from typing import get_args
+
+    from saffron.cell.session import LiveState
+
+    assert set(get_args(LiveState)) == {
+        "IMPLEMENTING",
+        "REPAIRING",
+        "REVIEWING",
+        "REBUTTING",
+    }
+
+    # All four: one repair, then a blocker that REBUT answers. The gate-count
+    # fixture already proves this shape.
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), [], []), patch=_ANCHORING_DIFF
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    heard: list[str] = []
+    _drive(
+        monkeypatch,
+        tmp_path / "all-four",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(),  # the repair turn after attempt 1
+            _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn("Fixed it."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        on_state=heard.append,
+    )
+    assert heard == ["IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"]
+
+    # Green: no repair, and REVIEW's own lenses file nothing.
+    heard = []
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "green",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        on_state=heard.append,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert heard == ["IMPLEMENTING", "REVIEWING"]
+
+    # A REBUTTING end: a claimed fix with nothing committed and no argument.
+    heard = []
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "rebutting",
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ),
+        on_state=heard.append,
+    )
+    assert outcome.state == "REBUTTING"
+    assert heard == ["IMPLEMENTING", "REVIEWING", "REBUTTING"]
+
+    # An EXHAUSTED end: the same new failure twice is no progress.
+    heard = []
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(failing), _results(failing), [])
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "exhausted",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+        on_state=heard.append,
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert heard == ["IMPLEMENTING", "REPAIRING"]
+
+    # Two repairs that each make progress, then a clean suite.
+    heard = []
+    first = Failure(file="a.py", code="E501", message="too long")
+    second = Failure(file="b.py", code="E501", message="too long")
+    cell = _stub_the_runtime(
+        monkeypatch, suites=([], _results(first), _results(second), [])
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "two-repairs",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(), _turn()],
+        on_state=heard.append,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert heard == ["IMPLEMENTING", "REPAIRING", "REPAIRING", "REVIEWING"]
 
 
 def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):

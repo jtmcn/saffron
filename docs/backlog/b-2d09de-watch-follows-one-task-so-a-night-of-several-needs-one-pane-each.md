@@ -1,10 +1,11 @@
 ---
 id: b-2d09de
 title: '`saffron watch` follows one task, so a night of several tasks needs one pane per spec id'
-status: open
+status: done
 filed: 2026-10-02
+closed: 2026-10-03
 specs: [SA-0197]
-prs: []
+prs: [659]
 commits: []
 cites: [§6]
 related: [62, 64]
@@ -30,3 +31,5 @@ log past its own offset, as item 62 made `watch` do for one log.
 ## Record
 
 - 2026-10-02: filed from a session that surveyed the operator's views of the queue.
+- 2026-10-03: done by `SA-0197` (#659), in the spec loop's run 27. `saffron watch`
+  with no spec id follows every task directory at once.

@@ -40,6 +40,7 @@ from saffron.reconcile import ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
+from saffron.report.index import orphan_rows, trailing_accept_rate
 from saffron.report.stack import write_stack_view
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
@@ -62,7 +63,7 @@ from saffron.task import (
     run_task,
     spec_ceilings,
 )
-from saffron.watch import UnknownTask, follow, once
+from saffron.watch import UnknownTask, follow, follow_every_task, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
@@ -151,9 +152,15 @@ def main(argv: list[str] | None = None) -> int:
     reconcile_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
     watch_parser = subcommands.add_parser(
-        "watch", help="follow one task's event log, agent-free"
+        "watch", help="follow one task's event log, or every task's, agent-free"
     )
-    watch_parser.add_argument("task", help="the spec id whose task directory to read")
+    watch_parser.add_argument(
+        "task",
+        nargs="?",
+        default=None,
+        help="the spec id whose task directory to read, omit to follow "
+        "every task directory under the batch tree instead",
+    )
     watch_parser.add_argument(
         "--all",
         action="store_true",
@@ -202,6 +209,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.command == "watch" and args.task is None:
+        if args.whole_log:
+            watch_parser.error("--whole-log needs a spec id")
+        if args.no_follow:
+            watch_parser.error("--no-follow needs a spec id")
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
 
@@ -1606,6 +1618,25 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             )
             candidates = resolved.candidates
 
+            # A failed rewrite never stops the night: the page is not the record.
+            # Skipped when nothing was stamped, or the repo is unseen.
+            if resolved.reconciled.orphaned and resolved.repo_id is not None:
+                try:
+                    stamped = set(resolved.reconciled.orphaned)
+                    spec_ids = {
+                        row["spec_id"]
+                        for row in ledger.tasks_by_repo(resolved.repo_id)
+                        if row["task_id"] in stamped
+                    }
+                    orphan_rows(
+                        out_dir,
+                        repo.name,
+                        spec_ids,
+                        header={"trailing accept rate": trailing_accept_rate(ledger)},
+                    )
+                except Exception as exc:
+                    print(f"batch: the queue page could not be rewritten: {exc}")
+
             if args.stack:
                 # A stack batch never rescans: the order is fixed right here.
                 # `repo_id` is still looked up fresh per task, not pinned now.
@@ -1814,20 +1845,32 @@ def _poll_interval(value: str) -> float:
 
 
 def _watch(args: argparse.Namespace, out_dir: Path) -> int:
-    """`saffron watch SY-1` — follow one task's `events.jsonl`, rendered
-    exactly as the attended terminal that ran it would have printed each
-    line.
+    """`saffron watch SY-1` follows one task's `events.jsonl`, rendered as the
+    attended terminal printed it. With no spec id it follows every task
+    directory under `out_dir` instead, through `follow_every_task`.
 
-    `task_dir` is built from `out_dir`, the same batch-tree root `main`
-    already computed above — never a second reading of `--home` here, which
-    is how a watcher comes to read a directory nothing writes.
-
-    By default this opens on the newest task the directory's log holds — a
-    spec driven twice writes both into one `events.jsonl`, and `--whole-log`
-    is the escape hatch back to every task, in order (backlog item
-    64). `--all` was already taken for the noisy-agent-line flag, so this is
-    a second name rather than a second meaning for it.
+    `task_dir` comes from `out_dir`, the batch-tree root `main` already
+    computed, read here and nowhere else. By default this opens on the
+    newest task a log holds, since a spec driven twice writes both into one
+    file. `--whole-log` reaches every task instead (backlog item 64), and
+    `--all`, already the noisy-line flag, keeps its one meaning.
     """
+    if args.task is None:
+        if not out_dir.is_dir():
+            print(f"watch: no batch tree at {out_dir}")
+            return 1
+        try:
+            for line in follow_every_task(
+                out_dir, verbose=args.all, interval=args.interval
+            ):
+                # Flushed: stdout is block-buffered off a tty, so a piped
+                # follower would show nothing until 8 KB accumulate.
+                print(line, flush=True)
+        except KeyboardInterrupt:
+            # The documented way this ends, the way `tail -f` ends.
+            pass
+        return 0
+
     task_dir = out_dir / args.task
     # `--no-follow` is this same loop with a poll that says stop the first
     # time round. Passed as a kwarg rather than a flag through `follow`, so
@@ -1841,9 +1884,6 @@ def _watch(args: argparse.Namespace, out_dir: Path) -> int:
             interval=args.interval,
             **poll,
         ):
-            # Flushed: stdout is block-buffered off a tty, and a `tail -f`
-            # shaped command that shows nothing until 8 KB accumulates is one
-            # nobody pipes twice.
             print(line, flush=True)
     except UnknownTask:
         print(f"watch: no task directory at {task_dir}")

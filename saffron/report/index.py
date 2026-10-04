@@ -8,15 +8,18 @@ from __future__ import annotations
 import fcntl
 import html
 import json
+import math
 import os
 import tempfile
 from collections.abc import Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
-from saffron.ledger import TaskState
+from saffron.cell.session import LiveState
+from saffron.ledger import Ledger, TaskState
+from saffron.scheduler import SETTLED_STATES
 
 # A row is a task or a skipped repo (§6). `SKIPPED` waits on multi-repo, which is v2.
 RowState = TaskState | Literal["SKIPPED"]
@@ -151,6 +154,7 @@ def render_index(
     )
     return f"""<!doctype html>
 <meta charset="utf-8">
+<meta http-equiv="refresh" content="60">
 <title>Saffron — morning queue</title>
 <style>
   body {{ font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -185,6 +189,18 @@ def counted_header(lines: Sequence[QueueLine]) -> dict[str, str]:
         "tasks": str(len(lines)),
         "spend": f"${sum(ln.cost_usd_est or 0 for ln in lines):.2f}",
     }
+
+
+def trailing_accept_rate(ledger: Ledger) -> str:
+    """§6's one number: the merged share of the twenty newest settled tasks,
+    pooled across every repo the ledger holds. Half rounds up, and the
+    count joins the percent below a full window of twenty."""
+    rows = ledger.newest_tasks_in_states(SETTLED_STATES, 20)
+    if not rows:
+        return "no settled task yet"
+    merged = sum(1 for row in rows if row["state"] == "MERGED")
+    pct = math.floor(100 * merged / len(rows) + 0.5)
+    return f"{pct}%" if len(rows) == 20 else f"{pct}% of {len(rows)}"
 
 
 def _row(line: QueueLine) -> str:
@@ -268,18 +284,63 @@ def append_queue_line(
             if (row.repo, row.spec_id) != (line.repo, line.spec_id)
         ]
         lines.append(line)
-        # Counted here, and a caller cannot override either: `out_dir` is shared
-        # and rows accumulate, so a caller's one-task spend would report only the
-        # last one.
-        counted = counted_header(lines)
-        header = counted | {k: v for k, v in (header or {}).items() if k not in counted}
-        # Compute all outputs before any write, so render failures leave nothing
-        # behind.
-        queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
-        index_html = render_index(lines, header=header)
-        _atomic_write(store, queue_json)
-        index = out_dir / "index.html"
-        _atomic_write(index, index_html)
+        return _write_rows(out_dir, lines, header)
+
+
+def orphan_rows(
+    out_dir: Path,
+    repo: str,
+    spec_ids: Sequence[str] | set[str],
+    *,
+    header: dict[str, str] | None = None,
+) -> Path | None:
+    """A batch scan's own rewrite (DESIGN.md §6): every stored row of `repo`
+    naming a spec in `spec_ids`, still in one of `get_args(LiveState)`, moves
+    to `ORPHANED`. Every other row, and every other field of a rewritten one,
+    stays as it was.
+
+    Returns early, with no lock taken, when `out_dir` holds no `queue.json`
+    yet. A repo's first night has nothing for this to rewrite. Writes
+    nothing, leaving both files untouched, when no row's state changes.
+    """
+    store = out_dir / "queue.json"
+    if not store.is_file():
+        return None
+    live = set(get_args(LiveState))
+    with _locked(out_dir):
+        lines = _existing_queue_rows(store)
+        changed = False
+        rewritten = []
+        for row in lines:
+            if row.repo == repo and row.spec_id in spec_ids and row.state in live:
+                rewritten.append(replace(row, state="ORPHANED"))
+                changed = True
+            else:
+                rewritten.append(row)
+        if not changed:
+            return None
+        return _write_rows(out_dir, rewritten, header)
+
+
+def _write_rows(
+    out_dir: Path, lines: list[QueueLine], header: dict[str, str] | None
+) -> Path:
+    """Render and persist `lines`, the shared tail of `append_queue_line` and
+    `orphan_rows`, so the counted header is computed in exactly one place.
+
+    Compute all outputs before any write, so render failures leave nothing
+    behind.
+    """
+    # Counted here, and a caller cannot override either: `out_dir` is shared
+    # and rows accumulate, so a caller's one-task spend would report only the
+    # last one.
+    counted = counted_header(lines)
+    merged = counted | {k: v for k, v in (header or {}).items() if k not in counted}
+    queue_json = json.dumps([asdict(ln) for ln in lines], indent=2)
+    index_html = render_index(lines, header=merged)
+    _atomic_write(out_dir / "queue.json", queue_json)
+    index = out_dir / "index.html"
+    _atomic_write(index, index_html)
     return index
 
 

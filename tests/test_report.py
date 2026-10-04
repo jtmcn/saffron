@@ -2001,3 +2001,87 @@ def test_a_state_nobody_ranked_sorts_with_the_states_that_need_you():
         link="",
     )
     assert sort_key(line)[0] == _STATE_RANK["GATE_ERROR"]
+
+
+def test_orphaning_rewrites_only_a_live_row_of_the_named_specs(tmp_path):
+    """`orphan_rows` moves only a named spec's own live row to `ORPHANED`.
+    Every other field, and every other row, stays as it was (DESIGN.md
+    §6)."""
+    from saffron.report.index import orphan_rows
+
+    rows = [
+        line(repo="r", spec_id="A-1", state="IMPLEMENTING", risk="elevated", note="n"),
+        line(repo="r", spec_id="A-2", state="REPAIRING", cost_usd_est=1.5),
+        line(repo="r", spec_id="A-3", state="REVIEWING"),
+        line(repo="r", spec_id="A-4", state="REBUTTING"),
+        line(repo="r", spec_id="A-5", state="READY_FOR_REVIEW"),
+        line(repo="r", spec_id="A-6", state="EXHAUSTED"),
+        line(repo="r", spec_id="A-7", state="ORPHANED"),
+        line(repo="r", spec_id="B-1", state="REVIEWING"),
+        line(repo="s", spec_id="A-1", state="REVIEWING"),
+    ]
+    for row in rows:
+        append_queue_line(tmp_path, row, header={})
+
+    index = orphan_rows(tmp_path, "r", {f"A-{n}" for n in range(1, 8)}, header={})
+    assert index is not None
+
+    # Whole rows, in order: a rewrite that drops any other field fails here.
+    stored = json.loads((tmp_path / "queue.json").read_text())
+    assert stored == [
+        asdict(replace(row, state="ORPHANED")) if n < 4 else asdict(row)
+        for n, row in enumerate(rows)
+    ]
+
+    page = index.read_text()
+    assert page.count("<code>ORPHANED</code>") == 5
+    assert "tasks <strong>9</strong>" in page
+    assert "spend <strong>$1.50</strong>" in page
+    assert page.count('<meta http-equiv="refresh" content="60">') == 1
+
+    sentinel = "sentinel"
+    (tmp_path / "index.html").write_text(sentinel)
+    before = (tmp_path / "queue.json").read_bytes()
+    # Repo `r` with no live row named, then a repo with no rows at all.
+    for repo in ("r", "t"):
+        assert orphan_rows(tmp_path, repo, {"A-5", "A-6", "A-7"}, header={}) is None
+        assert (tmp_path / "index.html").read_text() == sentinel
+        assert (tmp_path / "queue.json").read_bytes() == before
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert orphan_rows(empty, "r", {"A-1"}, header={}) is None
+    assert list(empty.iterdir()) == []
+
+
+def test_the_queue_page_refreshes_itself_every_minute(tmp_path):
+    """`render_index` itself, and every page `append_queue_line` and
+    `orphan_rows` write, carry the sixty-second meta refresh once, right
+    after the charset tag."""
+    from saffron.report.index import orphan_rows
+
+    html = render_index([], header={})
+    lines = html.splitlines()
+    assert lines[1] == '<meta charset="utf-8">'
+    assert lines[2] == '<meta http-equiv="refresh" content="60">'
+    assert html.count('<meta http-equiv="refresh" content="60">') == 1
+
+    row = line(repo="r", spec_id="A-1", state="IMPLEMENTING")
+    index = append_queue_line(tmp_path, row, header={})
+    assert index.read_text().count('<meta http-equiv="refresh" content="60">') == 1
+
+    index = orphan_rows(tmp_path, "r", {"A-1"}, header={})
+    assert index is not None
+    assert index.read_text().count('<meta http-equiv="refresh" content="60">') == 1
+
+
+def test_every_live_state_is_ranked_and_in_flight():
+    """`LiveState`'s own four names are each a key of `_STATE_RANK` and a
+    member of `reconcile.IN_FLIGHT_STATES`."""
+    from saffron.cell.session import LiveState
+    from saffron.reconcile import IN_FLIGHT_STATES
+
+    names = set(get_args(LiveState))
+    assert names == {"IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"}
+    assert names <= set(_STATE_RANK)
+    assert names <= IN_FLIGHT_STATES

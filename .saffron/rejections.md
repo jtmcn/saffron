@@ -1559,3 +1559,67 @@ the critic did not raise.
 - `SA-0152` (#650): the page prints a per-lens term, `not_reached`, for a
   layer whose Spec lens reviewed.
   **Bucket 3**, conventions. **Open:** b-466005.
+
+## 2026-10-03, `SA-0197`, `SA-0198` and `SA-0199` (the spec loop's run 27, #659, #662 and #670)
+
+- `SA-0197` (#659): the refusal witness never read the exit code, so a
+  stderr refusal exiting 1 passed for argparse's usage exit.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #659.
+- `SA-0197` (#659): only a missing batch tree was driven, so `exists()` in
+  place of `is_dir()` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #659.
+- `SA-0197` (#659): the directory present at the start held no log, so a
+  filter skipped for a log holding lines at the start passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #659.
+- `SA-0197` (#659): two docstrings claimed a shared fixture and an offset for
+  late joiners that the code does not have.
+  **Bucket 3**, conventions. **Landed:** a review commit on #659.
+- `SA-0197` (#659): `CLAUDE.md` and `DESIGN.md` still describe `saffron watch`
+  as following one spec's log.
+  **Bucket 3**, conventions. **Open:** b-348114.
+- `SA-0198` (#662): no ledger held nine to nineteen settled tasks, so the
+  count boundary could move anywhere in that range.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #662.
+- `SA-0198` (#662): the tie-break's kill rested on SQLite scanning tied rows
+  by ascending rowid.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #662.
+- `SA-0198` (#662): the test spelled the seven settled names twice, against
+  its own docstring.
+  **Bucket 3**, conventions. **Landed:** a review commit on #662.
+- `SA-0198` (#662): the header key is spelled by hand at each page writer.
+  **Bucket 3**, conventions. **Open:** b-2944c9.
+- `SA-0198` (#662): `SETTLED_STATES` has no vocabulary test or ontology class.
+  **Bucket 1**, a vocabulary test. **Open:** b-b2fffe.
+- `SA-0199` (#670): the `ORPHANED` row was checked on three fields, so a row
+  that changed its attempts, note or link passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): stored rows were compared on state and three fields, so
+  a rewrite that lost attempts or concerns passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): the notes' no-change call on repo `r` was dropped, so a
+  write whenever the repo has rows passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): the empty-directory check passed a directory that did not
+  exist, so a lock taken in an existing one passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): every failing write raised `OSError`, so either catch in
+  `run_task` narrowed to `OSError` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): the raising `orphan_rows` stub raised `OSError`, so the
+  scan's catch narrowed to it passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): no criterion pinned the `ORPHANED` write's header or its
+  printed line on failure, though the spec body asks for both.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #670.
+- `SA-0199` (#670): a comment cited `DESIGN.md` §6 for a rule §6 does not
+  state.
+  **Bucket 3**, conventions. **Landed:** a review commit on #670.
+- `SA-0199` (#670): a new test factory splatted a dict into `QueueLine`,
+  where the typed `line()` already exists.
+  **Bucket 3**, conventions. **Landed:** a review commit on #670.
+- `SA-0199` (#670): a comment named a repeated repair the case does not
+  drive, and an inner `_rows` shadowed the module's.
+  **Bucket 3**, conventions. **Landed:** a review commit on #670.
+- `SA-0199` (#670): `DESIGN.md:1277` calls the end-of-task line a verdict,
+  which `CONTEXT.md` avoids.
+  **Bucket 3**, conventions. **Open:** b-348114.
