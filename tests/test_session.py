@@ -1425,8 +1425,8 @@ def test_a_cell_reports_each_phase_state_as_it_enters_it(monkeypatch, tmp_path):
         "REBUTTING",
     }
 
-    # All four, with a repair that repeats: the gate-count fixture already
-    # proves this shape fails once then passes, then anchors a blocker.
+    # All four: one repair, then a blocker that REBUT answers. The gate-count
+    # fixture already proves this shape.
     failing = Failure(file="a.py", code="E501", message="too long")
     cell = _stub_the_runtime(
         monkeypatch, suites=([], _results(failing), [], []), patch=_ANCHORING_DIFF

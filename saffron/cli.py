@@ -1618,7 +1618,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             )
             candidates = resolved.candidates
 
-            # A failed rewrite never stops the night (`DESIGN.md` §6).
+            # A failed rewrite never stops the night: the page is not the record.
             # Skipped when nothing was stamped, or the repo is unseen.
             if resolved.reconciled.orphaned and resolved.repo_id is not None:
                 try:

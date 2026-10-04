@@ -3289,9 +3289,9 @@ def test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps(
         monkeypatch.setattr(cli, "run_batch", _fake_loop)
         monkeypatch.setattr(cli, "run_stack_batch", _fake_loop)
         if raising_orphan:
-
+            # Not an `OSError`, so a catch narrowed to one fails this test.
             def _raising_orphan(*a, **k):
-                raise OSError("disk full")
+                raise ValueError("disk full")
 
             monkeypatch.setattr(cli, "orphan_rows", _raising_orphan)
 

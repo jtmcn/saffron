@@ -1406,11 +1406,7 @@ def test_a_running_task_holds_one_queue_row_that_its_end_replaces(
         )
         index_report.append_queue_line(out_dir, other, header={})
         other_row = asdict(other)
-
-        def _rows() -> list[dict]:
-            return json.loads((out_dir / "queue.json").read_text())
-
-        assert _rows() == [other_row]
+        assert _rows(out_dir) == [other_row]
 
         ledger = Ledger(tmp_path / f"{name}.db")
         _seed_one_merged(ledger)
@@ -1420,10 +1416,10 @@ def test_a_running_task_holds_one_queue_row_that_its_end_replaces(
         def _run_one_cell(*a, **k):
             # Captured on entry, before any `on_state` call, so a row
             # written early, such as `QUEUED`, still shows up here.
-            reads.append(_rows())
+            reads.append(_rows(out_dir))
             for state in ("IMPLEMENTING", "REVIEWING"):
                 k["on_state"](state)
-                reads.append(_rows())
+                reads.append(_rows(out_dir))
                 page = (out_dir / "index.html").read_text()
                 assert f"<code>{state}</code>" in page
                 match = re.search(
@@ -1497,7 +1493,7 @@ def test_a_running_task_holds_one_queue_row_that_its_end_replaces(
         assert reads[1] == [other_row, _expect_live(spec_id, "IMPLEMENTING")]
         assert reads[2] == [other_row, _expect_live(spec_id, "REVIEWING")]
         assert rates == ["100% of 1", "100% of 2"]
-        return result, _rows(), other_row
+        return result, _rows(out_dir), other_row
 
     result, final, _other = _run_case(
         "exhausted", "SY-30", end_state="EXHAUSTED", package_ok=False
@@ -1521,12 +1517,16 @@ def test_a_cell_that_raises_leaves_its_running_row_orphaned(tmp_path, monkeypatc
     re-raises the same exception object. A raise before any write leaves no
     row and no page behind (DESIGN.md §6)."""
 
+    live_rows: dict[str, list[dict]] = {}
+
     def _drive(spec_id, out_dir, error, *, after_write):
         ledger = Ledger(tmp_path / f"{spec_id}.db")
+        _seed_one_merged(ledger)
 
         def _run_one_cell(*a, **k):
             if after_write:
                 k["on_state"]("REVIEWING")
+                live_rows[spec_id] = json.loads((out_dir / "queue.json").read_text())
             raise error
 
         monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
@@ -1552,18 +1552,17 @@ def test_a_cell_that_raises_leaves_its_running_row_orphaned(tmp_path, monkeypatc
     error = RuntimeError("boom")
     _drive("SY-40", out_dir, error, after_write=True)
     rows = json.loads((out_dir / "queue.json").read_text())
-    assert len(rows) == 1
-    assert rows[0]["spec_id"] == "SY-40"
-    assert rows[0]["state"] == "ORPHANED"
-    assert rows[0]["risk"] == "elevated"
+    assert [live["risk"] for live in live_rows["SY-40"]] == ["elevated"]
+    assert rows == [{**live, "state": "ORPHANED"} for live in live_rows["SY-40"]]
+    page = (out_dir / "index.html").read_text()
+    assert "trailing accept rate <strong>100% of 1</strong>" in page
 
     # A `KeyboardInterrupt`, caught the same way.
     out_dir2 = tmp_path / "out-write-interrupt"
     interrupt = KeyboardInterrupt()
     _drive("SY-41", out_dir2, interrupt, after_write=True)
     rows2 = json.loads((out_dir2 / "queue.json").read_text())
-    assert rows2[0]["state"] == "ORPHANED"
-    assert rows2[0]["risk"] == "elevated"
+    assert rows2 == [{**live, "state": "ORPHANED"} for live in live_rows["SY-41"]]
 
     # No write landed before the raise: no row, no page, but the task's own
     # `events.jsonl` directory is there.
@@ -1589,8 +1588,9 @@ def test_a_failed_live_row_write_never_stops_the_cell(tmp_path, monkeypatch):
 
     def _flaky(fails_on: set[str]):
         def _append(out, line, **kwargs):
+            # Not an `OSError`, so a catch narrowed to one fails this test.
             if line.state in fails_on:
-                raise OSError(f"disk full writing {line.state}")
+                raise ValueError(f"disk full writing {line.state}")
             return real_append(out, line, **kwargs)
 
         return _append
@@ -1677,6 +1677,10 @@ def test_a_failed_live_row_write_never_stops_the_cell(tmp_path, monkeypatch):
     rows2 = json.loads((out_dir2 / "queue.json").read_text())
     assert len(rows2) == 1
     assert rows2[0]["state"] == "REVIEWING"
+    orphan_hits = [
+        p for p in printed if "SY-51" in p and "ORPHANED" in p and "disk full" in p
+    ]
+    assert len(orphan_hits) == 1
 
     # `REVIEWING` fails mid-run: the exception still propagates, and the
     # store holds no row at all.

@@ -2003,16 +2003,6 @@ def test_a_state_nobody_ranked_sorts_with_the_states_that_need_you():
     assert sort_key(line)[0] == _STATE_RANK["GATE_ERROR"]
 
 
-def _line(repo, spec_id, state, **fields):
-    fields.setdefault("attempts", 1)
-    fields.setdefault("cost_usd_est", None)
-    fields.setdefault("concerns", 0)
-    fields.setdefault("added", 0)
-    fields.setdefault("removed", 0)
-    fields.setdefault("link", "")
-    return QueueLine(repo=repo, spec_id=spec_id, state=state, **fields)
-
-
 def test_orphaning_rewrites_only_a_live_row_of_the_named_specs(tmp_path):
     """`orphan_rows` moves only a named spec's own live row to `ORPHANED`.
     Every other field, and every other row, stays as it was (DESIGN.md
@@ -2020,15 +2010,15 @@ def test_orphaning_rewrites_only_a_live_row_of_the_named_specs(tmp_path):
     from saffron.report.index import orphan_rows
 
     rows = [
-        _line("r", "A-1", "IMPLEMENTING", risk="elevated", note="a note"),
-        _line("r", "A-2", "REPAIRING", cost_usd_est=1.5),
-        _line("r", "A-3", "REVIEWING"),
-        _line("r", "A-4", "REBUTTING"),
-        _line("r", "A-5", "READY_FOR_REVIEW"),
-        _line("r", "A-6", "EXHAUSTED"),
-        _line("r", "A-7", "ORPHANED"),
-        _line("r", "B-1", "REVIEWING"),
-        _line("s", "A-1", "REVIEWING"),
+        line(repo="r", spec_id="A-1", state="IMPLEMENTING", risk="elevated", note="n"),
+        line(repo="r", spec_id="A-2", state="REPAIRING", cost_usd_est=1.5),
+        line(repo="r", spec_id="A-3", state="REVIEWING"),
+        line(repo="r", spec_id="A-4", state="REBUTTING"),
+        line(repo="r", spec_id="A-5", state="READY_FOR_REVIEW"),
+        line(repo="r", spec_id="A-6", state="EXHAUSTED"),
+        line(repo="r", spec_id="A-7", state="ORPHANED"),
+        line(repo="r", spec_id="B-1", state="REVIEWING"),
+        line(repo="s", spec_id="A-1", state="REVIEWING"),
     ]
     for row in rows:
         append_queue_line(tmp_path, row, header={})
@@ -2036,19 +2026,12 @@ def test_orphaning_rewrites_only_a_live_row_of_the_named_specs(tmp_path):
     index = orphan_rows(tmp_path, "r", {f"A-{n}" for n in range(1, 8)}, header={})
     assert index is not None
 
+    # Whole rows, in order: a rewrite that drops any other field fails here.
     stored = json.loads((tmp_path / "queue.json").read_text())
-    assert [(row["repo"], row["spec_id"]) for row in stored] == [
-        (row.repo, row.spec_id) for row in rows
+    assert stored == [
+        asdict(replace(row, state="ORPHANED")) if n < 4 else asdict(row)
+        for n, row in enumerate(rows)
     ]
-    for n, row in enumerate(stored):
-        if n < 4:
-            assert row["state"] == "ORPHANED"
-        else:
-            assert row["state"] == rows[n].state
-    # Every other field of a rewritten row survives.
-    assert stored[0]["risk"] == "elevated"
-    assert stored[0]["note"] == "a note"
-    assert stored[1]["cost_usd_est"] == 1.5
 
     page = index.read_text()
     assert page.count("<code>ORPHANED</code>") == 5
@@ -2059,14 +2042,16 @@ def test_orphaning_rewrites_only_a_live_row_of_the_named_specs(tmp_path):
     sentinel = "sentinel"
     (tmp_path / "index.html").write_text(sentinel)
     before = (tmp_path / "queue.json").read_bytes()
-    result = orphan_rows(tmp_path, "t", {"A-5", "A-6", "A-7"}, header={})
-    assert result is None
-    assert (tmp_path / "index.html").read_text() == sentinel
-    assert (tmp_path / "queue.json").read_bytes() == before
+    # Repo `r` with no live row named, then a repo with no rows at all.
+    for repo in ("r", "t"):
+        assert orphan_rows(tmp_path, repo, {"A-5", "A-6", "A-7"}, header={}) is None
+        assert (tmp_path / "index.html").read_text() == sentinel
+        assert (tmp_path / "queue.json").read_bytes() == before
 
     empty = tmp_path / "empty"
+    empty.mkdir()
     assert orphan_rows(empty, "r", {"A-1"}, header={}) is None
-    assert not empty.exists()
+    assert list(empty.iterdir()) == []
 
 
 def test_the_queue_page_refreshes_itself_every_minute(tmp_path):
@@ -2081,7 +2066,7 @@ def test_the_queue_page_refreshes_itself_every_minute(tmp_path):
     assert lines[2] == '<meta http-equiv="refresh" content="60">'
     assert html.count('<meta http-equiv="refresh" content="60">') == 1
 
-    row = _line("r", "A-1", "IMPLEMENTING")
+    row = line(repo="r", spec_id="A-1", state="IMPLEMENTING")
     index = append_queue_line(tmp_path, row, header={})
     assert index.read_text().count('<meta http-equiv="refresh" content="60">') == 1
 
