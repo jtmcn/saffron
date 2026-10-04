@@ -1,5 +1,5 @@
 ---
-id: SA-0201
+id: SA-0205
 title: The ledger cannot say which model ran an attempt, because no writer of an attempt row passes one
 type: feature
 priority: 3
@@ -275,7 +275,7 @@ message.
   `attempts.model` in this spec's branch (`DESIGN.md:359`). It reads
   "`attempts.model` names the models an attempt's assistant messages
   named, comma-joined in first-seen order. The CLI's own `<synthetic>`
-  marker is no model and is skipped (SA-0201)." The file is protected.
+  marker is no model and is skipped (SA-0205)." The file is protected.
   Do not touch it.
 - **`replay`.** Its attempt has no agent, so `None` is its true model.
 - **End review turns.** Their agent is `stop_on_rejected` over

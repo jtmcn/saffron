@@ -140,7 +140,7 @@ a wrong version pass. Every caller blocker came from parallel drafting.
   `prose` hook refused three of them. A scratchpad script rewrote the pin per
   branch during the restack. `driver.py bookkeeping` could own that pin.
 
-## SA-0201, from item b-3732ef
+## SA-0205, from item b-3732ef
 
 The spec makes the ledger record which model ran each attempt. It covers
 the item's first half. The paid comparison of a stronger model stays a
@@ -172,7 +172,7 @@ Round 2 repeated round 1's class, so no third review ran. The writer
 implemented every declared wrong version on its prototype instead. It
 reported 47 probes and 47 killed, after one survivor forced a row value.
 
-## For the skill, from SA-0201
+## For the skill, from SA-0205
 
 Check 1 should be a probe table, not a reading. For each wrong version,
 the writer implements it on the prototype and names the row that kills it.

@@ -4,7 +4,7 @@ title: Every repair turn resumes the implementer's session on the default model,
 status: open
 tier: 3
 filed: 2026-09-21
-specs: [SA-0201]
+specs: [SA-0205]
 prs: []
 commits: []
 cites: ["§5.4"]
