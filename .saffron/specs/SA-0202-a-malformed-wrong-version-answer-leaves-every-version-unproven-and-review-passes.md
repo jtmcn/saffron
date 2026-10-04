@@ -4,7 +4,7 @@ title: A malformed wrong-version answer leaves every version unproven, and REVIE
 type: feature
 priority: 1
 depends_on: [SA-0201]
-estimated_lines: 342
+estimated_lines: 343
 estimate_measured: true
 touches:
   - saffron/phases/review.py
@@ -64,9 +64,10 @@ acceptance:
   - claim: >-
       The re-prompt fires once, and only where `run_lens` would fire its own.
       A second bad answer ends the criterion with an error that opens
-      `not the schema, even after a re-prompt: ` and carries its own cause.
-      That holds for a second answer with no block, one with the wrong
-      number of answers, and one whose JSON does not parse. A re-prompt that
+      `not the schema, even after a re-prompt: ` and carries the second
+      answer's own cause, not the first's. That holds for a second answer
+      with no block, one with the wrong number of answers after a first with
+      no block, and one whose JSON does not parse. A re-prompt that
       fails ends it too, charged both turns. A first turn that left exactly
       what it spent is re-prompted. No re-prompt follows a first turn that
       left less of the ceiling than it spent, one that carries no session id,
@@ -82,6 +83,7 @@ acceptance:
       - The retry's count check is copied from the first answer's, so a second wrong count files `not the schema` with no word of the re-prompt.
       - A second answer whose JSON does not parse is filed as a first-answer error.
       - The re-prompt is refused when the ceiling left equals what the first turn spent.
+      - The error after a second bad answer carries the first answer's cause.
   - claim: >-
       A criterion whose wrong-version entry still carries an error is an
       `error`, never a silent pass. `wrong-versions.json` records each of its
@@ -112,8 +114,8 @@ acceptance:
       criterion whose wrong-version entry carries an error. It names no
       answered criterion, and quotes no entry's error. `package()` hands the
       renderer the entries the cell outcome carries. The witness drives an
-      answered entry and two errored ones, from a failed session and from an
-      answer that was not the schema.
+      answered entry whose versions name no edit, and two errored ones,
+      from a failed session and from an answer that was not the schema.
     witness: tests/test_package.py::test_the_packaged_body_names_each_criterion_whose_wrong_versions_no_edit_reached
     wrong_versions:
       - "`package()` never hands the entries to the renderer."
@@ -121,6 +123,7 @@ acceptance:
       - The body quotes each entry's error beside its witness.
       - Only an entry whose error starts with "not the schema" is named.
       - The line is built and never added to the section.
+      - The body names each entry whose every version has a null edit.
   - claim: >-
       A session whose first answer is the schema is asked once, and the REVIEW
       line of a review with no errored criterion reads as it does today.
@@ -199,7 +202,8 @@ and nothing above one log line says so. Give the session the re-prompt a
 lens gets, and name what is still unanswered.
 
 1. **The re-prompt.** In `run_wrong_versions`, an answer that is not the
-   schema gets one re-prompt, built as `run_lens` builds its own. That
+   schema gets one re-prompt, built as `run_lens` builds its own,
+   without its announcement line. That
    covers a missing block, JSON that does not parse, JSON the model refuses
    and a wrong answer count. The retry resumes the failed turn's session,
    with the error then `EXTRACTION_PROMPT` as its prompt. It keeps the
@@ -316,7 +320,8 @@ its criterion's, `s-a` to `s-h`, except where the list says otherwise.
    `s-d`, so only the failure can refuse the re-prompt.
 5. `e`: a good answer at 0.1.
 6. `f`: a bad turn at 0.3, then `AgentFailed` carrying a turn at 0.25.
-7. `g`: two turns at 0.3 and 0.2, each a block of two answers.
+7. `g`: plain text with no block at 0.3, then a block of two answers at
+   0.2. The two causes differ, so the error shows whose it carries.
 8. `h`: two turns at 0.3 and 0.2, each a block whose JSON leaves a quote
    unescaped.
 
@@ -327,8 +332,9 @@ twelfth alone. Its errors are, in order, these.
 - `not the schema: no <output> block in the response`, twice
 - the first failure's own text, then `None`
 - `re-prompted once, then ` with the second failure's text
-- `not the schema, even after a re-prompt: 2 answers for 1 wrong versions`
-- one opening `not the schema, even after a re-prompt: Expecting ',' delimiter`
+- exactly `not the schema, even after a re-prompt: 2 answers for 1 wrong versions`
+- exactly `not the schema, even after a re-prompt: Expecting ',' delimiter: line 1 column 30 (char 29)`,
+  for a block holding `{"versions": [{"reason": "a "q" b", "edit": null}]}`
 
 Its costs are 1.2, 1.5, 0.3, 0.4, 0.1, 0.55, 0.5 and 0.5.
 
@@ -357,11 +363,12 @@ It asserts these.
 **Criterion 4's witness** follows
 `test_the_packaged_body_carries_the_implementers_notes`
 (`tests/test_package.py:1853`). Set `packageable.outcome.wrong_versions` to
-three entries. `t.py::answered` has error `None`. `t.py::cut` has an error
+three entries, each with one version whose `edit` is `None`.
+`t.py::answered` has error `None`. `t.py::cut` has an error
 ending `MARKER-ONE`, and `t.py::garbled` one opening `not the schema` and
 ending `MARKER-TWO`. Run `package()`, then read `pr_body.md`. The text
 between `## Not covered` and the next `## ` heading contains `t.py::cut` and
-`t.py::garbled`, and no `- Nothing:` line. The whole body contains neither
+`t.py::garbled`. The whole body contains neither
 `t.py::answered` nor `MARKER`.
 
 **Measured.** On 2026-10-03 a prototype of this change passed all four new
@@ -371,6 +378,9 @@ reverted to `0fecec0c`, all four new witnesses failed. Each wrong version
 above was applied to the prototype, and its own criterion's witness failed
 on every one. After the review, the revised witnesses ran again over the
 prototype and every wrong version was applied again. Each one failed again.
+The second review's fixes were measured the same way. A witness asserting no
+`- Nothing:` line was dropped, because it passed with no errored entry. The
+fixture's spec carries an unchecked criterion, which fills that section.
 
 **What criterion 3's witness leaves out.** It drives no re-prompt refused on
 the lens rule and no re-prompt that failed. Both entries carry an error the
@@ -392,6 +402,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks here. The
-prototype, counted by `size_gate`, came to 1369 tokens against the
+prototype, counted by `size_gate`, came to 1372 tokens against the
 `feature` ceiling of 3000. `estimated_lines` is that over four, with no
 overrun added. About a fifth of it is `saffron/`, and the rest is tests.
