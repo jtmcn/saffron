@@ -4,7 +4,7 @@ title: A plan turn the provider served nothing ends NOT_IMPLEMENTED and exits 1,
 type: bug
 priority: 2
 depends_on: [SA-0199]
-estimated_lines: 240
+estimated_lines: 243
 estimate_measured: true
 touches:
   - saffron/phases/implement.py
@@ -78,13 +78,14 @@ acceptance:
       - The served-nothing check made before the rejected-window check, so a closed window ends `PROVIDER_UNREACHABLE`.
       - The run row left open for the new state, so it does not read `COMPLETE`.
   - claim: >-
-      Of the plan turn's first call, a plan re-prompt and an implement turn,
-      only the first call can end the task `PROVIDER_UNREACHABLE`. The
-      witness drives four cases with no commits. That first call served
+      Of the plan turn's first call, its two re-prompts and an implement
+      turn, only the first call can end the task `PROVIDER_UNREACHABLE`. The
+      witness drives five cases with no commits. That first call served
       nothing ends `PROVIDER_UNREACHABLE`. That first
       call failing `api_error` at $0.00 with tokens served ends
-      `NOT_IMPLEMENTED`. A plan re-prompt served nothing after a completed
-      first call ends `NOT_IMPLEMENTED`. An implement turn served nothing
+      `NOT_IMPLEMENTED`. A schema re-prompt served nothing after a completed
+      first call ends `NOT_IMPLEMENTED`, and so does a scope re-prompt served
+      nothing after a first call whose proposal was refused. An implement turn served nothing
       after a completed plan turn ends `NOT_IMPLEMENTED` and logs that it
       ended without finishing. Each case checks the outcome, the task row
       and the number of turns run.
@@ -93,6 +94,7 @@ acceptance:
       - A failed plan re-prompt that keeps its served-nothing fact, so it ends `PROVIDER_UNREACHABLE` after a completed turn.
       - An implement turn served nothing that also ends `PROVIDER_UNREACHABLE`.
       - A plan-turn check on `api_error` at $0.00 instead of the served-nothing fact.
+      - The first call's completion recorded just before the schema re-prompt, so a failed scope re-prompt ends `PROVIDER_UNREACHABLE`.
   - claim: >-
       `saffron cell` exits 2 when its task ends `PROVIDER_UNREACHABLE`, and
       still exits 1 when it ends `NOT_IMPLEMENTED`.
@@ -123,8 +125,10 @@ acceptance:
       no wait, and nothing that depends on it is refused. It still counts
       toward the breaker, and a success after it resets the count. So the
       breaker bounds the re-offers: two in a row end the night
-      `INFRASTRUCTURE`, and the spec is not offered a third time. The
-      witness drives both halves. In the first order, two specs each end
+      `INFRASTRUCTURE`, and the spec is not offered a third time. The count
+      goes through the breaker's own abort set. With that set patched to
+      leave the state out, the same spec runs a third time and the night
+      drains. The witness drives all three. In the first order, two specs each end
       `PROVIDER_UNREACHABLE` once and then reach review, and the night drains.
       In the second, one spec ends `PROVIDER_UNREACHABLE` twice with a third
       run queued that would reach review.
@@ -140,6 +144,7 @@ acceptance:
       - The state routed through the `RATE_LIMITED` wait, so the batch sleeps for a reset time it was never given.
       - The state re-offered but not counted, so a run of them never reaches the breaker.
       - The breaker's abort set left without the state.
+      - The re-offer counted in its own branch beside the `RATE_LIMITED` one, outside the abort-set test, so the declared mutant cannot reach it.
 ---
 
 ## Context
@@ -178,7 +183,8 @@ when the turn failed (`saffron/phases/implement.py:385-421`).
 (`saffron/cell/session.py:511-513`). Its two re-prompts resume
 it after a completed first call (`saffron/cell/session.py:542-549`,
 `:575-582`). On `AgentFailed` it re-raises with the cost summed
-(`saffron/cell/session.py:611-618`). `run_one_cell` catches that, sets
+(`saffron/cell/session.py:611-618`). `_drive_cell`, which `run_one_cell`
+wraps (`saffron/cell/session.py:1785`), catches that, sets
 `NOT_IMPLEMENTED` and finishes the run `COMPLETE`
 (`saffron/cell/session.py:2149-2169`). The CLI maps an unmapped state to 1
 (`saffron/cli.py:488`).
@@ -186,7 +192,7 @@ it after a completed first call (`saffron/cell/session.py:542-549`,
 **The rate-limit guard comes first.** Every turn goes through
 `stop_on_rejected` (`saffron/cell/session.py:2045`). It turns a failed turn on
 a `rejected` window into `RateLimited` before any phase sees the
-`AgentFailed` (`saffron/cell/session.py:164-185`). `run_one_cell` ends that
+`AgentFailed` (`saffron/cell/session.py:164-185`). `_drive_cell` ends that
 `RATE_LIMITED` (`saffron/cell/session.py:3066-3094`).
 
 **What a later turn does today.** An implement turn that fails is kept as
@@ -198,7 +204,7 @@ rebuttal turns each have their own failure path (`saffron/cell/session.py:2324`,
 `:2504`, `:2574`, `saffron/phases/review.py:263`, `saffron/phases/rebut.py:210`).
 This spec changes none of them.
 
-**What `PREFLIGHT_FAILED` gets.** `run_one_cell` sets it and finishes the
+**What `PREFLIGHT_FAILED` gets.** `_drive_cell` sets it and finishes the
 run `COMPLETE` (`saffron/cell/session.py:1990-2001`). The CLI exits 2
 (`saffron/cli.py:87`). The breaker counts it as an abort
 (`saffron/batch.py:57-61`, `:309-318`). In a stack batch it is not a layer
@@ -231,7 +237,7 @@ cell must say so. Make these changes.
    that says the provider served the turn nothing. `run_agent` sets it true
    only when the result's terminal reason is `api_error` and all four
    counts are present and zero. A null or absent count leaves it false.
-2. **The state.** At `run_one_cell`'s plan-turn catch, a failed attempt
+2. **The state.** At `_drive_cell`'s plan-turn catch, a failed attempt
    carrying that fact ends the task `PROVIDER_UNREACHABLE`. Any other ends
    it `NOT_IMPLEMENTED` as today. Keep the phase line, the
    reported spend and the `COMPLETE` run row exactly as today.
@@ -246,10 +252,12 @@ cell must say so. Make these changes.
    treats `PREFLIGHT_FAILED`.
 6. **The stack batch's re-offer.** In a stack batch the state is not a
    miss. Keep it queued in the wrapper, as `RATE_LIMITED` is kept, so it
-   runs again on the same predecessor. In `_drive`, count it toward the
-   breaker as above, then drop it from the started set when `sleep` is
-   set, with no wait. Leave the `RATE_LIMITED` branch as it is. The breaker
-   is the only bound on the re-offers, so the count must rise on each one.
+   runs again on the same predecessor. In `_drive` the count goes through
+   the existing `ABORT_STATES` membership test (`saffron/batch.py:309`),
+   unchanged. The only new line there drops the spec from the started set
+   when `sleep` is set, after that test, with no wait. Leave the
+   `RATE_LIMITED` branch as it is. The breaker is the only bound on the
+   re-offers, so the count must rise on each one.
 
 ## Out of scope
 
@@ -261,10 +269,11 @@ cell must say so. Make these changes.
   nothing keeps the state it ends in today. Criterion 3 drives the plan
   re-prompt and the implement turn. The salvage, repair, notes, review
   and rebuttal turns are left undriven, since this change reaches none of them.
-- **A credential that is missing.** It also returns `api_error` with no
-  tokens, by `saffron/phases/implement.py:404-407`'s note. That is
-  infrastructure as well, so it ends `PROVIDER_UNREACHABLE` too, and that
-  is intended.
+- **A credential that is missing.** It returns `api_error`, by
+  `saffron/phases/implement.py:404-407`'s note, which says nothing of its
+  token counts. No event log on this host holds one, so whether it ends
+  `PROVIDER_UNREACHABLE` or `NOT_IMPLEMENTED` is unmeasured. Either is
+  acceptable here.
 
 ## Notes for the agent
 
@@ -296,15 +305,22 @@ true, cost 0.0 and the field set. For criterion 2's second half, add
 `rate_limit_status="rejected"` and a `rate_limit_resets_at`, and drive it
 under a fresh `tmp_path` subdirectory. For criterion 3, call
 `_stub_the_runtime(monkeypatch, commits=0)` per case, each under its own
-subdirectory. The re-prompt case scripts `_turn("not the schema", cost=0.0)`
-first. The implement case scripts `_turn(_block(_PLAN), cost=0.0)` first.
+subdirectory. The schema re-prompt case scripts `_turn("not the schema", cost=0.0)`
+first. The scope re-prompt case scripts a proposal already inside
+`touches` first, `_block(_PROPOSAL | {"proposed_touches": ["src/x.py"]})`
+at cost 0.0, as `test_a_refused_proposal_is_reprompted_and_a_plan_can_follow`
+does. The implement case scripts `_turn(_block(_PLAN), cost=0.0)` first.
 Both completed first turns cost $0.00, so a check on spend cannot pass.
 
 **Criterion 4's witness.** Copy the shape of
 `test_the_exit_code_distinguishes_the_terminal_states` in
-`tests/test_cli.py`. Also monkeypatch `cli.package_phase`'s
-`push_unpackaged_work` to return a `PushResult` with `pushed=False`. Script
-`run_one_cell` to return the two states in turn, and assert `[2, 1]`.
+`tests/test_cli.py`, which runs without a `push_unpackaged_work` patch.
+Script `run_one_cell` to return the two states in turn, and assert `[2, 1]`.
+
+**Two comments in `batch.py` go stale.** The started-set comment says
+only a rate-limited spec is taken back out (`saffron/batch.py:215`).
+`_is_layer`'s docstring calls anything else a miss
+(`saffron/batch.py:360-363`). Update each in one line to name the new state.
 
 **Criterion 5's witness.** Copy `test_two_consecutive_aborts_fire_the_breaker`.
 Three candidates, and a `FakeRunner` scripting two `PROVIDER_UNREACHABLE`
@@ -322,11 +338,14 @@ in order: `(TE-0, None)`, `(TE-1, TE-0)` twice, `(TE-2, TE-1)`,
 `(TE-3, TE-2)` twice. The second order is `TE-5` then `TE-6`. `TE-5`
 scripts two `PROVIDER_UNREACHABLE` steps and then a review. Assert
 `INFRASTRUCTURE`, an empty `sleeps`, and calls `(TE-5, None)` twice only.
+Last, monkeypatch `batch.ABORT_STATES` to leave the state out and run a
+third order with the same three steps. Assert `DRAINED` and three calls.
+A small local runner helper keeps the three orders short.
 
 **Measured on a prototype, 2026-10-03.** All six witnesses were written
 against `0fecec0c` with this pull request's hand edits, and passed.
 Criterion 6 was rewritten at `ed501943`, after review moved the stack batch
-off the miss. Each
+off the miss. Criteria 3 and 6 gained a case at `dc8facfe`. Each
 fails with the four source files reverted. Each wrong version listed above
 was applied to the prototype and failed its own criterion's witness. The
 four test modules passed whole, and `ruff` passed.
@@ -336,6 +355,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words. Keep each docstring within ten lines.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks. The
-prototype counted 959 changed tokens by `size_gate`, against the `bug`
+prototype counted 969 changed tokens by `size_gate`, against the `bug`
 ceiling of 1300. `estimated_lines` is those tokens over four. Keep comments
 to one or two lines, and the tests close to the shapes above.

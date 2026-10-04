@@ -22,7 +22,7 @@ factory:TaskShape a sh:NodeShape ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] .
 
-# Ten states reach the operator and no others — set containment inside the end
+# Eleven states reach the operator and no others — set containment inside the end
 # states, which is the distinction §4.6 names as justifying the namespace. What
 # the operator's own decision produces is an end state and is not terminal: the
 # conflation is how MERGED read as reaching the operator and ORPHANED, which
