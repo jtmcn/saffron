@@ -4,7 +4,7 @@ title: The ledger cannot say which model ran an attempt, because no writer of an
 type: feature
 priority: 3
 depends_on: [SA-0199]
-estimated_lines: 298
+estimated_lines: 300
 estimate_measured: true
 touches:
   - images/agent_runner.py
@@ -61,12 +61,13 @@ acceptance:
       The runner's `result` event carries a `model` key. Its value lists each
       distinct `model` the run's assistant messages named, in the order each
       first appeared, joined with ",". An assistant message whose `model` is
-      exactly `<synthetic>` is skipped. A run with no other assistant
-      message gives `null`. The `init` event's model is never read. Each run
-      starts with no model seen. The witness drives five runs through `main`
-      in one process. They are several models with repeats and a synthetic
-      message, one model sent twice, none at all, a synthetic message alone,
-      and one model after those two.
+      exactly `<synthetic>`, or empty, is skipped. A run with no other
+      assistant message gives `null`. The `init` event's model is never
+      read. Each run starts with no model seen. The witness drives five runs
+      through `main` in one process. They are several models with repeats
+      and a synthetic and an empty name among them, one model sent twice,
+      none at all, a synthetic and an empty name alone, and one model after
+      those two.
     witness: tests/test_agent_runner.py::test_the_result_event_names_each_model_the_turns_assistant_messages_named
     wrong_versions:
       - The model is read from the `init` event's data, so a run carries the configured model.
@@ -76,6 +77,7 @@ acceptance:
       - The models seen are never cleared between runs, so a later run in one process reports an earlier run's model.
       - The model is read from the result message's `model_usage` keys.
       - A `<synthetic>` name is recorded as a model.
+      - An empty name is kept, so a run reads `m-b,m-a,` or `""`.
   - claim: >-
       `AttemptResult` has a field `model`, `None` by default. `run_agent`
       sets it to the result event's `model`, a joined string kept as it
@@ -232,9 +234,9 @@ message.
 1. **The runner names the model.** Keep each distinct `model` the run's
    assistant messages carry, in first-seen order. Put them in the `result`
    event under `model`, joined with ",", or `null` when there are none.
-   Skip a message whose `model` is exactly `<synthetic>`. The CLI writes
-   that name itself for a turn it answers without a model, such as a
-   rate limit or an API error.
+   Skip a message whose `model` is exactly `<synthetic>`, or empty. The
+   CLI writes `<synthetic>` itself for a turn it answers without a model,
+   such as a rate limit or an API error.
    Not `model_usage`, which can list helper models the agent's own loop
    never called. Not the `init` event, which states the configured model
    rather than the one that answered. One runner process is one
@@ -263,9 +265,12 @@ message.
 
 - **Choosing a model.** No `model` option reaches `agent_options`, and no
   turn starts a fresh session. That is the item's second half, by hand.
-- **`DESIGN.md` §4.1.** Its sentence on `attempts.model` says no call
-  site supplies a value yet (`DESIGN.md:359`). The file is protected, so
-  the operator amends that sentence by hand.
+- **`DESIGN.md` §4.1.** The operator already amended its sentence on
+  `attempts.model` in this spec's branch (`DESIGN.md:359`). It reads
+  "`attempts.model` names the models an attempt's assistant messages
+  named, comma-joined in first-seen order. The CLI's own `<synthetic>`
+  marker is no model and is skipped (SA-0201)." The file is protected.
+  Do not touch it.
 - **`replay`.** Its attempt has no agent, so `None` is its true model.
 - **End review turns.** Their agent is `stop_on_rejected` over
   `run_agent` with no `record_attempts` (`saffron/cli.py:644-650`). So
@@ -304,14 +309,21 @@ a collection error that `revert` reads as `skip`.
 (`tests/test_agent_runner.py:475-509`). Run `main` five times in one test.
 Send one assistant message's `message_id` twice. Put an
 `init` system message naming a different model first in each run. The
-`none` run sends `init`, a partial message and the result. Put a
-`<synthetic>` message between two real ones in the several-models run.
-The synthetic-alone run sends `init`, that one message and the result,
-and gives `null`. Run the one-model run last, so a synthetic name kept
+`none` run sends `init`, a partial message and the result. In the
+several-models run, meet the names against alphabetical order, `m-b`
+before `m-a`, so a sorted join fails. Put a `<synthetic>` message and a
+message whose `model` is `""` between real ones there. A kept empty name
+then shows as a trailing ",", which a run of empty names alone can hide
+behind a `null`. The synthetic-alone run sends `init`, a
+`<synthetic>` message, a message whose `model` is `""`, and the result.
+It gives `null`. Run the one-model run last, so a synthetic name kept
 from an earlier run would show there. Clear any
 module list you add in the `_forget_seen_message_ids` fixture
 (`:38-45`), with `getattr` and a default as that fixture already does. A
 module list that leaks between tests turns the exact-dict test red.
+Annotate any module-level list you add, as `_seen_assistant_message_ids:
+set[str]` is annotated (`images/agent_runner.py:46`). The `types` rule
+on unannotated identities is gated.
 
 **Criterion 2.** Use `_stream` and `_result_line`
 (`tests/test_implement.py:185-237`). Drive a joined value, a single name,
@@ -324,18 +336,30 @@ once per outcome. Read the rows back with `ledger.attempts`.
 
 **Criteria 4 and 5.** Use `_Agent`, `_first`, `_second`, `_draft` and
 `_write_extract` (`tests/test_spec_review.py:54-87`, `:190-204`,
-`:1452-1466`). One row per return path. Give the first two turns different
-models in the clean row, and repeat a name across turns in another. Use
-one turn whose own value is joined, followed by a turn naming a name
-already in it.
+`:1452-1466`). One row per return path. Those helpers build attempts
+with no model, and `_KILLED` builds a failure with none. So give every
+row's first turn a model with `dataclasses.replace`. Raise a failed first
+turn as `AgentFailed(..., replace(_first(), model=...))`, never as
+`_KILLED`. Then every row expects a model but one deliberate row whose
+turns name none. That is how a return path that passes nothing shows,
+on the rejected, failed and no-session rows above all. In the clean row
+the first-seen order runs against alphabetical, `m-b` before `m-a`.
+Repeat a name across turns in another row. Use one turn whose own value
+is joined, followed by a turn naming a name already in it.
 
 **Criterion 6.** Use `_RevisionMint`, `_RevisionWrite`, `_RevisionRunner`,
 `_written` and `_writer_error` (`tests/test_batch.py:3310-3457`), with a
 small `review` callable of your own. One spec revises once and runs. A
-second spec's writer session carries an error.
+second spec's writer session carries an error. `_writer_error` builds a
+session with no model, so give that session its own model with
+`dataclasses.replace`. Give each review session and each writer session a
+distinct model, except one review left at `None`.
 
 **Criterion 7.** Use `_build`, `_stack`, `_qualify_stub`, `_write_stub` and
 `_mint_stub` (`tests/test_follow_up.py:131-330`), with a group built as `_q` and
 `_shared_findings` build theirs (`:241`, `:369`). Send five groups. A
 writer session that met the rate limit pools every later group, so send it
-last.
+last. Pass every session as a `SpecWriterSession`, never as a string,
+since `_write_stub` turns a string into a session with no model. The
+accepted, error, parse-failure and wrong-id sessions each carry a
+distinct model. The rate-limit session keeps none.
