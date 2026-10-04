@@ -4,7 +4,7 @@ title: The ledger cannot say which model ran an attempt, because no writer of an
 type: feature
 priority: 3
 depends_on: [SA-0199]
-estimated_lines: 292
+estimated_lines: 298
 estimate_measured: true
 touches:
   - images/agent_runner.py
@@ -60,11 +60,13 @@ acceptance:
   - claim: >-
       The runner's `result` event carries a `model` key. Its value lists each
       distinct `model` the run's assistant messages named, in the order each
-      first appeared, joined with ",". A run with no assistant message gives
-      `null`. The `init` event's model is never read. Each run starts with
-      no model seen. The witness drives four runs through `main` in one
-      process. They are several models with repeats, one model sent twice,
-      none at all, and one model after the `none` run.
+      first appeared, joined with ",". An assistant message whose `model` is
+      exactly `<synthetic>` is skipped. A run with no other assistant
+      message gives `null`. The `init` event's model is never read. Each run
+      starts with no model seen. The witness drives five runs through `main`
+      in one process. They are several models with repeats and a synthetic
+      message, one model sent twice, none at all, a synthetic message alone,
+      and one model after those two.
     witness: tests/test_agent_runner.py::test_the_result_event_names_each_model_the_turns_assistant_messages_named
     wrong_versions:
       - The model is read from the `init` event's data, so a run carries the configured model.
@@ -73,6 +75,7 @@ acceptance:
       - A run with no assistant message carries the empty string rather than `null`.
       - The models seen are never cleared between runs, so a later run in one process reports an earlier run's model.
       - The model is read from the result message's `model_usage` keys.
+      - A `<synthetic>` name is recorded as a model.
   - claim: >-
       `AttemptResult` has a field `model`, `None` by default. `run_agent`
       sets it to the result event's `model`, a joined string kept as it
@@ -229,6 +232,9 @@ message.
 1. **The runner names the model.** Keep each distinct `model` the run's
    assistant messages carry, in first-seen order. Put them in the `result`
    event under `model`, joined with ",", or `null` when there are none.
+   Skip a message whose `model` is exactly `<synthetic>`. The CLI writes
+   that name itself for a turn it answers without a model, such as a
+   rate limit or an API error.
    Not `model_usage`, which can list helper models the agent's own loop
    never called. Not the `init` event, which states the configured model
    rather than the one that answered. One runner process is one
@@ -264,9 +270,17 @@ message.
 - **End review turns.** Their agent is `stop_on_rejected` over
   `run_agent` with no `record_attempts` (`saffron/cli.py:644-650`). So
   they write no attempt row today, and this spec adds none.
-- **Filtering names.** The runner keeps each name an assistant message
-  carries, as sent. No subagent message reaches it, since
-  `IMPLEMENT_TOOLS` (`saffron/phases/implement.py:30`) offers no `Task`.
+- **Filtering names past `<synthetic>`.** The runner drops that one name
+  and keeps every other name as sent. The operator measured it on
+  2026-10-03 in 15 Claude Code transcripts under `~/.claude/projects` on
+  the host. The CLI wrote it for messages such as "You've hit your weekly
+  limit", "API Error: 500/529" and "Not logged in". Those are the walled
+  and errored turns, so a kept name would read `claude-sonnet-5,<synthetic>`.
+  `<synthetic>` is no model identifier (`CONTEXT.md:93`). Cell transcripts
+  are not kept on the host. So whether such a message reaches the SDK
+  stream inside a cell is not measured, and the skip costs nothing if none
+  does. No subagent message reaches the runner, since `IMPLEMENT_TOOLS`
+  (`saffron/phases/implement.py:30`) offers no `Task`.
 - **Rows written before this change.** They keep `None`.
 
 ## Notes for the agent
@@ -287,10 +301,14 @@ call. At base that raises `TypeError` in the test body, a failure, and not
 a collection error that `revert` reads as `skip`.
 
 **Criterion 1.** Use `_run_runner_in_process` and `_stub_module`
-(`tests/test_agent_runner.py:475-509`). Run `main` four times in one test.
+(`tests/test_agent_runner.py:475-509`). Run `main` five times in one test.
 Send one assistant message's `message_id` twice. Put an
 `init` system message naming a different model first in each run. The
-`none` run sends `init`, a partial message and the result. Clear any
+`none` run sends `init`, a partial message and the result. Put a
+`<synthetic>` message between two real ones in the several-models run.
+The synthetic-alone run sends `init`, that one message and the result,
+and gives `null`. Run the one-model run last, so a synthetic name kept
+from an earlier run would show there. Clear any
 module list you add in the `_forget_seen_message_ids` fixture
 (`:38-45`), with `getattr` and a default as that fixture already does. A
 module list that leaks between tests turns the exact-dict test red.
