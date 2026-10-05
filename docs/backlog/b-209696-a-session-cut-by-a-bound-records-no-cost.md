@@ -4,7 +4,7 @@ title: 'A session a bound cuts records $0.00, though it spent tokens'
 status: open
 tier: 2
 filed: 2026-10-02
-specs: []
+specs: [SA-0206]
 prs: []
 commits: []
 cites: [§4.3, §5.3]

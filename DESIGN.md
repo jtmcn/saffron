@@ -326,7 +326,8 @@ tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sh
               prompt_sha, parent_task_id, worktree, volume, budget_usd,
               spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
-              ended_at, subtype, terminal_reason, num_turns, cost_usd_est)
+              ended_at, subtype, terminal_reason, num_turns, cost_usd_est,
+              cost_floor_usd_est)
 gate_results (gate_result_id, attempt_id, run_id, gate, status, tool,
               duration_ms, summary)
 failures     (failure_id, gate_result_id, file, code, message, line)
@@ -356,7 +357,7 @@ needs the distinction and the first that enforces it.
 
 **`cost_usd_est`, and the suffix is not decoration.** Every dollar figure the agent runtime reports is a *client-side estimate*, computed locally from a price table bundled into the SDK at build time. It drifts when pricing changes, when the installed SDK doesn't recognize a model, and when billing rules apply that the client cannot model; the runtime's own documentation says not to make financial decisions from it. Saffron makes exactly one financial decision from it — the budget gate (§4.2) — and that is acceptable because the consequence of drift is a night that costs somewhat more or less than $50, not a wrong answer. What is *not* acceptable is `spent_usd` silently becoming the number you reason about in §7.1, so the estimate carries its suffix everywhere it is stored, and cost-per-accepted-PR is reconciled against real billing periodically rather than trusted outright. **A column named for a measurement it cannot make is how an estimate becomes a fact.**
 
-`terminal_reason` exists for the same reason the supervisor measures doneness from git (§4.3): the agent runtime distinguishes a clean finish from an abort, and a crashed session (`subtype = error_during_execution`) **may report every cost field as zero**. An attempt that burned $4 and then crashed records $0 unless the supervisor falls back to the last good figure it saw before the crash. Unattended overnight, this is the difference between a budget that holds and one that silently stops counting.
+`terminal_reason` exists for the same reason the supervisor measures doneness from git (§4.3): the agent runtime distinguishes a clean finish from an abort, and a crashed session (`subtype = error_during_execution`) **may report every cost field as zero**. An attempt that burned $4 and then crashed records $0 unless the supervisor falls back to the last good figure it saw before the crash. Unattended overnight, this is the difference between a budget that holds and one that silently stops counting. A session a bound cuts before its `result` event reports no cost at all. It is charged the larger of that last good figure and a floor priced from its per-step usage. `cost_floor_usd_est` records that floor.
 
 `spec_sha` matters: edit a spec while a batch is running and the task is invalidated rather than silently building the old thing. `policy_sha` does the same one level up — change a repo's gate declarations mid-batch and its in-flight tasks are invalidated, because a task judged against a policy that no longer exists is not evidence of anything. `image_built_at` versus the `.saffron/Dockerfile` mtime is what triggers a rebuild at preflight.
 
@@ -1362,7 +1363,7 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 | **`spec_sha` invalidation never fires** | Nothing re-reads the repo after preflight pins `base_sha` | Mirror refetch and sha comparison at each task's scheduling (§4.1) |
 | **Spend outside the supervisor's accounting** | The cell holds a live API key by necessity | Separate factory key, provider-side monthly cap — the one ceiling not dependent on the cell (§5.1) |
 | **Unattended agent hangs on a permission prompt** | Auto-accepting edits doesn't cover shell commands | A permission mode that denies rather than asks; prompts are a hang, not a fallback (§5.3) |
-| **A crashed attempt records $0** | The runtime zeroes cost fields on session crash | `terminal_reason` stored; supervisor falls back to the last good figure before the crash (§4.1) |
+| **A crashed attempt records $0** | The runtime zeroes cost fields on session crash | `terminal_reason` stored; supervisor falls back to the last good figure before the crash, or to a floor priced from usage when that is larger (§4.1) |
 | **Repair loop pays full input price every attempt** | 5-minute cache TTL is shorter than a gate suite | One-hour cache TTL set on the cell (§7.1) |
 | **A critic lens silently doesn't run** | Lenses spawned as subagents are invoked at the model's discretion | Each lens is a separate host-invoked session (§5.5) |
 | **An estimate hardens into a billing fact** | Runtime-reported cost is a local approximation | `_est` suffix on every stored figure; reconcile against real billing (§4.1) |

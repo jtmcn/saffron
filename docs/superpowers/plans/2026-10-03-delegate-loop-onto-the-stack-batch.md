@@ -17,8 +17,8 @@ end review until they stop finding what it misses. Only then cut the skill and
 the delegate agent down to what the batch leaves undone.
 
 **Spec:** `docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md`
-and `docs/superpowers/specs/2026-09-23-stack-batch-design.md` §4, "What the
-delegate still does".
+and section 4 of `docs/superpowers/specs/2026-09-23-stack-batch-design.md`,
+"What the delegate still does".
 
 ## Global Constraints
 
