@@ -467,6 +467,9 @@ version as unproven. A host listener that starts mid-loop is caught only at
 preflight. The rate's header key is spelled at seven sites. `SETTLED_STATES`
 has no vocabulary test. Four documentation lines lag the stack.
 
+**Placed 2026-10-04**, from settling item 170's failures: **b-86fa07**. The
+`prose` gate lists every hit in the repo, so the baseline cancels nearly all.
+
 **Placed 2026-10-05**, from the spec loop's run 28: **b-444bed**,
 **b-edcab7**, **b-7eb6d3**, then **b-6ac0cd**. A budget line says stop
 before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
