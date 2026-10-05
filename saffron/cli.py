@@ -89,6 +89,9 @@ CELL_EXIT = {
     "GATE_ERROR": 2,
     # Neither the task's failure nor the operator's: retry after the window.
     "RATE_LIMITED": 2,
+    # The provider served the plan turn's first call nothing: an
+    # infrastructure failure, not the task's (b-031ac2).
+    "PROVIDER_UNREACHABLE": 2,
 }
 
 

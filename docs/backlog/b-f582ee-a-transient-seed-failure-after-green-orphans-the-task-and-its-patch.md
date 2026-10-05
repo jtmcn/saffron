@@ -41,3 +41,5 @@ command can package it, and says which command does.
 ## Record
 
 - 2026-09-30: filed from the spec loop's run 23.
+- 2026-10-05: run 28 saw the same refusal while a cell seeded its
+  worktree, on `f61da02f`. A retry worked (b-6ac0cd).

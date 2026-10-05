@@ -34,7 +34,7 @@ That is the gate now.
 
 **b-792ab2** leads tier 1 from 2026-09-23. The operator asked for a loop that runs
 every queued spec with little input, and ADR 7 decides how. Its build specs
-come before the rest of this tier. **b-b0cd68** comes before the finish's
+come before the rest of this tier. ~~**b-b0cd68**~~ comes before the finish's
 specs run: until it lands, every finish with a layer turns this repo's gate
 suite red and pushes nothing.
 
@@ -198,8 +198,8 @@ went green died seeding its gate cell on a transient `Permission denied`. It
 was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
 again.
 
-**Placed 2026-10-01**, from the spec loop's run 24: **b-4c5dc7**, then
-**b-038aef**. Two cells went green, ran REVIEW past their budget, and were
+**Placed 2026-10-01**, from the spec loop's run 24: ~~**b-4c5dc7**~~, then
+~~**b-038aef**~~. Two cells went green, ran REVIEW past their budget, and were
 refused REBUT on one-line witness fixes. Each ended `EXHAUSTED` with no pull
 request, and the delegate opened both by hand.
 
@@ -207,10 +207,14 @@ request, and the delegate opened both by hand.
 killed a PLAN session that was still writing, and the ledger read $0.00.
 An unattended night would lose the task.
 
-**Placed 2026-10-03**, from the spec loop's run 26: **b-7251b5**, then
-**b-031ac2**. A malformed wrong-version answer leaves every version
+**Placed 2026-10-03**, from the spec loop's run 26: ~~**b-7251b5**~~, then
+~~**b-031ac2**~~. A malformed wrong-version answer leaves every version
 unproven, and REVIEW still passes. A refused API connection ends a task
 `NOT_IMPLEMENTED`, exit 1, as if the task failed.
+
+**Placed 2026-10-05**, from the spec loop's run 28: **b-34d743**. A spec
+whose subject is a test gets no measured wrong version. REVIEW's line still
+counts each one expressed.
 
 ### Tier 2 — the morning after
 
@@ -268,7 +272,7 @@ these buy is that it stops having to. Both are done (2026-09-16, by hand).
 decision because it was the one item whose defect was a guard that could not
 fire. Its number stays listed because item numbers are cited from `saffron/`.
 
-**From the stack batch's last spec reviews** (2026-09-25): **b-b0cd68**.
+**From the stack batch's last spec reviews** (2026-09-25): ~~**b-b0cd68**~~.
 Retiring a spec turns this repo's gate suite red, so a stack batch's finish
 cannot push here until the two tests it names are reworked.
 
@@ -373,6 +377,11 @@ layer's peak turns counts attempts its `max_turns` does not bound.
 **b-c94a2f**. The `tests` gate reads an interrupted pytest session as
 `error`. A second `depends_on` entry carries no code into the cell.
 
+**Placed 2026-10-05**, from the spec loop's run 28: **b-8e30bd**,
+**b-2247dd**, then **b-708c8a**. A merged draft leaves its task `EXHAUSTED`
+and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
+REVIEW's re-prompt is written twice.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -460,6 +469,12 @@ has no vocabulary test. Four documentation lines lag the stack.
 
 **Placed 2026-10-04**, from settling item 170's failures: **b-86fa07**. The
 `prose` gate lists every hit in the repo, so the baseline cancels nearly all.
+
+**Placed 2026-10-05**, from the spec loop's run 28: **b-444bed**,
+**b-edcab7**, **b-7eb6d3**, then **b-6ac0cd**. A budget line says stop
+before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
+cannot read a two-hyphen ordinal. Git in a cell was refused a loose object
+once.
 
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.

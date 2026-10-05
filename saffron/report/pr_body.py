@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
@@ -82,22 +82,25 @@ def render_pr_body(
     effective_risk: str | None = None,
     advisory_gates: Sequence[str] = (),
     notes: str = "",
+    wrong_versions: Sequence[Mapping[str, object]] = (),
+    exhausted: bool = False,
+    head_moved: bool = False,
 ) -> str:
-    """`effective_risk` is what the header reports — `elevated` when the spec
-    says so *or* the diff crossed a `policy.elevate_on` path — never bare
+    """`effective_risk` is what the header reports: `elevated` when the spec
+    says so, or the diff crossed a `policy.elevate_on` path. Never bare
     `spec.risk`, which only ever knows the first of those two (§5.6). Left
-    unset it falls back to `spec.risk`, so a caller that has not computed the
-    effective tier yet still gets the behaviour it always had.
+    unset it falls back to `spec.risk`, for a caller with no effective tier.
 
-    `advisory_gates` names every gate result in `results` this attempt did not
-    hold blocking — `size` at `standard`, a declared `blocking: false` gate at
-    any tier — so its row can say so: a `fail` here is not a contradiction of
-    a green pull request, and unmarked it would read like one (§5.6).
+    `advisory_gates` names every result this attempt did not hold blocking,
+    such as `size` at `standard` or a declared `blocking: false` gate. A
+    `fail` there is no contradiction of a green pull request, marked so (§5.6).
 
-    `notes` is the implementer's own extraction-turn text, if any (SA-0063,
-    backlog items 71/75) — untrusted cell-authored prose, rendered
-    last and clipped like every other such string here. Empty for every task
-    that produced none, which is every task before this channel existed."""
+    `notes` is the implementer's own extraction-turn text (SA-0063, backlog
+    items 71/75), rendered last and clipped like every other such string.
+
+    `exhausted` and `head_moved` are `SA-0204`'s pair, both off by default.
+    The task ended `EXHAUSTED` unjudged, and `head_moved` says REBUT moved
+    HEAD before the cap cut it short."""
     risk = effective_risk if effective_risk is not None else spec.risk
     # The `##` headings match `.github/pull_request_template.md`; a test holds them equal.
     sections = [
@@ -124,6 +127,9 @@ def render_pr_body(
             advisory_gates=advisory_gates,
             rebut_result=rebut_result,
             has_notes=bool(notes.strip()),
+            wrong_versions=wrong_versions,
+            exhausted=exhausted,
+            head_moved=head_moved,
         ),
         # Last, so cell-authored prose cannot appear to have moved a table
         # (SA-0044). Falsy when there are no notes.
@@ -497,14 +503,17 @@ def _not_covered(
     advisory_gates: Sequence[str] = (),
     rebut_result: RebutResult | None = None,
     has_notes: bool = False,
+    wrong_versions: Sequence[Mapping[str, object]] = (),
+    exhausted: bool = False,
+    head_moved: bool = False,
 ) -> str:
     """What this body does not stand behind, collected.
 
-    Every line is derivable from a section above — a `skip` row, an `(advisory)`
-    mark, the checklist's blockquote, an `anchored: no` cell — and each is one
-    cell of a wide table the operator is scanning for something else. §5.7 states
-    its own residual that way (the credential shapes the refusal does not know),
-    for the same reason: a reader who has to assemble it never does.
+    Every line is derivable from a section above — a `skip` row, an `(advisory)` mark,
+    the checklist's blockquote, an `anchored: no` cell — and each is one cell of a wide
+    table the operator is scanning for something else. §5.7 states its own residual that
+    way (the credential shapes the refusal does not know), for the same reason: a reader
+    who has to assemble it never does. Only the wrong-version line reads its own record.
 
     One thing that belongs here and is deliberately absent: gates that ran at
     `base_sha` and were not re-run. §5.7 makes that case *provably* redundant —
@@ -512,6 +521,19 @@ def _not_covered(
     a gap would be false, and `_verification` already says which case this is.
     """
     lines = []
+    # `SA-0204`'s pair, first: a blocker the operator is first to read.
+    # Keyed on `anchored_blockers`, the same selection `_disagreements` numbers.
+    blockers = anchored_blockers(reviews)
+    if exhausted and blockers:
+        lines.append(
+            "- The task ended `EXHAUSTED` before the critics finished judging "
+            "its rebuttal, so its blockers stand: "
+            + ", ".join(f"{_cell(f.file)}:{f.line}" for f in blockers)
+        )
+    if head_moved:
+        lines.append(
+            "- HEAD moved after REVIEW, so the patch carries commits no lens judged."
+        )
     if skipped := [r.gate for r in results if r.status == "skip"]:
         lines.append(
             "- Did not run: "
@@ -560,7 +582,6 @@ def _not_covered(
         )
     # A turn that recorded nothing, not one that argued nothing (§4.3). Its error
     # string is never quoted: untrusted model output (backlog item 42).
-    blockers = anchored_blockers(reviews)
     if blockers and _rebuttal_errored(rebut_result):
         lines.append(
             "- No implementer answer stands against "
@@ -570,6 +591,16 @@ def _not_covered(
                 else f"any of the {len(blockers)} blockers"
             )
             + ": the rebuttal turn recorded nothing (see `rebuttal.json`)."
+        )
+    # Named through `_cell`, never the error itself: untrusted model output
+    # (backlog item 42), the same rule the rebuttal line above keeps.
+    if unanswered := [
+        e["witness"] for e in wrong_versions if e.get("error") is not None
+    ]:
+        lines.append(
+            "- No session answered a wrong version for "
+            + ", ".join(f"`{_cell(w)}`" for w in unanswered)
+            + " (see `wrong-versions.json`)."
         )
     # With notes, `_notes` fills the section; "nothing" would contradict them.
     if not lines and not has_notes:

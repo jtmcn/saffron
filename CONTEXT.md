@@ -628,10 +628,10 @@ reasons. An IMPLEMENT turn cut by the turn ceiling or the wall clock with nothin
 ends `ORPHANED` the first time at a `spec_sha`. The second such cut ends `NOT_IMPLEMENTED`. The two names are deliberately distinct.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
-informative outcome about the spec or the codebase. Four more ways in share the state.
+informative outcome about the spec or the codebase. Five more ways in share the state.
 The spend ceiling stops the task before its next turn. Its gates go red after the
-rebuttal. Its exported patch does not apply or commit in a Gate-only or critic cell,
-or its commits net to no change.
+rebuttal. A REBUT past the budget is cut short by its $7.00 cap. Its exported patch
+does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
 **`RATE_LIMITED`**: The provider refused the turn — its ceiling, not the task's.
 Says nothing about the spec, and the only thing it asks for is a retry after the

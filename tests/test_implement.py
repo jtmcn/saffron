@@ -972,3 +972,53 @@ def test_a_turn_with_no_rate_limit_event_carries_none():
     )
     assert result.rate_limit_status is None
     assert result.rate_limit_resets_at is None
+
+
+_SA_0152_RESULT = {
+    "type": "result",
+    "subtype": "success",
+    "num_turns": 1,
+    "total_cost_usd": 0.0,
+    "session_id": "488a9976-3135-4e7d-8435-b4d793fc1f82",
+    "terminal_reason": "api_error",
+    "is_error": True,
+    "structured_output": None,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+}
+
+_TOKEN_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def test_a_turn_the_provider_served_no_token_is_told_apart_from_one_it_served():
+    """Only SA-0152's own shape reads as served nothing: `api_error` with
+    all four usage counts present and exactly zero (b-031ac2)."""
+    cases: list[tuple[str, dict, bool]] = [("base", dict(_SA_0152_RESULT), True)]
+    for field in _TOKEN_FIELDS:
+        cases.append((f"{field}=1", _SA_0152_RESULT | {field: 1}, False))
+        cases.append((f"{field}=null", _SA_0152_RESULT | {field: None}, False))
+    absent = {k: v for k, v in _SA_0152_RESULT.items() if k not in _TOKEN_FIELDS}
+    cases.append(("absent", absent, False))
+    cases.append(
+        ("completed", _SA_0152_RESULT | {"terminal_reason": "completed"}, False)
+    )
+    assert len(cases) == 11
+
+    for label, event, expected in cases:
+        with pytest.raises(implement.AgentFailed) as raised:
+            implement.run_agent(
+                "cell",
+                prompt="plan please",
+                options={"max_turns": 3},
+                spec_id="SY-1",
+                exec_stream=_stream(json.dumps(event), returncode=1),
+            )
+        assert raised.value.attempt is not None, label
+        assert raised.value.attempt.provider_served_nothing is expected, label

@@ -1623,3 +1623,47 @@ the critic did not raise.
 - `SA-0199` (#670): `DESIGN.md:1277` calls the end-of-task line a verdict,
   which `CONTEXT.md` avoids.
   **Bucket 3**, conventions. **Open:** b-348114.
+
+## 2026-10-05, `SA-0200` to `SA-0204` (the spec loop's run 28, #673 to #678)
+
+- `SA-0201` (#673): criterion 3's witness never read the task row, so a
+  mutant that split the ledger state from the outcome survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #673.
+- `SA-0201` (#673): `_is_layer`'s docstring said `RATE_LIMITED` and
+  `PROVIDER_UNREACHABLE` return before it runs. `record_layer` calls it for
+  every outcome.
+  **Bucket 3**, conventions. **Landed:** a review commit on #673.
+- `SA-0201` (#673): the comment on the started set named no state.
+  **Bucket 3**, conventions. **Landed:** a review commit on #673.
+- `SA-0200` (#674): the witness never checked that a missing measured id is
+  named, so two probes survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #674.
+- `SA-0202` (#675): a re-prompt without `EXTRACTION_PROMPT` passed the
+  re-prompt witness.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #675.
+- `SA-0202` (#675): no test drove `_cell`'s escaping of the wrong-version
+  line.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #675.
+- `SA-0202` (#675): `run_wrong_versions` restates `run_lens`'s re-prompt line
+  for line.
+  **Bucket 3**, conventions. **Open:** b-708c8a.
+- `SA-0203` (#676): a REBUT session the SDK cut at the cap never marked the
+  cap refused, so the task halted at `REBUTTING`. `SA-0204`'s parent-branch
+  spec review found it.
+  **Bucket 3**, correctness. **Landed:** a review commit on #676.
+- `SA-0203` (#676): no witness drove the cap's `remaining <= 0` boundary.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #676.
+- `SA-0203` (#676): the `Budget` docstring's rewrite lost why its field is
+  typed, and stated history that is false.
+  **Bucket 3**, conventions. **Landed:** a review commit on #676.
+- `SA-0203` (#676): the notes turn's budget check still prints a stopping
+  line before a REBUT that runs.
+  **Bucket 3**, correctness. **Open:** b-444bed.
+- `SA-0204` (#678): criterion 2's witness never read the row's `pushed_sha`, so
+  a package that wrote none passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #678.
+- `SA-0204` (#678): five citations named `SA-0210`, which does not exist.
+  **Bucket 3**, conventions. **Landed:** a review commit on #678.
+- `SA-0203` and `SA-0204` (#676, #678): three sentences in forbidden files
+  still say only `READY_FOR_REVIEW` is packaged.
+  **Bucket 3**, conventions. **Open:** b-edcab7.

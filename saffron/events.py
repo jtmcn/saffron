@@ -257,18 +257,22 @@ class GateResult:
 
 @dataclass(frozen=True, slots=True)
 class Budget:
-    """Which of the task's three ceilings stopped it — a typed field over an
-    enumeration, never a free string (SA-0005: died at the turn ceiling with
-    56% of budget unspent, and nothing said which of the three had fired).
-    `value`/`limit` are the reached figure and the declared one, in whatever
-    unit `ceiling` names (dollars for `budget_usd`, a count for the other
-    two)."""
+    """Which of the task's three ceilings this event reports, a typed field
+    over an enumeration, never a free string (SA-0005: died at the turn
+    ceiling with 56% of budget unspent, and nothing said which of the three
+    had fired). `value`/`limit` are the reached figure and the declared one,
+    in whatever unit `ceiling` names (dollars for `budget_usd`, a count for
+    the other two). Only a `budget_usd` event whose `rebut_spent_usd_est` is
+    `None` stops the task."""
 
     timestamp: float
     spec_id: str
     ceiling: Ceiling
     value: float
     limit: float
+    # Set only when this event follows a REBUT that ran past `budget_usd`:
+    # its own spend, never the task's whole total (DESIGN.md §5.6, §4.1).
+    rebut_spent_usd_est: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -796,6 +800,11 @@ def describe(event: Event) -> str:
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):
+        if event.rebut_spent_usd_est is not None:
+            return (
+                f"budget: ${event.value:.2f} of ${event.limit:.2f} — REBUT "
+                f"ran past it, spending ${event.rebut_spent_usd_est:.2f}"
+            )
         return f"budget: ${event.value:.2f} of ${event.limit:.2f} — stopping"
 
     if isinstance(event, Agent):
@@ -924,6 +933,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("IMPLEMENT: the turn ended without finishing", _S, Terminal),
     _Family("IMPLEMENT: finished and produced nothing", _S, Terminal),
     _Family("budget: … stopping", _S, Budget),
+    _Family("budget: … REBUT ran past it", _S, Budget),
     _Family("budget: … cut off … no room left to salvage", _S, Terminal),
     _Family("SALVAGE: the session failed", _S, PhaseStart),
     _Family("SALVAGE: uncommitted work checkpointed", _S, PhaseStart),

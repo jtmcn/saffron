@@ -14,11 +14,14 @@ from pathlib import Path
 import pytest
 
 from saffron import task as task_module
+from saffron.agents.findings import Finding
 from saffron.cell.session import CellOutcome
 from saffron.events import Ceilings, Event, Teardown, read_log
 from saffron.intake import Spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
+from saffron.phases.rebut import RebutResult, RebuttalTurn
+from saffron.phases.review import LensReview
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import PolicyError
 from saffron.task import PinnedBase, Refused, ResolvedCeilings
@@ -1708,3 +1711,302 @@ def test_a_failed_live_row_write_never_stops_the_cell(tmp_path, monkeypatch):
     ledger3.close()
     assert raised2.value is error2
     assert not (out_dir3 / "queue.json").exists()
+
+
+def test_an_exhausted_task_whose_rebuttal_was_never_paid_for_is_packaged(
+    tmp_path, monkeypatch
+):
+    """`run_task` hands a cell to `package()` in the `EXHAUSTED` mode exactly
+    when the cell ended `EXHAUSTED` with an anchored blocker and no
+    `rebut_result`. That call passes the same `parent_branch` a
+    `READY_FOR_REVIEW` cell's call does. Every other shape goes to
+    `push_unpackaged_work`, never to `package()`."""
+    from saffron.task import Handoff
+
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=3,
+        claim="broken",
+        anchored=True,
+    )
+    unanchored = Finding.model_validate(blocker.model_dump() | {"anchored": False})
+    concern = Finding.model_validate(blocker.model_dump() | {"severity": "concern"})
+    cut_short_rebuttal = RebutResult(
+        state="REBUTTED",
+        why="budget",
+        rebuttal=RebuttalTurn(),
+        verdicts=[],
+        moved=False,
+        cost_usd=1.0,
+    )
+
+    handoff = Handoff(stacked_on="d" * 40, target_branch="saffron/TE-8")
+    out_dir = tmp_path / "out"
+
+    cases = [
+        ("exhausted-unrebutted", "EXHAUSTED", [blocker], None, True, False),
+        ("ready", "READY_FOR_REVIEW", [], None, True, False),
+        ("exhausted-no-review", "EXHAUSTED", [], None, False, True),
+        ("exhausted-rebutted", "EXHAUSTED", [blocker], cut_short_rebuttal, False, True),
+        ("reviewing", "REVIEWING", [blocker], None, False, True),
+        ("rebutting", "REBUTTING", [blocker], None, False, True),
+        ("exhausted-unanchored", "EXHAUSTED", [unanchored], None, False, True),
+        ("exhausted-concern", "EXHAUSTED", [concern], None, False, True),
+    ]
+
+    for n, (
+        name,
+        state,
+        findings,
+        rebut_result,
+        expect_package,
+        expect_push,
+    ) in enumerate(cases):
+        task_id = 100 + n
+
+        def _run_one_cell(
+            *a,
+            _findings=findings,
+            _state=state,
+            _rebut=rebut_result,
+            _task_id=task_id,
+            _name=name,
+            **k,
+        ):
+            return CellOutcome(
+                state=_state,
+                task_id=_task_id,
+                run_id=_task_id,
+                task_dir=out_dir / _name,
+                spent_usd=1.0,
+                attempts=1,
+                reviews=(
+                    [LensReview(lens="correctness", findings=_findings)]
+                    if _findings
+                    else []
+                ),
+                rebut_result=_rebut,
+            )
+
+        monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+
+        package_calls: list[dict] = []
+
+        def _package(_outcome, *, _calls=package_calls, _state=state, **kwargs):
+            _calls.append(kwargs)
+            # A pull request every time: this test checks only whether
+            # `package()` is called. Criterion 4 covers push-after-refusal.
+            return package_phase.PackageResult(state=_state, pr_url="https://x/pull/1")
+
+        monkeypatch.setattr(package_phase, "package", _package)
+
+        push_calls: list[dict] = []
+
+        def _push(_outcome, *, _calls=push_calls, **kwargs):
+            _calls.append(kwargs)
+            return package_phase.PushResult(pushed=False, note="nothing to push")
+
+        monkeypatch.setattr(package_phase, "push_unpackaged_work", _push)
+
+        ledger = Ledger(tmp_path / f"{name}.db")
+        task_module.run_task(
+            _one_spec(f"TE-{n}"),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+            handoff=handoff,
+        )
+        ledger.close()
+
+        assert bool(package_calls) == expect_package, name
+        assert bool(push_calls) == expect_push, name
+        if expect_package:
+            assert package_calls[0]["parent_branch"] == "saffron/TE-8", name
+            assert package_calls[0]["exhausted"] == (state == "EXHAUSTED"), name
+
+
+def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
+    tmp_path, monkeypatch
+):
+    """When `package()` in the `EXHAUSTED` mode returns no `pr_url`, or
+    raises a `PackageError`, `run_task` still calls `push_unpackaged_work`,
+    handing it `package()`'s note or the error's text. A `PackageError` from
+    a `READY_FOR_REVIEW` cell's `package()` still raises, and nothing is
+    pushed."""
+    from saffron.report import index as index_report
+    from saffron.task import Handoff
+
+    out_dir = tmp_path / "out"
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=3,
+        claim="broken",
+        anchored=True,
+    )
+
+    def _exhausted_outcome(task_id: int, name: str) -> CellOutcome:
+        return CellOutcome(
+            state="EXHAUSTED",
+            task_id=task_id,
+            run_id=task_id,
+            task_dir=out_dir / name,
+            spent_usd=1.0,
+            attempts=1,
+            reviews=[LensReview(lens="correctness", findings=[blocker])],
+            rebut_result=None,
+        )
+
+    def _run(spec_id, task_id, name, outcome, package_fn, push_fn):
+        monkeypatch.setattr(task_module, "run_one_cell", lambda *a, **k: outcome)
+        monkeypatch.setattr(package_phase, "package", package_fn)
+        monkeypatch.setattr(package_phase, "push_unpackaged_work", push_fn)
+        ledger = Ledger(tmp_path / f"{name}.db")
+        result = task_module.run_task(
+            _one_spec(spec_id),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+            handoff=Handoff(stacked_on="d" * 40, target_branch="saffron/TE-8"),
+        )
+        ledger.close()
+        return result
+
+    # 1) A refusing fake: a `PackageResult` in `EXHAUSTED` whose note says it
+    # conflicts, and no `pr_url`.
+    push_calls_1: list[dict] = []
+
+    def _package_refuses(_outcome, **kwargs):
+        return package_phase.PackageResult(
+            state="EXHAUSTED", note="conflicts with main"
+        )
+
+    def _push_records_1(_outcome, *, package_refusal=None, **kwargs):
+        push_calls_1.append({"package_refusal": package_refusal, **kwargs})
+        return package_phase.PushResult(
+            pushed=True, branch="saffron/TE-1", pushed_sha="c" * 40, note="pushed"
+        )
+
+    result1 = _run(
+        "TE-1",
+        101,
+        "refuses",
+        _exhausted_outcome(101, "refuses"),
+        _package_refuses,
+        _push_records_1,
+    )
+    assert push_calls_1 and push_calls_1[0]["package_refusal"] == "conflicts with main"
+    row1 = _rows(out_dir)
+    row1 = next(r for r in row1 if r["spec_id"] == "TE-1")
+    assert row1["state"] == "EXHAUSTED"
+    assert row1["link"] == ""
+    assert "conflicts with main" in row1["note"] and "pushed" in row1["note"]
+    assert result1.state == "EXHAUSTED"
+
+    # 2) An opening fake: writes its own row with `append_queue_line` and
+    # returns a `pr_url`. No push must run.
+    push_calls_2: list[dict] = []
+
+    def _package_opens(_outcome, **kwargs):
+        index_report.append_queue_line(
+            out_dir,
+            index_report.QueueLine(
+                repo=(tmp_path / "target-repo").name,
+                spec_id="TE-2",
+                state="EXHAUSTED",
+                attempts=1,
+                cost_usd_est=1.0,
+                concerns=0,
+                added=1,
+                removed=0,
+                link="https://x/pull/2",
+                risk="standard",
+            ),
+            header={},
+        )
+        return package_phase.PackageResult(state="EXHAUSTED", pr_url="https://x/pull/2")
+
+    def _push_records_2(_outcome, **kwargs):
+        push_calls_2.append(kwargs)
+        return package_phase.PushResult(pushed=False, note="unused")
+
+    result2 = _run(
+        "TE-2",
+        102,
+        "opens",
+        _exhausted_outcome(102, "opens"),
+        _package_opens,
+        _push_records_2,
+    )
+    assert push_calls_2 == []
+    row2 = next(r for r in _rows(out_dir) if r["spec_id"] == "TE-2")
+    assert row2["state"] == "EXHAUSTED"
+    assert row2["link"] == "https://x/pull/2"
+    assert result2.state == "EXHAUSTED"
+
+    # 3) A raising fake: `run_task` catches it, pushes, and raises nothing.
+    push_calls_3: list[dict] = []
+
+    def _package_raises(_outcome, **kwargs):
+        raise package_phase.PackageError("gh is unavailable")
+
+    def _push_records_3(_outcome, *, package_refusal=None, **kwargs):
+        push_calls_3.append({"package_refusal": package_refusal, **kwargs})
+        return package_phase.PushResult(
+            pushed=True, branch="saffron/TE-3", pushed_sha="d" * 40, note="pushed"
+        )
+
+    result3 = _run(
+        "TE-3",
+        103,
+        "raises",
+        _exhausted_outcome(103, "raises"),
+        _package_raises,
+        _push_records_3,
+    )
+    assert push_calls_3 and push_calls_3[0]["package_refusal"] == "gh is unavailable"
+    row3 = next(r for r in _rows(out_dir) if r["spec_id"] == "TE-3")
+    assert row3["state"] == "EXHAUSTED"
+    assert row3["link"] == ""
+    assert "gh is unavailable" in row3["note"] and "pushed" in row3["note"]
+    assert result3.state == "EXHAUSTED"
+
+    # Last: a `READY_FOR_REVIEW` cell's `PackageError` through the same
+    # raising fake still raises, and no push runs.
+    push_calls_4: list[dict] = []
+
+    def _push_records_4(_outcome, **kwargs):
+        push_calls_4.append(kwargs)
+        return package_phase.PushResult(pushed=False, note="unused")
+
+    ready_outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=104,
+        run_id=104,
+        task_dir=out_dir / "raises-ready",
+        spent_usd=1.0,
+        attempts=1,
+    )
+    with pytest.raises(package_phase.PackageError):
+        _run(
+            "TE-4",
+            104,
+            "raises-ready",
+            ready_outcome,
+            _package_raises,
+            _push_records_4,
+        )
+    assert push_calls_4 == []

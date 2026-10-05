@@ -181,6 +181,31 @@ def test_budget_ceilings_round_trip_distinctly(tmp_path):
     assert len({e.ceiling for e in loaded}) == 3
 
 
+def test_a_rebut_overrun_budget_line_names_rebut_and_survives_the_log(tmp_path):
+    """SA-0203: `describe` renders REBUT's own line only when the field that
+    carries its spend is set, and the base stopping line otherwise. Both
+    shapes round-trip through the log unchanged."""
+    overrun = Budget(
+        timestamp=1.0,
+        spec_id="SA",
+        ceiling="budget_usd",
+        value=63.10,
+        limit=37.00,
+        rebut_spent_usd_est=5.74,
+    )
+    stopping = Budget(
+        timestamp=2.0, spec_id="SA", ceiling="budget_usd", value=9.0, limit=9.0
+    )
+    assert describe(overrun) == (
+        "budget: $63.10 of $37.00 — REBUT ran past it, spending $5.74"
+    )
+    assert describe(stopping) == "budget: $9.00 of $9.00 — stopping"
+    log = EventLog(tmp_path)
+    log.append(overrun)
+    log.append(stopping)
+    assert read_log(tmp_path) == [overrun, stopping]
+
+
 def test_terminal_distinguishes_all_five_zero_commit_endings(tmp_path):
     """The supervisor separates five ways an implement turn ends with no
     commits; a boolean would re-collapse them. 'Cut off and recovered' is
@@ -1211,9 +1236,10 @@ def test_the_table_did_not_quietly_lose_a_row():
     that matters.
 
     `SA-0085`, `SA-0125` and `SA-0126` each moved this count. `SA-0133`
-    and `SA-0186` each move it again, by two."""
-    assert len(FAMILIES) == 69
-    assert len({f.prefix for f in FAMILIES}) == 69
+    and `SA-0186` each move it again, by two. `SA-0203` moves it again,
+    by one."""
+    assert len(FAMILIES) == 70
+    assert len({f.prefix for f in FAMILIES}) == 70
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
