@@ -6,7 +6,7 @@ priority: 2
 depends_on: [SA-0215]
 consumes:
   - saffron/view/graph.py:build
-estimated_lines: 350
+estimated_lines: 376
 estimate_measured: true
 touches:
   - saffron/view/graph.py
@@ -40,8 +40,9 @@ acceptance:
       names a run and no attempt, is not stated. The witness drives all four
       statuses through one attempt. Beside it are an ungated attempt and a
       second gated attempt of the same task, a gated attempt of a second
-      task, and a baseline result of the same run. It checks each result's
-      suite and subject against its own attempt.
+      task, and a baseline result of the same run. Spare baseline results
+      are recorded first, so no gate result id equals its position. It
+      checks each result's suite and subject against its own attempt.
     witness: tests/test_view_graph.py::test_each_gate_status_maps_to_its_own_earl_outcome
     wrong_versions:
       - "`error` maps to `earl:failed`, so a gate that broke reads as code that is wrong."
@@ -49,6 +50,7 @@ acceptance:
       - Each gate result gets its own suite node rather than one per attempt.
       - Every attempt states a diff, gated or not.
       - The gate results are read without the attempt filter, so a baseline result is stated too.
+      - Results are named by a running counter over the stated results rather than by `gate_result_id`.
       - The suite and the diff are bound once per task, so a later attempt's results name the first gated attempt's suite and diff.
       - The suite and the diff carry over from the previous task, so the second task's results name the first task's.
   - claim: >-
@@ -94,16 +96,18 @@ acceptance:
       task's attempts, suites, diffs, gate results or findings. The witness
       drives five tasks in this order. They are a task with a gated attempt
       and one finding, a task with an ungated attempt and two findings, a
-      task with no attempt and one finding, then a task in an unknown state
-      and a task at an unknown risk. Each of the last two has a gated attempt
-      with a failing result and one finding.
+      task with no attempt and one finding, then three left-out tasks. A
+      task in an unknown state has an ungated attempt and one finding. A
+      task at an unknown risk has a gated attempt with a failing result and
+      one finding. A second task at an unknown risk, in a known state, has
+      an ungated attempt and one finding.
     witness: tests/test_view_graph.py::test_findings_without_a_gated_attempt_are_left_out_and_the_task_kept
     wrong_versions:
       - One `LeftOut` is added per finding rather than per task.
       - The whole task is left out with its findings.
       - Only a task that has attempts is checked, so a task with no attempt states a finding with no subject.
       - The last gated diff is not reset between tasks, so a later task's findings attach to an earlier task's diff.
-      - A task already left out for its state also gets a `findings_without_diff` entry.
+      - A task already left out for its state or its risk also gets a `findings_without_diff` entry.
       - A separate SELECT over `gate_results` outside the kept-task loop states a suite and a diff for a left-out task's gated attempt.
       - Findings are read for every task in the ledger, so a left-out task's finding is stated.
   - claim: >-
@@ -169,7 +173,7 @@ was measured at 678 lines and split in two. `SA-0215` is the parent and
 builds `saffron/view/graph.py`. This spec is the child. It adds the gate
 results and the findings to the graph that `SA-0215`'s `build` returns.
 
-Line numbers below were read at `2f8e15e6`.
+Line numbers below were read at `c1a04c8c`.
 
 **What `SA-0215` gives this spec.** Its `saffron/view/graph.py` has the
 frozen dataclasses `LeftOut(task_id, spec_id, reason)` and
@@ -235,9 +239,8 @@ fixture graph. No Python produces these triples yet.
    name is `data:gate-<name>`, typed and given a role as criterion 3 says.
 4. **Read the two sets from `shapes_path`.** Collect the `sh:in` list of
    each node shape whose `sh:targetClass` is `factory:CoreGate`. Do the
-   same for `factory:GateRole`. If `SA-0215` already has
-   a reader for a node-level `sh:in`, use it. Otherwise add one beside its
-   path reader.
+   same for `factory:GateRole`. `SA-0215` adds a helper that matches on
+   `sh:targetClass` for its in-flight states. Use it.
 5. **Findings.** For each task `build` keeps, read its findings. With a
    gated attempt, state each as criterion 5 says, and type each lens node
    `factory:CriticLens`. Without one, state none and append
@@ -307,10 +310,11 @@ Assert that none of the five appears in `ViewGraph.turtle`.
 **Criterion 4.** Compare `left_out` as a sorted list of
 `(task_id, spec_id, reason)` tuples, so a duplicate entry fails. Put the
 task with a gated attempt first, so a diff carried over from it would show
-on the tasks after it. Take each of the two left-out tasks. Assert that no
+on the tasks after it. Take each of the three left-out tasks. Assert that no
 triple names its attempt, suite, diff, gate result or finding, as subject
-or as object. `SA-0215` checks the state before the
-risk, so give the unknown-risk task a known state.
+or as object. `SA-0215` checks the state before the risk, so give both
+unknown-risk tasks a known state. The two ungated left-out tasks are what
+a second `findings_without_diff` entry would show on, one per reason.
 
 **Criterion 6.** Write the edited shapes under `tmp_path`, from
 `DEFAULT_SHAPES`'s text. `factory:dead` and `factory:prose` are typed
@@ -324,9 +328,22 @@ the review is where that is caught.
 
 **Criterion 7.** Load the turtle and `projection.VOCABULARY` into one
 `pyoxigraph.Store`, and read each query's text from its file. The fixture
-needs one batch with one run and one task, whose attempt has a `lint` fail
-with two failures and a `scope` pass. That task has one finding. A second
-task sits on a run with no batch.
+needs one batch with one run and one task, with a `pr_url` set. Its
+attempt has a `lint` fail with two failures and a `scope` pass. That task
+has one finding. A second task sits on a run with no batch.
+
+**Offset the ids.** A fresh ledger numbers each table from 1, so a node
+named by a running counter reads right by accident. Before each fixture's
+own rows, record spare baseline gate results on a spare run, and spare
+findings on a spare task. Delete the spare findings and the spare task
+before `build`. Their ids stay used, so no gate result or finding id
+equals its position. Build every expected IRI from the ids the ledger
+returned.
+
+**Measured on a prototype at `c1a04c8c`.** A prototype of this half passed
+all seven witnesses, and each failed against `SA-0215`'s half alone. Each
+of the 38 wrong versions above was applied to it as an edit. Each failed
+its own criterion's witness.
 
 **The IRI forms are a contract.** `SA-0217` parses a gate result's id
 from `data:gate-result-<gate_result_id>`, and a gate's name from
