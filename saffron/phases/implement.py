@@ -103,6 +103,19 @@ class AttemptResult:
     # The result event's own `structured_output`, whole, never re-derived
     # from `text` (§5.3, backlog b-4e0868).
     structured_output: Any | None = None
+    # True only for an `api_error` result carrying all four usage counts
+    # present and zero: the provider served this turn nothing (b-031ac2).
+    provider_served_nothing: bool = False
+
+
+# The four usage counts a result event carries (images/agent_runner.py).
+# A null or missing count is not zero, so only these exact values count.
+_TOKEN_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
 
 
 def agent_options(
@@ -399,6 +412,10 @@ def run_agent(
         rate_limit_status=rate_limit.get("status"),
         rate_limit_resets_at=rate_limit.get("resets_at"),
         structured_output=result.get("structured_output"),
+        provider_served_nothing=(
+            result.get("terminal_reason") == "api_error"
+            and all(result.get(key) == 0 for key in _TOKEN_USAGE_KEYS)
+        ),
     )
     if failed:
         # `is_error`, measured and not assumed: a cell with no credential

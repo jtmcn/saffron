@@ -57,8 +57,10 @@ StopReason = Literal["DRAINED", "BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE
 # The breaker's own set — deliberately not `scheduler.REQUEUE_STATES`, which
 # answers a different question (what re-queues tomorrow) and contains
 # `CHANGES_REQUESTED` and `ORPHANED`, both states a task *earned*. Only these
-# three mean the run itself is broken rather than the task's outcome.
-ABORT_STATES = frozenset({"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED"})
+# four mean the run itself is broken rather than the task's outcome.
+ABORT_STATES = frozenset(
+    {"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED", "PROVIDER_UNREACHABLE"}
+)
 
 # Two consecutive aborts is what fires the breaker (§4.2.1) — enough to tell
 # "the toolchain is broken" from "three flaky tasks", never fewer.
@@ -212,7 +214,7 @@ def _drive(
             return "INFRASTRUCTURE", consecutive_aborts
 
     # By spec id: a re-offered spec returns as a new `Candidate` and would
-    # start twice. A rate-limited one with `sleep` set is taken back out.
+    # start twice. One with `sleep` set is taken back out (b-031ac2).
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -317,6 +319,11 @@ def _drive(
                         # would have recovered on its third task (backlog item 70).
                         consecutive_aborts = 0
 
+                    if outcome.state == "PROVIDER_UNREACHABLE" and sleep is not None:
+                        # Not a miss: offered again at once, with no wait.
+                        # The breaker above is the only bound on it (b-031ac2).
+                        started.discard(candidate.spec.id)
+
                     if outcome.state in IN_FLIGHT_STATES:
                         # Read from `reconcile`, never copied: the next batch scan's own
                         # definition of "in flight" is what decides a corpse there, and a
@@ -360,7 +367,8 @@ def _wait_out_rate_limit(
 def _is_layer(result: CellOutcome | Refused) -> bool:
     """`run_stack_batch`'s one predicate. A result adds a layer only when it
     is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
-    `EXHAUSTED`, any other state, or a `Refused`."""
+    `EXHAUSTED`, any other state, or a `Refused`. `RATE_LIMITED` and
+    `PROVIDER_UNREACHABLE` return before this runs, inside `wrapped()`."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 
@@ -723,7 +731,10 @@ def run_stack_batch(
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
                 remaining.remove(original)
             raise
-        if isinstance(result, CellOutcome) and result.state == "RATE_LIMITED":
+        if isinstance(result, CellOutcome) and result.state in (
+            "RATE_LIMITED",
+            "PROVIDER_UNREACHABLE",
+        ):
             # Neither a layer nor a miss: `original` stays in `remaining` so
             # the same spec is offered again, against this same `pred`.
             return result

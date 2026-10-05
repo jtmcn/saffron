@@ -511,10 +511,14 @@ def plan_checkpoint(
     # `agent` is `implement.run_agent`, wrapped with `spec.spec_id` already
     # bound (§0) — `emit` is handed straight through, with no adapter.
     spent = 0.0
+    # Only the first call can mean the provider served nothing. A
+    # re-prompt below resumes an already completed call (b-031ac2).
+    first_call_returned = False
     try:
         attempt = agent(
             container, prompt=implement.PLAN_PROMPT, options=options, emit=emit
         )
+        first_call_returned = True
         spent = attempt.cost_usd_est
         # ponytail: the door is only here, at the plan checkpoint. A `touches`
         # insufficiency the implementer discovers mid-diff has no exit and
@@ -618,6 +622,10 @@ def plan_checkpoint(
         # its own identity and carries what the checkpoint already spent, or a
         # re-prompted turn's first half stops counting (§4.1).
         prior = failed.attempt or _failed_turn(failed, "")
+        if first_call_returned and prior.provider_served_nothing:
+            # This failure is a re-prompt's, not the first call's, so the
+            # served-nothing fact does not belong to it (b-031ac2).
+            prior = replace(prior, provider_served_nothing=False)
         failed.attempt = replace(prior, cost_usd_est=spent + prior.cost_usd_est)
         raise
     raise AssertionError("unreachable: the loop returns or raises")
@@ -2159,15 +2167,21 @@ def _drive_cell(
             # No plan and no commits, but a live cell: the earned state, not the
             # ORPHANED that a crash out of `run_one_cell` would stamp (§4.5).
             plan_cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            # The provider serving the first call nothing is not the task
+            # failing (b-031ac2). Any other failure keeps today's state.
+            served_nothing = bool(
+                failed.attempt and failed.attempt.provider_served_nothing
+            )
+            state = "PROVIDER_UNREACHABLE" if served_nothing else "NOT_IMPLEMENTED"
             _phase_start(
                 "IMPLEMENT",
                 "PLAN",
                 f"the session failed, ${plan_cost:.2f} spent — {failed}",
             )
-            ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
+            ledger.set_task_state(task_id, state)
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
-                state="NOT_IMPLEMENTED",
+                state=state,
                 task_id=task_id,
                 run_id=run_id,
                 task_dir=task_dir,

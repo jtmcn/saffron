@@ -4924,6 +4924,140 @@ def test_a_rate_limited_outcome_carries_the_reset_time(monkeypatch, tmp_path):
             assert isinstance(outcome.resets_at, int), resets_at
 
 
+def _served_nothing(cost=0.0, **overrides):
+    """What `run_agent` hands back when the provider served a turn nothing:
+    `api_error`, every count zero (SA-0152's own shape)."""
+    return implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=0,
+        cost_usd_est=cost,
+        is_error=True,
+        provider_served_nothing=True,
+        **overrides,
+    )
+
+
+def test_a_plan_turn_the_provider_served_nothing_ends_provider_unreachable(
+    monkeypatch, tmp_path
+):
+    """The plan turn's first call failing with the provider having served it
+    nothing is not the task failing (b-031ac2): the outcome, the ledger's
+    task row and the run row all say `PROVIDER_UNREACHABLE`, the spend is
+    $0.00, and no second turn runs. A closed window still ends
+    `RATE_LIMITED`, ahead of this check."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "unreachable",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+    )
+    assert outcome.state == "PROVIDER_UNREACHABLE"
+    assert outcome.spent_usd == 0.0
+    assert len(cell.turns) == 1
+    (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+    assert task_row["state"] == "PROVIDER_UNREACHABLE"
+    (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+    assert run_row["status"] == "COMPLETE"
+
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "rejected",
+        cell=cell2,
+        turns=[
+            implement.AgentFailed(
+                "api_error",
+                attempt=_served_nothing(
+                    rate_limit_status="rejected", rate_limit_resets_at=1755800000
+                ),
+            )
+        ],
+    )
+    assert outcome2.state == "RATE_LIMITED"
+    (task_row2,) = ledger2._db.execute("SELECT state FROM tasks").fetchall()
+    assert task_row2["state"] == "RATE_LIMITED"
+
+
+def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
+    monkeypatch, tmp_path
+):
+    """Of the plan turn's first call, its two re-prompts and the implement
+    turn, only the first call can end `PROVIDER_UNREACHABLE` (b-031ac2).
+    Each other failure keeps the state it earns today, with no commits."""
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "first-call",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+    )
+    assert outcome.state == "PROVIDER_UNREACHABLE"
+    assert len(cell.turns) == 1
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    ordinary_crash = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=1,
+        cost_usd_est=0.0,
+        is_error=True,
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "ordinary-crash",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=ordinary_crash)],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 1
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "schema-reprompt",
+        cell=cell,
+        turns=[
+            _turn("not the schema", cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 2
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "scope-reprompt",
+        cell=cell,
+        turns=[
+            _turn(_block(_PROPOSAL | {"proposed_touches": ["src/x.py"]}), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 2
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    captured: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "implement-turn",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+        capture=captured,
+    )
+    assert outcome.state == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 2
+    assert any("ended_without_finishing" in str(c) for c in captured)
+
+
 def _task_outcome(tmp_path, spec_id="SY-1"):
     """The one `TaskOutcome` a `use_default_emit=True` run logged."""
     from saffron.events import TaskOutcome, read_log
