@@ -49,7 +49,7 @@ max_attempts: 3
 max_turns: 130
 acceptance:
   - claim: >-
-      Every turn's wall gains the summed `duration_ms` of the task's
+      The wall `_drive_cell` binds into its one `agent` gains the summed `duration_ms` of the task's
       baseline results for the gates the repo's policy declares, advisory
       gates included, counted in seconds. A declared gate whose
       `duration_ms` is `None` adds nothing, and so does a result for a gate
