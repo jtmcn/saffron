@@ -4,7 +4,7 @@ title: The wall bound cut an IMPLEMENT session during its own full-suite run, wh
 status: open
 tier: 2
 filed: 2026-10-03
-specs: [SA-0170]
+specs: [SA-0170, SA-0207]
 prs: [647]
 commits: []
 cites: [§4.3, §5.3]

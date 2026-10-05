@@ -454,7 +454,7 @@ Every phase is bounded on five axes, all enforced host-side:
 | Spend | supervisor sums reported cost against task and batch ceilings; `max_budget_usd` per attempt as an in-cell backstop | expensive thrash |
 | Idle | no output for N seconds | a stalled agent |
 | Completion | a *short* silence window after the agent signals done | a finished agent whose child process (an MCP server, a spawned CLI) holds stdout open so EOF never arrives |
-| Wall clock | `asyncio.wait_for` + container timeout | deadlock |
+| Wall clock | a host-side `timeout_s` on each turn's stream, scaled to `max_turns` plus the declared gates' baseline time, then the cell is reaped | deadlock |
 
 **Note the order of the spend row, because it inverts the obvious one.** The agent runtime offers a per-query spend ceiling, and it is tempting to treat that as *the* budget enforcement. It is not: it is evaluated by the runtime process, which runs **inside the cell**, against the runtime's own running estimate. That places it on the untrusted side of §2's boundary — the same category as the `PreToolUse` path check (§5.3), valuable for cutting off a runaway attempt a few seconds earlier, worthless as a guarantee. The ceiling that holds is the supervisor's, because the supervisor is on the host and stops the cell rather than asking it to stop itself. The in-cell ceiling is still worth setting, for the same reason the path check is: it saves turns. It is just not what N2 rests on.
 
