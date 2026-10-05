@@ -189,8 +189,10 @@ acceptance:
       `EXHAUSTED` with a `pr_url`, as it refuses beside a `READY_FOR_REVIEW`
       one. An `EXHAUSTED` row with an empty `pr_url`, a `REJECTED` row with
       a `pr_url`, and another spec's `EXHAUSTED` row with a `pr_url` do not
-      stop it. The witness pushes with a plain keyword and with one holding
-      a credential, then beside each of those four earlier rows.
+      stop it. Before any earlier row exists, the witness pushes with a
+      keyword holding a mention and a closing keyword, and with one holding
+      a credential. Both go through. It then pushes beside each of those
+      four earlier rows, adding each row just before its push.
     witness: tests/test_package.py::test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft
     wrong_versions:
       - The guard still checks `READY_FOR_REVIEW` alone, so a re-run pushes over an open draft.
@@ -200,6 +202,9 @@ acceptance:
       - The commit says PACKAGE refused it without the text.
       - The guard reads every task in the repo, so another spec's open draft blocks this push.
       - The refusal text reaches the commit with its credential in it.
+      - A refusal text holding a credential refuses the whole push.
+      - The credential text is dropped and the commit does not say so.
+      - The refusal text reaches the commit without `neutralize`.
 ---
 
 ## Context
@@ -494,15 +499,18 @@ six times with a fake `gh` that prints a URL. Before each, write or remove
 `rebuttal.json` in `outcome.task_dir`. After each, read `pr_body.md` and
 look for "HEAD moved after REVIEW" in its `## Not covered` half.
 
-**Criterion 7's witness.** One `packageable` fixture. Push once with the
-new keyword and read the commit with `git log -1 --format=%B` on the
-remote branch, as `tests/test_package.py:3112-3131` does. Then add each
-earlier task with `create_run`, `create_task` and `set_task_package`,
-recording the remote head as its `pushed_sha`, so only the guard decides.
-Push once more with a keyword holding `FAKE_KEY`, and check the key is not in
-the commit. `tasks_by_repo` returns every task in the repo, so add one row
-under another spec too. Push beside the `REJECTED` row, the empty-`pr_url`
+**Criterion 7's witness.** One `packageable` fixture, and two phases.
+First, with no earlier row, push with the keyword `"conflicts; Fixes #1
+@someone"`. Read the commit with `git log -1 --format=%B` on the remote
+branch, as `tests/test_package.py:3112-3131` does. It holds `neutralize`'s
+form of that text and not the raw one. Push again with a keyword holding
+`FAKE_KEY`. Assert `pushed` is true, the key is not in the commit, and the
+commit says the text was left out. Second, build each earlier row with
+`create_run`, `create_task` and `set_task_package`. Add it right before the
+push beside it. Record the remote head as its `pushed_sha`, so only the
+guard decides. `tasks_by_repo` returns every task in the repo, so one row
+sits under another spec. In order: the `REJECTED` row, the empty-`pr_url`
 `EXHAUSTED` row, the other spec's drafted row, then this spec's drafted one.
-Assert `PushResult.pushed` is true for the first three and false beside the
-last. Compare `pushed`, never the remote head: two
-pushes of one tree inside a second can make the same squash commit.
+Assert `PushResult.pushed` is true for the first three and false for the
+last. Compare `pushed`, never the remote head: two pushes of one tree inside
+a second can make the same squash commit.
