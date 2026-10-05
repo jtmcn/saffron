@@ -1,0 +1,10 @@
+id: view-is-cli-only
+valid:
+  - 'import json'
+  - 'from saffron.projection import NS'
+  - 'note = "saffron.view renders the record"'
+invalid:
+  - 'import saffron.view.server'
+  - 'from saffron.view.graph import build'
+  - 'from saffron.view import graph'
+  - 'importlib.import_module("saffron.view.graph")'
