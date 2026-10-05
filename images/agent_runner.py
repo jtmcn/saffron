@@ -45,6 +45,10 @@ _STEP_USAGE_KEYS = (
 # runner process is one run_agent call, so this outlives nothing it shouldn't.
 _seen_assistant_message_ids: set[str] = set()
 
+# Each distinct model this run's assistant messages named, first-seen order
+# (SA-0205), reset in `main()`. `<synthetic>` and an empty name are skipped.
+_seen_models: list[str] = []
+
 # A whole message is silent until it lands, so the host's idle bound killed a
 # PLAN still writing one (b-d4e015). Deltas show tokens flowing, throttled.
 _PROGRESS_EVERY_S = 60.0
@@ -140,6 +144,9 @@ def events(message: Any) -> list[dict[str, Any]]:
             # Never through `_clip`: this is the one route a structured turn's
             # whole value can reach the host on (§5.3, backlog b-4e0868).
             "structured_output": getattr(message, "structured_output", None),
+            # `_seen_models`, joined (SA-0205). Never the `init` event's
+            # configured model, which states intent rather than what answered.
+            "model": ",".join(_seen_models) or None,
         }
         event.update(_usage_counts(getattr(message, "usage", None), _RESULT_USAGE_KEYS))
         return [event]
@@ -155,6 +162,9 @@ def events(message: Any) -> list[dict[str, Any]]:
                 evts[0].update(_usage_counts(usage, _STEP_USAGE_KEYS))
                 if message_id is not None:
                     _seen_assistant_message_ids.add(message_id)
+            model = getattr(message, "model", None)
+            if model and model != "<synthetic>" and model not in _seen_models:
+                _seen_models.append(model)
             return evts
         # A user message is the host's own prompt echoed back, or tool results.
         # Its text is never the agent's, so it must not reach `text` events —
@@ -214,6 +224,7 @@ async def _run(request: dict[str, Any]) -> int:
 def main() -> int:
     global _query_yielded
     _query_yielded = False
+    _seen_models.clear()
     try:
         request = json.load(sys.stdin)
         return asyncio.run(_run(request))

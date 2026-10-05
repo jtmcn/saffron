@@ -43,6 +43,7 @@ def _forget_seen_message_ids():
     has no such set, and a fixture that raised there would error every test
     in the file instead of failing the new ones."""
     getattr(runner, "_seen_assistant_message_ids", set()).clear()
+    getattr(runner, "_seen_models", []).clear()
 
 
 def _assistant(*blocks):
@@ -107,6 +108,7 @@ def test_the_result_event_carries_what_the_supervisor_bounds_on():
         "terminal_reason": "completed",
         "is_error": False,
         "structured_output": None,
+        "model": None,
         "input_tokens": 200,
         "output_tokens": 80,
         "cache_read_input_tokens": 500,
@@ -911,3 +913,94 @@ def test_deltas_a_window_apart_each_reach_the_host(monkeypatch):
     monkeypatch.setattr(runner, "_PROGRESS_EVERY_S", 0.0, raising=False)
     _recorded, types = _run_stream(monkeypatch, [_stream_event()] * 3)
     assert types == ["progress"] * 3
+
+
+# --- SA-0205: the result event names each model the run's assistant
+# messages named ---
+
+
+def _init_msg(model: str) -> SimpleNamespace:
+    # The configured model travels here. Only an assistant message's own
+    # `model` feeds `events()`'s own `model` key.
+    return SimpleNamespace(subtype="init", data={"model": model})
+
+
+def _assistant_msg(model: str, *, message_id: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(content=[], model=model, message_id=message_id)
+
+
+def _result_event_model(monkeypatch, messages: list) -> str | None:
+    async def _query(prompt, options):
+        for message in messages:
+            yield message
+
+    lines: list[dict] = []
+    _run_runner_in_process(
+        monkeypatch,
+        _stub_module(_query),
+        json.dumps({"prompt": "p", "options": {}}),
+        lambda line: lines.append(json.loads(line)),
+    )
+    (result,) = [e for e in lines if e["type"] == "result"]
+    return result["model"]
+
+
+def test_the_result_event_names_each_model_the_turns_assistant_messages_named(
+    monkeypatch,
+):
+    """`model` is the run's own distinct assistant-message models, first-seen
+    order, comma-joined. `<synthetic>` and empty names are skipped, never
+    sorted and never leaked between the five runs this drives through
+    `main` in one process. Never the `init` event's configured model."""
+    result_msg = _result_msg()
+
+    # Run 1 catches two wrong versions: sorting (m-b precedes m-a) and
+    # keeping an empty name (it sits last, so a kept one reads "m-b,m-a,").
+    run1 = [
+        _init_msg("init-model-1"),
+        _assistant_msg("m-b"),
+        _assistant_msg("<synthetic>"),
+        _assistant_msg("m-a"),
+        _assistant_msg(""),
+        result_msg,
+    ]
+    assert _result_event_model(monkeypatch, run1) == "m-b,m-a"
+
+    # Run 2: one model, sent by two assistant messages sharing a message_id.
+    # Kept once, not "m-x,m-x".
+    run2 = [
+        _init_msg("init-model-2"),
+        _assistant_msg("m-x", message_id="dup-1"),
+        _assistant_msg("m-x", message_id="dup-1"),
+        result_msg,
+    ]
+    assert _result_event_model(monkeypatch, run2) == "m-x"
+
+    # Run 3: none at all. Init, a partial message, and the result.
+    run3 = [_init_msg("init-model-3"), _stream_event(), result_msg]
+    assert _result_event_model(monkeypatch, run3) is None
+
+    # Run 4: a synthetic and an empty name alone.
+    run4 = [
+        _init_msg("init-model-4"),
+        _assistant_msg("<synthetic>"),
+        _assistant_msg(""),
+        result_msg,
+    ]
+    assert _result_event_model(monkeypatch, run4) is None
+
+    # Run 5 runs last, after the synthetic-alone run: a leaked model would
+    # show up here instead of a clean "m-solo".
+    run5 = [_init_msg("init-model-5"), _assistant_msg("m-solo"), result_msg]
+    assert _result_event_model(monkeypatch, run5) == "m-solo"
+
+
+def _result_msg(session_id: str = "s-model") -> SimpleNamespace:
+    return SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id=session_id,
+        total_cost_usd=0.01,
+        terminal_reason="completed",
+        is_error=False,
+    )

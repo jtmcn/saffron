@@ -379,6 +379,84 @@ def test_a_turn_ceiling_is_named_rather_than_left_to_the_exit_code():
         )
 
 
+def test_a_turn_records_the_model_its_result_event_names():
+    """`AttemptResult.model` is the result event's own `model`, verbatim,
+    joined exactly as the runner sent it. Never read from the `init`
+    event's configured model, which every row below carries ahead of the
+    result to rule out a fallback (SA-0205)."""
+    decoy_init = json.dumps(
+        {"type": "system", "subtype": "init", "data": {"model": "init-decoy"}}
+    )
+
+    joined = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        exec_stream=_stream(decoy_init, _result_line(model="m-a,m-b")),
+    )
+    assert joined.model == "m-a,m-b"
+
+    single = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        exec_stream=_stream(decoy_init, _result_line(model="m-solo")),
+    )
+    assert single.model == "m-solo"
+
+    null = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        exec_stream=_stream(decoy_init, _result_line(model=None)),
+    )
+    assert null.model is None
+
+    absent = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        exec_stream=_stream(decoy_init, _result_line()),
+    )
+    assert absent.model is None
+
+    with pytest.raises(implement.AgentFailed, match="api_error") as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            exec_stream=_stream(
+                decoy_init,
+                _result_line(
+                    subtype="success",
+                    is_error=True,
+                    terminal_reason="api_error",
+                    total_cost_usd=0.0,
+                    model="m-failed",
+                ),
+                returncode=1,
+            ),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.model == "m-failed"
+
+    with pytest.raises(implement.AgentFailed, match="no result event") as no_result:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            exec_stream=_stream(decoy_init),
+        )
+    assert no_result.value.attempt is not None
+    assert no_result.value.attempt.model is None
+
+
 def test_a_runner_killed_after_emitting_its_result_is_not_a_clean_turn():
     """§4.3's completion axis: a runner can emit a clean result event and then
     be killed holding stdout open. `is_error` is False and the subtype says

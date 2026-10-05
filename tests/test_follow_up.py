@@ -790,6 +790,121 @@ def test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_co
     assert "+beta_rate" not in prompt2
 
 
+def test_a_follow_up_writers_attempt_records_the_model_its_session_names(
+    tmp_path, monkeypatch
+):
+    """`write_follow_ups`'s `_charge` closes each spec-writing attempt it
+    opens with that writer session's own `model`. The accepted follow-up's
+    charges its minted task, and every pooled group's charges the layer's
+    own task (SA-0205)."""
+    from saffron import follow_up, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+    findings = _shared_findings()
+
+    def g() -> FollowUpGroup:
+        return FollowUpGroup(
+            task_key=key_102,
+            file="src/b.py",
+            findings=(_q(key_102, findings["concern_b"]),),
+        )
+
+    groups = [g() for _ in range(5)]
+
+    accepted_text = _candidate("SA-0108", mutant=("src/b.py", "not_here", "y"))
+    wrong_id_text = _candidate("SA-0999", claims=("claim-concern-b",))
+    turns = [
+        spec_review.SpecWriterSession(
+            text=accepted_text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-accepted",
+            num_turns=3,
+            spec_sha=hash_artifact(accepted_text),
+            model="wm-accepted",
+        ),
+        spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.25,
+            error="idle bound",
+            resets_at=None,
+            session_id="s-error",
+            num_turns=3,
+            spec_sha=None,
+            model="wm-error",
+        ),
+        spec_review.SpecWriterSession(
+            text="not a spec at all\n",
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-parse",
+            num_turns=3,
+            spec_sha=hash_artifact("not a spec at all\n"),
+            model="wm-parse",
+        ),
+        spec_review.SpecWriterSession(
+            text=wrong_id_text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-wrongid",
+            num_turns=3,
+            spec_sha=hash_artifact(wrong_id_text),
+            model="wm-wrongid",
+        ),
+        # Last, since a rate-limited writer session pools every later group.
+        spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.25,
+            error=None,
+            resets_at=1893456000,
+            session_id="s-rate",
+            num_turns=0,
+            spec_sha=None,
+            model="wm-rate",
+        ),
+    ]
+
+    write_calls: list = []
+    mint_calls: list = []
+    pooled: list = []
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups, []),
+        write=_write_stub(write_calls, turns),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=10.0,
+        emit=lambda line: None,
+        pooled=pooled,
+    )
+
+    assert [c.spec.id for c in candidates] == ["SA-0108"]
+    accepted_attempts = built.ledger.attempts(candidates[0].task_id)
+    assert len(accepted_attempts) == 1
+    assert accepted_attempts[0]["model"] == "wm-accepted"
+
+    pooled_attempts = built.ledger.attempts(built.task_102)
+    assert [a["model"] for a in pooled_attempts] == [
+        "wm-error",
+        "wm-parse",
+        "wm-wrongid",
+        "wm-rate",
+    ]
+
+
 def test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling(tmp_path):
     from saffron import follow_up, spec_review
 

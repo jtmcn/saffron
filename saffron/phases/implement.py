@@ -106,6 +106,9 @@ class AttemptResult:
     # True only for an `api_error` result carrying all four usage counts
     # present and zero: the provider served this turn nothing (b-031ac2).
     provider_served_nothing: bool = False
+    # The runner's joined `model` (SA-0205), never re-split. `None` on the
+    # no-result path, or a result whose `model` was `null` or absent.
+    model: str | None = None
 
 
 # The four usage counts a result event carries (images/agent_runner.py).
@@ -412,6 +415,7 @@ def run_agent(
         rate_limit_status=rate_limit.get("status"),
         rate_limit_resets_at=rate_limit.get("resets_at"),
         structured_output=result.get("structured_output"),
+        model=result.get("model"),
         provider_served_nothing=(
             result.get("terminal_reason") == "api_error"
             and all(result.get(key) == 0 for key in _TOKEN_USAGE_KEYS)

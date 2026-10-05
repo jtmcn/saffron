@@ -4130,6 +4130,73 @@ def test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task(ledger, r
     assert ledger.batch_spend(ledger.latest_batch_id()) == pytest.approx(29.125)
 
 
+def test_each_spec_session_attempt_records_the_model_its_session_names(ledger, repo_id):
+    """`run_stack_batch` closes each `SPEC_REVIEW` attempt with its review
+    session's own `model`. Each spec-writing attempt closes with its writer
+    session's own `model`, a writer session that carried an error included.
+    A session whose `model` is `None` writes `None` (SA-0205)."""
+    from dataclasses import replace
+
+    from saffron.batch import run_stack_batch
+    from saffron.spec_review import WRITING_PHASE
+
+    order = [_candidate_x("TE-1"), _candidate_x("TE-2")]
+
+    review_calls: dict[str, int] = {}
+
+    def review(candidate, layer, **kw):
+        spec_id = candidate.spec.id
+        review_calls[spec_id] = review_calls.get(spec_id, 0) + 1
+        if spec_id == "TE-1":
+            if review_calls[spec_id] == 1:
+                return replace(_review_session([_blocker("build")]), model="rm-1")
+            # TE-1's second review, after its one revision below. The one
+            # row this witness expects left at `None`.
+            return _review_session([])
+        return replace(_review_session([_blocker("build")]), model="rm-2")
+
+    revise_table = {
+        "TE-1": [replace(_written("r1\n"), model="wm-1")],
+        "TE-2": [replace(_writer_error("api_error"), model="wm-2")],
+    }
+
+    def revise(candidate, layer, spec_text, review_text):
+        return revise_table[candidate.spec.id].pop(0)
+
+    mint = _RevisionMint(ledger, repo_id)
+    runner = _RevisionRunner(ledger, repo_id)
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=review,
+        revise=revise,
+        mint=mint,
+    )
+    assert reason == "DRAINED"
+
+    def _attempts(spec_id: str) -> list[tuple[str, str | None]]:
+        return [(a["phase"], a["model"]) for a in ledger.attempts(mint.tasks[spec_id])]
+
+    # TE-1 revises once (a modeled review, a modeled writer turn) and runs
+    # on a second, unmodeled review.
+    assert _attempts("TE-1") == [
+        ("SPEC_REVIEW", "rm-1"),
+        (WRITING_PHASE, "wm-1"),
+        ("SPEC_REVIEW", None),
+    ]
+    # TE-2's writer session carries an error, and its own model still
+    # reaches the attempt row.
+    assert _attempts("TE-2") == [
+        ("SPEC_REVIEW", "rm-2"),
+        (WRITING_PHASE, "wm-2"),
+    ]
+
+
 def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_share(
     ledger, repo_id
 ):

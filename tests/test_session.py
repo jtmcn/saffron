@@ -51,6 +51,47 @@ def _failure(gate, file, code, message="m"):
     return NewFailure(gate, Failure(file=file, code=code, message=message))
 
 
+def test_every_recorded_turn_writes_the_model_its_attempt_names(tmp_path):
+    """`record_attempts` closes each turn's row with the model its own
+    attempt names, on a return and on a raised `AgentFailed` carrying one.
+    `None` applies when the attempt names none, or there is no attempt
+    at all (SA-0205)."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "origin", str(tmp_path / "m.git"), None)
+    run_id = ledger.create_run(repo_id, "a" * 40)
+    task_id = ledger.create_task(run_id, "SY-1", "b" * 64, "branch")
+
+    base = implement.AttemptResult(
+        session_id="s",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+
+    def _close_one(outcome) -> None:
+        def _agent(*_a, **_k):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        wrapped = session.record_attempts(_agent, ledger=ledger, task_id=task_id)
+        with contextlib.suppress(implement.AgentFailed):
+            wrapped()
+
+    # 1: a returned turn keeps its model.
+    _close_one(replace(base, model="m-return"))
+    # 2: a raised AgentFailed keeps its attempt's own model.
+    _close_one(implement.AgentFailed("boom", replace(base, model="m-failed")))
+    # 3: a raised AgentFailed with no attempt at all writes None.
+    _close_one(implement.AgentFailed("boom", None))
+    # 4: a returned turn whose attempt names no model writes None.
+    _close_one(replace(base, model=None))
+
+    rows = ledger.attempts(task_id)
+    assert [row["model"] for row in rows] == ["m-return", "m-failed", None, None]
+
+
 def test_the_loop_stops_when_there_are_no_new_failures():
     decision = session.repair_decision(attempt=1, max_attempts=4, new=[], previous=[])
     assert decision == "green"

@@ -589,6 +589,7 @@ def run_stack_batch(
                     ledger.close_attempt(
                         attempt_id,
                         session_id=session.session_id,
+                        model=session.model,
                         subtype="error" if session.error is not None else "success",
                         terminal_reason=None,
                         num_turns=session.num_turns,
@@ -697,6 +698,7 @@ def run_stack_batch(
                 ledger.close_attempt(
                     attempt_id,
                     session_id=turn.session_id,
+                    model=turn.model,
                     subtype="error" if turn.error is not None else "success",
                     terminal_reason=None,
                     num_turns=turn.num_turns,
