@@ -1,12 +1,12 @@
 ---
 id: b-b0cd68
 title: Retiring a spec turns this repo's gate suite red, so no stack batch finish can push here
-status: open
+status: done
 tier: 2
 filed: 2026-09-25
-closed:
+closed: 2026-10-05
 specs: [SA-0200]
-prs: []
+prs: [674]
 commits: []
 cites: [§5.4]
 related: [b-792ab2]
@@ -30,3 +30,5 @@ The two tests read the spec directory in a way a retirement does not break, and 
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
+- 2026-10-05: done by `SA-0200` (#674), in the spec loop's run 28. The
+  queue smoke test reads its measured ids, so retiring a spec leaves it green.

@@ -1,11 +1,12 @@
 ---
 id: b-038aef
 title: An EXHAUSTED task whose gates went green opens no pull request
-status: open
+status: done
 tier: 1
 filed: 2026-10-01
+closed: 2026-10-05
 specs: [SA-0162, SA-0151, SA-0204]
-prs: [626, 628]
+prs: [626, 628, 678]
 commits: []
 cites: [§5.7]
 related: [b-4c5dc7]
@@ -29,3 +30,6 @@ a draft pull request. Its body names the unanswered blockers.
 ## Record
 
 - 2026-10-01: filed from the spec loop's run 24.
+- 2026-10-05: done by `SA-0204` (#678), in the spec loop's run 28. An
+  `EXHAUSTED` task whose gates went green opens a draft pull request. Its own
+  cell ended `EXHAUSTED` with no pull request, and the delegate opened #678.
