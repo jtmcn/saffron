@@ -3,7 +3,7 @@ id: SA-0215
 title: The run record has no graph that states a task in flight, or the batch, run and attempts around it
 type: feature
 priority: 2
-estimated_lines: 447
+estimated_lines: 469
 estimate_measured: true
 touches:
   - saffron/view/__init__.py
@@ -52,7 +52,8 @@ acceptance:
       `rdfs:label` its spec id, and `prov:wasInformedBy` its run's node.
       It states `rdfs:seeAlso` its `pr_url` as an IRI when the column is set,
       and no `rdfs:seeAlso` when it is null. The witness drives all eight
-      states with a null `pr_url`, and a `REPAIRING` task with one set.
+      states at risk `standard` with a null `pr_url`, a `REPAIRING` task with
+      one set, and a `GATING` task at risk `elevated`.
     witness: tests/test_view_graph.py::test_an_in_flight_task_is_stated_with_its_state
     wrong_versions:
       - "The task node is not typed `factory:Task`."
@@ -61,16 +62,18 @@ acceptance:
       - "`rdfs:seeAlso` is stated as a string literal rather than an IRI."
       - "`rdfs:label` carries the task's `spec_sha` rather than its `spec_id`."
       - "`rdfs:seeAlso` is stated whatever `pr_url` holds, null included."
+      - "`riskTier` is derived from the state, `elevated` for an end state and `standard` otherwise."
   - claim: >-
       `build` states a task in each of the seventeen end states that
       `factory:TaskShape`'s `factory:endedInState` property lists, with both
       `factory:inState` and `factory:endedInState` set to that state. Its
       `factory:riskTier` is its own risk. The witness drives all seventeen,
-      each at risk `elevated`.
+      each at risk `elevated`, and one more `MERGED` task at risk `standard`.
     witness: tests/test_view_graph.py::test_an_ended_task_states_both_its_state_and_its_end
     wrong_versions:
       - "An ended task states `endedInState` alone and no `inState`."
       - "`riskTier` is `standard` whatever the row holds."
+      - "`riskTier` is derived from the state, `elevated` for an end state and `standard` otherwise."
       - "The end states are read from `TerminalStateShape`, so the six end states outside it state no `endedInState`."
   - claim: >-
       `build` states every run as `data:run-<run_id>` typed `factory:Run`,
@@ -85,6 +88,8 @@ acceptance:
       - "A run with a null `batch_id` is linked to a `data:batch-None` node."
       - "Tasks are read through a join that requires a batch, so a task on an unbatched run is not stated."
       - "A task states no `prov:wasInformedBy` its run."
+      - "A run is linked to `data:batch-<run_id>` rather than its batch's id."
+      - "A task is linked to `data:run-<task_id>` rather than its run's id."
   - claim: >-
       `build` states every batch as `data:batch-<batch_id>` typed
       `factory:Batch`. It states `factory:budgetUsd` as an `xsd:decimal` and
@@ -122,6 +127,7 @@ acceptance:
       - "The attempt node is not typed `factory:Attempt`."
       - "The phase node is not typed `factory:Phase`."
       - "The phase node is named per attempt, so two attempts in one phase name two phases."
+      - "The phase node is named `data:phase-<run_id>-<phase>` rather than by the task's id."
       - "The phase node states no `prov:wasInformedBy` its task."
       - "`factory:n` carries the attempt's id."
       - "`costUsdEst` is stated as a float literal."
@@ -132,12 +138,15 @@ acceptance:
       set is left out. `left_out` holds one `LeftOut` with its task id, its
       spec id and the reason `unknown_state`. No triple names its task node,
       its attempts' nodes or its phase nodes. A known task read after it is
-      still stated.
+      still stated. The state is checked before the risk, so a task unknown
+      on both counts gets exactly one `LeftOut`, with the reason
+      `unknown_state`. The witness drives one such task beside the first.
     witness: tests/test_view_graph.py::test_a_task_in_an_unknown_state_is_left_out_and_the_rest_are_stated
     wrong_versions:
       - "The loop stops at the first unknown state, so the tasks after it are not stated."
       - "The reason is `unknown_risk`."
       - "The task is recorded as left out, but its attempts and phases are still stated."
+      - "The risk is checked before the state, so a task unknown on both counts is left out as `unknown_risk`."
   - claim: >-
       A task whose risk is not in the risk set is left out. `left_out` holds
       one `LeftOut` with its task id, its spec id and the reason
@@ -151,11 +160,12 @@ acceptance:
   - claim: >-
       The whole graph `build` makes is validated with pyshacl against the
       shapes at `shapes_path`, with the vocabulary and `ontology/vendor/*.ttl`
-      as data beside it. `ViewGraph.turtle` is the graph alone, without the vocabulary. With
-      `DEFAULT_SHAPES`, a ledger holding a closed batch, a batched and an
-      unbatched run, an ended and an in-flight task and a closed attempt
-      builds, and its turtle passes those shapes when the witness validates it
-      itself. With a `shapes_path` that graph fails, `build` raises
+      as data beside it. `ViewGraph.turtle` is the graph alone, without the
+      vocabulary. With `DEFAULT_SHAPES`, a ledger holding a closed batch, a
+      batched and an unbatched run, an ended and an in-flight task and a
+      closed attempt builds. Its turtle passes those shapes when the witness
+      validates it itself, with the vocabulary and `ontology/vendor/*.ttl`
+      beside it as `build` does. With a `shapes_path` that graph fails, `build` raises
       `ViewGraphError` carrying pyshacl's report text.
     witness: tests/test_view_graph.py::test_the_graph_passes_the_shapes
     wrong_versions:
@@ -190,8 +200,8 @@ acceptance:
       `open_read_only(path)` returns a connection whose `row_factory` is
       `sqlite3.Row` and on which an `INSERT` raises
       `sqlite3.OperationalError` naming a read-only database. On a path that
-      does not exist, its first statement raises `sqlite3.OperationalError`
-      and no file is created there.
+      does not exist, `open_read_only` itself raises
+      `sqlite3.OperationalError`, and no file is created there.
     witness: tests/test_view_graph.py::test_the_connection_cannot_write
     wrong_versions:
       - "The path is passed to `sqlite3.connect` as a plain filename, so the connection writes and an absent path is created."
@@ -230,14 +240,18 @@ property lists the seventeen end states in `sh:in` (`:16-23`). Its
 targets `factory:InFlightState` and lists the eight in-flight states in a
 node-level `sh:in`. `_sh_in`'s approach therefore finds no in-flight state.
 `factory:AttemptShape` (`:61-68`) requires `factory:withinPhase` a
-`factory:Phase`, `factory:n` an `xsd:integer` of at least 1, and
-`factory:costUsdEst` an `xsd:decimal`. `factory:BatchShape` (`:77-85`)
+`factory:Phase` and `factory:n` an `xsd:integer` of at least 1. A
+`factory:costUsdEst` it states must be an `xsd:decimal`, though none is
+required (`:68`). `factory:BatchShape` (`:77-85`)
 requires `factory:spentUsdEst` an `xsd:decimal` (`:81`). `factory:RunShape`
 (`:87-91`) requires one `factory:baseSha`.
 
-**The ledger.** `saffron/ledger.py`'s schema writes every time column with
-`datetime('now')`, UTC text with no offset (`batches.started_at` at `:100`,
-`attempts.started_at` at `:159`). `batches.spent_usd_est`, `ended_at` and
+**The ledger.** Every time column in `saffron/ledger.py` holds UTC text
+in the form `%Y-%m-%d %H:%M:%S`, with no offset. The schema's defaults
+write it with `datetime('now')` (`:100`, `:159`). A row written from a
+fact takes its time from `_ledger_time` (`:315-318`). A new run's insert
+converts it at `:609`. An attempt's insert takes the time converted at
+`:656`, where `_ledger_time` is called once per fact. `batches.spent_usd_est`, `ended_at` and
 `status` are nullable (`:101-106`). A run's `batch_id` is nullable (`:114`).
 `attempts.num_turns`, `cost_usd_est` and `ended_at` are nullable
 (`:160-164`). `open_attempt` numbers `n` within one task's phase
@@ -245,8 +259,9 @@ requires `factory:spentUsdEst` an `xsd:decimal` (`:81`). `factory:RunShape`
 it writes on open.
 
 **The view queries.** `ontology/queries/view/V2-batch-tasks.rq` and
-`V5-unbatched-tasks.rq` read a task's state through
-`{ ?task factory:inState ?state } UNION { ?task factory:endedInState ?state }`.
+`V5-unbatched-tasks.rq` read `factory:inState` and `factory:endedInState`
+each in an `OPTIONAL`, and bind one state with `COALESCE`. So a task stating
+both is counted once.
 `V3-task-timeline.rq` joins `?phase prov:wasInformedBy ?task` and
 `?attempt factory:withinPhase ?phase ; factory:n ?n`. So the phase node
 needs both edges.
@@ -332,6 +347,12 @@ commit. Close the ledger, then call `build(open_read_only(...))` and parse
 whole expected set, and compare a decimal or a time by `toPython()` and its
 datatype.
 
+**Offset the ids across tables.** A fresh ledger numbers each table
+from 1. So a batch, a run and a task can share an id. A node named from the
+wrong table's id then reads right by accident. Create throwaway rows first,
+such as one batch, three runs and six tasks, so no two tables share an id.
+Build every expected IRI from the ids the ledger returned.
+
 **Criterion 4's witness** asserts `factory:budgetUsd` on every batch it
 makes, closed and running, each with its own value.
 
@@ -343,6 +364,8 @@ attempt id.
 **Criteria 6 and 7's witnesses** give the left-out task an attempt and
 create a known task after it. They assert no triple names the left-out
 task's node, its attempt's node or its phase's node, as subject or object.
+Criterion 6's witness adds a second unknown-state task at risk `reckless`,
+and compares `left_out` with the whole list of two.
 
 **Criterion 8's witness** makes the failing shapes by copying
 `DEFAULT_SHAPES` with `factory:spentUsdEst`'s `sh:maxCount` set to 0. The
@@ -354,9 +377,15 @@ copy changed one line, so the test cannot pass on an unchanged file.
 breaks the vocabulary's own individuals, since each in-flight state is
 typed `factory:InFlightState`. So the in-flight half adds a member. Adding
 `PAUSED` also needs the `sh:class factory:TaskState` clause dropped from the
-`factory:inState` property, since `PAUSED` is no `TaskState`. The end-state
-and risk sets are property-level, so dropping a member leaves the
-vocabulary valid. Assert each edited string occurs once before replacing it.
+`factory:inState` property, since `PAUSED` is no `TaskState`. That clause
+also appears in `InFlightStateShape`, so anchor the edit on the
+`factory:inState` property's own text. The end-state and risk sets are
+property-level, so dropping a member leaves the vocabulary valid. Assert
+each edited string occurs once before replacing it.
+
+**Criterion 11's witness** puts the `open_read_only` call on the absent
+path inside `pytest.raises`. SQLite refuses a read-only open of a missing
+file at connect, so the open itself raises.
 
 **Criterion 10's witness.** Close the `Ledger`. Open a plain
 `sqlite3.connect(path, isolation_level=None)`, run `BEGIN IMMEDIATE` and
@@ -364,12 +393,13 @@ an `UPDATE` of the task's state, and build while that is open. Roll back
 and close it in a `finally`.
 
 **Measured on a prototype, 2026-10-05.** A prototype of this half was cut
-from one of all of Task 3. It passed all eleven witnesses at `2f8e15e6`. Each failed with `saffron/view/` removed. Every wrong version
+from one of all of Task 3. It passed all eleven witnesses at `9831b2f2`.
+Each failed with `saffron/view/` removed. Every wrong version
 listed above was applied to it as an edit, and each failed its own
 criterion's witness. `types` passed on it. `dead` reported exactly the
 three `pending_symbols` entries. It built the real ledger read-only in
 0.8 s, with no task left out and no `ViewGraphError`. Formatted, its
-source and witnesses measured 1786 changed tokens under `size_gate`'s
+source and witnesses measured 1873 changed tokens under `size_gate`'s
 counter, with few docstrings. `estimated_lines` is that figure over four.
 
 **The prose gate** counts every new comment and docstring. Write none with
