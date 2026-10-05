@@ -476,6 +476,9 @@ before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
 cannot read a two-hyphen ordinal. Git in a cell was refused a loose object
 once.
 
+**Placed 2026-10-05**, from ADR 9: **b-b51c9c**. The run record view shows a
+night only once it ends.
+
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 

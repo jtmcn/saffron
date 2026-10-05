@@ -40,6 +40,23 @@ where it did, attempt by attempt?
    projection drops a task whose chain breaks or is still in flight. The view
    must show exactly those tasks.
 
+## Settled while planning
+
+- The view reads the ledger through its own `?mode=ro` connection. `Ledger`
+  runs its schema on open, so it is never the view's reader.
+- A gate status maps one-to-one onto an EARL outcome. `pass` is `earl:passed`,
+  `fail` is `earl:failed`, `error` is `earl:cantTell`, and `skip` is
+  `earl:inapplicable`. No `factory:gateStatus` term is added.
+- `GateShape`'s blocking level moves to declared gates. A core gate is its
+  vocabulary individual. A repo gate is a `ContractGate` when its name is a
+  gate role, and a `RepoDefinedGate` otherwise.
+- Each gated attempt states one `Diff` node, the subject of its gate results.
+- A phase and a spec are named by `rdfs:label`. A pull request is
+  `rdfs:seeAlso` on its task.
+- Failure lines are capped at 200 per gate result, with a count of the rest.
+- Step 0 measured a full rebuild at 3.4 s, so the live overlay rebuilds on
+  each ledger change.
+
 ## Components
 
 ```
@@ -71,10 +88,10 @@ Each new term is licensed by a view query that reads it (Appendix T).
 | `prov:wasInformedBy` | `Run` to `Batch`, `Task` to `Run` | batch membership, with PROV's own edge |
 | `prov:startedAtTime`, `prov:endedAtTime` | `Batch`, `Run`, `Attempt` | the timeline |
 | `factory:numTurns` | `Attempt` | turns beside cost |
-| `factory:gate`, `factory:gateStatus` | `GateResult` | status ranges over `pass`, `fail`, `skip`, `error` (`gates/contract.py`) |
 | `factory:failureCount` | `GateResult` | the count, while the lines stay in the ledger |
 | `prov:wasGeneratedBy` | `GateResult` to `GateSuite` | which attempt's suite produced it |
-| claim, verdict, file, line | `Finding` | the finding as the critic stated it |
+| `factory:claim`, `factory:verdict` | `Finding` | the finding as the critic stated it |
+| `factory:spentUsdEst` | `Batch` | the night's spend beside its budget |
 
 `uv run python -m ontology.render` regenerates `CONTEXT.md` and the shapes.
 
