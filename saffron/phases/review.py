@@ -556,6 +556,42 @@ def _unresolved_wrong_versions(criterion: Criterion, cost: float, error: str) ->
     }
 
 
+def _resolved_wrong_versions(
+    criterion: Criterion, cost: float, report: _WrongVersionReport
+) -> dict:
+    """The entry filed for a criterion whose session answered the schema, on
+    the first turn or after one re-prompt: every declared version paired with
+    its answer by position."""
+    return {
+        "witness": criterion.witness,
+        "claim": criterion.claim,
+        "cost_usd": cost,
+        "error": None,
+        "versions": [
+            {
+                "version": version,
+                "edit": None if answer.edit is None else answer.edit.model_dump(),
+                "reason": answer.reason,
+            }
+            for version, answer in zip(
+                criterion.wrong_versions, report.versions, strict=True
+            )
+        ],
+    }
+
+
+def _parse_wrong_version_report(text: str, declared: int) -> _WrongVersionReport:
+    """One turn's text, read the same way a lens's is: the `<output>` block,
+    then the schema. A count that does not match `declared` is raised here
+    too, so a first answer and a re-prompted one share one error shape."""
+    report = _WrongVersionReport.model_validate(json.loads(parse_output_block(text)))
+    if len(report.versions) != declared:
+        raise ValueError(
+            f"{len(report.versions)} answers for {declared} wrong versions"
+        )
+    return report
+
+
 def run_wrong_versions(
     container: str,
     *,
@@ -572,7 +608,14 @@ def run_wrong_versions(
 ) -> list[dict]:
     """One fresh session per criterion that declares wrong versions, in the
     spec's own declared order (backlog item b-7e69d0). A criterion declaring
-    none buys no session, exactly like `run_criterion_probes`."""
+    none buys no session, exactly like `run_criterion_probes`.
+
+    An answer that is not the schema gets one re-prompt, on `run_lens`'s own
+    rule: refused when the ceiling left is less than the failed turn spent, or
+    the turn carries no session id. The retry resumes that same session with
+    the error then `EXTRACTION_PROMPT`, on the budget the first turn left. An
+    `AgentFailed` turn is never re-prompted.
+    """
     entries = []
     for criterion in acceptance:
         if not criterion.wrong_versions:
@@ -601,58 +644,78 @@ def run_wrong_versions(
             entries.append(_unresolved_wrong_versions(criterion, cost, str(failed)))
             continue
         try:
-            report = _WrongVersionReport.model_validate(
-                json.loads(parse_output_block(attempt.text))
-            )
+            report = _parse_wrong_version_report(attempt.text, declared)
         except (ValueError, ValidationError) as exc:
-            entries.append(
-                _unresolved_wrong_versions(
-                    criterion, attempt.cost_usd_est, f"not the schema: {exc}"
+            remaining = budget_usd - attempt.cost_usd_est
+            # Refused on `run_lens`'s own rule: a retry given less budget
+            # than the failed turn spent cannot finish.
+            if remaining < attempt.cost_usd_est or not attempt.session_id:
+                entries.append(
+                    _unresolved_wrong_versions(
+                        criterion, attempt.cost_usd_est, f"not the schema: {exc}"
+                    )
                 )
+                continue
+            retry_options = implement.agent_options(
+                system_prompt=system_prompt,
+                max_turns=max_turns,
+                budget_usd=remaining,
+                tools=REVIEW_TOOLS,
             )
-            continue
-        if len(report.versions) != declared:
-            entries.append(
-                _unresolved_wrong_versions(
-                    criterion,
-                    attempt.cost_usd_est,
-                    f"not the schema: {len(report.versions)} answers for "
-                    f"{declared} wrong versions",
+            try:
+                retry = agent(
+                    container,
+                    prompt=f"{exc}\n\n{EXTRACTION_PROMPT}",
+                    options=retry_options,
+                    resume=attempt.session_id,
+                    emit=emit,
+                    last_cost_usd=attempt.cost_usd_est,
                 )
-            )
+            except implement.AgentFailed as failed:
+                cost = attempt.cost_usd_est + (
+                    failed.attempt.cost_usd_est if failed.attempt else 0.0
+                )
+                entries.append(
+                    _unresolved_wrong_versions(
+                        criterion, cost, f"re-prompted once, then {failed}"
+                    )
+                )
+                continue
+            total_cost = attempt.cost_usd_est + retry.cost_usd_est
+            try:
+                report2 = _parse_wrong_version_report(retry.text, declared)
+            except (ValueError, ValidationError) as exc2:
+                entries.append(
+                    _unresolved_wrong_versions(
+                        criterion,
+                        total_cost,
+                        f"not the schema, even after a re-prompt: {exc2}",
+                    )
+                )
+                continue
+            entries.append(_resolved_wrong_versions(criterion, total_cost, report2))
             continue
         entries.append(
-            {
-                "witness": criterion.witness,
-                "claim": criterion.claim,
-                "cost_usd": attempt.cost_usd_est,
-                "error": None,
-                "versions": [
-                    {
-                        "version": version,
-                        "edit": None
-                        if answer.edit is None
-                        else answer.edit.model_dump(),
-                        "reason": answer.reason,
-                    }
-                    for version, answer in zip(
-                        criterion.wrong_versions, report.versions, strict=True
-                    )
-                ],
-            }
+            _resolved_wrong_versions(criterion, attempt.cost_usd_est, report)
         )
     return entries
 
 
 def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
-    """The one REVIEW line the wrong-version sessions add, counted over the
-    entries `run_wrong_versions` returns: every version across every entry,
-    and how many of those an edit was named for."""
+    """The one REVIEW line the wrong-version sessions add. The first clause
+    counts every version across every entry and how many of those named an
+    edit. The second names, in entry order, the witness of each entry whose
+    session never answered the schema. With none, the line matches the
+    first clause alone."""
     versions = [
         v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])
     ]
     expressed = sum(1 for v in versions if v["edit"] is not None)
-    return f"wrong versions: {len(versions)} declared, {expressed} expressed"
+    line = f"wrong versions: {len(versions)} declared, {expressed} expressed"
+    unanswered = [e["witness"] for e in entries if e.get("error") is not None]
+    if unanswered:
+        line += "; no session answered: " + ", ".join(str(w) for w in unanswered)
+    return line
 
 
 # `witness_gate`'s own status, over one criterion, in this record's words

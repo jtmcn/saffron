@@ -1,11 +1,12 @@
 ---
 id: b-4c5dc7
 title: A budget stop after green does not stop REVIEW, so REBUT is refused and a one-line fix ends the task EXHAUSTED
-status: open
+status: done
 tier: 1
 filed: 2026-10-01
+closed: 2026-10-05
 specs: [SA-0162, SA-0151, SA-0203]
-prs: [626, 628]
+prs: [626, 628, 676]
 commits: []
 cites: [§3, §5.5]
 related: [b-038aef]
@@ -35,3 +36,6 @@ for lenses it cannot answer.
 ## Record
 
 - 2026-10-01: filed from the spec loop's run 24. Both cells were adopted by hand as #626 and #628.
+- 2026-10-05: done by `SA-0203` (#676), in the spec loop's run 28. A blocker
+  left past the budget gets a REBUT paid from its own cap. `SA-0204`'s second
+  cell hit this bug live, on a host without #676.

@@ -35,3 +35,5 @@ recognise, or the sentence is reworded. A test pins whichever it is.
 - 2026-09-30: filed from the spec loop's run 23.
 - 2026-10-03: all three of run 26's cells read `terms=fail` at base on
   `saffron/intake.py:158` again.
+- 2026-10-05: every cell of run 28 read `terms=fail` at base on
+  `saffron/intake.py:156`, the same docstring after it moved.

@@ -39,3 +39,6 @@ every field the two paths share.
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #339.
+- 2026-10-05: `SA-0204` (#678) added a third site in `saffron/task.py`.
+  Its `EXHAUSTED` row and the unpackaged row are two 13-field copies that
+  differ in `state` and `note` (b-edcab7).

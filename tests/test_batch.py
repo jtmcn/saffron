@@ -504,7 +504,12 @@ def test_the_clock_is_checked_before_a_task_still_inside_the_window(ledger, repo
 
 
 def test_two_consecutive_aborts_fire_the_breaker(ledger, repo_id):
-    assert {"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED"} == ABORT_STATES
+    assert {
+        "GATE_ERROR",
+        "PREFLIGHT_FAILED",
+        "RATE_LIMITED",
+        "PROVIDER_UNREACHABLE",
+    } == ABORT_STATES
     # Never scheduler.REQUEUE_STATES — that set also contains CHANGES_REQUESTED
     # and ORPHANED, both states a task earned.
     assert ABORT_STATES < REQUEUE_STATES
@@ -536,6 +541,33 @@ def test_two_consecutive_aborts_fire_the_breaker(ledger, repo_id):
 
     batch_id = _latest_batch_id(ledger)
     assert _batch_row(ledger, batch_id)["status"] == "INFRASTRUCTURE"
+
+
+def test_a_provider_that_served_nothing_counts_toward_the_breaker(ledger, repo_id):
+    """A plain batch treats `PROVIDER_UNREACHABLE` as it treats
+    `PREFLIGHT_FAILED` (b-031ac2): two in a row still fire the breaker."""
+    candidates = [_candidate("TE-0001"), _candidate("TE-0002"), _candidate("TE-0003")]
+    run_one = _spend(ledger, repo_id, 1.0)
+    run_two = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner(
+        [
+            _outcome(state="PROVIDER_UNREACHABLE", run_id=run_one),
+            _outcome(state="PROVIDER_UNREACHABLE", run_id=run_two),
+        ]
+    )
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        rescan=lambda: candidates,
+        readiness_check=_ready,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert runner.calls == candidates[:2]
 
 
 def test_an_exhausted_task_between_two_aborts_resets_the_breaker(ledger, repo_id):
@@ -2082,6 +2114,132 @@ def test_a_rate_limit_in_a_stack_batch_neither_counts_toward_the_breaker_nor_res
 
     assert reason3 == "INFRASTRUCTURE"
     assert runner3.calls == candidates3
+
+
+def test_a_stack_batch_offers_a_provider_that_served_nothing_again_until_the_breaker(
+    ledger, repo_id, monkeypatch
+):
+    """A stack batch does not treat `PROVIDER_UNREACHABLE` as a miss
+    (b-031ac2): the same spec is offered again at once, on the same
+    predecessor, with no wait, and nothing that depends on it is refused.
+    The breaker is still the only bound on the re-offers."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    order = [
+        _candidate("TE-0"),
+        _candidate("TE-1"),
+        _candidate("TE-2", depends_on=["TE-1"]),
+        _candidate("TE-3"),
+    ]
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    runner = RateLimitScript(
+        ledger,
+        repo_id,
+        clock,
+        {
+            "TE-0": [{"state": "READY_FOR_REVIEW"}],
+            "TE-1": [
+                {"state": "PROVIDER_UNREACHABLE"},
+                {"state": "READY_FOR_REVIEW"},
+            ],
+            "TE-2": [{"state": "READY_FOR_REVIEW"}],
+            "TE-3": [
+                {"state": "PROVIDER_UNREACHABLE"},
+                {"state": "READY_FOR_REVIEW"},
+            ],
+        },
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert not any(" refused " in line for line in lines)
+    assert clock.sleeps == []
+    assert runner.calls == [
+        ("TE-0", None),
+        ("TE-1", "TE-0"),
+        ("TE-1", "TE-0"),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-2"),
+        ("TE-3", "TE-2"),
+    ]
+
+    order2 = [_candidate("TE-5")]
+    clock2 = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    runner2 = RateLimitScript(
+        ledger,
+        repo_id,
+        clock2,
+        {
+            "TE-5": [
+                {"state": "PROVIDER_UNREACHABLE"},
+                {"state": "PROVIDER_UNREACHABLE"},
+                {"state": "READY_FOR_REVIEW"},
+            ],
+        },
+    )
+
+    reason2 = run_stack_batch(
+        order2,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner2,
+        readiness_check=_ready,
+        clock=clock2,
+        sleep=clock2.sleep,
+    )
+
+    assert reason2 == "INFRASTRUCTURE"
+    assert clock2.sleeps == []
+    assert runner2.calls == [("TE-5", None), ("TE-5", None)]
+
+    # With the state left out of the breaker's own abort set, the same
+    # spec runs a third time and the night drains instead.
+    monkeypatch.setattr(
+        "saffron.batch.ABORT_STATES",
+        ABORT_STATES - {"PROVIDER_UNREACHABLE"},
+    )
+    order3 = [_candidate("TE-8")]
+    clock3 = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    runner3 = RateLimitScript(
+        ledger,
+        repo_id,
+        clock3,
+        {
+            "TE-8": [
+                {"state": "PROVIDER_UNREACHABLE"},
+                {"state": "PROVIDER_UNREACHABLE"},
+                {"state": "READY_FOR_REVIEW"},
+            ],
+        },
+    )
+
+    reason3 = run_stack_batch(
+        order3,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner3,
+        readiness_check=_ready,
+        clock=clock3,
+        sleep=clock3.sleep,
+    )
+
+    assert reason3 == "DRAINED"
+    assert runner3.calls == [("TE-8", None), ("TE-8", None), ("TE-8", None)]
 
 
 def test_a_stack_batch_stops_at_until_rather_than_wait_past_it(

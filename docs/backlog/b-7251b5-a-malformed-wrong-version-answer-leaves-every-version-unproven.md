@@ -1,11 +1,12 @@
 ---
 id: b-7251b5
 title: A malformed wrong-version answer leaves every declared version unproven, and REVIEW still passes
-status: open
+status: done
 tier: 1
 filed: 2026-10-03
+closed: 2026-10-05
 specs: [SA-0183, SA-0202]
-prs: [648]
+prs: [648, 675]
 commits: []
 cites: [§4.3, §5.5]
 related: [b-12e717, b-2750d5]
@@ -39,3 +40,6 @@ silent pass.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 26.
+- 2026-10-05: done by `SA-0202` (#675), in the spec loop's run 28. REVIEW
+  re-prompts a malformed wrong-version answer once before it reads the versions
+  `unproven`.

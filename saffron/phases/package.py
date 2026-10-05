@@ -1,4 +1,5 @@
-"""PACKAGE — a green cell becomes a branch, a draft PR and a queue line (§5.7).
+"""PACKAGE: a green cell, reviewable or `EXHAUSTED` with its blockers still
+standing, becomes a branch, a draft PR and a queue line (§5.7).
 
 Host-side, no model, and no cell except the gate-only one part 3 of the spec
 describes. It runs after the cell is torn down: the host should not be talking
@@ -302,6 +303,7 @@ def commit_squash(
     spent_usd: float,
     agent_subjects: list[str],
     unpackaged_state: str | None = None,
+    package_refusal: str | None = None,
 ) -> str:
     """One commit. Not the repo's `type(scope):` convention — that describes a
     commit a person wrote about a defect they understood, and this one is
@@ -311,14 +313,19 @@ def commit_squash(
     commits died with the volume. It is recorded because it is the only name
     the transcript and the batch tree share.
 
-    `unpackaged_state`, set only by `push_unpackaged_work`, says the cell
-    ended in that state and PACKAGE never ran — so nobody reading the branch
-    mistakes this for a commit PACKAGE produced. `None`
-    (every packaged commit) reproduces the message byte-for-byte as before
-    this parameter existed.
+    `unpackaged_state` says the cell ended in that state and PACKAGE did
+    not package it. `package_refusal`, given only alongside it, is
+    PACKAGE's own cleared note, naming why it refused the task after REVIEW.
+    Neither set reproduces the
+    message byte-for-byte as it read before either parameter existed.
     """
     lines = [f"saffron {spec_id}: {neutralize(title)}", ""]
-    if unpackaged_state is not None:
+    if package_refusal is not None:
+        lines += [
+            f"NOT PACKAGED — PACKAGE refused it after REVIEW: {neutralize(package_refusal)}.",
+            "",
+        ]
+    elif unpackaged_state is not None:
         lines += [
             f"NOT PACKAGED — the cell ended {unpackaged_state}; PACKAGE never "
             "ran, so nothing here was re-verified or reviewed.",
@@ -606,15 +613,16 @@ def package(
     out_dir: Path,
     token: str | None,
     parent_branch: str | None = None,
+    exhausted: bool = False,
     gh: GhRunner = run_gh,
     emit: Callable[[Event], None] | None = None,
 ) -> PackageResult:
     """§5.7, host-side, after the cell is gone.
 
-    Every `PackageError` this raises is infrastructure and reaches `cli.main`,
-    which exits 2 without a queue line. Only the task's own failures —
-    a conflict, a leaked credential, new failures after the rebase, a branch
-    that moved, a parent that is gone — become `MERGE_FAILED`.
+    `PackageError` here is infrastructure. Unset, it reaches `cli.main`,
+    exits 2, and writes no queue line: only the task's own failures become
+    `MERGE_FAILED`. With `exhausted` set, `run_task` catches it instead,
+    and every state below records `EXHAUSTED` (`SA-0204`).
 
     `parent_branch` is the stacking half. Unset — a spec with no parent, or
     one whose parent has merged — every line below resolves to exactly what it
@@ -625,6 +633,11 @@ def package(
     (`SA-0026`) is what supplies it, from the same parent it stacked the
     worktree on.
     """
+
+    # The one place a literal state below is chosen, so a stray one
+    # added elsewhere skips the `exhausted` override.
+    def _state(ok_state: str) -> str:
+        return "EXHAUSTED" if exhausted else ok_state
 
     if emit is None:
         # The same shape `run_one_cell` defaults to, and for the same reason:
@@ -703,7 +716,9 @@ def package(
                     out_dir,
                     spec,
                     repo.name,
-                    PackageResult(state="MERGE_FAILED", branch=branch, note=str(gone)),
+                    PackageResult(
+                        state=_state("MERGE_FAILED"), branch=branch, note=str(gone)
+                    ),
                 )
             target_branch, target_head = parent_branch, parent_head
 
@@ -749,7 +764,7 @@ def package(
                 spec,
                 repo.name,
                 PackageResult(
-                    state="MERGE_FAILED",
+                    state=_state("MERGE_FAILED"),
                     branch=branch,
                     note=f"conflicts with {target_branch}",
                 ),
@@ -765,7 +780,7 @@ def package(
                 spec,
                 repo.name,
                 PackageResult(
-                    state="MERGE_FAILED",
+                    state=_state("MERGE_FAILED"),
                     branch=branch,
                     note=f"credential in {where}: {'; '.join(leaked)}",
                     **counts,
@@ -853,7 +868,7 @@ def package(
                 spec,
                 repo.name,
                 PackageResult(
-                    state="MERGE_FAILED",
+                    state=_state("MERGE_FAILED"),
                     branch=branch,
                     note=note,
                     added=added,
@@ -888,6 +903,9 @@ def package(
             # `""` for a task that recorded none, so the body stays
             # byte-identical to one packaged before this existed.
             notes=outcome.notes,
+            wrong_versions=outcome.wrong_versions,
+            exhausted=exhausted,
+            head_moved=_rebuttal_head_moved(outcome.task_dir) if exhausted else False,
         )
         body_path.write_text(body)
         # The body is the second cell-authored channel out: a claim or a
@@ -914,7 +932,7 @@ def package(
                 spec,
                 repo.name,
                 PackageResult(
-                    state="MERGE_FAILED",
+                    state=_state("MERGE_FAILED"),
                     branch=branch,
                     note=f"{branch} moved underneath us",
                     added=added,
@@ -942,7 +960,7 @@ def package(
             spec,
             repo.name,
             PackageResult(
-                state="READY_FOR_REVIEW",
+                state=_state("READY_FOR_REVIEW"),
                 pr_url=pr_url,
                 pushed_sha=pushed,
                 branch=branch,
@@ -959,6 +977,21 @@ def package(
             # Never let cleanup replace the outcome: it would turn a recorded
             # MERGE_FAILED into an exit 2. `add_worktree` self-heals anyway.
             _emit_package(f"could not remove {scratch}: {stuck}")
+
+
+def _rebuttal_head_moved(task_dir: Path) -> bool:
+    """Whether REBUT's own `rebuttal.json` recorded that HEAD moved. Called
+    only in the `exhausted` mode, the one case where the patch this packages
+    can carry commits no lens ever read. A missing or unreadable record, one
+    that is not an object, or one with no such key, all read as `False`."""
+    try:
+        data = json.loads((task_dir / "rebuttal.json").read_text())
+    except (OSError, ValueError):
+        return False
+    try:
+        return data["head_moved"] is True
+    except (KeyError, TypeError):
+        return False
 
 
 def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
@@ -1019,11 +1052,12 @@ def push_unpackaged_work(
     repo_id: int | None,
     ledger,
     token: str | None,
+    package_refusal: str | None = None,
     emit: Callable[[Event], None] | None = None,
 ) -> PushResult:
-    """A cell that did not end `READY_FOR_REVIEW` never reaches `package()`,
-    so a diff `export_patch` wrote at teardown was, until now, read by nobody
-    (backlog item 45). This pushes it anyway — never packages it.
+    """A cell `package()` did not package still reaches here. Either
+    `package()` never ran, or it ran in the `exhausted` mode and produced
+    nothing, which `package_refusal` names, cleared of any credential.
 
     **Onto the tree the cell built on, never the default branch.** The patch
     is relative to `tree_base` (`patch.json`), applies there by construction,
@@ -1034,9 +1068,9 @@ def push_unpackaged_work(
     **The branch is `saffron/<SPEC-ID>`**, the same name `package()` uses,
     pushed with the same force-with-lease `push_with_lease` gives PACKAGE. It
     pushes only when the remote branch is absent or already holds a sha this
-    spec recorded as pushed, this outcome's own task included
-    (`Ledger.tasks_by_spec_id`). It never pushes while another of those rows
-    is `READY_FOR_REVIEW`. Otherwise nothing is pushed.
+    spec recorded as pushed, this outcome's own task included. It never
+    pushes while another row is `READY_FOR_REVIEW`, or `EXHAUSTED` with its
+    own pull request open. Otherwise nothing is pushed.
 
     **Only a diff `scope` passes**, judged by the policy at `tree_base` — the
     one bound PACKAGE's own gates enforce before anything leaves the host.
@@ -1104,9 +1138,20 @@ def push_unpackaged_work(
     except (PackageError, OSError, ValueError, KeyError) as exc:
         return _refuse(str(exc))
 
-    task_rows = ledger.tasks_by_spec_id(repo_id, spec.id) if repo_id is not None else []
+    # `tasks_by_repo`, not `tasks_by_spec_id`: the latter carries no `pr_url`
+    # (`saffron/ledger.py`), and the second guard below needs one.
+    task_rows = (
+        [row for row in ledger.tasks_by_repo(repo_id) if row["spec_id"] == spec.id]
+        if repo_id is not None
+        else []
+    )
     others = [row for row in task_rows if row["task_id"] != outcome.task_id]
-    if any(row["state"] == "READY_FOR_REVIEW" for row in others):
+    # The `exhausted` mode's open draft awaits review under `EXHAUSTED`.
+    if any(
+        row["state"] == "READY_FOR_REVIEW"
+        or (row["state"] == "EXHAUSTED" and row["pr_url"])
+        for row in others
+    ):
         return _refuse(
             f"a pull request from {spec.id} is awaiting review on {branch} — "
             "not ours to replace"
@@ -1117,6 +1162,19 @@ def push_unpackaged_work(
         return _refuse(
             f"{branch} already points at {current[:12]}, which this spec never "
             "pushed — not ours to replace"
+        )
+
+    # Scanned before it reaches a commit: a refusal naming a leaked
+    # credential must not push that same leak through its own explanation.
+    refusal_for_commit = package_refusal
+    if refusal_for_commit is not None and (
+        leaked := find_credentials_in_text(
+            refusal_for_commit, token=token, where="PACKAGE's refusal"
+        )
+    ):
+        refusal_for_commit = (
+            "the reason PACKAGE gave carried a credential "
+            f"({'; '.join(leaked)}) and was left out"
         )
 
     scratch = out_dir / "package" / f"{spec.id}-unpackaged"
@@ -1147,6 +1205,7 @@ def push_unpackaged_work(
             spent_usd=outcome.spent_usd,
             agent_subjects=outcome.agent_subjects,
             unpackaged_state=outcome.state,
+            package_refusal=refusal_for_commit,
         )
         # PACKAGE pushes only a diff `scope` passed; without the same check, a
         # workflow edit reaches CI that runs on every push. `DIFF_FLAGS` so a

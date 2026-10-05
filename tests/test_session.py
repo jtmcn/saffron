@@ -22,6 +22,7 @@ from saffron.events import (
     Agent,
     Attempt,
     Baseline,
+    Budget,
     PhaseStart,
     Preflight,
     TaskOutcome,
@@ -3629,6 +3630,331 @@ def _through_rebut(*rebut_turns):
     ]
 
 
+def _rebut_turn_options(cell) -> list[dict]:
+    """`cell.turn_options`, filtered to REBUT's own sessions: the rebuttal
+    turn, its extraction turn, and each lens verdict, in the order they
+    ran (SA-0203). Identified by prompt, the way `cell.turns` records it."""
+    fixed = rebut.REBUT_PROMPT.split("{blockers}")[0]
+    return [
+        options
+        for prompt, options in zip(cell.turns, cell.turn_options, strict=True)
+        if prompt in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT)
+        or prompt.startswith(fixed)
+    ]
+
+
+def _rebut_capped(
+    monkeypatch,
+    tmp_path,
+    *rebut_costs: float | BaseException,
+    budget_usd: float,
+    rebut_commits: int = 1,
+    extracted: dict | None = None,
+    suites=(),
+):
+    """Drives one cell to `REBUTTING` already past `budget_usd`, so REBUT
+    runs under `_RebutCap` instead of being refused (SA-0203). `rebut_costs`
+    is the rebuttal turn, its extraction turn, then one verdict per lens
+    that filed a blocker, built directly rather than through
+    `_through_rebut`. A cost can be a scripted exception instead, read the
+    way `_run_agent` already reads one. The plan, implement and
+    all four lens turns each cost $0.125, so REBUT starts at $0.75. The
+    first `len(rebut_costs) - 2` lenses file `_BLOCKER`, and the rest file
+    nothing, and each default verdict withdraws its own lens's finding.
+    """
+    num_verdicts = len(rebut_costs) - 2
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF, suites=suites)
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+
+    if extracted is None:
+        extracted = {
+            "rebuttals": [
+                {
+                    "finding": n,
+                    "action": "argued",
+                    "argument": "the blocker is intentional",
+                }
+                for n in range(1, num_verdicts + 1)
+            ]
+        }
+
+    def _cost_turn(cost, *, structured_output=None, text=""):
+        if isinstance(cost, BaseException):
+            return cost
+        return _turn(text, cost=cost, structured_output=structured_output)
+
+    rebuttal_cost, extraction_cost, *verdict_costs = rebut_costs
+    lens_turns = [
+        _turn(_block(_BLOCKER if i < num_verdicts else {"findings": []}), cost=0.125)
+        for i in range(4)
+    ]
+    verdict_turns = [
+        _cost_turn(
+            cost,
+            structured_output={
+                "verdicts": [
+                    {"finding": n + 1, "verdict": "withdrawn", "reason": "fair"}
+                ]
+            },
+        )
+        for n, cost in enumerate(verdict_costs)
+    ]
+    turns = [
+        _turn(_block(_PLAN), cost=0.125),
+        _turn(cost=0.125),
+        *lens_turns,
+        _cost_turn(rebuttal_cost, text="the blocker is intentional."),
+        _cost_turn(extraction_cost, structured_output=extracted),
+        *verdict_turns,
+    ]
+    capture: list = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=turns,
+        spec=_spec(budget_usd=budget_usd),
+        capture=capture,
+    )
+    return outcome, ledger, cell, capture
+
+
+def test_a_blocker_left_past_the_budget_is_rebutted_once_and_its_spend_recorded(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 1: a task whose REVIEW leaves an anchored blocker
+    with its spend at or past `budget_usd` runs REBUT once instead of
+    ending `EXHAUSTED`. Its rebuttal, extraction and verdict turns each run
+    once, each landing as a `REBUTTING` attempt row. The spend lands on the
+    outcome, `task_spend` and `batch_spend` alike."""
+    outcome, ledger, _cell, _capture = _rebut_capped(
+        monkeypatch, tmp_path / "over", 1.50, 0.50, 0.75, budget_usd=0.25
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    rebutting = [
+        row["cost_usd_est"]
+        for row in ledger.attempts(outcome.task_id)
+        if row["phase"] == "REBUTTING"
+    ]
+    assert rebutting == pytest.approx([1.50, 0.50, 0.75])
+    assert outcome.spent_usd == pytest.approx(3.50)
+    assert ledger.task_spend(outcome.task_id) == pytest.approx(3.50)
+    run_id = ledger.task_run(outcome.task_id)
+    batch_id = ledger.create_batch(100.0)
+    ledger.attach_run_to_batch(run_id, batch_id)
+    assert ledger.batch_spend(batch_id) == pytest.approx(3.50)
+
+    outcome_exact, ledger_exact, _cell2, _capture2 = _rebut_capped(
+        monkeypatch, tmp_path / "exact", 1.50, 0.50, 0.75, budget_usd=0.75
+    )
+    assert outcome_exact.state == "READY_FOR_REVIEW"
+    rebutting_exact = [
+        row["cost_usd_est"]
+        for row in ledger_exact.attempts(outcome_exact.task_id)
+        if row["phase"] == "REBUTTING"
+    ]
+    assert rebutting_exact == pytest.approx([1.50, 0.50, 0.75])
+
+
+def test_a_rebut_past_the_budget_leaves_one_budget_line_naming_its_spend(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 2: a REBUT that starts at or past the budget
+    leaves exactly one `Budget` event, carrying REBUT's own spend. No line
+    in the capture says the task is stopping."""
+    _outcome, _ledger, cell, capture = _rebut_capped(
+        monkeypatch, tmp_path / "over", 1.50, 0.50, 0.75, budget_usd=0.25
+    )
+    budgets = [e for e in capture if isinstance(e, Budget)]
+    assert len(budgets) == 1
+    [event] = budgets
+    assert event.value == pytest.approx(3.50)
+    assert event.limit == pytest.approx(0.25)
+    assert event.rebut_spent_usd_est == pytest.approx(2.75)
+    assert describe(event) == (
+        "budget: $3.50 of $0.25 — REBUT ran past it, spending $2.75"
+    )
+    assert not any("stopping" in line for line in cell.watched)
+
+    _outcome2, _ledger2, _cell2, capture2 = _rebut_capped(
+        monkeypatch, tmp_path / "exact", 1.50, 0.50, 0.75, budget_usd=0.75
+    )
+    [event2] = [e for e in capture2 if isinstance(e, Budget)]
+    assert describe(event2) == (
+        "budget: $3.50 of $0.75 — REBUT ran past it, spending $2.75"
+    )
+
+
+def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 3: past the budget, REBUT's sessions share one
+    $7.00 cap, each session's own `max_budget_usd` the cap less what the
+    phase's earlier sessions already cost. A REBUT that starts under the
+    budget is unchanged."""
+
+    def _caps(path, *costs, budget_usd):
+        outcome, _ledger, cell, capture = _rebut_capped(
+            monkeypatch, tmp_path / path, *costs, budget_usd=budget_usd
+        )
+        return (
+            [o["max_budget_usd"] for o in _rebut_turn_options(cell)],
+            outcome.state,
+            capture,
+        )
+
+    caps, state, _capture = _caps("a", 3.00, 2.50, 1.00, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 4.00, 1.50])
+    assert state == "READY_FOR_REVIEW"
+
+    caps, state, _capture = _caps("b", 3.00, 2.50, 1.00, budget_usd=0.75)
+    assert caps == pytest.approx([7.00, 4.00, 1.50])
+    assert state == "READY_FOR_REVIEW"
+
+    caps, state, _capture = _caps("c", 7.25, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps(
+        "d",
+        implement.AgentFailed("provider crashed", _cut_off_turn(cost=7.25)),
+        0.50,
+        0.75,
+        budget_usd=0.25,
+    )
+    assert caps == pytest.approx([7.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("e", 3.00, 4.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 4.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("e0", 7.00, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("e1", 6.75, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 0.25])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("f", 2.00, 1.00, 1.50, 0.50, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 5.00, 4.00, 2.50])
+    assert state == "READY_FOR_REVIEW"
+
+    caps, state, capture = _caps("g", 1.50, 0.50, 0.75, budget_usd=1.00)
+    assert caps == pytest.approx([2.00, 2.00, 2.00])
+    assert state == "READY_FOR_REVIEW"
+    assert not any(isinstance(e, Budget) for e in capture)
+
+    caps, state, capture = _caps("h", 1.50, 0.50, 0.75, budget_usd=20.00)
+    assert caps == pytest.approx([19.25, 19.25, 19.25])
+    assert not any(isinstance(e, Budget) for e in capture)
+
+
+def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 5: a REBUT the cap cut short ends `EXHAUSTED`, a
+    decided state, with its anchored blockers standing and no `rebut_result`
+    on the outcome. A REBUT the cap did not cut short keeps its own state
+    and its own `rebut_result`, whatever that state is."""
+
+    def _run(path, *costs, budget_usd=0.25, rebut_commits=1, extracted=None, suites=()):
+        return _rebut_capped(
+            monkeypatch,
+            tmp_path / path,
+            *costs,
+            budget_usd=budget_usd,
+            rebut_commits=rebut_commits,
+            extracted=extracted,
+            suites=suites,
+        )
+
+    cut_short: list[tuple[str, tuple, dict]] = [
+        ("a", (7.25, 0.50, 0.75), {}),
+        (
+            "b",
+            (
+                implement.AgentFailed("provider crashed", _cut_off_turn(cost=7.25)),
+                0.50,
+                0.75,
+            ),
+            {},
+        ),
+        ("c", (3.00, 4.50, 0.75), {}),
+        # The last verdict is the session the cap cuts, and no call follows it.
+        (
+            "f",
+            (
+                3.00,
+                2.50,
+                implement.AgentFailed("budget spent", _cut_off_turn(cost=1.50)),
+            ),
+            {},
+        ),
+    ]
+    for path, costs, extra in cut_short:
+        outcome, ledger, _cell, capture = _run(path, *costs, **extra)
+        assert outcome.state == "EXHAUSTED"
+        assert outcome.rebut_result is None
+        [*_, rebut_start] = [
+            e for e in capture if isinstance(e, PhaseStart) and e.phase == "REBUT"
+        ]
+        assert "$7.00" in rebut_start.detail
+        assert len(review.anchored_blockers(outcome.reviews)) == 1
+        (queued,) = ledger.queue_lines()
+        assert queued["state"] == "EXHAUSTED"
+        budgets = [e for e in capture if isinstance(e, Budget)]
+        assert len(budgets) == 1
+        assert budgets[0].rebut_spent_usd_est is not None
+        assert (outcome.task_dir / "rebuttal.json").exists()
+        # The host's own running spend must still match what `attempts`
+        # recorded, a cap refusal costing nothing or not.
+        assert outcome.spent_usd == pytest.approx(ledger.task_spend(outcome.task_id))
+        assert budgets[0].value == pytest.approx(outcome.spent_usd)
+        assert budgets[0].limit == pytest.approx(0.25)
+
+    outcome_d, ledger_d, cell_d, capture_d = _run(
+        "d", 7.25, 0.50, 0.75, rebut_commits=0
+    )
+    assert outcome_d.state == "EXHAUSTED"
+    assert outcome_d.rebut_result is None
+    assert len(review.anchored_blockers(outcome_d.reviews)) == 1
+    (queued_d,) = ledger_d.queue_lines()
+    assert queued_d["state"] == "EXHAUSTED"
+    budgets_d = [e for e in capture_d if isinstance(e, Budget)]
+    assert len(budgets_d) == 1
+    assert budgets_d[0].rebut_spent_usd_est is not None
+    assert (outcome_d.task_dir / "rebuttal.json").exists()
+    assert outcome_d.spent_usd == pytest.approx(ledger_d.task_spend(outcome_d.task_id))
+    assert budgets_d[0].value == pytest.approx(outcome_d.spent_usd)
+    assert budgets_d[0].limit == pytest.approx(0.25)
+
+    caps = [o["max_budget_usd"] for o in _rebut_turn_options(cell_d)]
+    assert caps == pytest.approx([7.00])
+    assert rebut.VERDICT_TURN_PROMPT not in cell_d.turns
+
+    outcome5, *_rest5 = _run(
+        "e", 1.50, 0.50, 0.75, rebut_commits=0, extracted=_CLAIMED_FIX
+    )
+    assert outcome5.state == "REBUTTING"
+    assert outcome5.rebut_result is not None
+
+    outcome6, *_rest6 = _run(
+        "f",
+        7.25,
+        0.50,
+        0.75,
+        suites=(
+            [],
+            [],
+            _results(Failure(file="a.py", code="E501", message="too long")),
+        ),
+    )
+    assert outcome6.state == "EXHAUSTED"
+    assert outcome6.rebut_result is not None
+
+
 def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
     monkeypatch, tmp_path
 ):
@@ -4922,6 +5248,145 @@ def test_a_rate_limited_outcome_carries_the_reset_time(monkeypatch, tmp_path):
         assert outcome.resets_at == expected, resets_at
         if expected is not None:
             assert isinstance(outcome.resets_at, int), resets_at
+
+
+def _served_nothing(cost=0.0, **overrides):
+    """What `run_agent` hands back when the provider served a turn nothing:
+    `api_error`, every count zero (SA-0152's own shape)."""
+    return implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=1,
+        cost_usd_est=cost,
+        is_error=True,
+        provider_served_nothing=True,
+        **overrides,
+    )
+
+
+def _task_state(ledger):
+    (row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+    return row["state"]
+
+
+def test_a_plan_turn_the_provider_served_nothing_ends_provider_unreachable(
+    monkeypatch, tmp_path
+):
+    """The plan turn's first call failing with the provider having served it
+    nothing is not the task failing (b-031ac2): the outcome, the ledger's
+    task row and the run row all say `PROVIDER_UNREACHABLE`, the spend is
+    $0.00, and no second turn runs. A closed window still ends
+    `RATE_LIMITED`, ahead of this check."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "unreachable",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+    )
+    assert outcome.state == "PROVIDER_UNREACHABLE"
+    assert outcome.spent_usd == 0.0
+    assert len(cell.turns) == 1
+    (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+    assert task_row["state"] == "PROVIDER_UNREACHABLE"
+    (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+    assert run_row["status"] == "COMPLETE"
+
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "rejected",
+        cell=cell2,
+        turns=[
+            implement.AgentFailed(
+                "api_error",
+                attempt=_served_nothing(
+                    rate_limit_status="rejected", rate_limit_resets_at=1755800000
+                ),
+            )
+        ],
+    )
+    assert outcome2.state == "RATE_LIMITED"
+    (task_row2,) = ledger2._db.execute("SELECT state FROM tasks").fetchall()
+    assert task_row2["state"] == "RATE_LIMITED"
+
+
+def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
+    monkeypatch, tmp_path
+):
+    """Of the plan turn's first call, its two re-prompts and the implement
+    turn, only the first call can end `PROVIDER_UNREACHABLE` (b-031ac2).
+    Each other failure keeps the state it earns today, with no commits."""
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "first-call",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+    )
+    assert outcome.state == _task_state(ledger) == "PROVIDER_UNREACHABLE"
+    assert len(cell.turns) == 1
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    ordinary_crash = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=1,
+        cost_usd_est=0.0,
+        is_error=True,
+    )
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "ordinary-crash",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=ordinary_crash)],
+    )
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 1
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "schema-reprompt",
+        cell=cell,
+        turns=[
+            _turn("not the schema", cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+    )
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 2
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "scope-reprompt",
+        cell=cell,
+        turns=[
+            _turn(_block(_PROPOSAL | {"proposed_touches": ["src/x.py"]}), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+    )
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 2
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    captured: list = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "implement-turn",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+        capture=captured,
+    )
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
+    assert len(cell.turns) == 2
+    assert any("ended_without_finishing" in str(c) for c in captured)
 
 
 def _task_outcome(tmp_path, spec_id="SY-1"):
@@ -8074,11 +8539,12 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     """Criterion 3: four criteria, one declaring no wrong version between two
     that do. The first's versions are one the session could not express and
     one on a declared test path. The second's are an edit the `tests` gate
-    errors under, then an edit the witness kills. The third's session fails
-    outright, so both its versions are unproven with the entry's own error.
-    Only the second criterion's edits ever reach the witness, and no survivor
-    is filed, so the task ends `READY_FOR_REVIEW`. A spec declaring no wrong
-    version buys no such session and writes no such file."""
+    errors under, then an edit the witness kills. The third's session
+    answers with no block, twice, so the re-prompt fails too and both its
+    versions are `error` with the entry's own error. Only the second
+    criterion's edits ever reach the witness, and no survivor is filed, so
+    the task ends `READY_FOR_REVIEW`. A spec declaring no wrong version buys
+    no such session and writes no such file."""
     from saffron.intake import Criterion
 
     a = Criterion(claim="a is true", witness="t.py::a", wrong_versions=["a v1", "a v2"])
@@ -8126,6 +8592,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
             _turn(
                 _wrong_version_answer((edit_c1, "reason c1"), (edit_c2, "reason c2"))
             ),
+            _turn("not a block at all"),
             _turn("not a block at all"),
         ],
         spec=_spec(acceptance=[a, b, c, d]),
@@ -8189,22 +8656,31 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
         {
             "witness": "t.py::d",
             "claim": "d is true",
-            "cost_usd": pytest.approx(0.1),
-            "error": "not the schema: no <output> block in the response",
+            "cost_usd": pytest.approx(0.2),
+            "error": (
+                "not the schema, even after a re-prompt: "
+                "no <output> block in the response"
+            ),
             "versions": [
                 {
                     "version": "d v1",
                     "edit": None,
                     "reason": "",
-                    "outcome": "unproven",
-                    "summary": "not the schema: no <output> block in the response",
+                    "outcome": "error",
+                    "summary": (
+                        "not the schema, even after a re-prompt: "
+                        "no <output> block in the response"
+                    ),
                 },
                 {
                     "version": "d v2",
                     "edit": None,
                     "reason": "",
-                    "outcome": "unproven",
-                    "summary": "not the schema: no <output> block in the response",
+                    "outcome": "error",
+                    "summary": (
+                        "not the schema, even after a re-prompt: "
+                        "no <output> block in the response"
+                    ),
                 },
             ],
         },
@@ -8218,7 +8694,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     ]
     assert lines == [
         "REVIEW: criterion probes: 0 named, 4 unnamed",
-        "REVIEW: wrong versions: 6 declared, 3 expressed",
+        "REVIEW: wrong versions: 6 declared, 3 expressed; no session answered: t.py::d",
     ]
 
     # A spec whose criteria declare no wrong version buys no such session,
@@ -8239,6 +8715,79 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     assert not [
         w for w in empty_cell.watched if w.startswith("REVIEW: wrong versions:")
     ]
+
+
+def test_a_criterion_whose_wrong_versions_no_session_answered_is_an_error_the_review_line_names(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: a criterion whose wrong-version entry still carries an
+    error after a re-prompt is an `error`, never a silent pass. Both its
+    versions read `error` in `wrong-versions.json`, with the entry's own
+    error as their summary, and the task still reaches `READY_FOR_REVIEW`.
+    The REVIEW line names the witness of every such criterion and none that
+    answered. The witness drives three such criteria: one whose session
+    failed outright, one that twice answered with no block, and one that
+    twice answered the wrong count. Beside them is one that answered with
+    no edit, named nowhere on the line."""
+    from saffron.intake import Criterion
+
+    criteria = [
+        Criterion(
+            claim=f"claim {letter}",
+            witness=f"t.py::{letter}",
+            wrong_versions=[f"{letter} v1", f"{letter} v2"],
+        )
+        for letter in "abcd"
+    ]
+
+    cell = _stub_the_runtime(monkeypatch)
+    failed = implement.AgentFailed("cut off", _turn("", cost=0.3))
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            *(_turn(_probe_answer(None, f"no probe for {n}")) for n in "abcd")
+        )
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"), (None, "nothing here either")
+                )
+            ),
+            failed,
+            _turn("not a block at all"),
+            _turn("not a block at all"),
+            _turn(_wrong_version_answer((None, "one answer"))),
+            _turn(_wrong_version_answer((None, "one answer"))),
+        ],
+        spec=_spec(acceptance=criteria),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    by_witness = {e["witness"]: e for e in entries}
+    assert [v["outcome"] for v in by_witness["t.py::a"]["versions"]] == [
+        "unproven",
+        "unproven",
+    ]
+    for witness in ("t.py::b", "t.py::c", "t.py::d"):
+        entry = by_witness[witness]
+        assert [v["outcome"] for v in entry["versions"]] == ["error", "error"]
+        assert all(v["summary"] == entry["error"] for v in entry["versions"])
+    assert by_witness["t.py::d"]["error"] == (
+        "not the schema, even after a re-prompt: 1 answers for 2 wrong versions"
+    )
+    assert outcome.wrong_versions == entries
+
+    (line,) = [w for w in cell.watched if w.startswith("REVIEW: wrong versions:")]
+    assert "t.py::b" in line
+    assert "t.py::c" in line
+    assert "t.py::d" in line
+    assert "t.py::a" not in line
 
 
 def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend(
@@ -8544,6 +9093,7 @@ def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
         gates=[],
         new_failures=[],
         reviews=[],
+        wrong_versions=[],
         rebut_result=None,
         agent_subjects=[],
         effective_risk="standard",

@@ -161,6 +161,39 @@ def test_the_exit_code_distinguishes_the_terminal_states(monkeypatch, tmp_path):
     assert cli.main(argv) == 2
 
 
+def test_a_provider_that_served_nothing_exits_2_and_a_task_that_failed_exits_1(
+    monkeypatch, tmp_path
+):
+    """`PROVIDER_UNREACHABLE` is an infrastructure failure, not the task's
+    (b-031ac2): it exits 2, the same as `PREFLIGHT_FAILED` or `GATE_ERROR`,
+    while an ordinary `NOT_IMPLEMENTED` still exits 1."""
+    spec = tmp_path / "SY-1.md"
+    spec.write_text(
+        "---\nid: SY-1\ntitle: One\ntype: feature\ntouches: ['src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.repos.mirror.ensure_mirror", lambda repo, at: at)
+    monkeypatch.setattr(
+        "saffron.phases.package.real_remote", lambda repo: "https://github.com/o/r.git"
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+
+    states = iter(["PROVIDER_UNREACHABLE", "NOT_IMPLEMENTED"])
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: session.CellOutcome(
+            state=next(states), task_id=1, run_id=1, task_dir=tmp_path
+        ),
+    )
+
+    argv = ["--home", str(tmp_path / "home"), "cell", str(spec)]
+    assert [cli.main(argv), cli.main(argv)] == [2, 1]
+
+
 def test_an_unpackaged_task_names_the_branch_its_work_was_pushed_to(
     monkeypatch, tmp_path, capsys
 ):

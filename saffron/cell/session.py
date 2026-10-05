@@ -78,9 +78,13 @@ WALL_CAP_S = 3600.0
 # growing moves that number rather than dividing it. The floor is
 # what keeps "not gated" true when nothing is left: below it a lens would be
 # refused for having no room, and the task would reach the operator unreviewed.
-# REBUT *is* gated (`_over_budget` before the rebuttal turn): by then the
-# findings are written and the operator has something to read either way.
+# REBUT also runs once past budget_usd now. Its sessions share
+# REBUT_OVERRUN_CAP_USD below, so one answer to those findings still lands.
 REVIEW_FLOOR_USD = 2.0
+
+# One pool for the rebuttal, extraction and verdict turns once REBUT runs
+# past budget: the measured maximum REBUT spend, $6.40, rounded up.
+REBUT_OVERRUN_CAP_USD = 7.0
 
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
@@ -145,6 +149,51 @@ def spec_drift(gates_dir: Path, spec_id: str, spec_sha: str) -> str | None:
 def critic_budget(budget_usd: float, spent: float) -> float:
     """The per-session cap for one critic turn: the remainder, never zero."""
     return max(budget_usd - spent, REVIEW_FLOOR_USD)
+
+
+class _RebutCap:
+    """Shares one ceiling across a single REBUT's own sessions, once the
+    task meets or passes budget_usd: the rebuttal turn, its extraction
+    turn, and each lens verdict draw against the same pool. A call that
+    would get nothing, or less, is refused the way a failed turn already
+    reads to every caller here, with implement.AgentFailed.
+    """
+
+    def __init__(self, cap: float) -> None:
+        self.cap = cap
+        self.spent = 0.0
+        self.refused = False
+
+    def wrap(
+        self, agent: Callable[..., implement.AttemptResult]
+    ) -> Callable[..., implement.AttemptResult]:
+        """`agent`, with each call's own `max_budget_usd` drawn from this cap."""
+
+        def capped(
+            container: str, *, options: dict, **kwargs: object
+        ) -> implement.AttemptResult:
+            remaining = self.cap - self.spent
+            if remaining <= 0:
+                self.refused = True
+                raise implement.AgentFailed(
+                    f"the REBUT cap, ${self.cap:.2f}, is already spent"
+                )
+            try:
+                attempt = agent(
+                    container,
+                    options=options | {"max_budget_usd": remaining},
+                    **kwargs,
+                )
+            except implement.AgentFailed as failed:
+                self.spent += failed.attempt.cost_usd_est if failed.attempt else 0.0
+                # Spending the cap means the cap cut it, with no later call to refuse.
+                if self.spent >= self.cap:
+                    self.refused = True
+                raise
+            self.spent += attempt.cost_usd_est
+            return attempt
+
+        return capped
 
 
 class RateLimited(RuntimeError):
@@ -334,6 +383,9 @@ class CellOutcome:
     gates: list[GateResult] = field(default_factory=list)
     new_failures: list[NewFailure] = field(default_factory=list)
     reviews: list[review.LensReview] = field(default_factory=list)
+    # `run_wrong_versions`'s own entries, empty on every path that skipped
+    # REVIEW, exactly like `reviews` above.
+    wrong_versions: list[dict] = field(default_factory=list)
     rebut_result: rebut.RebutResult | None = None
     agent_subjects: list[str] = field(default_factory=list)
     # The last suite's own answer to §5.6's two questions — computed inside
@@ -511,10 +563,14 @@ def plan_checkpoint(
     # `agent` is `implement.run_agent`, wrapped with `spec.spec_id` already
     # bound (§0) — `emit` is handed straight through, with no adapter.
     spent = 0.0
+    # Only the first call can mean the provider served nothing. A
+    # re-prompt below resumes an already completed call (b-031ac2).
+    first_call_returned = False
     try:
         attempt = agent(
             container, prompt=implement.PLAN_PROMPT, options=options, emit=emit
         )
+        first_call_returned = True
         spent = attempt.cost_usd_est
         # ponytail: the door is only here, at the plan checkpoint. A `touches`
         # insufficiency the implementer discovers mid-diff has no exit and
@@ -618,6 +674,10 @@ def plan_checkpoint(
         # its own identity and carries what the checkpoint already spent, or a
         # re-prompted turn's first half stops counting (§4.1).
         prior = failed.attempt or _failed_turn(failed, "")
+        if first_call_returned and prior.provider_served_nothing:
+            # A re-prompt follows a completed call, so its failure never ends
+            # `PROVIDER_UNREACHABLE` (b-031ac2).
+            prior = replace(prior, provider_served_nothing=False)
         failed.attempt = replace(prior, cost_usd_est=spent + prior.cost_usd_est)
         raise
     raise AssertionError("unreachable: the loop returns or raises")
@@ -2156,18 +2216,24 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
         except implement.AgentFailed as failed:
-            # No plan and no commits, but a live cell: the earned state, not the
-            # ORPHANED that a crash out of `run_one_cell` would stamp (§4.5).
+            # No plan and no commits, but a live cell: the earned state, or
+            # `PROVIDER_UNREACHABLE`, not the ORPHANED a crash would stamp (§4.5).
             plan_cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            # The provider serving the first call nothing is not the task
+            # failing (b-031ac2). Any other failure ends `NOT_IMPLEMENTED`.
+            served_nothing = bool(
+                failed.attempt and failed.attempt.provider_served_nothing
+            )
+            state = "PROVIDER_UNREACHABLE" if served_nothing else "NOT_IMPLEMENTED"
             _phase_start(
                 "IMPLEMENT",
                 "PLAN",
                 f"the session failed, ${plan_cost:.2f} spent — {failed}",
             )
-            ledger.set_task_state(task_id, "NOT_IMPLEMENTED")
+            ledger.set_task_state(task_id, state)
             ledger.finish_run(run_id, "COMPLETE")
             return CellOutcome(
-                state="NOT_IMPLEMENTED",
+                state=state,
                 task_id=task_id,
                 run_id=run_id,
                 task_dir=task_dir,
@@ -2848,7 +2914,7 @@ def _drive_cell(
                     ):
                         if wv_entry["error"] is not None:
                             for version in wv_entry["versions"]:
-                                version["outcome"] = "unproven"
+                                version["outcome"] = "error"
                                 version["summary"] = wv_entry["error"]
                             continue
                         for version in wv_entry["versions"]:
@@ -2932,123 +2998,142 @@ def _drive_cell(
             if on_state is not None:
                 on_state("REBUTTING")
             blockers = review.anchored_blockers(reviews)
-            if _over_budget():
-                outcome = "EXHAUSTED"
-            else:
-                before = worktree.head_sha(container)
+            # Read directly, not through `_over_budget`: that call emits the
+            # stopping line, and REBUT no longer stops outright past budget.
+            overrun = spent >= spec.budget_usd
+            before = worktree.head_sha(container)
 
-                def _rebut_gates() -> str | None:
-                    """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
-                    not re-enter the repair loop. An errored gate is still
-                    infrastructure and still not charged to the task (§5.4)."""
-                    comparison = _judge()
-                    # The suite after the loop's last, so the gate count
-                    # continues rather than restarting at 1 (item 47).
-                    emit(
-                        attempt_event(
-                            comparison,
-                            spec_id=spec.spec_id,
-                            phase="REBUT",
-                            attempt=attempts + 1,
-                        )
-                    )
-                    if comparison.aborted or comparison.drift:
-                        return "GATE_ERROR"
-                    return "EXHAUSTED" if comparison.new_failures else None
-
-                with contextlib.ExitStack() as critic_stack:
-
-                    def _rebut_critic_container() -> str:
-                        """Called only once `run_rebut` has a green re-run to
-                        show a lens, never on an early return. Seeded from
-                        the implementer's *current* HEAD, so a rebuttal fix
-                        reaches the critic's tree (CONTEXT.md §5, item 118).
-                        `critic_stack` closes when `run_rebut` returns below,
-                        tearing the cell down the way REVIEW's is.
-                        """
-                        rebuttal_patch = worktree.export_patch(
-                            container, spec.tree_base
-                        )
-                        return critic_stack.enter_context(
-                            critic_cell(
-                                spec=spec,
-                                repo=repo,
-                                mirror=mirror,
-                                network=critic_network,
-                                env=critic_env,
-                                gates_dir=gates_dir,
-                                patch=rebuttal_patch,
-                                created=created,
-                                note=_critic_teardown,
-                            )
-                        )
-
-                    result = rebut.run_rebut(
-                        container,
-                        blockers=blockers,
-                        acceptance=spec.acceptance,
-                        options=options,
-                        session_id=session_id,
-                        spec_body=spec.body + context.criteria_section(spec.acceptance),
-                        context_md=context_md,
-                        claude_md=claude_md,
-                        prompts_dir=context.PROMPTS_DIR,
-                        max_turns=spec.max_turns,
-                        budget_usd=critic_budget(spec.budget_usd, spent),
-                        # Measured, never reported (§4.3): from the head the
-                        # rebuttal started at, so the implement turn's own
-                        # commits cannot satisfy it.
-                        head_moved=lambda: (
-                            worktree.commits_ahead(container, before) > 0
-                        ),
-                        rerun_gates=_rebut_gates,
-                        critic_container=_rebut_critic_container,
-                        # Read from the critic cell's own tree, never the
-                        # implementer's own `.git` (CONTEXT.md §5).
-                        diff=lambda critic: worktree.export_patch(
-                            critic, spec.tree_base
-                        ),
-                        agent=agent,
+            def _rebut_gates() -> str | None:
+                """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
+                not re-enter the repair loop. An errored gate is still
+                infrastructure and still not charged to the task (§5.4)."""
+                comparison = _judge()
+                # The suite after the loop's last, so the gate count
+                # continues rather than restarting at 1 (item 47).
+                emit(
+                    attempt_event(
+                        comparison,
                         spec_id=spec.spec_id,
-                        # The exact diff REVIEW's lenses were shown.
-                        reviewed_diff=reviewed_diff,
-                        emit=emit,
-                        last_cost_usd=last_cost,
+                        phase="REBUT",
+                        attempt=attempts + 1,
                     )
-                rebut_result = result
-                spent += result.cost_usd
-                session_id = result.rebuttal.session_id or session_id
-                (task_dir / "rebuttal.json").write_text(
-                    json.dumps(result.as_dict(blockers), indent=2)
                 )
-                # The critic's verdict and the implementer's argument, onto the
-                # rows REVIEW wrote. Both are keyed by the blocker's number,
-                # which is its position in `blockers` counted from 1 (§5.6).
-                # Nothing validates the rebuttal turn's numbering the way
-                # `run_verdict` validates a verdict set, so it is validated
-                # here: a number nobody asked about is dropped, and
-                # `first_answers` keeps the one that stands. Silently letting
-                # a duplicate win leaves another blocker reading as unanswered.
-                # `action` rides along because "fixed" and "argued" are the
-                # difference the critic-ROI query is asking about (§4.6).
-                argued = {
-                    n: f"{r.action}: {r.argument}"
-                    for n, r in rebut.first_answers(result.rebuttal).items()
-                    if 1 <= n <= len(blockers)
-                }
-                judged = {
-                    v.finding: v.verdict
-                    for lens in result.verdicts
-                    for v in lens.verdicts
-                }
-                for n, finding in enumerate(blockers, 1):
-                    ledger.record_rebuttal(
-                        recorded[id(finding)],
-                        verdict=judged.get(n),
-                        rebuttal=argued.get(n),
+                if comparison.aborted or comparison.drift:
+                    return "GATE_ERROR"
+                return "EXHAUSTED" if comparison.new_failures else None
+
+            # At or past budget_usd, REBUT's sessions share one cap instead of
+            # being refused outright. `cap` also says whether one was refused.
+            cap = _RebutCap(REBUT_OVERRUN_CAP_USD) if overrun else None
+            rebut_agent = cap.wrap(agent) if cap is not None else agent
+
+            with contextlib.ExitStack() as critic_stack:
+
+                def _rebut_critic_container() -> str:
+                    """Called only once `run_rebut` has a green re-run to
+                    show a lens, never on an early return. Seeded from
+                    the implementer's *current* HEAD, so a rebuttal fix
+                    reaches the critic's tree (CONTEXT.md §5, item 118).
+                    `critic_stack` closes when `run_rebut` returns below,
+                    tearing the cell down the way REVIEW's is.
+                    """
+                    rebuttal_patch = worktree.export_patch(container, spec.tree_base)
+                    return critic_stack.enter_context(
+                        critic_cell(
+                            spec=spec,
+                            repo=repo,
+                            mirror=mirror,
+                            network=critic_network,
+                            env=critic_env,
+                            gates_dir=gates_dir,
+                            patch=rebuttal_patch,
+                            created=created,
+                            note=_critic_teardown,
+                        )
                     )
-                outcome, why = result.state, result.why
-                _phase_start("REBUT", "REBUT", why)
+
+                result = rebut.run_rebut(
+                    container,
+                    blockers=blockers,
+                    acceptance=spec.acceptance,
+                    options=options,
+                    session_id=session_id,
+                    spec_body=spec.body + context.criteria_section(spec.acceptance),
+                    context_md=context_md,
+                    claude_md=claude_md,
+                    prompts_dir=context.PROMPTS_DIR,
+                    max_turns=spec.max_turns,
+                    budget_usd=critic_budget(spec.budget_usd, spent),
+                    # Measured, never reported (§4.3): from the head the
+                    # rebuttal started at, so the implement turn's own
+                    # commits cannot satisfy it.
+                    head_moved=lambda: worktree.commits_ahead(container, before) > 0,
+                    rerun_gates=_rebut_gates,
+                    critic_container=_rebut_critic_container,
+                    # Read from the critic cell's own tree, never the
+                    # implementer's own `.git` (CONTEXT.md §5).
+                    diff=lambda critic: worktree.export_patch(critic, spec.tree_base),
+                    agent=rebut_agent,
+                    spec_id=spec.spec_id,
+                    # The exact diff REVIEW's lenses were shown.
+                    reviewed_diff=reviewed_diff,
+                    emit=emit,
+                    last_cost_usd=last_cost,
+                )
+            rebut_result = result
+            spent += result.cost_usd
+            session_id = result.rebuttal.session_id or session_id
+            (task_dir / "rebuttal.json").write_text(
+                json.dumps(result.as_dict(blockers), indent=2)
+            )
+            # The critic's verdict and the implementer's argument, onto the
+            # rows REVIEW wrote. Both are keyed by the blocker's number,
+            # which is its position in `blockers` counted from 1 (§5.6).
+            # Nothing validates the rebuttal turn's numbering the way
+            # `run_verdict` validates a verdict set, so it is validated
+            # here: a number nobody asked about is dropped, and
+            # `first_answers` keeps the one that stands. Silently letting
+            # a duplicate win leaves another blocker reading as unanswered.
+            # `action` rides along because "fixed" and "argued" are the
+            # difference the critic-ROI query is asking about (§4.6).
+            argued = {
+                n: f"{r.action}: {r.argument}"
+                for n, r in rebut.first_answers(result.rebuttal).items()
+                if 1 <= n <= len(blockers)
+            }
+            judged = {
+                v.finding: v.verdict for lens in result.verdicts for v in lens.verdicts
+            }
+            for n, finding in enumerate(blockers, 1):
+                ledger.record_rebuttal(
+                    recorded[id(finding)],
+                    verdict=judged.get(n),
+                    rebuttal=argued.get(n),
+                )
+            outcome, why = result.state, result.why
+
+            if cap is not None:
+                emit(
+                    Budget(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        ceiling="budget_usd",
+                        value=spent,
+                        limit=spec.budget_usd,
+                        rebut_spent_usd_est=result.cost_usd,
+                    )
+                )
+                if outcome == "REBUTTING" and cap.refused:
+                    # The cap stopped a session, not the agent: the blockers
+                    # stand unanswered, and the task ends decided, not hanging.
+                    outcome = "EXHAUSTED"
+                    rebut_result = None
+                    why = (
+                        f"the REBUT cap (${REBUT_OVERRUN_CAP_USD:.2f}) cut a "
+                        f"session short — {why}"
+                    )
+
+            _phase_start("REBUT", "REBUT", why)
 
         # The task's own outcome — `events.FAMILIES`' two `TaskOutcome` rows.
         emit(
@@ -3072,6 +3157,7 @@ def _drive_cell(
             gates=latest.results,
             new_failures=new_failures,
             reviews=reviews,
+            wrong_versions=wrong_versions,
             rebut_result=rebut_result,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from harness import lens_scoring
 from saffron import end_review
 from saffron.agents import context
+from saffron.agents.artifacts import EXTRACTION_PROMPT
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -1051,7 +1052,7 @@ def _probe_agent(*turns, record=None):
 
     def run(container, *, prompt, options, **kwargs):
         if record is not None:
-            record.append({"prompt": prompt, "options": options})
+            record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
         turn = next(scripted)
         if isinstance(turn, BaseException):
             raise turn
@@ -1297,10 +1298,11 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
 
 
 def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version():
-    """Criterion 4: a failed session, a bad reply, and a mismatched count each
-    keep every version, with a null edit and an empty reason. None of the
-    four truncates, stops the loop, or re-prompts. Every later criterion is
-    still asked."""
+    """Criterion 4: a failed session keeps every version, with a null edit and
+    an empty reason, and is never re-prompted. A bad reply and a mismatched
+    count each get one re-prompt. Bad again, each keeps every version the
+    same way, with an error naming the re-prompt. None of the four truncates
+    or stops the loop. Every later criterion is still asked."""
     c1 = Criterion(
         claim="claim one", witness="t.py::test_1", wrong_versions=["c1 v1", "c1 v2"]
     )
@@ -1342,7 +1344,14 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
 
     record: list[dict] = []
     agent = _probe_agent(
-        failed, "not a block at all", one_answer, three_answers, record=record
+        failed,
+        "not a block at all",
+        "not a block at all",
+        one_answer,
+        one_answer,
+        three_answers,
+        three_answers,
+        record=record,
     )
 
     entries = review.run_wrong_versions(
@@ -1359,7 +1368,7 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
         emit=lambda _e: None,
     )
 
-    assert len(record) == 4, "every criterion is asked, whatever the previous answer"
+    assert len(record) == 7, "every criterion is asked, whatever the previous answer"
     assert entries == [
         {
             "witness": "t.py::test_1",
@@ -1374,8 +1383,11 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
         {
             "witness": "t.py::test_2",
             "claim": "claim two",
-            "cost_usd": pytest.approx(0.1),
-            "error": "not the schema: no <output> block in the response",
+            "cost_usd": pytest.approx(0.2),
+            "error": (
+                "not the schema, even after a re-prompt: "
+                "no <output> block in the response"
+            ),
             "versions": [
                 {"version": "c2 v1", "edit": None, "reason": ""},
                 {"version": "c2 v2", "edit": None, "reason": ""},
@@ -1384,8 +1396,10 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
         {
             "witness": "t.py::test_3",
             "claim": "claim three",
-            "cost_usd": pytest.approx(0.1),
-            "error": "not the schema: 1 answers for 2 wrong versions",
+            "cost_usd": pytest.approx(0.2),
+            "error": (
+                "not the schema, even after a re-prompt: 1 answers for 2 wrong versions"
+            ),
             "versions": [
                 {"version": "c3 v1", "edit": None, "reason": ""},
                 {"version": "c3 v2", "edit": None, "reason": ""},
@@ -1394,13 +1408,222 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
         {
             "witness": "t.py::test_4",
             "claim": "claim four",
-            "cost_usd": pytest.approx(0.1),
-            "error": "not the schema: 3 answers for 2 wrong versions",
+            "cost_usd": pytest.approx(0.2),
+            "error": (
+                "not the schema, even after a re-prompt: 3 answers for 2 wrong versions"
+            ),
             "versions": [
                 {"version": "c4 v1", "edit": None, "reason": ""},
                 {"version": "c4 v2", "edit": None, "reason": ""},
             ],
         },
+    ]
+
+
+def _wv_turn(session_id, text, cost):
+    return implement.AttemptResult(
+        session_id=session_id,
+        subtype="success",
+        terminal_reason="completed",
+        num_turns=1,
+        cost_usd_est=cost,
+        text=text,
+    )
+
+
+def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session():
+    """Criterion 1: a wrong-version answer that is not the schema gets one
+    re-prompt. It resumes the turn's own session, on the budget it left,
+    and passes its cost as `last_cost_usd`. That holds for a missing
+    `<output>` block, JSON that does not parse, a schema the model
+    refused, and a wrong answer count."""
+    criteria = [
+        Criterion(
+            claim=f"claim {letter}",
+            witness=f"t.py::{letter}",
+            wrong_versions=[f"{letter} v1", f"{letter} v2"],
+        )
+        for letter in "abcd"
+    ]
+    named_edit = {"file": "src/x.py", "find": "a", "replace": "b"}
+    bad_quote = (
+        'Here it is.\n<output>\n{"versions": '
+        '[{"edit": null, "reason": "a "bad" quote"}, '
+        '{"edit": null, "reason": "y"}]}\n</output>'
+    )
+    no_reason = (
+        'Here it is.\n<output>\n{"versions": '
+        '[{"edit": null}, {"edit": null}]}\n</output>'
+    )
+    one_answer = _wrong_version_block([{"edit": None, "reason": "only one"}])
+    good = _wrong_version_block(
+        [
+            {"edit": named_edit, "reason": "names an edit"},
+            {"edit": None, "reason": "second"},
+        ]
+    )
+    first_answers = [
+        "Plain text with no block at all.",
+        bad_quote,
+        no_reason,
+        one_answer,
+    ]
+
+    record: list[dict] = []
+    turns = []
+    for letter, text in zip("abcd", first_answers, strict=True):
+        turns.append(_wv_turn(f"s-{letter}", text, 0.3))
+        turns.append(_wv_turn(f"s-{letter}", good, 0.2))
+    agent = _probe_agent(*turns, record=record)
+
+    entries = review.run_wrong_versions(
+        "cell",
+        acceptance=criteria,
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 8
+    first_calls, second_calls = record[0::2], record[1::2]
+    assert all(call["kwargs"].get("resume") is None for call in first_calls)
+    for letter, first_call, second_call in zip(
+        "abcd", first_calls, second_calls, strict=True
+    ):
+        assert second_call["kwargs"]["resume"] == f"s-{letter}"
+        assert (
+            second_call["options"]["system_prompt"]
+            == (first_call["options"]["system_prompt"])
+        )
+        assert second_call["options"]["tools"] == review.REVIEW_TOOLS
+        assert second_call["options"]["max_budget_usd"] == pytest.approx(1.7)
+        assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
+
+    for fragment, call in zip(
+        [
+            "no <output> block in the response",
+            "Expecting ',' delimiter",
+            "reason",
+            "1 answers for 2 wrong versions",
+        ],
+        second_calls,
+        strict=True,
+    ):
+        assert fragment in call["prompt"]
+        assert call["prompt"].endswith(EXTRACTION_PROMPT)
+
+    assert entries == [
+        {
+            "witness": f"t.py::{letter}",
+            "claim": f"claim {letter}",
+            "cost_usd": pytest.approx(0.5),
+            "error": None,
+            "versions": [
+                {
+                    "version": f"{letter} v1",
+                    "edit": named_edit,
+                    "reason": "names an edit",
+                },
+                {"version": f"{letter} v2", "edit": None, "reason": "second"},
+            ],
+        }
+        for letter in "abcd"
+    ]
+
+
+def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
+    """Criterion 2: the re-prompt fires once, and only where `run_lens` would
+    fire its own. A second bad answer ends the criterion with an error naming
+    the re-prompt. A re-prompt that fails ends it too, charged both turns. No
+    re-prompt follows a turn that left less than it spent, carries no session
+    id, failed outright, or already answered the schema."""
+    criteria = [
+        Criterion(
+            claim=f"claim {letter}",
+            witness=f"t.py::{letter}",
+            wrong_versions=[f"{letter} v"],
+        )
+        for letter in "abcdefgh"
+    ]
+
+    bad = "no block here at all"
+    good = _wrong_version_block([{"edit": None, "reason": "fine"}])
+    two_answers = _wrong_version_block(
+        [{"edit": None, "reason": "one"}, {"edit": None, "reason": "two"}]
+    )
+    bad_quote = 'Here it is.\n<output>\n{"versions": [{"reason": "a "q" b", "edit": null}]}\n</output>'
+
+    turns = [
+        # a: left exactly what it spent, so the re-prompt fires, and fails again.
+        _wv_turn("s-a", bad, 1.0),
+        _wv_turn("s-a", bad, 0.2),
+        # b: left less than it spent, so no re-prompt.
+        _wv_turn("s-b", bad, 1.5),
+        # c: no session id, so no re-prompt.
+        _wv_turn(None, bad, 0.3),
+        # d: AgentFailed outright, so no re-prompt can fire.
+        implement.AgentFailed("cut off", _wv_turn("s-d", "", 0.4)),
+        # e: a good first answer, no re-prompt at all.
+        _wv_turn("s-e", good, 0.1),
+        # f: a bad turn, then the retry itself raises.
+        _wv_turn("s-f", bad, 0.3),
+        implement.AgentFailed("retry cut off", _wv_turn("s-f", "", 0.25)),
+        # g: a bad turn, then a wrong count on the retry.
+        _wv_turn("s-g", bad, 0.3),
+        _wv_turn("s-g", two_answers, 0.2),
+        # h: a bad turn, then still bad JSON on the retry.
+        _wv_turn("s-h", bad_quote, 0.3),
+        _wv_turn("s-h", bad_quote, 0.2),
+    ]
+    record: list[dict] = []
+    agent = _probe_agent(*turns, record=record)
+
+    entries = review.run_wrong_versions(
+        "cell",
+        acceptance=criteria,
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 12
+    resumed = [i for i, call in enumerate(record, 1) if call["kwargs"].get("resume")]
+    assert resumed == [2, 8, 10, 12]
+
+    errors = [e["error"] for e in entries]
+    assert errors == [
+        "not the schema, even after a re-prompt: no <output> block in the response",
+        "not the schema: no <output> block in the response",
+        "not the schema: no <output> block in the response",
+        "cut off",
+        None,
+        "re-prompted once, then retry cut off",
+        "not the schema, even after a re-prompt: 2 answers for 1 wrong versions",
+        "not the schema, even after a re-prompt: "
+        "Expecting ',' delimiter: line 1 column 30 (char 29)",
+    ]
+    costs = [e["cost_usd"] for e in entries]
+    assert costs == [
+        pytest.approx(1.2),
+        pytest.approx(1.5),
+        pytest.approx(0.3),
+        pytest.approx(0.4),
+        pytest.approx(0.1),
+        pytest.approx(0.55),
+        pytest.approx(0.5),
+        pytest.approx(0.5),
     ]
 
 

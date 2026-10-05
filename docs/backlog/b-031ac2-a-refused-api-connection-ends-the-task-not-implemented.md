@@ -1,11 +1,12 @@
 ---
 id: b-031ac2
 title: A refused API connection ends the task `NOT_IMPLEMENTED`, exit 1, as if the task failed
-status: open
+status: done
 tier: 1
 filed: 2026-10-03
+closed: 2026-10-05
 specs: [SA-0152, SA-0201]
-prs: [650]
+prs: [650, 673]
 commits: []
 cites: [§4.3, §5.1]
 related: [b-d4e015, b-209696]
@@ -37,3 +38,6 @@ was unreachable, never that the task was not implemented.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 26.
+- 2026-10-05: done by `SA-0201` (#673), in the spec loop's run 28. A plan
+  turn the provider served nothing ends the task `PROVIDER_UNREACHABLE`.
+  `SA-0204`'s first cell hit this bug live, on a host without #673.
