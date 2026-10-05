@@ -61,7 +61,7 @@ from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import sustained_blockers, unkept_fixes
-from saffron.phases.review import anchored_concerns
+from saffron.phases.review import anchored_blockers, anchored_concerns
 from saffron.reconcile import GhRunner, reconcile
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
@@ -452,7 +452,7 @@ def run_task(
     gh: GhRunner | None = None,
 ) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
-    and package the result if the cell came back reviewable.
+    and package a reviewable or unanswered-blocker `EXHAUSTED` result alike.
 
     A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
     Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
@@ -624,24 +624,84 @@ def run_task(
                     f"{spec.id}: the live row for ORPHANED could not be written: {exc}"
                 )
         raise
-    if outcome.state == "READY_FOR_REVIEW":
-        result = package_phase.package(
-            outcome,
-            spec=spec,
-            repo=repo,
-            mirror=base.mirror,
-            # Derived, not rebuilt: preflight already built this tag.
-            image=repo_image.cell_tag(repo),
-            ledger=ledger,
-            out_dir=out_dir,
-            token=token,
-            # `None` unless `stacked_on` is too: a stacked worktree must not
-            # reach a pull request that is not.
-            parent_branch=target_branch,
-            emit=emit,
-        )
-        print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
-        outcome.state = result.state
+    # SA-0210: an EXHAUSTED cell with gates green and an unanswered blocker
+    # still reaches package(), in its exhausted mode.
+    exhausted_package = (
+        outcome.state == "EXHAUSTED"
+        and outcome.rebut_result is None
+        and bool(anchored_blockers(outcome.reviews))
+    )
+    if outcome.state == "READY_FOR_REVIEW" or exhausted_package:
+        package_error_note: str | None = None
+        try:
+            result = package_phase.package(
+                outcome,
+                spec=spec,
+                repo=repo,
+                mirror=base.mirror,
+                # Derived, not rebuilt: preflight already built this tag.
+                image=repo_image.cell_tag(repo),
+                ledger=ledger,
+                out_dir=out_dir,
+                token=token,
+                # `None` unless `stacked_on` is too: a stacked worktree must not
+                # reach a pull request that is not.
+                parent_branch=target_branch,
+                exhausted=exhausted_package,
+                emit=emit,
+            )
+        except package_phase.PackageError as exc:
+            # Only in the exhausted mode: a READY_FOR_REVIEW cell's error
+            # still reaches cli.main (exit 2), as it always has.
+            if not exhausted_package:
+                raise
+            result = None
+            package_error_note = str(exc)
+        else:
+            print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
+            outcome.state = result.state
+        if exhausted_package and (result is None or not result.pr_url):
+            # No pull request either way, refused or raised, so the branch
+            # is pushed as any `EXHAUSTED` task's, told why PACKAGE did not open one.
+            package_note = result.note if result is not None else package_error_note
+            pushed = package_phase.push_unpackaged_work(
+                outcome,
+                spec=spec,
+                repo=repo,
+                mirror=base.mirror,
+                out_dir=out_dir,
+                repo_id=repo_id,
+                ledger=ledger,
+                token=token,
+                package_refusal=package_note,
+                emit=emit,
+            )
+            combined_note = f"{package_note}; {pushed.note}"
+            # `_finish` already wrote a row for this task, overwritten here
+            # since `append_queue_line` upserts on `(repo, spec_id)`.
+            index_report.append_queue_line(
+                out_dir,
+                index_report.QueueLine(
+                    repo=repo.name,
+                    spec_id=spec.id,
+                    state="EXHAUSTED",
+                    attempts=outcome.attempts,
+                    cost_usd_est=outcome.spent_usd,
+                    concerns=anchored_concerns(outcome.reviews),
+                    added=0,
+                    removed=0,
+                    link="",
+                    note=combined_note,
+                    risk=outcome.effective_risk,
+                    sustained=sustained_blockers(outcome.rebut_result),
+                    unkept=unkept_fixes(outcome.rebut_result),
+                ),
+                header={
+                    "trailing accept rate": index_report.trailing_accept_rate(ledger)
+                },
+            )
+            print(f"{spec.id:<10} EXHAUSTED  {combined_note}")
+            outcome.state = "EXHAUSTED"
     else:
         # PACKAGE never ran, but teardown may still have exported commits to
         # the cell's own branch (backlog item 45, `SA-0069`). Never packaged,

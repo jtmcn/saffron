@@ -83,22 +83,24 @@ def render_pr_body(
     advisory_gates: Sequence[str] = (),
     notes: str = "",
     wrong_versions: Sequence[Mapping[str, object]] = (),
+    exhausted: bool = False,
+    head_moved: bool = False,
 ) -> str:
-    """`effective_risk` is what the header reports — `elevated` when the spec
-    says so *or* the diff crossed a `policy.elevate_on` path — never bare
+    """`effective_risk` is what the header reports: `elevated` when the spec
+    says so, or the diff crossed a `policy.elevate_on` path. Never bare
     `spec.risk`, which only ever knows the first of those two (§5.6). Left
-    unset it falls back to `spec.risk`, so a caller that has not computed the
-    effective tier yet still gets the behaviour it always had.
+    unset it falls back to `spec.risk`, for a caller with no effective tier.
 
-    `advisory_gates` names every gate result in `results` this attempt did not
-    hold blocking — `size` at `standard`, a declared `blocking: false` gate at
-    any tier — so its row can say so: a `fail` here is not a contradiction of
-    a green pull request, and unmarked it would read like one (§5.6).
+    `advisory_gates` names every result this attempt did not hold blocking:
+    a `fail` there is no contradiction of a green pull request, marked so.
 
-    `notes` is the implementer's own extraction-turn text, if any (SA-0063,
-    backlog items 71/75) — untrusted cell-authored prose, rendered
-    last and clipped like every other such string here. Empty for every task
-    that produced none, which is every task before this channel existed."""
+    `notes` is the implementer's own extraction-turn text, rendered last and
+    clipped like every other such string here. Empty for a task that
+    produced none, which is every task before this channel existed.
+
+    `exhausted` and `head_moved` are `SA-0210`'s pair, both off by default.
+    The task ended `EXHAUSTED` unjudged, and `head_moved` says REBUT moved
+    HEAD before the cap cut it short."""
     risk = effective_risk if effective_risk is not None else spec.risk
     # The `##` headings match `.github/pull_request_template.md`; a test holds them equal.
     sections = [
@@ -126,6 +128,8 @@ def render_pr_body(
             rebut_result=rebut_result,
             has_notes=bool(notes.strip()),
             wrong_versions=wrong_versions,
+            exhausted=exhausted,
+            head_moved=head_moved,
         ),
         # Last, so cell-authored prose cannot appear to have moved a table
         # (SA-0044). Falsy when there are no notes.
@@ -500,6 +504,8 @@ def _not_covered(
     rebut_result: RebutResult | None = None,
     has_notes: bool = False,
     wrong_versions: Sequence[Mapping[str, object]] = (),
+    exhausted: bool = False,
+    head_moved: bool = False,
 ) -> str:
     """What this body does not stand behind, collected.
 
@@ -515,6 +521,19 @@ def _not_covered(
     a gap would be false, and `_verification` already says which case this is.
     """
     lines = []
+    # `SA-0210`'s pair, first: a blocker the operator is first to read.
+    # Keyed on `anchored_blockers`, the same selection `_disagreements` numbers.
+    blockers = anchored_blockers(reviews)
+    if exhausted and blockers:
+        lines.append(
+            "- The task ended `EXHAUSTED` before the critics finished judging "
+            "its rebuttal, so its blockers stand: "
+            + ", ".join(f"{_cell(f.file)}:{f.line}" for f in blockers)
+        )
+    if head_moved:
+        lines.append(
+            "- HEAD moved after REVIEW, so the patch carries commits no lens judged."
+        )
     if skipped := [r.gate for r in results if r.status == "skip"]:
         lines.append(
             "- Did not run: "
@@ -563,7 +582,6 @@ def _not_covered(
         )
     # A turn that recorded nothing, not one that argued nothing (§4.3). Its error
     # string is never quoted: untrusted model output (backlog item 42).
-    blockers = anchored_blockers(reviews)
     if blockers and _rebuttal_errored(rebut_result):
         lines.append(
             "- No implementer answer stands against "

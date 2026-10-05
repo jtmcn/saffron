@@ -3547,3 +3547,264 @@ def test_a_missing_patch_record_is_said_and_not_raised(packageable):
     result = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
 
     assert result.pushed is False
+
+
+def test_an_exhausted_package_keeps_its_state_on_every_path(
+    monkeypatch, packageable, tmp_path
+):
+    """`package(..., exhausted=True)` records `EXHAUSTED` everywhere an
+    unset call would record `MERGE_FAILED` or `READY_FOR_REVIEW`. That holds
+    for the returned `PackageResult`, the ledger row and the queue line
+    alike. Every one of the seven refusals, and the pull request path, is
+    driven, and the pull request's body carries the third criterion's own
+    line."""
+    task_id = packageable.task_id
+    patch_diff_path = packageable.outcome.task_dir / "patch.diff"
+    patch_json_path = packageable.outcome.task_dir / "patch.json"
+    original_patch_diff = patch_diff_path.read_text()
+    original_patch_json = patch_json_path.read_text()
+    # Read before any sub-case commits onto `cell`, which later steps
+    # advance past what the once-cloned mirror holds for it.
+    cell_head = git(packageable.work, "rev-parse", "cell")
+
+    def _exhausted(**extra):
+        return package(
+            packageable.outcome,
+            gh=_no_gh,
+            exhausted=True,
+            **packageable.kwargs,
+            **extra,
+        )
+
+    def _assert_exhausted(result, *, note_has=""):
+        assert result.state == "EXHAUSTED"
+        if note_has:
+            assert note_has in result.note
+        row = _state(packageable.ledger, task_id)
+        assert row["state"] == "EXHAUSTED"
+        queued = _queue_json_row(packageable.out_dir, "SA-0005")
+        assert queued["state"] == "EXHAUSTED"
+
+    # 1: a credential in the patch.
+    git(packageable.work, "checkout", "-q", "cell")
+    (packageable.work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "the agent hardcoded a key")
+    leaked_patch = (
+        git(packageable.work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n"
+    )
+    git(packageable.work, "checkout", "-q", "main")
+    patch_diff_path.write_text(leaked_patch)
+    result = _exhausted()
+    patch_diff_path.write_text(original_patch_diff)
+    _assert_exhausted(result, note_has="credential in the patch")
+
+    # 2: a credential in an agent commit subject.
+    packageable.outcome.agent_subjects = [f"fix: use {FAKE_KEY}"]
+    result = _exhausted()
+    packageable.outcome.agent_subjects = []
+    _assert_exhausted(result, note_has="credential in the commit subjects")
+
+    # 3: a credential in the body, from a blocker whose claim carries it.
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: _reverified())
+    packageable.outcome.reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[
+                Finding(
+                    lens="correctness",
+                    severity="blocker",
+                    file="f.txt",
+                    line=3,
+                    claim=f"the key {FAKE_KEY} is hardcoded here",
+                    anchored=True,
+                )
+            ],
+        )
+    ]
+    result = _exhausted()
+    packageable.outcome.reviews = []
+    _assert_exhausted(result, note_has="credential in the body")
+
+    # 4: new failures on re-verification.
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(
+            NewFailure(gate="tests", failure=Failure(file="f.py", code="E"))
+        ),
+    )
+    result = _exhausted()
+    _assert_exhausted(result, note_has="new failures")
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: _reverified())
+
+    # 5: the branch moved underneath us.
+    git(
+        packageable.work,
+        "push",
+        "-q",
+        str(packageable.remote),
+        "cell:refs/heads/saffron/SA-0005",
+    )
+    monkeypatch.setattr("saffron.phases.package.remote_sha", lambda *a, **k: "")
+    result = _exhausted()
+    monkeypatch.setattr("saffron.phases.package.remote_sha", remote_sha)
+    _assert_exhausted(result, note_has="moved underneath us")
+
+    # 6: a gone parent.
+    patch_json_path.write_text(
+        json.dumps({"base_sha": packageable.base, "tree_base": cell_head})
+    )
+    result = _exhausted(parent_branch="saffron/SA-0020")
+    patch_json_path.write_text(original_patch_json)
+    _assert_exhausted(result, note_has="saffron/SA-0020 is gone")
+
+    # 7: a pull request. An anchored blocker stands with no `rebut_result`,
+    # so the body carries the third criterion's own line.
+    packageable.outcome.reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[
+                Finding(
+                    lens="correctness",
+                    severity="blocker",
+                    file="f.txt",
+                    line=3,
+                    claim="a blocker REBUT never got to",
+                    anchored=True,
+                )
+            ],
+        )
+    ]
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/9\n"),
+        exhausted=True,
+        **packageable.kwargs,
+    )
+    packageable.outcome.reviews = []
+    assert result.state == "EXHAUSTED" and result.pr_url == "https://x/pull/9"
+    _assert_exhausted(result)
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "task ended `EXHAUSTED` before the critics finished judging" in body
+    assert "f.txt:3" in body.split("## Not covered", 1)[1]
+
+    # 8: a real conflict, last, since it moves `main` for good.
+    (packageable.work / "f.txt").write_text("a\nb\nMAIN_TOOK_IT\nd\ne\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+    result = _exhausted()
+    _assert_exhausted(result, note_has="conflicts with main")
+
+
+def test_an_exhausted_body_says_when_the_rebuttal_moved_head(
+    monkeypatch, packageable, tmp_path
+):
+    """In the `exhausted` mode, `package()` reads `head_moved` from
+    `rebuttal.json` and sets `render_pr_body`'s second keyword exactly when
+    it is `True`. A missing file, one that is not JSON, and JSON that is not
+    an object all read as `False` and raise nothing. Outside the mode, it is
+    never read at all."""
+    rebuttal_path = packageable.outcome.task_dir / "rebuttal.json"
+
+    def _open(*, exhausted: bool = True) -> str:
+        result = package(
+            packageable.outcome,
+            gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/9\n"),
+            exhausted=exhausted,
+            **packageable.kwargs,
+        )
+        assert result.pr_url == "https://x/pull/9"
+        return (packageable.outcome.task_dir / "pr_body.md").read_text()
+
+    # `head_moved: true`.
+    rebuttal_path.write_text(json.dumps({"head_moved": True}))
+    assert "HEAD moved after REVIEW" in _open()
+
+    # `head_moved: false`.
+    rebuttal_path.write_text(json.dumps({"head_moved": False}))
+    assert "HEAD moved after REVIEW" not in _open()
+
+    # No `rebuttal.json` at all.
+    rebuttal_path.unlink()
+    assert "HEAD moved after REVIEW" not in _open()
+
+    # Not JSON.
+    rebuttal_path.write_text("not json")
+    assert "HEAD moved after REVIEW" not in _open()
+
+    # JSON, but a list rather than an object.
+    rebuttal_path.write_text(json.dumps([True]))
+    assert "HEAD moved after REVIEW" not in _open()
+
+    # `head_moved: true`, outside the `exhausted` mode: never read.
+    rebuttal_path.write_text(json.dumps({"head_moved": True}))
+    assert "HEAD moved after REVIEW" not in _open(exhausted=False)
+
+
+def test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft(
+    packageable,
+):
+    """`push_unpackaged_work`'s `package_refusal` keyword says why PACKAGE
+    refused the task, through `neutralize`, and never claims PACKAGE never
+    ran. A text in which a credential is found is left out instead, and the
+    commit says so. The guard refuses beside an `EXHAUSTED` row of this spec
+    that already carries its own pull request, exactly as it refuses beside
+    a `READY_FOR_REVIEW` one. Nothing else blocks it."""
+    from saffron.phases.package import push_unpackaged_work
+
+    remote = packageable.remote
+
+    def _push(**extra):
+        packageable.outcome.state = "EXHAUSTED"
+        return push_unpackaged_work(
+            packageable.outcome, **packageable.unpackaged_kwargs, **extra
+        )
+
+    # Before any earlier row: a mention and a closing keyword go through,
+    # neutralized rather than raw.
+    result = _push(package_refusal="conflicts; Fixes #1 @someone")
+    assert result.pushed is True
+    message = git(remote, "log", "-1", "--format=%B", "saffron/SA-0005")
+    assert "PACKAGE refused it" in message
+    assert "PACKAGE never ran" not in message
+    assert "Fixes #1" not in message and "@someone" not in message
+    assert "ixes #1" in message and "someone" in message
+
+    # A refusal text holding a credential: left out, and said so.
+    result = _push(package_refusal=f"leaked {FAKE_KEY}")
+    assert result.pushed is True
+    message = git(remote, "log", "-1", "--format=%B", "saffron/SA-0005")
+    assert FAKE_KEY not in message
+    assert "left out" in message
+
+    # Four rows, each added right before its own push. `pushed_sha` is
+    # seeded to the remote's current head: only `pushed` is compared below.
+    other_run = packageable.ledger.create_run(packageable.repo_id, packageable.base)
+
+    def _seed_row(spec_id: str, state: str, pr_url: str) -> None:
+        head = remote_sha(str(remote), "saffron/SA-0005", cwd=packageable.work)
+        task_id = packageable.ledger.create_task(
+            other_run, spec_id, "s" * 40, branch=f"saffron/{spec_id}"
+        )
+        packageable.ledger.set_task_package(
+            task_id, state, f"saffron/{spec_id}", head, pr_url
+        )
+
+    # 1: a REJECTED row of this spec.
+    _seed_row("SA-0005", "REJECTED", "")
+    assert _push().pushed is True
+
+    # 2: an EXHAUSTED row of this spec with no pull request.
+    _seed_row("SA-0005", "EXHAUSTED", "")
+    assert _push().pushed is True
+
+    # 3: another spec's drafted row.
+    _seed_row("SA-0099", "EXHAUSTED", "https://x/pull/3")
+    assert _push().pushed is True
+
+    # 4: this spec's own drafted row, not ours to replace.
+    _seed_row("SA-0005", "EXHAUSTED", "https://x/pull/4")
+    result = _push()
+    assert result.pushed is False
+    assert "not ours to replace" in result.note

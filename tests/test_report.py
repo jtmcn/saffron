@@ -722,6 +722,63 @@ def _finding(**kw) -> Finding:
     return Finding.model_validate(base.model_dump() | kw)
 
 
+def test_an_unrebutted_body_names_every_blocker_it_left_standing():
+    """`SA-0210`'s own pair. `exhausted` names every anchored blocker and no
+    other finding. `head_moved` names the HEAD-moved gap. Neither renders
+    unset, even beside anchored blockers and no `rebut_result`. That is the
+    plain shape this body already renders for every ordinary unstacked
+    task, and it must not suddenly grow this section."""
+    blockers = [
+        _finding(file="a.py", line=3, claim="first blocker"),
+        _finding(file="a|b.py", line=17, claim="second blocker"),
+    ]
+    reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[
+                *blockers,
+                _finding(file="c.py", line=29, claim="unanchored", anchored=False),
+                _finding(file="d.py", line=41, claim="a concern", severity="concern"),
+            ],
+        )
+    ]
+
+    def _rendered(**kw):
+        return render_pr_body(
+            SPEC,
+            RESULTS,
+            [],
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            added=1,
+            removed=0,
+            transcript_path="/t",
+            reviews=reviews,
+            **kw,
+        )
+
+    neither = _rendered().split("## Not covered", 1)[1]
+    assert "the task ended `EXHAUSTED`" not in neither
+    assert "HEAD moved after REVIEW" not in neither
+
+    exhausted_only = _rendered(exhausted=True).split("## Not covered", 1)[1]
+    assert "task ended `EXHAUSTED` before the critics finished judging" in (
+        exhausted_only
+    )
+    assert "its blockers stand" in exhausted_only
+    assert "a.py:3" in exhausted_only
+    # `|` escaped the same way `_cell` writes every other table cell.
+    assert "a\\|b.py:17" in exhausted_only
+    assert "c.py:29" not in exhausted_only
+    assert "d.py:41" not in exhausted_only
+    assert "unanswered" not in exhausted_only
+    assert "HEAD moved after REVIEW" not in exhausted_only
+
+    both = _rendered(exhausted=True, head_moved=True).split("## Not covered", 1)[1]
+    assert "HEAD moved after REVIEW" in both
+    assert "no lens" in both and "judged" in both
+
+
 def test_a_finding_cannot_close_an_issue_or_notify_an_account():
     """§5.7's other half. `Fixes #1` in a PR *body* closes issue 1 on merge and
     `@someone` notifies a real account — and a correctness lens quoting
