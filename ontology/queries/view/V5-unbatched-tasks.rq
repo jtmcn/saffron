@@ -9,7 +9,11 @@ WHERE {
   ?task a factory:Task ; factory:riskTier ?risk ; prov:wasInformedBy ?run .
   ?run a factory:Run .
   FILTER NOT EXISTS { ?run prov:wasInformedBy ?batch . ?batch a factory:Batch }
-  { ?task factory:inState ?state } UNION { ?task factory:endedInState ?state }
+  # One state per task: a view task states both, and a UNION would count it twice.
+  OPTIONAL { ?task factory:inState ?now }
+  OPTIONAL { ?task factory:endedInState ?end }
+  BIND(COALESCE(?now, ?end) AS ?state)
+  FILTER(BOUND(?state))
   OPTIONAL { ?task rdfs:label ?spec }
   OPTIONAL { ?task rdfs:seeAlso ?pr }
 }

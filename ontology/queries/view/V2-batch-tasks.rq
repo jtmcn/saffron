@@ -8,7 +8,11 @@ SELECT ?batch ?task ?spec ?state ?risk ?pr (SUM(?cost) AS ?costUsd)
 WHERE {
   ?task a factory:Task ; factory:riskTier ?risk ; prov:wasInformedBy ?run .
   ?run prov:wasInformedBy ?batch .
-  { ?task factory:inState ?state } UNION { ?task factory:endedInState ?state }
+  # One state per task: a view task states both, and a UNION would count it twice.
+  OPTIONAL { ?task factory:inState ?now }
+  OPTIONAL { ?task factory:endedInState ?end }
+  BIND(COALESCE(?now, ?end) AS ?state)
+  FILTER(BOUND(?state))
   OPTIONAL { ?task rdfs:label ?spec }
   OPTIONAL { ?task rdfs:seeAlso ?pr }
   OPTIONAL { ?phase prov:wasInformedBy ?task . ?attempt factory:withinPhase ?phase ;
