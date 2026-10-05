@@ -80,14 +80,18 @@ acceptance:
       adds nothing. An event whose model the table does not name, `<synthetic>`
       included, or that names no model, adds nothing. So no count is ever
       priced at another model's rate. A turn with no such event carries
-      `0.0`. The witness drives `text`, `tool_use` and `thinking` events,
-      and each of three endings. They are the idle bound, the wall bound,
-      and a runner that exits 1 unbounded.
+      `0.0`. The witness drives `text`, `tool_use`, `thinking`,
+      `tool_result` and `passthrough` events, a null count and an absent
+      one, and each of four endings. They are the idle bound, the wall
+      bound, a runner that exits 1 unbounded, and one that exits 0 with no
+      result.
     witness: tests/test_implement.py::test_a_turn_with_no_result_event_carries_the_floor_its_usage_prices
     wrong_versions:
       - A model the table does not name is priced at the table's first entry.
       - Every event is priced at the model the `init` event names.
       - Only `text` events are counted.
+      - Only `text`, `tool_use` and `thinking` events are counted, so a `passthrough` or `tool_result` event's counts are dropped.
+      - An absent count raises rather than adding nothing.
       - A cache-read count is priced at the input rate.
       - A null count raises rather than adding nothing.
       - The floor is set only when a bound fired, so an unbounded exit carries `None`.
@@ -201,10 +205,13 @@ fit 294 result events in `~/.saffron/batches/` exactly. `agent_options`
 turns on the one-hour cache (`saffron/phases/implement.py:121`, `:155`), whose
 writes cost more than the default's (`DESIGN.md` §7.1).
 
-**The model name is the `init` event's.** `SA-0205`'s notes measured
-1,565 `init` events naming `claude-sonnet-5`. Whether an assistant
-message names that same string is unmeasured. If it names another, the
-floor prices nothing and the turn charges its carry, as at base.
+**The model name an assistant message carries.** `SA-0205`'s notes
+measured 1,565 `init` events naming `claude-sonnet-5`. On 2026-10-05
+the operator's delegate counted the `model` of assistant messages in
+host transcripts under `~/.claude/projects`. 18,652 name exactly
+`claude-sonnet-5`, with no dated suffix. Cell transcripts are not kept
+on the host. If a cell's messages named another string, the floor
+would price nothing and the turn would charge its carry, as at base.
 
 **Where an attempt's cost is written.** `record_attempts` closes one row per
 turn, on a return and on `AgentFailed` (`saffron/cell/session.py:242-266`).
@@ -241,7 +248,9 @@ per table (`:346-400`).
 5. **The ledger keeps it.** `close_attempt` gains the keyword and puts it
    on the fact beside `cost_usd_est`. `attempts` gains a nullable `REAL`
    column. `_apply` writes it from the fact, and reads a missing key as
-   null. The `ALTER TABLE` block adds it to an older file, with no default.
+   null. Add a new `ALTER TABLE` block for `attempts`, beside the three
+   other tables' blocks. It adds the column to an older file with no
+   default.
 
 ## Out of scope
 
@@ -305,13 +314,16 @@ autouse fixture already clears the seen ids (`:38-45`).
 **Criterion 2.** Use `_stream`, `_no_reap` and `pytest.raises(AgentFailed)`
 (`tests/test_implement.py:176-214`). Open the stream with an `init`
 system event naming `m-a`, then price an `m-b` event, so a floor priced at
-the `init` model fails. Put a null cache-read count on one event. Add one
-event each naming `m-c`, `<synthetic>` and no model, with counts large
-enough to show if priced. Run the same lines three times: `timed_out=True`
-with `bound="idle"`, the same with `bound="wall"`, and `returncode=1` with
-no bound. Then run a stream holding only the `init` event. The runner
-can put counts on a `passthrough` event too. The witness leaves that kind
-undriven, and the claim names only the three it drives.
+the `init` model fails. Put a null cache-read count on one event, and leave
+`cache_creation_input_tokens` out of another. Put priced counts on one
+`tool_result` event and one `passthrough` event, since the runner puts
+counts on `evts[0]` whatever its kind. Add one event each naming `m-c`,
+`<synthetic>` and no model, with counts large enough to show if priced.
+Run the same lines four times: `timed_out=True` with `bound="idle"`, the
+same with `bound="wall"`, `returncode=1` with no bound, and `returncode=0`
+with no bound. Then run a stream holding only the `init` event. The
+event-kind and absent-count wrong versions, and the fourth ending, came
+from the spec review. No prototype ran them.
 
 **Criterion 3.** One priced event fixes the floor. Drive carries of
 `0.0`, `2.0`, a value above the floor, and the floor itself. Assert both
