@@ -62,7 +62,7 @@ acceptance:
       2038 and 3688 seconds. In each, five kinds of turn carry that wall:
       the plan turn, an implement turn the wall cuts with nothing committed,
       the salvage turn after it, one REPAIR turn, and every REVIEW lens turn.
-    witness: tests/test_session.py::test_every_turn_carries_the_declared_gates_baseline_time_on_top_of_its_wall
+    witness: tests/test_session.py::test_the_bound_turns_carry_the_declared_gates_baseline_time_on_top_of_their_wall
     mutant:
       file: saffron/cell/session.py
       find: "timeout_s=turn_wall_s,"
@@ -160,7 +160,9 @@ Give every turn's wall room for one agent run of the repo's suite:
 - **The comments.** Rewrite the comment above `WALL_SECONDS_PER_TURN`
   in `saffron/cell/session.py`. Its "Capped at the library's hour" is no
   longer the whole wall. The comment above the binding, that no turn can
-  "quietly inherit the library's hour", stays true.
+  "quietly inherit the library's hour", stays true. The comment above the
+  `turn_wall_s` computation says the wall is "floored and capped by the
+  constants above". Rewrite it to name the headroom too.
 
 ## Out of scope
 
@@ -197,6 +199,10 @@ calls, argued here so a reviewer can check them.
   comes from another producer of a `GateResult`. Dropping the measured
   gates' time because one is unmeasured would throw away what is known.
   Counting it as nothing keeps the wall at least what it is today.
+- *No cap on the headroom.* It is uncapped on purpose. Each declared
+  gate's run is already bounded by `run_gate`'s own `timeout_s`, and a
+  baseline `error` ends the task before the wall is computed. The idle
+  bound still ends a session that stops producing output.
 
 **Why every turn.** The wall is bound once so that no call site drifts
 from the others (`SA-0184`). REPAIR runs the suite as IMPLEMENT does. A
