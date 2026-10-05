@@ -7,11 +7,13 @@
 @prefix earl:    <http://www.w3.org/ns/earl#> .
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
 
-# A task ends in a state it can actually end in. `tasks.state` is TEXT and says
-# neither which strings are legal nor which of them reach the operator (§3.3).
+# A task states the state it is in, or the one it ended in, and an end state is one it can end in.
+# `tasks.state` is TEXT and says neither which strings are legal nor which reach the operator (§3.3).
 factory:TaskShape a sh:NodeShape ;
     sh:targetClass factory:Task ;
-    sh:property [ sh:path factory:endedInState ; sh:minCount 1 ; sh:maxCount 1 ;
+    sh:property [ sh:path [ sh:alternativePath ( factory:endedInState factory:inState ) ] ;
+        sh:minCount 1 ] ;
+    sh:property [ sh:path factory:endedInState ; sh:maxCount 1 ;
         sh:class factory:EndState ;
         sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
@@ -19,6 +21,7 @@ factory:TaskShape a sh:NodeShape ;
             factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:APPROVED
             factory:CHANGES_REQUESTED factory:REJECTED factory:MERGED
             factory:ORPHANED factory:MERGE_TRAIN ) ] ;
+    sh:property [ sh:path factory:inState ; sh:maxCount 1 ; sh:class factory:TaskState ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] .
 
@@ -61,6 +64,7 @@ factory:AttemptShape a sh:NodeShape ;
         sh:class factory:Phase ] ;
     sh:property [ sh:path factory:n ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:datatype xsd:integer ; sh:minInclusive 1 ] ;
+    sh:property [ sh:path factory:numTurns ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
     sh:property [ sh:path factory:costUsdEst ; sh:maxCount 1 ; sh:datatype xsd:decimal ] .
 
 # A batch is not a run: budget is a batch property, base_sha is a run property.
@@ -74,6 +78,7 @@ factory:BatchShape a sh:NodeShape ;
     sh:targetClass factory:Batch ;
     sh:property [ sh:path factory:budgetUsd ; sh:minCount 1 ; sh:maxCount 1 ] ;
     sh:property [ sh:path factory:baseSha ; sh:maxCount 0 ] ;
+    sh:property [ sh:path factory:spentUsdEst ; sh:maxCount 1 ; sh:datatype xsd:decimal ] ;
     sh:property [ sh:path factory:endedBecause ; sh:minCount 0 ; sh:maxCount 1 ;
         sh:class factory:BatchStopReason ;
         sh:in ( factory:DRAINED factory:BUDGET factory:UNTIL
@@ -91,7 +96,12 @@ factory:GateShape a sh:NodeShape ;
     sh:targetClass factory:Gate ;
     sh:xone ( [ sh:class factory:CoreGate ]
               [ sh:class factory:ContractGate ]
-              [ sh:class factory:RepoDefinedGate ] ) ;
+              [ sh:class factory:RepoDefinedGate ] ) .
+
+# A blocking level belongs to a declaration. A gate known only from its result
+# carries none, because the ledger keeps the policy's hash and not its text.
+factory:DeclaredGateShape a sh:NodeShape ;
+    sh:targetObjectsOf factory:declaresGate ;
     sh:property [ sh:path factory:blockingAt ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:BlockingLevel ;
         sh:in ( factory:alwaysBlocking factory:blockingWhenElevated factory:advisory ) ] .
@@ -191,7 +201,9 @@ factory:FindingShape a sh:NodeShape ;
     sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:CriticLens ] ;
     sh:property [ sh:path earl:subject ; sh:minCount 1 ; sh:class earl:TestSubject ] ;
-    sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:maxCount 1 ] .
+    sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path factory:claim ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path factory:verdict ; sh:maxCount 1 ; sh:datatype xsd:string ] .
 
 # A gate result is asserted by a gate, automatically. The mode is the only real
 # difference between a gate result and a finding (§4.6), so it is stated rather
@@ -201,7 +213,11 @@ factory:GateResultShape a sh:NodeShape ;
     sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:Gate ] ;
     sh:property [ sh:path earl:subject ; sh:minCount 1 ; sh:class earl:TestSubject ] ;
-    sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:hasValue earl:automatic ] .
+    sh:property [ sh:path earl:mode ; sh:minCount 1 ; sh:hasValue earl:automatic ] ;
+    sh:property [ sh:path ( earl:result earl:outcome ) ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:in ( earl:passed earl:failed earl:cantTell earl:inapplicable ) ] ;
+    sh:property [ sh:path factory:failureCount ; sh:maxCount 1 ;
+        sh:datatype xsd:integer ; sh:minInclusive 0 ] .
 
 # Three judgements, three agents, one claim (§5.6). A rebuttal that records the
 # implementer's position without the critic's is half of the disagreement.

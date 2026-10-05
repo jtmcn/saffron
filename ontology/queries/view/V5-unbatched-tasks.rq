@@ -1,0 +1,16 @@
+# V5 — tasks whose run belongs to no batch: attended cells and replays.
+# SQL equivalent: tasks joined to runs WHERE batch_id IS NULL. SQL is not
+# preferable here: V2 and this query must partition one graph's tasks.
+PREFIX factory: <urn:software-factory:ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?task ?spec ?state ?risk ?pr
+WHERE {
+  ?task a factory:Task ; factory:riskTier ?risk ; prov:wasInformedBy ?run .
+  ?run a factory:Run .
+  FILTER NOT EXISTS { ?run prov:wasInformedBy ?batch . ?batch a factory:Batch }
+  { ?task factory:inState ?state } UNION { ?task factory:endedInState ?state }
+  OPTIONAL { ?task rdfs:label ?spec }
+  OPTIONAL { ?task rdfs:seeAlso ?pr }
+}
+ORDER BY DESC(?task)

@@ -9,6 +9,8 @@ NS = "urn:software-factory:ns#"
 VOCABULARY = ONTOLOGY / "factory.ttl"
 SHAPES = sorted((ONTOLOGY / "shapes").glob("*.ttl"))
 QUERIES = sorted((ONTOLOGY / "queries").glob("*.rq"))
+# The view's readers (ADR 9). RATIONALE.md answers for QUERIES alone.
+VIEW_QUERIES = sorted((ONTOLOGY / "queries" / "view").glob("*.rq"))
 VENDOR = sorted((ONTOLOGY / "vendor").glob("*.ttl"))
 EXPECTED = ONTOLOGY / "queries" / "expected"
 NEGATIVE = sorted((FIXTURES / "negative").glob("*.ttl"))

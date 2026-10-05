@@ -5,6 +5,7 @@
 @prefix prov:    <http://www.w3.org/ns/prov#> .
 @prefix earl:    <http://www.w3.org/ns/earl#> .
 @prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
 
 :batch-1 a factory:Batch ; factory:budgetUsd 50.00 .
 :run-1 a factory:Run ; prov:wasInformedBy :batch-1 ; prov:used :policy-1 ;
@@ -185,3 +186,28 @@
     factory:costUsdEst 5.50 ; prov:generated :diff-t4-1 .
 :diff-t4-1 a factory:Diff .
 :pr-t4 a factory:PullRequest ; prov:wasDerivedFrom :diff-t4-1 .
+
+## What the run record view reads (ADR 9).
+:batch-1 prov:startedAtTime "2026-01-01T22:00:00Z"^^xsd:dateTime ;
+    prov:endedAtTime "2026-01-02T05:10:00Z"^^xsd:dateTime ;
+    factory:endedBecause factory:DRAINED ; factory:spentUsdEst 12.40 .
+:task-t1 rdfs:label "SA-0001" ; rdfs:seeAlso <https://github.com/o/r/pull/1> .
+:at-t1-i1 prov:startedAtTime "2026-01-01T22:05:00Z"^^xsd:dateTime ;
+    prov:endedAtTime "2026-01-01T22:30:00Z"^^xsd:dateTime ; factory:numTurns 41 .
+:at-t1-i2 prov:startedAtTime "2026-01-01T22:31:00Z"^^xsd:dateTime ;
+    prov:endedAtTime "2026-01-01T22:40:00Z"^^xsd:dateTime ; factory:numTurns 12 .
+:gr-t1-1-lint factory:failureCount 3 .
+:gr-t1-2-lint factory:failureCount 0 .
+:finding-t1-1 factory:claim "the retry loop never re-reads the lock" ; factory:verdict "confirmed" .
+
+# An in-flight task: the case the view exists to show and Q4 drops.
+:task-t6 a factory:Task ; prov:wasInformedBy :run-1 ; rdfs:label "SA-0006" ;
+    factory:riskTier factory:standard ; factory:inState factory:REPAIRING .
+:ph-t6-implement a factory:Phase ; prov:wasInformedBy :task-t6 .
+:at-t6-i1 a factory:Attempt ; factory:withinPhase :ph-t6-implement ; factory:n 1 ;
+    factory:costUsdEst 0.90 ; factory:numTurns 20 .
+
+# An attended cell: a run in no batch, which V5 lists.
+:run-2 a factory:Run ; factory:baseSha "8b01d4e" .
+:task-t7 a factory:Task ; prov:wasInformedBy :run-2 ; rdfs:label "SA-0007" ;
+    factory:riskTier factory:standard ; factory:endedInState factory:EXHAUSTED .

@@ -128,6 +128,14 @@ factory:declaresGate a owl:ObjectProperty ; rdfs:domain factory:Policy ; rdfs:ra
 factory:ratifiedBy   a owl:ObjectProperty ; rdfs:domain factory:TouchesSet ; rdfs:range factory:Operator .
 factory:role         a owl:ObjectProperty ; rdfs:domain factory:ContractGate ; rdfs:range factory:GateRole ;
     rdfs:comment "Which contract role a repo's executable implements. A core gate has no role — it is the implementation." .
+factory:inState      a owl:ObjectProperty ; rdfs:domain factory:Task ; rdfs:range factory:TaskState ;
+    rdfs:comment "The state the ledger holds now, in flight or ended. `endedInState` names only an end." .
+factory:numTurns     a owl:DatatypeProperty ; rdfs:domain factory:Attempt ; rdfs:range xsd:integer .
+factory:failureCount a owl:DatatypeProperty ; rdfs:domain factory:GateResult ; rdfs:range xsd:integer ;
+    rdfs:comment "The count only. The lines stay in the ledger (ADR 9)." .
+factory:spentUsdEst  a owl:DatatypeProperty ; rdfs:domain factory:Batch ; rdfs:range xsd:decimal .
+factory:claim        a owl:DatatypeProperty ; rdfs:domain factory:Finding ; rdfs:range xsd:string .
+factory:verdict      a owl:DatatypeProperty ; rdfs:domain factory:Finding ; rdfs:range xsd:string .
 
 ## Enumerated values. Each set is an axiom the relational schema cannot state:
 ## every one of these is a TEXT column in §4.1.

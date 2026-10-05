@@ -2,7 +2,15 @@
 
 import pyoxigraph as ox
 import pytest
-from ontology_paths import EXPECTED, FIXTURES, NS, QUERIES, VENDOR, VOCABULARY
+from ontology_paths import (
+    EXPECTED,
+    FIXTURES,
+    NS,
+    QUERIES,
+    VENDOR,
+    VIEW_QUERIES,
+    VOCABULARY,
+)
 
 
 def query(stem_prefix: str):
@@ -28,20 +36,20 @@ def run(store, query_path):
     return result.serialize(format=ox.QueryResultsFormat.CSV).decode().splitlines()
 
 
-@pytest.mark.parametrize("query", QUERIES, ids=lambda p: p.stem)
+@pytest.mark.parametrize("query", [*QUERIES, *VIEW_QUERIES], ids=lambda p: p.stem)
 def test_query_returns_the_committed_result(store, query):
     actual = run(store, query)
     expected = (EXPECTED / f"{query.stem}.csv").read_text().splitlines()
     assert actual == expected
 
 
-@pytest.mark.parametrize("query", QUERIES, ids=lambda p: p.stem)
+@pytest.mark.parametrize("query", [*QUERIES, *VIEW_QUERIES], ids=lambda p: p.stem)
 def test_query_is_not_empty(store, query):
     """A query that returns nothing has not been shown to answer anything."""
     assert len(run(store, query)) > 1
 
 
-@pytest.mark.parametrize("query", QUERIES, ids=lambda p: p.stem)
+@pytest.mark.parametrize("query", [*QUERIES, *VIEW_QUERIES], ids=lambda p: p.stem)
 def test_query_states_its_sql_equivalent(query):
     """Each .rq opens with the SQL-equivalence challenge. A query that skips it
     has not been argued for, only written."""
