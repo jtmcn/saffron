@@ -382,6 +382,10 @@ layer's peak turns counts attempts its `max_turns` does not bound.
 and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
 REVIEW's re-prompt is written twice.
 
+**Placed 2026-10-05**, from the first live stack batch: **b-4e1b6d**.
+`saffron watch` shows nothing while a spec is reviewed or written, since
+those sessions log no events.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
