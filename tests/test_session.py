@@ -22,6 +22,7 @@ from saffron.events import (
     Agent,
     Attempt,
     Baseline,
+    Budget,
     PhaseStart,
     Preflight,
     TaskOutcome,
@@ -3627,6 +3628,309 @@ def _through_rebut(*rebut_turns):
         _turn(_block({"findings": []})),
         *rebut_turns,
     ]
+
+
+def _rebut_turn_options(cell) -> list[dict]:
+    """`cell.turn_options`, filtered to REBUT's own sessions: the rebuttal
+    turn, its extraction turn, and each lens verdict, in the order they
+    ran (SA-0203). Identified by prompt, the way `cell.turns` records it."""
+    fixed = rebut.REBUT_PROMPT.split("{blockers}")[0]
+    return [
+        options
+        for prompt, options in zip(cell.turns, cell.turn_options, strict=True)
+        if prompt in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT)
+        or prompt.startswith(fixed)
+    ]
+
+
+def _rebut_capped(
+    monkeypatch,
+    tmp_path,
+    *rebut_costs: float | BaseException,
+    budget_usd: float,
+    rebut_commits: int = 1,
+    extracted: dict | None = None,
+    suites=(),
+):
+    """Drives one cell to `REBUTTING` already past `budget_usd`, so REBUT
+    runs under `_RebutCap` instead of being refused (SA-0203). `rebut_costs`
+    is the rebuttal turn, its extraction turn, then one verdict per lens
+    that filed a blocker, built directly rather than through
+    `_through_rebut`. A cost can be a scripted exception instead, read the
+    way `_run_agent` already reads one (line 1322). The plan, implement and
+    all four lens turns each cost $0.125, so REBUT starts at $0.75. The
+    first `len(rebut_costs) - 2` lenses file `_BLOCKER`, and the rest file
+    nothing, and each default verdict withdraws its own lens's finding.
+    """
+    num_verdicts = len(rebut_costs) - 2
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF, suites=suites)
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+
+    if extracted is None:
+        extracted = {
+            "rebuttals": [
+                {
+                    "finding": n,
+                    "action": "argued",
+                    "argument": "the blocker is intentional",
+                }
+                for n in range(1, num_verdicts + 1)
+            ]
+        }
+
+    def _cost_turn(cost, *, structured_output=None, text=""):
+        if isinstance(cost, BaseException):
+            return cost
+        return _turn(text, cost=cost, structured_output=structured_output)
+
+    rebuttal_cost, extraction_cost, *verdict_costs = rebut_costs
+    lens_turns = [
+        _turn(_block(_BLOCKER if i < num_verdicts else {"findings": []}), cost=0.125)
+        for i in range(4)
+    ]
+    verdict_turns = [
+        _cost_turn(
+            cost,
+            structured_output={
+                "verdicts": [
+                    {"finding": n + 1, "verdict": "withdrawn", "reason": "fair"}
+                ]
+            },
+        )
+        for n, cost in enumerate(verdict_costs)
+    ]
+    turns = [
+        _turn(_block(_PLAN), cost=0.125),
+        _turn(cost=0.125),
+        *lens_turns,
+        _cost_turn(rebuttal_cost, text="the blocker is intentional."),
+        _cost_turn(extraction_cost, structured_output=extracted),
+        *verdict_turns,
+    ]
+    capture: list = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=turns,
+        spec=_spec(budget_usd=budget_usd),
+        capture=capture,
+    )
+    return outcome, ledger, cell, capture
+
+
+def test_a_blocker_left_past_the_budget_is_rebutted_once_and_its_spend_recorded(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 1: a task whose REVIEW leaves an anchored blocker
+    with its spend at or past `budget_usd` runs REBUT once instead of
+    ending `EXHAUSTED`. Its rebuttal, extraction and verdict turns each run
+    once, each landing as a `REBUTTING` attempt row. The spend lands on the
+    outcome, `task_spend` and `batch_spend` alike."""
+    outcome, ledger, _cell, _capture = _rebut_capped(
+        monkeypatch, tmp_path / "over", 1.50, 0.50, 0.75, budget_usd=0.25
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    rebutting = [
+        row["cost_usd_est"]
+        for row in ledger.attempts(outcome.task_id)
+        if row["phase"] == "REBUTTING"
+    ]
+    assert rebutting == pytest.approx([1.50, 0.50, 0.75])
+    assert outcome.spent_usd == pytest.approx(3.50)
+    assert ledger.task_spend(outcome.task_id) == pytest.approx(3.50)
+    run_id = ledger.task_run(outcome.task_id)
+    batch_id = ledger.create_batch(100.0)
+    ledger.attach_run_to_batch(run_id, batch_id)
+    assert ledger.batch_spend(batch_id) == pytest.approx(3.50)
+
+    outcome_exact, ledger_exact, _cell2, _capture2 = _rebut_capped(
+        monkeypatch, tmp_path / "exact", 1.50, 0.50, 0.75, budget_usd=0.75
+    )
+    assert outcome_exact.state == "READY_FOR_REVIEW"
+    rebutting_exact = [
+        row["cost_usd_est"]
+        for row in ledger_exact.attempts(outcome_exact.task_id)
+        if row["phase"] == "REBUTTING"
+    ]
+    assert rebutting_exact == pytest.approx([1.50, 0.50, 0.75])
+
+
+def test_a_rebut_past_the_budget_leaves_one_budget_line_naming_its_spend(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 2: a REBUT that starts at or past the budget
+    leaves exactly one `Budget` event, carrying REBUT's own spend. No line
+    in the capture says the task is stopping."""
+    _outcome, _ledger, cell, capture = _rebut_capped(
+        monkeypatch, tmp_path / "over", 1.50, 0.50, 0.75, budget_usd=0.25
+    )
+    budgets = [e for e in capture if isinstance(e, Budget)]
+    assert len(budgets) == 1
+    [event] = budgets
+    assert event.value == pytest.approx(3.50)
+    assert event.limit == pytest.approx(0.25)
+    assert event.rebut_spent_usd_est == pytest.approx(2.75)
+    assert describe(event) == (
+        "budget: $3.50 of $0.25 — REBUT ran past it, spending $2.75"
+    )
+    assert not any("stopping" in line for line in cell.watched)
+
+    _outcome2, _ledger2, _cell2, capture2 = _rebut_capped(
+        monkeypatch, tmp_path / "exact", 1.50, 0.50, 0.75, budget_usd=0.75
+    )
+    [event2] = [e for e in capture2 if isinstance(e, Budget)]
+    assert describe(event2) == (
+        "budget: $3.50 of $0.75 — REBUT ran past it, spending $2.75"
+    )
+
+
+def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 3: past the budget, REBUT's sessions share one
+    $7.00 cap, each session's own `max_budget_usd` the cap less what the
+    phase's earlier sessions already cost. A REBUT that starts under the
+    budget is unchanged."""
+
+    def _caps(path, *costs, budget_usd):
+        outcome, _ledger, cell, capture = _rebut_capped(
+            monkeypatch, tmp_path / path, *costs, budget_usd=budget_usd
+        )
+        return (
+            [o["max_budget_usd"] for o in _rebut_turn_options(cell)],
+            outcome.state,
+            capture,
+        )
+
+    caps, state, _capture = _caps("a", 3.00, 2.50, 1.00, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 4.00, 1.50])
+    assert state == "READY_FOR_REVIEW"
+
+    caps, state, _capture = _caps("b", 3.00, 2.50, 1.00, budget_usd=0.75)
+    assert caps == pytest.approx([7.00, 4.00, 1.50])
+    assert state == "READY_FOR_REVIEW"
+
+    caps, state, _capture = _caps("c", 7.25, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps(
+        "d",
+        implement.AgentFailed("provider crashed", _cut_off_turn(cost=7.25)),
+        0.50,
+        0.75,
+        budget_usd=0.25,
+    )
+    assert caps == pytest.approx([7.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("e", 3.00, 4.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 4.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("f", 2.00, 1.00, 1.50, 0.50, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 5.00, 4.00, 2.50])
+    assert state == "READY_FOR_REVIEW"
+
+    caps, state, capture = _caps("g", 1.50, 0.50, 0.75, budget_usd=1.00)
+    assert caps == pytest.approx([2.00, 2.00, 2.00])
+    assert state == "READY_FOR_REVIEW"
+    assert not any(isinstance(e, Budget) for e in capture)
+
+    caps, state, capture = _caps("h", 1.50, 0.50, 0.75, budget_usd=20.00)
+    assert caps == pytest.approx([19.25, 19.25, 19.25])
+    assert not any(isinstance(e, Budget) for e in capture)
+
+
+def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
+    monkeypatch, tmp_path
+):
+    """SA-0203, criterion 5: a REBUT the cap cut short ends `EXHAUSTED`, a
+    decided state, with its anchored blockers standing and no `rebut_result`
+    on the outcome. A REBUT the cap did not cut short keeps its own state
+    and its own `rebut_result`, whatever that state is."""
+
+    def _run(path, *costs, budget_usd=0.25, rebut_commits=1, extracted=None, suites=()):
+        return _rebut_capped(
+            monkeypatch,
+            tmp_path / path,
+            *costs,
+            budget_usd=budget_usd,
+            rebut_commits=rebut_commits,
+            extracted=extracted,
+            suites=suites,
+        )
+
+    cut_short: list[tuple[str, tuple, dict]] = [
+        ("a", (7.25, 0.50, 0.75), {}),
+        (
+            "b",
+            (
+                implement.AgentFailed("provider crashed", _cut_off_turn(cost=7.25)),
+                0.50,
+                0.75,
+            ),
+            {},
+        ),
+        ("c", (3.00, 4.50, 0.75), {}),
+    ]
+    for path, costs, extra in cut_short:
+        outcome, ledger, _cell, capture = _run(path, *costs, **extra)
+        assert outcome.state == "EXHAUSTED"
+        assert outcome.rebut_result is None
+        assert len(review.anchored_blockers(outcome.reviews)) == 1
+        (queued,) = ledger.queue_lines()
+        assert queued["state"] == "EXHAUSTED"
+        budgets = [e for e in capture if isinstance(e, Budget)]
+        assert len(budgets) == 1
+        assert budgets[0].rebut_spent_usd_est is not None
+        assert (outcome.task_dir / "rebuttal.json").exists()
+        # The host's own running spend must still match what `attempts`
+        # recorded, a cap refusal costing nothing or not.
+        assert outcome.spent_usd == pytest.approx(ledger.task_spend(outcome.task_id))
+        assert budgets[0].value == pytest.approx(outcome.spent_usd)
+        assert budgets[0].limit == pytest.approx(0.25)
+
+    outcome_d, ledger_d, cell_d, capture_d = _run(
+        "d", 7.25, 0.50, 0.75, rebut_commits=0
+    )
+    assert outcome_d.state == "EXHAUSTED"
+    assert outcome_d.rebut_result is None
+    assert len(review.anchored_blockers(outcome_d.reviews)) == 1
+    (queued_d,) = ledger_d.queue_lines()
+    assert queued_d["state"] == "EXHAUSTED"
+    budgets_d = [e for e in capture_d if isinstance(e, Budget)]
+    assert len(budgets_d) == 1
+    assert budgets_d[0].rebut_spent_usd_est is not None
+    assert (outcome_d.task_dir / "rebuttal.json").exists()
+    assert outcome_d.spent_usd == pytest.approx(ledger_d.task_spend(outcome_d.task_id))
+    assert budgets_d[0].value == pytest.approx(outcome_d.spent_usd)
+    assert budgets_d[0].limit == pytest.approx(0.25)
+
+    caps = [o["max_budget_usd"] for o in _rebut_turn_options(cell_d)]
+    assert caps == pytest.approx([7.00])
+    assert rebut.VERDICT_TURN_PROMPT not in cell_d.turns
+
+    outcome5, *_rest5 = _run(
+        "e", 1.50, 0.50, 0.75, rebut_commits=0, extracted=_CLAIMED_FIX
+    )
+    assert outcome5.state == "REBUTTING"
+    assert outcome5.rebut_result is not None
+
+    outcome6, *_rest6 = _run(
+        "f",
+        7.25,
+        0.50,
+        0.75,
+        suites=(
+            [],
+            [],
+            _results(Failure(file="a.py", code="E501", message="too long")),
+        ),
+    )
+    assert outcome6.state == "EXHAUSTED"
+    assert outcome6.rebut_result is not None
 
 
 def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
