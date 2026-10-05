@@ -217,12 +217,12 @@ def _resolve_stacked_on(
     Otherwise the newest row in `_STACKABLE_ON_RECONCILE` supplies the branch.
 
     **The ledger supplies the branch; the branch supplies the sha.** A row's
-    `pushed_sha` is written by PACKAGE — or, since `SA-0069`, by a push of
-    unpackaged work when PACKAGE never ran — and every review fix an operator
-    commits by hand moves the branch past it — so the recorded sha is a tree
-    the parent's pull request may no longer show. Worse, nothing puts that
-    commit where the cell can read it: `ensure_mirror` fetches `+refs/*:refs/*`
-    from the operator's *local checkout* with `--prune`, so a parent branch the
+    `pushed_sha` is PACKAGE's, or (`SA-0069`) a push of work PACKAGE did not
+    package. Each hand-committed review fix moves the branch past it, leaving
+    the recorded sha a tree the parent's pull request no longer shows. Worse,
+    nothing puts that commit where the cell can read it: `ensure_mirror`
+    fetches `+refs/*:refs/*` from the operator's *local checkout* with
+    `--prune`, so a parent branch the
     operator does not happen to have locally is deleted from the mirror, and
     the cell's own seed (`worktree.py`) fetches the mirror's default refspec.
     Fetching the branch here fixes both — it is `fetch_default_branch`'s own
@@ -452,7 +452,7 @@ def run_task(
     gh: GhRunner | None = None,
 ) -> CellOutcome | Refused:
     """One task, start to finish: stack it if it has a parent, run its cell,
-    and package a reviewable or unanswered-blocker `EXHAUSTED` result alike.
+    and package a reviewable or standing-blocker `EXHAUSTED` result alike.
 
     A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
     Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
@@ -624,7 +624,7 @@ def run_task(
                     f"{spec.id}: the live row for ORPHANED could not be written: {exc}"
                 )
         raise
-    # SA-0210: an EXHAUSTED cell with gates green and an unanswered blocker
+    # SA-0204: an EXHAUSTED cell with gates green and a standing blocker
     # still reaches package(), in its exhausted mode.
     exhausted_package = (
         outcome.state == "EXHAUSTED"
@@ -677,8 +677,8 @@ def run_task(
                 emit=emit,
             )
             combined_note = f"{package_note}; {pushed.note}"
-            # `_finish` already wrote a row for this task, overwritten here
-            # since `append_queue_line` upserts on `(repo, spec_id)`.
+            # This overwrites a refusal's `_finish` row, since `append_queue_line`
+            # upserts on `(repo, spec_id)`. A raised PACKAGE wrote none.
             index_report.append_queue_line(
                 out_dir,
                 index_report.QueueLine(

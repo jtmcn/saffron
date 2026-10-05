@@ -723,7 +723,7 @@ def _finding(**kw) -> Finding:
 
 
 def test_an_unrebutted_body_names_every_blocker_it_left_standing():
-    """`SA-0210`'s own pair. `exhausted` names every anchored blocker and no
+    """`SA-0204`'s own pair. `exhausted` names every anchored blocker and no
     other finding. `head_moved` names the HEAD-moved gap. Neither renders
     unset, even beside anchored blockers and no `rebut_result`. That is the
     plain shape this body already renders for every ordinary unstacked
@@ -758,7 +758,7 @@ def test_an_unrebutted_body_names_every_blocker_it_left_standing():
         )
 
     neither = _rendered().split("## Not covered", 1)[1]
-    assert "the task ended `EXHAUSTED`" not in neither
+    assert "before the critics finished judging" not in neither
     assert "HEAD moved after REVIEW" not in neither
 
     exhausted_only = _rendered(exhausted=True).split("## Not covered", 1)[1]

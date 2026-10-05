@@ -91,14 +91,14 @@ def render_pr_body(
     `spec.risk`, which only ever knows the first of those two (§5.6). Left
     unset it falls back to `spec.risk`, for a caller with no effective tier.
 
-    `advisory_gates` names every result this attempt did not hold blocking:
-    a `fail` there is no contradiction of a green pull request, marked so.
+    `advisory_gates` names every result this attempt did not hold blocking,
+    such as `size` at `standard` or a declared `blocking: false` gate. A
+    `fail` there is no contradiction of a green pull request, marked so (§5.6).
 
-    `notes` is the implementer's own extraction-turn text, rendered last and
-    clipped like every other such string here. Empty for a task that
-    produced none, which is every task before this channel existed.
+    `notes` is the implementer's own extraction-turn text (SA-0063, backlog
+    items 71/75), rendered last and clipped like every other such string.
 
-    `exhausted` and `head_moved` are `SA-0210`'s pair, both off by default.
+    `exhausted` and `head_moved` are `SA-0204`'s pair, both off by default.
     The task ended `EXHAUSTED` unjudged, and `head_moved` says REBUT moved
     HEAD before the cap cut it short."""
     risk = effective_risk if effective_risk is not None else spec.risk
@@ -521,7 +521,7 @@ def _not_covered(
     a gap would be false, and `_verification` already says which case this is.
     """
     lines = []
-    # `SA-0210`'s pair, first: a blocker the operator is first to read.
+    # `SA-0204`'s pair, first: a blocker the operator is first to read.
     # Keyed on `anchored_blockers`, the same selection `_disagreements` numbers.
     blockers = anchored_blockers(reviews)
     if exhausted and blockers:

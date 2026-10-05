@@ -3684,6 +3684,13 @@ def test_an_exhausted_package_keeps_its_state_on_every_path(
     packageable.outcome.reviews = []
     assert result.state == "EXHAUSTED" and result.pr_url == "https://x/pull/9"
     _assert_exhausted(result)
+    row = _state(packageable.ledger, task_id)
+    assert row["pr_url"] == result.pr_url
+    assert (
+        row["pushed_sha"]
+        == result.pushed_sha
+        == remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=packageable.work)
+    )
     body = (packageable.outcome.task_dir / "pr_body.md").read_text()
     assert "task ended `EXHAUSTED` before the critics finished judging" in body
     assert "f.txt:3" in body.split("## Not covered", 1)[1]
@@ -3792,7 +3799,7 @@ def test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft(
         )
 
     # 1: a REJECTED row of this spec.
-    _seed_row("SA-0005", "REJECTED", "")
+    _seed_row("SA-0005", "REJECTED", "https://x/pull/2")
     assert _push().pushed is True
 
     # 2: an EXHAUSTED row of this spec with no pull request.

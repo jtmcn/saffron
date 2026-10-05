@@ -315,15 +315,14 @@ def commit_squash(
 
     `unpackaged_state` says the cell ended in that state and PACKAGE did
     not package it. `package_refusal`, given only alongside it, is
-    PACKAGE's own cleared refusal note, naming why it refused and that
-    review and re-verification both ran first. Neither set reproduces the
+    PACKAGE's own cleared note, naming why it refused the task after REVIEW.
+    Neither set reproduces the
     message byte-for-byte as it read before either parameter existed.
     """
     lines = [f"saffron {spec_id}: {neutralize(title)}", ""]
     if package_refusal is not None:
         lines += [
-            f"NOT PACKAGED — PACKAGE refused it: {neutralize(package_refusal)}. "
-            "It was re-verified and reviewed before the refusal.",
+            f"NOT PACKAGED — PACKAGE refused it after REVIEW: {neutralize(package_refusal)}.",
             "",
         ]
     elif unpackaged_state is not None:
@@ -623,7 +622,7 @@ def package(
     `PackageError` here is infrastructure. Unset, it reaches `cli.main`,
     exits 2, and writes no queue line: only the task's own failures become
     `MERGE_FAILED`. With `exhausted` set, `run_task` catches it instead,
-    and every state below records `EXHAUSTED` (`SA-0210`).
+    and every state below records `EXHAUSTED` (`SA-0204`).
 
     `parent_branch` is the stacking half. Unset — a spec with no parent, or
     one whose parent has merged — every line below resolves to exactly what it
@@ -1147,14 +1146,12 @@ def push_unpackaged_work(
         else []
     )
     others = [row for row in task_rows if row["task_id"] != outcome.task_id]
-    if any(row["state"] == "READY_FOR_REVIEW" for row in others):
-        return _refuse(
-            f"a pull request from {spec.id} is awaiting review on {branch} — "
-            "not ours to replace"
-        )
-    # The `exhausted` mode's own open draft is still a pull request
-    # awaiting review, recorded under a state the check above misses.
-    if any(row["state"] == "EXHAUSTED" and row["pr_url"] for row in others):
+    # The `exhausted` mode's open draft awaits review under `EXHAUSTED`.
+    if any(
+        row["state"] == "READY_FOR_REVIEW"
+        or (row["state"] == "EXHAUSTED" and row["pr_url"])
+        for row in others
+    ):
         return _refuse(
             f"a pull request from {spec.id} is awaiting review on {branch} — "
             "not ours to replace"
