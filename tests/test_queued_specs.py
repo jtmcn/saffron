@@ -24,6 +24,7 @@ from saffron.scheduler import (
     protected_touch_refusal,
     retirement_refusal,
 )
+from tests.test_scheduler import _write
 
 REPO = Path(__file__).resolve().parents[1]
 SPECS = REPO / ".saffron" / "specs"
@@ -54,10 +55,6 @@ def _cases(directory: Path) -> list[DiscoveredSpec | _RetiredCase]:
 
 
 CASES = _cases(SPECS)
-
-
-def _write(directory: Path, name: str, *, id: str) -> None:
-    (directory / name).write_text(f"---\nid: {id}\ntitle: t\ntype: chore\n---\nbody\n")
 
 
 def _markers() -> list[tuple[str, str]]:

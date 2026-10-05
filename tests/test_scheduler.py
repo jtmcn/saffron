@@ -2251,9 +2251,9 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-05, a hundred-and-twentieth time, for b-b0cd68. The
-    `measured` set below replaces the whole-tree copy, so a retirement or a
-    new top-level spec leaves both asserted lists alone.
+    """Re-measured 2026-10-05, a hundred-and-twentieth time, for b-b0cd68:
+    `SA-0200` and `SA-0201` are candidates, `SA-0202` to `SA-0205` refused. The
+    `measured` set replaces the whole-tree copy, so a retirement leaves both.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -2878,6 +2878,7 @@ def test_the_measured_queue_holds_when_its_specs_retire_and_a_new_one_lands(
     A finishing commit retires every one of them and writes a new spec at
     the top, and the smoke test must survive both without edit.
     """
+    # Read once: the monkeypatches below rebind `REAL_SPECS` before attempt 3.
     live = REAL_SPECS
 
     retired_source = tmp_path / "retired"
@@ -2895,7 +2896,7 @@ def test_the_measured_queue_holds_when_its_specs_retire_and_a_new_one_lands(
     empty_source = tmp_path / "empty"
     (empty_source / "done").mkdir(parents=True)
     monkeypatch.setattr("tests.test_scheduler.REAL_SPECS", empty_source)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match=r"\ASA-\d{4}\b"):
         test_saffron_queue_smoke_reproduces_this_repos_measured_queue(
             tmp_path / "attempt-2", ledger
         )
