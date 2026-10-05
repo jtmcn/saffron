@@ -6,13 +6,15 @@ hold them on every pull request that adds or edits a spec."""
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from saffron.intake import discover_specs
+from saffron.intake import DiscoveredSpec, discover_specs
 from saffron.repos.mirror import retirement_markers
 from saffron.repos.policy import load_policy
 from saffron.scheduler import (
@@ -27,6 +29,35 @@ REPO = Path(__file__).resolve().parents[1]
 SPECS = REPO / ".saffron" / "specs"
 QUEUED, UNPARSED = discover_specs(SPECS)
 RETIRED, STOPPED = _retired_ids(SPECS)
+
+
+@dataclass(frozen=True)
+class _RetiredCase:
+    """A `done/` file's case, carried unparsed: the three per-spec tests
+    below read nothing from it but its name."""
+
+    path: Path
+
+
+def _cases(directory: Path) -> list[DiscoveredSpec | _RetiredCase]:
+    """Every queued spec in `directory`, plus every file in its `done/`
+    except `README.md`, named by filename either way.
+
+    A retired file is never parsed here: a spec `done/` holds is no longer
+    checked, so a file that stopped parsing still gets a case rather than
+    vanishing from the parametrization.
+    """
+    queued, _ = discover_specs(directory)
+    done = directory / "done"
+    retired = sorted(done.glob("*.md")) if done.is_dir() else []
+    return [*queued, *(_RetiredCase(p) for p in retired if p.name != "README.md")]
+
+
+CASES = _cases(SPECS)
+
+
+def _write(directory: Path, name: str, *, id: str) -> None:
+    (directory / name).write_text(f"---\nid: {id}\ntitle: t\ntype: chore\n---\nbody\n")
 
 
 def _markers() -> list[tuple[str, str]]:
@@ -63,8 +94,10 @@ def test_no_two_specs_share_an_id():
     assert sorted(set(ids) & RETIRED) == []
 
 
-@pytest.mark.parametrize("queued", QUEUED, ids=lambda d: d.path.name)
+@pytest.mark.parametrize("queued", CASES, ids=lambda d: d.path.name)
 def test_no_queued_spec_is_refused_on_its_own_text(queued):
+    if not isinstance(queued, DiscoveredSpec):
+        return  # retired to done/: no longer queued, so nothing here applies
     spec = queued.spec
     policy, _sha = load_policy(REPO)
     reasons = [
@@ -84,6 +117,58 @@ def test_no_queued_spec_is_refused_on_its_own_text(queued):
     assert [r for r in reasons if r is not None] == []
 
 
+def test_a_retired_case_checks_nothing_and_a_queued_one_is_still_checked(
+    tmp_path, monkeypatch
+):
+    directory = tmp_path / "specs"
+    (directory / "done").mkdir(parents=True)
+    (directory / "SA-8888.md").write_text(
+        "---\n"
+        "id: SA-8888\n"
+        "title: t\n"
+        "type: chore\n"
+        "depends_on:\n"
+        "  - SA-9999\n"
+        "acceptance:\n"
+        "  - claim: a\n"
+        "    witness: tests/nowhere.py::test_absent\n"
+        "    preserves: true\n"
+        "  - claim: b\n"
+        "    witness: tests/test_queued_specs.py::test_every_queued_spec_parses\n"
+        "---\n"
+        "body\n"
+    )
+    monkeypatch.setattr("tests.test_queued_specs._authored_at", lambda path: None)
+
+    queued_case = _cases(directory)[0]
+    with pytest.raises(AssertionError):
+        test_no_queued_spec_is_refused_on_its_own_text(queued_case)
+    with pytest.raises(AssertionError):
+        test_every_preserves_witness_names_a_test_the_suite_collects(
+            queued_case, frozenset()
+        )
+    with pytest.raises(AssertionError):
+        test_no_witness_that_claims_a_change_exists_where_the_spec_was_written(
+            queued_case
+        )
+
+    shutil.move(str(directory / "SA-8888.md"), directory / "done" / "SA-8888.md")
+    retired_case = _cases(directory)[0]
+    assert test_no_queued_spec_is_refused_on_its_own_text(retired_case) is None
+    assert (
+        test_every_preserves_witness_names_a_test_the_suite_collects(
+            retired_case, frozenset()
+        )
+        is None
+    )
+    assert (
+        test_no_witness_that_claims_a_change_exists_where_the_spec_was_written(
+            retired_case
+        )
+        is None
+    )
+
+
 @pytest.fixture(scope="module")
 def collected() -> frozenset[str]:
     # The flags `.saffron/gates/tests` collects with, so a witness resolves here
@@ -99,8 +184,40 @@ def collected() -> frozenset[str]:
     return frozenset(line for line in proc.stdout.splitlines() if "::" in line)
 
 
-@pytest.mark.parametrize("queued", QUEUED, ids=lambda d: d.path.name)
+def test_retiring_a_spec_keeps_every_case_id(tmp_path, collected):
+    directory = tmp_path / "specs"
+    done = directory / "done"
+    done.mkdir(parents=True)
+    _write(directory, "SA-7001.md", id="SA-7001")
+    _write(directory, "SA-7002.md", id="SA-7002")
+    (done / "broken.md").write_text("no frontmatter here")
+    (done / "README.md").write_text("docs")
+
+    before = {c.path.name for c in _cases(directory)}
+    shutil.move(str(directory / "SA-7001.md"), done / "SA-7001.md")
+    after = {c.path.name for c in _cases(directory)}
+
+    expected = {"SA-7001.md", "SA-7002.md", "broken.md"}
+    assert before == expected
+    assert after == expected
+    assert "README.md" not in before
+    assert "README.md" not in after
+
+    tests = (
+        "test_no_queued_spec_is_refused_on_its_own_text",
+        "test_every_preserves_witness_names_a_test_the_suite_collects",
+        "test_no_witness_that_claims_a_change_exists_where_the_spec_was_written",
+    )
+    for test in tests:
+        for path in sorted((SPECS / "done").glob("SA-*.md")):
+            node = f"tests/test_queued_specs.py::{test}[{path.name}]"
+            assert node in collected
+
+
+@pytest.mark.parametrize("queued", CASES, ids=lambda d: d.path.name)
 def test_every_preserves_witness_names_a_test_the_suite_collects(queued, collected):
+    if not isinstance(queued, DiscoveredSpec):
+        return
     # By collection, not by name: a real test in the wrong file or class is a
     # witness `criteria` reports as `witness-not-collected`.
     missing = [
@@ -175,8 +292,10 @@ def test_the_checkout_has_the_history_the_witness_check_reads():
     assert _git("rev-parse", "--is-shallow-repository").strip() == "false"
 
 
-@pytest.mark.parametrize("queued", QUEUED, ids=lambda d: d.path.name)
+@pytest.mark.parametrize("queued", CASES, ids=lambda d: d.path.name)
 def test_no_witness_that_claims_a_change_exists_where_the_spec_was_written(queued):
+    if not isinstance(queued, DiscoveredSpec):
+        return
     # At the spec's own commit, not HEAD: the cell that implements it writes the
     # witness, and HEAD holds it from then until the spec retires to `done/`.
     sha = _authored_at(queued.path)

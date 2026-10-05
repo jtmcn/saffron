@@ -62,6 +62,32 @@ def _sha(path):
 REAL_SPECS = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
 
 
+def _arrange_measured_queue(
+    source: Path, destination: Path, measured: set[str]
+) -> None:
+    """Build `destination` holding exactly `measured`'s specs at the top,
+    with `source`'s whole `done/` beneath however each one currently sits.
+
+    Each measured id comes from wherever `source` already holds it: moved
+    out of the copied `done/` if it retired there, copied from the top
+    otherwise. Neither path mutates `source`. A missing id names itself
+    in the assert rather than failing silently.
+    """
+    shutil.copytree(source / "done", destination / "done")
+    for spec_id in measured:
+        retired = next((destination / "done").glob(f"{spec_id}-*.md"), None)
+        if retired is not None:
+            shutil.move(str(retired), destination / retired.name)
+            continue
+        queued = next(source.glob(f"{spec_id}-*.md"), None)
+        assert queued is not None, spec_id
+        shutil.copy(queued, destination / queued.name)
+
+
+def _tree(root: Path) -> list[str]:
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+
+
 def _real_corpus(tmp_path, *, promote=frozenset()):
     """This repo's own spec files, arranged as a scannable directory.
 
@@ -2225,9 +2251,9 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-04, a hundred-and-nineteenth time: `SA-0205` queued
-    for b-3732ef on parent `SA-0203`. `SA-0200` and `SA-0201` stay candidates,
-    and `SA-0202` to `SA-0205` are each refused on a parent.
+    """Re-measured 2026-10-05, a hundred-and-twentieth time, for b-b0cd68. The
+    `measured` set below replaces the whole-tree copy, so a retirement or a
+    new top-level spec leaves both asserted lists alone.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -2815,9 +2841,16 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     why this test is untouched by backlog item 59's ancestor walk, and why the
     fixtures above are where that behaviour is pinned.
     """
-    live = Path(__file__).resolve().parent.parent / ".saffron" / "specs"
+    measured = {
+        "SA-0200",
+        "SA-0201",
+        "SA-0202",
+        "SA-0203",
+        "SA-0204",
+        "SA-0205",
+    }
     directory = tmp_path / "specs"
-    shutil.copytree(live, directory)
+    _arrange_measured_queue(REAL_SPECS, directory, measured)
     repo_id = _repo(ledger)
 
     candidates, refusals = build_queue(
@@ -2836,6 +2869,45 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
     assert len(list((directory / "done").glob("*.md"))) > 30
+
+
+def test_the_measured_queue_holds_when_its_specs_retire_and_a_new_one_lands(
+    tmp_path, ledger, monkeypatch
+):
+    """The smoke test above is built against ids this repo measures by hand.
+    A finishing commit retires every one of them and writes a new spec at
+    the top, and the smoke test must survive both without edit.
+    """
+    live = REAL_SPECS
+
+    retired_source = tmp_path / "retired"
+    shutil.copytree(live, retired_source)
+    for path in sorted(retired_source.glob("SA-*.md")):
+        shutil.move(str(path), retired_source / "done" / path.name)
+    _write(retired_source, "SA-9999.md", id="SA-9999")
+    monkeypatch.setattr("tests.test_scheduler.REAL_SPECS", retired_source)
+    before_retired = _tree(retired_source)
+    test_saffron_queue_smoke_reproduces_this_repos_measured_queue(
+        tmp_path / "attempt-1", ledger
+    )
+    assert _tree(retired_source) == before_retired
+
+    empty_source = tmp_path / "empty"
+    (empty_source / "done").mkdir(parents=True)
+    monkeypatch.setattr("tests.test_scheduler.REAL_SPECS", empty_source)
+    with pytest.raises(AssertionError):
+        test_saffron_queue_smoke_reproduces_this_repos_measured_queue(
+            tmp_path / "attempt-2", ledger
+        )
+
+    unmoved_source = tmp_path / "unmoved"
+    shutil.copytree(live, unmoved_source)
+    monkeypatch.setattr("tests.test_scheduler.REAL_SPECS", unmoved_source)
+    before_unmoved = _tree(unmoved_source)
+    test_saffron_queue_smoke_reproduces_this_repos_measured_queue(
+        tmp_path / "attempt-3", ledger
+    )
+    assert _tree(unmoved_source) == before_unmoved
 
 
 def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
