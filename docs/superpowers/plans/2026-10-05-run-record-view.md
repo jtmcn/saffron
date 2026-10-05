@@ -750,11 +750,15 @@ Open `http://127.0.0.1:8765/`. Check one merged task, one `EXHAUSTED` task and t
 
 ### Task 5: The import boundary as a `structure` rule
 
-By hand, on SA-0210's spec branch (Task 4, step 3). `.saffron/**` is protected.
+By hand, on SA-0210's spec branch (Task 4, step 3), after SA-0209 merges. `.saffron/**` is protected.
+It cannot land earlier: `test_every_rules_path_scope_still_reaches_a_file` fails while `saffron/view/` is absent (measured 2026-10-05).
+A ready patch sits in the plan's workspace as `0001-feat-rules-a-module-outside-the-cli-could-import-the.patch`.
 
 **Files:**
 - Create: `.saffron/rules/view-is-cli-only.yml`
 - Create: `.saffron/rule-tests/view-is-cli-only-test.yml`
+- Modify: `CLAUDE.md` *Invariants*, one bullet marked **(gated over `saffron/`)** naming `view-is-cli-only` (`test_every_gated_rule_is_named_in_claude_md`)
+- Modify: `tests/test_saffron_gates.py:669`, add `"view-is-cli-only": ["saffron/cli.py", "saffron/view/**"]` to the expected exemptions (`test_a_rules_exemptions_are_the_named_files`)
 
 - [ ] **Step 1: Write the rule test first**
 
