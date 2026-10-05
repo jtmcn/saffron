@@ -218,6 +218,9 @@ counts each one expressed.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-05**, from ADR 9: **b-a1d649**. No page says why a task ended
+where it did.
+
 **Placed 2026-10-02**, from the spec loop's run 26: **b-209696**. A session
 a bound cuts still records $0.00. Run 26 split it from b-d4e015, which fixed
 the kill itself.
