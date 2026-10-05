@@ -118,9 +118,10 @@ acceptance:
       the second set, `## Not covered` carries a line saying "HEAD moved
       after REVIEW" and that the patch carries commits "no lens judged".
       Unset, neither line renders, even beside anchored blockers and no
-      `rebut_result`. The witness renders two anchored blockers from two
-      lenses beside an unanchored blocker and an anchored concern, with the
-      first keyword alone, with both, and with neither.
+      `rebut_result`. Each `file` passes through `_cell`. The witness
+      renders two anchored blockers from two lenses beside an unanchored
+      blocker and an anchored concern, with the first keyword alone, with
+      both, and with neither. One anchored blocker's file holds a `|`.
     witness: tests/test_report.py::test_an_unrebutted_body_names_every_blocker_it_left_standing
     wrong_versions:
       - The line names only the first anchored blocker.
@@ -130,6 +131,7 @@ acceptance:
       - The line says the blockers went unanswered, which is false where the cut-short rebuttal recorded answers and only a verdict is missing.
       - The HEAD line renders whenever the first keyword is set, whatever the second says.
       - The HEAD line never renders.
+      - The line writes each file raw, skipping `_cell`.
   - claim: >-
       When `package()` in the `EXHAUSTED` mode returns no `pr_url`, or
       raises a `PackageError`, `run_task` then calls `push_unpackaged_work`
@@ -180,12 +182,17 @@ acceptance:
   - claim: >-
       `push_unpackaged_work` takes a keyword, off by default, naming why
       PACKAGE refused the task. Set, its commit says PACKAGE refused it and
-      gives that text, and never says PACKAGE never ran. Unset, the commit
-      reads as it does today. It refuses to push while another task of the
-      spec is `EXHAUSTED` with a `pr_url`, as it refuses beside a
-      `READY_FOR_REVIEW` one. An `EXHAUSTED` row with an empty `pr_url` and
-      a `REJECTED` row with a `pr_url` do not stop it. The witness pushes
-      once with the keyword, then beside each of those three earlier rows.
+      gives that text through `neutralize`, and never says PACKAGE never
+      ran. A text in which `find_credentials_in_text` finds a credential is
+      left out, and the commit says so. Unset, the commit reads as it does
+      today. It refuses to push while another task of the same spec is
+      `EXHAUSTED` with a `pr_url`, as it refuses beside a `READY_FOR_REVIEW`
+      one. An `EXHAUSTED` row with an empty `pr_url`, a `REJECTED` row with
+      a `pr_url`, and another spec's `EXHAUSTED` row with a `pr_url` do not
+      stop it. Before any earlier row exists, the witness pushes with a
+      keyword holding a mention and a closing keyword, and with one holding
+      a credential. Both go through. It then pushes beside each of those
+      four earlier rows, adding each row just before its push.
     witness: tests/test_package.py::test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft
     wrong_versions:
       - The guard still checks `READY_FOR_REVIEW` alone, so a re-run pushes over an open draft.
@@ -193,6 +200,11 @@ acceptance:
       - The guard refuses beside any `EXHAUSTED` row, a refused package's included.
       - The commit still says PACKAGE never ran when the keyword is set.
       - The commit says PACKAGE refused it without the text.
+      - The guard reads every task in the repo, so another spec's open draft blocks this push.
+      - The refusal text reaches the commit with its credential in it.
+      - A refusal text holding a credential refuses the whole push.
+      - The credential text is dropped and the commit does not say so.
+      - The refusal text reaches the commit without `neutralize`.
 ---
 
 ## Context
@@ -226,11 +238,10 @@ linked into the stack.
 pay for is packaged too". It was written by hand in this spec's own pull
 request.
 
-**The base this spec's cell runs on carries five specs not yet built here.**
-`SA-0198`, `SA-0199`, `SA-0201`, `SA-0202` and `SA-0203` land first. Every
-line number below was read at `5d5d7480`, where none of them is built. So
-each citation names its function or test beside its line, and the line is
-where to start looking.
+**The base this spec's cell runs on carries its parents' code.** `SA-0198`
+to `SA-0203` are built on `saffron/SA-0203`, which this cell is cut from.
+Most line numbers below were read before they landed. So each citation names
+its function or test beside its line, and the name is what to follow.
 
 ## Problem
 
@@ -250,8 +261,8 @@ after that end `EXHAUSTED`.
 The first three rows sit in `_drive_cell`, the third in its REBUT branch.
 The last two sit in `run_rebut`.
 
-The third row is `SA-0203`'s. At this base its lines are still the budget
-refusal it replaces. `SA-0203` lets a REBUT that starts past the budget run
+The third row is `SA-0203`'s, in `_drive_cell`'s REBUT branch, where it
+replaced the old budget refusal. `SA-0203` lets a REBUT that starts past the budget run
 once, its sessions sharing a $7.00 cap. When the cap refuses a session and
 `run_rebut` would halt at `REBUTTING`, the task ends `EXHAUSTED`. Its
 anchored blockers stand, and the outcome carries no `rebut_result`
@@ -365,7 +376,7 @@ is the `parent_branch` argument of the `package()` call in `run_task`
 none, and `witness` reports `skip` for them. Criterion 5 is `preserves`, and
 `saffron/batch.py` is `forbidden`.
 
-**Line numbers are read at `f0af2ec5`.** `SA-0198` and `SA-0199` edit
+**Line numbers predate the parents.** `SA-0198` and `SA-0199` edit
 `saffron/task.py`, `saffron/phases/package.py` and `tests/test_task.py`.
 `SA-0201` to `SA-0203` edit `saffron/cell/session.py` and
 `tests/test_session.py`. All five land before this cell, so find each site
@@ -420,7 +431,15 @@ sentence (`saffron/task.py:434-454`). Update the comment above the
 `push_unpackaged_work` call (`saffron/task.py:595-598`). Update the
 docstring sentence that says it never pushes beside a `READY_FOR_REVIEW`
 row (`saffron/phases/package.py:1037-1038`). Name the new keyword in
-`commit_squash`'s (`saffron/phases/package.py:294-319`).
+`commit_squash`'s (`saffron/phases/package.py:294-319`). Three more go false.
+`package()`'s docstring says every `PackageError` reaches `cli.main` and only
+`MERGE_FAILED` is recorded. `commit_squash`'s refused-branch text says
+"nothing here was re-verified or reviewed", though REVIEW ran and
+re-verification ran on a new-failures refusal. `_resolve_stacked_on`'s
+docstring says a push of unpackaged work writes `pushed_sha` only when
+PACKAGE never ran. And the comment above the push block's row write says
+`_finish` never ran, so the row is the task's only one. A refused-branch commit says
+PACKAGE refused it and why, and that REVIEW ran.
 
 **Every test you add must fail with this diff's source reverted.** At base
 `package()`, `render_pr_body` and `push_unpackaged_work` refuse the new
@@ -456,7 +475,11 @@ The single-path tests in `tests/test_package.py` show each setup.
 - Conflict, last: commit a different line 3 to `main` and push it.
 
 **Criterion 3's witness.** `_finding` (`tests/test_report.py:711-722`)
-builds each finding. Split the body at `## Not covered` and assert on the
+builds each finding, and it defaults every one to `a.py:3`. Give the four
+findings distinct places, none a prefix of another, such as `a.py:3`,
+`b.py:17`, `c.py:29` and `d.py:41`. Shared or prefixed places let the wrong
+versions that name a concern or only the first blocker pass. Give one anchored
+blocker the file `a|b.py`, and expect the escaped form `_cell` writes. Split the body at `## Not covered` and assert on the
 second half only. Check the two quoted phrases, and each anchored blocker's
 `file:line`. Check that neither the unanchored blocker's nor the concern's
 appears, nor the word `unanswered`. Render once more with both keywords and
@@ -476,10 +499,18 @@ six times with a fake `gh` that prints a URL. Before each, write or remove
 `rebuttal.json` in `outcome.task_dir`. After each, read `pr_body.md` and
 look for "HEAD moved after REVIEW" in its `## Not covered` half.
 
-**Criterion 7's witness.** One `packageable` fixture. Push once with the
-new keyword and read the commit with `git log -1 --format=%B` on the
-remote branch, as `tests/test_package.py:3112-3131` does. Then add each
-earlier task with `create_run`, `create_task` and `set_task_package`,
-recording the remote head as its `pushed_sha`, so only the guard decides.
-Push beside the `REJECTED` row, then the empty-`pr_url` `EXHAUSTED` row,
-then the drafted one, and assert the branch did not move.
+**Criterion 7's witness.** One `packageable` fixture, and two phases.
+First, with no earlier row, push with the keyword `"conflicts; Fixes #1
+@someone"`. Read the commit with `git log -1 --format=%B` on the remote
+branch, as `tests/test_package.py:3112-3131` does. It holds `neutralize`'s
+form of that text and not the raw one. Push again with a keyword holding
+`FAKE_KEY`. Assert `pushed` is true, the key is not in the commit, and the
+commit says the text was left out. Second, build each earlier row with
+`create_run`, `create_task` and `set_task_package`. Add it right before the
+push beside it. Record the remote head as its `pushed_sha`, so only the
+guard decides. `tasks_by_repo` returns every task in the repo, so one row
+sits under another spec. In order: the `REJECTED` row, the empty-`pr_url`
+`EXHAUSTED` row, the other spec's drafted row, then this spec's drafted one.
+Assert `PushResult.pushed` is true for the first three and false for the
+last. Compare `pushed`, never the remote head: two pushes of one tree inside
+a second can make the same squash commit.
