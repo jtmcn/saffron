@@ -4,7 +4,7 @@ title: Git in a cell was refused a loose object while seeding its worktree, and 
 status: open
 tier: 3
 filed: 2026-10-05
-specs: []
+specs: [SA-0203]
 prs: []
 commits: []
 cites: [§5.1]
@@ -15,9 +15,10 @@ related: [b-f582ee]
 
 Found in the spec loop's run 28.
 
-A cell exited 2 while it seeded its worktree. Git inside the cell got
-"Permission denied" on a loose object, `f61da02f`, the merge commit of #664.
-A retry minutes later worked. b-f582ee saw the same error on another object
+`SA-0203`'s first start exited 2 while it seeded its worktree. Git inside
+the cell got "Permission denied" on a loose object, `f61da02f`, the merge
+commit of #664. The ledger read `ORPHANED` at $0.00. A retry a minute later
+worked. b-f582ee saw the same error on another object
 in run 23, after green.
 
 The cause is unknown. The one lead is the `com.apple.provenance` extended
