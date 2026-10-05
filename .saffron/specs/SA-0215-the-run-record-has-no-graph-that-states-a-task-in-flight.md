@@ -3,7 +3,7 @@ id: SA-0215
 title: The run record has no graph that states a task in flight, or the batch, run and attempts around it
 type: feature
 priority: 2
-estimated_lines: 469
+estimated_lines: 483
 estimate_measured: true
 touches:
   - saffron/view/__init__.py
@@ -99,7 +99,12 @@ acceptance:
       vocabulary individual. A null column states nothing. The witness drives
       a closed batch for each of the five stop reasons, `DRAINED`,
       `BUDGET`, `UNTIL`, `INFRASTRUCTURE` and `INCOMPLETE`, and one batch
-      still running, whose three columns are null.
+      still running, whose three columns are null. Each closed batch holds
+      its own spend, and every spend and budget is a value a binary float
+      cannot hold exactly, such as 12.4. Each reads back equal to the
+      decimal of its written text. The witness builds with the process's
+      local timezone nine hours off UTC, and each time still reads back as
+      the ledger's text in UTC.
     witness: tests/test_view_graph.py::test_a_batch_states_its_budget_spend_window_and_stop_reason
     wrong_versions:
       - "The batch node is not typed `factory:Batch`."
@@ -109,6 +114,8 @@ acceptance:
       - "Times are stated as plain strings."
       - "`endedBecause` is stated as a string literal rather than the vocabulary individual."
       - "A running batch states `spentUsdEst` 0."
+      - "A money value is converted with `Decimal(value)` on the float, so 12.4 reads back with the float's binary tail."
+      - "A time is parsed with `strptime` and then `astimezone(UTC)`, which reads the ledger's text as local time."
   - claim: >-
       `build` states every attempt of a stated task as
       `data:attempt-<attempt_id>` typed `factory:Attempt`. It states
@@ -120,8 +127,10 @@ acceptance:
       the column is set, it states `factory:numTurns` as an `xsd:integer`,
       `factory:costUsdEst` as an `xsd:decimal`, and `prov:endedAtTime`. A
       null column states nothing. The witness drives a closed
-      `IMPLEMENTING` attempt, an open `REVIEWING` attempt, and a second open
-      `IMPLEMENTING` attempt.
+      `IMPLEMENTING` attempt costing 0.1, an open `REVIEWING` attempt, and a
+      second open `IMPLEMENTING` attempt. The cost reads back as
+      `Decimal("0.1")`. The witness builds with the process's local timezone
+      nine hours off UTC, and each time still reads back in UTC.
     witness: tests/test_view_graph.py::test_an_attempt_states_its_phase_number_turns_cost_and_times
     wrong_versions:
       - "The attempt node is not typed `factory:Attempt`."
@@ -133,6 +142,8 @@ acceptance:
       - "`costUsdEst` is stated as a float literal."
       - "`numTurns` is stated as an `xsd:decimal`."
       - "An open attempt states an `endedAtTime`."
+      - "A money value is converted with `Decimal(value)` on the float, so 0.1 reads back with the float's binary tail."
+      - "A time is parsed with `strptime` and then `astimezone(UTC)`, which reads the ledger's text as local time."
   - claim: >-
       A task whose state is in neither the end-state set nor the in-flight
       set is left out. `left_out` holds one `LeftOut` with its task id, its
@@ -181,8 +192,9 @@ acceptance:
       risks are the `sh:in` of `factory:riskTier`'s property shape. The
       witness's shapes file drops `MERGED` from the first, adds `PAUSED` to the
       second, and drops `elevated` from the third. A `MERGED` task is then left
-      out as `unknown_state`, and an `elevated` task as `unknown_risk`. A
-      `PAUSED` task is stated in that state with no `factory:endedInState`.
+      out as `unknown_state`, and an `elevated` task in `EXHAUSTED`, a state
+      the edited shapes still know, as `unknown_risk`. A `PAUSED` task is
+      stated in that state with no `factory:endedInState`.
     witness: tests/test_view_graph.py::test_the_closed_sets_are_read_from_the_shapes_it_is_given
     wrong_versions:
       - "The sets are read from `DEFAULT_SHAPES` whatever `shapes_path` names."
@@ -192,10 +204,13 @@ acceptance:
   - claim: >-
       `build` over `open_read_only`'s connection completes while a second
       connection holds an uncommitted write transaction on the same file.
-      The graph states the committed state, not the uncommitted one.
+      The graph states the state that second connection committed before
+      its transaction began, not the ledger's earlier state and not the
+      uncommitted one.
     witness: tests/test_view_graph.py::test_build_reads_a_ledger_another_connection_is_writing
     wrong_versions:
       - "`open_read_only` constructs a `Ledger` on the path first, whose schema script waits on the writer's lock and fails."
+      - "The URI adds `immutable=1`, so the reader skips locking and the write-ahead log and misses the committed change."
   - claim: >-
       `open_read_only(path)` returns a connection whose `row_factory` is
       `sqlite3.Row` and on which an `INSERT` raises
@@ -349,12 +364,21 @@ datatype.
 
 **Offset the ids across tables.** A fresh ledger numbers each table
 from 1. So a batch, a run and a task can share an id. A node named from the
-wrong table's id then reads right by accident. Create throwaway rows first,
-such as one batch, three runs and six tasks, so no two tables share an id.
-Build every expected IRI from the ids the ledger returned.
+wrong table's id then reads right by accident. Give each witness enough
+throwaway rows, made first, that the ids it compares differ. Build every
+expected IRI from the ids the ledger returned.
 
 **Criterion 4's witness** asserts `factory:budgetUsd` on every batch it
-makes, closed and running, each with its own value.
+makes, closed and running, each with its own value. `close_batch` writes
+each closed batch's spend as a sum over its attempts, which is 0.0 here.
+So `UPDATE` each closed batch's `spent_usd_est` to its own value after
+closing it. Compare each with `Decimal` built from its text, such as
+`Decimal("12.4")`.
+
+**Criteria 4 and 5's witnesses build in another timezone.** Set `TZ` to
+`JST-9` with `monkeypatch.setenv`, call `time.tzset()`, and build. Restore
+the variable and call `time.tzset()` again in a `finally`, as
+`tests/test_projection.py:594-596` sets it.
 
 **Criterion 5's witness** opens the attempts in the order `IMPLEMENTING`,
 `REVIEWING`, `IMPLEMENTING`. It asserts the `REVIEWING` attempt's `n` is 1
@@ -388,18 +412,20 @@ path inside `pytest.raises`. SQLite refuses a read-only open of a missing
 file at connect, so the open itself raises.
 
 **Criterion 10's witness.** Close the `Ledger`. Open a plain
-`sqlite3.connect(path, isolation_level=None)`, run `BEGIN IMMEDIATE` and
-an `UPDATE` of the task's state, and build while that is open. Roll back
-and close it in a `finally`.
+`sqlite3.connect(path, isolation_level=None)`. Commit one change of the
+task's state through it first. The ledger runs in WAL mode, so that commit
+sits in the write-ahead log. Then run `BEGIN IMMEDIATE` and a second
+`UPDATE` of the state, and build while that is open. Assert the graph
+states the committed state. Roll back and close it in a `finally`.
 
 **Measured on a prototype, 2026-10-05.** A prototype of this half was cut
-from one of all of Task 3. It passed all eleven witnesses at `9831b2f2`.
+from one of all of Task 3. It passed all eleven witnesses at `18615762`.
 Each failed with `saffron/view/` removed. Every wrong version
 listed above was applied to it as an edit, and each failed its own
 criterion's witness. `types` passed on it. `dead` reported exactly the
 three `pending_symbols` entries. It built the real ledger read-only in
 0.8 s, with no task left out and no `ViewGraphError`. Formatted, its
-source and witnesses measured 1873 changed tokens under `size_gate`'s
+source and witnesses measured 1929 changed tokens under `size_gate`'s
 counter, with few docstrings. `estimated_lines` is that figure over four.
 
 **The prose gate** counts every new comment and docstring. Write none with
