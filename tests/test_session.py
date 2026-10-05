@@ -3657,7 +3657,7 @@ def _rebut_capped(
     is the rebuttal turn, its extraction turn, then one verdict per lens
     that filed a blocker, built directly rather than through
     `_through_rebut`. A cost can be a scripted exception instead, read the
-    way `_run_agent` already reads one (line 1322). The plan, implement and
+    way `_run_agent` already reads one. The plan, implement and
     all four lens turns each cost $0.125, so REBUT starts at $0.75. The
     first `len(rebut_costs) - 2` lenses file `_BLOCKER`, and the rest file
     nothing, and each default verdict withdraws its own lens's finding.
@@ -3829,6 +3829,14 @@ def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
     assert caps == pytest.approx([7.00, 4.00])
     assert state == "EXHAUSTED"
 
+    caps, state, _capture = _caps("e0", 7.00, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00])
+    assert state == "EXHAUSTED"
+
+    caps, state, _capture = _caps("e1", 6.75, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([7.00, 0.25])
+    assert state == "EXHAUSTED"
+
     caps, state, _capture = _caps("f", 2.00, 1.00, 1.50, 0.50, budget_usd=0.25)
     assert caps == pytest.approx([7.00, 5.00, 4.00, 2.50])
     assert state == "READY_FOR_REVIEW"
@@ -3874,11 +3882,25 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
             {},
         ),
         ("c", (3.00, 4.50, 0.75), {}),
+        # The last verdict is the session the cap cuts, and no call follows it.
+        (
+            "f",
+            (
+                3.00,
+                2.50,
+                implement.AgentFailed("budget spent", _cut_off_turn(cost=1.50)),
+            ),
+            {},
+        ),
     ]
     for path, costs, extra in cut_short:
         outcome, ledger, _cell, capture = _run(path, *costs, **extra)
         assert outcome.state == "EXHAUSTED"
         assert outcome.rebut_result is None
+        [*_, rebut_start] = [
+            e for e in capture if isinstance(e, PhaseStart) and e.phase == "REBUT"
+        ]
+        assert "$7.00" in rebut_start.detail
         assert len(review.anchored_blockers(outcome.reviews)) == 1
         (queued,) = ledger.queue_lines()
         assert queued["state"] == "EXHAUSTED"

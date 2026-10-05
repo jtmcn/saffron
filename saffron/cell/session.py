@@ -153,7 +153,7 @@ def critic_budget(budget_usd: float, spent: float) -> float:
 
 class _RebutCap:
     """Shares one ceiling across a single REBUT's own sessions, once the
-    task already passed budget_usd: the rebuttal turn, its extraction
+    task meets or passes budget_usd: the rebuttal turn, its extraction
     turn, and each lens verdict draw against the same pool. A call that
     would get nothing, or less, is refused the way a failed turn already
     reads to every caller here, with implement.AgentFailed.
@@ -186,6 +186,9 @@ class _RebutCap:
                 )
             except implement.AgentFailed as failed:
                 self.spent += failed.attempt.cost_usd_est if failed.attempt else 0.0
+                # Spending the cap means the cap cut it, with no later call to refuse.
+                if self.spent >= self.cap:
+                    self.refused = True
                 raise
             self.spent += attempt.cost_usd_est
             return attempt
@@ -3019,7 +3022,7 @@ def _drive_cell(
                     return "GATE_ERROR"
                 return "EXHAUSTED" if comparison.new_failures else None
 
-            # Past budget_usd, REBUT's sessions share one cap instead of
+            # At or past budget_usd, REBUT's sessions share one cap instead of
             # being refused outright. `cap` also says whether one was refused.
             cap = _RebutCap(REBUT_OVERRUN_CAP_USD) if overrun else None
             rebut_agent = cap.wrap(agent) if cap is not None else agent
