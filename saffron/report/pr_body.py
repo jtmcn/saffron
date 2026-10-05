@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
@@ -82,6 +82,7 @@ def render_pr_body(
     effective_risk: str | None = None,
     advisory_gates: Sequence[str] = (),
     notes: str = "",
+    wrong_versions: Sequence[Mapping[str, object]] = (),
 ) -> str:
     """`effective_risk` is what the header reports — `elevated` when the spec
     says so *or* the diff crossed a `policy.elevate_on` path — never bare
@@ -124,6 +125,7 @@ def render_pr_body(
             advisory_gates=advisory_gates,
             rebut_result=rebut_result,
             has_notes=bool(notes.strip()),
+            wrong_versions=wrong_versions,
         ),
         # Last, so cell-authored prose cannot appear to have moved a table
         # (SA-0044). Falsy when there are no notes.
@@ -497,6 +499,7 @@ def _not_covered(
     advisory_gates: Sequence[str] = (),
     rebut_result: RebutResult | None = None,
     has_notes: bool = False,
+    wrong_versions: Sequence[Mapping[str, object]] = (),
 ) -> str:
     """What this body does not stand behind, collected.
 
@@ -570,6 +573,16 @@ def _not_covered(
                 else f"any of the {len(blockers)} blockers"
             )
             + ": the rebuttal turn recorded nothing (see `rebuttal.json`)."
+        )
+    # Named through `_cell`, never the error itself: untrusted model output
+    # (backlog item 42), the same rule the rebuttal line above keeps.
+    if unanswered := [
+        e["witness"] for e in wrong_versions if e.get("error") is not None
+    ]:
+        lines.append(
+            "- No session answered a wrong version for "
+            + ", ".join(f"`{_cell(w)}`" for w in unanswered)
+            + " (see `wrong-versions.json`)."
         )
     # With notes, `_notes` fills the section; "nothing" would contradict them.
     if not lines and not has_notes:

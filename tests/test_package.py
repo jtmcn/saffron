@@ -782,6 +782,7 @@ def _cell_outcome(task_dir, task_id, run_id):
         gates=[],
         new_failures=[],
         reviews=[],
+        wrong_versions=[],
         rebut_result=None,
         agent_subjects=[],
         effective_risk="standard",
@@ -1872,6 +1873,52 @@ def test_the_packaged_body_carries_the_implementers_notes(packageable):
     body = (packageable.outcome.task_dir / "pr_body.md").read_text()
     assert "### Notes from the implementer" in body
     assert "stray debug print left in f.txt" in body
+
+
+def test_the_packaged_body_names_each_criterion_whose_wrong_versions_no_edit_reached(
+    packageable,
+):
+    """`render_pr_body`'s `Not covered` section names the witness of each
+    wrong-version entry whose session never answered the schema. This runs
+    through `package()`'s own call site, never the renderer directly, the
+    same property the notes witness above proves for `notes`. It names no
+    answered criterion, and quotes no entry's error."""
+    packageable.outcome.wrong_versions = [
+        {
+            "witness": "t.py::answered",
+            "claim": "answered is true",
+            "cost_usd": 0.1,
+            "error": None,
+            "versions": [{"version": "v1", "edit": None, "reason": "no edit here"}],
+        },
+        {
+            "witness": "t.py::cut",
+            "claim": "cut is true",
+            "cost_usd": 0.4,
+            "error": "cut off MARKER-ONE",
+            "versions": [{"version": "v1", "edit": None, "reason": ""}],
+        },
+        {
+            "witness": "t.py::garbled",
+            "claim": "garbled is true",
+            "cost_usd": 0.2,
+            "error": "not the schema, even after a re-prompt: MARKER-TWO",
+            "versions": [{"version": "v1", "edit": None, "reason": ""}],
+        },
+    ]
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    section = body.split("## Not covered")[1].split("## ")[0]
+    assert "t.py::cut" in section
+    assert "t.py::garbled" in section
+    assert "t.py::answered" not in body
+    assert "MARKER" not in body
 
 
 def test_a_credential_in_the_notes_refuses_the_package(packageable):

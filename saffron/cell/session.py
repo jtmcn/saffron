@@ -334,6 +334,9 @@ class CellOutcome:
     gates: list[GateResult] = field(default_factory=list)
     new_failures: list[NewFailure] = field(default_factory=list)
     reviews: list[review.LensReview] = field(default_factory=list)
+    # `run_wrong_versions`'s own entries, unbound on every path that skipped
+    # REVIEW, exactly like `reviews` above.
+    wrong_versions: list[dict] = field(default_factory=list)
     rebut_result: rebut.RebutResult | None = None
     agent_subjects: list[str] = field(default_factory=list)
     # The last suite's own answer to §5.6's two questions — computed inside
@@ -2862,7 +2865,7 @@ def _drive_cell(
                     ):
                         if wv_entry["error"] is not None:
                             for version in wv_entry["versions"]:
-                                version["outcome"] = "unproven"
+                                version["outcome"] = "error"
                                 version["summary"] = wv_entry["error"]
                             continue
                         for version in wv_entry["versions"]:
@@ -3086,6 +3089,7 @@ def _drive_cell(
             gates=latest.results,
             new_failures=new_failures,
             reviews=reviews,
+            wrong_versions=wrong_versions,
             rebut_result=rebut_result,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),

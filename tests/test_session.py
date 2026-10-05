@@ -8213,11 +8213,12 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     """Criterion 3: four criteria, one declaring no wrong version between two
     that do. The first's versions are one the session could not express and
     one on a declared test path. The second's are an edit the `tests` gate
-    errors under, then an edit the witness kills. The third's session fails
-    outright, so both its versions are unproven with the entry's own error.
-    Only the second criterion's edits ever reach the witness, and no survivor
-    is filed, so the task ends `READY_FOR_REVIEW`. A spec declaring no wrong
-    version buys no such session and writes no such file."""
+    errors under, then an edit the witness kills. The third's session
+    answers with no block, twice, so the re-prompt fails too and both its
+    versions are `error` with the entry's own error. Only the second
+    criterion's edits ever reach the witness, and no survivor is filed, so
+    the task ends `READY_FOR_REVIEW`. A spec declaring no wrong version buys
+    no such session and writes no such file."""
     from saffron.intake import Criterion
 
     a = Criterion(claim="a is true", witness="t.py::a", wrong_versions=["a v1", "a v2"])
@@ -8265,6 +8266,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
             _turn(
                 _wrong_version_answer((edit_c1, "reason c1"), (edit_c2, "reason c2"))
             ),
+            _turn("not a block at all"),
             _turn("not a block at all"),
         ],
         spec=_spec(acceptance=[a, b, c, d]),
@@ -8328,22 +8330,31 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
         {
             "witness": "t.py::d",
             "claim": "d is true",
-            "cost_usd": pytest.approx(0.1),
-            "error": "not the schema: no <output> block in the response",
+            "cost_usd": pytest.approx(0.2),
+            "error": (
+                "not the schema, even after a re-prompt: "
+                "no <output> block in the response"
+            ),
             "versions": [
                 {
                     "version": "d v1",
                     "edit": None,
                     "reason": "",
-                    "outcome": "unproven",
-                    "summary": "not the schema: no <output> block in the response",
+                    "outcome": "error",
+                    "summary": (
+                        "not the schema, even after a re-prompt: "
+                        "no <output> block in the response"
+                    ),
                 },
                 {
                     "version": "d v2",
                     "edit": None,
                     "reason": "",
-                    "outcome": "unproven",
-                    "summary": "not the schema: no <output> block in the response",
+                    "outcome": "error",
+                    "summary": (
+                        "not the schema, even after a re-prompt: "
+                        "no <output> block in the response"
+                    ),
                 },
             ],
         },
@@ -8357,7 +8368,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     ]
     assert lines == [
         "REVIEW: criterion probes: 0 named, 4 unnamed",
-        "REVIEW: wrong versions: 6 declared, 3 expressed",
+        "REVIEW: wrong versions: 6 declared, 3 expressed; no session answered: t.py::d",
     ]
 
     # A spec whose criteria declare no wrong version buys no such session,
@@ -8378,6 +8389,79 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     assert not [
         w for w in empty_cell.watched if w.startswith("REVIEW: wrong versions:")
     ]
+
+
+def test_a_criterion_whose_wrong_versions_no_session_answered_is_an_error_the_review_line_names(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: a criterion whose wrong-version entry still carries an
+    error after a re-prompt is an `error`, never a silent pass. Both its
+    versions read `error` in `wrong-versions.json`, with the entry's own
+    error as their summary, and the task still reaches `READY_FOR_REVIEW`.
+    The REVIEW line names the witness of every such criterion and none that
+    answered. The witness drives three such criteria: one whose session
+    failed outright, one that twice answered with no block, and one that
+    twice answered the wrong count. Beside them is one that answered with
+    no edit, named nowhere on the line."""
+    from saffron.intake import Criterion
+
+    criteria = [
+        Criterion(
+            claim=f"claim {letter}",
+            witness=f"t.py::{letter}",
+            wrong_versions=[f"{letter} v1", f"{letter} v2"],
+        )
+        for letter in "abcd"
+    ]
+
+    cell = _stub_the_runtime(monkeypatch)
+    failed = implement.AgentFailed("cut off", _turn("", cost=0.3))
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            *(_turn(_probe_answer(None, f"no probe for {n}")) for n in "abcd")
+        )
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"), (None, "nothing here either")
+                )
+            ),
+            failed,
+            _turn("not a block at all"),
+            _turn("not a block at all"),
+            _turn(_wrong_version_answer((None, "one answer"))),
+            _turn(_wrong_version_answer((None, "one answer"))),
+        ],
+        spec=_spec(acceptance=criteria),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    by_witness = {e["witness"]: e for e in entries}
+    assert [v["outcome"] for v in by_witness["t.py::a"]["versions"]] == [
+        "unproven",
+        "unproven",
+    ]
+    for witness in ("t.py::b", "t.py::c", "t.py::d"):
+        entry = by_witness[witness]
+        assert [v["outcome"] for v in entry["versions"]] == ["error", "error"]
+        assert all(v["summary"] == entry["error"] for v in entry["versions"])
+    assert by_witness["t.py::d"]["error"] == (
+        "not the schema, even after a re-prompt: 1 answers for 2 wrong versions"
+    )
+    assert outcome.wrong_versions == entries
+
+    (line,) = [w for w in cell.watched if w.startswith("REVIEW: wrong versions:")]
+    assert "t.py::b" in line
+    assert "t.py::c" in line
+    assert "t.py::d" in line
+    assert "t.py::a" not in line
 
 
 def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend(
@@ -8683,6 +8767,7 @@ def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
         gates=[],
         new_failures=[],
         reviews=[],
+        wrong_versions=[],
         rebut_result=None,
         agent_subjects=[],
         effective_risk="standard",

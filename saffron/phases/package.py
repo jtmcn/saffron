@@ -888,6 +888,7 @@ def package(
             # `""` for a task that recorded none, so the body stays
             # byte-identical to one packaged before this existed.
             notes=outcome.notes,
+            wrong_versions=outcome.wrong_versions,
         )
         body_path.write_text(body)
         # The body is the second cell-authored channel out: a claim or a
