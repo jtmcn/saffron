@@ -1899,7 +1899,7 @@ def test_the_packaged_body_names_each_criterion_whose_wrong_versions_no_edit_rea
             "versions": [{"version": "v1", "edit": None, "reason": ""}],
         },
         {
-            "witness": "t.py::garbled",
+            "witness": "t.py::garbled[a|b]",
             "claim": "garbled is true",
             "cost_usd": 0.2,
             "error": "not the schema, even after a re-prompt: MARKER-TWO",
@@ -1916,7 +1916,7 @@ def test_the_packaged_body_names_each_criterion_whose_wrong_versions_no_edit_rea
     body = (packageable.outcome.task_dir / "pr_body.md").read_text()
     section = body.split("## Not covered")[1].split("## ")[0]
     assert "t.py::cut" in section
-    assert "t.py::garbled" in section
+    assert "`t.py::garbled[a\\|b]`" in section
     assert "t.py::answered" not in body
     assert "MARKER" not in body
 

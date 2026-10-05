@@ -334,7 +334,7 @@ class CellOutcome:
     gates: list[GateResult] = field(default_factory=list)
     new_failures: list[NewFailure] = field(default_factory=list)
     reviews: list[review.LensReview] = field(default_factory=list)
-    # `run_wrong_versions`'s own entries, unbound on every path that skipped
+    # `run_wrong_versions`'s own entries, empty on every path that skipped
     # REVIEW, exactly like `reviews` above.
     wrong_versions: list[dict] = field(default_factory=list)
     rebut_result: rebut.RebutResult | None = None

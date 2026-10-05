@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from harness import lens_scoring
 from saffron import end_review
 from saffron.agents import context
+from saffron.agents.artifacts import EXTRACTION_PROMPT
 from saffron.agents.findings import Finding
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
@@ -1051,7 +1052,7 @@ def _probe_agent(*turns, record=None):
 
     def run(container, *, prompt, options, **kwargs):
         if record is not None:
-            record.append({"prompt": prompt, "options": options})
+            record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
         turn = next(scripted)
         if isinstance(turn, BaseException):
             raise turn
@@ -1419,24 +1420,6 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
     ]
 
 
-def _wv_agent(*turns, record=None):
-    """Scripts one call per `run_wrong_versions` turn, first and retry alike,
-    recording every keyword the host passes, `resume` included. A scripted
-    turn is an exception to raise, or an `implement.AttemptResult` returned
-    verbatim, never wrapped, so a test can give each its own session id."""
-    scripted = iter(turns)
-
-    def run(container, *, prompt, options, **kwargs):
-        if record is not None:
-            record.append({"prompt": prompt, "options": options, "kwargs": kwargs})
-        turn = next(scripted)
-        if isinstance(turn, BaseException):
-            raise turn
-        return turn
-
-    return run
-
-
 def _wv_turn(session_id, text, cost):
     return implement.AttemptResult(
         session_id=session_id,
@@ -1491,7 +1474,7 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
     for letter, text in zip("abcd", first_answers, strict=True):
         turns.append(_wv_turn(f"s-{letter}", text, 0.3))
         turns.append(_wv_turn(f"s-{letter}", good, 0.2))
-    agent = _wv_agent(*turns, record=record)
+    agent = _probe_agent(*turns, record=record)
 
     entries = review.run_wrong_versions(
         "cell",
@@ -1533,6 +1516,7 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
         strict=True,
     ):
         assert fragment in call["prompt"]
+        assert call["prompt"].endswith(EXTRACTION_PROMPT)
 
     assert entries == [
         {
@@ -1598,7 +1582,7 @@ def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
         _wv_turn("s-h", bad_quote, 0.2),
     ]
     record: list[dict] = []
-    agent = _wv_agent(*turns, record=record)
+    agent = _probe_agent(*turns, record=record)
 
     entries = review.run_wrong_versions(
         "cell",

@@ -503,11 +503,11 @@ def _not_covered(
 ) -> str:
     """What this body does not stand behind, collected.
 
-    Every line is derivable from a section above — a `skip` row, an `(advisory)`
-    mark, the checklist's blockquote, an `anchored: no` cell — and each is one
-    cell of a wide table the operator is scanning for something else. §5.7 states
-    its own residual that way (the credential shapes the refusal does not know),
-    for the same reason: a reader who has to assemble it never does.
+    Every line is derivable from a section above — a `skip` row, an `(advisory)` mark,
+    the checklist's blockquote, an `anchored: no` cell — and each is one cell of a wide
+    table the operator is scanning for something else. §5.7 states its own residual that
+    way (the credential shapes the refusal does not know), for the same reason: a reader
+    who has to assemble it never does. Only the wrong-version line reads its own record.
 
     One thing that belongs here and is deliberately absent: gates that ran at
     `base_sha` and were not re-run. §5.7 makes that case *provably* redundant —
