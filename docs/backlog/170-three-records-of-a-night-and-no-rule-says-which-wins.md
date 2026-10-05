@@ -160,3 +160,13 @@ waits on the wiring. §10 lists `saffron/record/`. The full restatement lands
 with the first caller that constructs a `Ledger` with a record, as
 `saffron/ledger.py`'s docstring asks. The **Ledger** entry is hand-written, and
 the record design's claim that `factory.ttl` generates it is wrong.
+
+**2026-10-04.** The sectioned design exists:
+`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`. The
+paragraph above that calls it unwritten is stale. Its §7 settles migration.
+All stored tasks move, and a field the ledger cannot vouch for stays absent.
+Its §6 settles `queue.json`. It becomes a render first and goes once an
+equality check holds. The design's two open questions closed the same day. The
+fold runs on demand. The budget check folds only the task keys the batch
+started. Design steps 1 and 2 are built. The migration comes next, then the
+batch and run folds.

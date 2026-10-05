@@ -267,6 +267,11 @@ makes a lagging store decide a ceiling. Or give the record an index per batch,
 which is the second store §1 refuses. Plan 2 opens on this rather than reaching
 it.
 
+**Decided 2026-10-04: a third way.** The batch folds only the task keys it
+started. It holds that roster in memory and persists it nowhere, so no second
+store exists. The cost is O(the night). The fold of every target's refs stays
+the morning's reading.
+
 **This closes item 177.** A run stops being minted per task and becomes a fold
 over the tasks sharing a `batch_id` and a `repo` — which is what §4.1 and
 `CONTEXT.md` already define a run as, and what `SA-0100` could not make true
@@ -315,6 +320,10 @@ refused.
 
 The trailing accept rate survives the migration: it reads `MERGED`, which is
 unambiguous on all 65 rows that carry it.
+
+**Recounted 2026-10-04.** The ledger holds 223 tasks, 160 of them `MERGED`.
+`risk` reads `standard` on 145 rows and `elevated` on 78. The rule above is
+unchanged. Only its counts drifted.
 
 ## 8. Two streams, and the rule that keeps them from drifting
 
@@ -459,3 +468,17 @@ quantity once a task rather than once a morning.
 
 **What the budget check costs.** §5 removes the counter and prices nothing in
 its place. It is the first question plan 2 takes, and §5 says why.
+
+### Both closed 2026-10-04
+
+**The fold runs on demand.** A continuous fold adds a writer that can lag, and
+a lagging writer is the divergence §1 exists to end. The morning index and
+`saffron queue` pay for a rebuild instead. At 223 tasks it measured
+22.63 s, against 9.94 s at 118 (`docs/evidence/2026-10-04-fold-rebuild-time-at-223.md`).
+
+**The budget check folds the night's own tasks.** §5's addendum says how. It
+holds for one host. A second host's tasks are missing from that roster, so a
+cloud night reopens this with the compare-and-swap of §2.
+
+*Reopens on:* a morning rebuild an operator will not wait through, or a night
+that spans hosts.
