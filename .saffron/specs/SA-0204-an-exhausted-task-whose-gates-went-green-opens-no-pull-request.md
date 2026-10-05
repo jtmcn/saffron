@@ -118,9 +118,10 @@ acceptance:
       the second set, `## Not covered` carries a line saying "HEAD moved
       after REVIEW" and that the patch carries commits "no lens judged".
       Unset, neither line renders, even beside anchored blockers and no
-      `rebut_result`. The witness renders two anchored blockers from two
-      lenses beside an unanchored blocker and an anchored concern, with the
-      first keyword alone, with both, and with neither.
+      `rebut_result`. Each `file` passes through `_cell`. The witness
+      renders two anchored blockers from two lenses beside an unanchored
+      blocker and an anchored concern, with the first keyword alone, with
+      both, and with neither. One anchored blocker's file holds a `|`.
     witness: tests/test_report.py::test_an_unrebutted_body_names_every_blocker_it_left_standing
     wrong_versions:
       - The line names only the first anchored blocker.
@@ -130,6 +131,7 @@ acceptance:
       - The line says the blockers went unanswered, which is false where the cut-short rebuttal recorded answers and only a verdict is missing.
       - The HEAD line renders whenever the first keyword is set, whatever the second says.
       - The HEAD line never renders.
+      - The line writes each file raw, skipping `_cell`.
   - claim: >-
       When `package()` in the `EXHAUSTED` mode returns no `pr_url`, or
       raises a `PackageError`, `run_task` then calls `push_unpackaged_work`
@@ -180,12 +182,15 @@ acceptance:
   - claim: >-
       `push_unpackaged_work` takes a keyword, off by default, naming why
       PACKAGE refused the task. Set, its commit says PACKAGE refused it and
-      gives that text, and never says PACKAGE never ran. Unset, the commit
-      reads as it does today. It refuses to push while another task of the
-      spec is `EXHAUSTED` with a `pr_url`, as it refuses beside a
-      `READY_FOR_REVIEW` one. An `EXHAUSTED` row with an empty `pr_url` and
-      a `REJECTED` row with a `pr_url` do not stop it. The witness pushes
-      once with the keyword, then beside each of those three earlier rows.
+      gives that text through `neutralize`, and never says PACKAGE never
+      ran. A text in which `find_credentials_in_text` finds a credential is
+      left out, and the commit says so. Unset, the commit reads as it does
+      today. It refuses to push while another task of the same spec is
+      `EXHAUSTED` with a `pr_url`, as it refuses beside a `READY_FOR_REVIEW`
+      one. An `EXHAUSTED` row with an empty `pr_url`, a `REJECTED` row with
+      a `pr_url`, and another spec's `EXHAUSTED` row with a `pr_url` do not
+      stop it. The witness pushes with a plain keyword and with one holding
+      a credential, then beside each of those four earlier rows.
     witness: tests/test_package.py::test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft
     wrong_versions:
       - The guard still checks `READY_FOR_REVIEW` alone, so a re-run pushes over an open draft.
@@ -193,6 +198,8 @@ acceptance:
       - The guard refuses beside any `EXHAUSTED` row, a refused package's included.
       - The commit still says PACKAGE never ran when the keyword is set.
       - The commit says PACKAGE refused it without the text.
+      - The guard reads every task in the repo, so another spec's open draft blocks this push.
+      - The refusal text reaches the commit with its credential in it.
 ---
 
 ## Context
@@ -423,9 +430,10 @@ row (`saffron/phases/package.py:1037-1038`). Name the new keyword in
 `package()`'s docstring says every `PackageError` reaches `cli.main` and only
 `MERGE_FAILED` is recorded. `commit_squash`'s refused-branch text says
 "nothing here was re-verified or reviewed", though REVIEW ran and
-re-verification ran on a new-failures refusal. And `run_task`'s note on
-`pushed_sha` says a push of unpackaged work happens only when PACKAGE never
-ran (`saffron/task.py`, near `pushed_sha`). A refused-branch commit says
+re-verification ran on a new-failures refusal. `_resolve_stacked_on`'s
+docstring says a push of unpackaged work writes `pushed_sha` only when
+PACKAGE never ran. And the comment above the push block's row write says
+`_finish` never ran, so the row is the task's only one. A refused-branch commit says
 PACKAGE refused it and why, and that REVIEW ran.
 
 **Every test you add must fail with this diff's source reverted.** At base
@@ -465,7 +473,8 @@ The single-path tests in `tests/test_package.py` show each setup.
 builds each finding, and it defaults every one to `a.py:3`. Give the four
 findings distinct places, none a prefix of another, such as `a.py:3`,
 `b.py:17`, `c.py:29` and `d.py:41`. Shared or prefixed places let the wrong
-versions that name a concern or only the first blocker pass. Split the body at `## Not covered` and assert on the
+versions that name a concern or only the first blocker pass. Give one anchored
+blocker the file `a|b.py`, and expect the escaped form `_cell` writes. Split the body at `## Not covered` and assert on the
 second half only. Check the two quoted phrases, and each anchored blocker's
 `file:line`. Check that neither the unanchored blocker's nor the concern's
 appears, nor the word `unanswered`. Render once more with both keywords and
@@ -490,7 +499,10 @@ new keyword and read the commit with `git log -1 --format=%B` on the
 remote branch, as `tests/test_package.py:3112-3131` does. Then add each
 earlier task with `create_run`, `create_task` and `set_task_package`,
 recording the remote head as its `pushed_sha`, so only the guard decides.
-Push beside the `REJECTED` row, then the empty-`pr_url` `EXHAUSTED` row,
-then the drafted one. Assert `PushResult.pushed` is true for the first two and
-false beside the drafted one. Compare `pushed`, never the remote head: two
+Push once more with a keyword holding `FAKE_KEY`, and check the key is not in
+the commit. `tasks_by_repo` returns every task in the repo, so add one row
+under another spec too. Push beside the `REJECTED` row, the empty-`pr_url`
+`EXHAUSTED` row, the other spec's drafted row, then this spec's drafted one.
+Assert `PushResult.pushed` is true for the first three and false beside the
+last. Compare `pushed`, never the remote head: two
 pushes of one tree inside a second can make the same squash commit.
