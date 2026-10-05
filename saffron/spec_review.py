@@ -67,9 +67,8 @@ UNREADABLE_RESET = 1
 def _merge_models(current: str | None, addition: str | None) -> str | None:
     """`current` plus every name in `addition` not already present, in
     first-seen order, comma-joined or `None` (SA-0205). `addition` is one
-    turn's own joined `AttemptResult.model`, split on `,` here. Never the
-    other way around: a session's own join is never re-joined twice. An
-    empty segment, from an empty name or a trailing comma, names nothing."""
+    turn's own joined `AttemptResult.model`, split on `,` here. An empty
+    segment, from an empty name or a trailing comma, names nothing."""
     names = [] if current is None else current.split(",")
     for name in [] if addition is None else addition.split(","):
         if name and name not in names:

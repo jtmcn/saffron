@@ -272,8 +272,6 @@ def _close_attempt(
     ledger.close_attempt(
         attempt_id,
         session_id=attempt.session_id if attempt else None,
-        # `attempt.model` (SA-0205), same as every other field below:
-        # `None` on a turn with no attempt at all.
         model=attempt.model if attempt else None,
         # A turn that produced no result at all is not a turn that succeeded,
         # and $0.00 here is measured absence, not a crash's zeroed fields.

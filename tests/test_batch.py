@@ -4149,14 +4149,16 @@ def test_each_spec_session_attempt_records_the_model_its_session_names(ledger, r
         review_calls[spec_id] = review_calls.get(spec_id, 0) + 1
         if spec_id == "TE-1":
             if review_calls[spec_id] == 1:
-                return replace(_review_session([_blocker("build")]), model="rm-1")
+                return replace(
+                    _review_session([_blocker("build")]), model="rm-1a,rm-1b"
+                )
             # TE-1's second review, after its one revision below. The one
             # row this witness expects left at `None`.
             return _review_session([])
         return replace(_review_session([_blocker("build")]), model="rm-2")
 
     revise_table = {
-        "TE-1": [replace(_written("r1\n"), model="wm-1")],
+        "TE-1": [replace(_written("r1\n"), model="wm-1a,wm-1b")],
         "TE-2": [replace(_writer_error("api_error"), model="wm-2")],
     }
 
@@ -4185,8 +4187,8 @@ def test_each_spec_session_attempt_records_the_model_its_session_names(ledger, r
     # TE-1 revises once (a modeled review, a modeled writer turn) and runs
     # on a second, unmodeled review.
     assert _attempts("TE-1") == [
-        ("SPEC_REVIEW", "rm-1"),
-        (WRITING_PHASE, "wm-1"),
+        ("SPEC_REVIEW", "rm-1a,rm-1b"),
+        (WRITING_PHASE, "wm-1a,wm-1b"),
         ("SPEC_REVIEW", None),
     ]
     # TE-2's writer session carries an error, and its own model still

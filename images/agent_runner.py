@@ -45,7 +45,7 @@ _STEP_USAGE_KEYS = (
 # runner process is one run_agent call, so this outlives nothing it shouldn't.
 _seen_assistant_message_ids: set[str] = set()
 
-# Each distinct model this run's assistant messages named, first-seen order
+# Each distinct model this turn's assistant messages named, first-seen order
 # (SA-0205), reset in `main()`. `<synthetic>` and an empty name are skipped.
 _seen_models: list[str] = []
 

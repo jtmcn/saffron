@@ -915,7 +915,7 @@ def test_deltas_a_window_apart_each_reach_the_host(monkeypatch):
     assert types == ["progress"] * 3
 
 
-# --- SA-0205: the result event names each model the run's assistant
+# --- SA-0205: the result event names each model the turn's assistant
 # messages named ---
 
 
@@ -948,51 +948,52 @@ def _result_event_model(monkeypatch, messages: list) -> str | None:
 def test_the_result_event_names_each_model_the_turns_assistant_messages_named(
     monkeypatch,
 ):
-    """`model` is the run's own distinct assistant-message models, first-seen
-    order, comma-joined. `<synthetic>` and empty names are skipped, never
-    sorted and never leaked between the five runs this drives through
-    `main` in one process. Never the `init` event's configured model."""
+    """`model` is the turn's own distinct assistant-message models, first-seen
+    order, comma-joined. Only `<synthetic>` and empty names are skipped. They
+    are never sorted and never leaked between the five turns this drives
+    through `main` in one process. Never the `init` event's configured model."""
     result_msg = _result_msg()
 
-    # Run 1 catches two wrong versions: sorting (m-b precedes m-a) and
-    # keeping an empty name (it sits last, so a kept one reads "m-b,m-a,").
-    run1 = [
+    # Turn 1 kills sorting, a kept empty name and a skip wider than `<synthetic>`.
+    # The empty name sits last, and `<synthetic>-x` is kept.
+    turn1 = [
         _init_msg("init-model-1"),
         _assistant_msg("m-b"),
         _assistant_msg("<synthetic>"),
         _assistant_msg("m-a"),
+        _assistant_msg("<synthetic>-x"),
         _assistant_msg(""),
         result_msg,
     ]
-    assert _result_event_model(monkeypatch, run1) == "m-b,m-a"
+    assert _result_event_model(monkeypatch, turn1) == "m-b,m-a,<synthetic>-x"
 
-    # Run 2: one model, sent by two assistant messages sharing a message_id.
+    # Turn 2: one model, sent by two assistant messages sharing a message_id.
     # Kept once, not "m-x,m-x".
-    run2 = [
+    turn2 = [
         _init_msg("init-model-2"),
         _assistant_msg("m-x", message_id="dup-1"),
         _assistant_msg("m-x", message_id="dup-1"),
         result_msg,
     ]
-    assert _result_event_model(monkeypatch, run2) == "m-x"
+    assert _result_event_model(monkeypatch, turn2) == "m-x"
 
-    # Run 3: none at all. Init, a partial message, and the result.
-    run3 = [_init_msg("init-model-3"), _stream_event(), result_msg]
-    assert _result_event_model(monkeypatch, run3) is None
+    # Turn 3: none at all. Init, a partial message, and the result.
+    turn3 = [_init_msg("init-model-3"), _stream_event(), result_msg]
+    assert _result_event_model(monkeypatch, turn3) is None
 
-    # Run 4: a synthetic and an empty name alone.
-    run4 = [
+    # Turn 4: a synthetic and an empty name alone.
+    turn4 = [
         _init_msg("init-model-4"),
         _assistant_msg("<synthetic>"),
         _assistant_msg(""),
         result_msg,
     ]
-    assert _result_event_model(monkeypatch, run4) is None
+    assert _result_event_model(monkeypatch, turn4) is None
 
-    # Run 5 runs last, after the synthetic-alone run: a leaked model would
+    # Turn 5 comes last, after the synthetic-alone turn. A leaked model would
     # show up here instead of a clean "m-solo".
-    run5 = [_init_msg("init-model-5"), _assistant_msg("m-solo"), result_msg]
-    assert _result_event_model(monkeypatch, run5) == "m-solo"
+    turn5 = [_init_msg("init-model-5"), _assistant_msg("m-solo"), result_msg]
+    assert _result_event_model(monkeypatch, turn5) == "m-solo"
 
 
 def _result_msg(session_id: str = "s-model") -> SimpleNamespace:
