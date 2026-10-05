@@ -4,7 +4,7 @@ title: A layer's peak turns counts spec review and writing attempts, so the page
 status: open
 tier: 2
 filed: 2026-10-03
-specs: [SA-0152]
+specs: [SA-0152, SA-0208]
 prs: [650]
 commits: []
 cites: [§6]
