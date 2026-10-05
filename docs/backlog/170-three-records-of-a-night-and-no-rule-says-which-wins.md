@@ -170,3 +170,8 @@ equality check holds. The design's two open questions closed the same day. The
 fold runs on demand. The budget check folds only the task keys the batch
 started. Design steps 1 and 2 are built. The migration comes next, then the
 batch and run folds.
+
+**2026-10-04, later.** A gate-result fact keeps new failures only, with a count
+at head. Of 1,820,645 attempt failures, 668 survive baseline subtraction. The
+design's §3 records the rule, and its §7 applies it to the migration. Item
+b-86fa07 files the `prose` gate's output, which wrote nearly all the rest.

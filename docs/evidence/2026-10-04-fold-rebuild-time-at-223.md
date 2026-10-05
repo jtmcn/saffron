@@ -43,5 +43,19 @@ explain it. Failure rows went from 147,591 to 1,808,217. The earlier record
 left open whether to carry failures by reference, cap them, or leave them.
 This measurement makes that question the larger cost.
 
+**Almost none of those failures are new.** `scripts/2026-10-04-new-failures.py`
+ran `subtract_baseline` over every attempt in a copy of the ledger.
+
+```
+attempts with results 312 without baseline 0
+head failures 1820645 new failures 668
+new per attempt: median 0 p95 12 max 75
+new by gate prose 390, tests 58, committed 47, size 46, types 42, criteria 20, census 17, revert 16
+```
+
+`prose` wrote 2,948,560 of the 2,949,389 stored failure rows. Its result lists
+every hit in the repo, some 12,400 a result. The record design now keeps new
+failures only, in its §3.
+
 **The budget check is unaffected.** It folds the night's own tasks, so its cost
 follows the night and never the record.

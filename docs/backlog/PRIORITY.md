@@ -458,6 +458,9 @@ version as unproven. A host listener that starts mid-loop is caught only at
 preflight. The rate's header key is spelled at seven sites. `SETTLED_STATES`
 has no vocabulary test. Four documentation lines lag the stack.
 
+**Placed 2026-10-04**, from settling item 170's failures: **b-86fa07**. The
+`prose` gate lists every hit in the repo, so the baseline cancels nearly all.
+
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 
