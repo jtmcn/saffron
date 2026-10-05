@@ -2210,7 +2210,7 @@ def test_a_stack_batch_offers_a_provider_that_served_nothing_again_until_the_bre
     # spec runs a third time and the night drains instead.
     monkeypatch.setattr(
         "saffron.batch.ABORT_STATES",
-        frozenset({"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED"}),
+        ABORT_STATES - {"PROVIDER_UNREACHABLE"},
     )
     order3 = [_candidate("TE-8")]
     clock3 = AdvancingClock(datetime(2030, 1, 1, 2, 0))

@@ -213,8 +213,8 @@ def _drive(
             # token at 22:00 produces a night with no record it was attempted.
             return "INFRASTRUCTURE", consecutive_aborts
 
-    # By spec id: a re-offered spec returns as a new `Candidate` and would
-    # start twice. One with `sleep` set is taken back out (b-031ac2).
+    # By spec id, or a re-offered `Candidate` starts twice. A `RATE_LIMITED` or
+    # `PROVIDER_UNREACHABLE` one with `sleep` set is taken back out (b-031ac2).
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -367,8 +367,8 @@ def _wait_out_rate_limit(
 def _is_layer(result: CellOutcome | Refused) -> bool:
     """`run_stack_batch`'s one predicate. A result adds a layer only when it
     is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
-    `EXHAUSTED`, any other state, or a `Refused`. `RATE_LIMITED` and
-    `PROVIDER_UNREACHABLE` return before this runs, inside `wrapped()`."""
+    `EXHAUSTED`, any other state, or a `Refused`. `wrapped()` keeps
+    `RATE_LIMITED` and `PROVIDER_UNREACHABLE` queued rather than record a miss."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 

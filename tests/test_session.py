@@ -4931,12 +4931,17 @@ def _served_nothing(cost=0.0, **overrides):
         session_id="sess-1",
         subtype="success",
         terminal_reason="api_error",
-        num_turns=0,
+        num_turns=1,
         cost_usd_est=cost,
         is_error=True,
         provider_served_nothing=True,
         **overrides,
     )
+
+
+def _task_state(ledger):
+    (row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+    return row["state"]
 
 
 def test_a_plan_turn_the_provider_served_nothing_ends_provider_unreachable(
@@ -4988,13 +4993,13 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
     turn, only the first call can end `PROVIDER_UNREACHABLE` (b-031ac2).
     Each other failure keeps the state it earns today, with no commits."""
     cell = _stub_the_runtime(monkeypatch, commits=0)
-    outcome, _ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path / "first-call",
         cell=cell,
         turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
     )
-    assert outcome.state == "PROVIDER_UNREACHABLE"
+    assert outcome.state == _task_state(ledger) == "PROVIDER_UNREACHABLE"
     assert len(cell.turns) == 1
 
     cell = _stub_the_runtime(monkeypatch, commits=0)
@@ -5006,17 +5011,17 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
         cost_usd_est=0.0,
         is_error=True,
     )
-    outcome, _ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path / "ordinary-crash",
         cell=cell,
         turns=[implement.AgentFailed("api_error", attempt=ordinary_crash)],
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
     assert len(cell.turns) == 1
 
     cell = _stub_the_runtime(monkeypatch, commits=0)
-    outcome, _ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path / "schema-reprompt",
         cell=cell,
@@ -5025,11 +5030,11 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
             implement.AgentFailed("api_error", attempt=_served_nothing()),
         ],
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
     assert len(cell.turns) == 2
 
     cell = _stub_the_runtime(monkeypatch, commits=0)
-    outcome, _ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path / "scope-reprompt",
         cell=cell,
@@ -5038,12 +5043,12 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
             implement.AgentFailed("api_error", attempt=_served_nothing()),
         ],
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
     assert len(cell.turns) == 2
 
     cell = _stub_the_runtime(monkeypatch, commits=0)
     captured: list = []
-    outcome, _ledger = _drive(
+    outcome, ledger = _drive(
         monkeypatch,
         tmp_path / "implement-turn",
         cell=cell,
@@ -5053,7 +5058,7 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
         ],
         capture=captured,
     )
-    assert outcome.state == "NOT_IMPLEMENTED"
+    assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
     assert len(cell.turns) == 2
     assert any("ended_without_finishing" in str(c) for c in captured)
 

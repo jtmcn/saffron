@@ -623,8 +623,8 @@ def plan_checkpoint(
         # re-prompted turn's first half stops counting (§4.1).
         prior = failed.attempt or _failed_turn(failed, "")
         if first_call_returned and prior.provider_served_nothing:
-            # This failure is a re-prompt's, not the first call's, so the
-            # served-nothing fact does not belong to it (b-031ac2).
+            # A re-prompt follows a completed call, so its failure never ends
+            # `PROVIDER_UNREACHABLE` (b-031ac2).
             prior = replace(prior, provider_served_nothing=False)
         failed.attempt = replace(prior, cost_usd_est=spent + prior.cost_usd_est)
         raise
@@ -2164,11 +2164,11 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
         except implement.AgentFailed as failed:
-            # No plan and no commits, but a live cell: the earned state, not the
-            # ORPHANED that a crash out of `run_one_cell` would stamp (§4.5).
+            # No plan and no commits, but a live cell: the earned state, or
+            # `PROVIDER_UNREACHABLE`, not the ORPHANED a crash would stamp (§4.5).
             plan_cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
             # The provider serving the first call nothing is not the task
-            # failing (b-031ac2). Any other failure keeps today's state.
+            # failing (b-031ac2). Any other failure ends `NOT_IMPLEMENTED`.
             served_nothing = bool(
                 failed.attempt and failed.attempt.provider_served_nothing
             )

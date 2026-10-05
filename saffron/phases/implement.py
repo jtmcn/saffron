@@ -109,7 +109,7 @@ class AttemptResult:
 
 
 # The four usage counts a result event carries (images/agent_runner.py).
-# A null or missing count is not zero, so only these exact values count.
+# A null or missing count is not zero, so each must be present and equal 0.
 _TOKEN_USAGE_KEYS = (
     "input_tokens",
     "output_tokens",
