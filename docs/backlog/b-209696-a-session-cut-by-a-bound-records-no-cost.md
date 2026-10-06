@@ -1,11 +1,12 @@
 ---
 id: b-209696
 title: 'A session a bound cuts records $0.00, though it spent tokens'
-status: open
+status: done
+closed: 2026-10-05
 tier: 2
 filed: 2026-10-02
 specs: [SA-0206]
-prs: []
+prs: [696]
 commits: []
 cites: [§4.3, §5.3]
 related: [b-d4e015]
@@ -34,3 +35,4 @@ the figure is a floor.
 ## Record
 
 - 2026-10-02: filed in the spec loop's run 26, split from b-d4e015.
+- 2026-10-05: done by `SA-0206` (#696), from stage 2's second stack batch. A cut turn now records a floor priced from its per-step usage and charges the larger of the floor and its carry.
