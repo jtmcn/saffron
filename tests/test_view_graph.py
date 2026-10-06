@@ -26,6 +26,7 @@ FACTORY = NS
 PROV = "http://www.w3.org/ns/prov#"
 RDFS = "http://www.w3.org/2000/01/rdf-schema#"
 RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+EARL = "http://www.w3.org/ns/earl#"
 
 
 def _ledger(tmp_path: Path) -> tuple[Ledger, int]:
@@ -66,6 +67,14 @@ def _triples(g: rdflib.Graph, s=None, p=None, o=None) -> set:
         return rdflib.URIRef(x)
 
     return set(g.triples((ref(s), ref(p), ref(o))))
+
+
+def _absent(g: rdflib.Graph, node: str) -> None:
+    """`node` names nothing, as subject or as object. A left-out task's
+    own nodes must pass this check."""
+    uri = _uri(node)
+    assert not list(g.triples((uri, None, None)))
+    assert not list(g.triples((None, None, uri)))
 
 
 def test_an_in_flight_task_is_stated_with_its_state(tmp_path: Path) -> None:
@@ -618,3 +627,682 @@ def test_the_connection_cannot_write(tmp_path: Path) -> None:
     with pytest.raises(sqlite3.OperationalError):
         open_read_only(missing)
     assert not missing.exists()
+
+
+def test_each_gate_status_maps_to_its_own_earl_outcome(tmp_path: Path) -> None:
+    from saffron.gates.contract import GateResult, GateStatus
+    from saffron.view.graph import build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+
+    # Spare baseline results, recorded first, so no gate result id below
+    # equals its position.
+    for i in range(3):
+        ledger.record_gate_result(
+            GateResult(gate="spare", status="pass", tool=f"spare {i}"),
+            run_id=run_id,
+        )
+
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, task_id, state="GATING")
+    other_task = ledger.create_task(run_id, "SA-0002", "sha2", "b2")
+    _set_task(ledger, other_task, state="GATING")
+
+    ungated_attempt = ledger.open_attempt(task_id, "DIAGNOSING")
+
+    gated_attempt = ledger.open_attempt(task_id, "GATING")
+    status_outcome: dict[GateStatus, str] = {
+        "pass": "passed",
+        "fail": "failed",
+        "error": "cantTell",
+        "skip": "inapplicable",
+    }
+    result_ids: dict[str, int] = {
+        status: ledger.record_gate_result(
+            GateResult(gate=f"g-{status}", status=status, tool="t"),
+            attempt_id=gated_attempt,
+        )
+        for status in status_outcome
+    }
+    outcome_by_status: dict[str, str] = {str(k): v for k, v in status_outcome.items()}
+
+    second_gated_attempt = ledger.open_attempt(task_id, "GATING")
+    second_result_id = ledger.record_gate_result(
+        GateResult(gate="g-second", status="pass", tool="t"),
+        attempt_id=second_gated_attempt,
+    )
+
+    other_attempt = ledger.open_attempt(other_task, "GATING")
+    other_result_id = ledger.record_gate_result(
+        GateResult(gate="g-other", status="pass", tool="t"),
+        attempt_id=other_attempt,
+    )
+
+    baseline_result_id = ledger.record_gate_result(
+        GateResult(gate="g-baseline", status="fail", tool="t"), run_id=run_id
+    )
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+    g = _parse(view)
+
+    # An attempt with no gate result states no suite and no diff.
+    _absent(g, f"{DATA}gatesuite-{ungated_attempt}")
+    _absent(g, f"{DATA}diff-attempt-{ungated_attempt}")
+
+    # A baseline result is never stated.
+    _absent(g, f"{DATA}gate-result-{baseline_result_id}")
+
+    def check(attempt_id: int, expected: dict[str, int]) -> None:
+        suite_node = f"{DATA}gatesuite-{attempt_id}"
+        diff_node = f"{DATA}diff-attempt-{attempt_id}"
+        attempt_node = f"{DATA}attempt-{attempt_id}"
+        assert _triples(g, suite_node, RDF_TYPE, f"{FACTORY}GateSuite")
+        assert _triples(g, suite_node, f"{PROV}wasInformedBy", attempt_node)
+        assert _triples(g, diff_node, RDF_TYPE, f"{FACTORY}Diff")
+        assert _triples(g, attempt_node, f"{PROV}generated", diff_node)
+        for status, result_id in expected.items():
+            result_node = f"{DATA}gate-result-{result_id}"
+            assert _triples(g, result_node, RDF_TYPE, f"{FACTORY}GateResult")
+            assert _triples(g, result_node, f"{PROV}wasGeneratedBy", suite_node)
+            assert _triples(g, result_node, f"{EARL}subject", diff_node)
+            assert _triples(g, result_node, f"{EARL}mode", f"{EARL}automatic")
+            outcomes = list(g.objects(_uri(result_node), _uri(f"{EARL}result")))
+            assert len(outcomes) == 1
+            found = set(g.objects(outcomes[0], _uri(f"{EARL}outcome")))
+            assert found == {_uri(f"{EARL}{outcome_by_status[status]}")}
+
+    check(gated_attempt, result_ids)
+    check(second_gated_attempt, {"pass": second_result_id})
+    check(other_attempt, {"pass": other_result_id})
+
+    # Each result names its own attempt's suite and subject, never another's.
+    first_suite = f"{DATA}gatesuite-{gated_attempt}"
+    first_diff = f"{DATA}diff-attempt-{gated_attempt}"
+    second_result_node = f"{DATA}gate-result-{second_result_id}"
+    assert not _triples(g, second_result_node, f"{PROV}wasGeneratedBy", first_suite)
+    assert not _triples(g, second_result_node, f"{EARL}subject", first_diff)
+    other_result_node = f"{DATA}gate-result-{other_result_id}"
+    assert not _triples(g, other_result_node, f"{EARL}subject", first_diff)
+    assert not _triples(g, other_result_node, f"{PROV}wasGeneratedBy", first_suite)
+
+
+def test_a_gate_result_counts_its_failures_and_states_no_line(tmp_path: Path) -> None:
+    from saffron.gates.contract import Failure, GateResult
+    from saffron.view.graph import build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, task_id, state="GATING")
+    attempt_id = ledger.open_attempt(task_id, "GATING")
+
+    fail_result_id = ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="t",
+            summary="zzyzx-summary-fail-9f1a",
+            failures=[
+                Failure(
+                    file="zzyzx-file-1-c3e2.py",
+                    code="ZZYZX-CODE-1-77b0",
+                    message="zzyzx-message-1-1e44",
+                    line=918273,
+                ),
+                Failure(
+                    file="zzyzx-file-2-d4f3.py",
+                    code="ZZYZX-CODE-2-88c1",
+                    message="zzyzx-message-2-2f55",
+                    line=918274,
+                ),
+                Failure(
+                    file="zzyzx-file-3-e5a4.py",
+                    code="ZZYZX-CODE-3-99d2",
+                    message="zzyzx-message-3-3a66",
+                    line=918275,
+                ),
+            ],
+        ),
+        attempt_id=attempt_id,
+    )
+    pass_result_id = ledger.record_gate_result(
+        GateResult(
+            gate="scope",
+            status="pass",
+            tool="t",
+            summary="zzyzx-summary-pass-a0b1",
+            failures=[],
+        ),
+        attempt_id=attempt_id,
+    )
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+    g = _parse(view)
+
+    fail_node = f"{DATA}gate-result-{fail_result_id}"
+    pass_node = f"{DATA}gate-result-{pass_result_id}"
+    fail_count = _literal(g, fail_node, f"{FACTORY}failureCount")
+    assert fail_count.toPython() == 3
+    assert str(fail_count.datatype) == "http://www.w3.org/2001/XMLSchema#integer"
+    pass_count = _literal(g, pass_node, f"{FACTORY}failureCount")
+    assert pass_count.toPython() == 0
+
+    turtle_text = view.turtle.decode("utf-8")
+    sentinels = [
+        "zzyzx-summary-fail-9f1a",
+        "zzyzx-summary-pass-a0b1",
+        "zzyzx-file-1-c3e2.py",
+        "ZZYZX-CODE-1-77b0",
+        "zzyzx-message-1-1e44",
+        "918273",
+    ]
+    for sentinel in sentinels:
+        assert sentinel not in turtle_text
+
+
+def test_a_core_gate_is_its_vocabulary_individual_and_a_repo_gate_is_typed_by_role(
+    tmp_path: Path,
+) -> None:
+    from saffron.gates.contract import GateResult
+    from saffron.view.graph import build, open_read_only
+
+    core_gates = [
+        "scope",
+        "size",
+        "secrets",
+        "integrity",
+        "census",
+        "committed",
+        "criteria",
+        "revert",
+        "witness",
+    ]
+    role_gates = ["format", "lint", "types", "tests", "no-network", "coverage"]
+    repo_gates = ["structure"]
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, task_id, state="GATING")
+    attempt_id = ledger.open_attempt(task_id, "GATING")
+
+    result_ids: dict[str, int] = {}
+    for name in [*core_gates, *role_gates, *repo_gates]:
+        result_ids[name] = ledger.record_gate_result(
+            GateResult(gate=name, status="pass", tool="t"), attempt_id=attempt_id
+        )
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+    g = _parse(view)
+
+    for name in core_gates:
+        result_node = f"{DATA}gate-result-{result_ids[name]}"
+        assert _triples(g, result_node, f"{EARL}assertedBy", f"{FACTORY}{name}")
+        assert not _triples(g, result_node, f"{EARL}assertedBy", f"{DATA}gate-{name}")
+        _absent(g, f"{DATA}gate-{name}")
+
+    for name in role_gates:
+        result_node = f"{DATA}gate-result-{result_ids[name]}"
+        gate_node = f"{DATA}gate-{name}"
+        assert _triples(g, result_node, f"{EARL}assertedBy", gate_node)
+        types = _triples(g, gate_node, RDF_TYPE)
+        assert {o for _, _, o in types} == {_uri(f"{FACTORY}ContractGate")}
+        assert _triples(g, gate_node, f"{FACTORY}role", f"{FACTORY}{name}")
+
+    for name in repo_gates:
+        result_node = f"{DATA}gate-result-{result_ids[name]}"
+        gate_node = f"{DATA}gate-{name}"
+        assert _triples(g, result_node, f"{EARL}assertedBy", gate_node)
+        types = _triples(g, gate_node, RDF_TYPE)
+        assert {o for _, _, o in types} == {_uri(f"{FACTORY}RepoDefinedGate")}
+        assert not _triples(g, gate_node, f"{FACTORY}role")
+
+
+def test_findings_without_a_gated_attempt_are_left_out_and_the_task_kept(
+    tmp_path: Path,
+) -> None:
+    from saffron.agents.findings import Finding
+    from saffron.gates.contract import GateResult
+    from saffron.view.graph import LeftOut, build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+
+    # The task with a gated attempt is created first. A diff wrongly
+    # carried over from it would then show on every later task.
+    gated_task = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, gated_task, state="GATING")
+    gated_attempt = ledger.open_attempt(gated_task, "GATING")
+    ledger.record_gate_result(
+        GateResult(gate="scope", status="pass", tool="t"), attempt_id=gated_attempt
+    )
+    gated_finding_ids = ledger.record_findings(
+        gated_task,
+        [Finding(lens="style", severity="note", file="f", line=1, claim="c-gated")],
+    )
+
+    ungated_many_task = ledger.create_task(run_id, "SA-0002", "sha2", "b2")
+    _set_task(ledger, ungated_many_task, state="REVIEWING")
+    ledger.open_attempt(ungated_many_task, "REVIEWING")
+    ledger.record_findings(
+        ungated_many_task,
+        [
+            Finding(lens="style", severity="concern", file="f", line=1, claim="c2a"),
+            Finding(lens="style", severity="blocker", file="f", line=2, claim="c2b"),
+        ],
+    )
+
+    no_attempt_task = ledger.create_task(run_id, "SA-0003", "sha3", "b3")
+    _set_task(ledger, no_attempt_task, state="REVIEWING")
+    ledger.record_findings(
+        no_attempt_task,
+        [Finding(lens="style", severity="note", file="f", line=1, claim="c3")],
+    )
+
+    unknown_state_task = ledger.create_task(run_id, "SA-0004", "sha4", "b4")
+    _set_task(ledger, unknown_state_task, state="PAUSED")
+    unknown_state_attempt = ledger.open_attempt(unknown_state_task, "PAUSED")
+    ledger.record_findings(
+        unknown_state_task,
+        [Finding(lens="style", severity="note", file="f", line=1, claim="c4")],
+    )
+
+    unknown_risk_failing_task = ledger.create_task(run_id, "SA-0005", "sha5", "b5")
+    _set_task(ledger, unknown_risk_failing_task, state="GATING", risk="reckless")
+    unknown_risk_attempt = ledger.open_attempt(unknown_risk_failing_task, "GATING")
+    unknown_risk_result = ledger.record_gate_result(
+        GateResult(gate="scope", status="fail", tool="t"),
+        attempt_id=unknown_risk_attempt,
+    )
+    ledger.record_findings(
+        unknown_risk_failing_task,
+        [Finding(lens="style", severity="note", file="f", line=1, claim="c5")],
+    )
+
+    unknown_risk_known_state_task = ledger.create_task(run_id, "SA-0006", "sha6", "b6")
+    _set_task(ledger, unknown_risk_known_state_task, state="REVIEWING", risk="reckless")
+    unknown_risk_known_state_attempt = ledger.open_attempt(
+        unknown_risk_known_state_task, "REVIEWING"
+    )
+    ledger.record_findings(
+        unknown_risk_known_state_task,
+        [Finding(lens="style", severity="note", file="f", line=1, claim="c6")],
+    )
+
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+    g = _parse(view)
+
+    expected = sorted(
+        [
+            (ungated_many_task, "SA-0002", "findings_without_diff"),
+            (no_attempt_task, "SA-0003", "findings_without_diff"),
+            (unknown_state_task, "SA-0004", "unknown_state"),
+            (unknown_risk_failing_task, "SA-0005", "unknown_risk"),
+            (unknown_risk_known_state_task, "SA-0006", "unknown_risk"),
+        ]
+    )
+    actual = sorted((lo.task_id, lo.spec_id, lo.reason) for lo in view.left_out)
+    assert actual == expected
+    assert LeftOut(gated_task, "SA-0001", "findings_without_diff") not in view.left_out
+
+    # The gated task keeps its finding, against its own gated diff.
+    gated_diff = f"{DATA}diff-attempt-{gated_attempt}"
+    gated_finding_node = f"{DATA}finding-{gated_finding_ids[0]}"
+    assert _triples(g, gated_finding_node, RDF_TYPE, f"{FACTORY}Finding")
+    assert _triples(g, gated_finding_node, f"{EARL}subject", gated_diff)
+
+    # The two ungated-but-kept tasks still carry their own triples.
+    assert _triples(g, f"{DATA}task-{ungated_many_task}", RDF_TYPE, f"{FACTORY}Task")
+    assert _triples(g, f"{DATA}task-{no_attempt_task}", RDF_TYPE, f"{FACTORY}Task")
+    # ... but none of their findings are stated, whatever their number.
+    for claim in ("c2a", "c2b", "c3"):
+        assert claim not in view.turtle.decode("utf-8")
+
+    # The three fully left-out tasks state nothing: not their task, their
+    # attempt, their suite, their diff, their gate result, their finding.
+    _absent(g, f"{DATA}task-{unknown_state_task}")
+    _absent(g, f"{DATA}attempt-{unknown_state_attempt}")
+
+    _absent(g, f"{DATA}task-{unknown_risk_failing_task}")
+    _absent(g, f"{DATA}attempt-{unknown_risk_attempt}")
+    _absent(g, f"{DATA}gatesuite-{unknown_risk_attempt}")
+    _absent(g, f"{DATA}diff-attempt-{unknown_risk_attempt}")
+    _absent(g, f"{DATA}gate-result-{unknown_risk_result}")
+
+    _absent(g, f"{DATA}task-{unknown_risk_known_state_task}")
+    _absent(g, f"{DATA}attempt-{unknown_risk_known_state_attempt}")
+
+    for claim in ("c4", "c5", "c6"):
+        assert claim not in view.turtle.decode("utf-8")
+
+
+def test_a_finding_is_asserted_by_its_lens_against_the_last_gated_diff(
+    tmp_path: Path,
+) -> None:
+    from saffron.agents.findings import Finding
+    from saffron.gates.contract import GateResult
+    from saffron.view.graph import build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    first_gated = ledger.open_attempt(task_id, "GATING")
+    ledger.record_gate_result(
+        GateResult(gate="scope", status="pass", tool="t"), attempt_id=first_gated
+    )
+    second_gated = ledger.open_attempt(task_id, "GATING")
+    ledger.record_gate_result(
+        GateResult(gate="scope", status="pass", tool="t"), attempt_id=second_gated
+    )
+    # A gated attempt in a later phase, with a higher attempt_id than
+    # either attempt of the first phase, however their `n` compare.
+    last_gated = ledger.open_attempt(task_id, "REPAIRING")
+    ledger.record_gate_result(
+        GateResult(gate="scope", status="pass", tool="t"), attempt_id=last_gated
+    )
+    # An ungated attempt after it, which must not become the last diff.
+    ledger.open_attempt(task_id, "REPAIRING")
+
+    finding_ids = ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="adequacy",
+                severity="blocker",
+                file="f",
+                line=1,
+                claim="claim-a",
+            ),
+            Finding(
+                lens="style", severity="concern", file="f", line=2, claim="claim-b"
+            ),
+        ],
+    )
+    ledger._db.execute(
+        "UPDATE findings SET verdict = ? WHERE finding_id = ?",
+        ("confirmed", finding_ids[0]),
+    )
+    ledger._db.commit()
+
+    other_task = ledger.create_task(run_id, "SA-0002", "sha2", "b2")
+    _set_task(ledger, other_task, state="GATING")
+    other_gated = ledger.open_attempt(other_task, "GATING")
+    ledger.record_gate_result(
+        GateResult(gate="scope", status="pass", tool="t"), attempt_id=other_gated
+    )
+    other_finding_ids = ledger.record_findings(
+        other_task,
+        [Finding(lens="security", severity="note", file="f", line=3, claim="claim-c")],
+    )
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+    g = _parse(view)
+
+    last_diff = f"{DATA}diff-attempt-{last_gated}"
+    first_diff = f"{DATA}diff-attempt-{first_gated}"
+    second_diff = f"{DATA}diff-attempt-{second_gated}"
+    other_diff = f"{DATA}diff-attempt-{other_gated}"
+
+    finding_a = f"{DATA}finding-{finding_ids[0]}"
+    finding_b = f"{DATA}finding-{finding_ids[1]}"
+    finding_c = f"{DATA}finding-{other_finding_ids[0]}"
+
+    for finding_node, lens, severity in (
+        (finding_a, "adequacy", "blocker"),
+        (finding_b, "style", "concern"),
+        (finding_c, "security", "note"),
+    ):
+        assert _triples(g, finding_node, RDF_TYPE, f"{FACTORY}Finding")
+        assert _triples(g, finding_node, f"{FACTORY}severity", f"{FACTORY}{severity}")
+        lens_node = f"{DATA}lens-{lens}"
+        assert _triples(g, finding_node, f"{EARL}assertedBy", lens_node)
+        assert _triples(g, lens_node, RDF_TYPE, f"{FACTORY}CriticLens")
+        assert _triples(g, finding_node, f"{EARL}mode", f"{EARL}semiAuto")
+        assert not _triples(g, finding_node, f"{EARL}mode", f"{EARL}automatic")
+
+    # Task 1's findings name task 1's last gated diff, picked by attempt_id
+    # and not by phase-local `n` or by first-gated.
+    assert _triples(g, finding_a, f"{EARL}subject", last_diff)
+    assert not _triples(g, finding_a, f"{EARL}subject", first_diff)
+    assert not _triples(g, finding_a, f"{EARL}subject", second_diff)
+    assert _triples(g, finding_b, f"{EARL}subject", last_diff)
+
+    # Task 2's own finding names task 2's own diff, not task 1's.
+    assert _triples(g, finding_c, f"{EARL}subject", other_diff)
+    assert not _triples(g, finding_c, f"{EARL}subject", last_diff)
+
+    claim_a = _literal(g, finding_a, f"{FACTORY}claim")
+    assert claim_a.toPython() == "claim-a"
+    verdict_a = _literal(g, finding_a, f"{FACTORY}verdict")
+    assert verdict_a.toPython() == "confirmed"
+
+    # The finding with no verdict states no verdict triple at all. A null
+    # verdict is not the same fact as an empty string.
+    assert not _triples(g, finding_b, f"{FACTORY}verdict")
+
+
+def test_the_gate_sets_are_read_from_the_shapes_it_is_given(tmp_path: Path) -> None:
+    from saffron.gates.contract import GateResult
+    from saffron.view.graph import build, open_read_only
+
+    original = DEFAULT_SHAPES.read_text()
+
+    core_anchor = (
+        "sh:in ( factory:scope factory:size factory:secrets\n"
+        "            factory:integrity factory:census factory:committed\n"
+        "            factory:criteria factory:revert factory:witness ) ."
+    )
+    assert original.count(core_anchor) == 1
+    edited = original.replace(
+        core_anchor,
+        core_anchor.replace("factory:witness ) .", "factory:witness factory:dead ) ."),
+    )
+
+    role_anchor = (
+        "sh:in ( factory:format factory:lint factory:types\n"
+        "            factory:tests factory:no-network factory:coverage ) ."
+    )
+    assert edited.count(role_anchor) == 1
+    edited = edited.replace(
+        role_anchor,
+        role_anchor.replace(
+            "factory:coverage ) .", "factory:coverage factory:prose ) ."
+        ),
+    )
+
+    # `factory:dead` and `factory:prose` are typed nothing in the
+    # vocabulary, so a constraint that assumes otherwise must go too.
+    gate_result_anchor = (
+        "sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;\n"
+        "        sh:class factory:Gate ] ;"
+    )
+    assert edited.count(gate_result_anchor) == 1
+    edited = edited.replace(
+        gate_result_anchor,
+        "sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ] ;",
+    )
+
+    contract_anchor = (
+        "sh:path factory:role ; sh:minCount 1 ; sh:maxCount 1 ;\n"
+        "        sh:class factory:GateRole ] ."
+    )
+    assert edited.count(contract_anchor) == 1
+    edited = edited.replace(
+        contract_anchor,
+        "sh:path factory:role ; sh:minCount 1 ; sh:maxCount 1 ] .",
+    )
+
+    edited_shapes = tmp_path / "gate-sets-shapes.ttl"
+    edited_shapes.write_text(edited)
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, task_id, state="GATING")
+    attempt_id = ledger.open_attempt(task_id, "GATING")
+    result_ids = {
+        name: ledger.record_gate_result(
+            GateResult(gate=name, status="pass", tool="t"), attempt_id=attempt_id
+        )
+        for name in ("dead", "prose", "lint", "scope")
+    }
+    ledger.close()
+
+    conn1 = open_read_only(tmp_path / "ledger.db")
+    default_view = build(conn1)
+    g1 = _parse(default_view)
+
+    dead_result = f"{DATA}gate-result-{result_ids['dead']}"
+    prose_result = f"{DATA}gate-result-{result_ids['prose']}"
+    lint_result = f"{DATA}gate-result-{result_ids['lint']}"
+    scope_result = f"{DATA}gate-result-{result_ids['scope']}"
+
+    # With the default shapes, `dead` and `prose` are repo-defined gates.
+    assert _triples(g1, dead_result, f"{EARL}assertedBy", f"{DATA}gate-dead")
+    assert _triples(g1, f"{DATA}gate-dead", RDF_TYPE, f"{FACTORY}RepoDefinedGate")
+    assert _triples(g1, prose_result, f"{EARL}assertedBy", f"{DATA}gate-prose")
+    assert _triples(g1, f"{DATA}gate-prose", RDF_TYPE, f"{FACTORY}RepoDefinedGate")
+
+    conn2 = open_read_only(tmp_path / "ledger.db")
+    edited_view = build(conn2, shapes_path=edited_shapes)
+    g2 = _parse(edited_view)
+
+    # With the edited shapes, `dead` asserts as `factory:dead` and `prose`
+    # as a contract gate with role `factory:prose`.
+    assert _triples(g2, dead_result, f"{EARL}assertedBy", f"{FACTORY}dead")
+    assert not _triples(g2, dead_result, f"{EARL}assertedBy", f"{DATA}gate-dead")
+    _absent(g2, f"{DATA}gate-dead")
+
+    assert _triples(g2, prose_result, f"{EARL}assertedBy", f"{DATA}gate-prose")
+    assert _triples(g2, f"{DATA}gate-prose", RDF_TYPE, f"{FACTORY}ContractGate")
+    assert _triples(g2, f"{DATA}gate-prose", f"{FACTORY}role", f"{FACTORY}prose")
+
+    # `lint` keeps its role and `scope` stays core, whatever the edit adds.
+    assert _triples(g2, lint_result, f"{EARL}assertedBy", f"{DATA}gate-lint")
+    assert _triples(g2, f"{DATA}gate-lint", f"{FACTORY}role", f"{FACTORY}lint")
+    assert _triples(g2, scope_result, f"{EARL}assertedBy", f"{FACTORY}scope")
+    _absent(g2, f"{DATA}gate-scope")
+
+
+def test_each_view_query_reads_what_build_states(tmp_path: Path) -> None:
+    import pyoxigraph as ox
+
+    from saffron.agents.findings import Finding
+    from saffron.gates.contract import Failure, GateResult
+    from saffron.projection import VOCABULARY
+    from saffron.view.graph import build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    batch_id = ledger.create_batch(10.0)
+    ledger.close_batch(batch_id, "DRAINED")
+    run_id = ledger.create_run(repo_id, "base1", batch_id=batch_id)
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(
+        ledger,
+        task_id,
+        state="READY_FOR_REVIEW",
+        pr_url="https://example.com/pr/42",
+    )
+    attempt_id = ledger.open_attempt(task_id, "GATING")
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="t",
+            failures=[
+                Failure(file="a.py", code="E1", message="m1", line=1),
+                Failure(file="b.py", code="E2", message="m2", line=2),
+            ],
+        ),
+        attempt_id=attempt_id,
+    )
+    ledger.record_gate_result(
+        GateResult(gate="scope", status="pass", tool="t"), attempt_id=attempt_id
+    )
+    finding_ids = ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="style",
+                severity="concern",
+                file="f",
+                line=1,
+                claim="the one claim",
+            )
+        ],
+    )
+
+    other_run = ledger.create_run(repo_id, "base2")
+    other_task = ledger.create_task(other_run, "SA-0002", "sha2", "b2")
+    _set_task(ledger, other_task, state="DRAFT")
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+
+    store = ox.Store()
+    store.load(input=view.turtle, format=ox.RdfFormat.TURTLE)
+    store.load(path=str(VOCABULARY), format=ox.RdfFormat.TURTLE)
+
+    queries_dir = (
+        Path(__file__).resolve().parent.parent / "ontology" / "queries" / "view"
+    )
+
+    def run(stem_prefix: str) -> list:
+        (path,) = [
+            p for p in queries_dir.glob("*.rq") if p.stem.startswith(stem_prefix)
+        ]
+        result = store.query(path.read_text())
+        assert isinstance(result, ox.QuerySolutions)
+        return list(result)
+
+    task_node = ox.NamedNode(f"{DATA}task-{task_id}")
+    finding_node = ox.NamedNode(f"{DATA}finding-{finding_ids[0]}")
+
+    v1 = run("V1")
+    assert len(v1) == 1
+    assert v1[0]["because"] == ox.NamedNode(f"{FACTORY}DRAINED")
+    assert int(v1[0]["tasks"].value) == 1
+
+    v2 = run("V2")
+    assert len(v2) == 1
+    assert v2[0]["spec"].value == "SA-0001"
+    assert v2[0]["pr"] == ox.NamedNode("https://example.com/pr/42")
+
+    v3 = run("V3")
+    assert len(v3) == 2
+    by_gate = {row["gate"]: row for row in v3}
+    lint_row = by_gate[ox.NamedNode(f"{DATA}gate-lint")]
+    assert lint_row["outcome"] == ox.NamedNode(f"{EARL}failed")
+    assert int(lint_row["failures"].value) == 2
+    scope_row = by_gate[ox.NamedNode(f"{FACTORY}scope")]
+    assert scope_row["outcome"] == ox.NamedNode(f"{EARL}passed")
+    assert int(scope_row["failures"].value) == 0
+
+    v4 = run("V4")
+    assert len(v4) == 1
+    assert v4[0]["task"] == task_node
+    assert v4[0]["finding"] == finding_node
+    assert v4[0]["lens"] == ox.NamedNode(f"{DATA}lens-style")
+    assert v4[0]["severity"] == ox.NamedNode(f"{FACTORY}concern")
+    assert v4[0]["claim"].value == "the one claim"
+
+    v5 = run("V5")
+    assert len(v5) == 1
+    assert v5[0]["task"] == ox.NamedNode(f"{DATA}task-{other_task}")
+    assert v5[0]["spec"].value == "SA-0002"
