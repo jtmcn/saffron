@@ -279,6 +279,7 @@ def _close_attempt(
         terminal_reason=attempt.terminal_reason if attempt else None,
         num_turns=attempt.num_turns if attempt else 0,
         cost_usd_est=attempt.cost_usd_est if attempt else 0.0,
+        cost_floor_usd_est=attempt.cost_floor_usd_est if attempt else None,
     )
 
 

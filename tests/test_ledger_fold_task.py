@@ -119,7 +119,14 @@ def _find(
 
 
 def _close(
-    ledger: Ledger, attempt_id: int, sid: str, model, reason, turns: int, cost: float
+    ledger: Ledger,
+    attempt_id: int,
+    sid: str,
+    model,
+    reason,
+    turns: int,
+    cost: float,
+    floor: float | None = None,
 ) -> None:
     ledger.close_attempt(
         attempt_id,
@@ -129,6 +136,7 @@ def _close(
         terminal_reason=reason,
         num_turns=turns,
         cost_usd_est=cost,
+        cost_floor_usd_est=floor,
     )
 
 
@@ -174,7 +182,7 @@ def _drive_eleven_kinds(source: Ledger, after) -> tuple[str, int]:
     gate1 = _gate("lint", "ruff", _fail("a", "E1", 3, "m1"), _fail("b", "E2", 9, "m2"))
     source.record_gate_result(gate1, attempt_id=a1)
     after(key)
-    _close(source, a1, "s1", "m1", "done", 7, 3.25)
+    _close(source, a1, "s1", "m1", "done", 7, 3.25, floor=0.4)
     after(key)
     source.set_task_state(task_id, "REVIEWING")
     after(key)
@@ -201,7 +209,7 @@ def _drive_eleven_kinds(source: Ledger, after) -> tuple[str, int]:
     gate2 = _gate("types", "ty", _fail("c", "T1", 4, "m3"), _fail("d", "T2", 8, "m4"))
     source.record_gate_result(gate2, attempt_id=a2)
     after(key)
-    _close(source, a2, "s2", "m2", "budget", 3, 1.10)
+    _close(source, a2, "s2", "m2", "budget", 3, 1.10, floor=0.2)
     after(key)
     return key, repo_id
 

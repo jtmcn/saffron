@@ -161,7 +161,10 @@ CREATE TABLE IF NOT EXISTS attempts (
     subtype         TEXT,
     terminal_reason TEXT,
     num_turns       INTEGER,
-    cost_usd_est    REAL
+    cost_usd_est    REAL,
+    cost_floor_usd_est REAL
+    -- The no-result path's priced floor (SA-0206), null from a `result`
+    -- event. Below the column: SQLite 3.51.0's DROP COLUMN breaks above it.
 );
 
 -- Exactly one of attempt_id and run_id is set, and the null is the point: a
@@ -398,6 +401,14 @@ class Ledger:
         }
         if "tool" not in gate_existing:
             self._db.execute("ALTER TABLE gate_results ADD COLUMN tool TEXT")
+        # And on `attempts`: a ledger predating this column needs it added
+        # by hand before `close_attempt` can write to it (SA-0206).
+        attempts_existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(attempts)").fetchall()
+        }
+        if "cost_floor_usd_est" not in attempts_existing:
+            self._db.execute("ALTER TABLE attempts ADD COLUMN cost_floor_usd_est REAL")
         # The backfill the old schema comment promised. A ledger written before
         # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
         # a new attempt's id starts at 1 in that same integer namespace — so
@@ -688,7 +699,7 @@ class Ledger:
         if fact.kind == "attempt_closed":
             attempt_id = self._attempt_for(task_id, payload)
             self._db.execute(
-                "UPDATE attempts SET ended_at = ?, session_id = ?, model = ?, subtype = ?, terminal_reason = ?, num_turns = ?, cost_usd_est = ? WHERE attempt_id = ?",
+                "UPDATE attempts SET ended_at = ?, session_id = ?, model = ?, subtype = ?, terminal_reason = ?, num_turns = ?, cost_usd_est = ?, cost_floor_usd_est = ? WHERE attempt_id = ?",
                 (
                     at,
                     payload["session_id"],
@@ -697,6 +708,9 @@ class Ledger:
                     payload["terminal_reason"],
                     payload["num_turns"],
                     payload["cost_usd_est"],
+                    # `.get`: a fact written before this change has no such
+                    # key, and folds to null instead of raising (SA-0206).
+                    payload.get("cost_floor_usd_est"),
                     attempt_id,
                 ),
             )
@@ -1366,6 +1380,7 @@ class Ledger:
         terminal_reason: str | None,
         num_turns: int,
         cost_usd_est: float,
+        cost_floor_usd_est: float | None = None,
     ) -> None:
         owner = self._attempt_of(attempt_id, "close")
         fact = self._build_fact(
@@ -1380,6 +1395,7 @@ class Ledger:
                 "terminal_reason": terminal_reason,
                 "num_turns": num_turns,
                 "cost_usd_est": cost_usd_est,
+                "cost_floor_usd_est": cost_floor_usd_est,
             },
         )
         self._commit_and_append(fact)

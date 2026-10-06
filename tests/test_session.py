@@ -92,6 +92,49 @@ def test_every_recorded_turn_writes_the_model_its_attempt_names(tmp_path):
     assert [row["model"] for row in rows] == ["m-return", "m-failed", None, None]
 
 
+def test_every_recorded_turn_writes_the_floor_its_attempt_carries(tmp_path):
+    """`record_attempts` closes each turn's row with its attempt's
+    `cost_floor_usd_est`, on a return and on a raised `AgentFailed` carrying
+    one. A floor of `0.0` is written as `0.0`. A turn whose attempt carries
+    no floor, and one that raises with no attempt, write `None` (SA-0206)."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "origin", str(tmp_path / "m.git"), None)
+    run_id = ledger.create_run(repo_id, "a" * 40)
+    task_id = ledger.create_task(run_id, "SY-1", "b" * 64, "branch")
+
+    base = implement.AttemptResult(
+        session_id="s",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+
+    def _close_one(outcome) -> None:
+        def _agent(*_a, **_k):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        wrapped = session.record_attempts(_agent, ledger=ledger, task_id=task_id)
+        with contextlib.suppress(implement.AgentFailed):
+            wrapped()
+
+    # 1: a returned turn keeps its floor.
+    _close_one(replace(base, cost_floor_usd_est=1.5))
+    # 2: a raised AgentFailed keeps its attempt's own floor.
+    _close_one(implement.AgentFailed("boom", replace(base, cost_floor_usd_est=2.5)))
+    # 3: a floor of 0.0 is written as 0.0, never as None.
+    _close_one(replace(base, cost_floor_usd_est=0.0))
+    # 4: a returned turn whose attempt carries no floor writes None.
+    _close_one(replace(base, cost_floor_usd_est=None))
+    # 5: a raised AgentFailed with no attempt at all writes None.
+    _close_one(implement.AgentFailed("boom", None))
+
+    rows = ledger.attempts(task_id)
+    assert [row["cost_floor_usd_est"] for row in rows] == [1.5, 2.5, 0.0, None, None]
+
+
 def test_the_loop_stops_when_there_are_no_new_failures():
     decision = session.repair_decision(attempt=1, max_attempts=4, new=[], previous=[])
     assert decision == "green"

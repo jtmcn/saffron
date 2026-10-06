@@ -1312,6 +1312,52 @@ def test_a_ledger_that_predates_the_tool_column_gains_it(tmp_path):
     ledger.close()
 
 
+def test_a_ledger_that_predates_the_cost_floor_column_gains_it(tmp_path):
+    """`CREATE TABLE IF NOT EXISTS` is a no-op on an `attempts` that already
+    exists. A ledger built before the column keeps recording no-result
+    turns at `last_cost_usd` alone until it is added by hand (SA-0206)."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    cost_usd_est    REAL,\n    cost_floor_usd_est REAL\n",
+        "    cost_usd_est    REAL\n",
+    )
+    assert before != SCHEMA  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO attempts (task_id, phase, n, cost_usd_est) VALUES (1, 'IMPLEMENT', 1, 0.5)"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    # The row written before the column keeps its cost and reads a null
+    # floor. A row closed after it reads the floor it was given.
+    old_attempt_id = ledger.attempts(1)[0]["attempt_id"]
+    new_attempt_id = ledger.open_attempt(1, phase="IMPLEMENT")
+    ledger.close_attempt(
+        new_attempt_id,
+        session_id="s",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.0,
+        cost_floor_usd_est=1.25,
+    )
+    old_row, new_row = ledger.attempts(1)
+    assert old_row["attempt_id"] == old_attempt_id
+    assert (old_row["cost_usd_est"], old_row["cost_floor_usd_est"]) == (0.5, None)
+    assert new_row["attempt_id"] == new_attempt_id
+    assert new_row["cost_floor_usd_est"] == 1.25
+    ledger.close()
+
+
 def test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows(tmp_path):
     """The one ledger that exists needed both, and the order is load-bearing:
     the `tool` ALTER runs first so `_add_gate_result_reference`'s rebuild can
