@@ -50,6 +50,10 @@ _Avoid_: "the system", "the tool", "the pipeline" (the pipeline is one part of i
 Use when talking about the arrangement rather than the program.
 _Avoid_: "the platform", "the framework".
 
+**Engine**: Saffron as a versioned artifact that an operator deploys. A target repo
+carries `.saffron/` and never the engine (ADR 10).
+_Avoid_: "the package", "the app".
+
 **Control plane**: The trusted host-side half — intake, scheduler, supervisor, gate
 runner, packager, ledger. It decides what runs and whether the result is acceptable,
 and never executes model-authored code.
@@ -80,8 +84,13 @@ VM" (a cell now *has* one, so the phrase is ambiguous), "the hypervisor".
 A cell contains a worktree; it is not one.
 _Avoid_: "the checkout", "the clone", "the workspace", "the sandbox dir".
 
-**Operator**: The human. Singular, by design.
+**Operator**: The human. Singular per deployment, by design (ADR 10).
 _Avoid_: "the user", "the reviewer" (reviewing is one of several things they do).
+
+**Deployment**: One engine, one operator, one home, and the target repos that operator
+configures. It arbitrates that operator's credential, budget and review queue. Its
+host is the operator's Mac or a Linux host VM (ADR 10).
+_Avoid_: "the tenant", "the instance".
 
 **Target repo**: The repository a task modifies. Saffron is generic; the target repo
 holds the specs, the policy, the cell image, and the repo's own gates.

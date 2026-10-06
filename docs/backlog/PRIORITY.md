@@ -223,6 +223,11 @@ its descendants.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
+sequence crosses tiers, and each item keeps its own.
+First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
+**b-0569f7**, **b-da550a** and last **b-a9ec4b**.
+
 **Placed 2026-10-05**, from ADR 9: **b-a1d649**. No page says why a task ended
 where it did.
 
