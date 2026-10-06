@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from saffron import spec_review
 from saffron.end_review import END_LENSES
 from saffron.gates.contract import GateResult
 from saffron.intake import Spec
@@ -37,8 +38,7 @@ class StackLayer:
     state: str
     spent_usd: float
     budget_usd: float | None
-    peak_turns: int | None
-    max_turns: int | None
+    turns: tuple[tuple[str, int | None, int | None, bool], ...]
     pr_url: str | None
     size: str | None
     generation: int
@@ -106,7 +106,12 @@ def _build_layer(
 ) -> StackLayer:
     spec = specs.get(row["spec_id"])
     task_id = row["task_id"]
-    peak_turns = _peak_turns(ledger.attempts(task_id))
+    attempts = ledger.attempts(task_id)
+    spec_max_turns = spec.max_turns if spec is not None else None
+    turns = tuple(
+        (label, _peak_turns(attempts, phase), bound, flag)
+        for label, phase, bound, flag in _phase_table(spec_max_turns)
+    )
     predecessor_key = row["predecessor_key"]
     predecessor = (
         spec_id_by_key.get(predecessor_key) if predecessor_key is not None else None
@@ -118,8 +123,7 @@ def _build_layer(
         state=row["state"],
         spent_usd=ledger.task_spend(task_id),
         budget_usd=row["budget_usd"],
-        peak_turns=peak_turns,
-        max_turns=spec.max_turns if spec is not None else None,
+        turns=turns,
         pr_url=row["pr_url"],
         size=_last_size_summary(ledger.task_results(task_id)),
         generation=row["generation"],
@@ -129,8 +133,34 @@ def _build_layer(
     )
 
 
-def _peak_turns(attempts: list[sqlite3.Row]) -> int | None:
-    turns = [a["num_turns"] for a in attempts if a["num_turns"] is not None]
+def _phase_table(
+    spec_max_turns: int | None,
+) -> tuple[tuple[str, str, int | None, bool], ...]:
+    """The six attempt labels in page order: label, the attempt `phase` it
+    reads, its bound, and whether that bound caps each turn of a summed
+    session. The two session labels read their bound from `spec_review` at
+    call time, since those constants belong to that module."""
+    return (
+        ("SPEC_REVIEW", "SPEC_REVIEW", spec_review.SPEC_REVIEW_MAX_TURNS, True),
+        (
+            "SPEC_WRITING",
+            spec_review.WRITING_PHASE,
+            spec_review.SPEC_WRITER_MAX_TURNS,
+            True,
+        ),
+        ("IMPLEMENT", "IMPLEMENTING", spec_max_turns, False),
+        ("GATE ⇄ REPAIR", "REPAIRING", spec_max_turns, False),
+        ("REVIEW", "REVIEWING", spec_max_turns, False),
+        ("REBUT", "REBUTTING", spec_max_turns, False),
+    )
+
+
+def _peak_turns(attempts: list[sqlite3.Row], phase: str) -> int | None:
+    turns = [
+        a["num_turns"]
+        for a in attempts
+        if a["phase"] == phase and a["num_turns"] is not None
+    ]
     return max(turns) if turns else None
 
 
@@ -190,9 +220,8 @@ def _order_entry(entry: tuple[str, str, int | None]) -> str:
 def _layer_section(layer: StackLayer) -> str:
     title = html.escape(layer.title) if layer.title is not None else PLACEHOLDER
     budget = _money(layer.budget_usd)
-    turns = (
-        f"{layer.peak_turns if layer.peak_turns is not None else PLACEHOLDER} of "
-        f"{layer.max_turns if layer.max_turns is not None else PLACEHOLDER} turns"
+    turns_lines = "\n".join(
+        _turn_line(label, peak, bound, flag) for label, peak, bound, flag in layer.turns
     )
     size = html.escape(layer.size) if layer.size is not None else PLACEHOLDER
     pr_html = _link(layer.pr_url) if layer.pr_url else PLACEHOLDER
@@ -202,13 +231,24 @@ def _layer_section(layer: StackLayer) -> str:
 <p><code>{html.escape(layer.state)}</code> layer {layer.position}</p>
 <p>{title}</p>
 <p>${layer.spent_usd:.2f} of {budget}</p>
-<p>{turns}</p>
+{turns_lines}
 <p>generation {layer.generation}</p>
 <p>{predecessor}</p>
 <p>{pr_html}</p>
 <p>{size}</p>
 <p>end review <code>{layer.end_review}</code></p>
 </section>"""
+
+
+def _turn_line(label: str, peak: int | None, bound: int | None, flag: bool) -> str:
+    peak_text = peak if peak is not None else PLACEHOLDER
+    bound_text = bound if bound is not None else PLACEHOLDER
+    if flag:
+        return (
+            f"<p>{label} {peak_text} turns, extraction turns included, "
+            f"{bound_text} each</p>"
+        )
+    return f"<p>{label} {peak_text} of {bound_text} turns</p>"
 
 
 def _money(amount: float | None) -> str:

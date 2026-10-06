@@ -858,6 +858,88 @@ def test_a_spec_review_returns_its_tags_from_a_separate_extraction_turn():
     assert "const" not in fixes_schema
 
 
+def test_a_spec_review_session_names_each_model_its_turns_named():
+    """`SpecReviewSession.model` is every distinct model the session's own
+    turns named, first-seen order, comma-joined. Every return path carries
+    it, and `None` only when no turn named one (SA-0205)."""
+    from dataclasses import replace
+
+    def _named(attempt, model):
+        return replace(attempt, model=model)
+
+    _third = partial(_second, session_id="s-3")
+
+    # 1: a rejected window on the first turn.
+    double = _Agent([_named(_first(status="rejected", resets_at=9), "m-1")])
+    assert _run(double).model == "m-1"
+
+    # 2: a rejected window on the extraction turn.
+    double = _Agent(
+        [
+            _named(_first(), "m-a"),
+            _named(_second(status="rejected", resets_at=9), "m-b"),
+        ]
+    )
+    assert _run(double).model == "m-a,m-b"
+
+    # 3: a failed first turn, raised with an attempt naming a model.
+    double = _Agent(
+        [
+            implement.AgentFailed(
+                "cut",
+                _named(
+                    _attempt(text=J, cost=0.0625, session_id="s-1", num_turns=7), "m-3"
+                ),
+            )
+        ]
+    )
+    assert _run(double).model == "m-3"
+
+    # 4: a first turn with no session to extract from.
+    double = _Agent([_named(_first(session_id=None), "m-4")])
+    assert _run(double).model == "m-4"
+
+    # 5: a failed extraction turn, raised with an attempt naming a model.
+    double = _Agent(
+        [
+            _named(_first(), "m-5a"),
+            implement.AgentFailed(
+                "cut", _named(_attempt(cost=0.25, session_id="s-2"), "m-5b")
+            ),
+        ]
+    )
+    assert _run(double).model == "m-5a,m-5b"
+
+    # 6: a clean extraction, first-seen order against alphabetical.
+    double = _Agent([_named(_first(), "m-b"), _named(_second(), "m-a")])
+    assert _run(double).model == "m-b,m-a"
+
+    # 7: a clean re-ask, a name repeated across turns is kept once.
+    double = _Agent(
+        [
+            _named(_first(), "m-7"),
+            _named(_second(structured_output=None), "m-7"),
+            _named(_third(), "m-7b"),
+        ]
+    )
+    assert _run(double).model == "m-7,m-7b"
+
+    # 8: a re-ask still off the schema. The first turn's value is joined
+    # with an empty segment, and the second repeats one of its names.
+    double = _Agent(
+        [
+            _named(_first(), "m-a,,m-b"),
+            _named(_second(structured_output=None), "m-b"),
+            _named(_third(structured_output=None), "m-c"),
+        ]
+    )
+    assert _run(double).model == "m-a,m-b,m-c"
+
+    # 9: a second clean extraction whose turns name nothing at all.
+    double = _Agent([_first(), _second()])
+    assert _run(double).model is None
+
+
 def test_the_spec_review_system_prompt_fills_the_repos_declarations_into_cores_template(
     tmp_path, monkeypatch
 ):
@@ -1767,3 +1849,82 @@ def test_a_spec_writer_re_asks_once_when_its_extraction_is_not_the_schema():
     with pytest.raises(RuntimeError):
         _run_writer(double)
     assert len(double.calls) == 3
+
+
+def test_a_spec_writer_session_names_each_model_its_turns_named():
+    """`SpecWriterSession.model` is every distinct model the session's own
+    turns named, by the same rule as the review's. First-seen order,
+    comma-joined, `None` only when no turn named one (SA-0205)."""
+    from dataclasses import replace
+
+    def _named(attempt, model):
+        return replace(attempt, model=model)
+
+    _third = partial(_write_extract, session_id="s-3")
+
+    # 1: a rejected window on the first turn.
+    double = _Agent([_named(_draft(status="rejected", resets_at=9), "m-1")])
+    assert _run_writer(double).model == "m-1"
+
+    # 2: a rejected window on the extraction turn.
+    double = _Agent(
+        [
+            _named(_draft(), "m-a"),
+            _named(_write_extract(status="rejected", resets_at=9), "m-b"),
+        ]
+    )
+    assert _run_writer(double).model == "m-a,m-b"
+
+    # 3: a failed first turn, raised with an attempt naming a model.
+    double = _Agent(
+        [
+            implement.AgentFailed(
+                "cut", _named(_attempt(cost=0.5, session_id="s-1", num_turns=7), "m-3")
+            )
+        ]
+    )
+    assert _run_writer(double).model == "m-3"
+
+    # 4: a first turn with no session to extract from.
+    double = _Agent([_named(_draft(session_id=None), "m-4")])
+    assert _run_writer(double).model == "m-4"
+
+    # 5: a failed extraction turn, raised with an attempt naming a model.
+    double = _Agent(
+        [
+            _named(_draft(), "m-5a"),
+            implement.AgentFailed(
+                "cut", _named(_attempt(cost=0.25, session_id="s-2"), "m-5b")
+            ),
+        ]
+    )
+    assert _run_writer(double).model == "m-5a,m-5b"
+
+    # 6: a clean extraction, first-seen order against alphabetical.
+    double = _Agent([_named(_draft(), "m-b"), _named(_write_extract(), "m-a")])
+    assert _run_writer(double).model == "m-b,m-a"
+
+    # 7: a clean re-ask, a name repeated across turns is kept once.
+    double = _Agent(
+        [
+            _named(_draft(), "m-7"),
+            _named(_write_extract(structured_output=None), "m-7"),
+            _named(_third(), "m-7b"),
+        ]
+    )
+    assert _run_writer(double).model == "m-7,m-7b"
+
+    # 8: a re-ask still off the schema. The first turn's value is joined
+    # with an empty segment, and the second repeats one of its names.
+    double = _Agent(
+        [
+            _named(_draft(), "m-a,,m-b"),
+            _named(_write_extract(structured_output=None), "m-b"),
+            _named(_third(structured_output=None), "m-c"),
+        ]
+    )
+    assert _run_writer(double).model == "m-a,m-b,m-c"
+
+    # 9: a second clean extraction whose turns name nothing at all.
+    double = _Agent([_draft(), _write_extract()])
+    assert _run_writer(double).model is None

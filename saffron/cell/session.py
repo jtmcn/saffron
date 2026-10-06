@@ -272,10 +272,7 @@ def _close_attempt(
     ledger.close_attempt(
         attempt_id,
         session_id=attempt.session_id if attempt else None,
-        # Not yet available: AttemptResult carries no model, because the
-        # runner's result event doesn't either (agent_runner.py) — only an
-        # assistant message does, and nothing captures it from there yet.
-        model=None,
+        model=attempt.model if attempt else None,
         # A turn that produced no result at all is not a turn that succeeded,
         # and $0.00 here is measured absence, not a crash's zeroed fields.
         subtype=attempt.subtype if attempt else "error",

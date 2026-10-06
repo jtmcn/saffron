@@ -43,6 +43,7 @@ def _forget_seen_message_ids():
     has no such set, and a fixture that raised there would error every test
     in the file instead of failing the new ones."""
     getattr(runner, "_seen_assistant_message_ids", set()).clear()
+    getattr(runner, "_seen_models", []).clear()
 
 
 def _assistant(*blocks):
@@ -107,6 +108,7 @@ def test_the_result_event_carries_what_the_supervisor_bounds_on():
         "terminal_reason": "completed",
         "is_error": False,
         "structured_output": None,
+        "model": None,
         "input_tokens": 200,
         "output_tokens": 80,
         "cache_read_input_tokens": 500,
@@ -911,3 +913,95 @@ def test_deltas_a_window_apart_each_reach_the_host(monkeypatch):
     monkeypatch.setattr(runner, "_PROGRESS_EVERY_S", 0.0, raising=False)
     _recorded, types = _run_stream(monkeypatch, [_stream_event()] * 3)
     assert types == ["progress"] * 3
+
+
+# --- SA-0205: the result event names each model the turn's assistant
+# messages named ---
+
+
+def _init_msg(model: str) -> SimpleNamespace:
+    # The configured model travels here. Only an assistant message's own
+    # `model` feeds `events()`'s own `model` key.
+    return SimpleNamespace(subtype="init", data={"model": model})
+
+
+def _assistant_msg(model: str, *, message_id: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(content=[], model=model, message_id=message_id)
+
+
+def _result_event_model(monkeypatch, messages: list) -> str | None:
+    async def _query(prompt, options):
+        for message in messages:
+            yield message
+
+    lines: list[dict] = []
+    _run_runner_in_process(
+        monkeypatch,
+        _stub_module(_query),
+        json.dumps({"prompt": "p", "options": {}}),
+        lambda line: lines.append(json.loads(line)),
+    )
+    (result,) = [e for e in lines if e["type"] == "result"]
+    return result["model"]
+
+
+def test_the_result_event_names_each_model_the_turns_assistant_messages_named(
+    monkeypatch,
+):
+    """`model` is the turn's own distinct assistant-message models, first-seen
+    order, comma-joined. Only `<synthetic>` and empty names are skipped. They
+    are never sorted and never leaked between the five turns this drives
+    through `main` in one process. Never the `init` event's configured model."""
+    result_msg = _result_msg()
+
+    # Turn 1 kills sorting, a kept empty name and a skip wider than `<synthetic>`.
+    # The empty name sits last, and `<synthetic>-x` is kept.
+    turn1 = [
+        _init_msg("init-model-1"),
+        _assistant_msg("m-b"),
+        _assistant_msg("<synthetic>"),
+        _assistant_msg("m-a"),
+        _assistant_msg("<synthetic>-x"),
+        _assistant_msg(""),
+        result_msg,
+    ]
+    assert _result_event_model(monkeypatch, turn1) == "m-b,m-a,<synthetic>-x"
+
+    # Turn 2: one model, sent by two assistant messages sharing a message_id.
+    # Kept once, not "m-x,m-x".
+    turn2 = [
+        _init_msg("init-model-2"),
+        _assistant_msg("m-x", message_id="dup-1"),
+        _assistant_msg("m-x", message_id="dup-1"),
+        result_msg,
+    ]
+    assert _result_event_model(monkeypatch, turn2) == "m-x"
+
+    # Turn 3: none at all. Init, a partial message, and the result.
+    turn3 = [_init_msg("init-model-3"), _stream_event(), result_msg]
+    assert _result_event_model(monkeypatch, turn3) is None
+
+    # Turn 4: a synthetic and an empty name alone.
+    turn4 = [
+        _init_msg("init-model-4"),
+        _assistant_msg("<synthetic>"),
+        _assistant_msg(""),
+        result_msg,
+    ]
+    assert _result_event_model(monkeypatch, turn4) is None
+
+    # Turn 5 comes last, after the synthetic-alone turn. A leaked model would
+    # show up here instead of a clean "m-solo".
+    turn5 = [_init_msg("init-model-5"), _assistant_msg("m-solo"), result_msg]
+    assert _result_event_model(monkeypatch, turn5) == "m-solo"
+
+
+def _result_msg(session_id: str = "s-model") -> SimpleNamespace:
+    return SimpleNamespace(
+        subtype="success",
+        num_turns=1,
+        session_id=session_id,
+        total_cost_usd=0.01,
+        terminal_reason="completed",
+        is_error=False,
+    )

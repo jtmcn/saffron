@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -28,8 +29,15 @@ def _tests(summary: str) -> GateResult:
     return GateResult(gate="tests", status="pass", tool="pytest 8.0", summary=summary)
 
 
-def _attempt(ledger: Ledger, task_id: int, turns: int, cost: float, results) -> None:
-    attempt_id = ledger.open_attempt(task_id)
+def _attempt(
+    ledger: Ledger,
+    task_id: int,
+    turns: int,
+    cost: float,
+    results,
+    phase: str = "IMPLEMENTING",
+) -> None:
+    attempt_id = ledger.open_attempt(task_id, phase=phase)
     for result in results:
         ledger.record_gate_result(result, attempt_id=attempt_id)
     ledger.close_attempt(
@@ -140,8 +148,11 @@ def _build_batches(tmp_path: Path):
             branch=f"saffron/{spec_id}",
             budget_usd=float(budget),
         )
+        # TE-4's one batch B attempt is opened in REPAIRING rather than the
+        # default IMPLEMENTING, so its IMPLEMENT line reads absent.
+        attempt_phase = "REPAIRING" if spec_id == "TE-4" else "IMPLEMENTING"
         for turns, cost, results in attempts:
-            _attempt(ledger, task_id, turns, cost, results)
+            _attempt(ledger, task_id, turns, cost, results, phase=attempt_phase)
         if end == "READY_FOR_REVIEW":
             assert sha is not None and pr is not None
             ledger.set_task_package(task_id, end, f"saffron/{spec_id}", sha, pr)
@@ -157,6 +168,29 @@ def _build_batches(tmp_path: Path):
 
     # Neither read live: baked into `TE-9`'s and `TE-4`'s layers already.
     ledger.record_push(te7, "e" * 40)
+
+    # Phase-tagged attempts the turns witnesses read. Each phase that holds
+    # several has its peak between two lower ones, so first and last both miss.
+    _attempt(ledger, te7, 150, 0.0, [], phase="SPEC_REVIEW")
+    _attempt(ledger, te7, 200, 0.0, [], phase="REPLAY")
+    _attempt(ledger, te9, 12, 0.0, [], phase="SPEC_REVIEW")
+    _attempt(ledger, te9, 31, 0.0, [], phase="SPEC_REVIEW")
+    _attempt(ledger, te9, 7, 0.0, [], phase="SPEC_REVIEW")
+    _attempt(ledger, te9, 0, 0.0, [], phase="SPEC_WRITING")
+    _attempt(ledger, te9, 4, 0.0, [], phase="REPAIRING")
+    _attempt(ledger, te9, 27, 0.0, [], phase="REPAIRING")
+    _attempt(ledger, te9, 3, 0.0, [], phase="REPAIRING")
+    _attempt(ledger, te9, 6, 0.0, [], phase="REVIEWING")
+    _attempt(ledger, te9, 38, 0.0, [], phase="REVIEWING")
+    _attempt(ledger, te9, 2, 0.0, [], phase="REVIEWING")
+    _attempt(ledger, te9, 8, 0.0, [], phase="REBUTTING")
+    _attempt(ledger, te9, 45, 0.0, [], phase="REBUTTING")
+    _attempt(ledger, te9, 5, 0.0, [], phase="REBUTTING")
+    _attempt(ledger, te4_1, 5, 0.0, [], phase="SPEC_WRITING")
+    _attempt(ledger, te4_1, 9, 0.0, [], phase="SPEC_WRITING")
+    _attempt(ledger, te4_1, 2, 0.0, [], phase="SPEC_WRITING")
+    ledger.open_attempt(te6_2, phase="REBUTTING")
+
     ledger.set_task_state(te9, "REJECTED")
 
     run8 = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_b)
@@ -218,8 +252,6 @@ def _assert_layer(actual, expected: tuple) -> None:
         "state",
         "spent_usd",
         "budget_usd",
-        "peak_turns",
-        "max_turns",
         "pr_url",
         "size",
         "generation",
@@ -271,8 +303,6 @@ def test_the_stack_view_reads_each_layer_of_one_batch_in_position_order(tmp_path
             "READY_FOR_REVIEW",
             5.50,
             18.0,
-            44,
-            90,
             "https://github.com/o/r/pull/207",
             SIZE_900,
             0,
@@ -287,8 +317,6 @@ def test_the_stack_view_reads_each_layer_of_one_batch_in_position_order(tmp_path
             "REJECTED",
             5.00,
             20.0,
-            50,
-            140,
             "https://github.com/o/r/pull/209",
             SIZE_1180,
             0,
@@ -303,8 +331,6 @@ def test_the_stack_view_reads_each_layer_of_one_batch_in_position_order(tmp_path
             "READY_FOR_REVIEW",
             6.10,
             16.0,
-            61,
-            70,
             "https://github.com/o/r/pull/206",
             None,
             0,
@@ -319,8 +345,6 @@ def test_the_stack_view_reads_each_layer_of_one_batch_in_position_order(tmp_path
             "READY_FOR_REVIEW",
             0.75,
             12.0,
-            10,
-            None,
             "https://github.com/o/r/pull/204",
             SIZE_300,
             1,
@@ -353,8 +377,7 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
         state="READY_FOR_REVIEW",
         spent_usd=7.25,
         budget_usd=20.00,
-        peak_turns=44,
-        max_turns=140,
+        turns=(("IMPLEMENT", 44, 140, False),),
         pr_url="https://github.com/o/r/pull/209",
         size=SIZE_1180,
         generation=1,
@@ -371,8 +394,7 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
         state="READY_FOR_REVIEW",
         spent_usd=0.0,
         budget_usd=None,
-        peak_turns=None,
-        max_turns=None,
+        turns=(("IMPLEMENT", None, None, False),),
         pr_url=None,
         size=None,
         generation=0,
@@ -420,7 +442,7 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
     assert "&lt;b&gt;Nine&lt;/b&gt;" in nine_section
     assert "<b>Nine</b>" not in nine_section
     assert "$7.25 of $20.00" in nine_section
-    assert "44 of 140 turns" in nine_section
+    assert "IMPLEMENT 44 of 140 turns" in nine_section
     assert "generation 1" in nine_section
     assert f"on TE-7 at {'7' * 40}" in nine_section
     assert "end review <code>error</code>" in nine_section
@@ -434,7 +456,7 @@ def test_the_stack_view_renders_a_section_for_the_batch_and_each_layer():
     assert "<code>READY_FOR_REVIEW</code> layer 5" in four_section
     assert four_section.count(P) >= 7
     assert f"of {P}" in four_section
-    assert f"{P} of {P} turns" in four_section
+    assert f"IMPLEMENT {P} of {P} turns" in four_section
     assert f"on {P}" in four_section
     assert "end review <code>not_reached</code>" in four_section
     assert "None" not in rendered
@@ -521,3 +543,88 @@ def test_the_queue_page_carries_the_newest_batchs_stack_view_and_only_that(tmp_p
     empty_dir.mkdir()
     assert write_stack_view(empty_dir, ledger, specs) is None
     assert list(empty_dir.iterdir()) == []
+
+
+def _layer_section_text(rendered: str, spec_id: str) -> str:
+    marker = f"<h2>{spec_id}</h2>"
+    for section in rendered.split("<section"):
+        if marker in section:
+            return section
+    raise AssertionError(f"no layer section for {spec_id}")
+
+
+def _turn_lines(section: str) -> list[str]:
+    """Each `<p>` line holding ' turns', in order, `P` for `PLACEHOLDER` and
+    `X` for 'turns, extraction turns included,'."""
+    lines = re.findall(r"<p>([^<]*)</p>", section)
+    return [
+        line.replace(PLACEHOLDER, "P").replace("turns, extraction turns included,", "X")
+        for line in lines
+        if " turns" in line
+    ]
+
+
+def test_each_phase_reads_its_own_peak_beside_its_own_bound(tmp_path, monkeypatch):
+    from saffron import spec_review
+    from saffron.report.stack import render_stack, stack_view
+
+    monkeypatch.setattr(spec_review, "SPEC_REVIEW_MAX_TURNS", 77)
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_MAX_TURNS", 133)
+
+    ledger, specs, _batch_a, batch_b = _build_batches(tmp_path)
+    view = stack_view(ledger, batch_b, specs)
+    assert view is not None
+    rendered = render_stack(view)
+
+    assert _turn_lines(_layer_section_text(rendered, "TE-7")) == [
+        "SPEC_REVIEW 150 X 77 each",
+        "SPEC_WRITING P X 133 each",
+        "IMPLEMENT 44 of 90 turns",
+        "GATE ⇄ REPAIR P of 90 turns",
+        "REVIEW P of 90 turns",
+        "REBUT P of 90 turns",
+    ]
+    assert _turn_lines(_layer_section_text(rendered, "TE-9")) == [
+        "SPEC_REVIEW 31 X 77 each",
+        "SPEC_WRITING 0 X 133 each",
+        "IMPLEMENT 50 of 140 turns",
+        "GATE ⇄ REPAIR 27 of 140 turns",
+        "REVIEW 38 of 140 turns",
+        "REBUT 45 of 140 turns",
+    ]
+
+
+def test_a_phase_with_no_closed_attempt_reads_absent_never_zero(tmp_path, monkeypatch):
+    from saffron import spec_review
+    from saffron.report.stack import render_stack, stack_view
+
+    monkeypatch.setattr(spec_review, "SPEC_REVIEW_MAX_TURNS", 77)
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_MAX_TURNS", 133)
+
+    ledger, specs, _batch_a, batch_b = _build_batches(tmp_path)
+    view = stack_view(ledger, batch_b, specs)
+    assert view is not None
+    rendered = render_stack(view)
+
+    assert _turn_lines(_layer_section_text(rendered, "TE-6")) == [
+        "SPEC_REVIEW P X 77 each",
+        "SPEC_WRITING P X 133 each",
+        "IMPLEMENT 61 of 70 turns",
+        "GATE ⇄ REPAIR P of 70 turns",
+        "REVIEW P of 70 turns",
+        "REBUT P of 70 turns",
+    ]
+    assert _turn_lines(_layer_section_text(rendered, "TE-4")) == [
+        "SPEC_REVIEW P X 77 each",
+        "SPEC_WRITING 9 X 133 each",
+        "IMPLEMENT P of P turns",
+        "GATE ⇄ REPAIR 10 of P turns",
+        "REVIEW P of P turns",
+        "REBUT P of P turns",
+    ]
+
+    te9_lines = _turn_lines(_layer_section_text(rendered, "TE-9"))
+    assert "SPEC_WRITING 0 X 133 each" in te9_lines
+
+    te7_lines = _turn_lines(_layer_section_text(rendered, "TE-7"))
+    assert not any("200" in line for line in te7_lines)

@@ -63,6 +63,19 @@ SPEC_REVIEW_TIMEOUT_S = 2 * session.TURN_TIMEOUT_S
 # missing, unreadable or non-positive reset is shaped to this.
 UNREADABLE_RESET = 1
 
+
+def _merge_models(current: str | None, addition: str | None) -> str | None:
+    """`current` plus every name in `addition` not already present, in
+    first-seen order, comma-joined or `None` (SA-0205). `addition` is one
+    turn's own joined `AttemptResult.model`, split on `,` here. An empty
+    segment, from an empty name or a trailing comma, names nothing."""
+    names = [] if current is None else current.split(",")
+    for name in [] if addition is None else addition.split(","):
+        if name and name not in names:
+            names.append(name)
+    return ",".join(names) if names else None
+
+
 # A file name, not a loaded template: `spec_review_system_prompt` reads it
 # fresh from `prompts_dir` on every call.
 SPEC_REVIEW_PROMPT = "spec-review.md"
@@ -112,7 +125,8 @@ class SpecReviewSession:
     limit, and is the one field a `wait` route is driven by
     (`spec_review_route`). `session_id` and `num_turns` default for every
     caller that predates them, and feed the attempt row the batch opens
-    around the review."""
+    around the review. `model` is every distinct model this session's own
+    turns named, first-seen order, comma-joined (SA-0205)."""
 
     text: str
     cost_usd: float
@@ -120,6 +134,7 @@ class SpecReviewSession:
     resets_at: int | None = None
     session_id: str | None = None
     num_turns: int = 0
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -317,14 +332,16 @@ def run_spec_review(
     cost = 0.0
     turns = 0
     sid: str | None = None
+    model: str | None = None
 
     def _measure(attempt: implement.AttemptResult | None) -> None:
-        nonlocal cost, turns, sid
+        nonlocal cost, turns, sid, model
         if attempt is None:
             return
         cost += attempt.cost_usd_est
         turns += attempt.num_turns
         sid = attempt.session_id or sid
+        model = _merge_models(model, attempt.model)
 
     def _rejected(attempt: implement.AttemptResult) -> SpecReviewSession:
         return SpecReviewSession(
@@ -334,6 +351,7 @@ def run_spec_review(
             resets_at=_reset(attempt.rate_limit_resets_at),
             session_id=sid,
             num_turns=turns,
+            model=model,
         )
 
     try:
@@ -351,6 +369,7 @@ def run_spec_review(
             resets_at=None,
             session_id=sid,
             num_turns=turns,
+            model=model,
         )
 
     if session.terminal_for_rate_limit(first.rate_limit_status):
@@ -365,6 +384,7 @@ def run_spec_review(
             resets_at=None,
             session_id=None,
             num_turns=turns,
+            model=model,
         )
 
     extract_options = options | {
@@ -398,6 +418,7 @@ def run_spec_review(
                 resets_at=None,
                 session_id=sid,
                 num_turns=turns,
+                model=model,
             )
         if session.terminal_for_rate_limit(got.rate_limit_status):
             _measure(got)
@@ -421,6 +442,7 @@ def run_spec_review(
             resets_at=None,
             session_id=sid,
             num_turns=turns,
+            model=model,
         )
 
     # One re-ask, as run_lens makes (§5.3 says two). The CLI already retries
@@ -441,6 +463,7 @@ def run_spec_review(
             resets_at=None,
             session_id=sid,
             num_turns=turns,
+            model=model,
         )
     return SpecReviewSession(
         text="",
@@ -449,6 +472,7 @@ def run_spec_review(
         resets_at=None,
         session_id=sid,
         num_turns=turns,
+        model=model,
     )
 
 
@@ -565,7 +589,9 @@ class SpecWriterSession:
 
     `text` is the extraction turn's validated `spec` field, stripped, plus
     one newline. Neither turn's own `text` feeds it. `spec_sha` is
-    `hash_artifact` of it, or `None` beside empty text."""
+    `hash_artifact` of it, or `None` beside empty text. `model` is every
+    distinct model this session's own turns named, first-seen order,
+    comma-joined (SA-0205)."""
 
     text: str
     cost_usd: float
@@ -574,6 +600,7 @@ class SpecWriterSession:
     session_id: str | None
     num_turns: int
     spec_sha: str | None
+    model: str | None = None
 
 
 def _writer_session(
@@ -584,6 +611,7 @@ def _writer_session(
     resets_at: int | None,
     session_id: str | None,
     turns: int,
+    model: str | None = None,
 ) -> SpecWriterSession:
     return SpecWriterSession(
         text=text,
@@ -593,6 +621,7 @@ def _writer_session(
         session_id=session_id,
         num_turns=turns,
         spec_sha=hash_artifact(text) if text else None,
+        model=model,
     )
 
 
@@ -621,14 +650,16 @@ def run_spec_writer(
     cost = 0.0
     turns = 0
     sid: str | None = None
+    model: str | None = None
 
     def _measure(attempt: implement.AttemptResult | None) -> None:
-        nonlocal cost, turns, sid
+        nonlocal cost, turns, sid, model
         if attempt is None:
             return
         cost += attempt.cost_usd_est
         turns += attempt.num_turns
         sid = attempt.session_id or sid
+        model = _merge_models(model, attempt.model)
 
     def _rejected(attempt: implement.AttemptResult) -> SpecWriterSession:
         return _writer_session(
@@ -638,6 +669,7 @@ def run_spec_writer(
             resets_at=_reset(attempt.rate_limit_resets_at),
             session_id=sid,
             turns=turns,
+            model=model,
         )
 
     try:
@@ -655,6 +687,7 @@ def run_spec_writer(
             resets_at=None,
             session_id=sid,
             turns=turns,
+            model=model,
         )
 
     if session.terminal_for_rate_limit(first.rate_limit_status):
@@ -669,6 +702,7 @@ def run_spec_writer(
             resets_at=None,
             session_id=None,
             turns=turns,
+            model=model,
         )
 
     extract_options = options | {
@@ -702,6 +736,7 @@ def run_spec_writer(
                 resets_at=None,
                 session_id=sid,
                 turns=turns,
+                model=model,
             )
         if session.terminal_for_rate_limit(got.rate_limit_status):
             _measure(got)
@@ -731,6 +766,7 @@ def run_spec_writer(
             resets_at=None,
             session_id=sid,
             turns=turns,
+            model=model,
         )
 
     # One re-ask, as run_spec_review makes (§5.3 says two). The CLI already
@@ -751,7 +787,14 @@ def run_spec_writer(
             resets_at=None,
             session_id=sid,
             turns=turns,
+            model=model,
         )
     return _writer_session(
-        text="", cost=cost, error=error, resets_at=None, session_id=sid, turns=turns
+        text="",
+        cost=cost,
+        error=error,
+        resets_at=None,
+        session_id=sid,
+        turns=turns,
+        model=model,
     )

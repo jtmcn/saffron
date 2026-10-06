@@ -146,9 +146,9 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 -- `phase` is the state the task was in when the turn started, and `n` numbers
--- within it (§4.1). `close_attempt` now writes `model`, but `session.py`'s
--- own call site still passes `None`: the runner's result event does not
--- carry it, and only assistant messages do (agent_runner.py).
+-- within it (§4.1). `model` names the models an attempt's assistant messages
+-- named, comma-joined in first-seen order. The CLI's own `<synthetic>` marker
+-- is no model and is skipped (SA-0205).
 CREATE TABLE IF NOT EXISTS attempts (
     attempt_id      INTEGER PRIMARY KEY,
     task_id         INTEGER NOT NULL REFERENCES tasks(task_id),
