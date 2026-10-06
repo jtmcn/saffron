@@ -66,8 +66,8 @@ LiveState = Literal["IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"]
 # fewer, and the idle bound (runtime.IDLE_TIMEOUT_S) still catches a stall sooner.
 TURN_TIMEOUT_S = 900.0
 
-# Measured: about 1.4 times the slowest finished long session, SA-0168 at 10.8
-# seconds a turn. Capped at the library's hour.
+# Measured: about 1.4 times the slowest finished long session, SA-0168 at
+# 10.8 seconds a turn. The cap below bounds only the scaled part.
 WALL_SECONDS_PER_TURN = 15.0
 WALL_CAP_S = 3600.0
 
@@ -2098,10 +2098,22 @@ def _drive_cell(
         if on_state is not None:
             on_state("IMPLEMENTING")
 
+        # The headroom: every declared gate's own baseline duration, summed
+        # and converted to seconds. A None, or an undeclared gate, adds nothing.
+        headroom_s = (
+            sum(
+                result.duration_ms or 0
+                for result in baseline.results
+                if result.gate in policy.gates
+            )
+            / 1000.0
+        )
+
         # Scaled to this spec's own turn ceiling, floored and capped by the
-        # constants above.
-        turn_wall_s = min(
-            WALL_CAP_S, max(TURN_TIMEOUT_S, WALL_SECONDS_PER_TURN * spec.max_turns)
+        # constants above, with the headroom above added on top of both.
+        turn_wall_s = (
+            min(WALL_CAP_S, max(TURN_TIMEOUT_S, WALL_SECONDS_PER_TURN * spec.max_turns))
+            + headroom_s
         )
 
         # Bound once, here, so no turn — plan, implement, repair, review or
