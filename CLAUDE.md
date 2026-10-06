@@ -64,6 +64,7 @@ uv run saffron watch SA-NNNN               # follow a task's event log; --no-fol
 uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
 uv run saffron fold --repo <mirror> --into <ledger.db>    # rebuild a ledger from the record
 uv run saffron chains                      # compare Q4 with the checked walk over every merged task
+uv run saffron serve [--port 8765]         # the run record view at http://127.0.0.1:8765/, read-only (ADR 9)
 ```
 
 `saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a
