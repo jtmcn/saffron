@@ -67,7 +67,7 @@ LiveState = Literal["IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"]
 TURN_TIMEOUT_S = 900.0
 
 # Measured: about 1.4 times the slowest finished long session, SA-0168 at
-# 10.8 seconds a turn. The cap below bounds only the scaled part.
+# 10.8 seconds a turn. The cap, the library's hour, bounds only the scaled part.
 WALL_SECONDS_PER_TURN = 15.0
 WALL_CAP_S = 3600.0
 
@@ -2099,7 +2099,7 @@ def _drive_cell(
             on_state("IMPLEMENTING")
 
         # The headroom: every declared gate's own baseline duration, summed
-        # and converted to seconds. A None, or an undeclared gate, adds nothing.
+        # and converted to seconds. A `None`, or an undeclared gate, adds nothing.
         headroom_s = (
             sum(
                 result.duration_ms or 0

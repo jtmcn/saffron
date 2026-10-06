@@ -5090,7 +5090,9 @@ def test_every_turn_carries_a_wall_scaled_to_the_specs_max_turns(monkeypatch, tm
     policy naming no gate adds nothing, even against a baseline result for
     a gate it never declared."""
     failing = Failure(file="a.py", code="E501", message="too long")
-    undeclared = [GateResult(gate="extra", status="pass", duration_ms=500000)]
+    undeclared = [
+        GateResult(gate="extra", status="pass", tool="ruff 1.0", duration_ms=500000)
+    ]
     for max_turns, wall in [(40, 900.0), (130, 1950.0), (300, 3600.0)]:
         cell = _stub_the_runtime(
             monkeypatch, commits=[0, 1], suites=(undeclared, _results(failing), [])
@@ -5109,8 +5111,8 @@ def test_every_turn_carries_a_wall_scaled_to_the_specs_max_turns(monkeypatch, tm
 
 
 def _headroom_policy_and_baseline():
-    """Three declared gates, two blocking and one advisory, the shape this
-    spec's headroom sums over. The baseline carries 60.5s, no duration, and
+    """Backlog item b-23a149: three declared gates, two blocking and one
+    advisory, the shape the headroom sums over. The baseline carries 60.5s, no duration, and
     27.5s for them, plus an undeclared `witness` result at 500s that must
     not count."""
     policy = (
