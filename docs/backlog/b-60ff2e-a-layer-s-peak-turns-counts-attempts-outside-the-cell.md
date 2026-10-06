@@ -1,11 +1,12 @@
 ---
 id: b-60ff2e
 title: A layer's peak turns counts spec review and writing attempts, so the page can read 150 of 90 turns
-status: open
+status: done
+closed: 2026-10-05
 tier: 2
 filed: 2026-10-03
 specs: [SA-0152, SA-0208]
-prs: [650]
+prs: [650, 687]
 commits: []
 cites: [§6]
 related: [b-792ab2]
@@ -33,3 +34,4 @@ names each phase's peak beside its own bound.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 26.
+- 2026-10-05: done by `SA-0208` (#687), from stage 2's first stack batch. The stack page prints each phase's peak beside its own bound.

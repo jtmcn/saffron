@@ -216,6 +216,11 @@ unproven, and REVIEW still passes. A refused API connection ends a task
 whose subject is a test gets no measured wrong version. REVIEW's line still
 counts each one expressed.
 
+**Placed 2026-10-05**, from stage 2's stack batches: **b-3c7ce9**, then
+**b-60a399**. A stack finish retires each spec but closes no item, so this
+repo's suite goes red. A seeding failure marks a layer missed and refuses
+its descendants.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-05**, from ADR 9: **b-a1d649**. No page says why a task ended
@@ -389,6 +394,11 @@ REVIEW's re-prompt is written twice.
 `saffron watch` shows nothing while a spec is reviewed or written, since
 those sessions log no events.
 
+**Placed 2026-10-05**, from stage 2's stack batches: **b-e0e1cf**,
+**b-0a08bf**, then **b-593d50**. A stack batch cannot build on an unmerged
+layer from an earlier batch. `queue --stack` never says what `--budget`
+admits every layer. A cut resumed turn undercounts its own spend.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -482,6 +492,11 @@ has no vocabulary test. Four documentation lines lag the stack.
 before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
 cannot read a two-hyphen ordinal. Git in a cell was refused a loose object
 once.
+
+**Placed 2026-10-05**, from stage 2's stack batches: **b-937778**,
+**b-050733**, then **b-0efc31**. The loop driver's `history` counts every
+phase's turns against `max_turns`. Specs use bare "run" for a turn. Nothing
+compares the host's usage keys to the runner's.
 
 **Placed 2026-10-05**, from ADR 9: **b-b51c9c**. The run record view shows a
 night only once it ends.

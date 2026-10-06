@@ -171,6 +171,80 @@ def test_folding_twice_into_one_ledger_does_not_double_the_rows(tmp_path, record
     into.close()
 
 
+def test_the_fold_keeps_each_attempts_cost_floor(tmp_path, record):
+    """`Ledger.close_attempt` takes `cost_floor_usd_est`, `None` by default,
+    and carries it on the `attempt_closed` fact into
+    `attempts.cost_floor_usd_est`. A fold reproduces it. A fact written
+    before this change carries no such key, and folds to null rather than
+    raising (SA-0206, backlog b-209696)."""
+    source = Ledger(tmp_path / "source.db", record=record)
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", policy_sha="p")
+    run_id = source.create_run(repo_id, base_sha="a" * 40)
+    task_id = source.create_task(
+        run_id, spec_id="SA-0099", spec_sha="s" * 64, branch="b"
+    )
+
+    a1 = source.open_attempt(task_id)
+    source.close_attempt(
+        a1,
+        session_id="s1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+        cost_floor_usd_est=0.4,
+    )
+    a2 = source.open_attempt(task_id)
+    source.close_attempt(
+        a2,
+        session_id="s2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.0,
+        cost_floor_usd_est=0.0,
+    )
+    a3 = source.open_attempt(task_id)
+    source.close_attempt(
+        a3,
+        session_id="s3",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.0,
+    )
+    # A fourth attempt, closed by a fact built the way one was before this
+    # change: no `cost_floor_usd_est` key at all, not even a null one.
+    a4 = source.open_attempt(task_id)
+    owner = source._attempt_of(a4, "close")
+    legacy = source._build_fact(
+        task_id,
+        "attempt_closed",
+        {
+            "phase": owner["phase"],
+            "n": owner["n"],
+            "session_id": "s4",
+            "model": None,
+            "subtype": "success",
+            "terminal_reason": None,
+            "num_turns": 1,
+            "cost_usd_est": 0.05,
+        },
+    )
+    source._commit_and_append(legacy)
+
+    into = Ledger(tmp_path / "into.db")
+    fold(record, into)
+
+    def _floors(ledger):
+        return [r["cost_floor_usd_est"] for r in ledger.attempts(task_id)]
+
+    assert _floors(source) == [0.4, 0.0, None, None]
+    assert _floors(into) == [0.4, 0.0, None, None]
+    source.close()
+    into.close()
+
+
 def test_the_fold_keeps_error_and_fail_apart(tmp_path, record):
     source = Ledger(tmp_path / "source.db", record=record)
     repo_id = source.upsert_repo("saffron", "/o", "/m.git", policy_sha="p")

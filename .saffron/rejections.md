@@ -1667,3 +1667,40 @@ the critic did not raise.
 - `SA-0203` and `SA-0204` (#676, #678): three sentences in forbidden files
   still say only `READY_FOR_REVIEW` is packaged.
   **Bucket 3**, conventions. **Open:** b-edcab7.
+
+## 2026-10-05, `SA-0205` to `SA-0208` (stage 2's stack batches 13 and 14, #687, #689, #696 and #697)
+
+The end review raised nothing on any of the four layers. Every line here is a
+seat finding the in-cell critic and the end review both passed.
+
+- `SA-0208` (#687): only two of six phases held more than one closed attempt,
+  so a phase-specific first or last pick read the right peak elsewhere.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #687.
+- `SA-0208` (#687): the phase table's docstring justified a call-time read by
+  a test's monkeypatch.
+  **Bucket 3**, conventions. **Landed:** a review commit on #687.
+- `SA-0205` (#689): the batch witness drove single model names, so either
+  `run_stack_batch` site could keep the first of a joined value.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #689.
+- `SA-0205` (#689): the runner witness sent no name near `<synthetic>` that
+  must be kept, so a wider skip passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #689.
+- `SA-0205` (#689): comments and test labels used bare "run" for one turn,
+  copied from the spec's own prose.
+  **Bucket 3**, conventions. **Landed:** a review commit on #689. The spec
+  side is filed with the stage's backlog.
+- `SA-0205` (#689): a comment said every field falls back to `None` with no
+  attempt, though three fall back to `"error"`, 0 and 0.0.
+  **Bucket 3**, conventions. **Landed:** a review commit on #689.
+- `SA-0206` (#696): the floor witness priced no `thinking` or `tool_use`
+  event, the kinds that carry most counts, so dropping both passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #696.
+- `SA-0206` (#696): a comment said a result's usage was priced by the caller.
+  No caller prices it, and its counts are cumulative over the turn.
+  **Bucket 3**, conventions. **Landed:** a review commit on #696.
+- `SA-0206` (#696): a test docstring said a ledger without the new column
+  keeps recording turns. Its `close_attempt` raises on the missing column.
+  **Bucket 3**, conventions. **Landed:** a review commit on #696.
+- `SA-0207` (#697): every undeclared baseline result had no tool, so a filter
+  on `result.tool` passed for the declared-gate filter.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #697.

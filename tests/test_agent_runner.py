@@ -258,6 +258,54 @@ def test_the_counts_for_one_message_id_reach_the_log_once():
     assert "cache_creation_input_tokens" not in second_event
 
 
+def test_the_event_carrying_a_messages_usage_names_its_model():
+    """`model` lands beside the per-message counts on `evts[0]`, as the
+    message named it, and only when the counts themselves go on (SA-0206).
+    No other block of the message carries it, a repeat of a seen id carries
+    neither, and a usage-less message carries neither either."""
+    usage = {
+        "input_tokens": 3,
+        "cache_read_input_tokens": 1,
+        "cache_creation_input_tokens": 2,
+    }
+    two_blocks = SimpleNamespace(
+        content=[SimpleNamespace(text="a"), SimpleNamespace(text="b")],
+        model="m-a",
+        message_id="id-1",
+        usage=usage,
+    )
+    (first, second) = runner.events(two_blocks)
+    assert first["model"] == "m-a"
+    assert "model" not in second
+
+    repeat = SimpleNamespace(
+        content=[SimpleNamespace(text="c")],
+        model="m-a",
+        message_id="id-1",
+        usage=usage,
+    )
+    (repeated,) = runner.events(repeat)
+    assert "model" not in repeated
+
+    other = SimpleNamespace(
+        content=[SimpleNamespace(text="d")],
+        model="m-b",
+        message_id="id-2",
+        usage=usage,
+    )
+    (named,) = runner.events(other)
+    assert named["model"] == "m-b"
+
+    no_usage = SimpleNamespace(
+        content=[SimpleNamespace(text="e")],
+        model="m-c",
+        message_id="id-3",
+        usage=None,
+    )
+    (unusaged,) = runner.events(no_usage)
+    assert "model" not in unusaged
+
+
 def test_two_assistant_messages_with_no_id_each_carry_their_own_counts():
     """`message_id` is `str | None`, and absence is not a key. Keyed on `None`
     or on `""`, only the first id-less message would carry counts — and it

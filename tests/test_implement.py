@@ -1100,3 +1100,242 @@ def test_a_turn_the_provider_served_no_token_is_told_apart_from_one_it_served():
             )
         assert raised.value.attempt is not None, label
         assert raised.value.attempt.provider_served_nothing is expected, label
+
+
+def test_the_price_table_holds_sa_0161s_fitted_rates():
+    """`PRICES_PER_MTOK` carries SA-0161's own fitted rate for
+    `claude-sonnet-5`. Pinned as literals, so a swapped or rescaled
+    rate is caught here, not only in a substituted table."""
+    assert implement.PRICES_PER_MTOK == {
+        "claude-sonnet-5": {
+            "input_tokens": 3.0,
+            "cache_read_input_tokens": 0.30,
+            "cache_creation_input_tokens": 6.0,
+        },
+    }
+
+
+_TWO_MODEL_PRICES = {
+    "m-a": {
+        "input_tokens": 2.0,
+        "cache_read_input_tokens": 0.5,
+        "cache_creation_input_tokens": 4.0,
+    },
+    "m-b": {
+        "input_tokens": 10.0,
+        "cache_read_input_tokens": 1.0,
+        "cache_creation_input_tokens": 20.0,
+    },
+}
+
+# Text, tool_result, passthrough, thinking and tool_use, in that order. The
+# `m-c`, `<synthetic>` and no-model events price at nothing.
+_EXPECTED_FLOOR = 10.0 + 7.2 + 1.0 + 3.0 + 2.0
+
+
+def _priced_event_lines() -> list[str]:
+    """One stream's worth of non-result events. `m-a` names the `init`
+    event's own configured model, never read for pricing. Every priced
+    event names `m-b`, one of each kind, so a floor priced at the `init`
+    model or dropping any event kind disagrees with `_EXPECTED_FLOOR`."""
+    return [
+        json.dumps({"type": "system", "subtype": "init", "data": {"model": "m-a"}}),
+        json.dumps(
+            {
+                "type": "text",
+                "model": "m-b",
+                "input_tokens": 1_000_000,
+                "cache_read_input_tokens": None,
+            }
+        ),
+        json.dumps(
+            {
+                "type": "tool_result",
+                "model": "m-b",
+                "input_tokens": 500_000,
+                "cache_read_input_tokens": 200_000,
+                "cache_creation_input_tokens": 100_000,
+            }
+        ),
+        json.dumps(
+            {
+                "type": "passthrough",
+                "model": "m-b",
+                "cache_creation_input_tokens": 50_000,
+            }
+        ),
+        json.dumps({"type": "thinking", "model": "m-b", "input_tokens": 300_000}),
+        json.dumps(
+            {"type": "tool_use", "model": "m-b", "cache_read_input_tokens": 2_000_000}
+        ),
+        json.dumps({"type": "thinking", "model": "m-c", "input_tokens": 99_999_999}),
+        json.dumps(
+            {
+                "type": "tool_use",
+                "model": "<synthetic>",
+                "input_tokens": 99_999_999,
+            }
+        ),
+        json.dumps({"type": "passthrough", "input_tokens": 99_999_999}),
+    ]
+
+
+def test_a_turn_with_no_result_event_carries_the_floor_its_usage_prices(monkeypatch):
+    """A turn that ends with no `result` event carries `cost_floor_usd_est`,
+    the sum of every non-result event's own priced counts. Each prices at
+    its own model, never a neighbour's, never the init event's, and never
+    raises on a null or absent count (SA-0206). Four endings, all a
+    no-result failure: the idle bound, the wall bound, an unbounded exit
+    1, and an unbounded exit 0."""
+    monkeypatch.setattr(implement, "PRICES_PER_MTOK", _TWO_MODEL_PRICES)
+    lines = _priced_event_lines()
+
+    for kwargs, label in (
+        (dict(timed_out=True, bound="idle"), "idle"),
+        (dict(timed_out=True, bound="wall"), "wall"),
+        (dict(returncode=1), "returncode=1"),
+        (dict(returncode=0), "returncode=0"),
+    ):
+        with pytest.raises(implement.AgentFailed, match="no result event") as raised:
+            implement.run_agent(
+                "cell",
+                prompt="p",
+                options={},
+                spec_id="SY-1",
+                exec_stream=_stream(*lines, **kwargs),
+                reap_cell=_no_reap,
+            )
+        assert raised.value.attempt is not None, label
+        assert raised.value.attempt.cost_floor_usd_est == pytest.approx(
+            _EXPECTED_FLOOR
+        ), label
+
+    # A stream holding only the `init` event prices nothing at all.
+    with pytest.raises(implement.AgentFailed, match="no result event") as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            exec_stream=_stream(lines[0], returncode=1),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.cost_floor_usd_est == 0.0
+
+    # A stream with no lines at all carries no counted event either, and
+    # still reads as `0.0`, never `None`.
+    with pytest.raises(implement.AgentFailed, match="no result event") as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            exec_stream=_stream(returncode=1),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.cost_floor_usd_est == 0.0
+    assert raised.value.attempt.cost_usd_est == 0.0
+
+
+def test_a_cut_turn_charges_the_larger_of_its_floor_and_the_last_figure(monkeypatch):
+    """`cost_usd_est` on the no-result path is `max(floor, last_cost_usd)`,
+    and `cost_floor_usd_est` stays the floor whichever figure wins
+    (SA-0206)."""
+    monkeypatch.setattr(implement, "PRICES_PER_MTOK", _TWO_MODEL_PRICES)
+    line = json.dumps({"type": "text", "model": "m-b", "input_tokens": 1_000_000})
+    floor = 10.0  # 1_000_000 * m-b's input rate (10.0) / 1e6
+
+    for last_cost_usd, label in ((0.0, "below"), (2.0, "below"), (50.0, "above")):
+        with pytest.raises(implement.AgentFailed) as raised:
+            implement.run_agent(
+                "cell",
+                prompt="p",
+                options={},
+                spec_id="SY-1",
+                last_cost_usd=last_cost_usd,
+                exec_stream=_stream(line, returncode=1),
+            )
+        attempt = raised.value.attempt
+        assert attempt is not None, label
+        assert attempt.cost_floor_usd_est == pytest.approx(floor), label
+        assert attempt.cost_usd_est == pytest.approx(max(floor, last_cost_usd)), label
+
+    # The two equal: either reads as the charge.
+    with pytest.raises(implement.AgentFailed) as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            last_cost_usd=floor,
+            exec_stream=_stream(line, returncode=1),
+        )
+    attempt = raised.value.attempt
+    assert attempt is not None
+    assert attempt.cost_floor_usd_est == pytest.approx(floor)
+    assert attempt.cost_usd_est == pytest.approx(floor)
+
+
+def test_a_turn_that_reached_its_result_event_carries_no_floor(monkeypatch):
+    """`cost_floor_usd_est` is `None` on every attempt built from a
+    `result` event. That turn's cost path is unchanged. A failed turn
+    reporting zero still falls back to the last good figure, never to a
+    floor (SA-0206)."""
+    monkeypatch.setattr(implement, "PRICES_PER_MTOK", _TWO_MODEL_PRICES)
+    priced = json.dumps({"type": "text", "model": "m-b", "input_tokens": 1_000_000})
+
+    clean = implement.run_agent(
+        "cell",
+        prompt="p",
+        options={},
+        spec_id="SY-1",
+        exec_stream=_stream(priced, _result_line()),
+    )
+    assert clean.cost_floor_usd_est is None
+
+    with pytest.raises(implement.AgentFailed) as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            last_cost_usd=3.0,
+            exec_stream=_stream(
+                priced,
+                _result_line(subtype="error_during_execution", total_cost_usd=0.5),
+            ),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.cost_floor_usd_est is None
+    assert raised.value.attempt.cost_usd_est == 0.5
+
+    with pytest.raises(implement.AgentFailed) as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            last_cost_usd=3.0,
+            exec_stream=_stream(
+                priced,
+                _result_line(subtype="error_during_execution", total_cost_usd=0),
+            ),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.cost_floor_usd_est is None
+    assert raised.value.attempt.cost_usd_est == 3.0
+
+    with pytest.raises(implement.AgentFailed) as raised:
+        implement.run_agent(
+            "cell",
+            prompt="p",
+            options={},
+            spec_id="SY-1",
+            exec_stream=_stream(
+                priced,
+                _result_line(subtype="error_during_execution", total_cost_usd=0),
+            ),
+        )
+    assert raised.value.attempt is not None
+    assert raised.value.attempt.cost_floor_usd_est is None
+    assert raised.value.attempt.cost_usd_est == 0.0

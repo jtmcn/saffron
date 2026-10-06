@@ -1,11 +1,11 @@
 ---
 id: b-3732ef
 title: Every repair turn resumes the implementer's session on the default model, and the ledger cannot say which model ran
-status: open
+status: partial
 tier: 3
 filed: 2026-09-21
 specs: [SA-0205]
-prs: []
+prs: [689]
 commits: []
 cites: ["§5.4"]
 related: [b-e1afbb]
@@ -43,3 +43,4 @@ The variant ships only if it turns more tasks green per dollar.
 - 2026-09-21: filed. Recording the model can go through a cell. The
   comparison spends real money on live runs, so it runs by hand from
   `docs/evidence/scripts/`.
+- 2026-10-05: partial. `SA-0205` (#689) makes every attempt row record its model, from stage 2's first stack batch. The rerun of `EXHAUSTED` tasks on a stronger model is still open.

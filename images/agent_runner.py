@@ -158,11 +158,14 @@ def events(message: Any) -> list[dict[str, Any]]:
             usage = getattr(message, "usage", None)
             message_id = getattr(message, "message_id", None)
             unseen = message_id is None or message_id not in _seen_assistant_message_ids
+            model = getattr(message, "model", None)
             if isinstance(usage, dict) and evts and unseen:
                 evts[0].update(_usage_counts(usage, _STEP_USAGE_KEYS))
+                # Verbatim, so a host-side price table can key on this
+                # exact string (SA-0206). `<synthetic>` goes on as sent too.
+                evts[0]["model"] = model
                 if message_id is not None:
                     _seen_assistant_message_ids.add(message_id)
-            model = getattr(message, "model", None)
             if model and model != "<synthetic>" and model not in _seen_models:
                 _seen_models.append(model)
             return evts

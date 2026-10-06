@@ -1,11 +1,12 @@
 ---
 id: b-23a149
 title: The wall bound cut an IMPLEMENT session during its own full-suite run, which GATE repeats
-status: open
+status: done
+closed: 2026-10-05
 tier: 2
 filed: 2026-10-03
 specs: [SA-0170, SA-0207]
-prs: [647]
+prs: [647, 697]
 commits: []
 cites: [§4.3, §5.3]
 related: [b-36b551, b-d4e015, b-209696]
@@ -38,3 +39,4 @@ asks for. Either way, a session is not cut in a check GATE repeats.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 26.
+- 2026-10-05: done by `SA-0207` (#697), from stage 2's second stack batch. The wall now adds the declared gates' baseline time on top of the scaled wall.

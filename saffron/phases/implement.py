@@ -109,6 +109,9 @@ class AttemptResult:
     # The runner's joined `model` (SA-0205), never re-split. `None` on the
     # no-result path, or a result whose `model` was `null` or absent.
     model: str | None = None
+    # The no-result path's priced floor (SA-0206). `None` on every attempt
+    # built from a `result` event, where the reported cost is trusted.
+    cost_floor_usd_est: float | None = None
 
 
 # The four usage counts a result event carries (images/agent_runner.py).
@@ -119,6 +122,39 @@ _TOKEN_USAGE_KEYS = (
     "cache_read_input_tokens",
     "cache_creation_input_tokens",
 )
+
+# The three per-message counts a non-result event's first block names
+# (agent_runner.py's `_STEP_USAGE_KEYS`), output tokens left off (SA-0090).
+_STEP_USAGE_KEYS = (
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+# Dollars per million tokens, by model and `_STEP_USAGE_KEYS` name.
+# SA-0161's fit (2026-09-25), the only real price values in this module.
+PRICES_PER_MTOK: dict[str, dict[str, float]] = {
+    "claude-sonnet-5": {
+        "input_tokens": 3.0,
+        "cache_read_input_tokens": 0.30,
+        "cache_creation_input_tokens": 6.0,
+    },
+}
+
+
+def _priced_usd(event: dict) -> float:
+    """What one non-result event's own per-message counts are worth, priced
+    at its own `model`. Never a neighbour's, never the table's first
+    entry, and never a raise on a count the event does not carry."""
+    rates = PRICES_PER_MTOK.get(event.get("model"))
+    if not rates:
+        return 0.0
+    total = 0.0
+    for key in _STEP_USAGE_KEYS:
+        count = event.get(key)
+        if count is not None:
+            total += count * rates.get(key, 0.0)
+    return total / 1_000_000
 
 
 def agent_options(
@@ -276,6 +312,9 @@ def run_agent(
     errors: list[str] = []
     result: dict = {}
     rate_limit: dict = {}
+    # The floor a turn cut before its result event still charges (SA-0206),
+    # summed from every non-result event's own priced counts as they arrive.
+    floor_contributions: list[float] = []
 
     def _on_line(line: str) -> bool:
         """True once the result event has been seen — §4.3's completion signal,
@@ -309,6 +348,9 @@ def run_agent(
             # Last one wins: the CLI emits on transition, so the final state is
             # the one the next turn would start under.
             rate_limit.update(event)
+        if event.get("type") != "result":
+            # A result event's counts are cumulative over the turn, never one step's.
+            floor_contributions.append(_priced_usd(event))
         # The dict, verbatim, under `event` — never re-rendered to a string
         # here. `describe()` is the one place it becomes prose, and it is
         # called downstream of this line, not inside it.
@@ -361,9 +403,9 @@ def run_agent(
         else "errored"
     )
     if not result:
-        # An idle or wall kill takes the runner mid-stream, so no result event
-        # ever carries the cost fields. The turn still spent what the last good
-        # figure saw, and dropping it is how the ceiling stops counting (§4.1).
+        # No result event means no reported cost (§4.1). The floor is what the
+        # stream spent before it ended, and the carry keeps the ceiling counting.
+        floor_usd_est = sum(floor_contributions, 0.0)
         raise AgentFailed(
             f"the agent produced no result event, {how}: {detail}",
             AttemptResult(
@@ -371,12 +413,13 @@ def run_agent(
                 subtype="error",
                 terminal_reason=None,
                 num_turns=0,
-                cost_usd_est=last_cost_usd,
+                cost_usd_est=max(floor_usd_est, last_cost_usd),
                 text="".join(text),
                 is_error=True,
                 bound=done.bound,
                 rate_limit_status=rate_limit.get("status"),
                 rate_limit_resets_at=rate_limit.get("resets_at"),
+                cost_floor_usd_est=floor_usd_est,
             ),
         )
 

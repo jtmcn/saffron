@@ -92,6 +92,49 @@ def test_every_recorded_turn_writes_the_model_its_attempt_names(tmp_path):
     assert [row["model"] for row in rows] == ["m-return", "m-failed", None, None]
 
 
+def test_every_recorded_turn_writes_the_floor_its_attempt_carries(tmp_path):
+    """`record_attempts` closes each turn's row with its attempt's
+    `cost_floor_usd_est`, on a return and on a raised `AgentFailed` carrying
+    one. A floor of `0.0` is written as `0.0`. A turn whose attempt carries
+    no floor, and one that raises with no attempt, write `None` (SA-0206)."""
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "origin", str(tmp_path / "m.git"), None)
+    run_id = ledger.create_run(repo_id, "a" * 40)
+    task_id = ledger.create_task(run_id, "SY-1", "b" * 64, "branch")
+
+    base = implement.AttemptResult(
+        session_id="s",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+
+    def _close_one(outcome) -> None:
+        def _agent(*_a, **_k):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        wrapped = session.record_attempts(_agent, ledger=ledger, task_id=task_id)
+        with contextlib.suppress(implement.AgentFailed):
+            wrapped()
+
+    # 1: a returned turn keeps its floor.
+    _close_one(replace(base, cost_floor_usd_est=1.5))
+    # 2: a raised AgentFailed keeps its attempt's own floor.
+    _close_one(implement.AgentFailed("boom", replace(base, cost_floor_usd_est=2.5)))
+    # 3: a floor of 0.0 is written as 0.0, never as None.
+    _close_one(replace(base, cost_floor_usd_est=0.0))
+    # 4: a returned turn whose attempt carries no floor writes None.
+    _close_one(replace(base, cost_floor_usd_est=None))
+    # 5: a raised AgentFailed with no attempt at all writes None.
+    _close_one(implement.AgentFailed("boom", None))
+
+    rows = ledger.attempts(task_id)
+    assert [row["cost_floor_usd_est"] for row in rows] == [1.5, 2.5, 0.0, None, None]
+
+
 def test_the_loop_stops_when_there_are_no_new_failures():
     decision = session.repair_decision(attempt=1, max_attempts=4, new=[], previous=[])
     assert decision == "green"
@@ -5043,11 +5086,16 @@ def test_every_turn_carries_a_wall_scaled_to_the_specs_max_turns(monkeypatch, tm
     """Backlog item b-bf0c91: the wall scales with the spec's own `max_turns`.
     It is floored and capped, so a long spec is cut by its turn ceiling and
     not by a flat 900 seconds. Driven through a wall cut, the salvage turn it
-    buys, a repair turn and REVIEW's own lenses, all sharing one binding."""
+    buys, a repair turn and REVIEW's own lenses, all sharing one binding. A
+    policy naming no gate adds nothing, even against a baseline result for
+    a gate it never declared."""
     failing = Failure(file="a.py", code="E501", message="too long")
+    undeclared = [
+        GateResult(gate="extra", status="pass", tool="ruff 1.0", duration_ms=500000)
+    ]
     for max_turns, wall in [(40, 900.0), (130, 1950.0), (300, 3600.0)]:
         cell = _stub_the_runtime(
-            monkeypatch, commits=[0, 1], suites=([], _results(failing), [])
+            monkeypatch, commits=[0, 1], suites=(undeclared, _results(failing), [])
         )
         _drive(
             monkeypatch,
@@ -5060,6 +5108,90 @@ def test_every_turn_carries_a_wall_scaled_to_the_specs_max_turns(monkeypatch, tm
         assert "too long" in cell.turns[3]
         assert len(cell.turns) > 4
         assert cell.timeouts == [wall] * len(cell.timeouts)
+
+
+def _headroom_policy_and_baseline():
+    """Backlog item b-23a149: three declared gates, two blocking and one
+    advisory, the shape the headroom sums over. The baseline carries 60.5s, no duration, and
+    27.5s for them, plus an undeclared `witness` result at 500s that must
+    not count."""
+    policy = (
+        "gates:\n"
+        "  lint: { blocking: true }\n"
+        "  types: { blocking: true }\n"
+        "  format: { blocking: false }\n"
+    )
+    baseline = [
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", duration_ms=60500),
+        GateResult(gate="types", status="pass", tool="ruff 1.0", duration_ms=None),
+        GateResult(gate="format", status="pass", tool="ruff 1.0", duration_ms=27500),
+        GateResult(gate="witness", status="skip", duration_ms=500000),
+    ]
+    return policy, ("lint", "types", "format"), baseline
+
+
+def test_the_bound_turns_carry_the_declared_gates_baseline_time_on_top_of_their_wall(
+    monkeypatch, tmp_path
+):
+    """The wall gains the baseline's declared-gate time on top of the scaled
+    and capped figure. 88.0 seconds of headroom turns 900, 1950 and 3600
+    into 988.0, 2038.0 and 3688.0."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    policy, gate_names, baseline = _headroom_policy_and_baseline()
+    for max_turns, wall in [(40, 988.0), (130, 2038.0), (300, 3688.0)]:
+        cell = _stub_the_runtime(
+            monkeypatch, commits=[0, 1], suites=(baseline, _results(failing), [])
+        )
+        _drive(
+            monkeypatch,
+            tmp_path / f"case-{max_turns}",
+            cell=cell,
+            spec=_spec(max_turns=max_turns),
+            turns=[_turn(_block(_PLAN)), _wall_cut_turn(), _turn(), _turn()],
+            policy=policy,
+            gates=gate_names,
+        )
+        assert cell.turns[2] == implement.SALVAGE_PROMPT
+        assert "too long" in cell.turns[3]
+        assert len(cell.turns) > 4
+        assert cell.timeouts == [wall] * len(cell.timeouts)
+
+
+def test_a_session_inside_the_suites_headroom_ends_at_its_turn_ceiling(
+    monkeypatch, tmp_path
+):
+    """Under the same baseline and policy, 130 turns at 15.5s each, 2015
+    seconds, stays inside the 2038 second wall and ends at its own ceiling.
+    At 16s a turn it is cut by the wall instead, which now names 2038."""
+    policy, gate_names, baseline = _headroom_policy_and_baseline()
+
+    def _cut(seconds_per_turn, name):
+        cell = _stub_the_runtime(monkeypatch, suites=(baseline,))
+        raw: list[str] = []
+        _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            spec=_spec(max_turns=130),
+            turns=[
+                _turn(_block(_PLAN)),
+                implement.AgentFailed(
+                    "max turns", replace(_cut_off_turn(), num_turns=130)
+                ),
+            ],
+            policy=policy,
+            gates=gate_names,
+            real_run_agent=raw,
+            turn_seconds=seconds_per_turn,
+        )
+        return next(line for line in cell.watched if "the session failed" in line)
+
+    ceiling_line = _cut(15.5, "ceiling")
+    assert "ceiling of 130 turns" in ceiling_line
+    assert "wall" not in ceiling_line
+
+    wall_line = _cut(16.0, "wall")
+    assert "wall bound, given 2038s" in wall_line
 
 
 def test_a_long_session_ends_at_its_turn_ceiling_not_the_wall(monkeypatch, tmp_path):
