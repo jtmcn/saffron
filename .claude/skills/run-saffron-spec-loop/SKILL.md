@@ -136,10 +136,14 @@ it scores (run 13). The scores are informational and nothing reads them yet. A n
 loop carries on.
 
 ```bash
-env TYPESAFE_API_KEY="$(bash -c 'source ~/.secrets; printf %s "$TYPESAFE_API_KEY"')" \
-  uv run .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind spec-review \
-  --report <saved review> --commit <the commit SHA the reviewer read>
+sed -n 's/^export \(TYPESAFE_API_KEY=\)/\1/p' ~/.secrets > <scratch>/jev.env   # once per loop
+chmod 600 <scratch>/jev.env
+uv run --env-file <scratch>/jev.env .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN \
+  --kind spec-review --report <saved review> --commit <the commit SHA the reviewer read>
 ```
+
+The worktree guard refuses `source ~/.secrets`, and a user-settings allow rule
+permits exactly that `sed` line. Delete `jev.env` when the loop ends.
 
 **Only a spec that has not run.** Editing one whose pull request is already
 open — which is what an operator wants to do after reading its review — stops
@@ -243,8 +247,10 @@ whether the pull made the order stale.
 ### a. Start the cell in the background
 
 ```bash
-PYTHONUNBUFFERED=1 SAFFRON_ALLOW_HOST_PROCESS=<listener> env CLAUDE_CODE_OAUTH_TOKEN="$(bash -c 'source ~/.secrets; printf %s "$CLAUDE_CODE_OAUTH_TOKEN"')" \
-  uv run saffron cell .saffron/specs/SA-NNNN-*.md --repo . > /tmp/SA-NNNN.log 2>&1
+sed -n 's/^export \(CLAUDE_CODE_OAUTH_TOKEN=\)/\1/p' ~/.secrets > <scratch>/cell.env   # once per loop
+chmod 600 <scratch>/cell.env
+PYTHONUNBUFFERED=1 SAFFRON_ALLOW_HOST_PROCESS=<listener> uv run --env-file <scratch>/cell.env \
+  saffron cell .saffron/specs/SA-NNNN-*.md --repo . > /tmp/SA-NNNN.log 2>&1
 ```
 
 `<listener>` is the process `docs/HOST-HARDENING.md` lets this host tolerate.
