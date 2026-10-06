@@ -4,7 +4,7 @@ title: "The run record has no page that says why a task ended where it did"
 status: open
 tier: 2
 filed: 2026-10-05
-specs: [SA-0215, SA-0216, SA-0217]
+specs: [SA-0215, SA-0216, SA-0217, SA-0218]
 prs: [688]
 commits: []
 cites: [§6, §6.2]
