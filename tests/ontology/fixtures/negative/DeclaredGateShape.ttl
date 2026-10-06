@@ -1,0 +1,7 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix : <urn:software-factory:data:> .
+
+# A declared contract gate with no blocking level.
+:p a factory:Policy ; factory:declaresGate :g .
+:g a factory:Gate, factory:ContractGate ; factory:role factory:lint .
+factory:lint a factory:GateRole .

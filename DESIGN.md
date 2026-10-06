@@ -1312,6 +1312,14 @@ You approve in GitHub by marking PACKAGE's draft ready, and `saffron reconcile` 
 
 Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents *file* collisions but not *semantic* ones — two tasks can each pass while jointly breaking an invariant — and stacked branches (§4.2) make this more likely, not less. The train catches it at machine cost rather than at yours.
 
+### 6.2 The run record view
+
+The queue says which task needs you, and the view says why it ended there.
+`saffron serve` renders batches, tasks, phases, attempts and gate results from
+a view projection of the ledger (ADR 9). A gate result opens onto the failure
+lines its gate reported, read from the ledger and capped at 200. Diffs stay on
+GitHub, and the page writes nothing.
+
 ---
 
 ## 7. Failure modes and countermeasures
@@ -1770,3 +1778,4 @@ the ADR records, so a hand edit here is discarded.
 | 6 | Work larger than one cell is a composite spec, reviewed once at the joins | accepted | 2, 4, 12, 15, 17, 25, 26, 28, 29, 34, 38, 40, 45, 48, 49, 50 |
 | 7 | A stack batch runs the spec DAG into one stack and writes its own follow-ups | accepted | 2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62 |
 | 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 4, 6, 9, 15, 17, 18, 28, 29, 30, 34, 41, 43, 47, 50, 51, 61 |
+| 9 | A read-only view renders the run record from the graph | accepted | 25, 61 |

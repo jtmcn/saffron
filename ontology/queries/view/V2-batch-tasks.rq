@@ -1,0 +1,22 @@
+# V2 — the tasks of one batch, bound as ?batch, with state, risk, cost and PR.
+# SQL equivalent: tasks joined to runs and summed attempts. SQL is not
+# preferable here: the state is a vocabulary term, and the page links it.
+PREFIX factory: <urn:software-factory:ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?batch ?task ?spec ?state ?risk ?pr (SUM(?cost) AS ?costUsd)
+WHERE {
+  ?task a factory:Task ; factory:riskTier ?risk ; prov:wasInformedBy ?run .
+  ?run prov:wasInformedBy ?batch .
+  # One state per task: a view task states both, and a UNION would count it twice.
+  OPTIONAL { ?task factory:inState ?now }
+  OPTIONAL { ?task factory:endedInState ?end }
+  BIND(COALESCE(?now, ?end) AS ?state)
+  FILTER(BOUND(?state))
+  OPTIONAL { ?task rdfs:label ?spec }
+  OPTIONAL { ?task rdfs:seeAlso ?pr }
+  OPTIONAL { ?phase prov:wasInformedBy ?task . ?attempt factory:withinPhase ?phase ;
+             factory:costUsdEst ?cost }
+}
+GROUP BY ?batch ?task ?spec ?state ?risk ?pr
+ORDER BY ?batch ?task

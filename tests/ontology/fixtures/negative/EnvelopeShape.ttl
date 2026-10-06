@@ -6,7 +6,8 @@
 # The scope gate asserting over an envelope. An envelope is a reading bound and
 # is never enforced against a diff.
 :env a factory:Envelope, earl:TestSubject .
-:gr a factory:GateResult ; earl:assertedBy :g ; earl:mode earl:automatic ; earl:subject :env .
+:gr a factory:GateResult ; earl:assertedBy :g ; earl:mode earl:automatic ; earl:subject :env ;
+    earl:result [ earl:outcome earl:passed ] .
 :g a factory:Gate, factory:ContractGate ; factory:role factory:lint ;
    factory:blockingAt factory:alwaysBlocking .
 factory:lint a factory:GateRole .

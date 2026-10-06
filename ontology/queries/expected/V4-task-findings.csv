@@ -1,0 +1,4 @@
+task,finding,lens,severity,claim,verdict
+urn:software-factory:data:task-t1,urn:software-factory:data:finding-t1-1,urn:software-factory:data:lens-correctness,urn:software-factory:ns#blocker,the retry loop never re-reads the lock,confirmed
+urn:software-factory:data:task-t1,urn:software-factory:data:finding-t1-2,urn:software-factory:data:lens-contract,urn:software-factory:ns#concern,,
+urn:software-factory:data:task-t3,urn:software-factory:data:finding-t3-1,urn:software-factory:data:lens-blast,urn:software-factory:ns#blocker,,

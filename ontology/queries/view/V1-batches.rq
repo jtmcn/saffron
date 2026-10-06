@@ -1,0 +1,16 @@
+# V1 — every batch, newest first, with its window, stop reason and task count.
+# SQL equivalent: a join of batches, runs and tasks with a GROUP BY. SQL is not
+# preferable here: the page reads one graph, and a second reader would split it.
+PREFIX factory: <urn:software-factory:ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+SELECT ?batch ?started ?ended ?because ?budget ?spent (COUNT(?task) AS ?tasks)
+WHERE {
+  ?batch a factory:Batch ; factory:budgetUsd ?budget .
+  OPTIONAL { ?batch prov:startedAtTime ?started }
+  OPTIONAL { ?batch prov:endedAtTime ?ended }
+  OPTIONAL { ?batch factory:endedBecause ?because }
+  OPTIONAL { ?batch factory:spentUsdEst ?spent }
+  OPTIONAL { ?run prov:wasInformedBy ?batch . ?task prov:wasInformedBy ?run ; a factory:Task }
+}
+GROUP BY ?batch ?started ?ended ?because ?budget ?spent
+ORDER BY DESC(?started) ?batch

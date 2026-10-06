@@ -5,3 +5,6 @@
 
 # declaresGate pointing at something that is not a gate.
 :p a factory:Policy ; factory:declaresGate :not-a-gate .
+# A blocking level, so only the class check fires and not DeclaredGateShape.
+:not-a-gate factory:blockingAt factory:advisory .
+factory:advisory a factory:BlockingLevel .

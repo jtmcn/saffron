@@ -1,0 +1,24 @@
+# V3 — one task's attempts, bound as ?task, each with its gate outcomes.
+# SQL equivalent: attempts left-joined to gate_results and a failures count.
+# SQL is not preferable here: error and fail stay apart as two EARL outcomes.
+PREFIX factory: <urn:software-factory:ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
+SELECT ?task ?phase ?phaseName ?attempt ?n ?started ?ended ?turns ?cost ?result ?gate ?outcome ?failures
+WHERE {
+  ?phase prov:wasInformedBy ?task .
+  ?attempt factory:withinPhase ?phase ; factory:n ?n .
+  OPTIONAL { ?phase rdfs:label ?phaseName }
+  OPTIONAL { ?attempt prov:startedAtTime ?started }
+  OPTIONAL { ?attempt prov:endedAtTime ?ended }
+  OPTIONAL { ?attempt factory:numTurns ?turns }
+  OPTIONAL { ?attempt factory:costUsdEst ?cost }
+  OPTIONAL {
+    ?suite prov:wasInformedBy ?attempt .
+    ?result prov:wasGeneratedBy ?suite ; earl:assertedBy ?gate ;
+            earl:result [ earl:outcome ?outcome ] .
+    OPTIONAL { ?result factory:failureCount ?failures }
+  }
+}
+ORDER BY ?task ?started ?n ?gate

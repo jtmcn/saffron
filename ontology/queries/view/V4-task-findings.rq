@@ -1,0 +1,16 @@
+# V4 — one task's findings, bound as ?task, blockers first.
+# SQL equivalent: a filter on findings by task_id. SQL is preferable on its own;
+# it is a graph query so the page has one reader and the lens is a term.
+PREFIX factory: <urn:software-factory:ns#>
+PREFIX prov:    <http://www.w3.org/ns/prov#>
+PREFIX earl:    <http://www.w3.org/ns/earl#>
+SELECT ?task ?finding ?lens ?severity ?claim ?verdict
+WHERE {
+  ?finding a factory:Finding ; factory:severity ?severity ; earl:assertedBy ?lens ;
+           earl:subject ?diff .
+  ?attempt prov:generated ?diff ; factory:withinPhase ?phase .
+  ?phase prov:wasInformedBy ?task .
+  OPTIONAL { ?finding factory:claim ?claim }
+  OPTIONAL { ?finding factory:verdict ?verdict }
+}
+ORDER BY ?task ?severity ?finding

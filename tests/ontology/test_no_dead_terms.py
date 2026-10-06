@@ -10,7 +10,7 @@ saying otherwise is the part that is cheap to fake. Delete it; do not comment it
 import re
 
 import pyoxigraph as ox
-from ontology_paths import NS, QUERIES, SHAPES, VOCABULARY
+from ontology_paths import NS, QUERIES, SHAPES, VIEW_QUERIES, VOCABULARY
 
 # The hyphen is load-bearing: `no-network` is a gate role, and a regex that
 # stopped at the hyphen read its shape reference as a mention of `no`.
@@ -44,7 +44,7 @@ def declared_terms() -> set[str]:
 
 def referenced_terms() -> set[str]:
     names = set()
-    for path in [*QUERIES, *SHAPES]:
+    for path in [*QUERIES, *VIEW_QUERIES, *SHAPES]:
         names |= terms_in(path.read_text())
     return names
 

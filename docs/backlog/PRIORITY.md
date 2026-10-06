@@ -218,6 +218,9 @@ counts each one expressed.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-05**, from ADR 9: **b-a1d649**. No page says why a task ended
+where it did.
+
 **Placed 2026-10-02**, from the spec loop's run 26: **b-209696**. A session
 a bound cuts still records $0.00. Run 26 split it from b-d4e015, which fixed
 the kill itself.
@@ -475,6 +478,9 @@ has no vocabulary test. Four documentation lines lag the stack.
 before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
 cannot read a two-hyphen ordinal. Git in a cell was refused a loose object
 once.
+
+**Placed 2026-10-05**, from ADR 9: **b-b51c9c**. The run record view shows a
+night only once it ends.
 
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
