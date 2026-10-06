@@ -6,7 +6,7 @@ priority: 2
 depends_on: [SA-0218]
 consumes:
   - saffron/view/server.py:make_server
-estimated_lines: 531
+estimated_lines: 543
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -49,17 +49,22 @@ acceptance:
       batch's page, labelled with the batch id, or the text `none`. `pull
       request` is a link to its URL, or `none`. `cost` is the sum of the
       task's attempts' `costUsdEst`, each attempt counted once however many
-      gate results it has, rounded to cents. The witness drives a batched
-      task in an end state at `elevated`, whose four attempts carry three
-      gate results, none, one, and no cost at all. It drives an unbatched
-      task in flight at `standard` with no pull request, and a decoy task
-      with its own batch, cost and pull request.
+      gate results it has, rounded to cents. A task with no costed attempt
+      shows `0.00`. The witness drives a batched task in an end state at
+      `elevated`, whose five attempts carry three gate results, none, one,
+      no cost at all, and a cost equal to another attempt's. Its batch id
+      differs from every task id in the fixture. It drives an unbatched
+      task in flight at `standard` with no pull request and two costed
+      attempts, and asserts its total. It drives a decoy task with its own
+      batch, cost and pull request.
     witness: tests/test_view_server.py::test_a_task_page_heads_with_its_state_risk_batch_pull_request_and_cost
     wrong_versions:
       - The summary is read from `V2` alone, so the unbatched task's terms are empty.
       - The summary is read from `V5` alone, so the batched task's terms are empty.
       - "`V2` and `V5` run unbound, so the page shows the decoy task's batch and pull request."
       - The cost sums `V3`'s rows, so an attempt counts once per gate result.
+      - The total is read from `V2`'s `?costUsd`, so an unbatched task shows none.
+      - Costs are summed over distinct values, so two equal costs count once.
       - The cost is shown unrounded.
       - The cost is truncated to cents rather than rounded.
       - Each attempt's cost is rounded before the sum.
@@ -74,9 +79,10 @@ acceptance:
       per attempt in `V3`'s order, which is by start time. The cells are the
       phase, `n`, the start and the end as `V3` returns them, the turns and
       the cost rounded to cents. A value the attempt lacks is an empty cell.
-      The witness drives four attempts whose start order differs from both
+      The witness drives five attempts whose start order differs from both
       their id order and their phase names' order. One carries three gate
-      results, one carries none, and one was never closed.
+      results, one carries none, and one was never closed. Two have equal
+      costs.
     witness: tests/test_view_server.py::test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost
     wrong_versions:
       - One row per `V3` row, so an attempt with three gate results shows three times.
@@ -88,9 +94,9 @@ acceptance:
       - The turns column is left out.
   - claim: >-
       A task with no attempts gets a page with its summary, the text
-      `no attempts`, and no `<table>` at all. The witness serves a batched
-      task in `GATE_ERROR` with no attempts, and a task with attempts whose
-      page lacks that text.
+      `no attempts`, and no `<table>` at all. Its summary's cost reads
+      `0.00`. The witness serves a batched task in `GATE_ERROR` with no
+      attempts, and a task with attempts whose page lacks that text.
     witness: tests/test_view_server.py::test_a_task_with_no_attempts_shows_its_summary_and_no_table
     wrong_versions:
       - An empty attempts table is rendered beside the text.
@@ -102,13 +108,16 @@ acceptance:
       one row each, with the phase, `n`, the gate, the outcome and the
       failure count. An attempt with no gate result adds no row there. Each
       gate result with a failure count above zero gets its own table, with
-      id `failures-<gate_result_id>`, after an `<h3>` naming the gate, the
-      phase and `n`. That table lists the result's failure lines in the
+      id `failures-<gate_result_id>`, after an `<h3>`. The heading's text is
+      exactly the gate, `in`, the phase, `attempt` and `n`, as in `lint in
+      GATING attempt 1`. That table lists the result's failure lines in the
       order they were recorded. A result with no failures gets none.
       Findings sit in a table with id `findings`. The witness drives `lint`
-      failing in `GATING` attempt 1 and in `REPAIRING` attempt 2, a passing
-      and an erroring gate with no failure lines, an attempt with no gate
-      result, and two findings.
+      failing in `GATING` attempt 1 and in `REPAIRING` attempt 2, and
+      compares each heading's whole text. It drives a passing and an
+      erroring gate with no failure lines, and two findings. It opens a
+      `REPAIRING` attempt with no gate result before the `REPAIRING` one
+      with `lint`, which is what makes that one attempt 2.
     witness: tests/test_view_server.py::test_gate_results_failure_lines_and_findings_sit_in_separate_tables
     wrong_versions:
       - Failure lines stay in the gate-results table.
@@ -147,10 +156,11 @@ acceptance:
   - claim: >-
       The `no-batch` table on `/` and the `tasks` table on a batch page list
       tasks by id as a number, newest first. The `batches` table keeps
-      `V1`'s order. The witness drives four unbatched and three batched
-      tasks whose ids each cross from one digit to two, spec ids in no order
-      of their own, and three batches whose start order differs from their
-      id order both ways.
+      `V1`'s order. The witness drives four unbatched tasks, and three
+      batched tasks that share one batch. Each group's ids cross from one
+      digit to two, so `V2`'s text order and its reverse both differ from
+      newest first. Spec ids run in no order of their own. Three batches
+      have a start order that differs from their id order both ways.
     witness: tests/test_view_server.py::test_task_lists_run_newest_first_by_id_as_a_number
     wrong_versions:
       - The `no-batch` table keeps `V5`'s order, which sorts IRIs as text.
@@ -298,23 +308,33 @@ equals its position. Set a task's state, risk and pull request with
 in the same shape, since `close_attempt` stamps the clock. The ledger
 keeps times as `%Y-%m-%d %H:%M:%S`. `V3` returns them as, for example,
 `2026-01-02T01:00:00Z`, measured on the host at `c0a3488f`. Pick costs
-whose rounding tells the wrong versions apart. `1.234`, `2.004` and
-`0.459` sum to `3.697`, which rounds to `3.70`. Truncating gives `3.69`,
-and so does rounding each first. A decoy task with its own batch, cost
-and pull request shows a query read unbound. Criterion 6 sets the batches'
-`started_at` with a raw `UPDATE` too.
+whose rounding tells the wrong versions apart. `1.234`, `2.004`, `0.459`
+and `0.459` sum to `4.156`, which rounds to `4.16`. Truncating gives
+`4.15`, and so does rounding each first. Summing distinct values gives
+`3.70`. The unbatched task's `0.415` and `0.237` round to `0.65`, and a
+total read from `V2` shows nothing there. A decoy task with its own batch,
+cost and pull request shows a query read unbound. Criterion 6 sets the
+batches' `started_at` with a raw `UPDATE` too.
+
+**Batch ids against task ids.** `_ledger` hands out batch ids from 4 and
+task ids from 2 (`tests/test_view_server.py:44-77`). So a batch made early
+can share its id with a task it links, and a link built from the task id
+then passes. In criterion 1's fixture, make spare batches first until the
+batch id differs from every task id the fixture makes, and assert that.
 
 **Criterion 1's rounding.** Round half up or half even, as you like. The
 witness drives no half-cent sum.
 
 **Criterion 4's order.** Attempts opened in one second tie on
 `?started`, and the claim fixes no order among gate results. Compare the
-gate-results rows and the failures table ids as sorted lists. Open the
-attempt with no gate result before the `REPAIRING` one with `lint`. That
-one's `n` is then 2, and its heading differs from the `GATING` one's.
+gate-results rows and the failures table ids as sorted lists. `n` counts
+within one phase (`saffron/ledger.py:1353-1357`). So the attempt with no
+gate result must be a `REPAIRING` one, opened before the `REPAIRING` one
+with `lint`. That one's `n` is then 2. Assert each heading's whole text,
+so a heading that leaves out `n` fails.
 
-**Measured on a prototype at `c0a3488f`.** A prototype passed all 24
+**Measured on a prototype at `a20e6839`.** A prototype passed all 24
 tests in the file. Each of the six witnesses failed against the base
-`server.py`. Each of the 47 wrong versions above was applied to it as an
-edit, and each failed its own criterion's witness. Its diff was 2125
+`server.py`. Each of the 49 wrong versions above was applied to it as an
+edit, and each failed its own criterion's witness. Its diff was 2170
 changed tokens by the `size` gate, against the `feature` ceiling of 3000.
