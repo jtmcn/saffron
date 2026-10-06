@@ -6,7 +6,7 @@ priority: 2
 depends_on: [SA-0217]
 consumes:
   - saffron/view/server.py:make_server
-estimated_lines: 355
+estimated_lines: 365
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -159,20 +159,25 @@ acceptance:
       - The command exits 130 on interrupt.
   - claim: >-
       The task page lists `V4` bound on `?task`, one row per finding, whose
-      cells are exactly the lens name, the severity, the claim and the
-      verdict, empty when the verdict is null. A finding's claim and verdict
-      pass through `html.escape`. The page links its pull request, read
-      from `V2` bound on `?task`, or from `V5` bound on `?task` when `V2`
-      returns no row. The witness drives a batched task and an unbatched
-      task, each with a pull request, a gated attempt and one finding with
-      no verdict, plus markup in a claim and a verdict.
+      cells are exactly the lens name, the severity's local name, the claim
+      and the verdict, empty when the verdict is null. A finding's claim and
+      verdict pass through `html.escape`. The page links its pull request,
+      read from `V2` bound on `?task`, or from `V5` bound on `?task` when
+      `V2` returns no row, with the URL escaped in the `href`. The witness
+      drives two batched and two unbatched tasks. Each has its own pull
+      request, its own lens, a gated attempt and one finding with no
+      verdict. One URL carries an `&`. It adds markup in a claim and a
+      verdict.
     witness: tests/test_view_server.py::test_a_task_page_shows_its_findings_and_links_its_pull_request
     wrong_versions:
       - The link is read from `V2` alone, so the unbatched task has no link.
       - The link is read from `V5` alone, so the batched task has no link.
-      - The link is read unbound, so a page links another task's pull request.
+      - "`V2` is read unbound, so a page links another batched task's pull request."
+      - "`V5` is read unbound, so a page links another unbatched task's pull request."
       - "`V4` runs unbound, so another task's findings are listed."
       - The lens cell shows the whole IRI.
+      - The severity cell shows its whole IRI.
+      - The URL is not escaped in the `href`.
       - A null verdict is shown as `None`.
       - The claim is not escaped.
       - The verdict is not escaped.
@@ -241,7 +246,8 @@ and the decoding guards whatever a later parser does.
    `QuerySolutions` or `QueryBoolean` is 200 in SPARQL JSON. Anything else
    is 400.
 2. **`POST`.** Answer 405 on every path, with `Allow: GET`, which HTTP
-   requires of a 405. Nothing reads the body.
+   requires of a 405. First read and discard the body, up to its
+   `Content-Length` and at most 64 KiB.
 3. **The loopback check.** In `make_server`, before the graph is built,
    raise `ValueError` unless `host` is `localhost` or parses with
    `ipaddress.ip_address` as an IPv4 loopback address.
@@ -261,9 +267,11 @@ and the decoding guards whatever a later parser does.
    as an `<a href>`, with the URL escaped. After the attempts table, add a
    findings table from `V4` bound on `?task`, one row each, as criterion 9
    says. The lens cell is its name, so strip the `lens-` prefix from the
-   lens IRI as the gate cell strips `gate-`. This amends `SA-0217`'s page
-   contract: the task page holds its gate-result and failure rows and,
-   after them, these finding rows, and no other rows.
+   lens IRI as the gate cell strips `gate-`. The severity cell is the
+   severity's local name. This amends `SA-0217`'s page contract. The task
+   page holds its gate-result and failure rows and, after them, finding
+   rows. A finding row is the lens name, the severity's local name, the
+   claim and the verdict. The page holds no other rows.
 
 ## Out of scope
 
@@ -283,8 +291,10 @@ and the decoding guards whatever a later parser does.
 
 ## Notes for the agent
 
-**This change is new code.** None of the five parts exists at base, so
-no text there fixes a spelling. Each criterion declares a witness and no mutant, and the
+**This change is new code.** Four of the five parts do not exist at
+base. Part 5 edits `SA-0217`'s task page, which exists at the cell's base,
+but its spelling is unknown until `SA-0217` merges. So no text fixes a
+spelling. Each criterion declares a witness and no mutant, and the
 `witness` gate reports `skip` for all nine. The wrong versions under each
 criterion are what its witness must kill. Do not run them yourself.
 
@@ -317,9 +327,11 @@ hanging. Point every `SERVICE` at it and assert it recorded none. Assert
 the seven refusal bodies are one value, and that each escaped spelling's
 body differs from `pyoxigraph`'s message for the same text. Close with a
 plain `ASK`, answered 200, so the server is still up. The fetch was
-measured on the host only. The cell sets a proxy with `NO_PROXY` naming
-loopback, and whether `pyoxigraph` honours it is unmeasured. The 400 and
-the one refusal body kill a build with no `SERVICE` check either way. Write each
+measured on the host only. Whether a fetch reaches the listener under the
+cell's proxy is unmeasured. So the 400 and the one refusal body kill a late
+check, and the zero-connection assertion does not. On the host, a late
+check fails the witness with that assertion removed. It fails again with
+the listener answering 403, as a refusing proxy would. Write each
 backslash so the query text carries it, as a raw string or a doubled
 backslash.
 
@@ -348,15 +360,21 @@ records its `port` keyword and calls the real one with `port=0`.
 `make_server` takes `port` by keyword only, so the command passes it that
 way.
 
-**Criterion 9.** Give each of the two tasks a `pr_url` and an attempt
-with a recorded gate result. Give each one finding with its own lens and
-claim, and no verdict. `SA-0216` states a finding only for a task with a gated attempt.
+**Criterion 9.** Make two batched and two unbatched tasks. Give each a
+`pr_url`, a lens of its own, and an attempt with a recorded gate result.
+Give each one finding with its own claim and no verdict. `SA-0216` states
+a finding only for a task with a gated attempt. Put an `&` in one URL.
 Read each page with the parent's `html.parser` helper. Assert its own URL
-is among the links, and its finding row equals the four cells exactly.
-Assert neither the other task's URL nor its lens appears. Give one task a
-second finding whose claim and verdict carry markup, and set the verdict
-with a raw `UPDATE`. Assert its row reads the markup as text, and that no
-raw tag from it reaches the page.
+is among the links, and that `html.escape` of it appears in the body.
+Assert its finding row equals the four cells exactly. Assert no other
+task's URL or lens appears. Two tasks on each side of the `V2` and `V5`
+split are what show a query read unbound. Give one task a second finding
+whose claim and verdict carry markup, and set the verdict with a raw
+`UPDATE`. Assert its row reads the markup as text, and that no raw tag
+from it reaches the page.
+
+**The `POST` body.** An unread body can make Linux reset the connection
+before the client reads the 405, so `do_POST` drains it first.
 
 **The `dead` gate.** `http.server` dispatches `do_POST` by name, so
 vulture sees no caller. `.saffron/deadcode-allow.py` lists `do_POST` for
@@ -368,5 +386,5 @@ than a tuple, so narrow it before you slice it in a test.
 
 **Measured on a prototype at `8a0ad38f`.** A prototype of this half sat
 over the revised parent. It passed all nine witnesses, and each failed against the
-parent alone. Each of the 56 wrong versions above was applied to it as an
+parent alone. Each of the 59 wrong versions above was applied to it as an
 edit, and each failed its own criterion's witness.
