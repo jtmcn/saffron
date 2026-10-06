@@ -1,12 +1,12 @@
 ---
 id: SA-0218
-title: The run record view has no command that serves it, and no query endpoint that refuses a write or a fetch
+title: The run record view has no command that serves it, no query endpoint that refuses a write or a fetch, and no task page that shows findings
 type: feature
 priority: 2
 depends_on: [SA-0217]
 consumes:
   - saffron/view/server.py:make_server
-estimated_lines: 290
+estimated_lines: 355
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -157,6 +157,25 @@ acceptance:
       - The server is not closed on interrupt.
       - "`KeyboardInterrupt` is not caught."
       - The command exits 130 on interrupt.
+  - claim: >-
+      The task page lists `V4` bound on `?task`, one row per finding, whose
+      cells are exactly the lens name, the severity, the claim and the
+      verdict, empty when the verdict is null. A finding's claim and verdict
+      pass through `html.escape`. The page links its pull request, read
+      from `V2` bound on `?task`, or from `V5` bound on `?task` when `V2`
+      returns no row. The witness drives a batched task and an unbatched
+      task, each with a pull request, a gated attempt and one finding with
+      no verdict, plus markup in a claim and a verdict.
+    witness: tests/test_view_server.py::test_a_task_page_shows_its_findings_and_links_its_pull_request
+    wrong_versions:
+      - The link is read from `V2` alone, so the unbatched task has no link.
+      - The link is read from `V5` alone, so the batched task has no link.
+      - The link is read unbound, so a page links another task's pull request.
+      - "`V4` runs unbound, so another task's findings are listed."
+      - The lens cell shows the whole IRI.
+      - A null verdict is shown as `None`.
+      - The claim is not escaped.
+      - The verdict is not escaped.
 ---
 
 ## Context
@@ -175,7 +194,9 @@ The plan's Task 4 (`docs/superpowers/plans/2026-10-05-run-record-view.md:662-689
 was prototyped whole and measured at 2983 changed tokens, against the
 `feature` ceiling of 3000. It was split in two. `SA-0217` is the parent and
 serves the pages. This spec is the child. It adds `/sparql`, the `POST`
-refusal, the loopback check and the `saffron serve` command.
+refusal, the loopback check and the `saffron serve` command. It also adds a
+task's findings and its pull request link, which `SA-0217` moved here when
+its own size crossed the line.
 
 Line numbers below were read at `0996b3de`.
 
@@ -186,7 +207,10 @@ the graph once with `SA-0215`'s `build` and loads it into an in-memory
 `pyoxigraph.Store`. It serves `GET /`, `/batch/<id>` and `/task/<id>`, and
 404 elsewhere, `/sparql` included. It raises `ViewGraphError` from `build`
 when the graph fails the shapes. It has no host check and no `POST`
-handler, so a `POST` gets `http.server`'s 501. It does not touch
+handler, so a `POST` gets `http.server`'s 501. Its task page heads with the
+spec id, read from `V2` bound on `?task` or else `V5`, and then lists the
+attempts. It reads no `V4` and links no pull request. Its page contract
+says "The task page holds no other rows". It does not touch
 `saffron/cli.py`. Read the merged file before you edit it, and keep every
 name and every page it has.
 
@@ -232,11 +256,19 @@ and the decoding guards whatever a later parser does.
    `KeyboardInterrupt`, close the server and exit 0. The module
    docstring lists the commands (`saffron/cli.py:1-2`). Add the two it
    lacks, `fold` and `serve`.
+5. **Findings and the pull request link.** On the task page, take the
+   row that already gives the heading its spec id. Link its pull request
+   as an `<a href>`, with the URL escaped. After the attempts table, add a
+   findings table from `V4` bound on `?task`, one row each, as criterion 9
+   says. The lens cell is its name, so strip the `lens-` prefix from the
+   lens IRI as the gate cell strips `gate-`. This amends `SA-0217`'s page
+   contract: the task page holds its gate-result and failure rows and,
+   after them, these finding rows, and no other rows.
 
 ## Out of scope
 
-- The pages, the failure lines and the 404s. `SA-0217` serves them.
-  Change none of its tests.
+- The pages, the failure lines and the 404s, apart from criterion 9's
+  rows and link. `SA-0217` serves them. Change none of its tests.
 - The `view-is-cli-only` rule, which forbids importing `saffron.view`
   outside `saffron/cli.py`. It lands by hand later. The code obeys it
   already, since only `cli.py` imports the view.
@@ -251,17 +283,17 @@ and the decoding guards whatever a later parser does.
 
 ## Notes for the agent
 
-**This change is new code.** None of the four parts exists at base, so
+**This change is new code.** None of the five parts exists at base, so
 no text there fixes a spelling. Each criterion declares a witness and no mutant, and the
-`witness` gate reports `skip` for all eight. The wrong versions under each
+`witness` gate reports `skip` for all nine. The wrong versions under each
 criterion are what its witness must kill. Do not run them yourself.
 
-**Commit as each witness passes.** Eight witnesses, eight commits at
+**Commit as each witness passes.** Nine witnesses, nine commits at
 least. A turn cut by a bound then loses one witness's work.
 
 **Every witness must fail without this change.** The parent answers
 `/sparql` with 404 and a `POST` with 501. It binds every host, and `serve`
-is no subcommand. Import `saffron.view.server` inside each test
+is no subcommand. Its task page shows no finding and no link. Import `saffron.view.server` inside each test
 body, never at module scope.
 
 **Fixtures.** Reuse `SA-0217`'s helpers in `tests/test_view_server.py`
@@ -316,6 +348,16 @@ records its `port` keyword and calls the real one with `port=0`.
 `make_server` takes `port` by keyword only, so the command passes it that
 way.
 
+**Criterion 9.** Give each of the two tasks a `pr_url` and an attempt
+with a recorded gate result. Give each one finding with its own lens and
+claim, and no verdict. `SA-0216` states a finding only for a task with a gated attempt.
+Read each page with the parent's `html.parser` helper. Assert its own URL
+is among the links, and its finding row equals the four cells exactly.
+Assert neither the other task's URL nor its lens appears. Give one task a
+second finding whose claim and verdict carry markup, and set the verdict
+with a raw `UPDATE`. Assert its row reads the markup as text, and that no
+raw tag from it reaches the page.
+
 **The `dead` gate.** `http.server` dispatches `do_POST` by name, so
 vulture sees no caller. `.saffron/deadcode-allow.py` lists `do_POST` for
 this spec. Name the method exactly that.
@@ -324,7 +366,7 @@ this spec. Name the method exactly that.
 so narrow it before it becomes a body. `server_address` is typed wider
 than a tuple, so narrow it before you slice it in a test.
 
-**Measured on a prototype at `0996b3de`.** A prototype of this half, over
-the parent's, passed all eight witnesses, and each failed against the
-parent alone. Each of the 48 wrong versions above was applied to it as an
+**Measured on a prototype at `8a0ad38f`.** A prototype of this half sat
+over the revised parent. It passed all nine witnesses, and each failed against the
+parent alone. Each of the 56 wrong versions above was applied to it as an
 edit, and each failed its own criterion's witness.
