@@ -130,3 +130,64 @@ wrong version against its prototype, rather than by a third review.
   new ones.
 - Check new spec text against the `retired-vocabulary` hook before the
   commit. `SA-0216`'s draft named a retired term.
+
+## The run record view's server, `SA-0217` and `SA-0218`
+
+The same item, b-a1d649, and the plan's Task 4. One spec was asked for. A
+first writer measured a prototype of the whole server at 2983 tokens and
+split it. `SA-0217` holds the three pages. `SA-0218` holds the query
+endpoint, the 405, the loopback check and `saffron serve`. A first revision
+took `SA-0217` to 2418 tokens, so its findings criterion moved to `SA-0218`.
+
+### Cost
+
+| Step | `SA-0217` | `SA-0218` |
+|---|---|---|
+| Split measurement | 6.9 min, shared | |
+| Draft | 28.7 min | 18.6 min |
+| Review 1 | 3.8 min | 2.6 min |
+| Revise 1 | 10.6 min | 7.7 min |
+| Moved criterion | | 8.6 min |
+| Review 2 | 4.2 min | 4.8 min |
+| Revise 2 | 10.5 min | 9.4 min |
+
+Round 2 ended the chain again, settled by running every listed wrong
+version. `SA-0217` killed 51 of 51, and `SA-0218` killed 59 of 59.
+
+### Rounds
+
+| Spec | Round | Blockers | Concerns | Notes |
+|---|---|---|---|---|
+| `SA-0217` | 1 | 0 | 6 | 3 |
+| `SA-0217` | 2 | 0 | 3 | 3 |
+| `SA-0218` | 1 | 1 | 2 | 2 |
+| `SA-0218` | 2 | 2 | 3 | 4 |
+
+### Each finding by class
+
+- **A fixture that makes a wrong build right by coincidence.** Again the
+  largest class. One unbatched task let a fallback query run unbound. Ids
+  reused after a delete, and spare counts that made a run's id a real
+  task's. A `<title>` that satisfied a heading check on the raw body. One
+  attempt per phase let rows keyed by phase pass. The run's proposed
+  fixture check would have caught all four.
+- **A writer that decoded its own escape.** `SA-0218`'s draft turned a
+  four-digit `\u` escape into a plain letter while writing. The spec then
+  drove one escape form of two. Reading the rendered text missed it, and a
+  byte-level grep found it.
+- **A criterion moved without a review.** Both of `SA-0218`'s second-round
+  blockers sat in the criterion moved from `SA-0217`. A moved criterion
+  should get its own read before the next round.
+- **An operator rule that was wrong.** `str.isdigit()` accepts `²`, which
+  `int()` refuses, so a raw byte broke the handler instead of answering
+  404. The writer found it on its prototype.
+- **A host measurement that may not hold in the cell.** The `SERVICE`
+  fetch and an unread request body were measured on the host only. The
+  first is settled by an assertion that holds either way. The second by
+  draining the body.
+
+### What the next run changes
+
+- Grep escape-bearing witness inputs by bytes before review.
+- Review a moved criterion in its new spec before the next round starts.
+- Treat an operator's settled rule as a claim the prototype tests too.

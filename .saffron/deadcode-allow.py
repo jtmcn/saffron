@@ -17,6 +17,9 @@ _.test_strategy  # Plan field (§5.3): validates the extraction turn's plan.json
 _.risks  # Plan field (§5.3): validates the extraction turn's plan.json
 _.row_factory  # sqlite3 reads it on every query, saffron/ledger.py
 _.__getattr__  # module attribute hook: saffron/cell/runtime.py, saffron/phases/implement.py
+_.do_GET  # http.server dispatches each request method by name: saffron/view/server.py (SA-0217)
+_.log_message  # http.server calls it for every request: saffron/view/server.py (SA-0217)
+_.do_POST  # http.server dispatches each request method by name: saffron/view/server.py (SA-0218)
 
 # Called from outside the scanned roots.
 _.parse_block  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
