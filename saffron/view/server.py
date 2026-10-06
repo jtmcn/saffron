@@ -1,14 +1,18 @@
 """The run record's read-only pages (`DESIGN.md` §6.2, ADR 9).
 
 `make_server` builds the view graph once (`saffron.view.graph.build`) and
-serves `/`, `/batch/<id>` and `/task/<id>` over stdlib `http.server`.
+serves `/`, `/batch/<id>` and `/task/<id>` over stdlib `http.server`. It
+also serves `GET /sparql` for a `SELECT` or an `ASK`, answers every `POST`
+405, and binds a loopback host only.
 """
 
 from __future__ import annotations
 
 import html
+import ipaddress
 import re
 import sqlite3
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
@@ -19,6 +23,18 @@ from saffron.projection import DATA_NS, NS, VOCABULARY
 from saffron.view.graph import LeftOut, ViewGraph, build, open_read_only
 
 FAILURE_LINE_CAP = 200
+
+# The SPARQL JSON results media type. Compared with `==` by the caller, so
+# no charset parameter rides along.
+_SPARQL_RESULTS_JSON = "application/sparql-results+json"
+
+# One fixed body, whatever spelling of SERVICE the query carried.
+_SERVICE_REFUSED = "the query endpoint refuses a SERVICE clause"
+
+_MAX_POST_BODY = 65536
+
+_SERVICE_WORD = re.compile(r"\bservice\b", re.IGNORECASE)
+_UNICODE_ESCAPE = re.compile(r"\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8})")
 
 _RDF_TYPE = ox.NamedNode("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")
 _TASK_CLASS = ox.NamedNode(f"{NS}Task")
@@ -41,6 +57,7 @@ def _query_text(prefix: str) -> str:
 _V1 = _query_text("V1")
 _V2 = _query_text("V2")
 _V3 = _query_text("V3")
+_V4 = _query_text("V4")
 _V5 = _query_text("V5")
 
 _BATCH_IRI = re.compile(rf"^{re.escape(DATA_NS)}batch-(\d+)$")
@@ -74,6 +91,9 @@ def _local_name(iri: str) -> str:
     gate_prefix = f"{DATA_NS}gate-"
     if iri.startswith(gate_prefix):
         return iri[len(gate_prefix) :]
+    lens_prefix = f"{DATA_NS}lens-"
+    if iri.startswith(lens_prefix):
+        return iri[len(lens_prefix) :]
     return iri.rsplit("#", 1)[-1]
 
 
@@ -106,6 +126,44 @@ def _node_exists(store: ox.Store, iri: str, cls: ox.NamedNode) -> bool:
     return bool(list(store.quads_for_pattern(ox.NamedNode(iri), _RDF_TYPE, cls)))
 
 
+def _decode_escapes(text: str) -> str:
+    """Every `\\uXXXX` and `\\UXXXXXXXX` in `text`, decoded to its character.
+
+    Raises `ValueError` for a code point above `U+10FFFF`, caught by the
+    caller as a refusal rather than a crash."""
+
+    def replace(match: re.Match[str]) -> str:
+        digits = match.group(1) or match.group(2)
+        code_point = int(digits, 16)
+        if code_point > 0x10FFFF:
+            raise ValueError(f"escape out of range: {match.group(0)}")
+        return chr(code_point)
+
+    return _UNICODE_ESCAPE.sub(replace, text)
+
+
+def _mentions_service(text: str) -> bool:
+    return _SERVICE_WORD.search(text) is not None
+
+
+def _check_loopback(host: str) -> None:
+    """Raises `ValueError` unless `host` is `localhost` or an IPv4 loopback
+    address.
+
+    `ThreadingHTTPServer` binds IPv4 only, so an IPv6 loopback address such
+    as `::1` is refused along with everything else."""
+    if host == "localhost":
+        return
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError(
+            f"not localhost or an IPv4 loopback address: {host!r}"
+        ) from None
+    if not (isinstance(address, ipaddress.IPv4Address) and address.is_loopback):
+        raise ValueError(f"not localhost or an IPv4 loopback address: {host!r}")
+
+
 class _ViewServer(ThreadingHTTPServer):
     def __init__(
         self,
@@ -126,7 +184,9 @@ def make_server(
 ) -> ThreadingHTTPServer:
     """Builds the view graph once and returns an unstarted server on
     `(host, port)`. A graph that fails the shapes raises `ViewGraphError`
-    from `build`, propagated here with no socket touched."""
+    from `build`, propagated here with no socket touched. `host` must be
+    `localhost` or an IPv4 loopback address, checked before anything else."""
+    _check_loopback(host)
     conn = open_read_only(ledger_path)
     try:
         view: ViewGraph = build(conn)
@@ -142,6 +202,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         server = cast(_ViewServer, self.server)
         path = self.path
+        if path == "/sparql" or path.startswith("/sparql?"):
+            self._handle_sparql(server, path)
+            return
         if path == "/":
             self._respond(200, _render_index(server.store, server.left_out))
             return
@@ -165,13 +228,56 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._respond(200, _render_task(server.store, server.ledger_path, node_id))
 
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(min(length, _MAX_POST_BODY))
+        self.send_response(405)
+        self.send_header("Allow", "GET")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _handle_sparql(self, server: _ViewServer, path: str) -> None:
+        query_string = path.partition("?")[2]
+        values = urllib.parse.parse_qs(query_string, keep_blank_values=True).get(
+            "query"
+        )
+        if not values:
+            self._respond(400, "missing query parameter")
+            return
+        text = values[0]
+        try:
+            decoded = _decode_escapes(text)
+        except ValueError as broke:
+            self._respond(400, str(broke))
+            return
+        if _mentions_service(decoded):
+            self._respond(400, _SERVICE_REFUSED)
+            return
+        try:
+            result = server.store.query(text)
+        except SyntaxError as broke:
+            self._respond(400, str(broke))
+            return
+        if isinstance(result, (ox.QuerySolutions, ox.QueryBoolean)):
+            payload = result.serialize(format=ox.QueryResultsFormat.JSON)
+            assert isinstance(payload, bytes)
+            self._respond(200, payload, content_type=_SPARQL_RESULTS_JSON)
+            return
+        self._respond(400, "the query is neither a SELECT nor an ASK")
+
     def log_message(self, format: str, *args: object) -> None:
         """Silence the default per-request access log."""
 
-    def _respond(self, status: int, body: str) -> None:
-        payload = body.encode("utf-8")
+    def _respond(
+        self,
+        status: int,
+        body: str | bytes,
+        *,
+        content_type: str = "text/html; charset=utf-8",
+    ) -> None:
+        payload = body if isinstance(body, bytes) else body.encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -260,19 +366,41 @@ def _render_batch(store: ox.Store, batch_id: int) -> str:
 """
 
 
-def _task_spec_id(store: ox.Store, task_id: int) -> str:
+def _task_spec_id_and_pr(store: ox.Store, task_id: int) -> tuple[str, str | None]:
+    """The task's spec id and pull request URL.
+
+    Read from `V2` bound on `?task`, or from `V5` bound on `?task` when
+    `V2` returns no row. A batched task's own run reaches `V2`. An
+    unbatched one reaches only `V5`."""
     substitutions: _Substitutions = {
         ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
     }
-    for sol in _query(store, _V2, substitutions):
-        spec = sol["spec"]
-        if spec is not None:
-            return cast(str, spec.value)
-    for sol in _query(store, _V5, substitutions):
-        spec = sol["spec"]
-        if spec is not None:
-            return cast(str, spec.value)
-    return ""
+    for query_text in (_V2, _V5):
+        for sol in _query(store, query_text, substitutions):
+            spec = sol["spec"]
+            if spec is not None:
+                pr = sol["pr"]
+                return cast(str, spec.value), (
+                    cast(str, pr.value) if pr is not None else None
+                )
+    return "", None
+
+
+def _finding_rows(store: ox.Store, task_id: int) -> list[list[str]]:
+    substitutions: _Substitutions = {
+        ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
+    }
+    rows: list[list[str]] = []
+    for sol in _query(store, _V4, substitutions):
+        rows.append(
+            [
+                html.escape(_name(sol["lens"])),
+                html.escape(_name(sol["severity"])),
+                html.escape(_text(sol["claim"])),
+                html.escape(_text(sol["verdict"])),
+            ]
+        )
+    return rows
 
 
 def _failure_rows(conn: sqlite3.Connection, gate_result_id: int) -> list[sqlite3.Row]:
@@ -328,15 +456,19 @@ def _gate_result_rows(
 
 
 def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
-    spec_id = html.escape(_task_spec_id(store, task_id))
+    spec_id, pr_url = _task_spec_id_and_pr(store, task_id)
+    spec_id = html.escape(spec_id)
+    pr_html = _link(pr_url, pr_url) if pr_url else ""
     conn = open_read_only(ledger_path)
     try:
         rows = _gate_result_rows(store, conn, task_id)
     finally:
         conn.close()
+    rows = rows + _finding_rows(store, task_id)
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — {spec_id}</title>
 <h1>Task {task_id} — {spec_id}</h1>
+{pr_html}
 {_table(rows)}
 """

@@ -7,7 +7,13 @@ this file, rather than a collection error (`DESIGN.md` Appendix H).
 
 from __future__ import annotations
 
+import contextlib
+import html
+import json
 import socket
+import socketserver
+import subprocess
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -18,9 +24,13 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pyoxigraph as ox
+import pytest
+
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.ledger import Ledger
+from saffron.projection import DATA_NS
 
 _SPARE = "spare-failure"
 
@@ -175,6 +185,59 @@ def _get(base: str, path: str) -> tuple[int, str]:
         status, body = exc.code, exc.read().decode()
     assert _SPARE not in body, path
     return status, body
+
+
+def _sparql(base: str, query: str) -> tuple[int, str, str]:
+    """`GET /sparql?query=<query>`, percent-encoded here so the caller's own
+    text, backslashes included, reaches the server untouched."""
+    url = f"{base}/sparql?query={urllib.parse.quote(query, safe='')}"
+    try:
+        with urllib.request.urlopen(url) as resp:
+            return (
+                resp.status,
+                resp.read().decode(),
+                resp.headers.get("Content-Type", ""),
+            )
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode(), exc.headers.get("Content-Type", "")
+
+
+def _post(base: str, path: str) -> tuple[int, str | None]:
+    request = urllib.request.Request(base + path, data=b"x", method="POST")
+    try:
+        with urllib.request.urlopen(request) as resp:
+            return resp.status, resp.headers.get("Allow")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("Allow")
+
+
+@contextmanager
+def _closing_listener() -> Iterator[tuple[int, list[bool]]]:
+    """A loopback listener that records and closes each connection, so a
+    `SERVICE` fetch that reaches it fails fast rather than hanging the
+    suite."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen()
+    port = sock.getsockname()[1]
+    connections: list[bool] = []
+
+    def serve() -> None:
+        while True:
+            try:
+                conn, _addr = sock.accept()
+            except OSError:
+                return
+            connections.append(True)
+            conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield port, connections
+    finally:
+        sock.close()
+        thread.join(timeout=1)
 
 
 def test_the_index_lists_each_batch_and_the_tasks_with_no_batch(
@@ -615,3 +678,422 @@ def test_an_unknown_or_malformed_id_is_404(tmp_path: Path) -> None:
         assert split.port is not None
         line = _status_line(split.hostname, split.port, b"/task/\xb2")
         assert " 404 " in line
+
+
+def test_sparql_answers_a_select(tmp_path: Path) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_a = ledger.create_task(run_id, "SA-SEL1", "sa", "ba")
+    _set_task(ledger, task_a, state="DRAFT")
+    task_b = ledger.create_task(run_id, "SA-SEL2", "sb", "bb")
+    _set_task(ledger, task_b, state="DRAFT")
+    _close(ledger, spares)
+
+    select = (
+        "SELECT ?label WHERE { "
+        "?task a <urn:software-factory:ns#Task> ; "
+        "<http://www.w3.org/2000/01/rdf-schema#label> ?label . }"
+    )
+    ask_true = "ASK { ?s a <urn:software-factory:ns#Task> }"
+    ask_false = f"ASK {{ <{DATA_NS}task-999999> a <urn:software-factory:ns#Task> }}"
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body, content_type = _sparql(base, select)
+        assert status == 200
+        assert content_type == "application/sparql-results+json"
+        parsed = json.loads(body)
+        labels = sorted(row["label"]["value"] for row in parsed["results"]["bindings"])
+        assert labels == sorted(["SA-SEL1", "SA-SEL2"])
+
+        status, body, content_type = _sparql(base, ask_true)
+        assert status == 200
+        assert content_type == "application/sparql-results+json"
+        assert json.loads(body)["boolean"] is True
+
+        status, body, _ = _sparql(base, ask_false)
+        assert status == 200
+        assert json.loads(body)["boolean"] is False
+
+
+def test_sparql_refuses_an_update_and_a_construct(tmp_path: Path) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-UPD", "su", "bu")
+    _set_task(ledger, task_id, state="DRAFT")
+    _close(ledger, spares)
+
+    fresh = ox.Store()
+
+    def parser_message(text: str) -> str:
+        try:
+            fresh.query(text)
+        except SyntaxError as broke:
+            return str(broke)
+        raise AssertionError(f"expected a parse error for {text!r}")
+
+    insert = "INSERT DATA { <urn:test:s> <urn:test:p> <urn:test:o> . }"
+    delete = "DELETE WHERE { ?s ?p ?o }"
+    unparseable = "SELECT ?x WHERE {"
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, _ = _get(base, "/sparql")
+        assert status == 400
+
+        status, body, _ = _sparql(base, insert)
+        assert status == 400
+        assert body == parser_message(insert)
+
+        status, body, _ = _sparql(base, delete)
+        assert status == 400
+        assert body == parser_message(delete)
+
+        status, _, _ = _sparql(base, "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")
+        assert status == 400
+
+        status, _, _ = _sparql(base, "DESCRIBE <urn:software-factory:ns#Task>")
+        assert status == 400
+
+        status, body, _ = _sparql(base, unparseable)
+        assert status == 400
+        assert body == parser_message(unparseable)
+
+        status, body, _ = _sparql(
+            base, "ASK { <urn:test:s> <urn:test:p> <urn:test:o> }"
+        )
+        assert status == 200
+        assert json.loads(body)["boolean"] is False
+
+        status, body, _ = _sparql(base, "ASK { ?s a <urn:software-factory:ns#Task> }")
+        assert status == 200
+        assert json.loads(body)["boolean"] is True
+
+
+def test_sparql_refuses_a_service_clause_however_spelled(tmp_path: Path) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-SVC", "ss", "bs")
+    _set_task(ledger, task_id, state="DRAFT")
+    _close(ledger, spares)
+
+    with _closing_listener() as (port, connections):
+        endpoint = f"<http://127.0.0.1:{port}/>"
+        escaped_4 = (
+            "SELECT ?x WHERE { " + "\\u0053ERVICE " + endpoint + " { ?x ?y ?z } }"
+        )
+        escaped_8 = (
+            r"SELECT ?x WHERE { SERV\U00000049CE " + endpoint + " { ?x ?y ?z } }"
+        )
+        queries = [
+            f"SELECT ?x WHERE {{ SERVICE {endpoint} {{ ?x ?y ?z }} }}",
+            f"SELECT ?x WHERE {{ service {endpoint} {{ ?x ?y ?z }} }}",
+            f"SELECT ?x WHERE {{ SeRvIcE {endpoint} {{ ?x ?y ?z }} }}",
+            f"ASK {{ SERVICE {endpoint} {{ ?x ?y ?z }} }}",
+            escaped_4,
+            escaped_8,
+            'ASK { FILTER("SERVICE" = "SERVICE") }',
+        ]
+
+        fresh = ox.Store()
+
+        def parser_message(text: str) -> str:
+            try:
+                fresh.query(text)
+            except SyntaxError as broke:
+                return str(broke)
+            raise AssertionError(f"expected a parse error for {text!r}")
+
+        bodies: set[str] = set()
+        with _running(tmp_path / "ledger.db") as base:
+            for query in queries:
+                status, body, _ = _sparql(base, query)
+                assert status == 400, query
+                bodies.add(body)
+
+            assert len(bodies) == 1
+            (one_body,) = bodies
+            assert parser_message(escaped_4) != one_body
+            assert parser_message(escaped_8) != one_body
+
+            assert connections == []
+
+            # An escape above U+10FFFF must answer 400, not crash the
+            # handler.
+            status, body, _ = _sparql(base, "\\UFFFFFFFF")
+            assert status == 400
+
+            status, body, _ = _sparql(
+                base, "ASK { ?s a <urn:software-factory:ns#Task> }"
+            )
+            assert status == 200
+            assert json.loads(body)["boolean"] is True
+
+
+def test_a_post_is_405(tmp_path: Path) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-POST", "sp", "bp")
+    _set_task(ledger, task_id, state="DRAFT")
+    batch_id = ledger.create_batch(5.0)
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        for path in [
+            "/",
+            "/sparql?query=ASK%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D",
+            "/sparql",
+            f"/task/{task_id}",
+            f"/batch/{batch_id}",
+            "/nowhere",
+        ]:
+            status, allow = _post(base, path)
+            assert status == 405, path
+            assert allow == "GET", path
+
+
+def test_a_non_loopback_host_raises(tmp_path: Path) -> None:
+    from saffron.view.server import make_server
+
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-HOST", "sh", "bh")
+    _set_task(ledger, task_id, state="DRAFT")
+    _close(ledger, spares)
+    ledger_path = tmp_path / "ledger.db"
+
+    for bad_host in [
+        "0.0.0.0",
+        "",
+        "10.1.2.3",
+        "192.168.0.7",
+        "::1",
+        "::",
+        "example.com",
+        "127.0.0.1.example",
+    ]:
+        with pytest.raises(ValueError):
+            make_server(ledger_path, host=bad_host, port=0)
+
+    for good_host in ["127.0.0.1", "localhost"]:
+        server = make_server(ledger_path, host=good_host, port=0)
+        server.server_close()
+
+    with contextlib.suppress(OSError):
+        server = make_server(ledger_path, host="127.0.0.2", port=0)
+        server.server_close()
+
+
+def test_serve_exits_2_and_prints_the_report_when_the_graph_fails_the_shapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from saffron import cli
+
+    monkeypatch.setattr(
+        socketserver.BaseServer,
+        "serve_forever",
+        lambda self: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+
+    home = tmp_path
+    ledger, repo_id, spares = _ledger(home)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-BAD", "sb", "bb")
+    _set_task(ledger, task_id, state="DRAFT")
+    attempt = ledger.open_attempt(task_id, "GATING")
+    ledger.record_gate_result(_gate("lint", "pass"), attempt_id=attempt)
+    [finding_id] = ledger.record_findings(task_id, [_finding("concern", "a claim")])
+    ledger._db.execute(
+        "UPDATE findings SET severity = 'critical' WHERE finding_id = ?",
+        (finding_id,),
+    )
+    ledger._db.commit()
+    _close(ledger, spares)
+
+    assert cli.main(["--home", str(home), "serve"]) == 2
+    out = capsys.readouterr().out
+    assert "Conforms: False" in out
+
+
+def test_serve_exits_2_when_there_is_no_ledger(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from saffron import cli
+
+    existing_empty = tmp_path / "existing"
+    existing_empty.mkdir()
+    missing = tmp_path / "missing"
+
+    for home in (existing_empty, missing):
+        assert cli.main(["--home", str(home), "serve"]) == 2
+        out = capsys.readouterr().out
+        lines = out.splitlines()
+        assert len(lines) == 1
+        assert str(home / "ledger.db") in lines[0]
+
+    assert list(existing_empty.iterdir()) == []
+    assert not missing.exists()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import saffron.cli, sys; print('saffron.view' in sys.modules)",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parent.parent,
+    )
+    assert result.stdout.strip() == "False"
+
+
+def test_serve_binds_the_given_port_and_exits_0_when_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import saffron.view.server as view_server
+    from saffron import cli
+
+    home = tmp_path
+    ledger, repo_id, spares = _ledger(home)
+    _close(ledger, spares)
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    free_port = probe.getsockname()[1]
+    probe.close()
+
+    recorded_addresses: list[tuple[str, int] | str] = []
+    close_calls = {"n": 0}
+    real_close = socketserver.TCPServer.server_close
+
+    def fake_serve_forever(self: socketserver.BaseServer) -> None:
+        address = self.server_address
+        assert isinstance(address, tuple)
+        recorded_addresses.append(address)
+        raise KeyboardInterrupt
+
+    def fake_server_close(self: socketserver.TCPServer) -> None:
+        close_calls["n"] += 1
+        real_close(self)
+
+    monkeypatch.setattr(socketserver.BaseServer, "serve_forever", fake_serve_forever)
+    monkeypatch.setattr(socketserver.TCPServer, "server_close", fake_server_close)
+
+    assert cli.main(["--home", str(home), "serve", "--port", str(free_port)]) == 0
+    assert len(recorded_addresses) == 1
+    address = recorded_addresses[0]
+    assert isinstance(address, tuple)
+    host, port = address
+    assert port == free_port
+    assert close_calls["n"] == 1
+
+    recorded_ports: list[int] = []
+    real_make_server = view_server.make_server
+
+    def fake_make_server(
+        ledger_path: Path, *, host: str = "127.0.0.1", port: int = 8765
+    ) -> socketserver.TCPServer:
+        recorded_ports.append(port)
+        return real_make_server(ledger_path, host=host, port=0)
+
+    monkeypatch.setattr(view_server, "make_server", fake_make_server)
+    assert cli.main(["--home", str(home), "serve"]) == 0
+    assert recorded_ports == [8765]
+    assert close_calls["n"] == 2
+
+    # Any other raise must still close the server before it propagates.
+    def fake_serve_forever_raises(self: socketserver.BaseServer) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        socketserver.BaseServer, "serve_forever", fake_serve_forever_raises
+    )
+    with pytest.raises(RuntimeError):
+        cli.main(["--home", str(home), "serve"])
+    assert close_calls["n"] == 3
+
+
+def test_a_task_page_shows_its_findings_and_links_its_pull_request(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+
+    batch_id = ledger.create_batch(10.0)
+    run_batched = ledger.create_run(repo_id, "batched", batch_id=batch_id)
+    run_unbatched = ledger.create_run(repo_id, "unbatched")
+
+    def make_task(run_id: int, spec_id: str, pr_url: str, lens: str, claim: str) -> int:
+        task_id = ledger.create_task(run_id, spec_id, f"s-{spec_id}", f"b-{spec_id}")
+        _set_task(ledger, task_id, state="DRAFT", pr_url=pr_url)
+        attempt = ledger.open_attempt(task_id, "GATING")
+        ledger.record_gate_result(_gate("lint", "pass"), attempt_id=attempt)
+        ledger.record_findings(
+            task_id,
+            [Finding(lens=lens, severity="concern", file="f.py", line=1, claim=claim)],
+        )
+        return task_id
+
+    pr_amp = "https://example.com/pulls/1?x=1&y=2"
+    pr_b2 = "https://example.com/pulls/2"
+    pr_u1 = "https://example.com/pulls/3"
+    pr_u2 = "https://example.com/pulls/4"
+
+    task_b1 = make_task(run_batched, "SA-B1", pr_amp, "style", "claim-b1")
+    task_b2 = make_task(run_batched, "SA-B2", pr_b2, "security", "claim-b2")
+    task_u1 = make_task(run_unbatched, "SA-U1", pr_u1, "docs", "claim-u1")
+    task_u2 = make_task(run_unbatched, "SA-U2", pr_u2, "perf", "claim-u2")
+
+    markup_claim = "<b>markup claim</b>"
+    markup_verdict = "<i>markup verdict</i>"
+    [markup_finding_id] = ledger.record_findings(
+        task_b1,
+        [
+            Finding(
+                lens="style", severity="note", file="f.py", line=2, claim=markup_claim
+            )
+        ],
+    )
+    ledger._db.execute(
+        "UPDATE findings SET verdict = ? WHERE finding_id = ?",
+        (markup_verdict, markup_finding_id),
+    )
+    ledger._db.commit()
+    _close(ledger, spares)
+
+    tasks = {
+        task_b1: (pr_amp, "style", "claim-b1"),
+        task_b2: (pr_b2, "security", "claim-b2"),
+        task_u1: (pr_u1, "docs", "claim-u1"),
+        task_u2: (pr_u2, "perf", "claim-u2"),
+    }
+
+    with _running(tmp_path / "ledger.db") as base:
+        bodies = {}
+        pages = {}
+        for task_id in tasks:
+            status, body = _get(base, f"/task/{task_id}")
+            assert status == 200
+            bodies[task_id] = body
+            pages[task_id] = _parse(body)
+
+    for task_id, (pr_url, _lens, _claim) in tasks.items():
+        assert pr_url in pages[task_id].hrefs
+        # In the `href` attribute, not only somewhere in the body.
+        assert f'href="{html.escape(pr_url)}"' in bodies[task_id]
+        for other_id, (other_pr, other_lens, _other_claim) in tasks.items():
+            if other_id == task_id:
+                continue
+            assert other_pr not in bodies[task_id]
+            assert other_lens not in bodies[task_id]
+
+    b1_rows = pages[task_b1].tables.get(None, [])
+    finding_rows = [row for row in b1_rows if len(row) == 4]
+    assert ["style", "concern", "claim-b1", ""] in finding_rows
+    assert ["style", "note", markup_claim, markup_verdict] in finding_rows
+    assert len(finding_rows) == 2
+
+    for task_id, (_pr_url, lens, claim) in tasks.items():
+        if task_id == task_b1:
+            continue
+        rows = pages[task_id].tables.get(None, [])
+        findings = [row for row in rows if len(row) == 4]
+        assert findings == [[lens, "concern", claim, ""]]
