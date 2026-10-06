@@ -4,7 +4,7 @@ title: "The task page never says how the task ended"
 status: open
 tier: 2
 filed: 2026-10-06
-specs: []
+specs: [SA-0219]
 prs: [708]
 commits: []
 cites: [§6.2]
