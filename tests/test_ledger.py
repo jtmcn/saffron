@@ -1314,8 +1314,8 @@ def test_a_ledger_that_predates_the_tool_column_gains_it(tmp_path):
 
 def test_a_ledger_that_predates_the_cost_floor_column_gains_it(tmp_path):
     """`CREATE TABLE IF NOT EXISTS` is a no-op on an `attempts` that already
-    exists. A ledger built before the column keeps recording no-result
-    turns at `last_cost_usd` alone until it is added by hand (SA-0206)."""
+    exists. Without an `ALTER TABLE`, every `close_attempt` on such a ledger
+    raises on the missing column (SA-0206)."""
     path = tmp_path / "old.db"
     before = SCHEMA.replace(
         "    cost_usd_est    REAL,\n    cost_floor_usd_est REAL\n",

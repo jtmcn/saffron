@@ -402,7 +402,7 @@ class Ledger:
         if "tool" not in gate_existing:
             self._db.execute("ALTER TABLE gate_results ADD COLUMN tool TEXT")
         # And on `attempts`: a ledger predating this column needs it added
-        # by hand before `close_attempt` can write to it (SA-0206).
+        # here before `close_attempt` can write to it (SA-0206).
         attempts_existing = {
             row["name"]
             for row in self._db.execute("PRAGMA table_info(attempts)").fetchall()

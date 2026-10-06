@@ -1128,17 +1128,16 @@ _TWO_MODEL_PRICES = {
     },
 }
 
-# _priced_event_lines' own total: 10.0 (event A) + 7.2 (event B) + 1.0
-# (event C). The `m-c`, `<synthetic>` and no-model events price at nothing.
-_EXPECTED_FLOOR = 10.0 + 7.2 + 1.0
+# Text, tool_result, passthrough, thinking and tool_use, in that order. The
+# `m-c`, `<synthetic>` and no-model events price at nothing.
+_EXPECTED_FLOOR = 10.0 + 7.2 + 1.0 + 3.0 + 2.0
 
 
 def _priced_event_lines() -> list[str]:
     """One stream's worth of non-result events. `m-a` names the `init`
-    event's own configured model, never read for pricing. Every event
-    prices against `m-b` instead, so a floor priced at the `init` model,
-    at only `text` events, or dropping `tool_result`/`passthrough`,
-    disagrees with `_EXPECTED_FLOOR`."""
+    event's own configured model, never read for pricing. Every priced
+    event names `m-b`, one of each kind, so a floor priced at the `init`
+    model or dropping any event kind disagrees with `_EXPECTED_FLOOR`."""
     return [
         json.dumps({"type": "system", "subtype": "init", "data": {"model": "m-a"}}),
         json.dumps(
@@ -1164,6 +1163,10 @@ def _priced_event_lines() -> list[str]:
                 "model": "m-b",
                 "cache_creation_input_tokens": 50_000,
             }
+        ),
+        json.dumps({"type": "thinking", "model": "m-b", "input_tokens": 300_000}),
+        json.dumps(
+            {"type": "tool_use", "model": "m-b", "cache_read_input_tokens": 2_000_000}
         ),
         json.dumps({"type": "thinking", "model": "m-c", "input_tokens": 99_999_999}),
         json.dumps(

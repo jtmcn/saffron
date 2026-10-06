@@ -145,12 +145,7 @@ PRICES_PER_MTOK: dict[str, dict[str, float]] = {
 def _priced_usd(event: dict) -> float:
     """What one non-result event's own per-message counts are worth, priced
     at its own `model`. Never a neighbour's, never the table's first
-    entry, and never a raise on a count the event does not carry.
-
-    `PRICES_PER_MTOK` is read as a bare module global here, not captured as a
-    default argument, so a test's `monkeypatch.setattr(implement,
-    "PRICES_PER_MTOK", ...)` changes what every call prices (§4.3).
-    """
+    entry, and never a raise on a count the event does not carry."""
     rates = PRICES_PER_MTOK.get(event.get("model"))
     if not rates:
         return 0.0
@@ -354,8 +349,7 @@ def run_agent(
             # the one the next turn would start under.
             rate_limit.update(event)
         if event.get("type") != "result":
-            # A `result` event's own usage is priced by the caller already.
-            # Summing it here too would double it.
+            # A result event's counts are cumulative over the turn, never one step's.
             floor_contributions.append(_priced_usd(event))
         # The dict, verbatim, under `event` — never re-rendered to a string
         # here. `describe()` is the one place it becomes prose, and it is
@@ -409,9 +403,9 @@ def run_agent(
         else "errored"
     )
     if not result:
-        # No result event means no reported cost (§4.1). `floor_usd_est`
-        # sums what the stream itself still spent before the kill (SA-0206).
-        floor_usd_est = sum(floor_contributions)
+        # No result event means no reported cost (§4.1). The floor is what the
+        # stream spent before it ended, and the carry keeps the ceiling counting.
+        floor_usd_est = sum(floor_contributions, 0.0)
         raise AgentFailed(
             f"the agent produced no result event, {how}: {detail}",
             AttemptResult(
