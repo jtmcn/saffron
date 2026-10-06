@@ -412,6 +412,7 @@ GATED = {
     "no-alias-in-package-init": "**Import a name from the module that defines it.**",
     "no-reexport": "**Import a name from the module that defines it.**",
     "one-task-driver": "**One module drives a task.**",
+    "view-is-cli-only": "**The view only reads.**",
     "podman-runtime-is-runtime-only": "may spell their own binary",
     "skip-is-spelled-in-full": "**A skip, or a type, is spelled in full where it is used.**",
     "no-unannotated-identity": "**A skip, or a type, is spelled in full where it is used.**",

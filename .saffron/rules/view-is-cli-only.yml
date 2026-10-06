@@ -1,0 +1,28 @@
+id: view-is-cli-only
+language: python
+severity: error
+message: only saffron/cli.py may import saffron.view
+note: |
+  The view reads the run record and decides nothing (ADR 9, ADR 5). A second
+  importer is how a page's query becomes a scheduler's input.
+files:
+  - "saffron/**/*.py"
+ignores:
+  - "saffron/cli.py"
+  - "saffron/view/**"
+# The same three branches as agent-sdk-import-is-runner-only, for the same reasons.
+rule:
+  any:
+    - kind: import_statement
+      has: { regex: '^saffron\.view', stopBy: end }
+    - kind: import_from_statement
+      has: { field: module_name, regex: '^saffron\.view' }
+    - kind: call
+      all:
+        - has: { field: function, regex: '(^|\.)import_module$|^__import__$' }
+        - has:
+            field: arguments
+            has:
+              kind: string
+              nthChild: 1
+              has: { kind: string_content, regex: '^saffron\.view' }

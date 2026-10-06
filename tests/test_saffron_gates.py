@@ -674,6 +674,7 @@ def test_a_rules_exemptions_are_the_named_files():
         "no-alias-in-package-init": None,
         "no-reexport": None,
         "one-task-driver": ["saffron/task.py"],
+        "view-is-cli-only": ["saffron/cli.py", "saffron/view/**"],
         # None, not an exemption for tests/conftest.py: that is the file SA-0077
         # aliased the skip in, so exempting it would reopen exactly that hole.
         "skip-is-spelled-in-full": None,

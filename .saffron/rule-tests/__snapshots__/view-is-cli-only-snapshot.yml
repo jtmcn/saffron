@@ -1,0 +1,54 @@
+id: view-is-cli-only
+snapshots:
+  from saffron.view import graph:
+    labels:
+    - source: from saffron.view import graph
+      style: primary
+      start: 0
+      end: 30
+    - source: saffron.view
+      style: secondary
+      start: 5
+      end: 17
+  from saffron.view.graph import build:
+    labels:
+    - source: from saffron.view.graph import build
+      style: primary
+      start: 0
+      end: 36
+    - source: saffron.view.graph
+      style: secondary
+      start: 5
+      end: 23
+  import saffron.view.server:
+    labels:
+    - source: import saffron.view.server
+      style: primary
+      start: 0
+      end: 26
+    - source: saffron.view.server
+      style: secondary
+      start: 7
+      end: 26
+  importlib.import_module("saffron.view.graph"):
+    labels:
+    - source: importlib.import_module("saffron.view.graph")
+      style: primary
+      start: 0
+      end: 45
+    - source: importlib.import_module
+      style: secondary
+      start: 0
+      end: 23
+    - source: saffron.view.graph
+      style: secondary
+      start: 25
+      end: 43
+    - source: '"saffron.view.graph"'
+      style: secondary
+      start: 24
+      end: 44
+    - source: '"saffron.view.graph"'
+      style: secondary
+      start: 24
+      end: 44
