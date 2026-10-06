@@ -169,17 +169,26 @@ def _build_batches(tmp_path: Path):
     # Neither read live: baked into `TE-9`'s and `TE-4`'s layers already.
     ledger.record_push(te7, "e" * 40)
 
-    # Phase-tagged attempts the turns witnesses read (see the spec's table).
+    # Phase-tagged attempts the turns witnesses read. Each phase that holds
+    # several has its peak between two lower ones, so first and last both miss.
     _attempt(ledger, te7, 150, 0.0, [], phase="SPEC_REVIEW")
     _attempt(ledger, te7, 200, 0.0, [], phase="REPLAY")
     _attempt(ledger, te9, 12, 0.0, [], phase="SPEC_REVIEW")
     _attempt(ledger, te9, 31, 0.0, [], phase="SPEC_REVIEW")
     _attempt(ledger, te9, 7, 0.0, [], phase="SPEC_REVIEW")
     _attempt(ledger, te9, 0, 0.0, [], phase="SPEC_WRITING")
+    _attempt(ledger, te9, 4, 0.0, [], phase="REPAIRING")
     _attempt(ledger, te9, 27, 0.0, [], phase="REPAIRING")
+    _attempt(ledger, te9, 3, 0.0, [], phase="REPAIRING")
+    _attempt(ledger, te9, 6, 0.0, [], phase="REVIEWING")
     _attempt(ledger, te9, 38, 0.0, [], phase="REVIEWING")
+    _attempt(ledger, te9, 2, 0.0, [], phase="REVIEWING")
+    _attempt(ledger, te9, 8, 0.0, [], phase="REBUTTING")
     _attempt(ledger, te9, 45, 0.0, [], phase="REBUTTING")
+    _attempt(ledger, te9, 5, 0.0, [], phase="REBUTTING")
+    _attempt(ledger, te4_1, 5, 0.0, [], phase="SPEC_WRITING")
     _attempt(ledger, te4_1, 9, 0.0, [], phase="SPEC_WRITING")
+    _attempt(ledger, te4_1, 2, 0.0, [], phase="SPEC_WRITING")
     ledger.open_attempt(te6_2, phase="REBUTTING")
 
     ledger.set_task_state(te9, "REJECTED")

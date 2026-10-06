@@ -136,11 +136,10 @@ def _build_layer(
 def _phase_table(
     spec_max_turns: int | None,
 ) -> tuple[tuple[str, str, int | None, bool], ...]:
-    """The six phases in page order: label, the attempt `phase` it reads,
-    its bound, and whether that bound caps each turn of a summed session.
-    A plain `False` means the bound caps the one turn an attempt is. The
-    two session phases read their bound from `spec_review` live, at call
-    time, so a monkeypatched module shows up here too."""
+    """The six attempt labels in page order: label, the attempt `phase` it
+    reads, its bound, and whether that bound caps each turn of a summed
+    session. The two session labels read their bound from `spec_review` at
+    call time, since those constants belong to that module."""
     return (
         ("SPEC_REVIEW", "SPEC_REVIEW", spec_review.SPEC_REVIEW_MAX_TURNS, True),
         (
