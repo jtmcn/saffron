@@ -9,7 +9,7 @@ consumes:
   - saffron/view/graph.py:open_read_only
   - saffron/view/graph.py:LeftOut
   - saffron/view/graph.py:ViewGraphError
-estimated_lines: 565
+estimated_lines: 577
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -106,9 +106,10 @@ acceptance:
       result never reads as `failed`. No `urn:` IRI appears on that page.
       The witness drives all four statuses in one `IMPLEMENTING` attempt,
       over the core gate `scope`, the role gates `lint` and `no-network`
-      and a repo-defined gate. Two `REPAIRING` attempts follow. The first
-      swaps `error` and `fail` on two gates, and the second passes `lint`.
-      A second task has a `scope` result of its own.
+      and a repo-defined gate. There `lint` fails and `no-network` errors.
+      Two `REPAIRING` attempts follow. The first swaps those two statuses,
+      and the second passes `lint`. A second task has a `scope` result of
+      its own.
     witness: tests/test_view_server.py::test_a_task_page_shows_each_attempts_gate_outcomes_with_error_apart_from_fail
     wrong_versions:
       - "`cantTell` is shown as `failed`, so a gate that broke reads as code that is wrong."
@@ -146,17 +147,20 @@ acceptance:
       page, and in a task page's `<title>` and its heading. The heading's
       spec id is read through `V2` bound on `?task`, or through `V5` bound
       on `?task` when `V2` returns no row. The witness puts markup in each
-      field, and reads a batched task's page and an unbatched task's page.
-      Each value in a row renders as its own text in a cell. Each heading
-      holds its escaped spec id, and no fixture tag appears in any page.
+      field. It reads the pages of two batched tasks and two unbatched
+      tasks, each with its own spec id. Each value in a row renders as its
+      own text in a cell. The text of each page's `<h1>` ends with its own
+      spec id, and no fixture tag appears in any page.
     witness: tests/test_view_server.py::test_markup_in_a_stored_value_renders_as_text
     wrong_versions:
       - The spec id in an index row is not escaped.
       - The spec id in a batch page row is not escaped.
       - The spec id in a task page's `<title>` is not escaped.
       - The spec id in a task page's heading is not escaped.
-      - The heading is read from `V2` alone, so an unbatched task's heading lacks its spec id.
-      - The heading is read from `V5` alone, so a batched task's heading lacks its spec id.
+      - The heading is read from `V2` alone, so an unbatched task's heading lacks its spec id, while the `<title>` is right.
+      - The heading is read from `V5` alone, so a batched task's heading lacks its spec id, while the `<title>` is right.
+      - The heading reads `V2` unbound, so a task's heading names another task's spec id.
+      - The heading binds `V2` but reads `V5` unbound, so an unbatched task's heading names another task's spec id.
       - A failure's file is not escaped.
       - A failure's code is not escaped.
       - A failure's message is not escaped.
@@ -168,9 +172,10 @@ acceptance:
       with a third segment. An `unknown_state` task is in the ledger and
       not the graph, so its page is 404, and a task with no attempt answers
       200. The witness drives /task/99999, /task/abc, /task/-1, /task/1.5,
-      /task/+<id> of a real task, an `unknown_state` task, a run's id,
-      /batch/99999, /batch/abc, /batch/-1, /batch/+<id> of a real batch, a
-      task's id as a batch, /nowhere and /task/<id>/x of a real task. It
+      /task/+<id> of a real task, an `unknown_state` task, a run's id that
+      no task has, /batch/99999, /batch/abc, /batch/-1, /batch/+<id> of a
+      real batch, a task's id that no batch has, /nowhere and /task/<id>/x
+      of a real task. It
       also sends the raw byte `0xb2` as a task id, which the server decodes
       as a superscript two.
     witness: tests/test_view_server.py::test_an_unknown_or_malformed_id_is_404
@@ -195,11 +200,13 @@ pages. A first writer measured a prototype of the plan's Task 4
 lines and split it in two. This spec is the parent and builds the pages
 without the findings. `SA-0218` is the child. It adds `/sparql`, the 405
 on a write, the loopback check on `host` and the `saffron serve` command.
+Its criterion 9 adds a task's findings and its pull request link to the
+task page.
 
-Line numbers below were read at `531efcbc`.
+Line numbers below were read at `87746d28`.
 
 **What `SA-0215` and `SA-0216` give this spec.** `saffron/view/graph.py`
-does not exist at `531efcbc`. Their specs define it, and a cell for this
+does not exist at `87746d28`. Their specs define it, and a cell for this
 spec is cut from `SA-0216`'s branch. It has the frozen dataclasses
 `LeftOut(task_id, spec_id, reason)` and `ViewGraph(turtle, left_out)`, the
 exception `ViewGraphError` with pyshacl's report as its message,
@@ -262,9 +269,9 @@ def make_server(
    pyoxigraph.NamedNode(...)})`. That form was measured on pyoxigraph
    0.5.9.
 3. **The pages.** `GET /`, `GET /batch/<id>` and `GET /task/<id>`, as the
-   criteria say. The no-batch section on `/` is `V5` unbound. The left-out
-   panel shows a `findings_without_diff` entry as a kept task whose
-   findings were dropped.
+   criteria say. The no-batch section on `/` is `V5` unbound. For a
+   `findings_without_diff` entry, the left-out panel shows the entry's
+   reason and links its task.
 4. **The graph decides which pages exist.** Accept an id segment that is
    non-empty ASCII digits, as `str.isascii()` and `str.isdigit()` decide
    together. Then ask the store whether the node is typed
@@ -302,7 +309,7 @@ task page holds no other rows.
   as given here. `SA-0218`'s command also drives the `ViewGraphError` that
   `make_server` lets through.
 - A task's findings and its pull request link. `V4` and `rdfs:seeAlso`
-  are read by a later spec, which adds both to the task page.
+  are read by `SA-0218`, whose criterion 9 adds both to the task page.
 - The import rule that keeps `saffron.view` to `cli.py`. It is protected,
   and it lands by hand in a spec pull request.
 - A live overlay that rebuilds on each ledger change. The graph is built
@@ -334,7 +341,8 @@ fetches with `urllib.request`. It reads the port from
 **Fixtures.** Build each ledger with `Ledger(tmp_path / "ledger.db")`, then
 close it before `make_server`. Set a task's state and risk with a raw
 `UPDATE`. Record gate results with `record_gate_result` and `attempt_id=`
-(`saffron/ledger.py:1828`). A task in state `PAUSED` is left out as
+(`saffron/ledger.py:1828`). Record findings with `record_findings`
+(`saffron/ledger.py:1773`). A task in state `PAUSED` is left out as
 `unknown_state`, and one at risk `reckless` as `unknown_risk`.
 
 **Offset the ids.** A fresh ledger numbers each table from 1. An id taken
@@ -360,8 +368,9 @@ with no gate result.
 
 **Criterion 4.** Take the first four cells of every row on the page.
 Compare them, sorted, with the sorted expected rows. An extra row or a
-lost one then fails.
-Assert `urn:` and `gate-` appear nowhere in the body.
+lost one then fails. Assert `urn:` and `gate-` appear nowhere in the
+body. `lint` must appear in both `REPAIRING` attempts, so a build keying
+rows by phase and gate loses one.
 
 **Criterion 5.** Number each failure's message by its position, and give
 its file and line in the opposite order. Assert the message cells under
@@ -372,19 +381,24 @@ each result equal the expected list in order. Assert the row after the
 **Criterion 6 leaves fields undriven.** A gate name lives in an IRI,
 which cannot carry markup through `build`. A state, a risk and a stop
 reason are closed sets the shapes enforce. A phase label is escaped by
-Problem item 6, and no witness puts markup in it. Assert each heading by
-its escaped text, such as `&lt;b&gt;`.
+Problem item 6, and no witness puts markup in it. Read each heading's
+text with `html.parser` inside its `<h1>` element, and compare it with the
+raw spec id. The `<title>` carries the same text, so a check on the raw
+body cannot tell the two apart. Two tasks on each side keep a query read
+unbound from heading every page rightly.
 
 **Criterion 7.** Give the bare task no attempt, and put it on a batched
-run, so both its page and its batch's page answer 200. `urllib` cannot send
+run, so both its page and its batch's page answer 200. Assert that the
+run's id names no task and the task's id names no batch, so each 404 is
+real. `urllib` cannot send
 a non-ASCII path, so send the `0xb2` request on a raw socket and read the
 status from the reply's first line.
 
-**Measured on a prototype at `531efcbc`.** A prototype of this half passed
+**Measured on a prototype at `87746d28`.** A prototype of this half passed
 all seven witnesses over `SA-0216`'s prototype projection. Each failed with
-the server module absent. Each of the 49 wrong versions above was applied
+the server module absent. Each of the 51 wrong versions above was applied
 to it as an edit, and each failed its own criterion's witness. Its diff
-measured 2257 changed tokens with `size_gate`.
+measured 2308 changed tokens with `size_gate`.
 
 **`make_server` has no production caller yet.** `SA-0218`'s command calls
 it, and `pending_symbols` defers it until then. `do_GET` and `log_message`
