@@ -399,6 +399,9 @@ those sessions log no events.
 layer from an earlier batch. `queue --stack` never says what `--budget`
 admits every layer. A cut resumed turn undercounts its own spend.
 
+**Placed 2026-10-06**, at the operator's request: **b-e880ac**. Saffron takes
+the cell token from whoever starts it, so a delegate must hold the credential.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
