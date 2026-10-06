@@ -6,7 +6,7 @@ priority: 2
 depends_on: [SA-0217]
 consumes:
   - saffron/view/server.py:make_server
-estimated_lines: 285
+estimated_lines: 290
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -40,7 +40,7 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 24
 max_attempts: 3
-max_turns: 150
+max_turns: 160
 acceptance:
   - claim: >-
       The query endpoint, `GET /sparql?query=<text>`, runs a `SELECT` or an
@@ -79,7 +79,7 @@ acceptance:
       a string literal is refused too. An escape above U+10FFFF answers 400.
       No connection reaches the `SERVICE` endpoint. The witness drives
       `SERVICE`, `service` and `SeRvIcE` in a `SELECT`, `SERVICE` in an
-      `ASK`, `SERVICE`, `SERV\U00000049CE`, the word inside a string
+      `ASK`, `\u0053ERVICE`, `SERV\U00000049CE`, the word inside a string
       literal, and `\UFFFFFFFF`, each against a loopback listener.
     witness: tests/test_view_server.py::test_sparql_refuses_a_service_clause_however_spelled
     wrong_versions:
@@ -88,20 +88,23 @@ acceptance:
       - Only `SERVICE` and `service` are matched, so `SeRvIcE` is fetched.
       - The escapes are not decoded, so an escaped spelling gets the parser's message rather than the refusal.
       - Only the four-digit `\u` escape is decoded.
+      - Only the eight-digit `\U` escape is decoded.
       - The check runs after `Store.query`, so the fetch has already happened.
       - String literals are stripped before the match, so the literal is answered 200.
       - An escape above U+10FFFF raises inside the handler.
       - The refusal body quotes the spelling it matched, so the bodies differ.
   - claim: >-
-      A `POST` to any path answers 405. The witness posts a body to the
-      index, to the query endpoint with and without a `query` parameter, to
-      a task page, to a batch page and to an unknown path.
+      A `POST` to any path answers 405 with an `Allow: GET` header. The
+      witness posts a body to the index, to the query endpoint with and
+      without a `query` parameter, to a task page, to a batch page and to an
+      unknown path, and reads the status and the header of each.
     witness: tests/test_view_server.py::test_a_post_is_405
     wrong_versions:
       - No `POST` handler, so `http.server` answers 501.
       - Only `/sparql` answers 405, and every other path 404.
       - A `POST` is served as a `GET`.
       - A `POST` answers 403.
+      - The 405 carries no `Allow` header.
   - claim: >-
       `make_server` raises `ValueError` unless `host` is `localhost` or an
       IPv4 loopback address. The witness drives `0.0.0.0`, the empty
@@ -213,7 +216,8 @@ and the decoding guards whatever a later parser does.
    text with `Store.query`. A `SyntaxError` is 400 with its message. A
    `QuerySolutions` or `QueryBoolean` is 200 in SPARQL JSON. Anything else
    is 400.
-2. **`POST`.** Answer 405 on every path. Nothing reads the body.
+2. **`POST`.** Answer 405 on every path, with `Allow: GET`, which HTTP
+   requires of a 405. Nothing reads the body.
 3. **The loopback check.** In `make_server`, before the graph is built,
    raise `ValueError` unless `host` is `localhost` or parses with
    `ipaddress.ip_address` as an IPv4 loopback address.
@@ -225,7 +229,9 @@ and the decoding guards whatever a later parser does.
    the dispatch function, as `_chains` defers its import. With no
    `<home>/ledger.db`, print one line naming it and exit 2. On
    `ViewGraphError`, print its report and exit 2. Otherwise serve until
-   `KeyboardInterrupt`, close the server and exit 0.
+   `KeyboardInterrupt`, close the server and exit 0. The module
+   docstring lists the commands (`saffron/cli.py:1-2`). Add the two it
+   lacks, `fold` and `serve`.
 
 ## Out of scope
 
@@ -276,9 +282,12 @@ false, and an `ASK` for a task, which must hold.
 **Criterion 3.** Bind a listener on `127.0.0.1` port 0 in a thread. It
 records and closes each connection, so a fetch fails fast rather than
 hanging. Point every `SERVICE` at it and assert it recorded none. Assert
-the seven refusal bodies are one value, and that the escaped spelling's
+the seven refusal bodies are one value, and that each escaped spelling's
 body differs from `pyoxigraph`'s message for the same text. Close with a
-plain `ASK`, answered 200, so the server is still up. Write each
+plain `ASK`, answered 200, so the server is still up. The fetch was
+measured on the host only. The cell sets a proxy with `NO_PROXY` naming
+loopback, and whether `pyoxigraph` honours it is unmeasured. The 400 and
+the one refusal body kill a build with no `SERVICE` check either way. Write each
 backslash so the query text carries it, as a raw string or a doubled
 backslash.
 
@@ -293,7 +302,11 @@ Accept an `OSError` for that one host and nothing else, with
 `socketserver.BaseServer.serve_forever` to raise `KeyboardInterrupt` in
 each, so a wrong version that serves cannot hang the suite. Criterion 6
 sets a finding's severity with a raw `UPDATE`, since `SA-0216`'s `build`
-raises `ViewGraphError` on a value outside the closed set. Criterion 7
+raises `ViewGraphError` on a value outside the closed set. `build` states a
+finding only for a task with a gated attempt. So give the finding's task an
+attempt with a recorded gate result, or the graph conforms and nothing
+raises. Use an IRI-safe value such as `critical`, since the severity
+becomes `factory:<severity>`. Criterion 7
 runs `python -c "import saffron.cli, sys; print('saffron.view' in
 sys.modules)"` with `sys.executable`. Criterion 8 picks a free port with a
 bound and closed socket, records `server_address` in the stub, and wraps
@@ -313,5 +326,5 @@ than a tuple, so narrow it before you slice it in a test.
 
 **Measured on a prototype at `0996b3de`.** A prototype of this half, over
 the parent's, passed all eight witnesses, and each failed against the
-parent alone. Each of the 46 wrong versions above was applied to it as an
+parent alone. Each of the 48 wrong versions above was applied to it as an
 edit, and each failed its own criterion's witness.
