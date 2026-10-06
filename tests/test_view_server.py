@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -21,11 +22,50 @@ from saffron.agents.findings import Finding, Severity
 from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.ledger import Ledger
 
+_SPARE = "spare-failure"
 
-def _ledger(tmp_path: Path) -> tuple[Ledger, int]:
+
+@dataclass(frozen=True)
+class _Spares:
+    batches: list[int]
+    task: int
+
+
+def _ledger(tmp_path: Path) -> tuple[Ledger, int, _Spares]:
+    """A ledger whose tables number from different offsets.
+
+    An id read from the wrong table, or by position, then reads wrong."""
     ledger = Ledger(tmp_path / "ledger.db")
     repo_id = ledger.upsert_repo("r", "origin", str(tmp_path / "mirror"), None)
-    return ledger, repo_id
+    batches = [ledger.create_batch(1.0) for _ in range(3)]
+    runs = [ledger.create_run(repo_id, f"spare{i}") for i in range(4)]
+    for gate in ("lint", "types"):
+        ledger.record_gate_result(
+            _gate(
+                gate,
+                "fail",
+                failures=[Failure(file="s.py", line=1, code="E", message=_SPARE)],
+            ),
+            run_id=runs[0],
+        )
+    task = ledger.create_task(runs[1], "SA-SPARE", "ss", "bs")
+    for phase in ("IMPLEMENTING", "REPAIRING", "REPAIRING", "REPAIRING"):
+        ledger.open_attempt(task, phase)
+    ledger.record_findings(task, [_finding("concern", _SPARE)] * 2)
+    return ledger, repo_id, _Spares(batches, task)
+
+
+def _close(ledger: Ledger, spares: _Spares) -> None:
+    """Drops the spare rows only now, since a table without `AUTOINCREMENT`
+    hands a deleted id out again."""
+    db = ledger._db
+    for table in ("findings", "attempts", "tasks"):
+        db.execute(f"DELETE FROM {table} WHERE task_id = ?", (spares.task,))
+    db.executemany(
+        "DELETE FROM batches WHERE batch_id = ?", [(b,) for b in spares.batches]
+    )
+    db.commit()
+    ledger.close()
 
 
 def _set_task(ledger: Ledger, task_id: int, **columns: object) -> None:
@@ -130,15 +170,17 @@ def _running(ledger_path: Path) -> Iterator[str]:
 def _get(base: str, path: str) -> tuple[int, str]:
     try:
         with urllib.request.urlopen(base + path) as resp:
-            return resp.status, resp.read().decode()
+            status, body = resp.status, resp.read().decode()
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode()
+        status, body = exc.code, exc.read().decode()
+    assert _SPARE not in body, path
+    return status, body
 
 
 def test_the_index_lists_each_batch_and_the_tasks_with_no_batch(
     tmp_path: Path,
 ) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
 
     until_batch = ledger.create_batch(5.0)
     run_a = ledger.create_run(repo_id, "ba", batch_id=until_batch)
@@ -159,7 +201,7 @@ def test_the_index_lists_each_batch_and_the_tasks_with_no_batch(
         task_id = ledger.create_task(no_batch_run, f"SA-N{i:04d}", f"n{i}", f"nb{i}")
         _set_task(ledger, task_id, state="DRAFT")
         unbatched.append(task_id)
-    ledger.close()
+    _close(ledger, spares)
 
     with _running(tmp_path / "ledger.db") as base:
         status, body = _get(base, "/")
@@ -192,7 +234,7 @@ def test_the_index_lists_each_batch_and_the_tasks_with_no_batch(
 
 
 def test_the_index_lists_each_left_out_task_with_its_reason(tmp_path: Path) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
     batch_id = ledger.create_batch(10.0)
     run_id = ledger.create_run(repo_id, "base", batch_id=batch_id)
 
@@ -207,7 +249,7 @@ def test_the_index_lists_each_left_out_task_with_its_reason(tmp_path: Path) -> N
     ledger.open_attempt(kept, "REVIEWING")
     ledger.record_findings(kept, [_finding("concern", "a claim")])
     ledger.close_batch(batch_id, "DRAINED")
-    ledger.close()
+    _close(ledger, spares)
 
     with _running(tmp_path / "ledger.db") as base:
         status, body = _get(base, "/")
@@ -236,7 +278,7 @@ def test_the_index_lists_each_left_out_task_with_its_reason(tmp_path: Path) -> N
 
 
 def test_a_batch_page_lists_only_that_batchs_tasks(tmp_path: Path) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
 
     batch_one = ledger.create_batch(10.0)
     run_a = ledger.create_run(repo_id, "a", batch_id=batch_one)
@@ -254,7 +296,7 @@ def test_a_batch_page_lists_only_that_batchs_tasks(tmp_path: Path) -> None:
     run_d = ledger.create_run(repo_id, "d")
     task_d = ledger.create_task(run_d, "SA-D", "sd", "bd")
     _set_task(ledger, task_d, state="DRAFT")
-    ledger.close()
+    _close(ledger, spares)
 
     with _running(tmp_path / "ledger.db") as base:
         status, body = _get(base, f"/batch/{batch_one}")
@@ -272,7 +314,7 @@ def test_a_batch_page_lists_only_that_batchs_tasks(tmp_path: Path) -> None:
 def test_a_task_page_shows_each_attempts_gate_outcomes_with_error_apart_from_fail(
     tmp_path: Path,
 ) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
     run_id = ledger.create_run(repo_id, "base")
 
     task_id = ledger.create_task(run_id, "SA-MAIN", "sm", "bm")
@@ -294,7 +336,7 @@ def test_a_task_page_shows_each_attempts_gate_outcomes_with_error_apart_from_fai
     _set_task(ledger, other_task, state="DRAFT")
     other_attempt = ledger.open_attempt(other_task, "IMPLEMENTING")
     ledger.record_gate_result(_gate("scope", "pass"), attempt_id=other_attempt)
-    ledger.close()
+    _close(ledger, spares)
 
     with _running(tmp_path / "ledger.db") as base:
         status, body = _get(base, f"/task/{task_id}")
@@ -368,7 +410,7 @@ def _result_blocks(
 def test_a_task_page_shows_failure_lines_capped_with_a_count_of_the_rest(
     tmp_path: Path,
 ) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
     run_id = ledger.create_run(repo_id, "base")
     task_id = ledger.create_task(run_id, "SA-CAP", "sc", "bc")
     _set_task(ledger, task_id, state="REPAIRING")
@@ -384,7 +426,7 @@ def test_a_task_page_shows_failure_lines_capped_with_a_count_of_the_rest(
     ledger.record_gate_result(
         _gate("tests", "fail", failures=_failures("tests", 3)), attempt_id=repairing
     )
-    ledger.close()
+    _close(ledger, spares)
 
     with _running(tmp_path / "ledger.db") as base:
         status, body = _get(base, f"/task/{task_id}")
@@ -418,7 +460,7 @@ def test_a_task_page_shows_failure_lines_capped_with_a_count_of_the_rest(
 
 
 def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
     tag = "<markup>"
 
     batch_id = ledger.create_batch(10.0)
@@ -457,7 +499,7 @@ def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
     spec_x = "<markup>X</markup>"
     left_out_task = ledger.create_task(run_batched, spec_x, "sx", "bx")
     _set_task(ledger, left_out_task, state="PAUSED")
-    ledger.close()
+    _close(ledger, spares)
 
     pages = [
         (task_b1, spec_b1),
@@ -493,6 +535,14 @@ def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
             row for row in index_page.tables.get("left-out", []) if row[1] == spec_x
         )
         assert left_row[1] == spec_x
+        no_batch_specs = {row[1] for row in index_page.tables.get("no-batch", [])}
+        assert no_batch_specs == {spec_u1, spec_u2}
+
+        batch_status, batch_body = _get(base, f"/batch/{batch_id}")
+        assert batch_status == 200
+        assert tag not in batch_body
+        batch_specs = {row[1] for row in _parse(batch_body).tables.get(None, [])}
+        assert batch_specs == {spec_b1, spec_b2}
 
 
 def _status_line(host: str, port: int, raw_target: bytes) -> str:
@@ -511,12 +561,12 @@ def _status_line(host: str, port: int, raw_target: bytes) -> str:
 
 
 def test_an_unknown_or_malformed_id_is_404(tmp_path: Path) -> None:
-    ledger, repo_id = _ledger(tmp_path)
+    ledger, repo_id, spares = _ledger(tmp_path)
 
     main_batch = ledger.create_batch(5.0)
     main_run = ledger.create_run(repo_id, "m", batch_id=main_batch)
 
-    # Consumes task_id 1, so the real task below never shares main_batch's id.
+    # Consumes a task id, so the real task below never shares main_batch's id.
     throwaway = ledger.create_task(main_run, "SA-THROW", "st", "bt")
     _set_task(ledger, throwaway, state="DRAFT")
 
@@ -533,7 +583,7 @@ def test_an_unknown_or_malformed_id_is_404(tmp_path: Path) -> None:
         ledger.create_run(repo_id, f"dummy{n}")
     runs_only_id = ledger.create_run(repo_id, "runs-only")
     assert runs_only_id > highest_task_id
-    ledger.close()
+    _close(ledger, spares)
 
     with _running(tmp_path / "ledger.db") as base:
         for path in [

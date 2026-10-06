@@ -1,10 +1,7 @@
 """The run record's read-only pages (`DESIGN.md` §6.2, ADR 9).
 
 `make_server` builds the view graph once (`saffron.view.graph.build`) and
-serves it over stdlib `http.server`. `SA-0218` adds `/sparql`, the loopback
-check on `host`, the 405 on a write and the `saffron serve` command. This
-module takes `host` as given and serves `/`, `/batch/<id>` and `/task/<id>`
-only.
+serves `/`, `/batch/<id>` and `/task/<id>` over stdlib `http.server`.
 """
 
 from __future__ import annotations
@@ -70,8 +67,8 @@ def _id_from(pattern: re.Pattern[str], iri: str) -> int | None:
 def _local_name(iri: str) -> str:
     """What follows `factory:` or `data:gate-` in `iri`.
 
-    Never a bare split on the last hyphen: a hyphenated gate name like
-    `no-network` would break it (Problem item 4 of `SA-0217`)."""
+    Never a bare split on the last hyphen, which breaks a gate named
+    `no-network`."""
     if iri.startswith(NS):
         return iri[len(NS) :]
     gate_prefix = f"{DATA_NS}gate-"
@@ -98,14 +95,18 @@ def _text(value: _Term | None) -> str:
     return value.value
 
 
+def _name(value: _Term | None) -> str:
+    """A bound IRI's local name, or `""` for an unbound one (`None`)."""
+    if value is None:
+        return ""
+    return _local_name(value.value)
+
+
 def _node_exists(store: ox.Store, iri: str, cls: ox.NamedNode) -> bool:
     return bool(list(store.quads_for_pattern(ox.NamedNode(iri), _RDF_TYPE, cls)))
 
 
 class _ViewServer(ThreadingHTTPServer):
-    """A plain `ThreadingHTTPServer` with the view's own state attached, typed
-    rather than stashed as bare attributes on the stdlib class."""
-
     def __init__(
         self,
         server_address: tuple[str, int],
@@ -196,12 +197,11 @@ def _table(rows: list[list[str]], *, table_id: str | None = None) -> str:
 def _batch_row(sol: ox.QuerySolution) -> list[str]:
     batch_id = _id_from(_BATCH_IRI, cast(str, sol["batch"].value))
     assert batch_id is not None
-    because = sol["because"]
     return [
         _link(f"/batch/{batch_id}", str(batch_id)),
         html.escape(_text(sol["started"])),
         html.escape(_text(sol["ended"])),
-        html.escape(_local_name(because.value) if because is not None else ""),
+        html.escape(_name(sol["because"])),
         html.escape(_text(sol["budget"])),
         html.escape(_text(sol["spent"])),
         html.escape(_text(sol["tasks"])),
@@ -211,13 +211,11 @@ def _batch_row(sol: ox.QuerySolution) -> list[str]:
 def _task_row(sol: ox.QuerySolution) -> list[str]:
     task_id = _id_from(_TASK_IRI, cast(str, sol["task"].value))
     assert task_id is not None
-    state = sol["state"]
-    risk = sol["risk"]
     return [
         _link(f"/task/{task_id}", str(task_id)),
         html.escape(_text(sol["spec"])),
-        html.escape(_local_name(state.value) if state is not None else ""),
-        html.escape(_local_name(risk.value) if risk is not None else ""),
+        html.escape(_name(sol["state"])),
+        html.escape(_name(sol["risk"])),
     ]
 
 
@@ -288,7 +286,7 @@ def _failure_rows(conn: sqlite3.Connection, gate_result_id: int) -> list[sqlite3
 
 
 def _gate_result_rows(
-    store: ox.Store, ledger_path: Path, task_id: int
+    store: ox.Store, conn: sqlite3.Connection, task_id: int
 ) -> list[list[str]]:
     substitutions: _Substitutions = {
         ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
@@ -296,16 +294,13 @@ def _gate_result_rows(
     rows: list[list[str]] = []
     for sol in _query(store, _V3, substitutions):
         phase_name = sol["phaseName"]
-        n = sol["n"]
-        gate = sol["gate"]
-        outcome = sol["outcome"]
         failures = sol["failures"]
         rows.append(
             [
                 html.escape(_text(phase_name)),
-                html.escape(_text(n)),
-                html.escape(_local_name(gate.value) if gate is not None else ""),
-                html.escape(_local_name(outcome.value) if outcome is not None else ""),
+                html.escape(_text(sol["n"])),
+                html.escape(_name(sol["gate"])),
+                html.escape(_name(sol["outcome"])),
                 html.escape(_text(failures)),
             ]
         )
@@ -317,11 +312,7 @@ def _gate_result_rows(
         result_iri = cast(str, sol["result"].value)
         gate_result_id = _id_from(_GATE_RESULT_IRI, result_iri)
         assert gate_result_id is not None
-        conn = open_read_only(ledger_path)
-        try:
-            lines = _failure_rows(conn, gate_result_id)
-        finally:
-            conn.close()
+        lines = _failure_rows(conn, gate_result_id)
         for line in lines:
             rows.append(
                 [
@@ -338,7 +329,11 @@ def _gate_result_rows(
 
 def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
     spec_id = html.escape(_task_spec_id(store, task_id))
-    rows = _gate_result_rows(store, ledger_path, task_id)
+    conn = open_read_only(ledger_path)
+    try:
+        rows = _gate_result_rows(store, conn, task_id)
+    finally:
+        conn.close()
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — {spec_id}</title>
