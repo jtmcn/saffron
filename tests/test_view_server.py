@@ -608,12 +608,12 @@ def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
         assert batch_specs == {spec_b1, spec_b2}
 
 
-def _status_line(host: str, port: int, raw_target: bytes) -> str:
+def _status_line(host: str, port: int, raw_target: bytes, headers: bytes = b"") -> str:
     """One raw HTTP/1.0 request, with `raw_target` sent byte for byte.
 
-    The vehicle for a path byte `urllib` cannot encode."""
+    The vehicle for a path byte `urllib` cannot encode, or a forged `Host`."""
     with socket.create_connection((host, port)) as sock:
-        sock.sendall(b"GET " + raw_target + b" HTTP/1.0\r\n\r\n")
+        sock.sendall(b"GET " + raw_target + b" HTTP/1.0\r\n" + headers + b"\r\n")
         response = b""
         while True:
             chunk = sock.recv(4096)
@@ -1097,3 +1097,43 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
         rows = pages[task_id].tables.get(None, [])
         findings = [row for row in rows if len(row) == 4]
         assert findings == [[lens, "concern", claim, ""]]
+
+
+def _one_batched_task(tmp_path: Path) -> tuple[int, int]:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    batch = ledger.create_batch(5.0)
+    run = ledger.create_run(repo_id, "m", batch_id=batch)
+    task = ledger.create_task(run, "SA-REAL", "sr", "br")
+    _set_task(ledger, task, state="READY_FOR_REVIEW")
+    _close(ledger, spares)
+    return batch, task
+
+
+def test_a_request_naming_another_host_is_refused(tmp_path: Path) -> None:
+    # A DNS-rebinding page reaches loopback with its own name in Host.
+    _, task = _one_batched_task(tmp_path)
+    with _running(tmp_path / "ledger.db") as base:
+        split = urllib.parse.urlsplit(base)
+        assert split.hostname is not None
+        assert split.port is not None
+        host, port = split.hostname, split.port
+        targets = [b"/", f"/task/{task}".encode(), b"/sparql?query=ASK%7B%7D"]
+        for target in targets:
+            for forged in [b"evil.example", b"localhost.evil.example", b"10.0.0.5"]:
+                line = _status_line(host, port, target, b"Host: " + forged + b"\r\n")
+                assert " 421 " in line, (target, forged)
+            for own in [f"127.0.0.1:{port}", f"localhost:{port}", "localhost"]:
+                line = _status_line(host, port, target, f"Host: {own}\r\n".encode())
+                assert " 200 " in line, (target, own)
+
+
+def test_an_overlong_digit_id_is_404_and_a_query_string_keeps_its_page(
+    tmp_path: Path,
+) -> None:
+    batch, task = _one_batched_task(tmp_path)
+    with _running(tmp_path / "ledger.db") as base:
+        status, _ = _get(base, "/task/" + "9" * 5000)
+        assert status == 404
+        for path in ["/?x=1", f"/batch/{batch}?x=1", f"/task/{task}?x=1"]:
+            status, _ = _get(base, path)
+            assert status == 200, path

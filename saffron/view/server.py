@@ -32,6 +32,7 @@ _SPARQL_RESULTS_JSON = "application/sparql-results+json"
 _SERVICE_REFUSED = "the query endpoint refuses a SERVICE clause"
 
 _MAX_POST_BODY = 65536
+_MAX_ID_DIGITS = 18
 
 _SERVICE_WORD = re.compile(r"\bservice\b", re.IGNORECASE)
 _UNICODE_ESCAPE = re.compile(r"\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8})")
@@ -164,6 +165,19 @@ def _check_loopback(host: str) -> None:
         raise ValueError(f"not localhost or an IPv4 loopback address: {host!r}")
 
 
+def _host_is_local(header: str | None) -> bool:
+    """Whether a request's `Host` names this loopback server. A missing header
+    passes, because a browser always sends one."""
+    if header is None:
+        return True
+    name = header.rsplit(":", 1)[0] if ":" in header else header
+    try:
+        _check_loopback(name)
+    except ValueError:
+        return False
+    return True
+
+
 class _ViewServer(ThreadingHTTPServer):
     def __init__(
         self,
@@ -201,10 +215,14 @@ def make_server(
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         server = cast(_ViewServer, self.server)
-        path = self.path
-        if path == "/sparql" or path.startswith("/sparql?"):
-            self._handle_sparql(server, path)
+        # A DNS-rebinding page reaches loopback carrying its own name in Host.
+        if not _host_is_local(self.headers.get("Host")):
+            self._respond(421, "")
             return
+        if self.path == "/sparql" or self.path.startswith("/sparql?"):
+            self._handle_sparql(server, self.path)
+            return
+        path = urllib.parse.urlsplit(self.path).path
         if path == "/":
             self._respond(200, _render_index(server.store, server.left_out))
             return
@@ -213,7 +231,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(404, "")
             return
         kind, raw_id = parts[1], parts[2]
-        if kind not in ("batch", "task") or not (raw_id.isascii() and raw_id.isdigit()):
+        # int() refuses a digit string past 4300 digits. No ledger id needs 19.
+        digits = raw_id.isascii() and raw_id.isdigit() and len(raw_id) <= _MAX_ID_DIGITS
+        if kind not in ("batch", "task") or not digits:
             self._respond(404, "")
             return
         node_id = int(raw_id)
