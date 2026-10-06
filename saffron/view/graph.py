@@ -167,170 +167,187 @@ def build(db: sqlite3.Connection, *, shapes_path: Path = DEFAULT_SHAPES) -> View
 
     g = rdflib.Graph()
 
-    for row in db.execute("SELECT * FROM batches ORDER BY batch_id").fetchall():
-        batch_node = data[f"batch-{row['batch_id']}"]
-        g.add((batch_node, rdflib.RDF.type, factory.Batch))
-        g.add((batch_node, factory.budgetUsd, _decimal(row["budget_usd"])))
-        g.add((batch_node, prov.startedAtTime, _utc_time(row["started_at"])))
-        if row["spent_usd_est"] is not None:
-            g.add((batch_node, factory.spentUsdEst, _decimal(row["spent_usd_est"])))
-        if row["ended_at"] is not None:
-            g.add((batch_node, prov.endedAtTime, _utc_time(row["ended_at"])))
-        if row["status"] is not None:
-            g.add((batch_node, factory.endedBecause, factory[row["status"]]))
+    # One read snapshot, so a writer committing between reads cannot split the graph.
+    db.execute("BEGIN")
+    try:
+        for row in db.execute("SELECT * FROM batches ORDER BY batch_id").fetchall():
+            batch_node = data[f"batch-{row['batch_id']}"]
+            g.add((batch_node, rdflib.RDF.type, factory.Batch))
+            g.add((batch_node, factory.budgetUsd, _decimal(row["budget_usd"])))
+            g.add((batch_node, prov.startedAtTime, _utc_time(row["started_at"])))
+            if row["spent_usd_est"] is not None:
+                g.add((batch_node, factory.spentUsdEst, _decimal(row["spent_usd_est"])))
+            if row["ended_at"] is not None:
+                g.add((batch_node, prov.endedAtTime, _utc_time(row["ended_at"])))
+            if row["status"] is not None:
+                g.add((batch_node, factory.endedBecause, factory[row["status"]]))
 
-    for row in db.execute("SELECT * FROM runs ORDER BY run_id").fetchall():
-        run_node = data[f"run-{row['run_id']}"]
-        g.add((run_node, rdflib.RDF.type, factory.Run))
-        g.add((run_node, factory.baseSha, rdflib.Literal(row["base_sha"])))
-        if row["batch_id"] is not None:
-            g.add((run_node, prov.wasInformedBy, data[f"batch-{row['batch_id']}"]))
+        for row in db.execute("SELECT * FROM runs ORDER BY run_id").fetchall():
+            run_node = data[f"run-{row['run_id']}"]
+            g.add((run_node, rdflib.RDF.type, factory.Run))
+            g.add((run_node, factory.baseSha, rdflib.Literal(row["base_sha"])))
+            if row["batch_id"] is not None:
+                g.add((run_node, prov.wasInformedBy, data[f"batch-{row['batch_id']}"]))
 
-    left_out: list[LeftOut] = []
-    task_nodes: dict[int, rdflib.URIRef] = {}
-    spec_ids: dict[int, str] = {}
+        left_out: list[LeftOut] = []
+        task_nodes: dict[int, rdflib.URIRef] = {}
+        spec_ids: dict[int, str] = {}
 
-    for row in db.execute("SELECT * FROM tasks ORDER BY task_id").fetchall():
-        state_term = f"{NS}{row['state']}"
-        is_end = state_term in end_states
-        is_in_flight = state_term in in_flight_states
-        if not is_end and not is_in_flight:
-            left_out.append(LeftOut(row["task_id"], row["spec_id"], "unknown_state"))
-            continue
-        risk_term = f"{NS}{row['risk']}"
-        if risk_term not in risks:
-            left_out.append(LeftOut(row["task_id"], row["spec_id"], "unknown_risk"))
-            continue
+        for row in db.execute("SELECT * FROM tasks ORDER BY task_id").fetchall():
+            state_term = f"{NS}{row['state']}"
+            is_end = state_term in end_states
+            is_in_flight = state_term in in_flight_states
+            if not is_end and not is_in_flight:
+                left_out.append(
+                    LeftOut(row["task_id"], row["spec_id"], "unknown_state")
+                )
+                continue
+            risk_term = f"{NS}{row['risk']}"
+            if risk_term not in risks:
+                left_out.append(LeftOut(row["task_id"], row["spec_id"], "unknown_risk"))
+                continue
 
-        task_node = data[f"task-{row['task_id']}"]
-        g.add((task_node, rdflib.RDF.type, factory.Task))
-        g.add((task_node, factory.inState, factory[row["state"]]))
-        if is_end:
-            g.add((task_node, factory.endedInState, factory[row["state"]]))
-        g.add((task_node, factory.riskTier, factory[row["risk"]]))
-        g.add((task_node, rdfs.label, rdflib.Literal(row["spec_id"])))
-        g.add((task_node, prov.wasInformedBy, data[f"run-{row['run_id']}"]))
-        if row["pr_url"] is not None:
-            g.add((task_node, rdfs.seeAlso, rdflib.URIRef(row["pr_url"])))
-        task_nodes[row["task_id"]] = task_node
-        spec_ids[row["task_id"]] = row["spec_id"]
+            task_node = data[f"task-{row['task_id']}"]
+            g.add((task_node, rdflib.RDF.type, factory.Task))
+            g.add((task_node, factory.inState, factory[row["state"]]))
+            if is_end:
+                g.add((task_node, factory.endedInState, factory[row["state"]]))
+            g.add((task_node, factory.riskTier, factory[row["risk"]]))
+            g.add((task_node, rdfs.label, rdflib.Literal(row["spec_id"])))
+            g.add((task_node, prov.wasInformedBy, data[f"run-{row['run_id']}"]))
+            if row["pr_url"] is not None:
+                g.add((task_node, rdfs.seeAlso, rdflib.URIRef(row["pr_url"])))
+            task_nodes[row["task_id"]] = task_node
+            spec_ids[row["task_id"]] = row["spec_id"]
 
-    phases_seen: set[tuple[int, str]] = set()
-    last_gated_diff: dict[int, rdflib.URIRef] = {}
-    for row in db.execute("SELECT * FROM attempts ORDER BY attempt_id").fetchall():
-        task_node = task_nodes.get(row["task_id"])
-        if task_node is None:
-            continue
-        phase_key = (row["task_id"], row["phase"])
-        phase_node = data[f"phase-{row['task_id']}-{row['phase']}"]
-        if phase_key not in phases_seen:
-            g.add((phase_node, rdflib.RDF.type, factory.Phase))
-            g.add((phase_node, rdfs.label, rdflib.Literal(row["phase"])))
-            g.add((phase_node, prov.wasInformedBy, task_node))
-            phases_seen.add(phase_key)
+        phases_seen: set[tuple[int, str]] = set()
+        last_gated_diff: dict[int, rdflib.URIRef] = {}
+        for row in db.execute("SELECT * FROM attempts ORDER BY attempt_id").fetchall():
+            task_node = task_nodes.get(row["task_id"])
+            if task_node is None:
+                continue
+            phase_key = (row["task_id"], row["phase"])
+            phase_node = data[f"phase-{row['task_id']}-{row['phase']}"]
+            if phase_key not in phases_seen:
+                g.add((phase_node, rdflib.RDF.type, factory.Phase))
+                g.add((phase_node, rdfs.label, rdflib.Literal(row["phase"])))
+                g.add((phase_node, prov.wasInformedBy, task_node))
+                phases_seen.add(phase_key)
 
-        attempt_node = data[f"attempt-{row['attempt_id']}"]
-        g.add((attempt_node, rdflib.RDF.type, factory.Attempt))
-        g.add((attempt_node, factory.withinPhase, phase_node))
-        g.add((attempt_node, factory.n, rdflib.Literal(row["n"], datatype=xsd.integer)))
-        g.add((attempt_node, prov.startedAtTime, _utc_time(row["started_at"])))
-        if row["num_turns"] is not None:
+            attempt_node = data[f"attempt-{row['attempt_id']}"]
+            g.add((attempt_node, rdflib.RDF.type, factory.Attempt))
+            g.add((attempt_node, factory.withinPhase, phase_node))
             g.add(
                 (
                     attempt_node,
-                    factory.numTurns,
-                    rdflib.Literal(row["num_turns"], datatype=xsd.integer),
+                    factory.n,
+                    rdflib.Literal(row["n"], datatype=xsd.integer),
                 )
             )
-        if row["cost_usd_est"] is not None:
-            g.add((attempt_node, factory.costUsdEst, _decimal(row["cost_usd_est"])))
-        if row["ended_at"] is not None:
-            g.add((attempt_node, prov.endedAtTime, _utc_time(row["ended_at"])))
-
-        # One suite and one diff per gated attempt. A baseline result names
-        # a run, so this filter never matches one.
-        gate_rows = db.execute(
-            "SELECT * FROM gate_results WHERE attempt_id = ? ORDER BY gate_result_id",
-            (row["attempt_id"],),
-        ).fetchall()
-        if gate_rows:
-            suite_node = data[f"gatesuite-{row['attempt_id']}"]
-            diff_node = data[f"diff-attempt-{row['attempt_id']}"]
-            g.add((suite_node, rdflib.RDF.type, factory.GateSuite))
-            g.add((suite_node, prov.wasInformedBy, attempt_node))
-            g.add((diff_node, rdflib.RDF.type, factory.Diff))
-            g.add((attempt_node, prov.generated, diff_node))
-            last_gated_diff[row["task_id"]] = diff_node
-
-            for gate_row in gate_rows:
-                gate_result_node = data[f"gate-result-{gate_row['gate_result_id']}"]
-                g.add((gate_result_node, rdflib.RDF.type, factory.GateResult))
-                g.add((gate_result_node, prov.wasGeneratedBy, suite_node))
-                g.add((gate_result_node, earl.subject, diff_node))
-                g.add((gate_result_node, earl.mode, earl.automatic))
-                outcome_node = rdflib.BNode()
-                g.add((gate_result_node, earl.result, outcome_node))
+            g.add((attempt_node, prov.startedAtTime, _utc_time(row["started_at"])))
+            if row["num_turns"] is not None:
                 g.add(
                     (
-                        outcome_node,
-                        earl.outcome,
-                        earl[_STATUS_OUTCOME[gate_row["status"]]],
+                        attempt_node,
+                        factory.numTurns,
+                        rdflib.Literal(row["num_turns"], datatype=xsd.integer),
                     )
                 )
-                failure_count = db.execute(
-                    "SELECT COUNT(*) AS n FROM failures WHERE gate_result_id = ?",
-                    (gate_row["gate_result_id"],),
-                ).fetchone()["n"]
-                g.add(
-                    (
-                        gate_result_node,
-                        factory.failureCount,
-                        rdflib.Literal(failure_count, datatype=xsd.integer),
-                    )
-                )
-                gate_node = _gate_node(
-                    gate_row["gate"],
-                    factory=factory,
-                    data=data,
-                    core_gates=core_gates,
-                    gate_roles=gate_roles,
-                    g=g,
-                )
-                g.add((gate_result_node, earl.assertedBy, gate_node))
+            if row["cost_usd_est"] is not None:
+                g.add((attempt_node, factory.costUsdEst, _decimal(row["cost_usd_est"])))
+            if row["ended_at"] is not None:
+                g.add((attempt_node, prov.endedAtTime, _utc_time(row["ended_at"])))
 
-    # Read findings only for tasks `build` kept. A left-out task's findings
-    # are never read at all.
-    for task_id in task_nodes:
-        finding_rows = db.execute(
-            "SELECT * FROM findings WHERE task_id = ? ORDER BY finding_id",
-            (task_id,),
-        ).fetchall()
-        if not finding_rows:
-            continue
-        diff_node = last_gated_diff.get(task_id)
-        if diff_node is None:
-            left_out.append(
-                LeftOut(task_id, spec_ids[task_id], "findings_without_diff")
-            )
-            continue
-        for finding_row in finding_rows:
-            finding_node = data[f"finding-{finding_row['finding_id']}"]
-            lens_node = data[f"lens-{finding_row['lens']}"]
-            g.add((lens_node, rdflib.RDF.type, factory.CriticLens))
-            g.add((finding_node, rdflib.RDF.type, factory.Finding))
-            g.add((finding_node, factory.severity, factory[finding_row["severity"]]))
-            g.add((finding_node, earl.assertedBy, lens_node))
-            g.add((finding_node, earl.subject, diff_node))
-            g.add((finding_node, earl.mode, earl.semiAuto))
-            g.add((finding_node, factory.claim, rdflib.Literal(finding_row["claim"])))
-            if finding_row["verdict"] is not None:
-                g.add(
-                    (
-                        finding_node,
-                        factory.verdict,
-                        rdflib.Literal(finding_row["verdict"]),
+            # One suite and one diff per gated attempt. A baseline result names
+            # a run, so this filter never matches one.
+            gate_rows = db.execute(
+                "SELECT * FROM gate_results WHERE attempt_id = ? ORDER BY gate_result_id",
+                (row["attempt_id"],),
+            ).fetchall()
+            if gate_rows:
+                suite_node = data[f"gatesuite-{row['attempt_id']}"]
+                diff_node = data[f"diff-attempt-{row['attempt_id']}"]
+                g.add((suite_node, rdflib.RDF.type, factory.GateSuite))
+                g.add((suite_node, prov.wasInformedBy, attempt_node))
+                g.add((diff_node, rdflib.RDF.type, factory.Diff))
+                g.add((attempt_node, prov.generated, diff_node))
+                last_gated_diff[row["task_id"]] = diff_node
+
+                for gate_row in gate_rows:
+                    gate_result_node = data[f"gate-result-{gate_row['gate_result_id']}"]
+                    g.add((gate_result_node, rdflib.RDF.type, factory.GateResult))
+                    g.add((gate_result_node, prov.wasGeneratedBy, suite_node))
+                    g.add((gate_result_node, earl.subject, diff_node))
+                    g.add((gate_result_node, earl.mode, earl.automatic))
+                    outcome_node = rdflib.BNode()
+                    g.add((gate_result_node, earl.result, outcome_node))
+                    g.add(
+                        (
+                            outcome_node,
+                            earl.outcome,
+                            earl[_STATUS_OUTCOME[gate_row["status"]]],
+                        )
                     )
+                    failure_count = db.execute(
+                        "SELECT COUNT(*) AS n FROM failures WHERE gate_result_id = ?",
+                        (gate_row["gate_result_id"],),
+                    ).fetchone()["n"]
+                    g.add(
+                        (
+                            gate_result_node,
+                            factory.failureCount,
+                            rdflib.Literal(failure_count, datatype=xsd.integer),
+                        )
+                    )
+                    gate_node = _gate_node(
+                        gate_row["gate"],
+                        factory=factory,
+                        data=data,
+                        core_gates=core_gates,
+                        gate_roles=gate_roles,
+                        g=g,
+                    )
+                    g.add((gate_result_node, earl.assertedBy, gate_node))
+
+        # Read findings only for tasks `build` kept. A left-out task's findings
+        # are never read at all.
+        for task_id in task_nodes:
+            finding_rows = db.execute(
+                "SELECT * FROM findings WHERE task_id = ? ORDER BY finding_id",
+                (task_id,),
+            ).fetchall()
+            if not finding_rows:
+                continue
+            diff_node = last_gated_diff.get(task_id)
+            if diff_node is None:
+                left_out.append(
+                    LeftOut(task_id, spec_ids[task_id], "findings_without_diff")
                 )
+                continue
+            for finding_row in finding_rows:
+                finding_node = data[f"finding-{finding_row['finding_id']}"]
+                lens_node = data[f"lens-{finding_row['lens']}"]
+                g.add((lens_node, rdflib.RDF.type, factory.CriticLens))
+                g.add((finding_node, rdflib.RDF.type, factory.Finding))
+                g.add(
+                    (finding_node, factory.severity, factory[finding_row["severity"]])
+                )
+                g.add((finding_node, earl.assertedBy, lens_node))
+                g.add((finding_node, earl.subject, diff_node))
+                g.add((finding_node, earl.mode, earl.semiAuto))
+                g.add(
+                    (finding_node, factory.claim, rdflib.Literal(finding_row["claim"]))
+                )
+                if finding_row["verdict"] is not None:
+                    g.add(
+                        (
+                            finding_node,
+                            factory.verdict,
+                            rdflib.Literal(finding_row["verdict"]),
+                        )
+                    )
+    finally:
+        db.rollback()
 
     _validate(g, shapes_path)
     return ViewGraph(
