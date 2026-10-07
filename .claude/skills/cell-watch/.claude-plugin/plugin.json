@@ -1,0 +1,6 @@
+{
+  "name": "cell-watch",
+  "version": "0.1.0",
+  "description": "Follows a Saffron task's events.jsonl: status line, pane, and a wake-up on milestones",
+  "types": "./types/index.d.ts"
+}
