@@ -258,6 +258,11 @@ def test_stacked_on_defaults_to_unset():
     assert _spec().stacked_on is None
 
 
+def test_a_cell_spec_declares_no_tier_unless_given_one():
+    """A caller that passes no tier files none, never `standard` (item 170)."""
+    assert _spec().declared_risk is None
+
+
 def test_stacked_on_carries_a_second_base_distinct_from_base_sha():
     spec = _spec(base_sha="b" * 40, stacked_on="c" * 40)
     assert spec.stacked_on == "c" * 40

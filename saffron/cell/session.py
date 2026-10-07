@@ -1964,8 +1964,8 @@ def _drive_cell(
             spec.spec_sha,
             branch=spec.branch,
             budget_usd=spec.budget_usd,
-            # The spec-declared tier only (§5.6). `None` where the spec
-            # declared none at all, never `risk`'s defaulted string (item 170).
+            # The declared tier only: no diff exists yet for `elevate_on` (§5.6).
+            # `None` where the spec declared none (§4.1, item 170).
             risk=spec.declared_risk,
             # The declaration these gates actually ran under, read above from the
             # export at base_sha — never the working copy (§5.4, backlog item 16).
