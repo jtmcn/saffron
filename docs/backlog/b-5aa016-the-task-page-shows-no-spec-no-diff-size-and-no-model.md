@@ -4,7 +4,7 @@ title: "The task page shows no spec, no diff size and no model"
 status: open
 tier: 3
 filed: 2026-10-07
-specs: []
+specs: [SA-0225]
 prs: []
 commits: []
 cites: [§6.2, §4.1]
