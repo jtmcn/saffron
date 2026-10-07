@@ -22,7 +22,8 @@ REBUT `Attempt` carries `spent_usd_est: null`, as item 47 decided for every GATE
 and REBUT row. The next typed figure is the `TaskOutcome`, at $17.34 of $26.
 
 So a reader of the log sees $6.26 for the whole of REVIEW and REBUT. In
-`SA-0222`, the IMPLEMENT notes to the outcome ran 48 minutes and spent $11.08. A follower must either
+`SA-0222`, the span from the `notes recorded` line to the outcome ran 48
+minutes and spent $11.08. A follower must either
 show the stale figure or parse prose that `describe` owns. The mod shows the
 stale figure.
 
