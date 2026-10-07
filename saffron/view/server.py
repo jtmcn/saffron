@@ -305,7 +305,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
-_STYLE = """<style>
+_STYLESHEET = """<style>
   body { font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
          margin: 2rem auto; padding: 0 1rem; max-width: 72rem; color: #111; }
   h1 { font-size: 1.4rem; }
@@ -413,7 +413,7 @@ def _render_index(store: ox.Store, left_out: list[LeftOut]) -> str:
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — run record</title>
-{_STYLE}
+{_STYLESHEET}
 <h1>Run record</h1>
 <h2>Batches</h2>
 {batches_table}
@@ -433,7 +433,7 @@ def _render_batch(store: ox.Store, batch_id: int) -> str:
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — batch {batch_id}</title>
-{_STYLE}
+{_STYLESHEET}
 <h1>Batch {batch_id}</h1>
 {_table(rows, _TASK_COLUMNS, table_id="tasks")}
 """
@@ -692,7 +692,7 @@ def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — {spec_id}</title>
-{_STYLE}
+{_STYLESHEET}
 <h1>Task {task_id} — {spec_id}</h1>
 {summary_html}
 {body}
