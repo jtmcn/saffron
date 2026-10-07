@@ -332,9 +332,9 @@ tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sh
               spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
               ended_at, subtype, terminal_reason, num_turns, cost_usd_est,
-              cost_floor_usd_est)
+              cost_floor_usd_est, earned_risk)
 gate_results (gate_result_id, attempt_id, run_id, gate, status, tool,
-              duration_ms, summary)
+              duration_ms, summary, failures_at_head)
 failures     (failure_id, gate_result_id, file, code, message, line)
 findings     (finding_id, task_id, lens, severity, file, line, claim, anchored,
               verdict, adjudication, rebuttal)
@@ -356,6 +356,8 @@ needs the distinction and the first that enforces it.
 
 **`failures` is a table, not a log line, and that is load-bearing.** Three separate mechanisms key on `(gate, file, code)` — baseline subtraction, no-progress detection (§5.4), and the flywheel's "which gate was the sole failure" question (§8) — so the identity has to be queryable, not gzipped in the batch tree. A status-only `gate_results` would have made N7 re-derive the baseline by parsing files after a crash, and would have made `SA-0001`'s Q3 unanswerable *in SQL for schema reasons rather than expressiveness ones*, quietly corrupting the SQL-equivalence challenge that spec exists to run. `line` is stored because the PR body and finding anchoring display it; it is not part of the identity (§5.4).
 
+An attempt's `failures` rows are its new failures only, and `gate_results.failures_at_head` counts its failures at head. A baseline result keeps its full list. An attempt whose suite drifted or aborted keeps every failure at head, since §5.4 refuses that subtraction. Its count then equals its rows, as it does where nothing cancelled.
+
 **Exactly one of `attempt_id` and `run_id` is set**, and the null is the point: a gate result belongs to an attempt, *except* the baseline suite (§4.4), which runs against a run's `base_sha` with no agent, no session and no cost. Rev 7's schema had no column that could hold it. This is also §4.6's first criticism showing its teeth from the other side — `findings` stored `file`, `line` and `claim` in full while `gate_results` stored none of it, which is a strange asymmetry between two things the PR body already renders as one table.
 
 `findings` carries three distinct judgements, and they must not collapse into one column. **`verdict`** is the critic's own answer at REBUT. **`adjudication`** is the operator's agree or disagree. §4.6 flagged it as belonging in a typed field rather than folded into `decisions.reason`. It is the entire basis of the critic-ROI query. **`rebuttal`** is the implementer's argument. `anchored` records whether the finding survived reconciliation against the diff (§5.5) — dropped findings are kept, not deleted, because the drop rate is the signal that a lens is badly prompted. A `verdict` takes one of three values: `confirmed`, `withdrawn` or `contradicted` (§5.6). The host reads two of the critic's answers as `confirmed`, and the column records its reading (§5.6).
@@ -363,6 +365,8 @@ needs the distinction and the first that enforces it.
 **`cost_usd_est`, and the suffix is not decoration.** Every dollar figure the agent runtime reports is a *client-side estimate*, computed locally from a price table bundled into the SDK at build time. It drifts when pricing changes, when the installed SDK doesn't recognize a model, and when billing rules apply that the client cannot model; the runtime's own documentation says not to make financial decisions from it. Saffron makes exactly one financial decision from it — the budget gate (§4.2) — and that is acceptable because the consequence of drift is a night that costs somewhat more or less than $50, not a wrong answer. What is *not* acceptable is `spent_usd` silently becoming the number you reason about in §7.1, so the estimate carries its suffix everywhere it is stored, and cost-per-accepted-PR is reconciled against real billing periodically rather than trusted outright. **A column named for a measurement it cannot make is how an estimate becomes a fact.**
 
 `terminal_reason` exists for the same reason the supervisor measures doneness from git (§4.3): the agent runtime distinguishes a clean finish from an abort, and a crashed session (`subtype = error_during_execution`) **may report every cost field as zero**. An attempt that burned $4 and then crashed records $0 unless the supervisor falls back to the last good figure it saw before the crash. Unattended overnight, this is the difference between a budget that holds and one that silently stops counting. A session that ends before its `result` event reports no cost at all. It is charged the larger of that last good figure and a floor priced from its per-step usage. `cost_floor_usd_est` records that floor.
+
+`attempts.earned_risk` is the risk tier the attempt's gate suite ran at. It is null where no suite judged the attempt. `tasks.risk` stays the tier the spec declared. It reads `standard` where the spec declared no tier, and the `task_created` fact holds null there.
 
 `spec_sha` matters: edit a spec while a batch is running and the task is invalidated rather than silently building the old thing. `policy_sha` does the same one level up — change a repo's gate declarations mid-batch and its in-flight tasks are invalidated, because a task judged against a policy that no longer exists is not evidence of anything. `image_built_at` versus the `.saffron/Dockerfile` mtime is what triggers a rebuild at preflight.
 
@@ -1531,7 +1535,7 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
     cli.py                 # batch, run, queue, ratify, gc
     ledger.py              # SQLite schema + DAO
     record/
-      contract.py  refs.py  memory.py  fold.py         # the append-only record of facts, and the fold that rebuilds a ledger from it (item 170)
+      contract.py  refs.py  memory.py  fold.py  migrate.py   # the append-only record of facts, the fold that rebuilds a ledger from it, and the migration that writes a ledger's tasks into it (item 170)
     intake.py              # spec discovery, parse, validate (Pydantic)
     scheduler.py           # dep DAG, stacking, conflict sets, budget
     supervisor.py          # per-task lifecycle
