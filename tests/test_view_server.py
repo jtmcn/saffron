@@ -134,7 +134,7 @@ class _PageParser(HTMLParser):
     it, when there is one. `summary` maps each `<dl id="summary">` term's
     `<dt>` text to its `<dd>` text and the `href` of its `<a>`, if any.
     Also every `<a href>`, the first `<h1>`'s text, the `<title>`'s text,
-    and `text`: the page's own data, untagged."""
+    and `text`: the page's own data, untagged, without the stylesheet."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -165,6 +165,7 @@ class _PageParser(HTMLParser):
         self._dd_buffer = ""
         self._dd_href: str | None = None
         self._current_term: str | None = None
+        self._in_style = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
@@ -195,6 +196,8 @@ class _PageParser(HTMLParser):
             self._in_h1 = True
         elif tag == "title":
             self._in_title = True
+        elif tag == "style":
+            self._in_style = True
         elif tag == "h3":
             self._in_h3 = True
             self._h3_buffer = ""
@@ -228,6 +231,8 @@ class _PageParser(HTMLParser):
             self._in_h1 = False
         elif tag == "title":
             self._in_title = False
+        elif tag == "style":
+            self._in_style = False
         elif tag == "h3":
             self._in_h3 = False
             self._pending_h3 = self._h3_buffer
@@ -243,6 +248,8 @@ class _PageParser(HTMLParser):
             self._current_term = None
 
     def handle_data(self, data: str) -> None:
+        if self._in_style:
+            return
         self.text += data
         if self._cell is not None:
             self._cell.append(data)
@@ -1159,7 +1166,7 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
             if other_id == task_id:
                 continue
             assert other_pr not in bodies[task_id]
-            assert other_lens not in bodies[task_id]
+            assert other_lens not in pages[task_id].text
 
     finding_rows = pages[task_b1].tables.get("findings", [])
     assert ["style", "concern", "claim-b1", ""] in finding_rows
@@ -1705,3 +1712,13 @@ def test_task_lists_run_newest_first_by_id_as_a_number(tmp_path: Path) -> None:
     expected_chronological = [str(batch_x), str(batch_y), str(throwaway_batch)]
     ours_batches = [b for b in batch_ids_in_order if b in set(expected_chronological)]
     assert ours_batches == expected_chronological
+
+
+def test_every_page_carries_one_stylesheet_with_a_dark_scheme(tmp_path: Path) -> None:
+    batch, task = _one_batched_task(tmp_path)
+    with _running(tmp_path / "ledger.db") as base:
+        for path in ["/", f"/batch/{batch}", f"/task/{task}"]:
+            status, body = _get(base, path)
+            assert status == 200, path
+            assert body.count("<style>") == 1, path
+            assert "prefers-color-scheme: dark" in body, path
