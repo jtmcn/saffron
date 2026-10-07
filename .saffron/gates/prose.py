@@ -45,6 +45,10 @@ INCLUDED_DIRS = (
 )
 # A finished spec records what a cell was told, so it stays as written.
 EXCLUDED_DIRS = (".saffron/specs/done/",)
+# A closed backlog record is history too. `records/kinds.py` owns the set, and a test pins this copy.
+CLOSED_STATUSES = frozenset({"done", "superseded", "wontfix"})
+_FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+_STATUS = re.compile(r"^status:\s*(\w+)", re.M)
 # Python whose comments a cell or a person writes; `docs/` holds evidence scripts.
 CODE_DIRS = (
     "saffron/",
@@ -558,10 +562,20 @@ def _words(text: _Text, path: str, gate: str, root: Path) -> list[Hit]:
     return _style(text, path, root) if gate == "prose" else _avoided(text)
 
 
+def closed_record(text: str, path: str) -> bool:
+    if not path.startswith("docs/backlog/"):
+        return False
+    front = _FRONT_MATTER.match(text)
+    status = _STATUS.search(front.group(1)) if front else None
+    return status is not None and status.group(1) in CLOSED_STATUSES
+
+
 def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
     """Every hit `gate` reports for `text`, read as the file at `path`."""
     if gate not in GATES:
         raise ValueError(f"unknown gate: {gate}")
+    if closed_record(text, path):
+        return []
     if path.endswith(".py"):
         body = _python_prose(text)
         found = [] if body is None else _words(_Text(_prepare(body)), path, gate, root)
