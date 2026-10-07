@@ -3,17 +3,21 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { View, Watch } from '../types'
 import { parse, summarize } from './progress'
+import type { CellEvent } from './progress'
 
 const PANE = 'cell-watch'
 const POLL_MS = 3000
+const WINDOW_HOURS = 12
 const SPEC = /^SA-\d+$/
+const NO_WATCH: Watch = { spec: '', follow: false, wake: true }
+const NO_VIEW: View = { spec: '', status: '', lines: [] }
 
-const watch = atom({ plugin: 'cell-watch', key: 'watch' } as const, { spec: '', follow: false, wake: true })
-const view = atom({ plugin: 'cell-watch', key: 'view' } as const, { spec: '', status: '', lines: [] })
+const watch = atom({ plugin: 'cell-watch', key: 'watch' } as const, NO_WATCH)
+const view = atom({ plugin: 'cell-watch', key: 'view' } as const, NO_VIEW)
 const announced = atom({ plugin: 'cell-watch', key: 'announced' } as const, [])
 
 let timer: Timer | undefined
-let busy = false
+let inFlight: Promise<string[]> | undefined
 
 async function batches($: EngineInterface): Promise<string> {
   return `${(await $.env.get('HOME')) ?? ''}/.saffron/batches/v0`
@@ -22,7 +26,8 @@ async function batches($: EngineInterface): Promise<string> {
 // `saffron batch` moves from spec to spec, so follow mode takes the newest-written log.
 async function newestSpec($: EngineInterface): Promise<string> {
   const root = await batches($)
-  const found = await $.process.run(['find', root, '-maxdepth', '2', '-name', 'events.jsonl', '-mmin', '-720'])
+  const window = `-${WINDOW_HOURS * 60}`
+  const found = await $.process.run(['find', root, '-maxdepth', '2', '-name', 'events.jsonl', '-mmin', window])
   let best = { spec: '', mtime: -1 }
   for (const path of found.stdout.split('\n').filter(Boolean)) {
     const spec = path.split('/').at(-2) ?? ''
@@ -33,51 +38,69 @@ async function newestSpec($: EngineInterface): Promise<string> {
   return best.spec
 }
 
-// grep drops the agent's own lines. Measured on SA-0222, 300 KB of log became 5 KB, far under fs.read's 4 MiB cap.
-async function events($: EngineInterface, spec: string) {
+// grep drops the agent's own lines: 300 KB became 5 KB on SA-0222 (measured).
+// process.run cuts stdout at 4 MiB, and a cut read loses the newest events, so it is refused.
+async function events($: EngineInterface, spec: string): Promise<CellEvent[] | undefined> {
   const path = `${await batches($)}/${spec}/events.jsonl`
   const out = await $.process.run(['grep', '-v', '-F', '"kind": "Agent"', path])
-  return parse(out.stdout)
+  return out.isStdoutTruncated ? undefined : parse(out.stdout)
 }
 
 // announce false marks what the log already holds as seen, so starting a watch wakes nobody.
-async function poll($: EngineInterface, announce: boolean): Promise<string[]> {
-  if (busy) return []
-  busy = true
-  try {
-    const w: Watch = await read($, watch)
-    const spec = w.follow ? await newestSpec($) : w.spec
-    if (!spec) return []
-    const progress = summarize(await events($, spec))
-    const next: View = { spec, status: progress.status || `${spec} · no log yet`, lines: progress.lines.slice(-200) }
-    await update($, view, () => next)
-    $.ui.status(next.status)
+async function check($: EngineInterface, announce: boolean): Promise<string[]> {
+  const w: Watch = await read($, watch)
+  const spec = w.follow ? await newestSpec($) : w.spec
+  if (!spec) {
+    await update($, view, () => NO_VIEW)
+    $.ui.status(undefined)
+    return []
+  }
+  const log = await events($, spec)
+  if (log === undefined) {
+    $.ui.status(`${spec} · log past 4 MiB, cell-watch cannot read it`)
+    return []
+  }
+  const progress = summarize(log)
+  const next: View = { spec, status: progress.status || `${spec} · no log yet`, lines: progress.lines.slice(-200) }
+  await update($, view, () => next)
+  $.ui.status(next.status)
 
-    const seen = new Set<string>(await read($, announced))
-    const fresh = progress.milestones.filter(m => !seen.has(m.key))
-    if (fresh.length === 0) return []
-    await update($, announced, list => [...list, ...fresh.map(m => m.key)].slice(-500))
-    if (announce) {
-      for (const m of fresh) {
-        $.ui.toast(`${spec}: ${m.line}`)
-        if (w.wake) {
-          void $.prompt.submit({
-            text:
-              `cell-watch: ${spec} ${m.line}. Read from events.jsonl, not the process: ` +
-              `wait for the cell's exit notice before \`driver.py record\`.`,
-          })
-        }
+  const seen = new Set<string>(await read($, announced))
+  const fresh = progress.milestones.filter(m => !seen.has(m.key))
+  if (fresh.length === 0) return []
+  await update($, announced, list => [...list, ...fresh.map(m => m.key)].slice(-500))
+  if (announce) {
+    for (const m of fresh) {
+      $.ui.toast(`${spec}: ${m.line}`)
+      if (w.wake) {
+        void $.prompt.submit({
+          text:
+            `cell-watch: ${spec} ${m.line}. Read from events.jsonl, not the process: ` +
+            `wait for the cell's exit notice before \`driver.py record\`.`,
+        })
       }
     }
-    return fresh.map(m => m.line)
-  } finally {
-    busy = false
   }
+  return fresh.map(m => m.line)
+}
+
+function poll($: EngineInterface, announce: boolean): Promise<string[]> {
+  const run = check($, announce).finally(() => {
+    if (inFlight === run) inFlight = undefined
+  })
+  inFlight = run
+  return run
+}
+
+// A start-up poll that skipped an in-flight one would mark nothing seen, and the next tick would wake for all of it.
+async function settle(): Promise<void> {
+  while (inFlight) await inFlight.catch(() => [])
 }
 
 function arm($: EngineInterface) {
   timer?.cancel()
   timer = $.clock.every(POLL_MS, () => {
+    if (inFlight) return
     void poll($, true).catch(err => $.ui.log(`cell-watch: ${String(err)}`, { to: 'debug' }))
   })
 }
@@ -97,10 +120,11 @@ export const register: Register = on => {
 
   on('command.run', { command: 'cell-watch' }, async ($, e) => {
     const words = e.args.trim().split(/\s+/).filter(Boolean)
+    timer?.cancel()
+    timer = undefined
+    await settle()
     if (words.includes('stop')) {
-      timer?.cancel()
-      timer = undefined
-      await update($, watch, () => ({ spec: '', follow: false, wake: true }))
+      await update($, watch, () => NO_WATCH)
       $.ui.status(undefined)
       return { text: 'cell-watch stopped.' }
     }
@@ -110,7 +134,7 @@ export const register: Register = on => {
     arm($)
     if (words.includes('--pane')) void $.ui.open({ id: PANE, title: 'Cell watch' })
     const v = await read($, view)
-    const target = spec || `the newest task (${v.spec || 'none in the last 12 h'})`
+    const target = spec || `the newest task (${v.spec || `none in the last ${WINDOW_HOURS} h`})`
     const held = already.length ? ` Already in the log: ${already.join('; ')}.` : ''
     return { text: `Watching ${target}: ${v.status || 'no log yet'}.${held}` }
   })

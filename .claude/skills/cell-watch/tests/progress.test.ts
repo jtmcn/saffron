@@ -58,6 +58,25 @@ test('a truncated final line is skipped, not fatal', async () => {
   expect(p.lines.length).toBeGreaterThan(0)
 })
 
+test('cell-authored detail reaches a wake-up stripped of control characters and capped at 500', async () => {
+  const terminal = line({
+    kind: 'Terminal', timestamp: 40, ...base, reason: 'plan_rejected', spent_usd_est: 1,
+    detail: `\u001b]0;owned\u0007\u001b[2J${'x'.repeat(900)}`,
+  })
+  const wake = summarize(parse([LIVE[0], terminal].join('\n'))).milestones.at(-1)?.line ?? ''
+  expect(/[\u0000-\u001f\u007f]/.test(wake)).toBe(false)
+  expect(wake.length).toBeLessThan(560)
+})
+
+test('a dollar ceiling reads as dollars, and an unreadable reopening time says so', async () => {
+  const budget = line({ kind: 'Budget', timestamp: 50, ...base, ceiling: 'budget_usd', value: 26.123456, limit: 26 })
+  const limited = line({
+    kind: 'TaskOutcome', timestamp: 51, ...base, outcome: 'RATE_LIMITED', spent_usd_est: 3, resets_at_unreadable: true,
+  })
+  const lines = summarize(parse([LIVE[0], budget, limited].join('\n'))).milestones.map(m => m.line)
+  expect(lines).toEqual(['budget: budget_usd $26.12/$26.00', 'RATE_LIMITED at $3.00 of $26.00, reopening time unreadable'])
+})
+
 test('only a budget_usd ceiling with no rebut spend stops the task', async () => {
   const stop = line({ kind: 'Budget', timestamp: 30, ...base, ceiling: 'budget_usd', value: 26, limit: 26 })
   const rebut = line({

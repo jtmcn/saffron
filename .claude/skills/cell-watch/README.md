@@ -1,12 +1,12 @@
 # cell-watch
 
 A Claude Code mod that follows a Saffron task through its `events.jsonl`. It
-replaces the spec loop's Monitor over `tail -F | grep`. It reads each event's
-`kind` field, so no pattern over rendered lines decides a milestone.
+reads each event's `kind` field, so no pattern over rendered lines decides a
+milestone. For an operator at the prompt, it does the work of the spec loop's
+Monitor over `tail -F | grep`. The model cannot start it, so an unattended
+loop still uses the Monitor.
 
 ## Use
-
-The operator types the command. The model cannot start it.
 
 - `/cell-watch` follows the newest task log under `~/.saffron/batches/v0`, so
   it moves to each next spec of a batch by itself.
@@ -31,6 +31,10 @@ The mod submits one prompt for each milestone below.
 
 The log is not the process. Wait for the cell's exit notice before
 `driver.py record`.
+
+A detail field mixes host and cell text. The mod strips its control
+characters and caps it at 500 characters before any toast or prompt, as
+`describe` does.
 
 ## Check it
 
