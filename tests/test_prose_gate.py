@@ -443,6 +443,28 @@ def test_scope_leaves_the_records_alone():
     assert prose.in_scope(".claude/skills/a/b/SKILL.md")
 
 
+def _record(status: str) -> str:
+    return f"---\nid: b-000000\nstatus: {status}\n---\n\nThe cell stops; it restarts.\n"
+
+
+@pytest.mark.parametrize("gate", ["prose", "terms"])
+def test_a_closed_backlog_record_is_left_alone(gate):
+    text = _record("done") + "The sandbox stops.\n"
+    assert _prose().check(text, "docs/backlog/b-000000-x.md", gate, root=REPO) == []
+    assert _prose().check(text, "docs/adr/0001-x.md", gate, root=REPO)
+
+
+@pytest.mark.parametrize("status", ["open", "partial"])
+def test_an_open_backlog_record_is_still_read(status):
+    assert _codes(_record(status), "docs/backlog/b-000000-x.md") == ["semicolon"]
+
+
+def test_closed_statuses_agree_with_the_record_kinds():
+    from records.kinds import CLOSED
+
+    assert _prose().CLOSED_STATUSES == CLOSED
+
+
 def _terms(text: str) -> list[str]:
     return [f.excerpt for f in _prose().check(text, "README.md", "terms", root=REPO)]
 
