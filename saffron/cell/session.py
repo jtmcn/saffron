@@ -321,6 +321,9 @@ class CellSpec:
     # the_cell` is what says so — it went unpassed for a whole task once,
     # which made the declared half of §5.6 unreachable outside tests.
     risk: str = "standard"
+    # `intake.Spec.declared_risk`, `None` included, so the fact can tell a
+    # declared "standard" from no declaration at all (item 170).
+    declared_risk: str | None = None
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
     # by tests. Two defaults for one ceiling is a drift vector — they disagreed
@@ -1961,11 +1964,9 @@ def _drive_cell(
             spec.spec_sha,
             branch=spec.branch,
             budget_usd=spec.budget_usd,
-            # The spec-declared tier only: no diff exists yet for an `elevate_on`
-            # path to have matched, and there is no later write to correct it
-            # against (§5.6). `_suite` below computes the real, per-attempt
-            # effective tier from the diff it already has.
-            risk=spec.risk,
+            # The spec-declared tier only (§5.6). `None` where the spec
+            # declared none at all, never `risk`'s defaulted string (item 170).
+            risk=spec.declared_risk,
             # The declaration these gates actually ran under, read above from the
             # export at base_sha — never the working copy (§5.4, backlog item 16).
             policy_sha=policy_sha,

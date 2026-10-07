@@ -36,6 +36,7 @@ from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, rebut, review
 from saffron.phases import package as package_mod
+from saffron.record.memory import MemoryRecord
 from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
 from tests.test_implement import _HEX_64, _no_reap
@@ -1333,6 +1334,9 @@ def _drive(
     # wall-scaling witness below. `None` leaves every prior caller unchanged.
     turn_seconds=None,
     on_state=None,
+    # A `Record` backend for the `Ledger` this drives, `None` by default so
+    # every caller that predates it still gets a ledger with no record.
+    record=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1463,7 +1467,7 @@ def _drive(
     monkeypatch.setattr("saffron.phases.implement.run_agent", _run_agent)
 
     # Left open: the caller reads its rows. tmp_path takes the file away.
-    ledger = Ledger(tmp_path / "ledger.db")
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
     if use_default_emit:
         outcome = session.run_one_cell(
             spec or _spec(),
@@ -3378,10 +3382,42 @@ def test_the_task_is_recorded_with_the_specs_declared_risk(monkeypatch, tmp_path
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn()],
-        spec=_spec(risk="elevated"),
+        spec=_spec(risk="elevated", declared_risk="elevated"),
     )
     (line,) = ledger.queue_lines()
     assert line["risk"] == "elevated"
+
+
+def test_the_task_created_fact_carries_the_cells_declared_tier_and_null_where_none(
+    monkeypatch, tmp_path
+):
+    """The `task_created` fact's `risk` is `CellSpec.declared_risk`, a null
+    value included. `CellSpec.risk` is never the source: it is always a
+    string. The fold still writes the column's defaulted `standard` where
+    the fact's tier is null (item 170)."""
+    for i, declared in enumerate([None, "standard", "elevated"]):
+        drive_dir = tmp_path / f"drive-{i}"
+        drive_dir.mkdir()
+        record = MemoryRecord()
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, ledger = _drive(
+            monkeypatch,
+            drive_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(risk="elevated", declared_risk=declared),
+            record=record,
+        )
+        key = ledger.record_key(outcome.task_id)
+        assert key is not None
+        facts = record.read(key)
+        created = next(f for f in facts if f.kind == "task_created")
+        assert created.payload["risk"] == declared
+
+        (row,) = ledger._db.execute(
+            "SELECT risk FROM tasks WHERE task_id = ?", (outcome.task_id,)
+        ).fetchall()
+        assert row["risk"] == (declared if declared is not None else "standard")
 
 
 def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(

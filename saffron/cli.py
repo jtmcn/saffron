@@ -1053,7 +1053,7 @@ def _stack_mint(
             candidate.spec.id,
             candidate.spec_sha,
             _branch(candidate.spec.id),
-            risk=candidate.spec.risk,
+            risk=candidate.spec.declared_risk,
             budget_usd=candidate.spec.budget_usd,
             prompt_sha=context.prompt_sha(),
         )
