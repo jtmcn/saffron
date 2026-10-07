@@ -4,7 +4,7 @@ title: A migration writes no stack rows and reaches no origin, so a ledger's his
 type: feature
 priority: 1
 depends_on: [SA-0223]
-estimated_lines: 441
+estimated_lines: 434
 estimate_measured: true
 touches:
   - saffron/record/migrate.py
@@ -85,10 +85,11 @@ acceptance:
       Before it writes anything, it fetches only `refs/saffron/tasks/*` into
       each mirror from the row's `origin` URL, so the mirror's branches and
       its `refs/saffron/values/*` refs stay as they were. It then pushes each
-      migrated task's ref to its own row's `origin` URL, once, with no
-      `--force`. So a ref already on the origin is read and prefix-checked.
-      One holding the start of a task's facts is completed, and one that
-      disagrees is refused, never pushed, and left as it was. The command
+      migrated task's ref to its own row's `origin` URL with no `--force`.
+      Each ref that moves reaches the origin in one push. So a ref already
+      on the origin is read and prefix-checked. One holding the start of a
+      task's facts is completed, and one that disagrees is refused and left
+      as it was. The command
       prints one line per task, `migrated <key>` or `refused <key>:
       <reason>`, and nothing else. It exits 1 when any task was refused, and
       never opens the home ledger. The witness drives two repo rows, each
@@ -142,6 +143,7 @@ acceptance:
       - The class name in the push-failed reason is hard-coded.
       - The fetch refspec carries no `+`, so a ref that diverged is not replaced.
       - The fetch does not prune, so a ref only the mirror holds stays.
+      - All of a repo's keys go in one push.
   - claim: >-
       Every repo's mirror is fetched before any fact is written. A fetch that
       fails, or a source path that does not exist, exits 2. No task ref is
@@ -151,14 +153,16 @@ acceptance:
       command printed before it are kept, since it prints each as its task
       ends. The witness drives a ledger whose second repo row names an origin
       that does not exist and shares the first row's mirror. It then drives a
-      source path that does not exist. Last, it drives two repo rows whose
-      second origin is removed after its fetch.
+      source path that does not exist. Last, it drives one repo of two tasks
+      whose origin moves away after its first push, so the second push finds
+      no repository.
     witness: tests/test_record_migrate.py::test_migrate_exits_two_when_infrastructure_fails_and_keeps_what_it_printed
     wrong_versions:
       - Each mirror is fetched just before its own repo's tasks are written.
       - A failed fetch is reported as a task that did not make it, so the exit is 1.
       - Every push `RecordError` is reported per task, a gone origin included.
       - The lines print only once every task has ended.
+      - A repo's lines print once that repo's pushes have all ended.
       - The source is opened with a plain read-write `sqlite3.connect`.
 ---
 
@@ -174,7 +178,7 @@ writes the six key-filed tables, chooses the target record per repo, pushes
 it, and adds the command.
 
 Line numbers below were read at `f692c72c`, and no cited file changed by
-`ae425a9f`. That base carries `SA-0220` to `SA-0223` as queued specs, not as
+`fa00bd55`. That base carries `SA-0220` to `SA-0223` as queued specs, not as
 code. This spec is written against their
 end states. There `saffron/record/migrate.py` holds
 `migrate(source, record) -> Migration`, with `migrated` and `refused`. It
@@ -267,8 +271,9 @@ from its task's run. 50 tasks hold a null `policy_sha`.
    only when it is a `StaleWriter` or its `stderr` holds `[remote
    rejected]`. Report that one with the key and
    `f"{type(exc).__name__}: {exc}"` on one line. Any other push failure,
-   such as a dead remote or no write access, raises. So do a fetch failure
-   and a failure while appending.
+   such as a dead or missing remote, raises. So do a fetch failure and a
+   failure while appending. Push each key on its own, never a repo's keys
+   in one push.
 5. **The command.** Add `saffron migrate --from <ledger.db>` beside `fold`,
    dispatched before the home ledger opens. Print one line per task as it
    ends: `migrated <key>`, `refused <key>: <reason>` or `push failed <key>:
@@ -350,7 +355,10 @@ sorted list, with each line's text before its first colon exact.
 
 **Criterion 2.** After the other writer's appends, put a `pre-receive` hook
 on each origin that appends its input to a log file. Assert each migrated key
-appears in its origin's log once, and the refused key never. Write a values
+appears in its origin's log once. Every migrated ref moves in this witness. A
+push of a ref the origin already holds sends nothing and runs no hook, as
+measured below. So the log cannot show the refused key, and the witness
+asserts that ref's sha instead. Write a values
 ref into the first mirror with `compare_and_swap`, and assert it and the
 branch read the same sha after the run. Assert the second origin and the
 second mirror hold exactly the second repo's key, and the first origin none
@@ -364,9 +372,12 @@ and the second `push failed <key>: StaleWriter: `. Before the rerun, delete
 the hook, unset the setting, and append the first task's last fact to the
 mirror's ref with `RefsRecord(mirror)`.
 
-**Criterion 4.** For the last arm, wrap `RefsRecord.fetch` with
-`monkeypatch` so it removes the second origin once it fetched from it. Assert
-the output is the first task's `migrated` line, then `saffron: RecordError: `.
+**Criterion 4.** For the last arm, give the origin a `post-receive` hook that
+runs `mv` on the origin's own directory. The first push lands and moves it,
+and the second push finds no repository. Patch no method of the code under
+test. The error line spans several lines, so compare by line. Assert the
+first line is the first task's `migrated` line and the second starts with
+`saffron: RecordError: `.
 
 **Git behaviours relied on, measured with the host's git 2.54.0 only.** Each
 is unmeasured on the cell image's git 2.39.5.
@@ -377,6 +388,11 @@ is unmeasured on the cell image's git 2.39.5.
 - A `pre-receive` hook that exits non-zero prints `[remote rejected]`.
 - `uploadpack.hideRefs` hides a ref from fetch, and a push still sees it.
 - A push to a path that is not a repository prints neither refusal.
+- A `post-receive` hook that moves its own repository away lets that push
+  exit 0. The next push to the old path exits 128 with `does not appear to
+  be a git repository`.
+- A push of a ref the origin already holds at that sha prints `Everything
+  up-to-date` and runs no `pre-receive` hook.
 - A fetch with `--prune` and a glob refspec matching nothing on the remote
   exits 0, and drops the local refs under that glob.
 - `GIT_COMMITTER_DATE` changes the commit `commit-tree` makes, and two
@@ -398,11 +414,11 @@ migrate` is the command that writes its stored tasks into the record. Design
 `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md:166-167`
 stays true, since this command pushes without setting one.
 
-**Measured on a prototype at `f692c72c`, revised at `ae425a9f`.** The
+**Measured on a prototype at `f692c72c`, revised at `fa00bd55`.** The
 prototype was `SA-0223`'s, with `SA-0220`'s stand-in in `saffron/ledger.py`.
 On it, all four new witnesses passed, and each failed with `SA-0223`'s
 module. `SA-0222`'s and `SA-0223`'s six witnesses passed on both. The change
-measured 1764 changed tokens under `size_gate`. Each of the 37 wrong versions
+measured 1736 changed tokens under `size_gate`. Each of the 39 wrong versions
 above was applied to it as an edit, and each failed its own criterion's
 witness. The `dead` gate on it reported no unused name, so this spec defers
 none. Once it lands, `SA-0222`'s and `SA-0223`'s `pending_symbols` entries
