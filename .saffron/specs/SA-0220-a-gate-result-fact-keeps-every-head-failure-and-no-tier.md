@@ -3,7 +3,7 @@ id: SA-0220
 title: A gate-result fact keeps every failure at head and no tier, so the record carries what the baseline cancels and drops the tier the suite ran at
 type: feature
 priority: 1
-estimated_lines: 295
+estimated_lines: 405
 estimate_measured: true
 touches:
   - saffron/ledger.py
@@ -51,20 +51,25 @@ max_turns: 180
 risk: elevated
 acceptance:
   - claim: >-
-      `Ledger.record_gate_result(result, attempt_id=...)` writes, as the
-      `gate_result` fact's `failures` and as that result's `failures` rows,
-      only what `subtract_baseline([result], baseline)` leaves. Here
-      `baseline` is the baseline results stored for the run of the attempt's
-      own task. The fact's `failures_at_head` key and a new nullable
-      `gate_results.failures_at_head` column hold `len(result.failures)`,
-      and `0` for a result with none. A run's baseline result keeps every
-      failure and a null count. The witness drives six members. One is a
-      baseline failure that cancels its match at another line. Another is two
-      head copies of one baseline failure, and a third is a `witness`
-      failure coded `survived-mutant` at base and at head. The fourth is a
-      `tests` baseline failure matching a `lint` head failure, the fifth is
-      a baseline failure stored on another run, and the sixth is a gate
-      with no failures.
+      `Ledger.record_gate_result(result, attempt_id=...)` takes a keyword
+      `baseline`, a list of gate results that is `None` by default. It writes,
+      as the `gate_result` fact's `failures` and as that result's `failures`
+      rows, only what `subtract_baseline([result], baseline)` leaves. A passed
+      `baseline`, an empty one included, is the one subtracted. Only with no
+      `baseline` passed does it read the baseline results stored for the run
+      of the attempt's own task. A run with none stored cancels nothing. The
+      fact's `failures_at_head` key and a new nullable
+      `gate_results.failures_at_head` column hold `len(result.failures)`, and
+      `0` for a result with none. A run's baseline result keeps every failure
+      and a null count. The witness drives nine members. The first six read
+      stored rows. One is a baseline failure that cancels its match at
+      another line. Another is two head copies of one baseline failure, and a
+      third is a `witness` failure coded `survived-mutant` at base and at
+      head. The fourth is a `tests` baseline failure matching a `lint` head
+      failure, the fifth is a baseline failure stored on another run, and the
+      sixth is a gate with no failures. The seventh passes a one-copy
+      baseline to a run holding two stored suites, and the eighth passes an
+      empty one there. The ninth is a run with no stored baseline.
     witness: tests/test_ledger_appends.py::test_an_attempts_gate_result_keeps_only_its_new_failures
     wrong_versions:
       - The fact and the rows carry every failure at head.
@@ -76,6 +81,8 @@ acceptance:
       - "`failures_at_head` counts the new failures rather than the failures at head."
       - A gate with no failures stores a null count.
       - A run's baseline result is given a count of its own.
+      - Every baseline stored for the run is subtracted when one is passed.
+      - An empty passed baseline falls back to the stored rows.
   - claim: >-
       `record_gate_result` takes a keyword `earned_risk`, `None` by default,
       and writes it as the `gate_result` fact's `earned_risk` key, a null
@@ -107,10 +114,14 @@ acceptance:
   - claim: >-
       Each gate result a cell's suite records against an attempt carries the
       tier that suite ran at, `SuiteRun.effective_risk`. Its `failures` rows
-      keep only what the run's baseline did not cancel. An attempt no suite
-      judged reads a null tier. The witness drives a spec whose diff matches
-      `elevate_on`, which reads `elevated`, and one whose diff does not,
-      which reads `standard`.
+      keep only what the suite's own baseline, the one it compared against,
+      did not cancel. A suite that aborted or drifted keeps every failure at
+      head, since §5.4 trusts no subtraction across it, and its count still
+      equals them. An attempt no suite judged reads a null tier. The witness
+      drives five cells. One has a diff matching `elevate_on`, which reads
+      `elevated`, and one has a diff that does not, which reads `standard`.
+      One drifted, one aborted, and one reruns a task whose run holds a
+      stored baseline already.
     witness: tests/test_session.py::test_an_attempts_rows_carry_its_suites_tier_and_only_its_new_failures
     wrong_versions:
       - The suite records no tier.
@@ -118,6 +129,11 @@ acceptance:
       - The suite records the baseline run's tier.
       - The tier lands on the task's first attempt rather than the judged one.
       - The cell's attempt rows keep every failure at head.
+      - A drifted or aborted suite's rows keep only the failures the subtraction left.
+      - Only a drifted suite keeps every failure, so an aborted one is subtracted.
+      - Only an aborted suite keeps every failure, so a drifted one is subtracted.
+      - A drifted or aborted suite passes no baseline, so the run's stored rows are subtracted.
+      - The cell passes no baseline, so a rerun's two stored suites both cancel.
   - claim: >-
       A ledger whose tables predate both columns gains both when it is
       opened. A row written before reads null in each, and a row written
@@ -140,7 +156,7 @@ step 3, the migration. It changes the facts the migration will write, so the
 migration, `SA-0222` and `SA-0223`, writes them in their final shape. `SA-0221`
 writes a task's declared tier only where the spec declared one.
 
-Line numbers below were read at `d938eab5`.
+Line numbers below were read at `66552540`.
 
 **A gate result keeps new failures only.** The design's §3 decided it on
 2026-10-04
@@ -173,12 +189,27 @@ line, compares on the gate as part of the identity, and never cancels a
 `survived-mutant` failure. `Ledger.task_run` (`saffron/ledger.py:1143`) and
 `Ledger.baseline_results` (`:1899`) read a task's run and its stored baseline.
 
+**A run can hold two baselines.** A cell given a task reads that task's run
+rather than minting one (`saffron/cell/session.py:1950-1954`). A stack batch
+keeps each spec's task for a rerun (`saffron/batch.py:462-464`). It offers a
+rate-limited spec again (`saffron/batch.py:739-742`). So the rerun's baseline
+is stored on the same run a second time. Subtracting every stored row would then
+cancel each baseline failure twice. The suite's own baseline is the one
+`_judge` compares against, in `suite.against(tree, baseline)` at
+`saffron/cell/session.py:2530`.
+
+**A drifted suite has no trusted subtraction.** `_compare` returns before it
+subtracts when a gate errored, and when `suite_drift` finds the two suites
+differ (`saffron/gates/suite.py:231-237`). Its comment says the subtraction
+"is not to be trusted, let alone reported (§5.4)".
+
 ## Problem
 
-1. **New failures.** In `record_gate_result`'s attempt branch, read the stored
-   baseline of the attempt's task's run. Write the fact's `failures` as what
-   `subtract_baseline` leaves, and add `failures_at_head`. The run branch is
-   unchanged and writes no count.
+1. **New failures.** `record_gate_result` gains a keyword `baseline`. In its
+   attempt branch, subtract the passed one. Read the stored baseline of the
+   attempt's task's run only when none is passed. Write the fact's
+   `failures` as what `subtract_baseline` leaves, and add
+   `failures_at_head`. The run branch is unchanged and writes no count.
 2. **The two columns.** Add `failures_at_head INTEGER` to `gate_results` and
    `earned_risk TEXT` to `attempts`, both nullable, in `SCHEMA`. Add each
    with an `ALTER` on open for a ledger that lacks it (`saffron/ledger.py:398-411`).
@@ -187,10 +218,13 @@ line, compares on the gate as part of the identity, and never cancels a
    the column added before it is dropped.
 3. **The tier.** `record_gate_result` gains `earned_risk`. The fact carries it
    under that key, and `_apply`'s `gate_result` branch sets the attempt's
-   column when it is not null. `_judge` passes `latest.effective_risk`.
-4. **The fold.** `_apply` writes `failures_at_head` from the fact with
+   column when it is not null.
+4. **The cell.** `_judge` passes `earned_risk=latest.effective_risk`. It
+   passes `baseline.results` when the comparison neither aborted nor
+   drifted, and an empty list when it did.
+5. **The fold.** `_apply` writes `failures_at_head` from the fact with
    `.get`, so a fact written before this change folds to null.
-5. **The tests this changes.** `tests/test_ledger.py:713-730` pins
+6. **The tests this changes.** `tests/test_ledger.py:713-730` pins
    `gate_results`'s columns to §4.1's listing, so it gains the new one. The
    `cost_floor_usd_est` test at `:1312-1321` builds an old schema by replacing
    text that this change moves. The loop at
@@ -205,7 +239,11 @@ line, compares on the gate as part of the identity, and never cancels a
   failures only. That is the operator's call, and `SA-0219` edits the view.
   `failures_at_head` is stored and not shown.
 - `saffron/replay.py:84-90` records a baseline and then an attempt's results.
-  It needs no edit. Its attempt now keeps new failures and passes no tier.
+  It needs no edit. It passes no baseline, so its attempt subtracts the
+  stored one and passes no tier.
+- `docs/evidence/scripts/2026-09-20-fold-rebuild-time.py:139` reads an
+  attempt's `failures` rows. On a ledger written after this change they are
+  new failures only, so its measurement means something else there.
 - The declared tier on `task_created`, which is `SA-0221`'s.
 - The migration, `SA-0222` and `SA-0223`. No production caller constructs a
   `Ledger` with a record, and this spec adds none.
@@ -231,6 +269,10 @@ the task's run, so a lookup that reads the wrong run cancels it. Give the task's
 run a `lint`, a `tests` and a `witness` baseline. Record `lint`, `witness` and
 an empty `types` at head. Assert the fact's `failures`, `attempt_results` and
 the column, gate by gate, and assert the baseline results keep their counts.
+Then store one `lint` failure twice on a third run. Record two head copies
+with a one-copy `baseline`, which keeps one, and one copy with `baseline=[]`,
+which keeps it. A fourth run stores no baseline. Two head copies recorded
+there with none passed are both kept, and the fact counts two.
 
 **Criterion 2.** Open three attempts before any result, so a write that
 reaches the whole task shows on the other two.
@@ -247,7 +289,13 @@ fold that clears the tier shows.
 head holds it and one more. Drive once with `elevate_on: [src/**]` in the
 policy, since `_stub_the_runtime` reports `src/x.py` changed, and once without.
 Give each drive its own directory. Read the one attempt holding gate results,
-and assert every other attempt reads a null tier.
+and assert every other attempt reads a null tier. For the drifted cell, give
+the head's `lint` another `tool`. For the aborted cell, add a `tests` result
+with status `error`. Assert both keep the two `lint` failures with a count of
+two. For the rerun, make the ledger at the drive's own path first, as
+`tests/test_session.py:2488-2515` does. Store one `lint` baseline failure on the
+minted task's run, then drive with `_spec(task_id=...)`. A head holding that
+failure twice and one new failure keeps two rows and counts three.
 
 **Criterion 5.** Build each old ledger from `SCHEMA`. Drop the two columns
 with `ALTER TABLE ... DROP COLUMN`, so the test does not depend on how the
@@ -257,7 +305,7 @@ on a table whose last column has a comment above it (`saffron/ledger.py:166-167`
 Put a new column's comment below it.
 
 **Measured on a prototype at `d938eab5`.** A prototype passed all five
-witnesses, and each failed with its source reverted. Its diff measured 1179
-changed tokens. Each of the 26 wrong versions above was applied to it as an
+witnesses, and each failed with its source reverted. Its diff measured 1619
+changed tokens. Each of the 33 wrong versions above was applied to it as an
 edit, and each failed its own criterion's witness. The rest of the suite
 passed on it.
