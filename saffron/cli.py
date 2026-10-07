@@ -1819,6 +1819,9 @@ def _serve(args: argparse.Namespace) -> int:
     except ViewGraphError as broke:
         print(str(broke))
         return 2
+    host, port = server.server_address[:2]
+    # Flushed: under a pipe the line would otherwise wait for exit.
+    print(f"serving http://{host}:{port}/ (Ctrl-C to stop)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

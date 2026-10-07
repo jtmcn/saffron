@@ -1722,3 +1722,44 @@ def test_every_page_carries_one_stylesheet_with_a_dark_scheme(tmp_path: Path) ->
             assert status == 200, path
             assert body.count("<style>") == 1, path
             assert "prefers-color-scheme: dark" in body, path
+
+
+def test_serve_prints_the_bound_address_before_it_serves(tmp_path: Path) -> None:
+    import select
+    import signal
+
+    ledger, _, spares = _ledger(tmp_path)
+    _close(ledger, spares)
+    # A pipe, not a terminal: a line left in the buffer never reaches launchd's log.
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys, saffron.cli; sys.exit(saffron.cli.main(sys.argv[1:]))",
+            "--home",
+            str(tmp_path),
+            "serve",
+            "--port",
+            "0",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=Path(__file__).resolve().parent.parent,
+    )
+    try:
+        assert proc.stdout is not None
+        ready, _, _ = select.select([proc.stdout], [], [], 30)
+        assert ready, "serve printed nothing within 30 s"
+        line = proc.stdout.readline().strip()
+        url = line.split()[1]
+        assert line == f"serving {url} (Ctrl-C to stop)"
+        port = urllib.parse.urlsplit(url).port
+        assert port is not None and port != 0
+        status, _ = _get(url.rstrip("/"), "/")
+        assert status == 200
+        proc.send_signal(signal.SIGINT)
+        assert proc.wait(timeout=30) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
