@@ -3,7 +3,7 @@ id: b-98a3be
 title: The spec chain records no cost and no round per escaped defect, so no step can be cut on evidence
 status: open
 filed: 2026-10-07
-specs: []
+specs: [SA-0226]
 prs: []
 commits: []
 cites: []
