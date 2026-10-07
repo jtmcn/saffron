@@ -4,7 +4,7 @@ title: The task page sums no phase's turns, cost or wall time
 type: feature
 priority: 3
 depends_on: [SA-0225]
-estimated_lines: 137
+estimated_lines: 140
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -49,19 +49,24 @@ acceptance:
       is counted once however many gate results it has, and only the page's
       own task's attempts are counted. `turns` sums `numTurns`. `cost` sums
       `costUsdEst` exactly, then rounds half up to cents. `wall time` sums
-      each attempt's end minus its start, as hours, then two-digit minutes
-      and seconds, joined by colons. A total over which no attempt lacks the
-      value shows that sum. A total over which some attempts lack it shows
-      the sum of the rest, then ` + `, the number lacking it and
-      ` unknown`. A total over which every attempt lacks it shows only that
-      number and ` unknown`. The witness drives one task with four phases.
-      `SPEC_WRITING` has two attempts with every value, one over 24 hours,
-      and its second attempt starts after every other phase's.
-      `SPEC_REVIEW` has two such attempts, each costing `0.005`, and one
-      lacking all three values. `IMPLEMENTING` has three attempts, each
-      lacking one value, end, turns or cost, and the first carries three
-      gate results. `REVIEWING` has two attempts lacking all three values.
-      A decoy task has a `SPEC_REVIEW` attempt of its own.
+      each attempt's end minus its start, as unpadded hours, then two-digit
+      minutes and two-digit seconds, joined by colons. A total over which no
+      attempt lacks the value shows that sum. A total over which some
+      attempts lack it shows the sum of the rest, then ` + `, the number
+      lacking it and ` unknown`. A total over which every attempt lacks it
+      shows only that number and ` unknown`. The witness drives one task
+      with four phases, whose first attempts come in the order
+      `SPEC_WRITING`, `IMPLEMENTING`, `SPEC_REVIEW`, `REVIEWING`. That order
+      is neither ascending nor descending by name. `SPEC_WRITING` has two
+      attempts with every value, one over 24 hours, and its second attempt
+      starts after every other phase's. `IMPLEMENTING` has three attempts,
+      each lacking one value, end, turns or cost, and the first carries
+      three gate results. Its known costs are `0.50` and `0.625`, so their
+      sum ends in an odd half-cent. `SPEC_REVIEW` has two attempts with
+      every value, each costing `0.005`, and one lacking all three values.
+      Its known wall time sums to a total whose seconds are under 10.
+      `REVIEWING` has two attempts lacking all three values. A decoy task
+      has a `SPEC_REVIEW` attempt of its own.
     witness: tests/test_view_server.py::test_a_task_page_totals_each_phase_and_the_task_with_unknowns_never_zero
     wrong_versions:
       - An attempt with several gate results is counted once per gate result.
@@ -77,7 +82,11 @@ acceptance:
       - Each attempt's cost is rounded to cents before the sum.
       - Wall time is rendered by `str` of a `timedelta`, so a total past a day reads `1 day, ...`.
       - Wall time is rendered as a whole number of seconds.
+      - The cost is rounded half to even, so `1.125` reads `1.12`.
+      - The seconds are not padded, so `0:07:05` reads `0:07:5`.
+      - The hours are padded to two digits, so `0:20:00` reads `00:20:00`.
       - The phase rows are sorted by phase name.
+      - The phase rows are sorted descending by phase name.
       - The phase rows follow each phase's last attempt, not its first.
       - The `all phases` row comes first.
       - The `all phases` row counts the phases with an unknown, not the attempts.
@@ -143,7 +152,8 @@ attempts table and the summary only for their position.
   task with none, as `SA-0219` specified. The `all phases` row says what it
   leaves out.
 - A per-spec reader across tasks. A `saffron draft` task carries one spec's
-  whole chain (`SA-0227`), so its page is that spec's sum. A stack batch
+  whole chain under `SA-0227`, a sibling spec queued beside this one. So
+  its page is that spec's sum. A stack batch
   opens its spec review attempt on the task it mints for that spec
   (`saffron/batch.py:532` and `:588`).
 - Tokens. The attempts table keeps no token count
@@ -175,8 +185,8 @@ them yourself.
 from the test module. `open_attempt(task_id, phase)` numbers `n` within the
 phase. Set each attempt's times with `_set_attempt`. Never call
 `close_attempt`, since it stamps the end from the clock. Use second-level
-times, such as an attempt of five minutes and thirty seconds, so the
-seconds field is driven. Assert the whole `phase-totals` table by `==`,
+times, such as attempts of 5:30 and 1:35 summing to 0:07:05, so the
+seconds field and its padding are driven. Assert the whole `phase-totals` table by `==`,
 rows and cells in order.
 
 **The test that changes, by name kept.** The `census` gate fails a removed
@@ -186,10 +196,10 @@ or renamed test.
 (`:1618`) and each table's header (`:1627`). Add `phase-totals` after
 `attempts` in both.
 
-**Measured on a prototype over `d7a9ec6e`.** All 46 tests in the two view
+**Measured on a prototype over `36a80190`.** All 46 tests in the two view
 test files passed. The witness failed against the base source. Each of the
-19 wrong versions above, applied as an edit, failed its own witness. The
-diff was 547 changed tokens by the `size` gate's counter, against the
+23 wrong versions above, applied as an edit, failed its own witness. The
+diff was 561 changed tokens by the `size` gate's counter, against the
 `feature` ceiling of 3000. `ruff`, `ty`, the `dead` scan and the `prose`
 counter passed on both files.
 
