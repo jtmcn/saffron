@@ -305,6 +305,30 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+_STYLE = """<style>
+  body { font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+         margin: 2rem auto; padding: 0 1rem; max-width: 72rem; color: #111; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  h3 { font-size: 1rem; margin-top: 1.5rem; color: #444; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+  th { text-align: left; font-weight: 600; border-bottom: 2px solid #ccc; }
+  th, td { padding: .35rem .6rem; vertical-align: top; }
+  td { border-bottom: 1px solid #eee; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1.2rem; }
+  dt { color: #555; }
+  dd { margin: 0; }
+  a { color: #0645ad; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111; color: #eee; }
+    h3, dt { color: #aaa; }
+    th { border-bottom-color: #444; }
+    td { border-bottom-color: #262626; }
+    a { color: #8ab4f8; }
+  }
+</style>"""
+
+
 def _link(path: str, label: str) -> str:
     return f'<a href="{html.escape(path)}">{html.escape(label)}</a>'
 
@@ -389,6 +413,7 @@ def _render_index(store: ox.Store, left_out: list[LeftOut]) -> str:
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — run record</title>
+{_STYLE}
 <h1>Run record</h1>
 <h2>Batches</h2>
 {batches_table}
@@ -408,6 +433,7 @@ def _render_batch(store: ox.Store, batch_id: int) -> str:
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — batch {batch_id}</title>
+{_STYLE}
 <h1>Batch {batch_id}</h1>
 {_table(rows, _TASK_COLUMNS, table_id="tasks")}
 """
@@ -666,6 +692,7 @@ def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — {spec_id}</title>
+{_STYLE}
 <h1>Task {task_id} — {spec_id}</h1>
 {summary_html}
 {body}

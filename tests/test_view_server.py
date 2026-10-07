@@ -1113,7 +1113,7 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
     pr_u1 = "https://example.com/pulls/3"
     pr_u2 = "https://example.com/pulls/4"
 
-    task_b1 = make_task(run_batched, "SA-B1", pr_amp, "style", "claim-b1")
+    task_b1 = make_task(run_batched, "SA-B1", pr_amp, "naming", "claim-b1")
     task_b2 = make_task(run_batched, "SA-B2", pr_b2, "security", "claim-b2")
     task_u1 = make_task(run_unbatched, "SA-U1", pr_u1, "docs", "claim-u1")
     task_u2 = make_task(run_unbatched, "SA-U2", pr_u2, "perf", "claim-u2")
@@ -1124,7 +1124,7 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
         task_b1,
         [
             Finding(
-                lens="style", severity="note", file="f.py", line=2, claim=markup_claim
+                lens="naming", severity="note", file="f.py", line=2, claim=markup_claim
             )
         ],
     )
@@ -1136,7 +1136,7 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
     _close(ledger, spares)
 
     tasks = {
-        task_b1: (pr_amp, "style", "claim-b1"),
+        task_b1: (pr_amp, "naming", "claim-b1"),
         task_b2: (pr_b2, "security", "claim-b2"),
         task_u1: (pr_u1, "docs", "claim-u1"),
         task_u2: (pr_u2, "perf", "claim-u2"),
@@ -1162,8 +1162,8 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
             assert other_lens not in bodies[task_id]
 
     finding_rows = pages[task_b1].tables.get("findings", [])
-    assert ["style", "concern", "claim-b1", ""] in finding_rows
-    assert ["style", "note", markup_claim, markup_verdict] in finding_rows
+    assert ["naming", "concern", "claim-b1", ""] in finding_rows
+    assert ["naming", "note", markup_claim, markup_verdict] in finding_rows
     assert len(finding_rows) == 2
 
     for task_id, (_pr_url, lens, claim) in tasks.items():
@@ -1705,3 +1705,13 @@ def test_task_lists_run_newest_first_by_id_as_a_number(tmp_path: Path) -> None:
     expected_chronological = [str(batch_x), str(batch_y), str(throwaway_batch)]
     ours_batches = [b for b in batch_ids_in_order if b in set(expected_chronological)]
     assert ours_batches == expected_chronological
+
+
+def test_every_page_carries_one_stylesheet_with_a_dark_scheme(tmp_path: Path) -> None:
+    batch, task = _one_batched_task(tmp_path)
+    with _running(tmp_path / "ledger.db") as base:
+        for path in ["/", f"/batch/{batch}", f"/task/{task}"]:
+            status, body = _get(base, path)
+            assert status == 200, path
+            assert body.count("<style>") == 1, path
+            assert "prefers-color-scheme: dark" in body, path
