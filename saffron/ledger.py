@@ -165,8 +165,8 @@ CREATE TABLE IF NOT EXISTS attempts (
     cost_usd_est    REAL,
     cost_floor_usd_est REAL,
     earned_risk     TEXT
-    -- cost_floor_usd_est: the no-result path's priced floor (SA-0206).
-    -- earned_risk: the tier a suite judged this attempt at (§5.6).
+    -- cost_floor_usd_est: SA-0206's priced floor, null from a `result` event.
+    -- earned_risk: its suite's tier (§4.1). Below the column, as `tasks` says.
 );
 
 -- Exactly one of attempt_id and run_id is set, and the null is the point: a
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS gate_results (
     duration_ms    INTEGER,
     summary        TEXT,
     failures_at_head INTEGER,
-    -- The failure count before baseline subtraction (§3), null for a
+    -- The failure count before baseline subtraction (§4.1), null for a
     -- baseline result naming a run.
     CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
 );
@@ -420,7 +420,7 @@ class Ledger:
         }
         if "cost_floor_usd_est" not in attempts_existing:
             self._db.execute("ALTER TABLE attempts ADD COLUMN cost_floor_usd_est REAL")
-        # Item 170: the tier the gate suite ran at (§5.6).
+        # Item 170: the tier the gate suite ran at (§4.1).
         if "earned_risk" not in attempts_existing:
             self._db.execute("ALTER TABLE attempts ADD COLUMN earned_risk TEXT")
         # The backfill the old schema comment promised. A ledger written before
@@ -1910,7 +1910,7 @@ class Ledger:
             return gate_result_id
         owner = self._attempt_of(attempt_id, "record a gate result against")
         # A passed `baseline`, an empty one included, is what gets subtracted.
-        # With none passed, the run's own stored baseline is read instead (§3).
+        # With none passed, the run's own stored baseline is read instead (§4.1).
         base = (
             baseline
             if baseline is not None
