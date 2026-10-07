@@ -46,7 +46,7 @@ The important inversion: **the product of this factory is not code, it is a revi
 | N1 | Unattended safety | Zero writes to real infrastructure, prod DB, or remote `main` — enforced structurally, not by prompt or by in-agent hook |
 | N2 | Bounded spend | Per-attempt, per-task, and per-batch USD ceilings; hard stop, enforced host-side against reported spend (§4.1). Under a subscription those dollars are notional, so the ceiling that actually binds is the provider's rate limit: the runtime reports `RateLimitInfo` and a `rejected` window is the terminal state `RATE_LIMITED`, never `EXHAUSTED` — a provider limit and a task that could not pass its gates are different outcomes (§3.3, §5.1) |
 | N3 | Bounded time | Batch completes inside the sleep window (~8h) or is killed and reclaimed cleanly |
-| N4 | Throughput | 3 concurrent tasks on a 32GB M-series Mac; 6–12 accepted PRs per week |
+| N4 | Throughput | 3 concurrent tasks on a 32GB M-series Mac; 6–12 accepted PRs per week. K on a Linux host VM is unmeasured (ADR 10) |
 | N5 | Auditability | Any merged change reconstructible from stored artifacts alone — expressed as a derivation-chain query, so it is checkable rather than asserted (§4.6) |
 | N6 | Operability | Single operator, zero standing services beyond the cell runtime; `saffron` is one CLI. ADR 10 reads "single" as one per deployment |
 | N7 | Recoverability | Crash mid-batch resumes without losing completed work or leaking disk |
@@ -68,7 +68,8 @@ The important inversion: **the product of this factory is not code, it is a revi
   A hosted service that runs other operators' repos stays refused.
 - Autonomous merge. Never, at any version.
 - Cloud runners. Local only until throughput actually binds.
-  ADR 10 withdraws this. A laptop host binds before throughput does, so a VM in the operator's GCP project is a supported deployment.
+  ADR 10 withdraws this. A laptop host binds before throughput does, so a Linux host VM is a supported deployment.
+  A deployment inside a target repo's CI stays refused. It would hold the credential beside branches that cells write.
 - Agents writing their own specs from a roadmap. That's v3 and it's the part most likely to waste money.
   ADR 7 narrows this, at the operator's request of 2026-09-23. A stack batch writes a follow-up spec only from a finding the host qualified, one generation deep.
   It also revises a queued spec, but only for a witness or buildability blocker.
@@ -1604,7 +1605,7 @@ And the other half of the layout — the part that lives in every target repo, a
 | Batch scope | One pool, one budget, all repos | Per-repo batches | Repos contend for the same 3 cells — but visibly, with round-robin, rather than by accident |
 | Cross-repo deps | Not supported | Coordinated merge trains | Two specs and a manual sequence; no version of the alternative is simple |
 | Runtime | Local Mac, containerized. ADR 10 adds a Linux host VM per operator | Cloud CI | K=3 ceiling; Mac must be awake; you own the container plumbing |
-| Cell runtime | **`apple/container`** — VM per cell, decided by spike (Appendix G) | Shared VM (Docker Desktop/Colima); or deciding by taste | No `no-new-privileges` or seccomp, a young runtime, and a measured `--cpus` offset to carry; buys a private kernel per cell and no shared memory allocation |
+| Cell runtime | **`apple/container`** — VM per cell, decided by spike (Appendix G). ADR 10 adds podman on a Linux host VM, under §5.1's weaker argument | Shared VM (Docker Desktop/Colima); or deciding by taste | No `no-new-privileges` or seccomp, a young runtime, and a measured `--cpus` offset to carry; buys a private kernel per cell and no shared memory allocation |
 | Orchestration | Agent SDK + custom Python | Claude Code headless + shell | Weeks of harness code you own forever — bought back in host-side gate enforcement and structured state |
 | Task queue | Spec files in target repo | GitHub issues | You write markdown instead of clicking; no notifications |
 | Review UI | GitHub PRs + a thin index | Custom dossier viewer | Index is dumb; you're in a browser tab, not a local page |
@@ -1784,4 +1785,4 @@ the ADR records, so a hand edit here is discarded.
 | 7 | A stack batch runs the spec DAG into one stack and writes its own follow-ups | accepted | 2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62 |
 | 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 4, 6, 9, 15, 17, 18, 28, 29, 30, 34, 41, 43, 47, 50, 51, 61 |
 | 9 | A read-only view renders the run record from the graph | accepted | 25, 61 |
-| 10 | Saffron ships as an engine that each operator deploys | accepted | 4, 12, 14, 23, 25, 30, 31, 32, 33, 62 |
+| 10 | Saffron ships as an engine that each operator deploys | accepted | 4, 7, 12, 14, 21, 23, 25, 30, 31, 32, 33, 62 |

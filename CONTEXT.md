@@ -88,7 +88,8 @@ _Avoid_: "the checkout", "the clone", "the workspace", "the sandbox dir".
 _Avoid_: "the user", "the reviewer" (reviewing is one of several things they do).
 
 **Deployment**: One engine, one operator, one home, and the target repos that operator
-configures. It arbitrates that operator's credential, budget and review queue. Its
+configures. The home is the `--home` directory, `~/.saffron` by default. A target repo
+belongs to one deployment. It arbitrates that operator's credential, budget and review queue. Its
 host is the operator's Mac or a Linux host VM (ADR 10).
 _Avoid_: "the tenant", "the instance".
 

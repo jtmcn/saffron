@@ -35,5 +35,8 @@ it does.
 `when` and `envelope_default` are each either read or refused at load. A test
 loads a policy declaring each and asserts which.
 
-On a shared-kernel host, a policy that declares no `thread_env` is refused.
-There it is the only CPU control (§5.1, ADR 10).
+On a shared-kernel host, a policy that declares no `thread_env` draws a
+warning at load. There it is the only control over a pool sized from
+`sysconf` (§5.1, ADR 10). The task still runs, and its record says the pool
+was uncapped. A test loads such a policy on a shared-kernel runtime and
+asserts the warning and the recorded field.

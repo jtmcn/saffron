@@ -29,5 +29,7 @@ tool names what it reads from the engine and what it reads from the target.
 An operator onboards a repo and writes its first spec with no clone of this
 repo.
 
-This is also ADR 10's test of §2.1. A second operator onboards a repo of
-their own, and the diff to `saffron/` that it needs is empty.
+This is also ADR 10's test of §2.1 across operators. A second operator
+onboards a repo of their own, and the diff to `saffron/` that it needs is
+empty. It tests the operator axis only. The language claim stays with §9's
+v3 and its dissimilar third repo.
