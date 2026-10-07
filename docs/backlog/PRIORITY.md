@@ -228,6 +228,9 @@ sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
 **b-0569f7**, **b-da550a** and last **b-a9ec4b**.
 
+**Placed 2026-10-06**, from stopping a cell by hand: **b-5df2a7**. SIGTERM skips
+the cell's teardown, so its containers and its task stay in flight.
+
 **Placed 2026-10-06**, from the run record view's final review: **b-cf50dc**.
 The task page never says how the task ended.
 
