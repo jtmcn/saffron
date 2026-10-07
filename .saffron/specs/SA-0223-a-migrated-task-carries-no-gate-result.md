@@ -4,7 +4,7 @@ title: A migrated task carries no gate result, so the record loses every attempt
 type: feature
 priority: 1
 depends_on: [SA-0222]
-estimated_lines: 369
+estimated_lines: 415
 estimate_measured: true
 touches:
   - saffron/record/migrate.py
@@ -59,7 +59,14 @@ acceptance:
       `earned_risk`, and every stored value as it is, a null included.
       Folded into a fresh ledger, the record gives back the source's
       `attempts` rows with `earned_risk`. The attempt `gate_results` and
-      `failures` rows hold exactly the values above. The witness drives
+      `failures` rows hold exactly the values above. On the facts
+      themselves, each `gate_result` fact follows its attempt's
+      `attempt_closed`, or its `attempt_opened` where the attempt never
+      closed. Its `at` is that attempt's `ended_at`, or its `started_at`
+      where it never closed, in the `T` form with `+00:00`. It carries the
+      task's repo name and its run's `batch_id` as text. The witness reads
+      all twelve of the task's results this way, five on two closed attempts
+      and seven on four open ones, on a batched run. The witness drives
       fourteen members. One is a baseline failure that cancels its match at
       another line. Another is two head copies of one baseline failure, and a
       third is a `witness` failure coded `survived-mutant` at base and at
@@ -98,6 +105,10 @@ acceptance:
       - A null summary is carried as an empty one.
       - "`suite_drift` is called with its arguments swapped."
       - A tool comparison that ignores status stands in for `suite_drift`.
+      - A `gate_result` fact's `at` uses a space where the live form has `T`.
+      - A `gate_result` fact carries a null `batch_key`.
+      - A `gate_result` fact's `at` is the task's `updated_at`.
+      - The `gate_result` facts come before their attempt's `attempt_closed`.
   - claim: >-
       A task is refused where any of its own results has a null count and
       either its run stores a baseline result for one gate twice or one of
@@ -105,7 +116,8 @@ acceptance:
       under its key. `migrate`'s result lists it in `refused` with a reason
       naming the gate, and the attempt where the attempt holds it twice. Every
       other task still migrates. A task on a doubled run whose results all
-      carry a count migrates. The witness drives five tasks. Three runs hold
+      carry a count migrates, and so does a task whose doubled attempt holds
+      only counted results. The witness drives six tasks. Three runs hold
       `lint` twice and `tests` once. On the first, every result is counted,
       and the task migrates. On the second, one result is counted and one is
       not, and the task is refused. On the third, the one uncounted result
@@ -113,7 +125,8 @@ acceptance:
       run holds `lint` and `tests` once each, with an uncounted result, and
       the task migrates. The fifth run holds them once each too, and its
       task's one attempt stores two uncounted `lint` results, so it is
-      refused.
+      refused. The sixth is the fifth with both results counted, and it
+      migrates with both stored rows.
     witness: tests/test_record_migrate.py::test_a_task_whose_run_stores_a_gates_baseline_twice_is_refused_where_it_still_needs_subtracting
     wrong_versions:
       - The task is migrated with both copies subtracted.
@@ -123,6 +136,7 @@ acceptance:
       - A task is refused only where every one of its results is uncounted.
       - An aborted suite exempts its task from the refusal.
       - An attempt storing a gate twice is not refused, and its whole suite is subtracted in one call.
+      - An attempt storing a gate twice is refused whatever its counts.
   - claim: >-
       Each column's presence is read on its own. A source whose
       `gate_results` lacks the `failures_at_head` column migrates as if every
@@ -151,7 +165,7 @@ where a spec declared one. `SA-0222` writes the facts that fill `tasks`,
 the rest of the tables, the target record per mirror, the push and the
 `saffron migrate` command.
 
-Line numbers below were read at `9862e366`. That base carries `SA-0220`,
+Line numbers below were read at `f692c72c`. That base carries `SA-0220`,
 `SA-0221` and `SA-0222` as queued specs, not as code. This spec is written
 against their end states. For `SA-0220` that is its revision after review.
 There `record_gate_result` takes a `baseline=` keyword, and a passed one is
@@ -169,11 +183,13 @@ aborted keeps every failure at head, since §5.4 refuses that subtraction.
 
 **How the cell decides it.** `_compare` returns before it subtracts when a
 gate errored, and when `suite_drift` finds the suites differ
-(`saffron/gates/suite.py:229-237`). `aborted_gates` names the gates whose
+(`saffron/gates/suite.py:231-237`). `aborted_gates` names the gates whose
 status is `error` (`saffron/gates/suite.py:33-36`). `suite_drift` reports two
 shapes (`saffron/gates/baseline.py:67-109`). One is a gate that ran on both
 sides under different tools. The other is a gate that ran at base and is
-skipped at head. A gate skipped at base and run at head is neither.
+skipped at head. A gate skipped at base and run at head is neither, even
+with a null `tool` at base. A gate that passed or failed at base with a
+null `tool` and ran at head under one does drift.
 `subtract_baseline` counts, ignores the line, keeps the gate in the identity
 and never cancels a `survived-mutant` failure
 (`saffron/gates/baseline.py:44-64`). A `GateResult`'s `summary` is a `str`
@@ -195,10 +211,10 @@ attempt that stores one gate twice has the same ambiguity on the head side.
 any gate's baseline twice, and none of 2,022 attempts stores any gate twice.
 The drift and abort arm keeps one attempt whole. It aborted, and it stores
 three failures where the subtraction would leave two. No attempt drifted.
-The operator measured the same ledger. It found the only tool differences
-between an attempt and its baseline in `revert` and `witness`. Each went from
-`tool: null` to a real tool, the shape `suite_drift` does not report. A prototype of
-this spec migrated all 234 tasks. The fold gave back `tasks`, `attempts`,
+Its only tool differences between an attempt and its baseline are in
+`revert` and `witness`, 272 results. Each went from a skipped base with
+`tool: null` to a run at head, the shape `suite_drift` does not report. A
+prototype of this spec migrated all 234 tasks. The fold gave back `tasks`, `attempts`,
 `findings` and all 5,150 attempt `gate_results` rows. 2,129,429 stored
 attempt failures became 786.
 
@@ -237,7 +253,7 @@ attempt failures became 786.
   `saffron/record/migrate.py::migrate` under `pending_symbols`.
 - Run-scoped gate results and `baseline_names`. They are design step 4's.
 - A source so old that `gate_results` lacks `tool`. The ledger's open adds
-  that column (`saffron/ledger.py:398-402`), so every ledger opened since
+  that column (`saffron/ledger.py:403`), so every ledger opened since
   holds it. Without it no stored suite could show the drift its cell saw.
 - `SA-0222`'s witnesses. Their fixtures hold no case this spec changes, so
   they stay as they are. A record that a migration without results already
@@ -279,22 +295,34 @@ record a passing `revert` with a tool beside a cancelled `lint` failure. On
 a sixth, record a skipped `types` beside a cancelled `lint` failure. Null
 every count but the second attempt's. Null the `types` failure's message and
 the `format` summary through `_db`. Give a second, `elevated` task one closed
-attempt holding one passing result. Then compare the folded `attempts` rows,
+attempt holding one passing result. Every gate an attempt shares with its
+run keeps the run's tool, except where a member says otherwise, so no
+attempt drifts by accident. Then compare the folded `attempts` rows,
 `earned_risk` included, with the source's.
 
-**Criterion 2.** Null the counts explicitly, as the five tasks need them.
+Attach the task's run to a batch with `create_batch` and
+`attach_run_to_batch`. Set every attempt's `started_at` and `ended_at`
+and the task's `updated_at` to distinct times through `_db`. Read the
+record's `gate_result` facts. Assert each one's `at`, `repo` and
+`batch_key`, and that the last fact before it, other results aside, is
+its attempt's `attempt_closed` or `attempt_opened`.
+
+**Criterion 2.** Null the counts explicitly, as the six tasks need them.
 Assert `migrated` and `refused` as exact lists.
 
 **Criterion 3.** Make each source with `Ledger`, then drop its columns with
 `ALTER TABLE ... DROP COLUMN` and close it. Give each its own directory.
 
 **Where the claims stop.** A doubled run whose task has no result at all
-migrates, and no witness drives it.
+migrates, and no witness drives it. The refusal is task-wide by design. A
+counted doubled attempt beside another attempt's uncounted result refuses
+the whole task, though nothing on that attempt needs subtracting. The
+measured ledger holds no doubled attempt, so it refuses no task this way.
 
-**Measured on a prototype at `9862e366`.** The prototype was `SA-0222`'s,
+**Measured on a prototype at `f692c72c`.** The prototype was `SA-0222`'s,
 with `SA-0220`'s stand-in in `saffron/ledger.py`. On it, all three new
 witnesses passed, and each failed with `SA-0222`'s module. `SA-0222`'s three
-witnesses passed on both. The change measured 1474 changed tokens under
-`size_gate`. Each of the 32 wrong versions above was applied to it as an
+witnesses passed on both. The change measured 1660 changed tokens under
+`size_gate`. Each of the 37 wrong versions above was applied to it as an
 edit. Each failed its own criterion's witness, on the assertion its sentence
 names.
