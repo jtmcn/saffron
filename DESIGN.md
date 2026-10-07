@@ -1535,7 +1535,7 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
     cli.py                 # batch, run, queue, ratify, gc
     ledger.py              # SQLite schema + DAO
     record/
-      contract.py  refs.py  memory.py  fold.py         # the append-only record of facts, and the fold that rebuilds a ledger from it (item 170)
+      contract.py  refs.py  memory.py  fold.py  migrate.py   # the append-only record of facts, the fold that rebuilds a ledger from it, and the migration that writes a ledger's tasks into it (item 170)
     intake.py              # spec discovery, parse, validate (Pydantic)
     scheduler.py           # dep DAG, stacking, conflict sets, budget
     supervisor.py          # per-task lifecycle

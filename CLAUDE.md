@@ -135,8 +135,9 @@ exception has a shape worth memorising: **core invokes declared gates, never too
   `baseline.py` subtracts pre-existing failures; `core/` holds the host-side gates.
 - `saffron/record/` holds the append-only log of facts per task, on
   `refs/saffron/*`, that the ledger is folded from. `contract.py` is the whole
-  backend-agnostic surface. `refs.py` and `memory.py` are its two backends, and
-  `fold.py` rebuilds the ledger. A record entry is a **fact**, never an event.
+  backend-agnostic surface. `refs.py` and `memory.py` are its two backends,
+  `migrate.py` writes a ledger's tasks into it, and `fold.py` rebuilds the
+  ledger. A record entry is a **fact**, never an event.
   `events.py` owns that word for the `events.jsonl` stream, and the two must not
   merge. Nothing constructs a record-backed `Ledger` yet.
 - `saffron/phases/` — `implement.py` (plan checkpoint + repair turns), `review.py` (lenses),
