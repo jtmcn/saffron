@@ -1,24 +1,24 @@
 # Saffron — terminology
 
 The controlled vocabulary for Saffron. Every term used in a spec, a system prompt,
-a PR body, a queue line, or `DESIGN.md` should appear here with one meaning.
+a PR body, a queue line, or `DESIGN.md` must appear here with one meaning.
 
-**How this is used.** This is a host artifact — it lives in Saffron, not in any
+**How this is used.** This is a host artifact. It lives in Saffron, not in any
 target repo, so an agent inside a cell cannot follow a reference to it. It is
 **injected into the system prompt, per phase, section by section** (`DESIGN.md`
 §5.3). Each section below is tagged with the phases that receive it. Sections
-tagged `—` are for the operator and the design documents only; nothing inside a
-cell can act on them.
+tagged `—` are for the operator and the design documents only. Nothing
+inside a cell can act on them.
 
 Only three phases appear in the table. REPAIR and REBUT resume the implementer's
-session and inherit its sections; PACKAGE involves no model.
+session and inherit its sections. PACKAGE involves no model.
 
-It is *definitional*, not behavioural — it says what words mean, never what to do —
-so it stays out of `CLAUDE.md` and is exempt from the ~200-line budget in §8.
-Rules of conduct belong in `CLAUDE.md`; rules of naming belong here.
+It is *definitional*, not behavioural: it says what words mean, never what to do.
+So it stays out of `CLAUDE.md` and is exempt from the ~200-line budget in §8.
+Rules of conduct belong in `CLAUDE.md`. Rules of naming belong here.
 
 `_Avoid_` lists are the load-bearing part. A synonym that reads as harmless in prose
-is what makes two log lines, two prompts, and a ledger column quietly disagree.
+is what makes two log lines, two prompts, and a ledger column disagree.
 They are written for the operator and the `terms` gate. Injection strips them, since
 a prohibition puts the banned word in the prompt, so a cell sees only the headword.
 The conventions lens keeps them, because it judges a diff against them (SA-0195).
@@ -54,34 +54,34 @@ _Avoid_: "the platform", "the framework".
 carries `.saffron/` and never the engine (ADR 10).
 _Avoid_: "the package", "the app".
 
-**Control plane**: The trusted host-side half — intake, scheduler, supervisor, gate
+**Control plane**: The trusted host-side half: intake, scheduler, supervisor, gate
 runner, packager, ledger. It decides what runs and whether the result is acceptable,
 and never executes model-authored code.
 _Avoid_: "the server", "the daemon", "the backend".
 
-**Cell**: One task's isolation unit — a container plus its worktree volume, agent
+**Cell**: One task's isolation unit: a container plus its worktree volume, agent
 state volume, and any fixture services. The cell is untrusted.
-_Avoid_: "sandbox" — it implies the isolation boundary is the control, and in
+_Avoid_: "sandbox". The word implies the isolation boundary is the control, and in
 Saffron it is not (the controls are structural and live outside the cell).
 _Avoid_ also: "the container" when you mean the whole cell, "worker", "runner".
 
-**Container**: The runtime primitive specifically — the object the cell runtime
+**Container**: The runtime primitive specifically: the object the cell runtime
 creates and destroys. Use only when that object itself is the subject.
 
-**Cell runtime**: The program that creates cells. `apple/container` — a VM per
-cell — chosen in rev 10 against a four-assertion spike (Appendix G).
-Say "the cell runtime". The seam is `saffron/cell/runtime.py`, which every caller
-uses and which names no product at all; each runtime's own module under
-`saffron/cell/runtimes/` names exactly one, and nothing else in `saffron/` may
-name any. A decision made by spike can be remade by spike, and a second answer
-is a second module rather than an edit spread through the tree.
-_Avoid_: **"Docker"** as a generic term for it — that was a product name standing
-in for an unmade decision through seven revisions, and naming a different product
+**Cell runtime**: The program that creates cells. `apple/container` (a VM per
+cell), chosen in rev 10 against a four-assertion spike (Appendix G).
+Say "the cell runtime". The seam is `saffron/cell/runtime.py`. Every caller
+uses it, and it names no product at all. Each runtime's own module under
+`saffron/cell/runtimes/` names exactly one. No other module in `saffron/`
+names any. A decision made by spike can be remade by spike. A second answer
+is then a second module rather than an edit spread through the tree.
+_Avoid_: **"Docker"** as a generic term for it. "Docker" was a product name standing
+in for an unmade decision through seven revisions. Naming a different product
 generically would repeat the mistake. _Avoid_ also "the container engine", "the
 VM" (a cell now *has* one, so the phrase is ambiguous), "the hypervisor".
 
 **Worktree**: The git working tree a task edits, on a volume mounted at `/work`.
-A cell contains a worktree; it is not one.
+A cell contains a worktree and is not one.
 _Avoid_: "the checkout", "the clone", "the workspace", "the sandbox dir".
 
 **Operator**: The human. Singular per deployment, by design (ADR 10).
@@ -93,32 +93,32 @@ belongs to one deployment. It arbitrates that operator's credential, budget and 
 host is the operator's Mac or a Linux host VM (ADR 10).
 _Avoid_: "the tenant", "the instance".
 
-**Target repo**: The repository a task modifies. Saffron is generic; the target repo
+**Target repo**: The repository a task modifies. Saffron is generic. The target repo
 holds the specs, the policy, the cell image, and the repo's own gates.
 _Avoid_: "the project", "the codebase", "the client repo".
 
-**Agent**: Any model session inside a cell, when the specific role doesn't matter.
-The ontology's `prov:Agent` is wider — it includes the operator, their delegates,
+**Agent**: Any model session inside a cell, when the specific role does not matter.
+The ontology's `prov:Agent` is wider. It includes the operator, their delegates,
 and every gate, which is a `prov:SoftwareAgent` there because it asserts
 (`ontology/factory.ttl`, `DESIGN.md` §4.6). "Model" means a model identifier.
 _Avoid_: "the AI", "the bot", "the LLM".
 
 **Delegate**: A model session the operator starts on the host, outside any cell, to
 act on their behalf, under their git identity and credentials. The factory neither
-starts nor constrains it, and none of its work is recorded as a task's — the ledger
+starts nor constrains it. None of its work is recorded as a task's, so the ledger
 cannot tell it from the operator. It is never the operator: a ratification or
-approval it types is still the operator's judgement. Plural, unlike the operator; a
+approval it types is still the operator's judgement. Plural, unlike the operator. A
 delegate's subagents are delegates too, and every chain of them ends at the
 operator.
-> PROV-O's word, and PROV-O would call the implementer one as well — it too acts
+> PROV-O's word, and PROV-O would call the implementer one as well. The implementer too acts
 > on the operator's behalf, directly or through a delegate, and both can work to a
-> plan. What separates them is what holds them to it: the implementer's plan is a
+> plan. What separates them is what holds them to it. The implementer's plan is a
 > control artifact, validated outside its cell, and its work is recorded as
-> attempts; a plan handed to a delegate binds only as far as the delegate follows
+> attempts. A plan handed to a delegate binds only as far as the delegate follows
 > it, and nothing records whether it did.
 
 _Avoid_: "Claude Code" (a product standing for a role), "the assistant", "the
-agent" (that is inside a cell), bare "session", "surrogate", and "the critic" or
+agent" (that is inside a cell), bare "session", and "surrogate". _Avoid_ also "the critic" or
 "a lens" for a delegate's review.
 
 ---
@@ -129,13 +129,13 @@ agent" (that is inside a cell), bare "session", "surrogate", and "the critic" or
 repo. The unit of work, written by the operator.
 _Avoid_: "ticket", "issue", "story", "request", "prompt".
 
-**Task**: One spec being executed — a ledger row with a state, a branch, a budget,
-and a cell. A spec is the input; a task is the execution. Its budget is a
-**best-effort** bound: it is checked between attempts and an attempt's cost is
-not knowable until the attempt ends, so a task admitted under its ceiling can
-finish over it by up to one whole attempt — 67% on `SA-0059` (`DESIGN.md` §3).
-In a batch, the bound that is actually enforced is the batch's, checked between
-tasks (`DESIGN.md` §4.2.1) — itself exceedable by at most one task's overshoot,
+**Task**: One spec being executed: a ledger row with a state, a branch, a budget,
+and a cell. A spec is the input. A task is the execution. Its budget is a
+**best-effort** bound. It is checked between attempts, and an attempt's cost is
+not knowable until the attempt ends. So a task admitted under its ceiling can
+finish over it by up to one whole attempt: 67% on `SA-0059` (`DESIGN.md` §3).
+In a batch, the bound that is enforced is the batch's, checked between
+tasks (`DESIGN.md` §4.2.1). The batch's bound is itself exceedable by at most one task's overshoot,
 since it admits a task on that task's declared ceiling. A task started by
 `saffron cell` belongs to no batch, and its own best-effort bound is the only one.
 _Avoid_: "job", "work item", "unit".
@@ -146,14 +146,14 @@ _Avoid_: "session" (that means an agent session), "cycle", "sweep", "run".
 
 **Batch stop reason**: `DRAINED`, `BUDGET`, `UNTIL`, `INFRASTRUCTURE`, or
 `INCOMPLETE`. Why a night ended, written on the batch when it closes and absent
-while it is still running — an absent one means in flight, not unknown. Never a
+while it is still running. An absent one means in flight, not unknown. Never a
 task's end state: these describe the night, and `DRAINED` says the queue emptied,
 not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, and
 it is the only one of the five that says the machine rather than the work was
 wrong. `INCOMPLETE` is a night that left a task in flight: that task reached no
 end state, which is not the same as failing. It outranks the other ordinary
 reasons, and `INFRASTRUCTURE` outranks it.
-_Avoid_: "failed" for `INFRASTRUCTURE` (a task fails; a night stops), "finished",
+_Avoid_: "failed" for `INFRASTRUCTURE` (a task fails, a night stops), "finished",
 "timeout" for `UNTIL`.
 
 **Stack batch**: A batch started with `saffron batch --stack` (ADR 7). It fixes its
@@ -219,7 +219,7 @@ task's tree and baseline sit on its parent's head instead, while its run keeps t
 pin. `saffron cell` and `saffron replay` each mint a run that belongs to no batch.
 The per-repo slice of a batch has no name and no row (backlog item 177).
 > Batch and run are **not** synonyms and stopped being interchangeable when Saffron
-> went multi-repo. Budget is a batch property; `base_sha` is a run property. If a
+> went multi-repo. Budget is a batch property, and `base_sha` is a run property. If a
 > sentence works with either word, it is imprecise.
 
 **Preflight outcome**: What a run records when its first baseline suite ends: `PASSED`
@@ -228,7 +228,7 @@ It lives in `runs.preflight`. A baseline that aborts in the cell writes `FAILED`
 this is not the batch-start **Preflight** under Repos (backlog item 113). What a
 NULL means is open (backlog item b-eac388).
 
-**Phase**: A named stage in the cell pipeline — DIAGNOSE, IMPLEMENT, GATE ⇄ REPAIR,
+**Phase**: A named stage in the cell pipeline: DIAGNOSE, IMPLEMENT, GATE ⇄ REPAIR,
 REVIEW, REBUT, PACKAGE. Written in bare caps. A stack batch also labels attempts
 SPEC_REVIEW and SPEC_WRITING. Each is a host-invoked session before the cell, and
 neither is a stage of the cell pipeline.
@@ -236,15 +236,15 @@ The event log alone splits GATE ⇄ REPAIR into GATE and REPAIR, because a gate
 attempt and a repair turn print different lines. Everywhere else it is one phase.
 _Avoid_: "stage", "step", "mode".
 
-**Attempt**: One numbered execution of a phase. Attempts are bounded on five axes —
+**Attempt**: One numbered execution of a phase. Attempts are bounded on five axes:
 turns, spend, idle, completion, and wall clock. "Attempt 3" without a phase is
-ambiguous — name both. A gate suite's number is the one exception: it counts the
+ambiguous, so name both. A gate suite's number is the one exception. It counts the
 gate suites judged in a task, so the suite re-run after REBUT continues the
-repair loop's count — attempt 3, labelled REBUT, after a loop that reached 2.
+repair loop's count. After a loop that reached 2, that re-run is attempt 3, labelled REBUT.
 _Avoid_: "iteration", "round", "pass", "retry", "try".
 
 **Plan checkpoint**: The `plan.json` write and host-side validation that opens the
-IMPLEMENT session. Deliberately *not* a phase — the planner and the implementer are
+IMPLEMENT session. Deliberately *not* a phase, because the planner and the implementer are
 the same session.
 _Avoid_: "the planning phase", "the plan step", "PLAN".
 
@@ -254,12 +254,12 @@ schema-constrained value. Every other extraction turn emits an `<output>` block.
 How every structured artifact is produced.
 _Avoid_: "the JSON step", "parsing the output".
 
-**Control artifact**: A host-consumed file an agent produces — `plan.json`,
+**Control artifact**: A host-consumed file an agent produces: `plan.json`,
 `scope.json`. Extracted and hashed the moment it is written, never re-read from
 `/work`. A control artifact left in the workspace is a claim, not a record.
 
-**Refusal**: A task rejected before any cell starts — a duplicate open PR, an
-overlapping in-flight change, a malformed or moved spec, a repo that failed preflight.
+**Refusal**: A task rejected before any cell starts. The causes include a duplicate open PR, an
+overlapping in-flight change, a malformed or moved spec, and a repo that failed preflight.
 The refusal itself costs nothing. A refusal the queue scan makes reaches the queue as
 one line. `run_task` also refuses a task whose `consumes` entry does not resolve, or
 cannot be read, at the tree base. That refusal prints one line and writes no queue
@@ -280,10 +280,10 @@ _Avoid_: "import", "dependency" (that is a `depends_on` entry).
 
 ## 3. Scope
 
-**Envelope**: The loose outer bound a DIAGNOSE phase may read within. Declared by
-the operator on bug specs; never enforced against a diff.
+**Envelope**: The loose outer bound on what a DIAGNOSE phase reads. Declared by
+the operator on bug specs, and never enforced against a diff.
 
-**Touches**: The set of paths a task may change. Declared directly on non-bug specs.
+**Touches**: The set of paths a task is permitted to change. Declared directly on non-bug specs.
 Proposed, then ratified by the operator, where the declaration cannot stand: by
 DIAGNOSE on a bug spec, which has none, and by IMPLEMENT on any spec whose declared
 set cannot satisfy its acceptance criteria. Once fixed it feeds the conflict set
@@ -304,19 +304,19 @@ _Avoid_: "lock", "collision detection", "the overlap check".
 **Forbidden**: Per-spec deny paths, declared in frontmatter.
 
 **Protected paths**: Global deny paths, declared in the target repo's `policy.yaml`.
-Distinct from `forbidden` — one is per-task, one is repo-wide.
+Distinct from `forbidden`: one is per-task, one is repo-wide.
 _Avoid_: using either name for the other, or "the denylist" for either.
 
 **Out of scope**: The prose section of a spec naming adjacent broken things the
-agent must leave alone. Not machine-enforced; it reduces sprawl by being read.
+agent must leave alone. Not machine-enforced. It reduces sprawl by being read.
 _Avoid_: conflating with `forbidden`, which is enforced.
 
 **Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically when
 the diff touches a path in the repo's `elevate_on`. At the plan checkpoint the same
 rule reads the plan's `files_to_change` instead, as a forecast. Elevated makes `size`
-and `witness` blocking — the only two gates a tier moves (`DESIGN.md` §5.4.1) — and
-marks the queue entry; it adds no lens, because every declared lens runs at every tier
-(`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking — `coverage` is
+and `witness` blocking, the only two gates a tier moves (`DESIGN.md` §5.4.1). It
+also marks the queue entry. It adds no lens, because every declared lens runs at every tier
+(`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking: `coverage` is
 advisory at every tier (`DESIGN.md` §5.4).
 _Avoid_: "priority" (a separate field), "severity" (that is a finding property),
 "critical", "high-risk".
@@ -329,79 +329,79 @@ _Avoid_: "priority" (a separate field), "severity" (that is a finding property),
 executable that emits one JSON object: `gate`, `status`, `tool`, `failures[]`,
 `summary`. Nothing downstream sees tool output.
 
-**`tool`**: The identifier a gate obtains *by executing* its tool (`ruff 0.14.2`),
-and the only thing separating a gate that ran and passed from one that never ran
+**`tool`**: The identifier a gate obtains *by executing* its tool (`ruff 0.14.2`).
+It is the only thing separating a gate that ran and passed from one that never ran
 (Appendix H, `DESIGN.md` §5.4).
-_Avoid_: "the version", "the tool name" — it is neither on its own, and a string
+_Avoid_: "the version", "the tool name". A `tool` value is neither on its own, and a string
 literal in a gate script is not a `tool` value at all.
 
 **Gate role**: A name in the contract — `format`, `lint`, `types`, `tests`,
-`no-network`, `coverage`. The repo supplies the executable; core supplies the
+`no-network`, `coverage`. The repo supplies the executable, and core supplies the
 meaning.
 
 **Gate**: One named verification, host-invoked and deterministic. Written lowercase
 in backticks. Three kinds, and the distinction is the core/repo boundary:
 
 - **Core gates** — `scope`, `size`, `secrets`, `integrity`, `census`, `committed`,
-  `criteria`, `revert`, `witness`. Implemented in Saffron. Most read the diff;
+  `criteria`, `revert`, `witness`. Implemented in Saffron. Most read the diff.
   `committed` reads the worktree's status instead, and `census` and `criteria`
   read other gates' results. `revert` and `witness` are the two that run
   something, and §2.1's rule is shaped around them rather than broken by them:
   core invokes declared gates, never tools (`DESIGN.md` §2.1). `witness` is also
-  the second gate a risk tier moves (§5.4.1); the rest sit at the level §5.4
+  the second gate a risk tier moves (§5.4.1). The rest sit at the level §5.4
   fixes for them.
-- **Contract gates** — the gate roles above. Declared in `policy.yaml`, implemented
+- **Contract gates**: the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
-- **Repo-defined gates** — anything a repo adds against its own hard-to-fake
+- **Repo-defined gates**: anything a repo adds against its own hard-to-fake
   surfaces, conditional on touched paths. Names vary by repo and are not vocabulary.
 
 _Avoid_: "check", "validation", "CI" (there is no CI), "the linter" for the `lint`
 gate. _Avoid_ naming any repo-defined gate here as though it were universal.
 
-**Gate result**: One execution of one gate against one tree — an attempt's, or a
+**Gate result**: One execution of one gate against one tree: an attempt's, or a
 run's `base_sha` for the baseline. Exactly one of `attempt_id` and `run_id` is set
 on the row, and the baseline is why (`DESIGN.md` §4.1).
-_Avoid_: "gate run", or bare "run" — "run" means one task's pin.
+_Avoid_: "gate run", or bare "run". "Run" means one task's pin.
 
-**Gate suite**: Every gate executed as one unit against one tree — the core gates
-plus the roles the repo declares. It has no identity of its own; name what it ran
+**Gate suite**: Every gate executed as one unit against one tree: the core gates
+plus the roles the repo declares. It has no identity of its own, so name what it ran
 against ("the baseline suite", "attempt 3's suite"). Two suites are what the
 baseline subtracts and what `suite_drift` compares.
 > Bare "suite" means the **gate suite**. A repo's own tests are always "the test
-> suite", never bare, because the gate suite *contains* them — §7.1 times both two
+> suite", never bare, because the gate suite *contains* them. §7.1 times both two
 > lines apart, and a bare "the suite is minutes" names the wrong cost.
 
 _Avoid_: "gate run", as for a gate result.
 
-**Suite comparison**: What judging a head gate suite against its baseline yields —
-one of three things, checked in this order: a gate `error`ed, and whatever ran
-the suite aborts — an attempt, or a package; the suites **drifted** (a gate
-stopped running, or its `tool` changed), so no subtraction is to be trusted; or
+**Suite comparison**: What judging a head gate suite against its baseline yields.
+It is one of three things, checked in this order. First, a gate `error`ed, and whatever ran
+the suite aborts, whether an attempt or a package. Second, the suites **drifted** (a gate
+stopped running, or its `tool` changed), so no subtraction is to be trusted. Third,
 the blocking new failures that remain.
-_Avoid_: "verdict" — that is the critic's confirm-or-withdraw of a finding.
+_Avoid_: "verdict", which is the critic's confirm-or-withdraw of a finding.
 _Avoid_ also "the subtraction" for the whole: the subtraction produces only the
 third outcome, and it is not even attempted when either of the first two holds.
 
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
-- `skip` — the repo declares no such gate. Not a failure; nothing is wrong.
-- `fail` — the repo's code is wrong.
-- **`error` — the gate itself broke.** Toolchain missing, service down, collection
+- `skip`: the repo declares no such gate. Not a failure. Nothing is wrong.
+- `fail`: the repo's code is wrong.
+- **`error`: the gate itself broke.** Toolchain missing, service down, collection
   crashed. It aborts the attempt, is never charged to the task, and is what
   distinguishes "three flaky tests" from "the toolchain is broken" at preflight.
 
 > `error` and `fail` are the single most important distinction in this section.
-> Reserve the bare word "failed" for `fail`; say "errored" for `error`.
+> Reserve the bare word "failed" for `fail`. Say "errored" for `error`.
 
-**Blocking / advisory**: A gate is one or the other. Blocking gates stop the task;
-advisory gates are reported in the PR body and stop nothing. State which when it
-matters — `coverage` being advisory is a design decision, not an oversight.
+**Blocking / advisory**: A gate is one or the other. Blocking gates stop the task.
+Advisory gates are reported in the PR body and stop nothing. State which when it
+matters. `coverage` being advisory is a design decision, not an oversight.
 _Avoid_: "soft fail", "warning", "non-fatal".
 
 **Baseline**: The gate results recorded against a run's `base_sha` at batch start.
-Per repo; never compared across repos.
+Per repo, and never compared across repos.
 
 **New failure**: A gate failure not present in the baseline, compared on
-`(gate, file, code, normalized message)` — never on line number, which the diff
+`(gate, file, code, normalized message)`, never on line number, which the diff
 moves. The comparison **counts**: identities collide legitimately, so one baseline
 failure cancels one head failure, not all of them. Only new failures are a task's
 problem. A `witness` survivor is the one exception. The baseline never cancels a
@@ -421,7 +421,7 @@ _Avoid_: "fix", "retry", "self-heal", "auto-fix".
 **No-progress**: An identical new-failure set across two consecutive attempts, on
 the same identity as a new failure and counted the same way. The signal to stop
 paying.
-_Avoid_: "byte-identical" — line numbers shift every attempt, so a byte comparison
+_Avoid_: "byte-identical". Line numbers shift every attempt, so a byte comparison
 never fires.
 
 **Witness**: The test a spec's `acceptance:` entry names as the guard for its
@@ -436,10 +436,10 @@ which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` g
 to ask whether the tests would notice the claim being broken. Withheld from the
 implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
 killed.
-_Avoid_: "mutation testing" for the gate as a whole — it runs one declared edit
+_Avoid_: "mutation testing" for the gate as a whole. The gate runs one declared edit
 against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
-the edit is applied to; that is the worktree, mutated. _Avoid_ "mutant" for the
-edit a lens names in a review finding; that is a vacuity probe.
+the edit is applied to. That is the worktree, mutated. _Avoid_ "mutant" for the
+edit a lens names in a review finding. That is a vacuity probe.
 
 **Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
 notice the behaviour it describes breaking. After REVIEW the host applies each anchored adequacy
@@ -453,7 +453,7 @@ During a task only a failure of a test the diff adds kills a probe. A new failur
 other test is recorded beside the verdict and does not kill it. The corpus harness still
 counts every test it collected. During a task the verdict decides the finding. `survived` makes it a `blocker`, `killed`
 makes it a `note`, and `unproven` leaves the severity the lens filed.
-_Avoid_: "mutant" for one — a mutant is declared by a criterion, is withheld from the
+_Avoid_: "mutant" for one. A mutant is declared by a criterion, is withheld from the
 implementer, and must be killed. _Avoid_ "mutation testing" for the corpus number: one probe
 per finding, chosen by the lens to make its own case, is not a sample of the mutation space.
 
@@ -485,14 +485,14 @@ probe's session is shown no list.
 
 **Critic**: The adversarial reviewer. A fresh, read-only session that never sees the
 implementer's transcript.
-_Avoid_: "the reviewer" (that's the operator), "QA", "the checker".
+_Avoid_: "the reviewer" (that is the operator), "QA", "the checker".
 
 **Critic cell**: The cell a critic runs in. It is a new container from the repo's
 cell image. Its worktree is the task's base with the exported patch applied by
 that cell's own git. It sits on a critic network the task's proxy joins and the
 implementer does not. It is never the implementer's
 cell. A fresh session in the container the implementer had root in re-execs a
-runner that container could have rewritten, and reads the tree through a `.git`
+runner that container could have rewritten. That session also reads the tree through a `.git`
 the implementer wrote (Appendix Q, `DESIGN.md` §5.5). REVIEW's lenses and
 REBUT's verdict sessions both run in one (`SA-0087`, `SA-0088`). The end review
 and a stack batch's spec sessions use one with no implementer behind it. It is
@@ -500,23 +500,23 @@ seeded at a head, or at `base_sha`, with no patch applied (ADR 7).
 _Avoid_: "review cell", "clean cell", "second cell", "the critic's container"
 when you mean the whole cell.
 
-**Gate-only cell**: The cell the gate table a critic is shown is computed in:
-the same rebuilt tree as the critic cell, but on a network of its own and
-carrying `policy.thread_env` and nothing else — no proxy, no agent, no
+**Gate-only cell**: The cell the gate table a critic is shown is computed in.
+It holds the same rebuilt tree as the critic cell, but sits on a network of its own.
+It carries `policy.thread_env` and nothing else: no proxy, no agent, no
 credential, because it runs gates rather than a session. It is not the critic
-cell, and the distinction is the point: a gate runs model-authored code, and
-running it in the container the lenses then re-exec their runner from would
-hand that code root over the critic (`SA-0089`; `DESIGN.md` §5.5). PACKAGE's
+cell, and the distinction is the point. A gate runs model-authored code.
+Running that code in the container the lenses then re-exec their runner from would
+hand it root over the critic (`SA-0089`, `DESIGN.md` §5.5). PACKAGE's
 re-verification uses one too.
 _Avoid_: "the gate cell", "the suite cell", "the third cell".
 
 **Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
 acts on the operator's behalf, directly or through the delegate that started the
-task, and every diff it writes is written to the plan validated at the plan
+task. Every diff it writes is written to the plan validated at the plan
 checkpoint. An attempt that ends in a scope proposal writes neither.
 _Avoid_: "the coder", "the writer", "the worker".
 
-**Lens**: One critic perspective with a bounded remit — correctness & data
+**Lens**: One critic perspective with a bounded remit: correctness & data
 semantics, contract & schema, test adequacy, conventions. Their remits are meant to
 be disjoint, and Appendix L measured two lenses filing one finding. Two lenses agreeing
 is a fact about the prompts, not corroboration. So any single blocker routes to REBUT,
@@ -554,17 +554,17 @@ _Avoid_: "issue", "comment", "bug", "problem".
 
 **Anchored**: A finding that either falls inside a diff hunk, or cites a line
 naming an identifier the diff changed. The second target is what keeps a lens
-usable when its findings point at code the diff did not touch — written for
-blast radius (retired, `DESIGN.md` §5.5.1) and now load-bearing for test
+usable when its findings point at code the diff did not touch. The second target was written for
+blast radius (retired, `DESIGN.md` §5.5.1). It is now load-bearing for test
 adequacy, whose finding is often about a test that already existed.
-Unanchored findings are recorded and excluded, never deleted — the drop rate per
+Unanchored findings are recorded and excluded, never deleted, because the drop rate per
 lens is the signal that a lens is badly prompted.
 
 **Severity**: `blocker`, `concern`, or `note`.
-- **`blocker`** — routes the task to REBUT.
-- **`concern`** — reaches the operator's judgement. The count in a queue line is
+- **`blocker`**: routes the task to REBUT.
+- **`concern`**: reaches the operator's judgement. The count in a queue line is
   concerns, and only concerns.
-- **`note`** — true but trivial. Appears in the PR body, counted nowhere. It exists
+- **`note`**: true but trivial. Appears in the PR body, counted nowhere. It exists
   so that filing everything as a concern is visibly wrong.
 
 _Avoid_: "nit", "minor", "suggestion". _Avoid_ using "finding" where you mean one
@@ -581,7 +581,7 @@ the spec, revises it, or withholds it (`SPEC_WITHHELD`). A provider limit routes
 it to `wait`, and an unreadable read to `error`.
 `spec-reviewer` is the file and id of the agent definition that performs it, not
 a role.
-_Avoid_: "the reviewer" (that's the operator), "the critic" or "a lens" (both
+_Avoid_: "the reviewer" (that is the operator), "the critic" or "a lens" (both
 read a diff, and are sessions the host starts).
 
 **Verdict**: The critic's own answer on a finding at REBUT: `confirmed`, `withdrawn` or
@@ -596,8 +596,8 @@ the critic's verdict, and the basis of the critic-ROI question.
 > **adjudicates**, the implementer **rebuts**. Never call any of them "the verdict"
 > without saying whose.
 
-**Rebuttal**: The implementer's single response to confirmed blockers — either a fix
-or an argument that the finding is wrong. Both outcomes are recorded; a documented
+**Rebuttal**: The implementer's single response to confirmed blockers: either a fix
+or an argument that the finding is wrong. Both outcomes are recorded. A documented
 disagreement is more informative than agreement.
 _Avoid_: "response", "appeal", "pushback".
 
@@ -627,9 +627,9 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
 `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`.
 Everything else is internal.
-> A state a task *ends in* is a wider set than the states that *reach you* —
+> A state a task *ends in* is a wider set than the states that *reach you*.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
-> rather than the operator — and one column holds both.
+> rather than the operator. One column holds both.
 
 `TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
 IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
@@ -643,7 +643,7 @@ The spend ceiling stops the task before its next turn. Its gates go red after th
 rebuttal. A REBUT past the budget is cut short by its $7.00 cap. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
-**`RATE_LIMITED`**: The provider refused the turn — its ceiling, not the task's.
+**`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
 Says nothing about the spec, and the only thing it asks for is a retry after the
 window reopens.
 _Avoid_: "exhausted", "out of budget".
@@ -680,14 +680,14 @@ _Avoid_: "accept", "merge" (merging is what the train does, later, if green), an
 **Trailing accept rate**: The share of the last twenty settled tasks that are
 `MERGED`. The number that says whether this is working.
 > Always "trailing". A batch's own accept rate is unknowable when the batch ends,
-> because nothing has been merged yet — that is the next morning's work.
+> because nothing in it is merged by then. Merging is the next morning's work.
 
 **Settled task**: A task whose outcome can no longer change. Its state is
 `MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`,
 `PLAN_REJECTED` or `SPEC_WITHHELD`. A task the scheduler re-queues has not settled,
 and neither has one whose outcome still waits on the operator.
 
-**Merge train**: The serial post-approval process — rebase onto current `main`,
+**Merge train**: The serial post-approval process: rebase onto current `main`,
 re-run the full gate suite on the merged result, merge only if green.
 _Avoid_: "merge queue" (GitHub's feature, which this is not).
 
@@ -697,13 +697,13 @@ batch a task is cut from its predecessor's head instead, which need not be its p
 A dependency there is met by a layer below it in the same stack, or by the default
 branch.
 
-**Retired spec**: A spec the operator has moved to `.saffron/specs/done/`, asserting
-that its work is in the default branch. Not offered to the scan, and admits a
-dependent the same way a `MERGED` task does — the assertion the ledger cannot
+**Retired spec**: A spec the operator moved to `.saffron/specs/done/`, asserting
+that its work is in the default branch. Not offered to the scan. It admits a
+dependent the same way a `MERGED` task does. Retiring it makes the assertion the ledger cannot
 make, because only a cell writes a task.
 
 **Tree base**: The commit a task's worktree is built on and its patch is exported
-against — `base_sha` for an ordinary task, the parent's branch head for a stacked
+against. It is `base_sha` for an ordinary task, and the parent's branch head for a stacked
 one. Recorded in `patch.json` beside `base_sha`, which stays the run's pin: gates
 and policy are exported from the pin either way.
 _Avoid_: using it and `base_sha` interchangeably. They differ for exactly one kind
@@ -713,7 +713,7 @@ of task, and that is the kind every consumer of either has to be right about.
 
 ## 7. Repos
 
-**Policy**: `.saffron/policy.yaml` in a target repo — gate roles and blocking
+**Policy**: `.saffron/policy.yaml` in a target repo: gate roles and blocking
 levels, `elevate_on`, protected paths, envelope defaults, `integrity` patterns,
 thread env. Everything repo-shaped that is not an executable.
 _Avoid_: "config", "settings", "the manifest".
@@ -723,19 +723,19 @@ image. Carries the toolchain, services, migrations, and seed data.
 _Avoid_: "the container image" when the distinction from a base image matters.
 
 **Base image**: `saffron/cell-base:<runtime>`. Agent runtime and git. Nothing
-else, ever — in particular no gate shim: the host `exec`s the repo's own gate
-executables through the runtime, so there is nothing for one to do (§2.1).
+else, ever. In particular, it carries no gate shim. The host `exec`s the repo's own gate
+executables through the runtime, so a shim would have nothing to do (§2.1).
 
 **Fixture services**: Whatever a repo bakes into its cell image to make its tests
-meaningful — a database, a cache, nothing at all. Never anything the operator runs
+meaningful: a database, a cache, nothing at all. Never anything the operator runs
 for real, which no cell can reach.
 _Avoid_: "the test DB", "the local DB", naming a specific engine as though every
 repo has one.
 
 **Onboarding**: Writing a repo's `.saffron/` directory. It touches zero lines of
-Saffron. If it doesn't, the core/repo boundary has failed.
+Saffron. If it does not, the core/repo boundary failed.
 
-**Preflight**: Per-repo readiness at batch start — mirror fetch, policy parse, image
+**Preflight**: Per-repo readiness at batch start: mirror fetch, policy parse, image
 rebuild, baseline. A repo that fails preflight is skipped, not fatal.
 A task has a preflight of its own. Each `PreflightEvent` is one step of it, written by
 `events.Preflight`. The steps include the proxy, the image build, the port probe and the
@@ -753,7 +753,7 @@ Item 170 makes it an index that `saffron fold` rebuilds from the record on
 _Avoid_: "the DB" (ambiguous with fixture services inside a cell), "the store".
 
 **Batch tree**: The plain directory tree of artifacts under
-`~/.saffron/batches/` — transcripts, diffs, gate logs. Greppable on purpose.
+`~/.saffron/batches/`: transcripts, diffs, gate logs. Greppable on purpose.
 _Avoid_: "artifact store", "the logs", "the run tree".
 
 **Event kind**: What tags one line of a task's event log: `PreflightEvent`,
@@ -789,10 +789,10 @@ projection, so comparing the two is not the projection agreeing with itself. A t
 walk finds whole and the derivation-chain query drops is a break.
 
 **Mirror**: The local bare git repository that is a cell's only remote.
-_Avoid_: "origin" (that's the real remote, reachable only from the host).
+_Avoid_: "origin" (that is the real remote, reachable only from the host).
 
 **Index**: The static page listing one line per task across a batch. An index, not a
-viewer — the diffs live in GitHub.
+viewer, because the diffs live in GitHub.
 _Avoid_: "dashboard", "the queue UI", "the report", "dossier".
 
 **Queue line**: One task's entry in the index. While the task runs, it is a live row
@@ -806,15 +806,15 @@ holding the phase state. Once the task ends, it is the outcome summary. It is ne
 **Rejection**: An operator decision to reject or request changes, plus the one-line
 reason appended to `.saffron/rejections.md`.
 
-**Bucket**: One of the three destinations a rejection is triaged into — a gate
+**Bucket**: One of the three destinations a rejection is triaged into: a gate
 (bucket 1), a `CLAUDE.md` line (bucket 2), a lens amendment (bucket 3). Cheapest
 first.
 _Avoid_: "category", "type", "tier".
 
-**Promote**: To move a rule toward bucket 1 — lens to `CLAUDE.md`, or `CLAUDE.md`
-to a gate. The direction that should always be travelled.
+**Promote**: To move a rule toward bucket 1: lens to `CLAUDE.md`, or `CLAUDE.md`
+to a gate. The direction a rule must always travel.
 > Name the destination, never the direction. The buckets print 1, 2, 3 but are
-> ordered cheapest-first, so "up" and "down" point opposite ways depending on
+> ordered cheapest-first. So "up" and "down" point opposite ways depending on
 > whether you mean the page or the cost. Say "promote to bucket 1".
 
 _Avoid_: "automate", "harden", "codify", "promote up", "promote down".
@@ -827,9 +827,9 @@ _Avoid_: bare "run" for one, "attempt" (that is a phase execution inside a task)
 "sample", "trial".
 
 **Scoring pass**: A set of scoring runs over one fixture, scored together and
-recorded under `docs/evidence/passes/`. Its n is part of its result — a k/n
+recorded under `docs/evidence/passes/`. Its n is part of its result. A k/n
 without its n is the shape item 69 charged the mutation-vs-lens record with.
-_Avoid_: bare "pass" — that is a gate status, and `_Avoid_` under **Attempt**
+_Avoid_: bare "pass". That is a gate status, and `_Avoid_` under **Attempt**
 already reserves it. Also "round", "sweep", "iteration".
 
 **Review round**: One review of one spec or pull request at one commit, in
@@ -854,7 +854,7 @@ _Avoid_: bare "round", "iteration", and "pass".
 - Task states in caps **in backticks, in prose**: `` `READY_FOR_REVIEW` ``, not
   "ready for review" and not bare caps. Bare caps are reserved for phases, so the
   two are distinguishable at a glance. Inside code blocks, YAML, state diagrams and
-  sample output, states appear bare — backticks are prose markup, not part of the
+  sample output, states appear bare, because backticks are prose markup, not part of the
   name.
 - Phases in bare caps: DIAGNOSE, IMPLEMENT, REVIEW.
 - Gate names lowercase in backticks: the `revert` gate, not the Revert gate.
@@ -863,27 +863,27 @@ _Avoid_: bare "round", "iteration", and "pass".
 - Spec IDs with the repo prefix: `TE-0142`, `SA-0001`.
 - Refer to a document section by number when precision matters: "§5.4", not "the
   gates section". Section numbers in `DESIGN.md` are stable and are cited by specs.
-- "The agent" is singular and generic; name the role when the role matters.
+- "The agent" is singular and generic. Name the role when the role matters.
 
 ---
 
 ## 11. Design record
 
 Where a decision Saffron made is written down. Every genre here is addressed by a
-citation rather than a path — "principle 34", "Appendix G", "ADR 1", "§5.4" — because specs,
+citation rather than a path: "principle 34", "Appendix G", "ADR 1", "§5.4". The reason is that specs,
 prompts and evidence records all cite them, and a record addressed by path moves
 when the path does. Distinct from the **run record** (`DESIGN.md` §4.6), which is
-what the factory produced; this is why the factory has the shape it has.
+what the factory produced. The design record says why the factory has the shape it has.
 
 **Principle**: A numbered lesson in one global sequence, stating what generalizes
 past the case that found it. Contributed by the revision appendix that found it,
 never renumbered, cited as "principle 34".
-_Avoid_: "lesson", "learning", "takeaway", and "rule" — **rule** already carries
-three senses here (a rule of conduct in `CLAUDE.md`, a numbered rule inside a
-`DESIGN.md` section such as §4.6.2b, and the rules a gate runs), so it cannot
-also carry this one.
+_Avoid_: "lesson", "learning", "takeaway", and "rule". **rule** already carries
+three senses here, so it cannot also carry this one. The three are a rule of
+conduct in `CLAUDE.md`, a numbered rule inside a `DESIGN.md` section such as
+§4.6.2b, and the rules a gate runs.
 
-**Revision appendix**: A record under `docs/appendices/` recording what a revision found —
+**Revision appendix**: A record under `docs/appendices/` recording what a revision found:
 the live run, the spike, or the read-through, and what it cost. It carries the
 narrative a principle compresses. Cited by letter: "Appendix G". Usually one per
 revision, and not reliably so: a revision that *closes* an earlier revision's
@@ -893,7 +893,7 @@ _Avoid_: "the changelog" (an appendix records what was *learned*, not what
 changed), "release notes", "the postmortem".
 
 **Evidence record**: A dated document under `docs/evidence/` holding what one run
-or one spike actually produced. The primary record — a measured fact beats a
+or one spike produced. The primary record: a measured fact beats a
 reasoned one, and this is where the measurement lives.
 _Avoid_: "the writeup", "the report" (`saffron/report/` renders the index, so the
 word would name either),
@@ -901,7 +901,7 @@ word would name either),
 
 **Spike verdict**: A bounded document answering the one question a spike was run to
 answer, carrying the clause that would reopen it (`ontology/RATIONALE.md`). A
-verdict may be negative and still be the deliverable (principle 10).
+negative verdict is still the deliverable (principle 10).
 _Avoid_: "ADR", "the analysis", "the recommendation".
 
 **ADR**: A record under `docs/adr/` holding one decision Saffron made, as it
@@ -919,27 +919,27 @@ them.
 Recorded because each was a live ambiguity and each turned out to be a design
 defect rather than a word choice (Appendix E).
 
-1. **run vs. batch** — *not* synonyms. A **batch** is one night across repos and
-   owns the budget; a **run** is one task's pin and owns `base_sha` and the
+1. **run vs. batch**: *not* synonyms. A **batch** is one night across repos and
+   owns the budget. A **run** is one task's pin and owns `base_sha` and the
    baseline. They diverged when Saffron went multi-repo and kept sharing a table,
    which left a multi-repo night with no identity to query. The ledger now has a
-   `batches` table. The third sense — one gate execution — is retired: it is a
+   `batches` table. The third sense, one gate execution, is retired: it is a
    **gate result**.
 
-2. **verdict** — three judgements, not two, defined under Review above. The
+2. **verdict**: three judgements, not two, defined under Review above. The
    operator's judgement was previously folded into `decisions.reason`, which made
    the critic-ROI question unanswerable.
 
-3. **Docker vs. the cell runtime** — "Docker" was never a decision, only a
-   proper noun that read as one, and it survived seven revisions and an
+3. **Docker vs. the cell runtime**: "Docker" was never a decision, only a
+   proper noun that read as one. It survived seven revisions and an
    adversarial review on that basis. The runtime is chosen at v0.5 against a
-   four-assertion spike; until then the word is **cell runtime**. Same shape as
+   four-assertion spike. Until then the word is **cell runtime**. Same shape as
    the two above: a word hiding a design defect rather than a word choice
    (Appendix G, principle 32).
 
-4. **ADR vs. the design record** — Saffron keeps no ADRs, and never did. `CLAUDE.md`
+4. **ADR vs. the design record**: Saffron keeps no ADRs, and never did. `CLAUDE.md`
    and `docs/agents/domain.md` promised `docs/adr/` from the day the engineering
-   skills were given a repo config to read (`26ce379`); the directory was the
+   skills were given a repo config to read (`26ce379`). The directory was the
    skill's own example structure, pasted, and no decision here ever went in one.
    Meanwhile every `ADR-NNNN` in the design record cites *prior art's* records, so the
    word already meant something else. Same shape as 3: a name that read as a
@@ -951,27 +951,27 @@ defect rather than a word choice (Appendix E).
    Reversed in ADR 1: Saffron keeps its own ADRs under `docs/adr/`, cited
    without the dash.
 
-5. **Claude Code vs. the delegate** — a model session on the host had no name, so
-   it was called by its product, and the product name hid the fact that shapes
-   the design: it acts on the operator's behalf, under their identity, and none
-   of its work is recorded as a task's, so the ledger cannot tell it from the
+5. **Claude Code vs. the delegate**: a model session on the host had no name, so
+   it was called by its product. The product name hid the fact that shapes
+   the design. A delegate acts on the operator's behalf, under their identity, and none
+   of its work is recorded as a task's. So the ledger cannot tell it from the
    operator. The word is PROV-O's (`prov:actedOnBehalfOf`), chosen for the
    alignment. "Surrogate" was considered and dropped, and so was "works to no
-   plan": both rested on a delegate never being handed a plan, and it can be —
-   PROV-O puts `prov:hadPlan` on an association, and a plan binds no one who is
+   plan". Both rested on a delegate never being handed a plan, and a delegate can be
+   handed one. PROV-O puts `prov:hadPlan` on an association, and a plan binds no one who is
    not checked against it. Same shape as 3: a proper noun standing where a role
    was never named (principle 32).
 
-6. **`saffron:` vs. `factory:`** — the vocabulary's namespace carried the
-   program's name, and the vocabulary describes the arrangement: gates, cells,
-   target repos, the operator and their delegates — the **factory**. The prefix
+6. **`saffron:` vs. `factory:`**: the vocabulary's namespace carried the
+   program's name. The vocabulary describes the arrangement: gates, cells,
+   target repos, the operator and their delegates. That arrangement is the **factory**. The prefix
    is `factory:` and the IRI `urn:software-factory:ns#`, a URN so that it cannot
    resolve (`DESIGN.md` §1.4). Every use was rewritten, dated records included.
    `saffron:retired-by` was not: it is a marker in source that the scheduler
    reads, not a vocabulary term, and shares only the spelling.
 
-7. **the spec reviewer vs. a spec review** — a delegate reading a spec before its
-   first cell was named "the spec reviewer", and "the reviewer" was already the
+7. **the spec reviewer vs. a spec review**: a delegate reading a spec before its
+   first cell was named "the spec reviewer". "The reviewer" was already the
    operator and a lens's avoided name. The seat had an occupant, and the name hid
    what separates this one: its `blocker` cannot route to REBUT, because no task
    exists yet, so it reaches the operator. It is named as an activity a delegate
@@ -989,14 +989,14 @@ defect rather than a word choice (Appendix E).
 
 ## Open naming decisions
 
-Add here rather than resolving in prose elsewhere — an ambiguity that gets settled
+Add here rather than resolving in prose elsewhere. An ambiguity that gets settled
 in a commit message is an ambiguity that comes back.
 
-1. **A word for what a gate result and a finding both are.** `DESIGN.md` §4.6 holds
-   that a `mypy` failure and a critic blocker are one shape — *an assertion, by an
-   agent, about a subject, with an outcome* — and calls the two-table split "worth
-   reconciling in §4.1". §4 and §5 here reproduce that split with no shared term, so
+1. **A word for what a gate result and a finding both are.** `DESIGN.md` §4.6 treats
+   a `mypy` failure and a critic blocker as one shape. That shape is *an assertion, by an
+   agent, about a subject, with an outcome*. The same section calls the two-table split "worth
+   reconciling in §4.1". §4 and §5 here reproduce that split with no shared term. So
    the sentence the ontology exists to make cannot be written in Saffron's own
    vocabulary. Left open deliberately: coining a supertype before §4.1 reconciles
-   would put a word here that nothing says. Resolve when the schema does — or record
+   would put a word here that nothing says. Resolve when the schema does, or record
    that it never will.
