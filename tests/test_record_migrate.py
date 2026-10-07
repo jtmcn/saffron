@@ -1,6 +1,6 @@
 """`saffron/record/migrate.py`. It appends a stored ledger's tasks, attempts
 and findings as the facts a live run would have written. A fold then gives
-them back (backlog item 170, design §7)."""
+them back (backlog item 170, the record design's §7)."""
 
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         run2 = source.create_run(repo_id, base_sha="a" * 40)
         run3 = source.create_run(repo_id, base_sha="a" * 40)
         run4 = source.create_run(repo_id, base_sha="a" * 40)
+        run5 = source.create_run(repo_id, base_sha="a" * 40)
         _set(
             source,
             "UPDATE runs SET started_at = ? WHERE run_id = ?",
@@ -60,6 +61,11 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
             source,
             "UPDATE runs SET started_at = ? WHERE run_id = ?",
             ("2026-01-01 11:00:00", run4),
+        )
+        _set(
+            source,
+            "UPDATE runs SET started_at = ? WHERE run_id = ?",
+            ("2026-01-01 12:00:00", run5),
         )
 
         batch_id = source.create_batch(budget_usd=20.0)
@@ -81,10 +87,12 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         source.close_attempt(
             a1,
             session_id="sess-1",
+            model="m-1",
             subtype="success",
-            terminal_reason=None,
+            terminal_reason="max_turns",
             num_turns=4,
             cost_usd_est=1.5,
+            cost_floor_usd_est=1.25,
         )
         finding_ids = source.record_findings(
             task1,
@@ -196,18 +204,26 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
             task4, "MERGE_FAILED", "saffron/SA-0004-retry", "e" * 40, ""
         )
 
+        # Task 5: packaged in PACKAGE's exhausted mode, with a pull request.
+        task5 = source.create_task(
+            run5, spec_id="SA-0005", spec_sha="s" * 64, branch="saffron/SA-0005"
+        )
+        source.set_task_package(
+            task5, "EXHAUSTED", "saffron/SA-0005", "f" * 40, "https://x/pull/5"
+        )
+
         source_path = tmp_path / "source.db"
         keys = {
             n: source._db.execute(
                 "SELECT record_key FROM tasks WHERE task_id = ?", (tid,)
             ).fetchone()["record_key"]
-            for n, tid in [(1, task1), (2, task2), (3, task3), (4, task4)]
+            for n, tid in [(1, task1), (2, task2), (3, task3), (4, task4), (5, task5)]
         }
         source.close()
 
         record = MemoryRecord()
         result = migrate(source_path, record)
-        assert sorted(result.migrated) == sorted(keys.values())
+        assert result.migrated == [keys[1], keys[2], keys[3], keys[4], keys[5]]
         assert result.refused == []
 
         rebuilt = Ledger(tmp_path / "rebuilt.db")
@@ -218,7 +234,7 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         task_cols = (
             "record_key, spec_id, spec_sha, state, risk, branch, budget_usd,"
             " policy_sha, prompt_sha, pushed_sha, pr_url, merged_head_sha,"
-            " added, removed"
+            " added, removed, updated_at"
         )
         spend = (
             "(SELECT COALESCE(SUM(a.cost_usd_est), 0.0) FROM attempts a"
@@ -279,7 +295,7 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
             row["spec_id"]
             for row in rebuilt._db.execute("SELECT spec_id FROM tasks ORDER BY task_id")
         ]
-        assert ordered == ["SA-0001", "SA-0002", "SA-0003", "SA-0004"]
+        assert ordered == ["SA-0001", "SA-0002", "SA-0003", "SA-0004", "SA-0005"]
 
         all_facts: list[Fact] = []
         for key in keys.values():
@@ -313,6 +329,7 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         assert _package(keys[4]).payload["state"] == "MERGE_FAILED"
         assert _package(keys[4]).payload["added"] is None
         assert _package(keys[4]).payload["removed"] is None
+        assert _package(keys[5]).payload["state"] == "EXHAUSTED"
 
         rebuilt.close()
     finally:
@@ -398,15 +415,18 @@ def test_a_rerun_completes_a_migration_cut_short_and_refuses_a_record_that_disag
 
     result = migrate(source_path, seeded)
 
-    assert sorted(result.migrated) == sorted([keys[0], keys[1], keys[2]])
-    assert sorted(key for key, _ in result.refused) == sorted(
-        [keys[3], keys[4], keys[5]]
-    )
+    assert result.migrated == [keys[0], keys[1], keys[2]]
+    assert [key for key, _ in result.refused] == [keys[3], keys[4], keys[5]]
 
     for key in (keys[0], keys[1], keys[2]):
         assert seeded.read(key) == expected[key]
     for key in (keys[3], keys[4], keys[5]):
         assert seeded.read(key) == held_before[key]
+
+    # A held fact differing in `batch_key` alone disagrees too: facts compare whole.
+    other = MemoryRecord()
+    other.append(keys[0], replace(expected[keys[0]][0], batch_key="9"))
+    assert [key for key, _ in migrate(source_path, other).refused] == [keys[0]]
 
 
 def test_a_ledger_that_predates_the_head_count_migrates_and_is_left_unwritten(

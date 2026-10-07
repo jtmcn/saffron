@@ -1,14 +1,17 @@
 """Record <- ledger. Reads a stored `Ledger`'s rows directly, read-only.
 Appends the facts a live run would have written, so a fold gives back §4's
-tasks, attempts and findings (backlog item 170, design §7).
+tasks, attempts and findings (backlog item 170, §7).
+
+§ numbers here are `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`'s,
+not `DESIGN.md`'s.
 
 Nine kinds only. `task_created`, `attempt_opened`, `attempt_closed`,
 `finding`, `rebuttal`, `task_merged_head`, `task_package`, `task_push` and
-`task_state`. `gate_result` and `task_policy` are `SA-0223`'s. The six
-key-filed tables are `SA-0224`'s.
+`task_state`. `gate_result` is `SA-0223`'s. No `task_policy` fact is written,
+since `policy_sha` rides on `task_created` as stored. The six key-filed
+tables are `SA-0224`'s.
 
-Never a `Ledger`. A broken source cannot pass for one `Ledger.fold_task`
-already trusts.
+Never a `Ledger`. Its open adds missing columns, so it would write the source.
 """
 
 from __future__ import annotations
@@ -49,8 +52,8 @@ _TASKS = """
 
 
 def _fact_time(value: str) -> str:
-    """A ledger time is UTC text with no offset (`Ledger._ledger_time`'s own
-    shape). Read with that assumption, then written back as the offset form
+    """A ledger time is UTC text with no offset (`saffron.ledger._ledger_time`'s
+    own shape). Read with that assumption, then written back as the offset form
     every live fact carries."""
     return datetime.fromisoformat(value).replace(tzinfo=UTC).isoformat()
 
@@ -70,7 +73,7 @@ def migrate(source: Path, record: Record) -> Migration:
             held = record.read(key)
             if held != facts[: len(held)]:
                 result.refused.append(
-                    (key, f"held {len(held)} fact(s) that disagree with the record")
+                    (key, f"the record holds {len(held)} fact(s) that disagree")
                 )
                 continue
             for fact in facts[len(held) :]:
@@ -196,20 +199,22 @@ def _finding_facts(
     return facts
 
 
+_PACKAGED = frozenset({"READY_FOR_REVIEW", "MERGE_FAILED", "EXHAUSTED"})
+
+
 def _outcome_facts(task: sqlite3.Row, one: _Maker) -> list[Fact]:
     """`task_merged_head`, then `task_package`/`task_push`, then `task_state`
-    last, every one at `updated_at`. `task_package`'s own `state` is derived
-    rather than copied. The stored `tasks.state` is the current value.
-    `reconcile` can move it past whatever PACKAGE itself wrote,
-    `READY_FOR_REVIEW` or `MERGE_FAILED`, the only two states it writes
-    outside the `exhausted` path. Copying it would make a merged task's
-    package fact claim it was already `MERGED`."""
+    last, every one at `updated_at`. `task_package`'s `state` is copied where
+    it is one PACKAGE writes. A state `reconcile` moved it to is derived back
+    from `pr_url`, so a merged task's package fact never claims `MERGED`."""
     facts = []
     at = task["updated_at"]
     if task["merged_head_sha"] is not None:
         facts.append(one("task_merged_head", at, {"head": task["merged_head_sha"]}))
     if task["pr_url"] is not None:
-        state = "MERGE_FAILED" if task["pr_url"] == "" else "READY_FOR_REVIEW"
+        state = task["state"]
+        if state not in _PACKAGED:
+            state = "MERGE_FAILED" if task["pr_url"] == "" else "READY_FOR_REVIEW"
         facts.append(
             one(
                 "task_package",
