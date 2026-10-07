@@ -155,7 +155,7 @@ class Criterion(BaseModel):
 
 
 class Spec(BaseModel):
-    """The unit of work. Never a ticket, an issue, or a prompt."""
+    """The unit of work a cell runs, validated from a spec file's frontmatter."""
 
     model_config = ConfigDict(extra="forbid")
 
