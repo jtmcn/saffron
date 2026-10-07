@@ -158,7 +158,7 @@ factory:EXHAUSTED a factory:TerminalState . factory:READY_FOR_REVIEW a factory:T
 factory:MERGE_FAILED a factory:TerminalState . factory:PREFLIGHT_FAILED a factory:TerminalState .
 factory:NOT_IMPLEMENTED a factory:TerminalState . factory:GATE_ERROR a factory:TerminalState .
 factory:RATE_LIMITED a factory:TerminalState . factory:SPEC_WITHHELD a factory:TerminalState .
-factory:PROVIDER_UNREACHABLE a factory:TerminalState .
+factory:PROVIDER_UNREACHABLE a factory:TerminalState . factory:SPEC_DRAFTED a factory:TerminalState .
 
 # What the operator's decision produces, plus the state a crash produces. None of
 # these reaches the operator — they are downstream of a judgement they already made.
@@ -216,6 +216,7 @@ factory:stack_layer a factory:FactKind .
 factory:end_review a factory:FactKind .
 factory:qualification a factory:FactKind .
 factory:spec_review a factory:FactKind .
+factory:spec_finding a factory:FactKind .
 factory:spec_text a factory:FactKind .
 factory:stack_finish a factory:FactKind .
 
