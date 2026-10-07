@@ -1326,8 +1326,10 @@ Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents
 The queue says which task needs you, and the view says why it ended there.
 `saffron serve` renders batches, tasks, phases, attempts and gate results from
 a view projection of the ledger (ADR 9). A gate result opens onto the failure
-lines its gate reported, read from the ledger and capped at 200. Diffs stay on
-GitHub, and the page writes nothing.
+lines its gate reported, read from the ledger and capped at 200. A task page
+reads its spec from the repo's mirror at the run's `base_sha`. It shows the
+text only when that text hashes to the task's `spec_sha`. Diffs stay on GitHub,
+and the page writes nothing.
 
 ---
 

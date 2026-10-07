@@ -5,7 +5,7 @@ PREFIX factory: <urn:software-factory:ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX earl:    <http://www.w3.org/ns/earl#>
 PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?task ?phase ?phaseName ?attempt ?n ?started ?ended ?turns ?cost ?result ?gate ?outcome ?failures
+SELECT ?task ?phase ?phaseName ?attempt ?n ?started ?ended ?turns ?cost ?model ?result ?gate ?outcome ?failures
 WHERE {
   ?phase prov:wasInformedBy ?task .
   ?attempt factory:withinPhase ?phase ; factory:n ?n .
@@ -14,6 +14,7 @@ WHERE {
   OPTIONAL { ?attempt prov:endedAtTime ?ended }
   OPTIONAL { ?attempt factory:numTurns ?turns }
   OPTIONAL { ?attempt factory:costUsdEst ?cost }
+  OPTIONAL { ?attempt factory:model ?model }
   OPTIONAL {
     ?suite prov:wasInformedBy ?attempt .
     ?result prov:wasGeneratedBy ?suite ; earl:assertedBy ?gate ;

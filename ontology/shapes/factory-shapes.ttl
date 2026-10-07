@@ -23,7 +23,9 @@ factory:TaskShape a sh:NodeShape ;
             factory:ORPHANED factory:MERGE_TRAIN ) ] ;
     sh:property [ sh:path factory:inState ; sh:maxCount 1 ; sh:class factory:TaskState ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
-        sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] .
+        sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] ;
+    sh:property [ sh:path factory:linesAdded ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
+    sh:property [ sh:path factory:linesRemoved ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] .
 
 # Eleven states reach the operator and no others — set containment inside the end
 # states, which is the distinction §4.6 names as justifying the namespace. What
@@ -65,7 +67,8 @@ factory:AttemptShape a sh:NodeShape ;
     sh:property [ sh:path factory:n ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:datatype xsd:integer ; sh:minInclusive 1 ] ;
     sh:property [ sh:path factory:numTurns ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
-    sh:property [ sh:path factory:costUsdEst ; sh:maxCount 1 ; sh:datatype xsd:decimal ] .
+    sh:property [ sh:path factory:costUsdEst ; sh:maxCount 1 ; sh:datatype xsd:decimal ] ;
+    sh:property [ sh:path factory:model ; sh:maxCount 1 ; sh:datatype xsd:string ] .
 
 # A batch is not a run: budget is a batch property, base_sha is a run property.
 # Rev 4 left them sharing a table, which is the defect these two shapes forbid.

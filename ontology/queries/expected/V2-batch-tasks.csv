@@ -1,6 +1,6 @@
-batch,task,spec,state,risk,pr,costUsd
-urn:software-factory:data:batch-1,urn:software-factory:data:task-t1,SA-0001,urn:software-factory:ns#MERGED,urn:software-factory:ns#elevated,https://github.com/o/r/pull/1,4.7
-urn:software-factory:data:batch-1,urn:software-factory:data:task-t2,,urn:software-factory:ns#EXHAUSTED,urn:software-factory:ns#standard,,4.9
-urn:software-factory:data:batch-1,urn:software-factory:data:task-t3,,urn:software-factory:ns#REJECTED,urn:software-factory:ns#standard,,4.6
-urn:software-factory:data:batch-1,urn:software-factory:data:task-t4,,urn:software-factory:ns#MERGED,urn:software-factory:ns#standard,,5.5
-urn:software-factory:data:batch-1,urn:software-factory:data:task-t6,SA-0006,urn:software-factory:ns#REPAIRING,urn:software-factory:ns#standard,,0.9
+batch,task,spec,state,risk,pr,added,removed,costUsd
+urn:software-factory:data:batch-1,urn:software-factory:data:task-t1,SA-0001,urn:software-factory:ns#MERGED,urn:software-factory:ns#elevated,https://github.com/o/r/pull/1,120,0,4.7
+urn:software-factory:data:batch-1,urn:software-factory:data:task-t2,,urn:software-factory:ns#EXHAUSTED,urn:software-factory:ns#standard,,,,4.9
+urn:software-factory:data:batch-1,urn:software-factory:data:task-t3,,urn:software-factory:ns#REJECTED,urn:software-factory:ns#standard,,,,4.6
+urn:software-factory:data:batch-1,urn:software-factory:data:task-t4,,urn:software-factory:ns#MERGED,urn:software-factory:ns#standard,,,,5.5
+urn:software-factory:data:batch-1,urn:software-factory:data:task-t6,SA-0006,urn:software-factory:ns#REPAIRING,urn:software-factory:ns#standard,,,,0.9
