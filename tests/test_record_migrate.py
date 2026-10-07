@@ -75,7 +75,7 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
 
 def _bare(path: Path) -> Path:
     """A fresh bare repository. Every origin and every "other writer"'s own
-    repository in criteria 2-4 is one of these."""
+    repository in the command's witnesses is one of these."""
     subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
     return path
 
@@ -83,7 +83,7 @@ def _bare(path: Path) -> Path:
 def _scratch_with_branch(path: Path) -> Path:
     """A non-bare repository holding one commit on `main`. A mirror cloned
     from it carries a branch, and its own `origin` remote is never the
-    row's declared `origin` (notes, problem 4)."""
+    row's declared `origin`."""
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     (path / "README").write_text("scratch\n")
     _git(path, "add", "README")
@@ -125,11 +125,7 @@ def _declining_hook(origin: Path, name: str, needle: str) -> None:
 
 
 def _rev_parse(repo: Path, ref: str) -> str | None:
-    done = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", ref],
-        capture_output=True,
-        text=True,
-    )
+    done = _git(repo, "rev-parse", "--verify", "-q", ref, check=False)
     return done.stdout.strip() if done.returncode == 0 else None
 
 
@@ -1527,12 +1523,8 @@ def test_a_migrated_stack_folds_back_to_its_key_filed_rows(tmp_path: Path) -> No
         batch1, branch="saffron/SA-1002", head_sha="d" * 40, pr_url=None
     )
 
-    key1 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task1,)
-    ).fetchone()["record_key"]
-    key2 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task2,)
-    ).fetchone()["record_key"]
+    key1 = _key(source, task1)
+    key2 = _key(source, task2)
 
     # Numbered 1 and 3, not 1 and 2: `migrate` must keep whatever is stored.
     _set(
@@ -1566,8 +1558,7 @@ def test_a_migrated_stack_folds_back_to_its_key_filed_rows(tmp_path: Path) -> No
     source_path = tmp_path / "source.db"
     source.close()
 
-    record = MemoryRecord()
-    result = migrate(source_path, record)
+    result, record = _migrated(source_path)
     assert sorted(result.migrated) == sorted([key1, key2])
     assert result.refused == []
 
@@ -1598,6 +1589,15 @@ def test_a_migrated_stack_folds_back_to_its_key_filed_rows(tmp_path: Path) -> No
         ],
         key2: ["stack_layer", "stack_finish"],
     }
+    # Each key column's stored values, in the order its rows were read.
+    expected_numbers = {
+        key1: [
+            ("stack_layer", "position", [1]),
+            ("qualification", "position", [1, 3]),
+            ("spec_review", "n", [1, 3]),
+        ],
+        key2: [("stack_layer", "position", [2])],
+    }
     frozen_batch_key = {key1: str(batch1), key2: str(batch1)}
     task_batch_key = {key1: str(batch2), key2: str(batch2)}
 
@@ -1606,6 +1606,8 @@ def test_a_migrated_stack_folds_back_to_its_key_filed_rows(tmp_path: Path) -> No
         state_index = next(i for i, f in enumerate(facts) if f.kind == "task_state")
         tail = facts[state_index + 1 :]
         assert [f.kind for f in tail] == expected_tail[key]
+        for kind, column, numbers in expected_numbers[key]:
+            assert [f.payload[column] for f in tail if f.kind == kind] == numbers, kind
         for fact in tail:
             assert fact.at == _iso(updated_at[n])
             assert fact.repo == "saffron"
@@ -1650,21 +1652,23 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
     repo2 = source.upsert_repo("repo-b", str(origin2), str(mirror2), None)
 
     run_good, task_good = _task(source, repo1, "SA-2001")
+    source.open_attempt(task_good, phase="IMPLEMENTING")
     run_bad, task_bad = _task(source, repo1, "SA-2002")
     run_other, task_other = _task(source, repo2, "SA-2003")
 
-    good_key = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task_good,)
-    ).fetchone()["record_key"]
-    bad_key = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task_bad,)
-    ).fetchone()["record_key"]
-    other_key = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task_other,)
-    ).fetchone()["record_key"]
+    good_key = _key(source, task_good)
+    bad_key = _key(source, task_bad)
+    other_key = _key(source, task_other)
 
-    # The other writer's disagreeing first fact for the bad task, pushed
-    # straight to origin1 under a distinct committer date.
+    source_path = tmp_path / "source.db"
+    source.close()
+
+    _, truth = _migrated(source_path)
+    expected = {key: truth.read(key) for key in (good_key, other_key)}
+    assert len(expected[good_key]) > 2
+
+    # The other writer pushes the good task's first two true facts and the
+    # bad task's disagreeing first fact to origin1, under its own date.
     writer_repo = _bare(tmp_path / "writer.git")
     writer_record = RefsRecord(writer_repo, remote=str(origin1))
     bad_fact = Fact(
@@ -1677,7 +1681,13 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
     )
     with monkeypatch.context() as patched:
         patched.setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
+        writer_record.append(good_key, expected[good_key][0])
+        writer_record.append(good_key, expected[good_key][1])
         writer_record.append(bad_key, bad_fact)
+    writer_commits = _git(
+        origin1, "rev-list", f"refs/saffron/tasks/{good_key}"
+    ).stdout.split()
+    assert len(writer_commits) == 2
     bad_sha_before = _rev_parse(origin1, f"refs/saffron/tasks/{bad_key}")
     assert bad_sha_before is not None
 
@@ -1693,14 +1703,10 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
     _logging_hook(origin1, "pre-receive", log1)
     _logging_hook(origin2, "pre-receive", log2)
 
-    source_path = tmp_path / "source.db"
-    source.close()
-
-    expected = {}
-    truth = MemoryRecord()
-    migrate(source_path, truth)
-    for key in (good_key, other_key):
-        expected[key] = truth.read(key)
+    seeded = MemoryRecord()
+    seeded.append(bad_key, bad_fact)
+    reason = dict(migrate(source_path, seeded).refused)[bad_key]
+    assert reason != ""
 
     home = tmp_path / "home"
     push_calls = _spy_on_pushes(monkeypatch)
@@ -1714,15 +1720,27 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
     assert push_calls
     assert not any("--force" in call for call in push_calls)
 
-    lines = sorted(_reports(out))
-    assert [line.split(":", 1)[0] for line in lines] == sorted(
-        [f"migrated {good_key}", f"migrated {other_key}", f"refused {bad_key}"]
+    assert sorted(out.splitlines()) == sorted(
+        [
+            f"migrated {good_key}",
+            f"migrated {other_key}",
+            f"refused {bad_key}: {reason}",
+        ]
     )
-    refused_line = next(line for line in lines if line.startswith(f"refused {bad_key}"))
-    assert refused_line.split(":", 1)[1].strip() != ""
     assert rc == 1
 
+    # The other writer's prefix is completed on top of its own commits.
     assert RefsRecord(origin1).read(good_key) == expected[good_key]
+    for sha in writer_commits:
+        ancestry = _git(
+            origin1,
+            "merge-base",
+            "--is-ancestor",
+            sha,
+            f"refs/saffron/tasks/{good_key}",
+            check=False,
+        )
+        assert ancestry.returncode == 0, sha
     assert RefsRecord(origin2).read(other_key) == expected[other_key]
 
     # A push of a ref the origin already holds sends nothing and runs no
@@ -1745,7 +1763,6 @@ def test_a_refused_push_is_reported_per_task_and_a_rerun_completes_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from saffron import cli
-    from saffron.record.migrate import migrate
     from saffron.record.refs import RefsRecord
 
     origin = _bare(tmp_path / "origin.git")
@@ -1771,20 +1788,13 @@ def test_a_refused_push_is_reported_per_task_and_a_rerun_completes_it(
     _, task1 = _task(source, repo_id, "SA-3001")
     _, task2 = _task(source, repo_id, "SA-3002")
     _, task3 = _task(source, repo_id, "SA-3003")
-    key1 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task1,)
-    ).fetchone()["record_key"]
-    key2 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task2,)
-    ).fetchone()["record_key"]
-    key3 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task3,)
-    ).fetchone()["record_key"]
+    key1 = _key(source, task1)
+    key2 = _key(source, task2)
+    key3 = _key(source, task3)
     source_path = tmp_path / "source.db"
     source.close()
 
-    truth = MemoryRecord()
-    migrate(source_path, truth)
+    _, truth = _migrated(source_path)
     expected = {key: truth.read(key) for key in (key1, key2, key3)}
 
     # The second task's own first fact, already on the origin under another
@@ -1825,9 +1835,11 @@ def test_a_refused_push_is_reported_per_task_and_a_rerun_completes_it(
     # included: the origin never held it, so only the prune removes it.
     assert _rev_parse(mirror, f"refs/saffron/tasks/{stray_key}") is None
 
-    # Remove both causes, then rerun.
+    # Remove both causes, and give the mirror a fact the origin never took.
     (origin / "hooks" / "pre-receive").unlink()
     _git(origin, "config", "--unset", "uploadpack.hideRefs")
+    RefsRecord(mirror).append(key1, expected[key1][-1])
+    assert RefsRecord(mirror).read(key1) == [*expected[key1], expected[key1][-1]]
 
     rc2 = cli.main(
         ["--home", str(tmp_path / "home"), "migrate", "--from", str(source_path)]
@@ -1848,7 +1860,7 @@ def test_a_refused_push_is_reported_per_task_and_a_rerun_completes_it(
 
 def _moving_post_receive(origin: Path, moved_to: Path) -> None:
     """Moves `origin`'s own directory away once a push lands, so the next
-    push to the same path finds no repository (criterion 4)."""
+    push to the same path finds no repository."""
     hook = origin / "hooks" / "post-receive"
     hook.write_text(f"#!/bin/sh\nmv {str(origin)!r} {str(moved_to)!r}\nexit 0\n")
     hook.chmod(0o755)
@@ -1909,9 +1921,7 @@ def test_migrate_exits_two_when_infrastructure_fails_and_keeps_what_it_printed(
     repo_c = source_c.upsert_repo("repo-c", str(origin_c), str(mirror_c), None)
     _, task_c1 = _task(source_c, repo_c, "SA-4003")
     _, task_c2 = _task(source_c, repo_c, "SA-4004")
-    key_c1 = source_c._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task_c1,)
-    ).fetchone()["record_key"]
+    key_c1 = _key(source_c, task_c1)
     source_c_path = tmp_path / "c" / "source.db"
     source_c.close()
 

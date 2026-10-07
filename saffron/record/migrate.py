@@ -1,14 +1,16 @@
 """Record <- ledger. Reads a stored `Ledger`'s rows directly, read-only.
 Appends the facts a live run would have written. A fold then gives back §4's
-tasks, attempts, gate results and findings (backlog item 170, §7).
+tasks, attempts, gate results, findings and six key-filed tables (backlog item
+170, §7).
 
 § numbers here are `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`'s,
 not `DESIGN.md`'s.
 
-Ten kinds. `task_created`, `attempt_opened`, `attempt_closed`, `gate_result`,
-`finding`, `rebuttal`, `task_merged_head`, `task_package`, `task_push` and
-`task_state`. No `task_policy` fact is written, since `policy_sha` rides on
-`task_created` as stored. The six key-filed tables (`stack_layers`,
+Sixteen kinds. `task_created`, `attempt_opened`, `attempt_closed`,
+`gate_result`, `finding`, `rebuttal`, `task_merged_head`, `task_package`,
+`task_push`, `task_state`, `stack_layer`, `end_review`, `qualification`,
+`spec_review`, `spec_text` and `stack_finish`. No `task_policy` fact is
+written, since `policy_sha` rides on `task_created` as stored. The six key-filed tables (`stack_layers`,
 `end_reviews`, `qualifications`, `spec_reviews`, `spec_texts` and
 `stack_finishes`) are written after each task's own `task_state` fact.
 
@@ -474,12 +476,12 @@ def _key_filed_facts(
     conn: sqlite3.Connection, task: sqlite3.Row, one: _Maker
 ) -> list[Fact]:
     """The six tables filed under a record key rather than a task id
-    (problem 1, backlog item 170). One fact per row, after the task's own
+    (backlog item 170). One fact per row, after the task's own
     `task_state`. The tables come in the order `Ledger._apply` lists them,
     each table's own rows by its key column, every one timed at the task's
     `updated_at`. A `stack_layer` or `stack_finish` fact carries its row's
     own stored `batch_key`, by `dataclasses.replace`. Every other one keeps
-    the task's, already baked into `one` (problem 1)."""
+    the task's, already baked into `one`."""
     key = task["record_key"]
     at = task["updated_at"]
     facts: list[Fact] = []
@@ -582,7 +584,7 @@ def _key_filed_facts(
     return facts
 
 
-def repo_rows(source: Path) -> list[sqlite3.Row]:
+def _repo_rows(source: Path) -> list[sqlite3.Row]:
     """Every `repos` row, read-only, oldest first. What `migrate_and_push`
     fetches from and pushes to, one `RefsRecord` per row."""
     conn = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
@@ -598,7 +600,7 @@ def repo_rows(source: Path) -> list[sqlite3.Row]:
 
 
 def migrate_and_push(source: Path) -> Iterator[tuple[str, str, str | None]]:
-    """The `saffron migrate` command's whole orchestration (problem 4). One
+    """The `saffron migrate` command's whole orchestration. One
     `RefsRecord` per repo row is fetched from its own `origin` before any
     repo's facts are written. Then each repo's tasks are migrated and each
     migrated key is pushed to the same `origin`, one ref at a time.
@@ -606,9 +608,8 @@ def migrate_and_push(source: Path) -> Iterator[tuple[str, str, str | None]]:
     Yields `(kind, key, detail)` as each task ends: `('migrated', key, None)`,
     `('refused', key, reason)`, or `('push_failed', key, detail)` for a stale
     or declined push. Any other push, fetch or append failure raises, and
-    the lines already yielded are the caller's to keep (`DESIGN.md` §4.1,
-    §4.4, §4.6, §6)."""
-    rows = repo_rows(source)
+    the lines already yielded are the caller's to keep."""
+    rows = _repo_rows(source)
     records = {row["repo_id"]: RefsRecord(Path(row["mirror_path"])) for row in rows}
     for row in rows:
         records[row["repo_id"]].fetch(row["origin"])

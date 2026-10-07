@@ -1820,10 +1820,11 @@ def _fold(args: argparse.Namespace) -> int:
 
 def _migrate(args: argparse.Namespace) -> int:
     """Write a stored ledger's tasks into the record, routed to each task's
-    own repo and pushed to that repo's `origin` (backlog item 170, design
-    §3). One line per task as it ends. The caller's own `except` wraps this,
-    so a fetch, append or other-than-stale push failure exits 2 with the
-    lines already printed kept."""
+    own repo. Each is pushed to that repo's `origin` (backlog item 170, §3
+    of the record design). One line per task as it ends. The caller's own
+    `except` wraps this. So a fetch failure, an append failure, or a push
+    failure that is neither stale nor declined exits 2. The lines already
+    printed are kept."""
     had_trouble = False
     for kind, key, detail in migrate_and_push(args.from_path):
         if kind == "migrated":
@@ -1834,8 +1835,8 @@ def _migrate(args: argparse.Namespace) -> int:
         else:
             had_trouble = True
             print(f"push failed {key}: {detail}")
-    # Exit 1, not 2: every task that reached here was read fine, and a
-    # refusal or a refused push is the record disagreeing, not infrastructure.
+    # Exit 1, not 2: every task that reached here was read fine. The record
+    # or the origin refused it, which is no infrastructure failure.
     return 1 if had_trouble else 0
 
 
