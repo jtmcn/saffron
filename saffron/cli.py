@@ -1,5 +1,5 @@
-"""`saffron`: cell, batch, queue, reconcile, watch, fold, chains, serve,
-replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, queue, reconcile, watch, fold, migrate, chains,
+serve, replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from saffron.phases import implement, review
 from saffron.phases import package as package_phase
 from saffron.reconcile import ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
+from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
 from saffron.replay import replay
 from saffron.report.index import orphan_rows, trailing_accept_rate
@@ -205,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
         "rather than stopping on the first",
     )
 
+    migrate_parser = subcommands.add_parser(
+        "migrate",
+        help="write a stored ledger's tasks into the record on "
+        "refs/saffron/*, routed and pushed per repo",
+    )
+    # Required, no default: a ledger to migrate is never assumed, least of
+    # all the home one `_migrate` runs before the rest of this function opens.
+    migrate_parser.add_argument("--from", dest="from_path", type=Path, required=True)
+
     subcommands.add_parser(
         "chains",
         help="materialize the projection and compare Q4 with the checked walk "
@@ -230,6 +240,15 @@ def main(argv: list[str] | None = None) -> int:
         # to rebuild, and opening the home one would create what it protects.
         try:
             return _fold(args)
+        except Exception as broke:
+            print(f"saffron: {type(broke).__name__}: {broke}")
+            return 2
+
+    if args.command == "migrate":
+        # Before the home ledger below: this command constructs no
+        # `Ledger` of its own, and opening the home one would create it.
+        try:
+            return _migrate(args)
         except Exception as broke:
             print(f"saffron: {type(broke).__name__}: {broke}")
             return 2
@@ -1797,6 +1816,27 @@ def _fold(args: argparse.Namespace) -> int:
     # A rebuild short of tasks is not the ledger back. Exit 1, not 2: the
     # tasks did not make it, and no infrastructure broke to stop them.
     return 1 if done.skipped else 0
+
+
+def _migrate(args: argparse.Namespace) -> int:
+    """Write a stored ledger's tasks into the record, routed to each task's
+    own repo and pushed to that repo's `origin` (backlog item 170, design
+    §3). One line per task as it ends. The caller's own `except` wraps this,
+    so a fetch, append or other-than-stale push failure exits 2 with the
+    lines already printed kept."""
+    had_trouble = False
+    for kind, key, detail in migrate_and_push(args.from_path):
+        if kind == "migrated":
+            print(f"migrated {key}")
+        elif kind == "refused":
+            had_trouble = True
+            print(f"refused {key}: {detail}")
+        else:
+            had_trouble = True
+            print(f"push failed {key}: {detail}")
+    # Exit 1, not 2: every task that reached here was read fine, and a
+    # refusal or a refused push is the record disagreeing, not infrastructure.
+    return 1 if had_trouble else 0
 
 
 def _serve(args: argparse.Namespace) -> int:

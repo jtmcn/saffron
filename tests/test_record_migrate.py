@@ -7,11 +7,13 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+import subprocess
 import time
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -63,6 +65,104 @@ def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[sqlite
 def _iso(stored: str) -> str:
     """A stored ledger time, as the offset form a live fact's `at` carries."""
     return datetime.fromisoformat(stored).replace(tzinfo=UTC).isoformat()
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=check
+    )
+
+
+def _bare(path: Path) -> Path:
+    """A fresh bare repository. Every origin and every "other writer"'s own
+    repository in criteria 2-4 is one of these."""
+    subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
+    return path
+
+
+def _scratch_with_branch(path: Path) -> Path:
+    """A non-bare repository holding one commit on `main`. A mirror cloned
+    from it carries a branch, and its own `origin` remote is never the
+    row's declared `origin` (notes, problem 4)."""
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    (path / "README").write_text("scratch\n")
+    _git(path, "add", "README")
+    _git(
+        path,
+        "-c",
+        "user.email=scratch@localhost",
+        "-c",
+        "user.name=Scratch",
+        "commit",
+        "-q",
+        "-m",
+        "init",
+    )
+    _git(path, "branch", "-M", "main")
+    return path
+
+
+def _mirror_of(scratch: Path, dest: Path) -> Path:
+    subprocess.run(
+        ["git", "clone", "-q", "--mirror", str(scratch), str(dest)], check=True
+    )
+    return dest
+
+
+def _logging_hook(origin: Path, name: str, log: Path) -> None:
+    """A hook that appends whatever git feeds it to `log` and exits 0."""
+    hook = origin / "hooks" / name
+    hook.write_text(f"#!/bin/sh\ncat >> {str(log)!r}\nexit 0\n")
+    hook.chmod(0o755)
+
+
+def _declining_hook(origin: Path, name: str, needle: str) -> None:
+    """A hook that fails only when its stdin names `needle`, so one ref in a
+    push can be declined while the rest land."""
+    hook = origin / "hooks" / name
+    hook.write_text(f"#!/bin/sh\nif grep -q {needle!r} -; then exit 1; fi\nexit 0\n")
+    hook.chmod(0o755)
+
+
+def _rev_parse(repo: Path, ref: str) -> str | None:
+    done = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "-q", ref],
+        capture_output=True,
+        text=True,
+    )
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _ref_lines(log: Path, ref: str) -> list[str]:
+    if not log.exists():
+        return []
+    return [line for line in log.read_text().splitlines() if ref in line]
+
+
+def _spy_on_pushes(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Every `git push` argv issued while active. A push that always lands
+    would hide a `--force` added back in. This checks the argv itself,
+    never the push's own outcome."""
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def _spy(cmd: Any, *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+        if isinstance(cmd, list) and "push" in cmd:
+            calls.append(list(cmd))
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _spy)
+    return calls
+
+
+_REPORT_PREFIXES = ("migrated ", "refused ", "push failed ")
+
+
+def _reports(out: str) -> list[str]:
+    """The command's own report lines, one per task. A `RecordError`'s own
+    message can carry git's multi-line stderr, so a continuation line is
+    dropped rather than read as a report of its own."""
+    return [line for line in out.splitlines() if line.startswith(_REPORT_PREFIXES)]
 
 
 def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
@@ -1315,3 +1415,518 @@ def test_a_ledger_that_predates_the_head_count_subtracts_its_stored_failures(
     (row_b,) = _rows(rebuilt_b._db, "SELECT earned_risk FROM attempts")
     assert row_b["earned_risk"] == "elevated"
     rebuilt_b.close()
+
+
+_KEY_FILED_KINDS = (
+    "stack_layer",
+    "end_review",
+    "qualification",
+    "spec_review",
+    "spec_text",
+    "stack_finish",
+)
+
+_KEY_FILED_COLUMNS = {
+    "stack_layers": "task_key, batch_key, position, spec_id, predecessor_key,"
+    " predecessor_head, generation",
+    "end_reviews": "task_key, lens, status, cost_usd, error",
+    "qualifications": "task_key, position, lens, severity, file, line, claim,"
+    " probe_verdict, outcome, reason",
+    "spec_reviews": "task_key, n, route, block, block_sha256, error",
+    "spec_texts": "task_key, n, origin, spec_id, path, text, spec_sha",
+    "stack_finishes": "batch_key, task_key, branch, head_sha, pr_url",
+}
+
+
+def test_a_migrated_stack_folds_back_to_its_key_filed_rows(tmp_path: Path) -> None:
+    from saffron.record.fold import fold
+    from saffron.record.migrate import migrate
+
+    source = Ledger(tmp_path / "source.db")
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
+
+    batch1 = source.create_batch(budget_usd=20.0)
+    run1 = source.create_run(repo_id, base_sha="a" * 40)
+    run2 = source.create_run(repo_id, base_sha="a" * 40)
+    source.attach_run_to_batch(run1, batch1)
+    source.attach_run_to_batch(run2, batch1)
+    _set(
+        source,
+        "UPDATE runs SET started_at = ? WHERE run_id = ?",
+        ("2020-01-01 08:00:00", run1),
+    )
+    _set(
+        source,
+        "UPDATE runs SET started_at = ? WHERE run_id = ?",
+        ("2020-01-01 09:00:00", run2),
+    )
+
+    task1 = source.create_task(
+        run1, spec_id="SA-1001", spec_sha="s" * 64, branch="saffron/SA-1001"
+    )
+    task2 = source.create_task(
+        run2, spec_id="SA-1002", spec_sha="s" * 64, branch="saffron/SA-1002"
+    )
+
+    # Two layers: task1 has no predecessor, task2's is task1.
+    source.record_stack_layer(task1, position=1, predecessor_task_id=None, generation=1)
+    source.record_stack_layer(
+        task2, position=2, predecessor_task_id=task1, generation=1
+    )
+
+    # Every one of the other four key-filed tables, both rows on task1.
+    source.record_end_review(
+        task1, lens="l1", status="reviewed", cost_usd=1.5, error=None
+    )
+    source.record_end_review(
+        task1, lens="l2", status="error", cost_usd=0.0, error="boom"
+    )
+
+    f1 = Finding(
+        lens="l1", severity="blocker", file="a.py", line=1, claim="c1", anchored=True
+    )
+    f2 = Finding(
+        lens="l2",
+        severity="concern",
+        file="b.py",
+        line=2,
+        claim="c2",
+        anchored=False,
+        probe_verdict="survived",
+    )
+    source.record_qualification(
+        task1, finding=f1, filed="blocker", outcome="kept", reason="r1"
+    )
+    source.record_qualification(
+        task1, finding=f2, filed="concern", outcome="dropped", reason="r2"
+    )
+
+    source.record_spec_review(
+        task1, route="revise", block=None, block_sha256=None, error=None
+    )
+    source.record_spec_review(
+        task1, route="run", block="b" * 10, block_sha256="c" * 64, error=None
+    )
+
+    source.record_spec_text(
+        task1,
+        origin="revision",
+        spec_id="SA-1001",
+        path=".saffron/specs/SA-1001-foo.md",
+        text="hello",
+    )
+    source.record_spec_text(
+        task1,
+        origin="follow_up",
+        spec_id="SA-1001",
+        path=".saffron/specs/SA-1001-bar.md",
+        text="world",
+    )
+
+    source.record_stack_finish(
+        batch1, branch="saffron/SA-1002", head_sha="d" * 40, pr_url=None
+    )
+
+    key1 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task1,)
+    ).fetchone()["record_key"]
+    key2 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task2,)
+    ).fetchone()["record_key"]
+
+    # Numbered 1 and 3, not 1 and 2: `migrate` must keep whatever is stored.
+    _set(
+        source,
+        "UPDATE spec_reviews SET n = 3 WHERE task_key = ? AND n = 2",
+        (key1,),
+    )
+    _set(
+        source,
+        "UPDATE qualifications SET position = 3 WHERE task_key = ? AND position = 2",
+        (key1,),
+    )
+
+    source.set_task_state(task1, "READY_FOR_REVIEW")
+    source.set_task_state(task2, "READY_FOR_REVIEW")
+
+    # The runs move to another batch after the stack's rows are written.
+    batch2 = source.create_batch(budget_usd=10.0)
+    source.attach_run_to_batch(run1, batch2)
+    source.attach_run_to_batch(run2, batch2)
+
+    updated_at = {
+        1: source._db.execute(
+            "SELECT updated_at FROM tasks WHERE task_id = ?", (task1,)
+        ).fetchone()["updated_at"],
+        2: source._db.execute(
+            "SELECT updated_at FROM tasks WHERE task_id = ?", (task2,)
+        ).fetchone()["updated_at"],
+    }
+
+    source_path = tmp_path / "source.db"
+    source.close()
+
+    record = MemoryRecord()
+    result = migrate(source_path, record)
+    assert sorted(result.migrated) == sorted([key1, key2])
+    assert result.refused == []
+
+    rebuilt = Ledger(tmp_path / "rebuilt.db")
+    fold(record, rebuilt)
+
+    reread = sqlite3.connect(source_path)
+    reread.row_factory = sqlite3.Row
+    for table, cols in _KEY_FILED_COLUMNS.items():
+        before_rows = _rows(reread, f"SELECT {cols} FROM {table}")
+        after_rows = _rows(rebuilt._db, f"SELECT {cols} FROM {table}")
+        assert before_rows, f"{table} holds no rows to compare"
+        before = Counter(tuple(r) for r in before_rows)
+        after = Counter(tuple(r) for r in after_rows)
+        assert before == after, table
+
+    expected_tail = {
+        key1: [
+            "stack_layer",
+            "end_review",
+            "end_review",
+            "qualification",
+            "qualification",
+            "spec_review",
+            "spec_review",
+            "spec_text",
+            "spec_text",
+        ],
+        key2: ["stack_layer", "stack_finish"],
+    }
+    frozen_batch_key = {key1: str(batch1), key2: str(batch1)}
+    task_batch_key = {key1: str(batch2), key2: str(batch2)}
+
+    for n, key in ((1, key1), (2, key2)):
+        facts = record.read(key)
+        state_index = next(i for i, f in enumerate(facts) if f.kind == "task_state")
+        tail = facts[state_index + 1 :]
+        assert [f.kind for f in tail] == expected_tail[key]
+        for fact in tail:
+            assert fact.at == _iso(updated_at[n])
+            assert fact.repo == "saffron"
+            if fact.kind in ("stack_layer", "stack_finish"):
+                assert fact.batch_key == frozen_batch_key[key]
+            else:
+                assert fact.batch_key == task_batch_key[key]
+
+    # A record holding each key's facts up to its task_state is completed by
+    # a rerun, with no key refused.
+    seeded = MemoryRecord()
+    for key in (key1, key2):
+        full = record.read(key)
+        state_index = next(i for i, f in enumerate(full) if f.kind == "task_state")
+        for fact in full[: state_index + 1]:
+            seeded.append(key, Fact.from_json(fact.to_json()))
+    rerun = migrate(source_path, seeded)
+    assert sorted(rerun.migrated) == sorted([key1, key2])
+    assert rerun.refused == []
+    for key in (key1, key2):
+        assert seeded.read(key) == record.read(key)
+
+    rebuilt.close()
+    reread.close()
+
+
+def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagreeing_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from saffron import cli
+    from saffron.record.migrate import migrate
+    from saffron.record.refs import RefsRecord
+
+    origin1 = _bare(tmp_path / "origin1.git")
+    origin2 = _bare(tmp_path / "origin2.git")
+    scratch = _scratch_with_branch(tmp_path / "scratch")
+    mirror1 = _mirror_of(scratch, tmp_path / "mirror1.git")
+    mirror2 = _mirror_of(scratch, tmp_path / "mirror2.git")
+
+    source = Ledger(tmp_path / "source.db")
+    repo1 = source.upsert_repo("repo-a", str(origin1), str(mirror1), None)
+    repo2 = source.upsert_repo("repo-b", str(origin2), str(mirror2), None)
+
+    run_good, task_good = _task(source, repo1, "SA-2001")
+    run_bad, task_bad = _task(source, repo1, "SA-2002")
+    run_other, task_other = _task(source, repo2, "SA-2003")
+
+    good_key = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_good,)
+    ).fetchone()["record_key"]
+    bad_key = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_bad,)
+    ).fetchone()["record_key"]
+    other_key = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_other,)
+    ).fetchone()["record_key"]
+
+    # The other writer's disagreeing first fact for the bad task, pushed
+    # straight to origin1 under a distinct committer date.
+    writer_repo = _bare(tmp_path / "writer.git")
+    writer_record = RefsRecord(writer_repo, remote=str(origin1))
+    bad_fact = Fact(
+        kind="task_created",
+        task_key=bad_key,
+        at="2020-01-01T00:00:00+00:00",
+        repo="repo-a",
+        batch_key=None,
+        payload={"spec_id": "SA-2002", "spec_sha": "x" * 64},
+    )
+    with monkeypatch.context() as patched:
+        patched.setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
+        writer_record.append(bad_key, bad_fact)
+    bad_sha_before = _rev_parse(origin1, f"refs/saffron/tasks/{bad_key}")
+    assert bad_sha_before is not None
+
+    # The mirror already carries local-only state the fetch must leave alone.
+    RefsRecord(mirror1).compare_and_swap("some-value", None, "v1")
+    values_sha_before = _rev_parse(mirror1, "refs/saffron/values/some-value")
+    branch_sha_before = _rev_parse(mirror1, "refs/heads/main")
+    assert values_sha_before is not None
+    assert branch_sha_before is not None
+
+    log1 = tmp_path / "origin1.log"
+    log2 = tmp_path / "origin2.log"
+    _logging_hook(origin1, "pre-receive", log1)
+    _logging_hook(origin2, "pre-receive", log2)
+
+    source_path = tmp_path / "source.db"
+    source.close()
+
+    expected = {}
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    for key in (good_key, other_key):
+        expected[key] = truth.read(key)
+
+    home = tmp_path / "home"
+    push_calls = _spy_on_pushes(monkeypatch)
+    rc = cli.main(["--home", str(home), "migrate", "--from", str(source_path)])
+    out = capsys.readouterr().out
+
+    # Never opens the home ledger: the dispatch runs before `Ledger` does.
+    assert not home.exists()
+
+    # No ref moves by overwriting history, only by a fast-forward.
+    assert push_calls
+    assert not any("--force" in call for call in push_calls)
+
+    lines = sorted(_reports(out))
+    assert [line.split(":", 1)[0] for line in lines] == sorted(
+        [f"migrated {good_key}", f"migrated {other_key}", f"refused {bad_key}"]
+    )
+    refused_line = next(line for line in lines if line.startswith(f"refused {bad_key}"))
+    assert refused_line.split(":", 1)[1].strip() != ""
+    assert rc == 1
+
+    assert RefsRecord(origin1).read(good_key) == expected[good_key]
+    assert RefsRecord(origin2).read(other_key) == expected[other_key]
+
+    # A push of a ref the origin already holds sends nothing and runs no
+    # hook. The refused key's ref is asserted by its sha, never the log.
+    assert _rev_parse(origin1, f"refs/saffron/tasks/{bad_key}") == bad_sha_before
+
+    assert set(RefsRecord(origin1).task_keys()) == {good_key, bad_key}
+    assert RefsRecord(origin2).task_keys() == [other_key]
+    assert RefsRecord(mirror2).task_keys() == [other_key]
+
+    assert len(_ref_lines(log1, f"refs/saffron/tasks/{good_key}")) == 1
+    assert _ref_lines(log1, f"refs/saffron/tasks/{bad_key}") == []
+    assert len(_ref_lines(log2, f"refs/saffron/tasks/{other_key}")) == 1
+
+    assert _rev_parse(mirror1, "refs/saffron/values/some-value") == values_sha_before
+    assert _rev_parse(mirror1, "refs/heads/main") == branch_sha_before
+
+
+def test_a_refused_push_is_reported_per_task_and_a_rerun_completes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from saffron import cli
+    from saffron.record.migrate import migrate
+    from saffron.record.refs import RefsRecord
+
+    origin = _bare(tmp_path / "origin.git")
+    scratch = _scratch_with_branch(tmp_path / "scratch")
+    mirror = _mirror_of(scratch, tmp_path / "mirror.git")
+
+    # A ref the mirror holds and the origin never will, so the fetch's own
+    # prune is what removes it rather than anything the migration writes.
+    stray_key = "f" * 32
+    stray_fact = Fact(
+        kind="task_created",
+        task_key=stray_key,
+        at="2020-01-01T00:00:00+00:00",
+        repo="saffron",
+        batch_key=None,
+        payload={"spec_id": "SA-9999", "spec_sha": "z" * 64},
+    )
+    RefsRecord(mirror).append(stray_key, stray_fact)
+    assert _rev_parse(mirror, f"refs/saffron/tasks/{stray_key}") is not None
+
+    source = Ledger(tmp_path / "source.db")
+    repo_id = source.upsert_repo("saffron", str(origin), str(mirror), None)
+    _, task1 = _task(source, repo_id, "SA-3001")
+    _, task2 = _task(source, repo_id, "SA-3002")
+    _, task3 = _task(source, repo_id, "SA-3003")
+    key1 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task1,)
+    ).fetchone()["record_key"]
+    key2 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task2,)
+    ).fetchone()["record_key"]
+    key3 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task3,)
+    ).fetchone()["record_key"]
+    source_path = tmp_path / "source.db"
+    source.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    expected = {key: truth.read(key) for key in (key1, key2, key3)}
+
+    # The second task's own first fact, already on the origin under another
+    # writer's committer date, hidden from fetch so our push cannot know it.
+    writer_repo = _bare(tmp_path / "writer.git")
+    writer_record = RefsRecord(writer_repo, remote=str(origin))
+    with monkeypatch.context() as patched:
+        patched.setenv("GIT_COMMITTER_DATE", "2019-06-01T00:00:00Z")
+        writer_record.append(key2, expected[key2][0])
+    stale_sha_before = _rev_parse(origin, f"refs/saffron/tasks/{key2}")
+    assert stale_sha_before is not None
+    _git(origin, "config", "uploadpack.hideRefs", f"refs/saffron/tasks/{key2}")
+
+    _declining_hook(origin, "pre-receive", key1)
+
+    rc1 = cli.main(
+        ["--home", str(tmp_path / "home"), "migrate", "--from", str(source_path)]
+    )
+    out1 = capsys.readouterr().out
+    lines1 = sorted(_reports(out1))
+    assert [line.split(":", 1)[0] for line in lines1] == sorted(
+        [f"push failed {key1}", f"push failed {key2}", f"migrated {key3}"]
+    )
+    decline_line = next(
+        line for line in lines1 if line.startswith(f"push failed {key1}")
+    )
+    stale_line = next(line for line in lines1 if line.startswith(f"push failed {key2}"))
+    assert decline_line.startswith(f"push failed {key1}: RecordError: ")
+    assert stale_line.startswith(f"push failed {key2}: StaleWriter: ")
+    assert rc1 == 1
+
+    # Neither failed push moved the origin's own ref for its key.
+    assert _rev_parse(origin, f"refs/saffron/tasks/{key1}") is None
+    assert _rev_parse(origin, f"refs/saffron/tasks/{key2}") == stale_sha_before
+    assert RefsRecord(origin).read(key3) == expected[key3]
+
+    # The fetch drops a ref the origin lacks outright, this repo's own key
+    # included: the origin never held it, so only the prune removes it.
+    assert _rev_parse(mirror, f"refs/saffron/tasks/{stray_key}") is None
+
+    # Remove both causes, then rerun.
+    (origin / "hooks" / "pre-receive").unlink()
+    _git(origin, "config", "--unset", "uploadpack.hideRefs")
+
+    rc2 = cli.main(
+        ["--home", str(tmp_path / "home"), "migrate", "--from", str(source_path)]
+    )
+    out2 = capsys.readouterr().out
+    lines2 = sorted(_reports(out2))
+    assert [line.split(":", 1)[0] for line in lines2] == sorted(
+        [f"migrated {key1}", f"migrated {key2}", f"migrated {key3}"]
+    )
+    assert rc2 == 0
+
+    # After the rerun, every key's ref on the origin and the mirror reads
+    # as the facts a fresh `migrate` into a `MemoryRecord` gives back.
+    for key in (key1, key2, key3):
+        assert RefsRecord(origin).read(key) == expected[key]
+        assert RefsRecord(mirror).read(key) == expected[key]
+
+
+def _moving_post_receive(origin: Path, moved_to: Path) -> None:
+    """Moves `origin`'s own directory away once a push lands, so the next
+    push to the same path finds no repository (criterion 4)."""
+    hook = origin / "hooks" / "post-receive"
+    hook.write_text(f"#!/bin/sh\nmv {str(origin)!r} {str(moved_to)!r}\nexit 0\n")
+    hook.chmod(0o755)
+
+
+def test_migrate_exits_two_when_infrastructure_fails_and_keeps_what_it_printed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from saffron import cli
+    from saffron.record.refs import RefsRecord
+
+    # Arm 1: a second row's dead origin shares the first row's mirror.
+    # Every repo is fetched before any write, so the first still buys nothing.
+    origin_a = _bare(tmp_path / "a" / "origin.git")
+    scratch_a = _scratch_with_branch(tmp_path / "a" / "scratch")
+    mirror_a = _mirror_of(scratch_a, tmp_path / "a" / "mirror.git")
+    ghost_origin = tmp_path / "a" / "ghost-origin.git"
+
+    source_a = Ledger(tmp_path / "a" / "source.db")
+    repo_a1 = source_a.upsert_repo("repo-a1", str(origin_a), str(mirror_a), None)
+    repo_a2 = source_a.upsert_repo("repo-a2", str(ghost_origin), str(mirror_a), None)
+    _task(source_a, repo_a1, "SA-4001")
+    _task(source_a, repo_a2, "SA-4002")
+    source_a_path = tmp_path / "a" / "source.db"
+    source_a.close()
+
+    home_a = tmp_path / "a" / "home"
+    rc_a = cli.main(["--home", str(home_a), "migrate", "--from", str(source_a_path)])
+    out_a = capsys.readouterr().out
+    assert rc_a == 2
+    assert _reports(out_a) == []
+    assert out_a.strip().startswith("saffron:")
+    assert RefsRecord(mirror_a).task_keys() == []
+    assert RefsRecord(origin_a).task_keys() == []
+    assert not home_a.exists()
+
+    # Arm 2: a source path that does not exist.
+    missing = tmp_path / "missing.db"
+    rc_b = cli.main(
+        ["--home", str(tmp_path / "b" / "home"), "migrate", "--from", str(missing)]
+    )
+    out_b = capsys.readouterr().out
+    assert rc_b == 2
+    assert _reports(out_b) == []
+    assert out_b.strip().startswith("saffron:")
+    assert not missing.exists()
+    assert not (tmp_path / "b" / "home").exists()
+
+    # Arm 3: the origin moves away after the first push lands, so the
+    # second push finds no repository at all.
+    origin_c = _bare(tmp_path / "c" / "origin.git")
+    moved_origin_c = tmp_path / "c" / "origin-moved.git"
+    scratch_c = _scratch_with_branch(tmp_path / "c" / "scratch")
+    mirror_c = _mirror_of(scratch_c, tmp_path / "c" / "mirror.git")
+    _moving_post_receive(origin_c, moved_origin_c)
+
+    source_c = Ledger(tmp_path / "c" / "source.db")
+    repo_c = source_c.upsert_repo("repo-c", str(origin_c), str(mirror_c), None)
+    _, task_c1 = _task(source_c, repo_c, "SA-4003")
+    _, task_c2 = _task(source_c, repo_c, "SA-4004")
+    key_c1 = source_c._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_c1,)
+    ).fetchone()["record_key"]
+    source_c_path = tmp_path / "c" / "source.db"
+    source_c.close()
+
+    rc_c = cli.main(
+        [
+            "--home",
+            str(tmp_path / "c" / "home"),
+            "migrate",
+            "--from",
+            str(source_c_path),
+        ]
+    )
+    out_c = capsys.readouterr().out
+    out_lines_c = out_c.splitlines()
+    assert out_lines_c[0] == f"migrated {key_c1}"
+    assert out_lines_c[1].startswith("saffron: RecordError: ")
+    assert rc_c == 2
+    assert RefsRecord(moved_origin_c).read(key_c1)

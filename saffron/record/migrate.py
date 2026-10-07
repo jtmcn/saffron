@@ -8,17 +8,24 @@ not `DESIGN.md`'s.
 Ten kinds. `task_created`, `attempt_opened`, `attempt_closed`, `gate_result`,
 `finding`, `rebuttal`, `task_merged_head`, `task_package`, `task_push` and
 `task_state`. No `task_policy` fact is written, since `policy_sha` rides on
-`task_created` as stored. The six key-filed tables are `SA-0224`'s.
+`task_created` as stored. The six key-filed tables (`stack_layers`,
+`end_reviews`, `qualifications`, `spec_reviews`, `spec_texts` and
+`stack_finishes`) are written after each task's own `task_state` fact.
 
 Never a `Ledger`. Its open adds missing columns, so it would write the source.
+
+`migrate_and_push` is the orchestration the `saffron migrate` command runs.
+One `RefsRecord` per repo row is fetched from its own `origin` before
+anything is written. Then each repo's tasks are migrated and pushed one ref
+at a time.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from collections import Counter
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,7 +33,8 @@ from typing import Any
 from saffron.gates.baseline import subtract_baseline, suite_drift
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.suite import aborted_gates
-from saffron.record.contract import Fact, Record
+from saffron.record.contract import Fact, Record, RecordError, StaleWriter
+from saffron.record.refs import RefsRecord
 
 _Maker = Callable[[str, str, dict[str, Any]], Fact]
 
@@ -45,7 +53,7 @@ class Migration:
 
 _TASKS = """
     SELECT t.*, r.started_at AS run_started_at, r.base_sha AS run_base_sha,
-           r.batch_id AS run_batch_id, rp.name AS repo_name,
+           r.batch_id AS run_batch_id, r.repo_id AS run_repo_id, rp.name AS repo_name,
            rp.origin AS repo_origin, rp.mirror_path AS repo_mirror_path
       FROM tasks t
       JOIN runs r ON r.run_id = t.run_id
@@ -67,11 +75,14 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def migrate(source: Path, record: Record) -> Migration:
+def migrate(source: Path, record: Record, *, repo_id: int | None = None) -> Migration:
     """Append the facts `source`'s stored tasks are owed, task by task in
     `task_id` order. Opens `source` read-only, so its bytes are the same
     after this returns. A path that does not exist raises
-    `sqlite3.OperationalError` and creates no file."""
+    `sqlite3.OperationalError` and creates no file.
+
+    `repo_id` is `None` for every caller but `migrate_and_push`: given one,
+    only that repo's tasks are migrated, everything else skipped."""
     conn = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
@@ -79,6 +90,8 @@ def migrate(source: Path, record: Record) -> Migration:
         has_earned_risk = "earned_risk" in _columns(conn, "attempts")
         result = Migration()
         for task in conn.execute(_TASKS).fetchall():
+            if repo_id is not None and task["run_repo_id"] != repo_id:
+                continue
             key = task["record_key"]
             refusal = _refusal_reason(conn, task, has_head_count)
             if refusal is not None:
@@ -319,6 +332,7 @@ def _facts_for_task(
     facts.extend(_attempt_facts(conn, task, one, has_head_count, has_earned_risk))
     facts.extend(_finding_facts(conn, task, one))
     facts.extend(_outcome_facts(task, one))
+    facts.extend(_key_filed_facts(conn, task, one))
     return facts
 
 
@@ -454,3 +468,161 @@ def _outcome_facts(task: sqlite3.Row, one: _Maker) -> list[Fact]:
         facts.append(one("task_push", at, {"pushed_sha": task["pushed_sha"]}))
     facts.append(one("task_state", at, {"state": task["state"]}))
     return facts
+
+
+def _key_filed_facts(
+    conn: sqlite3.Connection, task: sqlite3.Row, one: _Maker
+) -> list[Fact]:
+    """The six tables filed under a record key rather than a task id
+    (problem 1, backlog item 170). One fact per row, after the task's own
+    `task_state`. The tables come in the order `Ledger._apply` lists them,
+    each table's own rows by its key column, every one timed at the task's
+    `updated_at`. A `stack_layer` or `stack_finish` fact carries its row's
+    own stored `batch_key`, by `dataclasses.replace`. Every other one keeps
+    the task's, already baked into `one` (problem 1)."""
+    key = task["record_key"]
+    at = task["updated_at"]
+    facts: list[Fact] = []
+    for row in conn.execute(
+        "SELECT * FROM stack_layers WHERE task_key = ? ORDER BY position", (key,)
+    ):
+        fact = one(
+            "stack_layer",
+            at,
+            {
+                "position": row["position"],
+                "spec_id": row["spec_id"],
+                "predecessor_key": row["predecessor_key"],
+                "predecessor_head": row["predecessor_head"],
+                "generation": row["generation"],
+            },
+        )
+        facts.append(replace(fact, batch_key=row["batch_key"]))
+    for row in conn.execute(
+        "SELECT * FROM end_reviews WHERE task_key = ? ORDER BY lens", (key,)
+    ):
+        facts.append(
+            one(
+                "end_review",
+                at,
+                {
+                    "lens": row["lens"],
+                    "status": row["status"],
+                    "cost_usd": row["cost_usd"],
+                    "error": row["error"],
+                },
+            )
+        )
+    for row in conn.execute(
+        "SELECT * FROM qualifications WHERE task_key = ? ORDER BY position", (key,)
+    ):
+        facts.append(
+            one(
+                "qualification",
+                at,
+                {
+                    "position": row["position"],
+                    "lens": row["lens"],
+                    "severity": row["severity"],
+                    "file": row["file"],
+                    "line": row["line"],
+                    "claim": row["claim"],
+                    "probe_verdict": row["probe_verdict"],
+                    "outcome": row["outcome"],
+                    "reason": row["reason"],
+                },
+            )
+        )
+    for row in conn.execute(
+        "SELECT * FROM spec_reviews WHERE task_key = ? ORDER BY n", (key,)
+    ):
+        facts.append(
+            one(
+                "spec_review",
+                at,
+                {
+                    "n": row["n"],
+                    "route": row["route"],
+                    "block": row["block"],
+                    "block_sha256": row["block_sha256"],
+                    "error": row["error"],
+                },
+            )
+        )
+    for row in conn.execute(
+        "SELECT * FROM spec_texts WHERE task_key = ? ORDER BY n", (key,)
+    ):
+        facts.append(
+            one(
+                "spec_text",
+                at,
+                {
+                    "n": row["n"],
+                    "origin": row["origin"],
+                    "spec_id": row["spec_id"],
+                    "path": row["path"],
+                    "text": row["text"],
+                    "spec_sha": row["spec_sha"],
+                },
+            )
+        )
+    for row in conn.execute(
+        "SELECT * FROM stack_finishes WHERE task_key = ? ORDER BY batch_key", (key,)
+    ):
+        fact = one(
+            "stack_finish",
+            at,
+            {
+                "branch": row["branch"],
+                "head_sha": row["head_sha"],
+                "pr_url": row["pr_url"],
+            },
+        )
+        facts.append(replace(fact, batch_key=row["batch_key"]))
+    return facts
+
+
+def repo_rows(source: Path) -> list[sqlite3.Row]:
+    """Every `repos` row, read-only, oldest first. What `migrate_and_push`
+    fetches from and pushes to, one `RefsRecord` per row."""
+    conn = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        return list(
+            conn.execute(
+                "SELECT repo_id, name, origin, mirror_path FROM repos ORDER BY repo_id"
+            )
+        )
+    finally:
+        conn.close()
+
+
+def migrate_and_push(source: Path) -> Iterator[tuple[str, str, str | None]]:
+    """The `saffron migrate` command's whole orchestration (problem 4). One
+    `RefsRecord` per repo row is fetched from its own `origin` before any
+    repo's facts are written. Then each repo's tasks are migrated and each
+    migrated key is pushed to the same `origin`, one ref at a time.
+
+    Yields `(kind, key, detail)` as each task ends: `('migrated', key, None)`,
+    `('refused', key, reason)`, or `('push_failed', key, detail)` for a stale
+    or declined push. Any other push, fetch or append failure raises, and
+    the lines already yielded are the caller's to keep (`DESIGN.md` §4.1,
+    §4.4, §4.6, §6)."""
+    rows = repo_rows(source)
+    records = {row["repo_id"]: RefsRecord(Path(row["mirror_path"])) for row in rows}
+    for row in rows:
+        records[row["repo_id"]].fetch(row["origin"])
+    for row in rows:
+        record = records[row["repo_id"]]
+        result = migrate(source, record, repo_id=row["repo_id"])
+        for key in result.migrated:
+            try:
+                record.push(key, row["origin"])
+            except RecordError as exc:
+                if isinstance(exc, StaleWriter) or "[remote rejected]" in exc.stderr:
+                    yield ("push_failed", key, f"{type(exc).__name__}: {exc}")
+                    continue
+                raise
+            yield ("migrated", key, None)
+        for key, reason in result.refused:
+            yield ("refused", key, reason)
