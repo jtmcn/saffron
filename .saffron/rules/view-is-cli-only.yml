@@ -17,6 +17,12 @@ rule:
       has: { regex: '^saffron\.view', stopBy: end }
     - kind: import_from_statement
       has: { field: module_name, regex: '^saffron\.view' }
+    # `from saffron import view`: the module is `saffron`, and view is a name.
+    - kind: import_from_statement
+      all:
+        - has: { field: module_name, regex: '^saffron$' }
+        # Any imported name, not only the first: `field: name` reads the first.
+        - has: { kind: dotted_name, regex: '^view$', stopBy: end }
     - kind: call
       all:
         - has: { field: function, regex: '(^|\.)import_module$|^__import__$' }

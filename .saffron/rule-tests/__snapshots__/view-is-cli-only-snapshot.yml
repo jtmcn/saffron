@@ -1,5 +1,47 @@
 id: view-is-cli-only
 snapshots:
+  from saffron import cli, view:
+    labels:
+    - source: from saffron import cli, view
+      style: primary
+      start: 0
+      end: 29
+    - source: saffron
+      style: secondary
+      start: 5
+      end: 12
+    - source: view
+      style: secondary
+      start: 25
+      end: 29
+  from saffron import view:
+    labels:
+    - source: from saffron import view
+      style: primary
+      start: 0
+      end: 24
+    - source: saffron
+      style: secondary
+      start: 5
+      end: 12
+    - source: view
+      style: secondary
+      start: 20
+      end: 24
+  from saffron import view as v:
+    labels:
+    - source: from saffron import view as v
+      style: primary
+      start: 0
+      end: 29
+    - source: saffron
+      style: secondary
+      start: 5
+      end: 12
+    - source: view
+      style: secondary
+      start: 20
+      end: 24
   from saffron.view import graph:
     labels:
     - source: from saffron.view import graph
