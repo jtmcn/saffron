@@ -13,6 +13,8 @@ import ipaddress
 import re
 import sqlite3
 import urllib.parse
+from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
@@ -311,13 +313,16 @@ def _tr(cells: list[str]) -> str:
     return "<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>"
 
 
-def _table(rows: list[list[str]], *, table_id: str | None = None) -> str:
-    """`table_id` names which section a row belongs to on a page with more
-    than one table.
+def _th_row(columns: list[str]) -> str:
+    return "<tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in columns) + "</tr>"
 
-    A reader cannot tell two tables apart by position alone."""
-    open_tag = f'<table id="{table_id}">' if table_id is not None else "<table>"
-    return open_tag + "\n" + "\n".join(_tr(row) for row in rows) + "\n</table>"
+
+def _table(rows: list[list[str]], columns: list[str], *, table_id: str) -> str:
+    """`table_id` names which section a row belongs to on a page with more
+    than one table. A reader cannot tell two tables apart by position
+    alone. The first row is the only `<th>` row, naming `columns`."""
+    body_rows = [_th_row(columns), *(_tr(row) for row in rows)]
+    return f'<table id="{table_id}">\n' + "\n".join(body_rows) + "\n</table>"
 
 
 def _batch_row(sol: ox.QuerySolution) -> list[str]:
@@ -334,9 +339,14 @@ def _batch_row(sol: ox.QuerySolution) -> list[str]:
     ]
 
 
-def _task_row(sol: ox.QuerySolution) -> list[str]:
+def _task_id_of(sol: ox.QuerySolution) -> int:
     task_id = _id_from(_TASK_IRI, cast(str, sol["task"].value))
     assert task_id is not None
+    return task_id
+
+
+def _task_row(sol: ox.QuerySolution) -> list[str]:
+    task_id = _task_id_of(sol)
     return [
         _link(f"/task/{task_id}", str(task_id)),
         html.escape(_text(sol["spec"])),
@@ -354,22 +364,38 @@ def _left_out_row(store: ox.Store, entry: LeftOut) -> list[str]:
     return [task_cell, html.escape(entry.spec_id), html.escape(entry.reason)]
 
 
+_TASK_COLUMNS = ["task", "spec", "state", "risk"]
+_BATCH_COLUMNS = [
+    "batch",
+    "started",
+    "ended",
+    "ended because",
+    "budget",
+    "spent",
+    "tasks",
+]
+_LEFT_OUT_COLUMNS = ["task", "spec", "reason"]
+
+
 def _render_index(store: ox.Store, left_out: list[LeftOut]) -> str:
     batches = list(_query(store, _V1))
     rows = [_batch_row(sol) for sol in batches]
-    unbatched = list(_query(store, _V5))
+    unbatched = sorted(_query(store, _V5), key=_task_id_of, reverse=True)
     task_rows = [_task_row(sol) for sol in unbatched]
     left_rows = [_left_out_row(store, entry) for entry in left_out]
+    batches_table = _table(rows, _BATCH_COLUMNS, table_id="batches")
+    no_batch_table = _table(task_rows, _TASK_COLUMNS, table_id="no-batch")
+    left_out_table = _table(left_rows, _LEFT_OUT_COLUMNS, table_id="left-out")
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — run record</title>
 <h1>Run record</h1>
 <h2>Batches</h2>
-{_table(rows, table_id="batches")}
+{batches_table}
 <h2>No batch</h2>
-{_table(task_rows, table_id="no-batch")}
+{no_batch_table}
 <h2>Left out</h2>
-{_table(left_rows, table_id="left-out")}
+{left_out_table}
 """
 
 
@@ -377,33 +403,113 @@ def _render_batch(store: ox.Store, batch_id: int) -> str:
     substitutions: _Substitutions = {
         ox.Variable("batch"): ox.NamedNode(_batch_iri(batch_id))
     }
-    rows = [_task_row(sol) for sol in _query(store, _V2, substitutions)]
+    solutions = sorted(_query(store, _V2, substitutions), key=_task_id_of, reverse=True)
+    rows = [_task_row(sol) for sol in solutions]
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — batch {batch_id}</title>
 <h1>Batch {batch_id}</h1>
-{_table(rows)}
+{_table(rows, _TASK_COLUMNS, table_id="tasks")}
 """
 
 
-def _task_spec_id_and_pr(store: ox.Store, task_id: int) -> tuple[str, str | None]:
-    """The task's spec id and pull request URL.
+@dataclass(frozen=True)
+class _TaskSummary:
+    """One task's `<dl id="summary">` material, read from `V2` bound on
+    `?task`, or from `V5` bound on `?task` when `V2` returns no row. A
+    batched task's own run reaches `V2`. An unbatched one reaches only
+    `V5`, which has no `?batch` to read."""
 
-    Read from `V2` bound on `?task`, or from `V5` bound on `?task` when
-    `V2` returns no row. A batched task's own run reaches `V2`. An
-    unbatched one reaches only `V5`."""
+    spec_id: str
+    state: str
+    risk: str
+    batch_id: int | None
+    pr_url: str | None
+
+
+def _task_summary(store: ox.Store, task_id: int) -> _TaskSummary:
     substitutions: _Substitutions = {
         ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
     }
     for query_text in (_V2, _V5):
         for sol in _query(store, query_text, substitutions):
             spec = sol["spec"]
-            if spec is not None:
-                pr = sol["pr"]
-                return cast(str, spec.value), (
-                    cast(str, pr.value) if pr is not None else None
-                )
-    return "", None
+            if spec is None:
+                continue
+            batch = sol["batch"]
+            pr = sol["pr"]
+            return _TaskSummary(
+                spec_id=cast(str, spec.value),
+                state=_name(sol["state"]),
+                risk=_name(sol["risk"]),
+                batch_id=(
+                    _id_from(_BATCH_IRI, cast(str, batch.value))
+                    if batch is not None
+                    else None
+                ),
+                pr_url=cast(str, pr.value) if pr is not None else None,
+            )
+    return _TaskSummary(spec_id="", state="", risk="", batch_id=None, pr_url=None)
+
+
+_CENTS = Decimal("0.01")
+
+
+def _round_cents(value: Decimal) -> str:
+    return str(value.quantize(_CENTS, rounding=ROUND_HALF_UP))
+
+
+def _attempt_solutions(store: ox.Store, task_id: int) -> list[ox.QuerySolution]:
+    """One `V3` solution per distinct `?attempt`, the first in `V3`'s own
+    order. `V3` has one row per gate result, so an attempt with several
+    would otherwise be counted, and its cost summed, more than once."""
+    substitutions: _Substitutions = {
+        ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
+    }
+    seen: set[str] = set()
+    solutions: list[ox.QuerySolution] = []
+    for sol in _query(store, _V3, substitutions):
+        attempt_iri = cast(ox.NamedNode, sol["attempt"]).value
+        if attempt_iri in seen:
+            continue
+        seen.add(attempt_iri)
+        solutions.append(sol)
+    return solutions
+
+
+def _task_cost(store: ox.Store, task_id: int) -> str:
+    """The task's attempts' `costUsdEst`, summed once per attempt however
+    many gate results it has. A `Decimal` sum, so no float noise reaches
+    the page."""
+    total = Decimal(0)
+    for sol in _attempt_solutions(store, task_id):
+        cost = sol["cost"]
+        if cost is not None:
+            total += Decimal(cast(str, cost.value))
+    return _round_cents(total)
+
+
+_ATTEMPT_COLUMNS = ["phase", "n", "started", "ended", "turns", "cost"]
+
+
+def _attempts_rows(store: ox.Store, task_id: int) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for sol in _attempt_solutions(store, task_id):
+        cost = sol["cost"]
+        cost_text = (
+            _round_cents(Decimal(cast(str, cost.value))) if cost is not None else ""
+        )
+        rows.append(
+            [
+                html.escape(_text(sol["phaseName"])),
+                html.escape(_text(sol["n"])),
+                html.escape(_text(sol["started"])),
+                html.escape(_text(sol["ended"])),
+                html.escape(_text(sol["turns"])),
+                html.escape(cost_text),
+            ]
+        )
+    return rows
 
 
 def _finding_rows(store: ox.Store, task_id: int) -> list[list[str]]:
@@ -433,25 +539,53 @@ def _failure_rows(conn: sqlite3.Connection, gate_result_id: int) -> list[sqlite3
     )
 
 
-def _gate_result_rows(
-    store: ox.Store, conn: sqlite3.Connection, task_id: int
-) -> list[list[str]]:
+_GATE_RESULT_COLUMNS = ["phase", "n", "gate", "outcome", "failures"]
+_FAILURE_COLUMNS = ["file", "line", "code", "message"]
+_FINDING_COLUMNS = ["lens", "severity", "claim", "verdict"]
+
+
+def _gate_result_rows(store: ox.Store, task_id: int) -> list[list[str]]:
+    """The `V3` rows with `?result` bound. An attempt with no gate result
+    adds no row. Its failure lines, if any, live in their own table."""
     substitutions: _Substitutions = {
         ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
     }
     rows: list[list[str]] = []
     for sol in _query(store, _V3, substitutions):
-        phase_name = sol["phaseName"]
-        failures = sol["failures"]
+        if sol["result"] is None:
+            continue
         rows.append(
             [
-                html.escape(_text(phase_name)),
+                html.escape(_text(sol["phaseName"])),
                 html.escape(_text(sol["n"])),
                 html.escape(_name(sol["gate"])),
                 html.escape(_name(sol["outcome"])),
-                html.escape(_text(failures)),
+                html.escape(_text(sol["failures"])),
             ]
         )
+    return rows
+
+
+@dataclass(frozen=True)
+class _FailuresBlock:
+    """One gate result's failure lines: the `<h3>` text that introduces
+    them, the table id, and the rows (ending in an `N more` row when the
+    ledger holds more than `FAILURE_LINE_CAP`)."""
+
+    heading: str
+    table_id: str
+    rows: list[list[str]]
+
+
+def _failures_blocks(
+    store: ox.Store, conn: sqlite3.Connection, task_id: int
+) -> list[_FailuresBlock]:
+    substitutions: _Substitutions = {
+        ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
+    }
+    blocks: list[_FailuresBlock] = []
+    for sol in _query(store, _V3, substitutions):
+        failures = sol["failures"]
         if failures is None:
             continue
         count = int(cast(str, failures.value))
@@ -460,35 +594,79 @@ def _gate_result_rows(
         result_iri = cast(str, sol["result"].value)
         gate_result_id = _id_from(_GATE_RESULT_IRI, result_iri)
         assert gate_result_id is not None
+        heading = (
+            f"{_name(sol['gate'])} in {_text(sol['phaseName'])} "
+            f"attempt {_text(sol['n'])}"
+        )
         lines = _failure_rows(conn, gate_result_id)
-        for line in lines:
-            rows.append(
-                [
-                    html.escape(str(line["file"])),
-                    html.escape("" if line["line"] is None else str(line["line"])),
-                    html.escape(str(line["code"])),
-                    html.escape(str(line["message"] or "")),
-                ]
-            )
+        rows = [
+            [
+                html.escape(str(line["file"])),
+                html.escape("" if line["line"] is None else str(line["line"])),
+                html.escape(str(line["code"])),
+                html.escape(str(line["message"] or "")),
+            ]
+            for line in lines
+        ]
         if count > len(lines):
             rows.append([f"{count - len(lines)} more"])
-    return rows
+        blocks.append(
+            _FailuresBlock(
+                heading=heading, table_id=f"failures-{gate_result_id}", rows=rows
+            )
+        )
+    return blocks
 
 
 def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
-    spec_id, pr_url = _task_spec_id_and_pr(store, task_id)
-    spec_id = html.escape(spec_id)
-    pr_html = _link(pr_url, pr_url) if pr_url else ""
-    conn = open_read_only(ledger_path)
-    try:
-        rows = _gate_result_rows(store, conn, task_id)
-    finally:
-        conn.close()
-    rows = rows + _finding_rows(store, task_id)
+    summary = _task_summary(store, task_id)
+    spec_id = html.escape(summary.spec_id)
+    batch_html = (
+        _link(f"/batch/{summary.batch_id}", str(summary.batch_id))
+        if summary.batch_id is not None
+        else "none"
+    )
+    pr_html = _link(summary.pr_url, summary.pr_url) if summary.pr_url else "none"
+    summary_html = f"""<dl id="summary">
+<dt>state</dt><dd>{html.escape(summary.state)}</dd>
+<dt>risk</dt><dd>{html.escape(summary.risk)}</dd>
+<dt>batch</dt><dd>{batch_html}</dd>
+<dt>pull request</dt><dd>{pr_html}</dd>
+<dt>cost</dt><dd>{html.escape(_task_cost(store, task_id))}</dd>
+</dl>"""
+
+    attempt_rows = _attempts_rows(store, task_id)
+    if not attempt_rows:
+        body = "no attempts"
+    else:
+        sections = [
+            _table(attempt_rows, _ATTEMPT_COLUMNS, table_id="attempts"),
+            _table(
+                _gate_result_rows(store, task_id),
+                _GATE_RESULT_COLUMNS,
+                table_id="gate-results",
+            ),
+        ]
+        conn = open_read_only(ledger_path)
+        try:
+            blocks = _failures_blocks(store, conn, task_id)
+        finally:
+            conn.close()
+        for block in blocks:
+            sections.append(f"<h3>{html.escape(block.heading)}</h3>")
+            sections.append(
+                _table(block.rows, _FAILURE_COLUMNS, table_id=block.table_id)
+            )
+        findings_table = _table(
+            _finding_rows(store, task_id), _FINDING_COLUMNS, table_id="findings"
+        )
+        sections.append(findings_table)
+        body = "\n".join(sections)
+
     return f"""<!doctype html>
 <meta charset="utf-8">
 <title>Saffron — {spec_id}</title>
 <h1>Task {task_id} — {spec_id}</h1>
-{pr_html}
-{_table(rows)}
+{summary_html}
+{body}
 """
