@@ -1,6 +1,6 @@
 ---
 id: b-ba0cba
-title: REVIEW and REBUT spend reaches `events.jsonl` only as prose, so a follower's running total stalls from IMPLEMENT to the outcome
+title: REVIEW and REBUT spend reaches `events.jsonl` only as prose and raw agent payloads, so a follower's running total stalls from IMPLEMENT to the outcome
 status: open
 filed: 2026-10-07
 specs: []
@@ -36,3 +36,9 @@ without parsing `detail`.
 ## Record
 
 - 2026-10-07: filed from the `cell-watch` mod spike, measured on `SA-0222`.
+- 2026-10-07: `SA-0223` puts most of the gap outside the prose. IMPLEMENT
+  ended at $9.82 and the outcome read $27.43 of $26. The four lenses state
+  $4.92 of the $17.61 between them in `detail`. The full figure sits only in
+  the 16 raw `Agent` result payloads, whose `total_cost_usd` sums to $27.43.
+  Those payloads come from inside the cell, so the host's own events state
+  $12.69 of the spend nowhere.
