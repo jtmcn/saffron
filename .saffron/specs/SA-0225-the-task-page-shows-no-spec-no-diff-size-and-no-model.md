@@ -4,7 +4,7 @@ title: The task page shows no spec, no diff size and no model
 type: feature
 priority: 3
 depends_on: []
-estimated_lines: 367
+estimated_lines: 435
 estimate_measured: true
 touches:
   - saffron/view/graph.py
@@ -69,9 +69,9 @@ acceptance:
       come from `V2` bound on `?task`, or from `V5` bound on `?task` when
       `V2` returns no row. The witness drives a batched task with 12 and 0,
       an unbatched task with 3 and 7, an unbatched task with 5 and null, and
-      an unbatched task with neither. It drives a batched decoy that `V2`
-      returns first when unbound, and an unbatched decoy that `V5` returns
-      first when unbound.
+      an unbatched task with neither. It drives a batched decoy and an
+      unbatched decoy. It asserts, through the query endpoint, that unbound `V2`
+      returns the batched decoy first and unbound `V5` the unbatched one.
     witness: tests/test_view_server.py::test_a_task_summary_shows_the_lines_added_and_removed_the_ledger_holds
     wrong_versions:
       - The counts are read from `V2` alone, so an unbatched task shows none.
@@ -94,20 +94,30 @@ acceptance:
   - claim: >-
       A task page shows its spec's title and type in a `<dl id="spec">`,
       with the terms `title` and `type`, and its `## Problem` section in a
-      `<pre id="problem">`. The text is read from the task's repo mirror at
-      its run's `base_sha`, from the file under `.saffron/specs/` whose name
-      starts with the spec id and a hyphen. It is shown only when its sha256
-      equals the task's `spec_sha`. The Problem text is exactly what the pull
-      request body's extractor returns for that spec, so it is clipped and
-      neutralized the same way. Title and Problem render as text, never as
-      markup. A spec with no Problem section has no `<pre id="problem">`. The
-      witness drives three specs in one mirror. One carries markup in its
-      title and Problem and an `@` mention. One has a Problem past the
-      extractor's limit, and one has no Problem. A later commit rewrites
-      every spec, so a reader of `HEAD` reads other text.
+      `<pre id="problem">`. The bytes are read from the mirror of the
+      task's own run's repo, at that run's `base_sha`. They come from the
+      file under `.saffron/specs/` whose name starts with the spec id and a
+      hyphen. They are shown only when their sha256 equals the task's
+      `spec_sha`, and then decoded as UTF-8. A spec the parser refuses only
+      for disclosing its own mutant is shown from the spec that refusal
+      carries. The Problem text is exactly what the pull request body's
+      extractor returns for that spec, so it is clipped and neutralized the
+      same way. Title and Problem render as text, never as markup. A spec
+      with no Problem section has no `<pre id="problem">`. The witness drives
+      five specs in one mirror. One carries markup in its title and Problem
+      and an `@` mention. One has a Problem past the extractor's limit, and
+      one has no Problem. One is committed with CRLF line ends, and one
+      discloses its own mutant. A later commit rewrites every spec. A later
+      run of the same repo sits at that commit, and a later repo names a
+      mirror that does not exist.
     witness: tests/test_view_server.py::test_a_task_page_shows_its_specs_title_type_and_problem_read_at_the_runs_base
     wrong_versions:
       - The spec is read at the mirror's `HEAD`, not at the run's `base_sha`.
+      - The `base_sha` is read from the repo's latest run, not the task's own run.
+      - The mirror path is read from the latest repo, not the run's repo.
+      - The mirror path is read from the first repo, not the run's repo.
+      - The hash is taken over text whose CRLF line ends became LF, so a CRLF spec reads as `hash mismatch`.
+      - A spec that discloses its own mutant reads as `unparseable`.
       - The title is written into the page unescaped.
       - The Problem is written into the page unescaped.
       - The Problem is cut out with a copy of the regex that neither clips nor neutralizes.
@@ -118,21 +128,26 @@ acceptance:
       `<dl id="spec">` and no `<pre id="problem">`, and holds a `<p
       id="spec-unavailable">` whose whole text is `spec text unavailable:`
       and one reason. The reason is `absent` when no file name starts with
-      the spec id and a hyphen, and `hash mismatch` when the text does not
-      hash to `spec_sha`. It is `unparseable` when the text hashes but the
-      spec parser refuses it. It is `unreadable` when git or decoding
-      fails. The witness drives `absent` with a file whose name starts with
-      the spec id and no hyphen. It drives `unreadable` four ways. They are
-      a mirror path that does not exist, a `base_sha` the mirror lacks, a
-      symlink leaving the tree, and bytes that are not UTF-8.
+      the spec id and a hyphen, and `hash mismatch` when the bytes do not
+      hash to `spec_sha`. It is `unparseable` when the bytes hash but the
+      spec parser refuses them for any reason but a disclosed mutant. It is
+      `unreadable` when git fails or cannot run, when the matching entry is
+      not a regular file, or when bytes that hash are not UTF-8. The witness
+      drives `absent` two ways. One is a file whose name starts with the
+      spec id and no hyphen, and one is a `base_sha` with no
+      `.saffron/specs/` at all. It drives `unreadable` four ways. They are a
+      mirror path that does not exist, a `base_sha` the mirror lacks, a
+      symlink, and bytes that are not UTF-8.
     witness: tests/test_view_server.py::test_a_task_page_says_why_its_spec_text_is_unavailable
     wrong_versions:
-      - Only `GitError` is caught, so bytes that are not UTF-8 end the request with no response.
+      - A decode error is not caught, so bytes that are not UTF-8 end the request with no response.
       - The file is matched on the spec id with no hyphen, so `SA-001` finds `SA-0012-good.md`.
       - A spec the parser refuses ends the request with no response.
       - The text is shown without the hash check.
       - A mirror path that does not exist reads as `absent`.
-      - A `base_sha` the mirror lacks reads as `absent`.
+      - A failed listing reads as `absent`.
+      - A symlink is read as a blob, so it reads as `hash mismatch`.
+      - The listing names the directory as a tree path, so a `base_sha` with no `.saffron/specs/` reads as `unreadable`.
   - claim: >-
       The pull request body still carries the spec's `## Problem` section
       under `## What`, now through the extractor's public name.
@@ -180,17 +195,18 @@ names the spec by id alone (`saffron/view/server.py:696`).
 (`saffron/ledger.py:126`) and `repos.mirror_path`
 (`saffron/ledger.py:83`), and the run keeps `base_sha`
 (`saffron/ledger.py:115`). `load_spec` hashes the spec file's bytes
-(`saffron/intake.py:340-351`). `file_at` reads one path at a commit and
-returns `None` when the tree lacks it (`saffron/repos/mirror.py:241-269`).
+(`saffron/intake.py:340-351`). `DisclosedMutantError` carries the spec it
+parsed as `spec`, since its frontmatter validated
+(`saffron/intake.py:56-69`).
 
-Measured on 2026-10-07 over the operator's ledger, read-only. It held 237
-tasks. For 235 of them, the file under `.saffron/specs/` at the run's
-`base_sha`, named for the spec id and a hyphen, hashed to `spec_sha`. The
-text `file_at` returned, encoded as UTF-8, hashed the same for all 235. Two
-did not hash, task 38 (`SA-0043`) and task 61 (`SA-0064`). No spec id
-matched two files, and no spec file held a carriage return. One of the
-235 failed today's `parse_spec`: task 59 (`SA-0063`) raised
-`DisclosedMutantError`.
+Measured later on 2026-10-07 over the operator's ledger, read-only. It
+held 237 tasks. For 235 of them, the file under `.saffron/specs/` at the
+run's `base_sha`, named for the spec id and a hyphen, hashed to
+`spec_sha`. Two did not hash, task 38 (`SA-0043`) and task 61
+(`SA-0064`). No spec id matched two files, and no spec file held a
+carriage return. One of the 235 failed today's `parse_spec`. Task 59
+(`SA-0063`) raised `DisclosedMutantError`, so its page shows the spec
+that error carries.
 
 ## Problem
 
@@ -208,9 +224,10 @@ matched two files, and no spec file held a carriage return. One of the
    Problem, or the one line naming why the text is unavailable. Read the
    task's `spec_id`, `spec_sha`, its run's `base_sha` and its repo's
    `mirror_path` from the ledger by task id. Open it the way the failure
-   lines are read (`saffron/view/server.py:676-680`). Find the file, read
-   it with `file_at`, compare its sha256 with `spec_sha`, and parse it
-   with `parse_spec` (`saffron/intake.py:249`).
+   lines are read (`saffron/view/server.py:676-680`). Find the file and
+   read its raw bytes at `base_sha`. Compare their sha256 with
+   `spec_sha`, decode them strictly as UTF-8, and parse the text with
+   `parse_spec` (`saffron/intake.py:249`).
 5. **The extractor.** `_problem` (`saffron/report/pr_body.py:187-210`)
    cuts out, clips and neutralizes a spec's Problem section. Give it a
    public name and call it from both places. Its one caller is
@@ -243,16 +260,26 @@ what its witness must kill. Do not run them yourself.
 **Commit as each witness passes.** Five witnesses and the updated tests
 make six commits at least.
 
-**Listing the spec directory.** `saffron/repos/**` is forbidden, and
-`mirror.py` has no function that lists a directory. So list
-`.saffron/specs/` at `base_sha` with one `git ls-tree` call in the view.
-A failed listing is `unreadable`, as a `GitError` from `file_at` is.
-`file_at` raises `UnreadablePath`, a `GitError`, for a symlink leaving the
-tree (`saffron/repos/mirror.py:254-264`). It decodes with `text=True`
-(`saffron/repos/mirror.py:55`), so bytes that are not UTF-8 raise
-`UnicodeDecodeError`, which is no `GitError`. Hash the returned text
-encoded as UTF-8. `parse_spec` raises `SpecError` and its subclasses
+**Reading the spec.** `saffron/repos/**` is forbidden, and `mirror.py`
+has no function that lists a directory. Do not read through `file_at`.
+Its git runner sets `text=True` (`saffron/repos/mirror.py:55`), which turns
+CRLF into LF before any hash. So the view runs git itself, in bytes mode,
+with no `text=True`. List with `git -C <mirror> ls-tree -z <base_sha> --
+.saffron/specs/`. That spelling prints nothing when the directory is
+missing, which is `absent`. Read a matching regular file with `git -C
+<mirror> cat-file blob <base_sha>:<path>`. An entry whose mode is not
+`100644` or `100755` is `unreadable`, so a symlink is never read as a
+blob. A nonzero exit is `unreadable`, and so is an `OSError` such as a
+missing git binary. Hash the raw bytes, then decode them with
+`bytes.decode("utf-8")`. Catch `DisclosedMutantError` before `SpecError`
 (`saffron/intake.py:51` and `:56`).
+
+**Not the reader to reuse.** `_find_spec_version`
+(`saffron/projection.py:132-165`) also finds a spec by id and hash. It
+searches every blob `rev-list --objects --all` names
+(`saffron/projection.py:127`), not the tree at `base_sha`. It also
+files a decode error as `spec_unusable` (`saffron/projection.py:160-161`).
+Neither import it nor copy it.
 
 **Escaping.** Every value from the spec goes through `html.escape`, as
 every other cell on the page does. The extractor's text is already
@@ -277,19 +304,33 @@ task's `spec_sha` is the sha256 of the committed bytes. Build the expected
 Problem with the extractor's public name, imported inside the test body. A
 module-scope import makes the reverted run a collection error.
 
+**Criterion 4's cases.** Make the CRLF spec by replacing each `\n` in its
+bytes with `\r\n`. Its Problem then keeps `\r\n` inside. Make the
+disclosing spec with an `acceptance` mutant whose `find` text also sits in
+its Problem. After the tasks, create a run of the same repo at the
+rewriting commit. Then register a repo whose mirror path does not exist,
+with a run of its own. A reader of the latest run or the latest repo then
+shows no spec. The `_ledger` repo comes first and has no mirror, so a
+reader of the first repo shows none either.
+
 **Criterion 2's decoys.** Create the batched decoy before the batched
-task, in the same batch, and assert its IRI sorts first as text. Create
-the unbatched decoy last, so `V5`'s `DESC(?task)` returns it first.
+task, in the same batch, and the unbatched decoy last. Then send `V2` and
+`V5` unbound through `/sparql` and assert each returns its decoy first.
+`V5` orders by `DESC(?task)`, which compares IRIs as text
+(`ontology/queries/view/V5-unbatched-tasks.rq:22`).
 
 **Criterion 5's cases.** For `absent`, use a spec id of `SA-001` beside a
-file `SA-0012-good.md`. For `unreadable`, use four tasks. One run's
-`base_sha` is forty zeros. One repo's mirror path does not exist. One spec
-is a symlink to `../../../outside.md`. One spec ends in the two bytes
-`\xff\xfe`. For `unparseable`, leave `type` out of the frontmatter.
+file `SA-0012-good.md`. Also use a run at a commit whose tree is empty,
+made with `git hash-object -t tree /dev/null` and `git commit-tree`. For
+`unreadable`, use four tasks. One run's `base_sha` is forty zeros. One
+repo's mirror path does not exist. One spec is a symlink to
+`../../../outside.md`. One spec ends in the two bytes `\xff\xfe`, with
+`spec_sha` taken over those bytes. For `unparseable`, leave `type` out of
+the frontmatter.
 
 **Measured on a prototype over `ffcfb432`.** All 50 tests in the two view
 test files passed, and `tests/test_report.py` passed unchanged.
 Each of the five new witnesses failed against the base source. Each of the
-28 wrong versions above, applied as an edit, failed its own witness. The
-diff was 1467 changed tokens by the `size` gate's counter, against the
+35 wrong versions above, applied as an edit, failed its own witness. The
+diff was 1739 changed tokens by the `size` gate's counter, against the
 `feature` ceiling of 3000.
