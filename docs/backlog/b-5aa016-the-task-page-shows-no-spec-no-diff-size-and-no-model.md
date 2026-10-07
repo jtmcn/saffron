@@ -5,7 +5,7 @@ status: open
 tier: 3
 filed: 2026-10-07
 specs: [SA-0225]
-prs: []
+prs: [728]
 commits: []
 cites: [§6.2, §4.1]
 related: [b-cf50dc, b-d269f4]
