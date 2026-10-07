@@ -4,7 +4,7 @@
 PREFIX factory: <urn:software-factory:ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?batch ?task ?spec ?state ?risk ?pr (SUM(?cost) AS ?costUsd)
+SELECT ?batch ?task ?spec ?state ?risk ?pr ?added ?removed (SUM(?cost) AS ?costUsd)
 WHERE {
   ?task a factory:Task ; factory:riskTier ?risk ; prov:wasInformedBy ?run .
   ?run prov:wasInformedBy ?batch .
@@ -15,8 +15,10 @@ WHERE {
   FILTER(BOUND(?state))
   OPTIONAL { ?task rdfs:label ?spec }
   OPTIONAL { ?task rdfs:seeAlso ?pr }
+  OPTIONAL { ?task factory:linesAdded ?added }
+  OPTIONAL { ?task factory:linesRemoved ?removed }
   OPTIONAL { ?phase prov:wasInformedBy ?task . ?attempt factory:withinPhase ?phase ;
              factory:costUsdEst ?cost }
 }
-GROUP BY ?batch ?task ?spec ?state ?risk ?pr
+GROUP BY ?batch ?task ?spec ?state ?risk ?pr ?added ?removed
 ORDER BY ?batch ?task

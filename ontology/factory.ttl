@@ -131,6 +131,10 @@ factory:role         a owl:ObjectProperty ; rdfs:domain factory:ContractGate ; r
 factory:inState      a owl:ObjectProperty ; rdfs:domain factory:Task ; rdfs:range factory:TaskState ;
     rdfs:comment "The state the ledger holds now, in flight or ended. `endedInState` names only an end." .
 factory:numTurns     a owl:DatatypeProperty ; rdfs:domain factory:Attempt ; rdfs:range xsd:integer .
+factory:model        a owl:DatatypeProperty ; rdfs:domain factory:Attempt ; rdfs:range xsd:string ;
+    rdfs:comment "The model the agent reported. Absent on attempts older than its writer." .
+factory:linesAdded   a owl:DatatypeProperty ; rdfs:domain factory:Task ; rdfs:range xsd:integer .
+factory:linesRemoved a owl:DatatypeProperty ; rdfs:domain factory:Task ; rdfs:range xsd:integer .
 factory:failureCount a owl:DatatypeProperty ; rdfs:domain factory:GateResult ; rdfs:range xsd:integer ;
     rdfs:comment "The count only. The lines stay in the ledger (ADR 9)." .
 factory:spentUsdEst  a owl:DatatypeProperty ; rdfs:domain factory:Batch ; rdfs:range xsd:decimal .

@@ -4,7 +4,7 @@
 PREFIX factory: <urn:software-factory:ns#>
 PREFIX prov:    <http://www.w3.org/ns/prov#>
 PREFIX rdfs:    <http://www.w3.org/2000/01/rdf-schema#>
-SELECT ?task ?spec ?state ?risk ?pr
+SELECT ?task ?spec ?state ?risk ?pr ?added ?removed
 WHERE {
   ?task a factory:Task ; factory:riskTier ?risk ; prov:wasInformedBy ?run .
   ?run a factory:Run .
@@ -16,5 +16,7 @@ WHERE {
   FILTER(BOUND(?state))
   OPTIONAL { ?task rdfs:label ?spec }
   OPTIONAL { ?task rdfs:seeAlso ?pr }
+  OPTIONAL { ?task factory:linesAdded ?added }
+  OPTIONAL { ?task factory:linesRemoved ?removed }
 }
 ORDER BY DESC(?task)

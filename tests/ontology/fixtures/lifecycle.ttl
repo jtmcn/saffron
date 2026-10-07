@@ -193,9 +193,10 @@
     prov:endedAtTime "2026-01-02T05:10:00Z"^^xsd:dateTime ;
     factory:endedBecause factory:DRAINED ; factory:spentUsdEst 12.40 .
 :task-t1 rdfs:label "SA-0001" ; rdfs:seeAlso <https://github.com/o/r/pull/1> ;
-    factory:inState factory:MERGED .
+    factory:inState factory:MERGED ; factory:linesAdded 120 ; factory:linesRemoved 0 .
 :at-t1-i1 prov:startedAtTime "2026-01-01T22:05:00Z"^^xsd:dateTime ;
-    prov:endedAtTime "2026-01-01T22:30:00Z"^^xsd:dateTime ; factory:numTurns 41 .
+    prov:endedAtTime "2026-01-01T22:30:00Z"^^xsd:dateTime ; factory:numTurns 41 ;
+    factory:model "claude-sonnet-5" .
 :at-t1-i2 prov:startedAtTime "2026-01-01T22:31:00Z"^^xsd:dateTime ;
     prov:endedAtTime "2026-01-01T22:40:00Z"^^xsd:dateTime ; factory:numTurns 12 .
 :gr-t1-1-lint factory:failureCount 3 .
@@ -213,4 +214,4 @@
 :run-2 a factory:Run ; factory:baseSha "8b01d4e" .
 :task-t7 a factory:Task ; prov:wasInformedBy :run-2 ; rdfs:label "SA-0007" ;
     factory:riskTier factory:standard ; factory:endedInState factory:EXHAUSTED ;
-    factory:inState factory:EXHAUSTED .
+    factory:inState factory:EXHAUSTED ; factory:linesAdded 7 ; factory:linesRemoved 3 .
