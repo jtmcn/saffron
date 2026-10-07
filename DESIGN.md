@@ -74,6 +74,8 @@ The important inversion: **the product of this factory is not code, it is a revi
   ADR 7 narrows this, at the operator's request of 2026-09-23. A stack batch writes a follow-up spec only from a finding the host qualified, one generation deep.
   It also revises a queued spec, but only for a witness or buildability blocker.
   The money reason still holds, so one generation and a bound on revision rounds limit it. Qualification is the seam.
+  §3.4 narrows it again, at the operator's request of 2026-10-07. `saffron draft` writes a spec from one item the operator names.
+  The operator chooses the item and merges the spec, so no roadmap is read and nothing chooses work.
 - A bespoke diff viewer. GitHub already built the best one you will ever have (§6).
 - An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record. It never controls execution. SHACL shapes validate the projection. They do not gate state transitions, and no scheduling decision reads a triple. (Stands for v1. The spike that could reopen it ran and left it standing. Appendix O's rule closed the question on 2026-09-04, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`.)
 - Publishing the vocabulary at a resolvable IRI, or `owl:imports` of external ontologies at run time. Cells have no network (§5.1). External vocabularies are vendored and committed.
@@ -309,6 +311,28 @@ Design notes:
 Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `SPEC_WITHHELD`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`, `PROVIDER_UNREACHABLE`. Everything else is internal. The last four are named rather than folded into a neighbour. Folded, an abort or an attempt that produced nothing reads as an ordinary task outcome. That is principle 34 wearing a state name.
 
 `MERGE_TRAIN` is an end state and not a terminal one, as `APPROVED` is (item 52). A task there waits on the train, not on the operator. The rule behind every end state is that the task is no longer Saffron's to advance. The eight in-flight states from `DRAFT` to `REBUTTING` are the rest, and `CONTEXT.md` §6 names both sets.
+
+### 3.4 Drafting a spec from an item
+
+Until 2026-10-07 a delegate wrote every spec through the spec chain, outside the record. Its cost, its wall time and its review rounds lived only in hand-written evidence. So no step could be cut on evidence (backlog item b-98a3be).
+
+**`saffron draft <item> --repo <repo>` runs the spec chain as a task.** `<item>` is a file of text the operator chose. Core reads it as data and never parses it (§5.3). Core knows no backlog format. A repo that keeps one renders the item to a file first, so §2.1 holds.
+
+The command reuses the stack batch's parts (ADR 7) in this order.
+
+1. It mints a run and a task at the default branch's head, as a stack batch does.
+2. A spec writer session drafts the spec from the item, in the writer prompt's `context:` form. The id comes from `follow_up.next_spec_id`. The reply is a recorded spec text with the origin `draft`.
+3. A spec review session reads the recorded text. A clean review ends the chain.
+4. A review that routes `revise` starts one revision. A second review that is still unclean escalates. The bound is two review rounds, the spec chain's own stop rule.
+5. The host writes the last recorded text to `.saffron/specs/` in `--repo`'s working tree. It commits nothing and opens no pull request. The operator reads, commits and merges the spec.
+
+The task ends `SPEC_DRAFTED` on a clean review and `SPEC_WITHHELD` on an escalation. Both write the file. An escalated draft is still the cheapest start for the operator's own edit. The exit codes keep their meaning: `0` drafted, `1` withheld, `2` infrastructure.
+
+**Every review round records its findings one by one.** Each is a `spec_finding` fact with its round, severity, tag, claim and file. A stack batch's spec review writes them too. A defect a later stage confirms can then name the round that raised it, or show that none did. A findings block stored as one text cannot.
+
+**Cost and time come from the attempts.** Each session is a `SPEC_WRITING` or `SPEC_REVIEW` attempt with turns, cost and times (§4.1). Nothing new records them. What is new is a reader that sums them per spec.
+
+What stays with the delegate: choosing the item, the pre-flight checks that are not yet commands, and verifying a finding against the base before a revision applies it. The writer prompt asks the writer to verify each finding. Each check the factory takes over later is a gate or a prompt line, never a delegate step.
 
 ---
 
