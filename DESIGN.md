@@ -46,15 +46,16 @@ The important inversion: **the product of this factory is not code, it is a revi
 | N1 | Unattended safety | Zero writes to real infrastructure, prod DB, or remote `main` — enforced structurally, not by prompt or by in-agent hook |
 | N2 | Bounded spend | Per-attempt, per-task, and per-batch USD ceilings; hard stop, enforced host-side against reported spend (§4.1). Under a subscription those dollars are notional, so the ceiling that actually binds is the provider's rate limit: the runtime reports `RateLimitInfo` and a `rejected` window is the terminal state `RATE_LIMITED`, never `EXHAUSTED` — a provider limit and a task that could not pass its gates are different outcomes (§3.3, §5.1) |
 | N3 | Bounded time | Batch completes inside the sleep window (~8h) or is killed and reclaimed cleanly |
-| N4 | Throughput | 3 concurrent tasks on a 32GB M-series Mac; 6–12 accepted PRs per week |
+| N4 | Throughput | 3 concurrent tasks on a 32GB M-series Mac; 6–12 accepted PRs per week. K on a Linux host VM is unmeasured (ADR 10) |
 | N5 | Auditability | Any merged change reconstructible from stored artifacts alone — expressed as a derivation-chain query, so it is checkable rather than asserted (§4.6) |
-| N6 | Operability | Single operator, zero standing services beyond the cell runtime; `saffron` is one CLI |
+| N6 | Operability | Single operator, zero standing services beyond the cell runtime; `saffron` is one CLI. ADR 10 reads "single" as one per deployment |
 | N7 | Recoverability | Crash mid-batch resumes without losing completed work or leaking disk |
 | N8 | Onboarding cost | A new repo is productive after writing one `.saffron/` directory — target: an afternoon, not a Saffron release |
 
 ### 1.3 Constraints
 
 - One machine (Mac; every container runtime here is a Linux VM), one operator, part-time attention.
+  ADR 10 widens this. A deployment also runs on a Linux host VM, and each deployment keeps one operator.
 - **Saffron's harness is Python. The repos it works on are any language.** These are unrelated facts and the design must not let them become related.
 - API auth must reach a container without leaking any target repo's credentials into it.
 - **The generality is aspirational until proven.** The first two repos (Saffron, `thermal-edge`) are both Python. The language seam will be *designed* long before it is *exercised* — §7's "premature generality" row exists because of this, and §9 treats the third repo as the real test.
@@ -63,8 +64,12 @@ The important inversion: **the product of this factory is not code, it is a revi
 ### 1.4 Explicit non-goals for v1
 
 - Multi-tenant / multi-user. One operator.
+  ADR 10 narrows this. Each deployment has one operator, and another operator deploys their own engine.
+  A hosted service that runs other operators' repos stays refused.
 - Autonomous merge. Never, at any version.
 - Cloud runners. Local only until throughput actually binds.
+  ADR 10 withdraws this. A laptop host binds before throughput does, so a Linux host VM is a supported deployment.
+  A deployment inside a target repo's CI stays refused. It would hold the credential beside branches that cells write.
 - Agents writing their own specs from a roadmap. That's v3 and it's the part most likely to waste money.
   ADR 7 narrows this, at the operator's request of 2026-09-23. A stack batch writes a follow-up spec only from a finding the host qualified, one generation deep.
   It also revises a queued spec, but only for a witness or buildability blocker.
@@ -95,7 +100,7 @@ This list is a **living refusal record**, not a one-time scoping exercise. Each 
                                  │ git (local bare mirror, no network)
                                  ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  SAFFRON CONTROL PLANE   (host process, Python, ~/Code/saffron)          │
+│  SAFFRON CONTROL PLANE   (host process, Python, one per operator)        │
 │                                                                          │
 │   intake ─▶ gc ─▶ scheduler ─▶ supervisor ─▶ gate runner ─▶ packager     │
 │      │                 │            │            │             │         │
@@ -1507,6 +1512,7 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
 - **A deliberately dissimilar third repo** — TypeScript, Rust, Go; small, chosen for being unlike the first two. This is the only real evidence that §2.1's boundary holds. Budget an afternoon; if it takes a weekend, spend the rest of that weekend fixing the contract rather than the repo.
 - Decomposition agent: coarse goal → spec DAG (you approve specs, not code).
 - Remote runners, if throughput actually binds — it probably won't before spec-writing does.
+  ADR 10 moves the whole control plane onto one host VM. A remote runner here still means cells spread across several hosts.
 
 **Do not build v3 first.** The gravitational pull of this project is toward the planner, because it's the interesting part. It also has the worst cost-to-value ratio until the verification layer beneath it is trustworthy. A factory that reliably executes good specs is worth a great deal; a factory that generates mediocre specs and executes them unreliably is worth *less than nothing*, because it consumes review attention.
 
@@ -1598,8 +1604,8 @@ And the other half of the layout — the part that lives in every target repo, a
 | Services (DB, cache) | Baked into the repo's `.saffron/Dockerfile` | `services:` in policy, core runs Compose | Repo owner writes a Dockerfile; core stays out of service lifecycle |
 | Batch scope | One pool, one budget, all repos | Per-repo batches | Repos contend for the same 3 cells — but visibly, with round-robin, rather than by accident |
 | Cross-repo deps | Not supported | Coordinated merge trains | Two specs and a manual sequence; no version of the alternative is simple |
-| Runtime | Local Mac, containerized | Cloud CI | K=3 ceiling; Mac must be awake; you own the container plumbing |
-| Cell runtime | **`apple/container`** — VM per cell, decided by spike (Appendix G) | Shared VM (Docker Desktop/Colima); or deciding by taste | No `no-new-privileges` or seccomp, a young runtime, and a measured `--cpus` offset to carry; buys a private kernel per cell and no shared memory allocation |
+| Runtime | Local Mac, containerized. ADR 10 adds a Linux host VM per operator | Cloud CI | K=3 ceiling; Mac must be awake; you own the container plumbing |
+| Cell runtime | **`apple/container`** — VM per cell, decided by spike (Appendix G). ADR 10 adds podman on a Linux host VM, under §5.1's weaker argument | Shared VM (Docker Desktop/Colima); or deciding by taste | No `no-new-privileges` or seccomp, a young runtime, and a measured `--cpus` offset to carry; buys a private kernel per cell and no shared memory allocation |
 | Orchestration | Agent SDK + custom Python | Claude Code headless + shell | Weeks of harness code you own forever — bought back in host-side gate enforcement and structured state |
 | Task queue | Spec files in target repo | GitHub issues | You write markdown instead of clicking; no notifications |
 | Review UI | GitHub PRs + a thin index | Custom dossier viewer | Index is dumb; you're in a browser tab, not a local page |
@@ -1779,3 +1785,4 @@ the ADR records, so a hand edit here is discarded.
 | 7 | A stack batch runs the spec DAG into one stack and writes its own follow-ups | accepted | 2, 4, 6, 15, 16, 17, 21, 23, 26, 27, 28, 29, 30, 34, 36, 38, 40, 41, 44, 45, 47, 49, 50, 54, 62 |
 | 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 4, 6, 9, 15, 17, 18, 28, 29, 30, 34, 41, 43, 47, 50, 51, 61 |
 | 9 | A read-only view renders the run record from the graph | accepted | 25, 61 |
+| 10 | Saffron ships as an engine that each operator deploys | accepted | 4, 7, 12, 14, 21, 23, 25, 30, 31, 32, 33, 62 |
