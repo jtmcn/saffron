@@ -366,7 +366,7 @@ An attempt's `failures` rows are its new failures only, and `gate_results.failur
 
 `terminal_reason` exists for the same reason the supervisor measures doneness from git (§4.3): the agent runtime distinguishes a clean finish from an abort, and a crashed session (`subtype = error_during_execution`) **may report every cost field as zero**. An attempt that burned $4 and then crashed records $0 unless the supervisor falls back to the last good figure it saw before the crash. Unattended overnight, this is the difference between a budget that holds and one that silently stops counting. A session that ends before its `result` event reports no cost at all. It is charged the larger of that last good figure and a floor priced from its per-step usage. `cost_floor_usd_est` records that floor.
 
-`attempts.earned_risk` is the risk tier the attempt's gate suite ran at. It is null where no suite judged the attempt. `tasks.risk` stays the tier the spec declared.
+`attempts.earned_risk` is the risk tier the attempt's gate suite ran at. It is null where no suite judged the attempt. `tasks.risk` stays the tier the spec declared. It reads `standard` where the spec declared no tier, and the `task_created` fact holds null there.
 
 `spec_sha` matters: edit a spec while a batch is running and the task is invalidated rather than silently building the old thing. `policy_sha` does the same one level up — change a repo's gate declarations mid-batch and its in-flight tasks are invalidated, because a task judged against a policy that no longer exists is not evidence of anything. `image_built_at` versus the `.saffron/Dockerfile` mtime is what triggers a rebuild at preflight.
 
