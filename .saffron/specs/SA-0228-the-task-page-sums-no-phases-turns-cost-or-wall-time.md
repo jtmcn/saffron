@@ -4,7 +4,7 @@ title: The task page sums no phase's turns, cost or wall time
 type: feature
 priority: 3
 depends_on: [SA-0225]
-estimated_lines: 140
+estimated_lines: 141
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -58,15 +58,24 @@ acceptance:
       with four phases, whose first attempts come in the order
       `SPEC_WRITING`, `IMPLEMENTING`, `SPEC_REVIEW`, `REVIEWING`. That order
       is neither ascending nor descending by name. `SPEC_WRITING` has two
-      attempts with every value, one over 24 hours, and its second attempt
-      starts after every other phase's. `IMPLEMENTING` has three attempts,
-      each lacking one value, end, turns or cost, and the first carries
-      three gate results. Its known costs are `0.50` and `0.625`, so their
-      sum ends in an odd half-cent. `SPEC_REVIEW` has two attempts with
-      every value, each costing `0.005`, and one lacking all three values.
-      Its known wall time sums to a total whose seconds are under 10.
-      `REVIEWING` has two attempts lacking all three values. A decoy task
-      has a `SPEC_REVIEW` attempt of its own.
+      attempts with every value. They run 25:00:00 and 0:10:00, with 30
+      and 8 turns, and cost `0.80` and `0.805`. Its second attempt starts
+      after every other phase's. Its row reads `2`, `38`, `1.61` and
+      `25:10:00`. `IMPLEMENTING` has three attempts, and the first carries
+      three gate results. The first runs 0:10:00 with 7 turns and no cost.
+      The second runs 0:10:00 with no turns and costs `0.50`. The third has
+      no end, 4 turns and costs `0.625`. Its row reads `3`,
+      `11 + 1 unknown`, `1.13 + 1 unknown` and `0:20:00 + 1 unknown`.
+      `SPEC_REVIEW` has three attempts. The first runs 0:05:30 with 12
+      turns and costs `0.005`. The second lacks all three values. The
+      third runs 0:01:35 with 3 turns and costs `0.005`. Its row reads `3`,
+      `15 + 1 unknown`, `0.01 + 1 unknown` and `0:07:05 + 1 unknown`.
+      `REVIEWING` has two attempts lacking all three values, so its row
+      reads `2`, then `2 unknown` three times. The `all phases` row reads
+      `10`, `64 + 4 unknown`, `2.74 + 4 unknown` and
+      `25:37:05 + 4 unknown`. The exact cost sums are `1.605`, `1.125`,
+      `0.010` and `2.740`. A decoy task has a `SPEC_REVIEW` attempt of its
+      own.
     witness: tests/test_view_server.py::test_a_task_page_totals_each_phase_and_the_task_with_unknowns_never_zero
     wrong_versions:
       - An attempt with several gate results is counted once per gate result.
@@ -83,8 +92,10 @@ acceptance:
       - Wall time is rendered by `str` of a `timedelta`, so a total past a day reads `1 day, ...`.
       - Wall time is rendered as a whole number of seconds.
       - The cost is rounded half to even, so `1.125` reads `1.12`.
+      - The costs are summed as floats, then rounded half up, so `0.80` and `0.805` read `1.60`.
+      - The `all phases` cost sums the per-phase totals already rounded to cents, so it reads `2.75`.
       - The seconds are not padded, so `0:07:05` reads `0:07:5`.
-      - The hours are padded to two digits, so `0:20:00` reads `00:20:00`.
+      - The hours are padded to two digits, so `0:07:05` reads `00:07:05`.
       - The phase rows are sorted by phase name.
       - The phase rows are sorted descending by phase name.
       - The phase rows follow each phase's last attempt, not its first.
@@ -107,11 +118,11 @@ for every writer, reviewer and delegate step. `DESIGN.md` §3.4's paragraph
 "Cost and time come from the attempts" says each session is a
 `SPEC_WRITING` or `SPEC_REVIEW` attempt with turns, cost and times (§4.1).
 It says nothing new records them, and what is new is a reader that sums
-them. §3.4 and the item landed in `d7a9ec6e`, the base this spec was read
-at. Line numbers below are at that commit.
+them. §3.4 and the item landed in `d7a9ec6e`. Line numbers below are at
+`d6a55414`, the base this spec was read at.
 
 **What the graph already states.** The graph states every attempt's start,
-since `attempts.started_at` is `NOT NULL` (`saffron/ledger.py:159`,
+since `attempts.started_at` is `NOT NULL` (`saffron/ledger.py:160`,
 `saffron/view/graph.py:247`). It states turns, cost and end only where the
 column is not null (`saffron/view/graph.py:248`, `:256` and `:258`). A
 phase node is named from the task id and the phase text
@@ -157,7 +168,7 @@ attempts table and the summary only for their position.
   opens its spec review attempt on the task it mints for that spec
   (`saffron/batch.py:532` and `:588`).
 - Tokens. The attempts table keeps no token count
-  (`saffron/ledger.py:152`), and no ledger change is in scope.
+  (`saffron/ledger.py:153`), and no ledger change is in scope.
 - An end before its start. No criterion fixes how one renders.
 - Escaping a phase name holding markup. The graph builder raises on one,
   since the name is part of the phase IRI (`saffron/view/graph.py:230`).
@@ -196,10 +207,10 @@ or renamed test.
 (`:1618`) and each table's header (`:1627`). Add `phase-totals` after
 `attempts` in both.
 
-**Measured on a prototype over `36a80190`.** All 46 tests in the two view
+**Measured on a prototype over `d6a55414`.** All 46 tests in the two view
 test files passed. The witness failed against the base source. Each of the
-23 wrong versions above, applied as an edit, failed its own witness. The
-diff was 561 changed tokens by the `size` gate's counter, against the
+25 wrong versions above, applied as an edit, failed its own witness. The
+diff was 562 changed tokens by the `size` gate's counter, against the
 `feature` ceiling of 3000. `ruff`, `ty`, the `dead` scan and the `prose`
 counter passed on both files.
 
