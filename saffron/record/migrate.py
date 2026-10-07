@@ -62,9 +62,8 @@ def _fact_time(value: str) -> str:
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    """A source this old can lack a column. `PRAGMA table_info` is read
-    against this one table alone, never assumed from another table's
-    presence (`DESIGN.md:359`, problem 3)."""
+    """The source's column names for `table`, read per table because an old
+    source can lack one."""
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
@@ -122,10 +121,9 @@ def _failure_rows(conn: sqlite3.Connection, gate_result_id: int) -> list[sqlite3
 
 def _comparison_result(row: sqlite3.Row, failure_rows: list[sqlite3.Row]) -> GateResult:
     """A `GateResult` built from stored rows, for `aborted_gates`,
-    `suite_drift` and `subtract_baseline` only (problem 1). It is never
-    written to a fact. A null `message` reads as `""` here, matching what
-    `identity` already normalizes away. The fact payload keeps the stored
-    null instead."""
+    `suite_drift` and `subtract_baseline` only. It is never written to a
+    fact. A null `message` reads as `""`, since `Failure.message` is a `str`.
+    The fact payload keeps the stored null instead."""
     return GateResult(
         gate=row["gate"],
         status=row["status"],
@@ -143,8 +141,7 @@ def _comparison_result(row: sqlite3.Row, failure_rows: list[sqlite3.Row]) -> Gat
 
 
 def _baseline_comparison(conn: sqlite3.Connection, run_id: int) -> list[GateResult]:
-    """The run's own stored baseline, as comparison-only `GateResult`s
-    (problem 1's "the run's stored results")."""
+    """The run's own stored baseline, as comparison-only `GateResult`s."""
     return [
         _comparison_result(row, _failure_rows(conn, row["gate_result_id"]))
         for row in _result_rows(conn, "run_id", run_id)
@@ -160,9 +157,9 @@ def _doubled_gate(rows: Iterable[sqlite3.Row]) -> str | None:
 def _refusal_reason(
     conn: sqlite3.Connection, task: sqlite3.Row, has_head_count: bool
 ) -> str | None:
-    """Problem 4. A doubled baseline or a doubled attempt makes the
-    subtraction below ambiguous, but only where that ambiguity can bite:
-    some attempt-scoped result has no stored head count to fall back on.
+    """A doubled baseline or a doubled attempt makes the subtraction below
+    ambiguous, but only where that ambiguity can bite: some attempt-scoped
+    result has no stored head count to fall back on.
     A run-scoped baseline row is never one of "its own results". It never
     carries a count of its own, so a doubled baseline whose task stores
     every result counted still migrates."""
@@ -216,14 +213,13 @@ def _gate_result_facts(
     has_earned_risk: bool,
 ) -> list[Fact]:
     """One `gate_result` fact per `gate_results` row stored against this
-    attempt, in the shape a live cell's `Ledger.record_gate_result` writes
-    (problem 1-3). A row whose `failures_at_head` is already stored (post
-    `SA-0220`) is copied through unchanged. Otherwise its stored failures
-    are the full head set, so the count becomes how many were stored. The
-    kept failures are then what `subtract_baseline` leaves against the
-    run's baseline, unless this attempt's own suite `error`ed or drifted
-    against it. Either one keeps every stored failure whole instead (§5.4,
-    `DESIGN.md:359`)."""
+    attempt, carrying the keys the fold's `gate_result` branch reads. A row
+    whose `failures_at_head` is already stored (post `SA-0220`) is copied
+    through unchanged. Otherwise its stored failures are the full head set,
+    so the count becomes how many were stored. The kept failures are then
+    what `subtract_baseline` leaves against the run's baseline, unless this
+    attempt's own suite `error`ed or drifted against it. Either one keeps
+    every stored failure whole instead (`DESIGN.md` §4.1 and §5.4)."""
     rows = _result_rows(conn, "attempt_id", attempt["attempt_id"])
     if not rows:
         return []
@@ -234,8 +230,8 @@ def _gate_result_facts(
         _comparison_result(row, failures)
         for row, failures in zip(rows, failure_rows_by_result, strict=True)
     ]
-    # In that order (problem 2): an aborted suite is never also checked for
-    # drift, though either alone is enough to distrust the subtraction.
+    # In that order: an aborted suite is never also checked for drift,
+    # though either alone is enough to distrust the subtraction.
     aborted = aborted_gates(comparisons)
     keep_whole = bool(aborted) or bool(suite_drift(comparisons, baseline))
     earned_risk = attempt["earned_risk"] if has_earned_risk else None
@@ -336,8 +332,7 @@ def _attempt_facts(
     """`attempt_opened`, an optional `attempt_closed`, then that attempt's
     own `gate_result` facts. They stay contiguous, before the next
     attempt's own facts start. A reader walking the list backward from any
-    one of them meets its own attempt's open or close fact first
-    (problem 1)."""
+    one of them meets its own attempt's open or close fact first."""
     facts = []
     baseline = _baseline_comparison(conn, task["run_id"])
     for attempt in conn.execute(

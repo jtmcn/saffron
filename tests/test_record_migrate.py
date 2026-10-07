@@ -27,10 +27,10 @@ def _set(ledger: Ledger, sql: str, params: tuple) -> None:
     ledger._db.commit()
 
 
-def _source(path: Path) -> Ledger:
-    """A fresh `Ledger` at `path`, the shape every scenario below is built
-    on top of."""
-    return Ledger(path)
+def _key(ledger: Ledger, task_id: int) -> str:
+    return ledger._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()["record_key"]
 
 
 def _task(
@@ -46,10 +46,6 @@ def _task(
         risk=risk,
     )
     return run_id, task_id
-
-
-def _close(ledger: Ledger) -> None:
-    ledger.close()
 
 
 def _migrated(source_path: Path):
@@ -258,9 +254,7 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
 
         source_path = tmp_path / "source.db"
         keys = {
-            n: source._db.execute(
-                "SELECT record_key FROM tasks WHERE task_id = ?", (tid,)
-            ).fetchone()["record_key"]
+            n: _key(source, tid)
             for n, tid in [(1, task1), (2, task2), (3, task3), (4, task4), (5, task5)]
         }
         source.close()
@@ -274,7 +268,6 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         fold(record, rebuilt)
 
         reread = sqlite3.connect(source_path)
-        reread.row_factory = sqlite3.Row
         task_cols = (
             "record_key, spec_id, spec_sha, state, risk, branch, budget_usd,"
             " policy_sha, prompt_sha, pushed_sha, pr_url, merged_head_sha,"
@@ -285,8 +278,7 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
             " WHERE a.task_id = t.task_id) AS spent"
         )
         before = Counter(
-            tuple(r)
-            for r in reread.execute(f"SELECT {task_cols}, {spend} FROM tasks t")
+            tuple(r) for r in _rows(reread, f"SELECT {task_cols}, {spend} FROM tasks t")
         )
         after = Counter(
             tuple(r)
@@ -301,9 +293,10 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         )
         before_a = Counter(
             tuple(r)
-            for r in reread.execute(
+            for r in _rows(
+                reread,
                 f"SELECT {attempt_cols} FROM attempts a"
-                " JOIN tasks t ON t.task_id = a.task_id"
+                " JOIN tasks t ON t.task_id = a.task_id",
             )
         )
         after_a = Counter(
@@ -321,9 +314,10 @@ def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
         )
         before_f = Counter(
             tuple(r)
-            for r in reread.execute(
+            for r in _rows(
+                reread,
                 f"SELECT {finding_cols} FROM findings f"
-                " JOIN tasks t ON t.task_id = f.task_id"
+                " JOIN tasks t ON t.task_id = f.task_id",
             )
         )
         after_f = Counter(
@@ -409,12 +403,7 @@ def test_a_rerun_completes_a_migration_cut_short_and_refuses_a_record_that_disag
             cost_usd_est=float(i),
         )
         task_ids.append(task_id)
-    keys = [
-        source._db.execute(
-            "SELECT record_key FROM tasks WHERE task_id = ?", (tid,)
-        ).fetchone()["record_key"]
-        for tid in task_ids
-    ]
+    keys = [_key(source, tid) for tid in task_ids]
     source_path = tmp_path / "source.db"
     source.close()
 
@@ -519,8 +508,7 @@ def test_a_ledger_that_predates_the_head_count_migrates_and_is_left_unwritten(
 def _assert_gate_results_follow_their_attempt(facts: list[Fact]) -> None:
     """Every `gate_result` fact's immediate predecessor, other `gate_result`
     facts aside, is its own attempt's fact: `attempt_closed` where that
-    attempt closed anywhere in `facts`, `attempt_opened` otherwise
-    (problem 1). A closed attempt's own `gate_result` facts must follow
+    attempt closed anywhere in `facts`, `attempt_opened` otherwise. A closed attempt's own `gate_result` facts must follow
     its close, never its open."""
     closed_attempts = {
         (f.payload["phase"], f.payload["n"])
@@ -549,11 +537,11 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
 ) -> None:
     from saffron.record.fold import fold
 
-    source = _source(tmp_path / "source.db")
+    source = Ledger(tmp_path / "source.db")
     repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
 
     # Another run, made first, whose "types" baseline failure shares attempt
-    # 1's exactly (members 5 and 7): reading the wrong run's baseline would cancel it.
+    # 1's exactly: reading the wrong run's baseline would cancel it.
     other_run = source.create_run(repo_id, base_sha="a" * 40)
     source.record_gate_result(
         GateResult(
@@ -632,6 +620,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=101,
             gate="lint",
             status="fail",
             tool="ruff 1.0",
@@ -647,6 +636,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=102,
             gate="witness",
             status="fail",
             tool="pytest 8.0",
@@ -661,6 +651,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=103,
             gate="types",
             status="fail",
             tool="mypy 1.0",
@@ -671,14 +662,19 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
     source.record_gate_result(
         GateResult(
-            gate="format", status="pass", tool="black 1.0", summary="", failures=[]
+            duration_ms=104,
+            gate="format",
+            status="pass",
+            tool="black 1.0",
+            summary="",
+            failures=[],
         ),
         attempt_id=a1,
         baseline=[],
     )
 
     # Attempt 2 (closed): three lint copies of one baseline failure.
-    # A one-copy baseline leaves two, and earned_risk is stored elevated (member 8).
+    # A one-copy baseline leaves two, and earned_risk is stored elevated.
     a2 = source.open_attempt(task1, phase="REPAIRING")
     source.close_attempt(
         a2,
@@ -690,6 +686,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=201,
             gate="lint",
             status="fail",
             tool="ruff 1.0",
@@ -711,11 +708,12 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
         earned_risk="elevated",
     )
 
-    # Attempts 3-6: never closed (member counts: five results on the two
-    # closed attempts above, seven on these four open ones).
+    # Attempts 3-6: never closed. Five results sit on the two closed
+    # attempts above, seven on these four open ones.
     a3 = source.open_attempt(task1, phase="GATING")
     source.record_gate_result(
         GateResult(
+            duration_ms=301,
             gate="lint",
             status="fail",
             tool="ruff 1.0",
@@ -726,6 +724,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=302,
             gate="tests",
             status="error",
             tool="pytest 8.0",
@@ -739,6 +738,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     a4 = source.open_attempt(task1, phase="GATING")
     source.record_gate_result(
         GateResult(
+            duration_ms=401,
             gate="lint",
             status="fail",
             tool="ruff 2.0",
@@ -750,12 +750,20 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
 
     a5 = source.open_attempt(task1, phase="GATING")
     source.record_gate_result(
-        GateResult(gate="revert", status="pass", tool="revert-tool 1.0", failures=[]),
+        GateResult(
+            duration_ms=501,
+            gate="revert",
+            status="pass",
+            tool="revert-tool 1.0",
+            summary="reverted clean",
+            failures=[],
+        ),
         attempt_id=a5,
         baseline=[],
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=502,
             gate="lint",
             status="fail",
             tool="ruff 1.0",
@@ -767,12 +775,20 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
 
     a6 = source.open_attempt(task1, phase="GATING")
     source.record_gate_result(
-        GateResult(gate="types", status="skip", tool=None, failures=[]),
+        GateResult(
+            duration_ms=601,
+            gate="types",
+            status="skip",
+            tool=None,
+            summary="not configured",
+            failures=[],
+        ),
         attempt_id=a6,
         baseline=[],
     )
     source.record_gate_result(
         GateResult(
+            duration_ms=602,
             gate="lint",
             status="fail",
             tool="ruff 1.0",
@@ -783,7 +799,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
 
     # Null every count but attempt 2's, plus the "types" failure's message
-    # and "format"'s summary, which must round trip null (problem 1).
+    # and "format"'s summary, which must round trip null.
     for attempt_id in (a1, a3, a4, a5, a6):
         _set(
             source,
@@ -839,7 +855,7 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     )
 
     # A second, elevated task with one clean, closed attempt. Its own
-    # earned_risk stays null, never defaulted from the task's risk (member 14).
+    # earned_risk stays null, never defaulted from the task's risk.
     run2, task2 = _task(source, repo_id, "SA-0102", risk="elevated")
     a7 = source.open_attempt(task2, phase="IMPLEMENTING")
     source.close_attempt(
@@ -853,7 +869,14 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
     # Left counted (unlike a1/a3-a6): a zero stored count must stay 0, not
     # become null, through the "copy as stored" branch.
     source.record_gate_result(
-        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        GateResult(
+            duration_ms=701,
+            gate="lint",
+            status="pass",
+            tool="ruff 1.0",
+            summary="clean",
+            failures=[],
+        ),
         attempt_id=a7,
         baseline=[],
     )
@@ -868,17 +891,13 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
         ("2026-02-01 10:20:00", task2),
     )
 
-    key1 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task1,)
-    ).fetchone()["record_key"]
-    key2 = source._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task2,)
-    ).fetchone()["record_key"]
+    key1 = _key(source, task1)
+    key2 = _key(source, task2)
     source_path = tmp_path / "source.db"
-    _close(source)
+    source.close()
 
     result, record = _migrated(source_path)
-    assert sorted(result.migrated) == sorted([key1, key2])
+    assert result.migrated == [key1, key2]
     assert result.refused == []
 
     facts1 = record.read(key1)
@@ -993,22 +1012,59 @@ def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_ca
 
     rebuilt = Ledger(tmp_path / "rebuilt.db")
     fold(record, rebuilt)
-    attempt_cols = "t.record_key, a.phase, a.n, a.earned_risk"
+    attempt_sql = (
+        "SELECT t.record_key, a.phase, a.n, a.session_id, a.model, a.started_at,"
+        " a.ended_at, a.subtype, a.terminal_reason, a.num_turns, a.cost_usd_est,"
+        " a.cost_floor_usd_est, a.earned_risk"
+        " FROM attempts a JOIN tasks t ON t.task_id = a.task_id"
+        " ORDER BY a.attempt_id"
+    )
     reread = sqlite3.connect(source_path)
-    reread.row_factory = sqlite3.Row
-    before = Counter(
-        tuple(r)
-        for r in reread.execute(
-            f"SELECT {attempt_cols} FROM attempts a JOIN tasks t ON t.task_id = a.task_id"
-        )
-    )
-    after = Counter(
-        tuple(r)
-        for r in rebuilt._db.execute(
-            f"SELECT {attempt_cols} FROM attempts a JOIN tasks t ON t.task_id = a.task_id"
-        )
-    )
+    before = [tuple(r) for r in _rows(reread, attempt_sql)]
+    after = [tuple(r) for r in _rows(rebuilt._db, attempt_sql)]
+    assert len(before) == 7
     assert before == after
+
+    results_sql = (
+        "SELECT t.record_key, a.phase, a.n, g.gate, g.status, g.tool,"
+        " g.duration_ms, g.summary, g.failures_at_head"
+        " FROM gate_results g JOIN attempts a ON a.attempt_id = g.attempt_id"
+        " JOIN tasks t ON t.task_id = a.task_id ORDER BY g.gate_result_id"
+    )
+    impl, rep, gate = "IMPLEMENTING", "REPAIRING", "GATING"
+    assert [tuple(r) for r in _rows(rebuilt._db, results_sql)] == [
+        (key1, impl, 1, "lint", "fail", "ruff 1.0", 101, "", 4),
+        (key1, impl, 1, "witness", "fail", "pytest 8.0", 102, "", 1),
+        (key1, impl, 1, "types", "fail", "mypy 1.0", 103, "", 1),
+        (key1, impl, 1, "format", "pass", "black 1.0", 104, None, 0),
+        (key1, rep, 1, "lint", "fail", "ruff 1.0", 201, "", 3),
+        (key1, gate, 1, "lint", "fail", "ruff 1.0", 301, "", 1),
+        (key1, gate, 1, "tests", "error", "pytest 8.0", 302, "collection crashed", 0),
+        (key1, gate, 2, "lint", "fail", "ruff 2.0", 401, "", 1),
+        (key1, gate, 3, "revert", "pass", "revert-tool 1.0", 501, "reverted clean", 0),
+        (key1, gate, 3, "lint", "fail", "ruff 1.0", 502, "", 1),
+        (key1, gate, 4, "types", "skip", None, 601, "not configured", 0),
+        (key1, gate, 4, "lint", "fail", "ruff 1.0", 602, "", 1),
+        (key2, impl, 1, "lint", "pass", "ruff 1.0", 701, "clean", 0),
+    ]
+
+    failures_sql = (
+        "SELECT t.record_key, a.phase, a.n, g.gate, f.file, f.line, f.code, f.message"
+        " FROM failures f JOIN gate_results g ON g.gate_result_id = f.gate_result_id"
+        " JOIN attempts a ON a.attempt_id = g.attempt_id"
+        " JOIN tasks t ON t.task_id = a.task_id ORDER BY f.failure_id"
+    )
+    assert [tuple(r) for r in _rows(rebuilt._db, failures_sql)] == [
+        (key1, impl, 1, "lint", "b.py", 21, "E2", "bad two"),
+        (key1, impl, 1, "lint", "shared.py", 9, "SAME", ""),
+        (key1, impl, 1, "witness", "w.py", 5, "survived-mutant", "mutant lived"),
+        (key1, impl, 1, "types", "n.py", 3, "N1", None),
+        (key1, rep, 1, "lint", "a.py", 11, "E1", "bad one"),
+        (key1, rep, 1, "lint", "a.py", 12, "E1", "bad one"),
+        (key1, gate, 1, "lint", "a.py", 10, "E1", "bad one"),
+        (key1, gate, 2, "lint", "a.py", 10, "E1", "bad one"),
+        (key1, gate, 4, "lint", "a.py", 10, "E1", "bad one"),
+    ]
     rebuilt.close()
     reread.close()
 
@@ -1027,7 +1083,7 @@ def test_a_task_whose_run_stores_a_gates_baseline_twice_is_refused_where_it_stil
             run_id=run_id,
         )
 
-    source = _source(tmp_path / "source.db")
+    source = Ledger(tmp_path / "source.db")
     repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
 
     # Task 1: doubled baseline, every attempt result counted -> migrates.
@@ -1129,9 +1185,7 @@ def test_a_task_whose_run_stores_a_gates_baseline_twice_is_refused_where_it_stil
     )
 
     keys = {
-        n: source._db.execute(
-            "SELECT record_key FROM tasks WHERE task_id = ?", (tid,)
-        ).fetchone()["record_key"]
+        n: _key(source, tid)
         for n, tid in [
             (1, task1),
             (2, task2),
@@ -1142,18 +1196,15 @@ def test_a_task_whose_run_stores_a_gates_baseline_twice_is_refused_where_it_stil
         ]
     }
     source_path = tmp_path / "source.db"
-    _close(source)
+    source.close()
 
     result, record = _migrated(source_path)
-    assert sorted(result.migrated) == sorted([keys[1], keys[4], keys[6]])
-    assert sorted(key for key, _ in result.refused) == sorted(
-        [keys[2], keys[3], keys[5]]
-    )
-
-    reasons = dict(result.refused)
-    assert "lint" in reasons[keys[2]] and "baseline" in reasons[keys[2]]
-    assert "lint" in reasons[keys[3]] and "baseline" in reasons[keys[3]]
-    assert "lint" in reasons[keys[5]] and "IMPLEMENTING" in reasons[keys[5]]
+    assert result.migrated == [keys[1], keys[4], keys[6]]
+    assert result.refused == [
+        (keys[2], "gate 'lint' stored twice in the run's baseline"),
+        (keys[3], "gate 'lint' stored twice in the run's baseline"),
+        (keys[5], "gate 'lint' stored twice on attempt IMPLEMENTING 1"),
+    ]
 
     assert record.read(keys[2]) == []
     assert record.read(keys[3]) == []
@@ -1164,6 +1215,48 @@ def test_a_task_whose_run_stores_a_gates_baseline_twice_is_refused_where_it_stil
     assert [f.payload["status"] for f in results6] == ["pass", "fail"]
 
 
+def _predating_source(
+    path: Path,
+    spec_id: str,
+    old: Failure,
+    new: Failure,
+    *,
+    earned_risk: str | None,
+    drop_earned_risk: bool,
+) -> str:
+    """A ledger with `old` in its run's baseline and an attempt storing `old`
+    and `new`, its `failures_at_head` column dropped. Returns the task's key."""
+    source = Ledger(path)
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
+    run_id, task_id = _task(source, repo_id, spec_id)
+    source.record_gate_result(
+        GateResult(gate="lint", status="fail", tool="ruff 1.0", failures=[old]),
+        run_id=run_id,
+    )
+    attempt_id = source.open_attempt(task_id, phase="IMPLEMENTING")
+    source.close_attempt(
+        attempt_id,
+        session_id="s",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+    source.record_gate_result(
+        GateResult(gate="lint", status="fail", tool="ruff 1.0", failures=[old, new]),
+        attempt_id=attempt_id,
+        baseline=[],
+        earned_risk=earned_risk,
+    )
+    key = _key(source, task_id)
+    source._db.execute("ALTER TABLE gate_results DROP COLUMN failures_at_head")
+    if drop_earned_risk:
+        source._db.execute("ALTER TABLE attempts DROP COLUMN earned_risk")
+    source._db.commit()
+    source.close()
+    return key
+
+
 def test_a_ledger_that_predates_the_head_count_subtracts_its_stored_failures(
     tmp_path: Path,
 ) -> None:
@@ -1171,47 +1264,14 @@ def test_a_ledger_that_predates_the_head_count_subtracts_its_stored_failures(
 
     # Source A: predates both failures_at_head and earned_risk entirely.
     source_a_path = tmp_path / "a" / "source.db"
-    source_a = _source(source_a_path)
-    repo_a = source_a.upsert_repo("saffron", "/o", "/m.git", None)
-    run_a, task_a = _task(source_a, repo_a, "SA-0301")
-    source_a.record_gate_result(
-        GateResult(
-            gate="lint",
-            status="fail",
-            tool="ruff 1.0",
-            failures=[Failure(file="a.py", line=1, code="E1", message="bad")],
-        ),
-        run_id=run_a,
+    key_a = _predating_source(
+        source_a_path,
+        "SA-0301",
+        Failure(file="a.py", line=1, code="E1", message="bad"),
+        Failure(file="b.py", line=2, code="E2", message="new"),
+        earned_risk=None,
+        drop_earned_risk=True,
     )
-    attempt_a = source_a.open_attempt(task_a, phase="IMPLEMENTING")
-    source_a.close_attempt(
-        attempt_a,
-        session_id="sa",
-        subtype="success",
-        terminal_reason=None,
-        num_turns=1,
-        cost_usd_est=1.0,
-    )
-    source_a.record_gate_result(
-        GateResult(
-            gate="lint",
-            status="fail",
-            tool="ruff 1.0",
-            failures=[
-                Failure(file="a.py", line=1, code="E1", message="bad"),
-                Failure(file="b.py", line=2, code="E2", message="new"),
-            ],
-        ),
-        attempt_id=attempt_a,
-        baseline=[],
-    )
-    key_a = source_a._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task_a,)
-    ).fetchone()["record_key"]
-    source_a._db.execute("ALTER TABLE gate_results DROP COLUMN failures_at_head")
-    source_a._db.execute("ALTER TABLE attempts DROP COLUMN earned_risk")
-    source_a._db.commit()
-    _close(source_a)
 
     result_a, record_a = _migrated(source_a_path)
     assert result_a.migrated == [key_a]
@@ -1231,47 +1291,14 @@ def test_a_ledger_that_predates_the_head_count_subtracts_its_stored_failures(
 
     # Source B: predates failures_at_head alone, and stores an elevated tier.
     source_b_path = tmp_path / "b" / "source.db"
-    source_b = _source(source_b_path)
-    repo_b = source_b.upsert_repo("saffron", "/o", "/m.git", None)
-    run_b, task_b = _task(source_b, repo_b, "SA-0302")
-    source_b.record_gate_result(
-        GateResult(
-            gate="lint",
-            status="fail",
-            tool="ruff 1.0",
-            failures=[Failure(file="c.py", line=1, code="E3", message="old")],
-        ),
-        run_id=run_b,
-    )
-    attempt_b = source_b.open_attempt(task_b, phase="IMPLEMENTING")
-    source_b.close_attempt(
-        attempt_b,
-        session_id="sb",
-        subtype="success",
-        terminal_reason=None,
-        num_turns=1,
-        cost_usd_est=1.0,
-    )
-    source_b.record_gate_result(
-        GateResult(
-            gate="lint",
-            status="fail",
-            tool="ruff 1.0",
-            failures=[
-                Failure(file="c.py", line=1, code="E3", message="old"),
-                Failure(file="d.py", line=2, code="E4", message="new"),
-            ],
-        ),
-        attempt_id=attempt_b,
-        baseline=[],
+    key_b = _predating_source(
+        source_b_path,
+        "SA-0302",
+        Failure(file="c.py", line=1, code="E3", message="old"),
+        Failure(file="d.py", line=2, code="E4", message="new"),
         earned_risk="elevated",
+        drop_earned_risk=False,
     )
-    key_b = source_b._db.execute(
-        "SELECT record_key FROM tasks WHERE task_id = ?", (task_b,)
-    ).fetchone()["record_key"]
-    source_b._db.execute("ALTER TABLE gate_results DROP COLUMN failures_at_head")
-    source_b._db.commit()
-    _close(source_b)
 
     result_b, record_b = _migrated(source_b_path)
     assert result_b.migrated == [key_b]
