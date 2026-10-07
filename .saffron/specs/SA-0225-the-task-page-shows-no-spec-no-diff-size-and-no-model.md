@@ -135,9 +135,11 @@ acceptance:
       not a regular file, or when bytes that hash are not UTF-8. The witness
       drives `absent` two ways. One is a file whose name starts with the
       spec id and no hyphen, and one is a `base_sha` with no
-      `.saffron/specs/` at all. It drives `unreadable` four ways. They are a
-      mirror path that does not exist, a `base_sha` the mirror lacks, a
-      symlink, and bytes that are not UTF-8.
+      `.saffron/specs/` at all. It drives `hash mismatch` with a `spec_sha`
+      taken over other bytes, and `unparseable` with a spec that has no
+      `type`. It drives `unreadable` five ways. They are a mirror path that
+      does not exist, a `base_sha` the mirror lacks, a symlink, bytes that
+      are not UTF-8, and a `PATH` with no git on it.
     witness: tests/test_view_server.py::test_a_task_page_says_why_its_spec_text_is_unavailable
     wrong_versions:
       - A decode error is not caught, so bytes that are not UTF-8 end the request with no response.
@@ -147,6 +149,7 @@ acceptance:
       - A mirror path that does not exist reads as `absent`.
       - A failed listing reads as `absent`.
       - A symlink is read as a blob, so it reads as `hash mismatch`.
+      - Only a nonzero exit is caught, so a missing git binary ends the request with no response.
       - The listing names the directory as a tree path, so a `base_sha` with no `.saffron/specs/` reads as `unreadable`.
   - claim: >-
       The pull request body still carries the spec's `## Problem` section
@@ -296,10 +299,12 @@ exist (`tests/test_view_server.py:49`).
 (`tests/test_view_server.py:205` and `:247`). The witnesses also need the
 `<dl id="spec">` terms, and the text of a `<p>` or `<pre>` by its id.
 
-**Fixtures.** Build the mirror as a git repo under `tmp_path`, with a
-local `user.name` and `user.email`. Commit the specs, keep that sha as
+**Fixtures.** Build the mirror as a git repo at `tmp_path / "spec-mirror"`,
+with a local `user.name` and `user.email`. Commit the specs, keep that sha as
 `base_sha`, then commit a rewrite of each spec. Register it with
-`ledger.upsert_repo` and a run with `ledger.create_run(repo_id, sha)`. A
+`ledger.upsert_repo` under the origin `"spec-origin"`. The `_ledger` repo
+already holds `tmp_path / "mirror"` and the origin `"origin"`, and
+`repos.origin` is unique. Register a run with `ledger.create_run(repo_id, sha)`. A
 task's `spec_sha` is the sha256 of the committed bytes. Build the expected
 Problem with the extractor's public name, imported inside the test body. A
 module-scope import makes the reverted run a collection error.
@@ -321,12 +326,15 @@ task, in the same batch, and the unbatched decoy last. Then send `V2` and
 
 **Criterion 5's cases.** For `absent`, use a spec id of `SA-001` beside a
 file `SA-0012-good.md`. Also use a run at a commit whose tree is empty,
-made with `git hash-object -t tree /dev/null` and `git commit-tree`. For
-`unreadable`, use four tasks. One run's `base_sha` is forty zeros. One
+made with `git hash-object -w -t tree /dev/null` and `git commit-tree`.
+For `hash mismatch`, give a task the sha256 of bytes other than its file's.
+For `unreadable`, use five tasks. One run's `base_sha` is forty zeros. One
 repo's mirror path does not exist. One spec is a symlink to
 `../../../outside.md`. One spec ends in the two bytes `\xff\xfe`, with
-`spec_sha` taken over those bytes. For `unparseable`, leave `type` out of
-the frontmatter.
+`spec_sha` taken over those bytes. For the last, fetch a good task's page
+with `monkeypatch.setenv("PATH", ...)` naming an empty directory. The server
+runs in the test's own process, so its git call then raises an `OSError`.
+For `unparseable`, leave `type` out of the frontmatter.
 
 **Measured on a prototype over `ffcfb432`.** All 50 tests in the two view
 test files passed, and `tests/test_report.py` passed unchanged.
