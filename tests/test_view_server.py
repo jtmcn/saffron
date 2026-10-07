@@ -87,6 +87,33 @@ def _set_task(ledger: Ledger, task_id: int, **columns: object) -> None:
     ledger._db.commit()
 
 
+def _set_attempt(ledger: Ledger, attempt_id: int, **columns: object) -> None:
+    """Sets an attempt's times, turns and cost directly. `close_attempt`
+    always stamps `ended_at` from the clock, so a fixture wanting a chosen
+    value, or an attempt never closed at all, writes the row itself."""
+    names = ", ".join(f"{name} = ?" for name in columns)
+    ledger._db.execute(
+        f"UPDATE attempts SET {names} WHERE attempt_id = ?",
+        (*columns.values(), attempt_id),
+    )
+    ledger._db.commit()
+
+
+def _set_batch(ledger: Ledger, batch_id: int, **columns: object) -> None:
+    names = ", ".join(f"{name} = ?" for name in columns)
+    ledger._db.execute(
+        f"UPDATE batches SET {names} WHERE batch_id = ?",
+        (*columns.values(), batch_id),
+    )
+    ledger._db.commit()
+
+
+def _dt(ledger_time: str) -> str:
+    """`V3`'s own spelling of a ledger timestamp: `%Y-%m-%d %H:%M:%S`
+    becomes `...THH:MM:SSZ`, measured on the host at `cc3f4622`."""
+    return ledger_time.replace(" ", "T") + "Z"
+
+
 def _gate(
     gate: str, status: GateStatus, *, failures: list[Failure] | None = None
 ) -> GateResult:
@@ -98,47 +125,102 @@ def _finding(severity: Severity, claim: str) -> Finding:
 
 
 class _PageParser(HTMLParser):
-    """Every `<tr>`'s `<td>` texts, grouped by its enclosing `<table id>`
-    (`None` for an untagged table), every `<a href>`, the first `<h1>`'s text
-    and the `<title>`'s text."""
+    """Every `<tr>`'s `<td>` texts, grouped by its enclosing `<table id>`,
+    apart from each table's own `<th>` header row, kept in `header_rows`
+    by the same id. `row_kinds` holds `True` for a header row and
+    `False` for a data row, by table id, in the document's row order.
+    `table_ids` lists every table id in the order its `<table>` tag
+    appears. `headings3` maps a table id to the `<h3>` text right before
+    it, when there is one. `summary` maps each `<dl id="summary">` term's
+    `<dt>` text to its `<dd>` text and the `href` of its `<a>`, if any.
+    Also every `<a href>`, the first `<h1>`'s text, the `<title>`'s text,
+    and `text`: the page's own data, untagged."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.tables: dict[str | None, list[list[str]]] = {}
+        self.tables: dict[str, list[list[str]]] = {}
+        self.header_rows: dict[str, list[str]] = {}
+        self.row_kinds: dict[str, list[bool]] = {}
+        self.table_ids: list[str] = []
+        self.headings3: dict[str, str] = {}
+        self.summary: dict[str, tuple[str, str | None]] = {}
         self.hrefs: list[str] = []
         self.heading = ""
         self.title = ""
-        self._table_stack: list[str | None] = []
+        self.text = ""
+
+        self._table_stack: list[str] = []
         self._row: list[str] | None = None
+        self._row_is_header = False
         self._cell: list[str] | None = None
         self._in_h1 = False
         self._in_title = False
+        self._in_h3 = False
+        self._h3_buffer = ""
+        self._pending_h3: str | None = None
+        self._in_dl_summary = False
+        self._in_dt = False
+        self._in_dd = False
+        self._dt_buffer = ""
+        self._dd_buffer = ""
+        self._dd_href: str | None = None
+        self._current_term: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
         if tag == "table":
-            self._table_stack.append(attr_map.get("id"))
+            table_id = attr_map.get("id")
+            assert table_id is not None, "every table now carries an id"
+            self._table_stack.append(table_id)
+            self.table_ids.append(table_id)
+            self.tables.setdefault(table_id, [])
+            if self._pending_h3 is not None:
+                self.headings3[table_id] = self._pending_h3
+                self._pending_h3 = None
         elif tag == "tr":
             self._row = []
+            self._row_is_header = False
+        elif tag == "th":
+            self._row_is_header = True
+            self._cell = []
         elif tag == "td":
             self._cell = []
         elif tag == "a":
             href = attr_map.get("href")
             if href is not None:
                 self.hrefs.append(href)
+                if self._in_dd:
+                    self._dd_href = href
         elif tag == "h1":
             self._in_h1 = True
         elif tag == "title":
             self._in_title = True
+        elif tag == "h3":
+            self._in_h3 = True
+            self._h3_buffer = ""
+        elif tag == "dl":
+            self._in_dl_summary = attr_map.get("id") == "summary"
+        elif tag == "dt" and self._in_dl_summary:
+            self._in_dt = True
+            self._dt_buffer = ""
+        elif tag == "dd" and self._in_dl_summary:
+            self._in_dd = True
+            self._dd_buffer = ""
+            self._dd_href = None
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "table" and self._table_stack:
             self._table_stack.pop()
         elif tag == "tr" and self._row is not None:
             table_id = self._table_stack[-1] if self._table_stack else None
-            self.tables.setdefault(table_id, []).append(self._row)
+            if table_id is not None:
+                self.row_kinds.setdefault(table_id, []).append(self._row_is_header)
+                if self._row_is_header:
+                    self.header_rows[table_id] = self._row
+                else:
+                    self.tables[table_id].append(self._row)
             self._row = None
-        elif tag == "td" and self._cell is not None:
+        elif tag in ("td", "th") and self._cell is not None:
             if self._row is not None:
                 self._row.append("".join(self._cell))
             self._cell = None
@@ -146,14 +228,34 @@ class _PageParser(HTMLParser):
             self._in_h1 = False
         elif tag == "title":
             self._in_title = False
+        elif tag == "h3":
+            self._in_h3 = False
+            self._pending_h3 = self._h3_buffer
+        elif tag == "dl":
+            self._in_dl_summary = False
+        elif tag == "dt" and self._in_dt:
+            self._in_dt = False
+            self._current_term = self._dt_buffer.strip()
+        elif tag == "dd" and self._in_dd:
+            self._in_dd = False
+            if self._current_term is not None:
+                self.summary[self._current_term] = (self._dd_buffer, self._dd_href)
+            self._current_term = None
 
     def handle_data(self, data: str) -> None:
+        self.text += data
         if self._cell is not None:
             self._cell.append(data)
         if self._in_h1:
             self.heading += data
         if self._in_title:
             self.title += data
+        if self._in_h3:
+            self._h3_buffer += data
+        if self._in_dt:
+            self._dt_buffer += data
+        if self._in_dd:
+            self._dd_buffer += data
 
 
 def _parse(body: str) -> _PageParser:
@@ -336,8 +438,11 @@ def test_the_index_lists_each_left_out_task_with_its_reason(tmp_path: Path) -> N
 
     assert kept_status == 200
     kept_page = _parse(kept_body)
-    rows = kept_page.tables.get(None, [])
-    assert ["REVIEWING", "1", "", "", ""] in rows
+    rows = kept_page.tables.get("attempts", [])
+    (kept_attempt_row,) = [row for row in rows if row[0] == "REVIEWING"]
+    assert kept_attempt_row[1] == "1"
+    assert kept_attempt_row[2] != ""  # started
+    assert kept_attempt_row[3:] == ["", "", ""]  # ended, turns, cost
 
 
 def test_a_batch_page_lists_only_that_batchs_tasks(tmp_path: Path) -> None:
@@ -366,7 +471,7 @@ def test_a_batch_page_lists_only_that_batchs_tasks(tmp_path: Path) -> None:
     assert status == 200
     page = _parse(body)
 
-    rows = page.tables.get(None, [])
+    rows = page.tables.get("tasks", [])
     ids = {row[0] for row in rows}
     assert ids == {str(task_a), str(task_b)}
 
@@ -406,7 +511,7 @@ def test_a_task_page_shows_each_attempts_gate_outcomes_with_error_apart_from_fai
     assert status == 200
     page = _parse(body)
 
-    rows = page.tables.get(None, [])
+    rows = page.tables.get("gate-results", [])
     first_four = sorted(row[:4] for row in rows)
     expected = sorted(
         [
@@ -421,7 +526,7 @@ def test_a_task_page_shows_each_attempts_gate_outcomes_with_error_apart_from_fai
     )
     assert first_four == expected
     assert "urn:" not in body
-    assert "gate-" not in body
+    assert "gate-" not in page.text
 
 
 def _failures(tag: str, count: int) -> list[Failure]:
@@ -444,32 +549,6 @@ def _failures(tag: str, count: int) -> list[Failure]:
     ]
 
 
-def _result_blocks(
-    rows: list[list[str]],
-) -> list[tuple[list[str], list[list[str]], str | None]]:
-    """Groups a task page's flat row list back into one `(gate row, failure
-    lines, more cell)` tuple per gate result, by each row's own cell count:
-    5 for a gate result, 4 for a failure line, 1 for a `more` row."""
-    blocks: list[tuple[list[str], list[list[str]], str | None]] = []
-    i = 0
-    while i < len(rows):
-        row = rows[i]
-        if len(row) != 5:
-            i += 1
-            continue
-        i += 1
-        lines: list[list[str]] = []
-        while i < len(rows) and len(rows[i]) == 4:
-            lines.append(rows[i])
-            i += 1
-        more = None
-        if i < len(rows) and len(rows[i]) == 1:
-            more = rows[i][0]
-            i += 1
-        blocks.append((row, lines, more))
-    return blocks
-
-
 def test_a_task_page_shows_failure_lines_capped_with_a_count_of_the_rest(
     tmp_path: Path,
 ) -> None:
@@ -479,14 +558,14 @@ def test_a_task_page_shows_failure_lines_capped_with_a_count_of_the_rest(
     _set_task(ledger, task_id, state="REPAIRING")
 
     gating = ledger.open_attempt(task_id, "GATING")
-    ledger.record_gate_result(
+    lint_result_id = ledger.record_gate_result(
         _gate("lint", "fail", failures=_failures("lint", 205)), attempt_id=gating
     )
-    ledger.record_gate_result(
+    types_result_id = ledger.record_gate_result(
         _gate("types", "fail", failures=_failures("types", 200)), attempt_id=gating
     )
     repairing = ledger.open_attempt(task_id, "REPAIRING")
-    ledger.record_gate_result(
+    tests_result_id = ledger.record_gate_result(
         _gate("tests", "fail", failures=_failures("tests", 3)), attempt_id=repairing
     )
     _close(ledger, spares)
@@ -495,27 +574,25 @@ def test_a_task_page_shows_failure_lines_capped_with_a_count_of_the_rest(
         status, body = _get(base, f"/task/{task_id}")
     assert status == 200
     page = _parse(body)
-    blocks = _result_blocks(page.tables.get(None, []))
 
-    # `lint` and `types` share an attempt, and `lint`'s own 205 rows outrun
-    # the cap, so this block alone cannot catch a wrong attempt-wide query.
-    lint_block = next(b for b in blocks if b[0][2] == "lint")
-    assert [line[3] for line in lint_block[1]] == [f"lint-msg{i}" for i in range(200)]
-    assert lint_block[2] == "5 more"
+    # `lint` and `types` share an attempt. `lint`'s own 205 rows outrun the
+    # cap, so its table alone cannot catch a wrong attempt-wide query.
+    lint_rows = page.tables[f"failures-{lint_result_id}"]
+    assert [row[3] for row in lint_rows[:-1]] == [f"lint-msg{i}" for i in range(200)]
+    assert lint_rows[-1] == ["5 more"]
 
     # `types`'s own 200 rows start only after `lint`'s 205. Borrowing the
     # attempt's earliest 200 instead reads as 200 `lint-msg*` rows here.
-    types_block = next(b for b in blocks if b[0][2] == "types")
-    assert [line[3] for line in types_block[1]] == [f"types-msg{i}" for i in range(200)]
-    assert types_block[2] is None
+    types_rows = page.tables[f"failures-{types_result_id}"]
+    assert [row[3] for row in types_rows] == [f"types-msg{i}" for i in range(200)]
 
-    tests_block = next(b for b in blocks if b[0][2] == "tests")
-    assert [line[3] for line in tests_block[1]] == [f"tests-msg{i}" for i in range(3)]
-    assert tests_block[2] is None
+    tests_rows = page.tables[f"failures-{tests_result_id}"]
+    assert [row[3] for row in tests_rows] == [f"tests-msg{i}" for i in range(3)]
 
     more_cells = [
         cell
-        for row in page.tables.get(None, [])
+        for rows in page.tables.values()
+        for row in rows
         for cell in row
         if cell.endswith(" more")
     ]
@@ -535,7 +612,7 @@ def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
     task_b2 = ledger.create_task(run_batched, spec_b2, "sb2", "bb2")
     _set_task(ledger, task_b2, state="DRAFT")
     attempt = ledger.open_attempt(task_b1, "GATING")
-    ledger.record_gate_result(
+    lint_result_id = ledger.record_gate_result(
         _gate(
             "lint",
             "fail",
@@ -581,8 +658,7 @@ def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
 
         status, b1_body = _get(base, f"/task/{task_b1}")
         b1_page = _parse(b1_body)
-        rows = b1_page.tables.get(None, [])
-        failure_row = next(row for row in rows if len(row) == 4)
+        (failure_row,) = b1_page.tables[f"failures-{lint_result_id}"]
         assert failure_row == [
             "<markup>f</markup>.py",
             "1",
@@ -604,7 +680,7 @@ def test_markup_in_a_stored_value_renders_as_text(tmp_path: Path) -> None:
         batch_status, batch_body = _get(base, f"/batch/{batch_id}")
         assert batch_status == 200
         assert tag not in batch_body
-        batch_specs = {row[1] for row in _parse(batch_body).tables.get(None, [])}
+        batch_specs = {row[1] for row in _parse(batch_body).tables.get("tasks", [])}
         assert batch_specs == {spec_b1, spec_b2}
 
 
@@ -1085,8 +1161,7 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
             assert other_pr not in bodies[task_id]
             assert other_lens not in bodies[task_id]
 
-    b1_rows = pages[task_b1].tables.get(None, [])
-    finding_rows = [row for row in b1_rows if len(row) == 4]
+    finding_rows = pages[task_b1].tables.get("findings", [])
     assert ["style", "concern", "claim-b1", ""] in finding_rows
     assert ["style", "note", markup_claim, markup_verdict] in finding_rows
     assert len(finding_rows) == 2
@@ -1094,8 +1169,7 @@ def test_a_task_page_shows_its_findings_and_links_its_pull_request(
     for task_id, (_pr_url, lens, claim) in tasks.items():
         if task_id == task_b1:
             continue
-        rows = pages[task_id].tables.get(None, [])
-        findings = [row for row in rows if len(row) == 4]
+        findings = pages[task_id].tables.get("findings", [])
         assert findings == [[lens, "concern", claim, ""]]
 
 
@@ -1137,3 +1211,497 @@ def test_an_overlong_digit_id_is_404_and_a_query_string_keeps_its_page(
         for path in ["/?x=1", f"/batch/{batch}?x=1", f"/task/{task}?x=1"]:
             status, _ = _get(base, path)
             assert status == 200, path
+
+
+def test_a_task_page_heads_with_its_state_risk_batch_pull_request_and_cost(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+
+    # `_ledger` hands out batch ids from 4 and task ids from 2. Spare
+    # batches here push the counter past every task id this fixture mints.
+    for _ in range(6):
+        ledger.create_batch(1.0)
+
+    main_batch = ledger.create_batch(9.0)
+    main_run = ledger.create_run(repo_id, "main", batch_id=main_batch)
+    main_task = ledger.create_task(main_run, "SA-MAIN", "sm", "bm")
+    main_pr = "https://example.com/pulls/9"
+    _set_task(
+        ledger, main_task, state="READY_FOR_REVIEW", risk="elevated", pr_url=main_pr
+    )
+
+    three_results = ledger.open_attempt(main_task, "GATING")
+    for gate in ("lint", "types", "tests"):
+        ledger.record_gate_result(_gate(gate, "pass"), attempt_id=three_results)
+    _set_attempt(ledger, three_results, cost_usd_est=1.234)
+
+    no_gate_result = ledger.open_attempt(main_task, "IMPLEMENTING")
+    _set_attempt(ledger, no_gate_result, cost_usd_est=2.004)
+
+    one_gate_result = ledger.open_attempt(main_task, "REPAIRING")
+    ledger.record_gate_result(_gate("lint", "pass"), attempt_id=one_gate_result)
+    _set_attempt(ledger, one_gate_result, cost_usd_est=0.459)
+
+    ledger.open_attempt(main_task, "REPAIRING")  # no cost at all
+
+    duplicate_cost = ledger.open_attempt(main_task, "REPAIRING")
+    _set_attempt(ledger, duplicate_cost, cost_usd_est=0.459)
+
+    unbatched_run = ledger.create_run(repo_id, "unbatched")
+    unbatched_task = ledger.create_task(unbatched_run, "SA-UNB", "su", "bu")
+    _set_task(ledger, unbatched_task, state="GATING", risk="standard")
+    unbatched_attempt_one = ledger.open_attempt(unbatched_task, "GATING")
+    _set_attempt(ledger, unbatched_attempt_one, cost_usd_est=0.415)
+    unbatched_attempt_two = ledger.open_attempt(unbatched_task, "REPAIRING")
+    _set_attempt(ledger, unbatched_attempt_two, cost_usd_est=0.237)
+
+    decoy_batch = ledger.create_batch(2.0)
+    decoy_run = ledger.create_run(repo_id, "decoy", batch_id=decoy_batch)
+    batched_decoy = ledger.create_task(decoy_run, "SA-DECOY-B", "sdb", "bdb")
+    decoy_pr = "https://example.com/pulls/404"
+    _set_task(ledger, batched_decoy, state="DRAFT", risk="standard", pr_url=decoy_pr)
+    decoy_attempt = ledger.open_attempt(batched_decoy, "GATING")
+    _set_attempt(ledger, decoy_attempt, cost_usd_est=99.99)
+
+    unbatched_decoy = ledger.create_task(unbatched_run, "SA-DECOY-U", "sdu", "bdu")
+    unbatched_decoy_pr = "https://example.com/pulls/405"
+    _set_task(
+        ledger,
+        unbatched_decoy,
+        state="REVIEWING",
+        risk="elevated",
+        pr_url=unbatched_decoy_pr,
+    )
+    unbatched_decoy_attempt = ledger.open_attempt(unbatched_decoy, "REVIEWING")
+    _set_attempt(ledger, unbatched_decoy_attempt, cost_usd_est=50.0)
+    assert unbatched_decoy > unbatched_task
+
+    fixture_task_ids = {main_task, unbatched_task, batched_decoy, unbatched_decoy}
+    assert main_batch not in fixture_task_ids
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        main_status, main_body = _get(base, f"/task/{main_task}")
+        unbatched_status, unbatched_body = _get(base, f"/task/{unbatched_task}")
+    assert main_status == 200
+    assert unbatched_status == 200
+
+    main_page = _parse(main_body)
+    assert main_page.summary["state"] == ("READY_FOR_REVIEW", None)
+    assert main_page.summary["risk"] == ("elevated", None)
+    assert main_page.summary["batch"] == (str(main_batch), f"/batch/{main_batch}")
+    assert main_page.summary["pull request"] == (main_pr, main_pr)
+    assert main_page.summary["cost"] == ("4.16", None)
+    assert decoy_pr not in main_body
+    assert str(decoy_batch) not in main_page.summary["batch"][0]
+
+    unbatched_page = _parse(unbatched_body)
+    assert unbatched_page.summary["state"] == ("GATING", None)
+    assert unbatched_page.summary["risk"] == ("standard", None)
+    assert unbatched_page.summary["batch"] == ("none", None)
+    assert unbatched_page.summary["pull request"] == ("none", None)
+    assert unbatched_page.summary["cost"] == ("0.65", None)
+    assert unbatched_decoy_pr not in unbatched_body
+
+
+def test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-ATTEMPTS", "sa", "ba")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    implementing = ledger.open_attempt(task_id, "IMPLEMENTING")
+    for gate in ("lint", "types", "tests"):
+        ledger.record_gate_result(_gate(gate, "pass"), attempt_id=implementing)
+    _set_attempt(
+        ledger,
+        implementing,
+        started_at="2026-01-02 03:00:00",
+        ended_at="2026-01-02 03:10:00",
+        num_turns=7,
+        cost_usd_est=1.50,
+    )
+
+    gating = ledger.open_attempt(task_id, "GATING")
+    _set_attempt(
+        ledger,
+        gating,
+        started_at="2026-01-02 01:00:00",
+        ended_at="2026-01-02 01:05:00",
+        num_turns=2,
+        cost_usd_est=0.30,
+    )
+
+    repairing = ledger.open_attempt(task_id, "REPAIRING")
+    ledger.record_gate_result(_gate("lint", "fail"), attempt_id=repairing)
+    _set_attempt(
+        ledger,
+        repairing,
+        started_at="2026-01-02 05:00:00",
+        ended_at="2026-01-02 05:20:00",
+        num_turns=11,
+        cost_usd_est=0.75,
+    )
+
+    reviewing = ledger.open_attempt(task_id, "REVIEWING")
+    _set_attempt(ledger, reviewing, started_at="2026-01-02 02:00:00")
+    # Never closed: ended_at, num_turns and cost_usd_est stay NULL.
+
+    rebutting = ledger.open_attempt(task_id, "REBUTTING")
+    _set_attempt(
+        ledger,
+        rebutting,
+        started_at="2026-01-02 04:00:00",
+        ended_at="2026-01-02 04:15:00",
+        num_turns=4,
+        cost_usd_est=1.50,  # equal to `implementing`'s cost
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+    page = _parse(body)
+
+    assert page.tables["attempts"] == [
+        [
+            "GATING",
+            "1",
+            _dt("2026-01-02 01:00:00"),
+            _dt("2026-01-02 01:05:00"),
+            "2",
+            "0.30",
+        ],
+        ["REVIEWING", "1", _dt("2026-01-02 02:00:00"), "", "", ""],
+        [
+            "IMPLEMENTING",
+            "1",
+            _dt("2026-01-02 03:00:00"),
+            _dt("2026-01-02 03:10:00"),
+            "7",
+            "1.50",
+        ],
+        [
+            "REBUTTING",
+            "1",
+            _dt("2026-01-02 04:00:00"),
+            _dt("2026-01-02 04:15:00"),
+            "4",
+            "1.50",
+        ],
+        [
+            "REPAIRING",
+            "1",
+            _dt("2026-01-02 05:00:00"),
+            _dt("2026-01-02 05:20:00"),
+            "11",
+            "0.75",
+        ],
+    ]
+
+
+def test_a_task_with_no_attempts_shows_its_summary_and_no_table(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    batch_id = ledger.create_batch(5.0)
+    run_id = ledger.create_run(repo_id, "base", batch_id=batch_id)
+    task_id = ledger.create_task(run_id, "SA-EMPTY", "se", "be")
+    _set_task(ledger, task_id, state="GATE_ERROR")
+
+    other_task = ledger.create_task(run_id, "SA-OTHER", "so", "bo")
+    _set_task(ledger, other_task, state="DRAFT")
+    ledger.open_attempt(other_task, "GATING")
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+        other_status, other_body = _get(base, f"/task/{other_task}")
+    assert status == 200
+    assert other_status == 200
+
+    assert "<table" not in body
+    page = _parse(body)
+    assert page.summary["state"] == ("GATE_ERROR", None)
+    assert page.summary["cost"] == ("0.00", None)
+    assert "no attempts" in body
+
+    assert "no attempts" not in other_body
+
+
+def test_gate_results_failure_lines_and_findings_sit_in_separate_tables(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-SPLIT", "ss", "bs")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    gating = ledger.open_attempt(task_id, "GATING")
+    # Filed out of file order, so a table sorted by `file` instead of as
+    # recorded would read `a.py` first and fail this test.
+    gating_lint_id = ledger.record_gate_result(
+        _gate(
+            "lint",
+            "fail",
+            failures=[
+                Failure(file="b.py", line=1, code="E1", message="first"),
+                Failure(file="a.py", line=2, code="E2", message="second"),
+            ],
+        ),
+        attempt_id=gating,
+    )
+    ledger.record_gate_result(_gate("types", "pass"), attempt_id=gating)
+    ledger.record_gate_result(_gate("no-network", "error"), attempt_id=gating)
+
+    # Opened before the `REPAIRING` attempt with `lint`, with no gate result
+    # of its own, so that one becomes `REPAIRING` attempt 2.
+    ledger.open_attempt(task_id, "REPAIRING")
+
+    repair_with_lint = ledger.open_attempt(task_id, "REPAIRING")
+    repair_lint_id = ledger.record_gate_result(
+        _gate(
+            "lint",
+            "fail",
+            failures=[Failure(file="c.py", line=3, code="E3", message="third")],
+        ),
+        attempt_id=repair_with_lint,
+    )
+
+    ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="style", severity="concern", file="f.py", line=1, claim="claim-one"
+            ),
+            Finding(
+                lens="security",
+                severity="blocker",
+                file="g.py",
+                line=2,
+                claim="claim-two",
+            ),
+        ],
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+    page = _parse(body)
+
+    gate_rows = page.tables["gate-results"]
+    assert sorted(row[:4] for row in gate_rows) == sorted(
+        [
+            ["GATING", "1", "lint", "failed"],
+            ["GATING", "1", "types", "passed"],
+            ["GATING", "1", "no-network", "cantTell"],
+            ["REPAIRING", "2", "lint", "failed"],
+        ]
+    )
+    assert len(gate_rows) == 4  # the no-result `REPAIRING` attempt adds none
+
+    gating_heading = "lint in GATING attempt 1"
+    repair_heading = "lint in REPAIRING attempt 2"
+    assert page.headings3[f"failures-{gating_lint_id}"] == gating_heading
+    assert page.headings3[f"failures-{repair_lint_id}"] == repair_heading
+
+    assert page.tables[f"failures-{gating_lint_id}"] == [
+        ["b.py", "1", "E1", "first"],
+        ["a.py", "2", "E2", "second"],
+    ]
+    assert page.tables[f"failures-{repair_lint_id}"] == [["c.py", "3", "E3", "third"]]
+
+    failures_table_ids = [tid for tid in page.table_ids if tid.startswith("failures-")]
+    assert failures_table_ids == [
+        f"failures-{gating_lint_id}",
+        f"failures-{repair_lint_id}",
+    ]
+
+    findings = page.tables["findings"]
+    assert sorted(findings) == sorted(
+        [
+            ["style", "concern", "claim-one", ""],
+            ["security", "blocker", "claim-two", ""],
+        ]
+    )
+
+
+def test_every_table_on_every_page_has_a_header_row_naming_its_columns(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    batch_id = ledger.create_batch(5.0)
+    run_id = ledger.create_run(repo_id, "base", batch_id=batch_id)
+
+    task_id = ledger.create_task(run_id, "SA-HEADERS", "sh", "bh")
+    _set_task(ledger, task_id, state="REPAIRING")
+    attempt = ledger.open_attempt(task_id, "GATING")
+    result_id = ledger.record_gate_result(
+        _gate(
+            "lint",
+            "fail",
+            failures=[Failure(file="a.py", line=1, code="E", message="m")],
+        ),
+        attempt_id=attempt,
+    )
+    ledger.record_findings(task_id, [_finding("concern", "a claim")])
+
+    unbatched_run = ledger.create_run(repo_id, "unbatched")
+    unbatched_task = ledger.create_task(unbatched_run, "SA-UNB", "su", "bu")
+    _set_task(ledger, unbatched_task, state="DRAFT")
+
+    left_out_task = ledger.create_task(run_id, "SA-LEFT", "sl", "bl")
+    _set_task(ledger, left_out_task, state="PAUSED")
+
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        index_status, index_body = _get(base, "/")
+        batch_status, batch_body = _get(base, f"/batch/{batch_id}")
+        task_status, task_body = _get(base, f"/task/{task_id}")
+    assert index_status == 200
+    assert batch_status == 200
+    assert task_status == 200
+
+    def _assert_headers_and_widths(
+        page: _PageParser, expected: dict[str, list[str]]
+    ) -> None:
+        for table_id, columns in expected.items():
+            assert page.header_rows[table_id] == columns, table_id
+            # The header row is the table's first row, and its only one.
+            kinds = page.row_kinds[table_id]
+            assert kinds[0] is True, table_id
+            assert kinds.count(True) == 1, table_id
+            rows = page.tables[table_id]
+            assert len(rows) >= 1, table_id
+            for row in rows:
+                if row and row[0].endswith(" more"):
+                    continue
+                assert len(row) == len(columns), (table_id, row)
+
+    index_page = _parse(index_body)
+    assert index_page.table_ids == ["batches", "no-batch", "left-out"]
+    _assert_headers_and_widths(
+        index_page,
+        {
+            "batches": [
+                "batch",
+                "started",
+                "ended",
+                "ended because",
+                "budget",
+                "spent",
+                "tasks",
+            ],
+            "no-batch": ["task", "spec", "state", "risk"],
+            "left-out": ["task", "spec", "reason"],
+        },
+    )
+
+    batch_page = _parse(batch_body)
+    assert batch_page.table_ids == ["tasks"]
+    _assert_headers_and_widths(batch_page, {"tasks": ["task", "spec", "state", "risk"]})
+
+    task_page = _parse(task_body)
+    failures_table_id = f"failures-{result_id}"
+    assert task_page.table_ids == [
+        "attempts",
+        "gate-results",
+        failures_table_id,
+        "findings",
+    ]
+    _assert_headers_and_widths(
+        task_page,
+        {
+            "attempts": ["phase", "n", "started", "ended", "turns", "cost"],
+            "gate-results": ["phase", "n", "gate", "outcome", "failures"],
+            failures_table_id: ["file", "line", "code", "message"],
+            "findings": ["lens", "severity", "claim", "verdict"],
+        },
+    )
+
+
+def test_task_lists_run_newest_first_by_id_as_a_number(tmp_path: Path) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+
+    # A throwaway batch and run advance the task id counter past 7, so each
+    # group below crosses the single-to-double-digit boundary on its own.
+    throwaway_batch = ledger.create_batch(1.0)
+    throwaway_run = ledger.create_run(repo_id, "throwaway", batch_id=throwaway_batch)
+    for i in range(6):
+        throwaway = ledger.create_task(throwaway_run, f"SA-THROW{i}", f"t{i}", f"bt{i}")
+        _set_task(ledger, throwaway, state="DRAFT")
+
+    main_batch = ledger.create_batch(20.0)
+    main_run = ledger.create_run(repo_id, "main", batch_id=main_batch)
+    unbatched_run = ledger.create_run(repo_id, "unbatched")
+
+    # Interleaved, so each group's own ids cross the 9/10 boundary rather
+    # than only the combined set of both groups.
+    batched_1 = ledger.create_task(main_run, "SA-QUX", "sq", "bq")
+    _set_task(ledger, batched_1, state="DRAFT")
+    unbatched_1 = ledger.create_task(unbatched_run, "SA-FOO", "sf", "bf")
+    _set_task(ledger, unbatched_1, state="DRAFT")
+    batched_2 = ledger.create_task(main_run, "SA-BAR", "sb", "bb")
+    _set_task(ledger, batched_2, state="DRAFT")
+    unbatched_2 = ledger.create_task(unbatched_run, "SA-ZAP", "sz", "bz")
+    _set_task(ledger, unbatched_2, state="DRAFT")
+    batched_3 = ledger.create_task(main_run, "SA-MOO", "sm", "bm")
+    _set_task(ledger, batched_3, state="DRAFT")
+    unbatched_3 = ledger.create_task(unbatched_run, "SA-EEK", "se", "be")
+    _set_task(ledger, unbatched_3, state="DRAFT")
+    unbatched_4 = ledger.create_task(unbatched_run, "SA-ARG", "sa", "ba")
+    _set_task(ledger, unbatched_4, state="DRAFT")
+
+    assert (
+        min(batched_1, batched_2, batched_3)
+        < 10
+        <= max(batched_1, batched_2, batched_3)
+    )
+    assert (
+        min(unbatched_1, unbatched_2, unbatched_3, unbatched_4)
+        < 10
+        <= max(unbatched_1, unbatched_2, unbatched_3, unbatched_4)
+    )
+
+    # Three batches here start in an order that differs from their id
+    # order both ways. The index keeps `V1`'s own order, not one by id.
+    batch_x = ledger.create_batch(1.0)
+    batch_y = ledger.create_batch(1.0)
+    _set_batch(ledger, throwaway_batch, started_at="2026-01-01 00:00:00")
+    _set_batch(ledger, batch_x, started_at="2026-01-03 00:00:00")
+    _set_batch(ledger, batch_y, started_at="2026-01-02 00:00:00")
+
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        index_status, index_body = _get(base, "/")
+        batch_status, batch_body = _get(base, f"/batch/{main_batch}")
+    assert index_status == 200
+    assert batch_status == 200
+
+    index_page = _parse(index_body)
+    no_batch_ids = [row[0] for row in index_page.tables["no-batch"]]
+    expected_unbatched_order = [
+        str(t)
+        for t in sorted(
+            [unbatched_1, unbatched_2, unbatched_3, unbatched_4], reverse=True
+        )
+    ]
+    assert no_batch_ids == expected_unbatched_order
+
+    batch_page = _parse(batch_body)
+    tasks_ids = [row[0] for row in batch_page.tables["tasks"]]
+    expected_batched_order = [
+        str(t) for t in sorted([batched_1, batched_2, batched_3], reverse=True)
+    ]
+    assert tasks_ids == expected_batched_order
+
+    batch_ids_in_order = [row[0] for row in index_page.tables["batches"]]
+    expected_chronological = [str(batch_x), str(batch_y), str(throwaway_batch)]
+    ours_batches = [b for b in batch_ids_in_order if b in set(expected_chronological)]
+    assert ours_batches == expected_chronological
