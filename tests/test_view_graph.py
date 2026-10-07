@@ -608,6 +608,51 @@ def test_build_reads_a_ledger_another_connection_is_writing(tmp_path: Path) -> N
         writer.close()
 
 
+def test_build_reads_one_snapshot_while_a_writer_commits_between_its_reads(
+    tmp_path: Path,
+) -> None:
+    from saffron.view.graph import build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+    task_id = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, task_id, state="DRAFT")
+    ledger.close()
+
+    db_path = tmp_path / "ledger.db"
+    writer = sqlite3.connect(db_path, isolation_level=None)
+    late: list[int] = []
+
+    def commit_between_reads(statement: str) -> None:
+        # Fires as build starts reading tasks, after it has read the runs.
+        if late or "FROM tasks" not in statement:
+            return
+        late_run = writer.execute(
+            "INSERT INTO runs (repo_id, base_sha, status) VALUES (?, 'late', 'RUNNING')",
+            (repo_id,),
+        ).lastrowid
+        assert late_run is not None
+        late_task = writer.execute(
+            "INSERT INTO tasks (run_id, spec_id, spec_sha, branch, state)"
+            " VALUES (?, 'SA-0002', 'sha2', 'b2', 'DRAFT')",
+            (late_run,),
+        ).lastrowid
+        assert late_task is not None
+        late.append(late_task)
+
+    conn = open_read_only(db_path)
+    conn.set_trace_callback(commit_between_reads)
+    try:
+        view = build(conn)
+    finally:
+        writer.close()
+
+    assert late, "the writer never ran"
+    g = _parse(view)
+    assert not _triples(g, f"{DATA}task-{late[0]}", None, None)
+    assert _triples(g, f"{DATA}task-{task_id}", f"{FACTORY}inState", f"{FACTORY}DRAFT")
+
+
 def test_the_connection_cannot_write(tmp_path: Path) -> None:
     from saffron.view.graph import open_read_only
 

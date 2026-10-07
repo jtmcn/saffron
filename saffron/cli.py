@@ -1,5 +1,5 @@
-"""`saffron` — cell, batch, queue, reconcile, watch, chains, replay. `ratify`
-and `gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, queue, reconcile, watch, fold, chains, serve,
+replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -211,6 +211,11 @@ def main(argv: list[str] | None = None) -> int:
         "over every merged task, once",
     )
 
+    serve_parser = subcommands.add_parser(
+        "serve", help="serve the run record's read-only pages (§6.2, ADR 9)"
+    )
+    serve_parser.add_argument("--port", type=int, default=8765)
+
     args = parser.parse_args(argv)
     if args.command == "watch" and args.task is None:
         if args.whole_log:
@@ -228,6 +233,11 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as broke:
             print(f"saffron: {type(broke).__name__}: {broke}")
             return 2
+
+    if args.command == "serve":
+        # Before the home ledger below: its constructor creates the file
+        # this command must report missing, not create.
+        return _serve(args)
 
     ledger = Ledger(args.home / "ledger.db")
     try:
@@ -1787,6 +1797,36 @@ def _fold(args: argparse.Namespace) -> int:
     # A rebuild short of tasks is not the ledger back. Exit 1, not 2: the
     # tasks did not make it, and no infrastructure broke to stop them.
     return 1 if done.skipped else 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    """`saffron serve [--port N]`: serve the run record's read-only pages
+    over the home ledger, until interrupted (§6.2, ADR 9).
+
+    Imported here, not at module scope, so a fresh interpreter that only
+    imports `saffron.cli` loads no `saffron.view` module (the `view-is-cli-
+    only` rule).
+    """
+    import saffron.view.server as view_server
+    from saffron.view.graph import ViewGraphError
+
+    ledger_path = args.home / "ledger.db"
+    if not ledger_path.is_file():
+        print(f"serve: no ledger at {ledger_path}")
+        return 2
+    try:
+        server = view_server.make_server(ledger_path, port=args.port)
+    except ViewGraphError as broke:
+        print(str(broke))
+        return 2
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        # The documented way this ends, the way `tail -f` ends.
+        pass
+    finally:
+        server.server_close()
+    return 0
 
 
 def _queue(args: argparse.Namespace, ledger: Ledger) -> int:

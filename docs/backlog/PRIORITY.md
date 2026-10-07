@@ -228,6 +228,9 @@ sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
 **b-0569f7**, **b-da550a** and last **b-a9ec4b**.
 
+**Placed 2026-10-06**, from the run record view's final review: **b-cf50dc**.
+The task page never says how the task ended.
+
 **Placed 2026-10-05**, from ADR 9: **b-a1d649**. No page says why a task ended
 where it did.
 
@@ -508,6 +511,9 @@ compares the host's usage keys to the runner's.
 
 **Placed 2026-10-05**, from ADR 9: **b-b51c9c**. The run record view shows a
 night only once it ends.
+
+**Placed 2026-10-06**, from the same review: **b-d269f4**. The view server
+exits 1 on a startup failure and shows float noise.
 
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
