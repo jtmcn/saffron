@@ -1,6 +1,6 @@
-"""`saffron/record/migrate.py`. It appends a stored ledger's tasks, attempts
-and findings as the facts a live run would have written. A fold then gives
-them back (backlog item 170, the record design's §7)."""
+"""`saffron/record/migrate.py`. It appends a stored ledger's tasks, attempts,
+gate results and findings as the facts a live run would have written. A fold
+then gives them back (backlog item 170, the record design's §7)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ import sqlite3
 import time
 from collections import Counter
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from saffron.agents.findings import Finding
+from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
 from saffron.record.contract import Fact
 from saffron.record.memory import MemoryRecord
@@ -23,6 +25,48 @@ from saffron.record.memory import MemoryRecord
 def _set(ledger: Ledger, sql: str, params: tuple) -> None:
     ledger._db.execute(sql, params)
     ledger._db.commit()
+
+
+def _source(path: Path) -> Ledger:
+    """A fresh `Ledger` at `path`, the shape every scenario below is built
+    on top of."""
+    return Ledger(path)
+
+
+def _task(
+    ledger: Ledger, repo_id: int, spec_id: str, *, risk: str | None = None
+) -> tuple[int, int]:
+    """A run and the one task on it, before any attempt or gate result."""
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(
+        run_id,
+        spec_id=spec_id,
+        spec_sha="s" * 64,
+        branch=f"saffron/{spec_id}",
+        risk=risk,
+    )
+    return run_id, task_id
+
+
+def _close(ledger: Ledger) -> None:
+    ledger.close()
+
+
+def _migrated(source_path: Path):
+    from saffron.record.migrate import migrate
+
+    record = MemoryRecord()
+    return migrate(source_path, record), record
+
+
+def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    return list(conn.execute(sql, params))
+
+
+def _iso(stored: str) -> str:
+    """A stored ledger time, as the offset form a live fact's `at` carries."""
+    return datetime.fromisoformat(stored).replace(tzinfo=UTC).isoformat()
 
 
 def test_a_migrated_ledger_folds_back_to_the_rows_its_tasks_held(
@@ -470,3 +514,777 @@ def test_a_ledger_that_predates_the_head_count_migrates_and_is_left_unwritten(
     with pytest.raises(sqlite3.OperationalError):
         migrate(missing, MemoryRecord())
     assert not missing.exists()
+
+
+def _assert_gate_results_follow_their_attempt(facts: list[Fact]) -> None:
+    """Every `gate_result` fact's immediate predecessor, other `gate_result`
+    facts aside, is its own attempt's fact: `attempt_closed` where that
+    attempt closed anywhere in `facts`, `attempt_opened` otherwise
+    (problem 1). A closed attempt's own `gate_result` facts must follow
+    its close, never its open."""
+    closed_attempts = {
+        (f.payload["phase"], f.payload["n"])
+        for f in facts
+        if f.kind == "attempt_closed"
+    }
+    last_non_gate: Fact | None = None
+    for fact in facts:
+        if fact.kind == "gate_result":
+            assert last_non_gate is not None
+            key = (fact.payload["phase"], fact.payload["n"])
+            expected_kind = (
+                "attempt_closed" if key in closed_attempts else "attempt_opened"
+            )
+            assert last_non_gate.kind == expected_kind
+            assert (
+                last_non_gate.payload["phase"],
+                last_non_gate.payload["n"],
+            ) == key
+        else:
+            last_non_gate = fact
+
+
+def test_a_migrated_attempt_keeps_only_the_failures_its_runs_baseline_did_not_cancel(
+    tmp_path: Path,
+) -> None:
+    from saffron.record.fold import fold
+
+    source = _source(tmp_path / "source.db")
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
+
+    # Another run, made first, whose "types" baseline failure shares attempt
+    # 1's exactly (members 5 and 7): reading the wrong run's baseline would cancel it.
+    other_run = source.create_run(repo_id, base_sha="a" * 40)
+    source.record_gate_result(
+        GateResult(
+            gate="types",
+            status="fail",
+            tool="mypy 1.0",
+            failures=[Failure(file="n.py", line=1, code="N1", message="")],
+        ),
+        run_id=other_run,
+    )
+
+    run1, task1 = _task(source, repo_id, "SA-0101")
+    batch_id = source.create_batch(budget_usd=50.0)
+    source.attach_run_to_batch(run1, batch_id)
+    _set(
+        source,
+        "UPDATE runs SET started_at = ? WHERE run_id = ?",
+        ("2026-02-01 08:00:00", run1),
+    )
+
+    # The run's own baseline: lint (two distinct failures), tests, witness
+    # (a survivor), an empty types, and a revert skipped with no tool.
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="a.py", line=10, code="E1", message="bad one"),
+                Failure(file="b.py", line=20, code="E2", message="bad two"),
+            ],
+        ),
+        run_id=run1,
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            failures=[Failure(file="shared.py", line=9, code="SAME", message="")],
+        ),
+        run_id=run1,
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="witness",
+            status="fail",
+            tool="pytest 8.0",
+            failures=[
+                Failure(
+                    file="w.py", line=5, code="survived-mutant", message="mutant lived"
+                )
+            ],
+        ),
+        run_id=run1,
+    )
+    source.record_gate_result(
+        GateResult(gate="types", status="pass", tool="mypy 1.0", failures=[]),
+        run_id=run1,
+    )
+    source.record_gate_result(
+        GateResult(gate="revert", status="skip", tool=None, failures=[]),
+        run_id=run1,
+    )
+
+    # Attempt 1 (closed): lint, witness, types and format, every one
+    # uncounted, as a ledger predating SA-0220 would hold them.
+    a1 = source.open_attempt(task1, phase="IMPLEMENTING")
+    source.close_attempt(
+        a1,
+        session_id="s1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=3,
+        cost_usd_est=1.0,
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="a.py", line=99, code="E1", message="bad one"),
+                Failure(file="b.py", line=20, code="E2", message="bad two"),
+                Failure(file="b.py", line=21, code="E2", message="bad two"),
+                Failure(file="shared.py", line=9, code="SAME", message=""),
+            ],
+        ),
+        attempt_id=a1,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="witness",
+            status="fail",
+            tool="pytest 8.0",
+            failures=[
+                Failure(
+                    file="w.py", line=5, code="survived-mutant", message="mutant lived"
+                )
+            ],
+        ),
+        attempt_id=a1,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="types",
+            status="fail",
+            tool="mypy 1.0",
+            failures=[Failure(file="n.py", line=3, code="N1", message="")],
+        ),
+        attempt_id=a1,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="format", status="pass", tool="black 1.0", summary="", failures=[]
+        ),
+        attempt_id=a1,
+        baseline=[],
+    )
+
+    # Attempt 2 (closed): three lint copies of one baseline failure.
+    # A one-copy baseline leaves two, and earned_risk is stored elevated (member 8).
+    a2 = source.open_attempt(task1, phase="REPAIRING")
+    source.close_attempt(
+        a2,
+        session_id="s2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=2,
+        cost_usd_est=2.0,
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="a.py", line=10, code="E1", message="bad one"),
+                Failure(file="a.py", line=11, code="E1", message="bad one"),
+                Failure(file="a.py", line=12, code="E1", message="bad one"),
+            ],
+        ),
+        attempt_id=a2,
+        baseline=[
+            GateResult(
+                gate="lint",
+                status="fail",
+                tool="ruff 1.0",
+                failures=[Failure(file="a.py", line=10, code="E1", message="bad one")],
+            )
+        ],
+        earned_risk="elevated",
+    )
+
+    # Attempts 3-6: never closed (member counts: five results on the two
+    # closed attempts above, seven on these four open ones).
+    a3 = source.open_attempt(task1, phase="GATING")
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="a.py", line=10, code="E1", message="bad one")],
+        ),
+        attempt_id=a3,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="tests",
+            status="error",
+            tool="pytest 8.0",
+            summary="collection crashed",
+            failures=[],
+        ),
+        attempt_id=a3,
+        baseline=[],
+    )
+
+    a4 = source.open_attempt(task1, phase="GATING")
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 2.0",
+            failures=[Failure(file="a.py", line=10, code="E1", message="bad one")],
+        ),
+        attempt_id=a4,
+        baseline=[],
+    )
+
+    a5 = source.open_attempt(task1, phase="GATING")
+    source.record_gate_result(
+        GateResult(gate="revert", status="pass", tool="revert-tool 1.0", failures=[]),
+        attempt_id=a5,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="a.py", line=10, code="E1", message="bad one")],
+        ),
+        attempt_id=a5,
+        baseline=[],
+    )
+
+    a6 = source.open_attempt(task1, phase="GATING")
+    source.record_gate_result(
+        GateResult(gate="types", status="skip", tool=None, failures=[]),
+        attempt_id=a6,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="a.py", line=10, code="E1", message="bad one")],
+        ),
+        attempt_id=a6,
+        baseline=[],
+    )
+
+    # Null every count but attempt 2's, plus the "types" failure's message
+    # and "format"'s summary, which must round trip null (problem 1).
+    for attempt_id in (a1, a3, a4, a5, a6):
+        _set(
+            source,
+            "UPDATE gate_results SET failures_at_head = NULL WHERE attempt_id = ?",
+            (attempt_id,),
+        )
+    _set(
+        source,
+        "UPDATE failures SET message = NULL WHERE file = 'n.py' AND code = 'N1'",
+        (),
+    )
+    _set(
+        source,
+        "UPDATE gate_results SET summary = NULL WHERE attempt_id = ? AND gate = 'format'",
+        (a1,),
+    )
+
+    # Distinct times throughout.
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ?, ended_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 08:10:00", "2026-02-01 08:20:00", a1),
+    )
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ?, ended_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 08:30:00", "2026-02-01 08:40:00", a2),
+    )
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 08:50:00", a3),
+    )
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 09:00:00", a4),
+    )
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 09:10:00", a5),
+    )
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 09:20:00", a6),
+    )
+    _set(
+        source,
+        "UPDATE tasks SET updated_at = ? WHERE task_id = ?",
+        ("2026-02-01 09:30:00", task1),
+    )
+
+    # A second, elevated task with one clean, closed attempt. Its own
+    # earned_risk stays null, never defaulted from the task's risk (member 14).
+    run2, task2 = _task(source, repo_id, "SA-0102", risk="elevated")
+    a7 = source.open_attempt(task2, phase="IMPLEMENTING")
+    source.close_attempt(
+        a7,
+        session_id="s7",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+    # Left counted (unlike a1/a3-a6): a zero stored count must stay 0, not
+    # become null, through the "copy as stored" branch.
+    source.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a7,
+        baseline=[],
+    )
+    _set(
+        source,
+        "UPDATE attempts SET started_at = ?, ended_at = ? WHERE attempt_id = ?",
+        ("2026-02-01 10:00:00", "2026-02-01 10:10:00", a7),
+    )
+    _set(
+        source,
+        "UPDATE tasks SET updated_at = ? WHERE task_id = ?",
+        ("2026-02-01 10:20:00", task2),
+    )
+
+    key1 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task1,)
+    ).fetchone()["record_key"]
+    key2 = source._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task2,)
+    ).fetchone()["record_key"]
+    source_path = tmp_path / "source.db"
+    _close(source)
+
+    result, record = _migrated(source_path)
+    assert sorted(result.migrated) == sorted([key1, key2])
+    assert result.refused == []
+
+    facts1 = record.read(key1)
+    facts2 = record.read(key2)
+    _assert_gate_results_follow_their_attempt(facts1)
+    _assert_gate_results_follow_their_attempt(facts2)
+
+    def _results(facts: list[Fact]) -> list[Fact]:
+        return [f for f in facts if f.kind == "gate_result"]
+
+    results1 = _results(facts1)
+    results2 = _results(facts2)
+    assert len(results1) == 12
+    assert len(results2) == 1
+
+    for fact in results1 + results2:
+        assert fact.repo == "saffron"
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00", fact.at)
+    for fact in results1:
+        assert fact.batch_key == str(batch_id)
+    for fact in results2:
+        assert fact.batch_key is None
+
+    def _failures(fact: Fact) -> list[tuple[str, int | None, str, str | None]]:
+        return [
+            (f["file"], f["line"], f["code"], f["message"])
+            for f in fact.payload["failures"]
+        ]
+
+    def _at(phase: str, n: int) -> list[Fact]:
+        return [
+            f for f in results1 if f.payload["phase"] == phase and f.payload["n"] == n
+        ]
+
+    lint1, witness1, types1, format1 = _at("IMPLEMENTING", 1)
+    # a1 closed at 08:20. Its gate_result facts carry that, not its 08:10
+    # start or the task's own 09:30 updated_at.
+    for fact in (lint1, witness1, types1, format1):
+        assert fact.at == _iso("2026-02-01 08:20:00")
+    assert lint1.payload["gate"] == "lint"
+    assert _failures(lint1) == [
+        ("b.py", 21, "E2", "bad two"),
+        ("shared.py", 9, "SAME", ""),
+    ]
+    assert lint1.payload["failures_at_head"] == 4
+    assert lint1.payload["earned_risk"] is None
+
+    assert witness1.payload["gate"] == "witness"
+    assert _failures(witness1) == [("w.py", 5, "survived-mutant", "mutant lived")]
+    assert witness1.payload["failures_at_head"] == 1
+
+    assert types1.payload["gate"] == "types"
+    assert _failures(types1) == [("n.py", 3, "N1", None)]
+    assert types1.payload["failures_at_head"] == 1
+
+    assert format1.payload["gate"] == "format"
+    assert _failures(format1) == []
+    assert format1.payload["failures_at_head"] == 0
+    assert format1.payload["summary"] is None
+
+    (lint2,) = _at("REPAIRING", 1)
+    assert lint2.at == _iso("2026-02-01 08:40:00")
+    assert _failures(lint2) == [
+        ("a.py", 11, "E1", "bad one"),
+        ("a.py", 12, "E1", "bad one"),
+    ]
+    assert lint2.payload["failures_at_head"] == 3
+    assert lint2.payload["earned_risk"] == "elevated"
+
+    lint3, tests3 = _at("GATING", 1)
+    # a3 never closed, so its facts carry its 08:50 start.
+    for fact in (lint3, tests3):
+        assert fact.at == _iso("2026-02-01 08:50:00")
+    assert lint3.payload["gate"] == "lint"
+    assert _failures(lint3) == [("a.py", 10, "E1", "bad one")]
+    assert lint3.payload["failures_at_head"] == 1
+    assert tests3.payload["gate"] == "tests"
+    assert tests3.payload["status"] == "error"
+    assert _failures(tests3) == []
+
+    (lint4,) = _at("GATING", 2)
+    assert lint4.at == _iso("2026-02-01 09:00:00")
+    assert lint4.payload["tool"] == "ruff 2.0"
+    assert _failures(lint4) == [("a.py", 10, "E1", "bad one")]
+    assert lint4.payload["failures_at_head"] == 1
+
+    revert5, lint5 = _at("GATING", 3)
+    for fact in (revert5, lint5):
+        assert fact.at == _iso("2026-02-01 09:10:00")
+    assert revert5.payload["gate"] == "revert"
+    assert _failures(revert5) == []
+    assert lint5.payload["gate"] == "lint"
+    assert _failures(lint5) == []
+    assert lint5.payload["failures_at_head"] == 1
+
+    types6, lint6 = _at("GATING", 4)
+    for fact in (types6, lint6):
+        assert fact.at == _iso("2026-02-01 09:20:00")
+    assert types6.payload["gate"] == "types"
+    assert types6.payload["status"] == "skip"
+    assert lint6.payload["gate"] == "lint"
+    assert _failures(lint6) == [("a.py", 10, "E1", "bad one")]
+    assert lint6.payload["failures_at_head"] == 1
+
+    (lint7,) = results2
+    # a7 closed at 10:10. Its fact carries that, not its 10:00 start or
+    # task2's own 10:20 updated_at.
+    assert lint7.at == _iso("2026-02-01 10:10:00")
+    assert _failures(lint7) == []
+    assert lint7.payload["failures_at_head"] == 0
+    assert lint7.payload["earned_risk"] is None
+
+    rebuilt = Ledger(tmp_path / "rebuilt.db")
+    fold(record, rebuilt)
+    attempt_cols = "t.record_key, a.phase, a.n, a.earned_risk"
+    reread = sqlite3.connect(source_path)
+    reread.row_factory = sqlite3.Row
+    before = Counter(
+        tuple(r)
+        for r in reread.execute(
+            f"SELECT {attempt_cols} FROM attempts a JOIN tasks t ON t.task_id = a.task_id"
+        )
+    )
+    after = Counter(
+        tuple(r)
+        for r in rebuilt._db.execute(
+            f"SELECT {attempt_cols} FROM attempts a JOIN tasks t ON t.task_id = a.task_id"
+        )
+    )
+    assert before == after
+    rebuilt.close()
+    reread.close()
+
+
+def test_a_task_whose_run_stores_a_gates_baseline_twice_is_refused_where_it_still_needs_subtracting(
+    tmp_path: Path,
+) -> None:
+    def _baseline(ledger: Ledger, run_id: int, lint_count: int) -> None:
+        for _ in range(lint_count):
+            ledger.record_gate_result(
+                GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+                run_id=run_id,
+            )
+        ledger.record_gate_result(
+            GateResult(gate="tests", status="pass", tool="pytest 8.0", failures=[]),
+            run_id=run_id,
+        )
+
+    source = _source(tmp_path / "source.db")
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
+
+    # Task 1: doubled baseline, every attempt result counted -> migrates.
+    run1, task1 = _task(source, repo_id, "SA-0201")
+    _baseline(source, run1, lint_count=2)
+    a1 = source.open_attempt(task1, phase="IMPLEMENTING")
+    source.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a1,
+        baseline=[],
+    )
+
+    # Task 2: doubled baseline, one counted and one uncounted -> refused.
+    run2, task2 = _task(source, repo_id, "SA-0202")
+    _baseline(source, run2, lint_count=2)
+    a2 = source.open_attempt(task2, phase="IMPLEMENTING")
+    source.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a2,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(gate="tests", status="pass", tool="pytest 8.0", failures=[]),
+        attempt_id=a2,
+        baseline=[],
+    )
+    _set(
+        source,
+        "UPDATE gate_results SET failures_at_head = NULL WHERE attempt_id = ? AND gate = 'tests'",
+        (a2,),
+    )
+
+    # Task 3: doubled baseline, its one uncounted result's suite holds an
+    # error. Still refused: an abort exempts nothing.
+    run3, task3 = _task(source, repo_id, "SA-0203")
+    _baseline(source, run3, lint_count=2)
+    a3 = source.open_attempt(task3, phase="IMPLEMENTING")
+    source.record_gate_result(
+        GateResult(gate="tests", status="error", tool="pytest 8.0", failures=[]),
+        attempt_id=a3,
+        baseline=[],
+    )
+    _set(
+        source,
+        "UPDATE gate_results SET failures_at_head = NULL WHERE attempt_id = ?",
+        (a3,),
+    )
+
+    # Task 4: no doubling, an uncounted result -> migrates.
+    run4, task4 = _task(source, repo_id, "SA-0204")
+    _baseline(source, run4, lint_count=1)
+    a4 = source.open_attempt(task4, phase="IMPLEMENTING")
+    source.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a4,
+        baseline=[],
+    )
+    _set(
+        source,
+        "UPDATE gate_results SET failures_at_head = NULL WHERE attempt_id = ?",
+        (a4,),
+    )
+
+    # Task 5: no baseline doubling, but its one attempt stores two uncounted
+    # lint results -> refused.
+    run5, task5 = _task(source, repo_id, "SA-0205")
+    _baseline(source, run5, lint_count=1)
+    a5 = source.open_attempt(task5, phase="IMPLEMENTING")
+    source.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a5,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(gate="lint", status="fail", tool="ruff 1.0", failures=[]),
+        attempt_id=a5,
+        baseline=[],
+    )
+    _set(
+        source,
+        "UPDATE gate_results SET failures_at_head = NULL WHERE attempt_id = ?",
+        (a5,),
+    )
+
+    # Task 6: task 5's shape, both of the attempt's lint results counted ->
+    # migrates, with both stored rows kept.
+    run6, task6 = _task(source, repo_id, "SA-0206")
+    _baseline(source, run6, lint_count=1)
+    a6 = source.open_attempt(task6, phase="IMPLEMENTING")
+    source.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a6,
+        baseline=[],
+    )
+    source.record_gate_result(
+        GateResult(gate="lint", status="fail", tool="ruff 1.0", failures=[]),
+        attempt_id=a6,
+        baseline=[],
+    )
+
+    keys = {
+        n: source._db.execute(
+            "SELECT record_key FROM tasks WHERE task_id = ?", (tid,)
+        ).fetchone()["record_key"]
+        for n, tid in [
+            (1, task1),
+            (2, task2),
+            (3, task3),
+            (4, task4),
+            (5, task5),
+            (6, task6),
+        ]
+    }
+    source_path = tmp_path / "source.db"
+    _close(source)
+
+    result, record = _migrated(source_path)
+    assert sorted(result.migrated) == sorted([keys[1], keys[4], keys[6]])
+    assert sorted(key for key, _ in result.refused) == sorted(
+        [keys[2], keys[3], keys[5]]
+    )
+
+    reasons = dict(result.refused)
+    assert "lint" in reasons[keys[2]] and "baseline" in reasons[keys[2]]
+    assert "lint" in reasons[keys[3]] and "baseline" in reasons[keys[3]]
+    assert "lint" in reasons[keys[5]] and "IMPLEMENTING" in reasons[keys[5]]
+
+    assert record.read(keys[2]) == []
+    assert record.read(keys[3]) == []
+    assert record.read(keys[5]) == []
+
+    results6 = [f for f in record.read(keys[6]) if f.kind == "gate_result"]
+    assert len(results6) == 2
+    assert [f.payload["status"] for f in results6] == ["pass", "fail"]
+
+
+def test_a_ledger_that_predates_the_head_count_subtracts_its_stored_failures(
+    tmp_path: Path,
+) -> None:
+    from saffron.record.fold import fold
+
+    # Source A: predates both failures_at_head and earned_risk entirely.
+    source_a_path = tmp_path / "a" / "source.db"
+    source_a = _source(source_a_path)
+    repo_a = source_a.upsert_repo("saffron", "/o", "/m.git", None)
+    run_a, task_a = _task(source_a, repo_a, "SA-0301")
+    source_a.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="a.py", line=1, code="E1", message="bad")],
+        ),
+        run_id=run_a,
+    )
+    attempt_a = source_a.open_attempt(task_a, phase="IMPLEMENTING")
+    source_a.close_attempt(
+        attempt_a,
+        session_id="sa",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+    source_a.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="a.py", line=1, code="E1", message="bad"),
+                Failure(file="b.py", line=2, code="E2", message="new"),
+            ],
+        ),
+        attempt_id=attempt_a,
+        baseline=[],
+    )
+    key_a = source_a._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_a,)
+    ).fetchone()["record_key"]
+    source_a._db.execute("ALTER TABLE gate_results DROP COLUMN failures_at_head")
+    source_a._db.execute("ALTER TABLE attempts DROP COLUMN earned_risk")
+    source_a._db.commit()
+    _close(source_a)
+
+    result_a, record_a = _migrated(source_a_path)
+    assert result_a.migrated == [key_a]
+    assert result_a.refused == []
+    (fact_a,) = [f for f in record_a.read(key_a) if f.kind == "gate_result"]
+    assert [(f["file"], f["code"]) for f in fact_a.payload["failures"]] == [
+        ("b.py", "E2")
+    ]
+    assert fact_a.payload["failures_at_head"] == 2
+    assert fact_a.payload["earned_risk"] is None
+
+    rebuilt_a = Ledger(tmp_path / "a" / "rebuilt.db")
+    fold(record_a, rebuilt_a)
+    (row_a,) = _rows(rebuilt_a._db, "SELECT earned_risk FROM attempts")
+    assert row_a["earned_risk"] is None
+    rebuilt_a.close()
+
+    # Source B: predates failures_at_head alone, and stores an elevated tier.
+    source_b_path = tmp_path / "b" / "source.db"
+    source_b = _source(source_b_path)
+    repo_b = source_b.upsert_repo("saffron", "/o", "/m.git", None)
+    run_b, task_b = _task(source_b, repo_b, "SA-0302")
+    source_b.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="c.py", line=1, code="E3", message="old")],
+        ),
+        run_id=run_b,
+    )
+    attempt_b = source_b.open_attempt(task_b, phase="IMPLEMENTING")
+    source_b.close_attempt(
+        attempt_b,
+        session_id="sb",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+    source_b.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="c.py", line=1, code="E3", message="old"),
+                Failure(file="d.py", line=2, code="E4", message="new"),
+            ],
+        ),
+        attempt_id=attempt_b,
+        baseline=[],
+        earned_risk="elevated",
+    )
+    key_b = source_b._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (task_b,)
+    ).fetchone()["record_key"]
+    source_b._db.execute("ALTER TABLE gate_results DROP COLUMN failures_at_head")
+    source_b._db.commit()
+    _close(source_b)
+
+    result_b, record_b = _migrated(source_b_path)
+    assert result_b.migrated == [key_b]
+    assert result_b.refused == []
+    (fact_b,) = [f for f in record_b.read(key_b) if f.kind == "gate_result"]
+    assert [(f["file"], f["code"]) for f in fact_b.payload["failures"]] == [
+        ("d.py", "E4")
+    ]
+    assert fact_b.payload["failures_at_head"] == 2
+    assert fact_b.payload["earned_risk"] == "elevated"
+
+    rebuilt_b = Ledger(tmp_path / "b" / "rebuilt.db")
+    fold(record_b, rebuilt_b)
+    (row_b,) = _rows(rebuilt_b._db, "SELECT earned_risk FROM attempts")
+    assert row_b["earned_risk"] == "elevated"
+    rebuilt_b.close()

@@ -1,15 +1,14 @@
 """Record <- ledger. Reads a stored `Ledger`'s rows directly, read-only.
-Appends the facts a live run would have written, so a fold gives back §4's
-tasks, attempts and findings (backlog item 170, §7).
+Appends the facts a live run would have written. A fold then gives back §4's
+tasks, attempts, gate results and findings (backlog item 170, §7).
 
 § numbers here are `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`'s,
 not `DESIGN.md`'s.
 
-Nine kinds only. `task_created`, `attempt_opened`, `attempt_closed`,
+Ten kinds. `task_created`, `attempt_opened`, `attempt_closed`, `gate_result`,
 `finding`, `rebuttal`, `task_merged_head`, `task_package`, `task_push` and
-`task_state`. `gate_result` is `SA-0223`'s. No `task_policy` fact is written,
-since `policy_sha` rides on `task_created` as stored. The six key-filed
-tables are `SA-0224`'s.
+`task_state`. No `task_policy` fact is written, since `policy_sha` rides on
+`task_created` as stored. The six key-filed tables are `SA-0224`'s.
 
 Never a `Ledger`. Its open adds missing columns, so it would write the source.
 """
@@ -17,12 +16,16 @@ Never a `Ledger`. Its open adds missing columns, so it would write the source.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from saffron.gates.baseline import subtract_baseline, suite_drift
+from saffron.gates.contract import Failure, GateResult
+from saffron.gates.suite import aborted_gates
 from saffron.record.contract import Fact, Record
 
 _Maker = Callable[[str, str, dict[str, Any]], Fact]
@@ -58,6 +61,13 @@ def _fact_time(value: str) -> str:
     return datetime.fromisoformat(value).replace(tzinfo=UTC).isoformat()
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """A source this old can lack a column. `PRAGMA table_info` is read
+    against this one table alone, never assumed from another table's
+    presence (`DESIGN.md:359`, problem 3)."""
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def migrate(source: Path, record: Record) -> Migration:
     """Append the facts `source`'s stored tasks are owed, task by task in
     `task_id` order. Opens `source` read-only, so its bytes are the same
@@ -66,10 +76,16 @@ def migrate(source: Path, record: Record) -> Migration:
     conn = sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
+        has_head_count = "failures_at_head" in _columns(conn, "gate_results")
+        has_earned_risk = "earned_risk" in _columns(conn, "attempts")
         result = Migration()
         for task in conn.execute(_TASKS).fetchall():
             key = task["record_key"]
-            facts = _facts_for_task(conn, task)
+            refusal = _refusal_reason(conn, task, has_head_count)
+            if refusal is not None:
+                result.refused.append((key, refusal))
+                continue
+            facts = _facts_for_task(conn, task, has_head_count, has_earned_risk)
             held = record.read(key)
             if held != facts[: len(held)]:
                 result.refused.append(
@@ -84,7 +100,194 @@ def migrate(source: Path, record: Record) -> Migration:
         conn.close()
 
 
-def _facts_for_task(conn: sqlite3.Connection, task: sqlite3.Row) -> list[Fact]:
+def _result_rows(
+    conn: sqlite3.Connection, column: str, value: int
+) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            f"SELECT * FROM gate_results WHERE {column} = ? ORDER BY gate_result_id",
+            (value,),
+        )
+    )
+
+
+def _failure_rows(conn: sqlite3.Connection, gate_result_id: int) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM failures WHERE gate_result_id = ? ORDER BY failure_id",
+            (gate_result_id,),
+        )
+    )
+
+
+def _comparison_result(row: sqlite3.Row, failure_rows: list[sqlite3.Row]) -> GateResult:
+    """A `GateResult` built from stored rows, for `aborted_gates`,
+    `suite_drift` and `subtract_baseline` only (problem 1). It is never
+    written to a fact. A null `message` reads as `""` here, matching what
+    `identity` already normalizes away. The fact payload keeps the stored
+    null instead."""
+    return GateResult(
+        gate=row["gate"],
+        status=row["status"],
+        tool=row["tool"],
+        failures=[
+            Failure(
+                file=f["file"],
+                line=f["line"],
+                code=f["code"],
+                message=f["message"] or "",
+            )
+            for f in failure_rows
+        ],
+    )
+
+
+def _baseline_comparison(conn: sqlite3.Connection, run_id: int) -> list[GateResult]:
+    """The run's own stored baseline, as comparison-only `GateResult`s
+    (problem 1's "the run's stored results")."""
+    return [
+        _comparison_result(row, _failure_rows(conn, row["gate_result_id"]))
+        for row in _result_rows(conn, "run_id", run_id)
+    ]
+
+
+def _doubled_gate(rows: Iterable[sqlite3.Row]) -> str | None:
+    """The first gate name stored more than once among `rows`, or `None`."""
+    counts = Counter(row["gate"] for row in rows)
+    return next((gate for gate, n in counts.items() if n > 1), None)
+
+
+def _refusal_reason(
+    conn: sqlite3.Connection, task: sqlite3.Row, has_head_count: bool
+) -> str | None:
+    """Problem 4. A doubled baseline or a doubled attempt makes the
+    subtraction below ambiguous, but only where that ambiguity can bite:
+    some attempt-scoped result has no stored head count to fall back on.
+    A run-scoped baseline row is never one of "its own results". It never
+    carries a count of its own, so a doubled baseline whose task stores
+    every result counted still migrates."""
+    baseline_rows = _result_rows(conn, "run_id", task["run_id"])
+    doubled_baseline = _doubled_gate(baseline_rows)
+
+    any_null_count = False
+    doubled_attempt: tuple[str, sqlite3.Row] | None = None
+    for attempt in conn.execute(
+        "SELECT * FROM attempts WHERE task_id = ? ORDER BY attempt_id",
+        (task["task_id"],),
+    ):
+        rows = _result_rows(conn, "attempt_id", attempt["attempt_id"])
+        if doubled_attempt is None:
+            gate = _doubled_gate(rows)
+            if gate is not None:
+                doubled_attempt = (gate, attempt)
+        for row in rows:
+            if not has_head_count or row["failures_at_head"] is None:
+                any_null_count = True
+
+    if not any_null_count:
+        return None
+    if doubled_baseline is not None:
+        return f"gate {doubled_baseline!r} stored twice in the run's baseline"
+    if doubled_attempt is not None:
+        gate, attempt = doubled_attempt
+        return (
+            f"gate {gate!r} stored twice on attempt {attempt['phase']} {attempt['n']}"
+        )
+    return None
+
+
+def _failure_payload(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "file": row["file"],
+        "line": row["line"],
+        "code": row["code"],
+        "message": row["message"],
+    }
+
+
+def _gate_result_facts(
+    conn: sqlite3.Connection,
+    attempt: sqlite3.Row,
+    baseline: list[GateResult],
+    at: str,
+    one: _Maker,
+    *,
+    has_head_count: bool,
+    has_earned_risk: bool,
+) -> list[Fact]:
+    """One `gate_result` fact per `gate_results` row stored against this
+    attempt, in the shape a live cell's `Ledger.record_gate_result` writes
+    (problem 1-3). A row whose `failures_at_head` is already stored (post
+    `SA-0220`) is copied through unchanged. Otherwise its stored failures
+    are the full head set, so the count becomes how many were stored. The
+    kept failures are then what `subtract_baseline` leaves against the
+    run's baseline, unless this attempt's own suite `error`ed or drifted
+    against it. Either one keeps every stored failure whole instead (§5.4,
+    `DESIGN.md:359`)."""
+    rows = _result_rows(conn, "attempt_id", attempt["attempt_id"])
+    if not rows:
+        return []
+    failure_rows_by_result = [
+        _failure_rows(conn, row["gate_result_id"]) for row in rows
+    ]
+    comparisons = [
+        _comparison_result(row, failures)
+        for row, failures in zip(rows, failure_rows_by_result, strict=True)
+    ]
+    # In that order (problem 2): an aborted suite is never also checked for
+    # drift, though either alone is enough to distrust the subtraction.
+    aborted = aborted_gates(comparisons)
+    keep_whole = bool(aborted) or bool(suite_drift(comparisons, baseline))
+    earned_risk = attempt["earned_risk"] if has_earned_risk else None
+
+    facts = []
+    for row, failure_rows, comparison in zip(
+        rows, failure_rows_by_result, comparisons, strict=True
+    ):
+        stored_count = row["failures_at_head"] if has_head_count else None
+        if stored_count is not None:
+            failures = [_failure_payload(f) for f in failure_rows]
+            count = stored_count
+        elif keep_whole:
+            failures = [_failure_payload(f) for f in failure_rows]
+            count = len(failure_rows)
+        else:
+            kept = {id(nf.failure) for nf in subtract_baseline([comparison], baseline)}
+            failures = [
+                _failure_payload(f)
+                for f, comp_failure in zip(
+                    failure_rows, comparison.failures, strict=True
+                )
+                if id(comp_failure) in kept
+            ]
+            count = len(failure_rows)
+        facts.append(
+            one(
+                "gate_result",
+                at,
+                {
+                    "gate": row["gate"],
+                    "status": row["status"],
+                    "tool": row["tool"],
+                    "duration_ms": row["duration_ms"],
+                    "summary": row["summary"],
+                    "failures": failures,
+                    "failures_at_head": count,
+                    "earned_risk": earned_risk,
+                    "phase": attempt["phase"],
+                    "n": attempt["n"],
+                },
+            )
+        )
+    return facts
+
+
+def _facts_for_task(
+    conn: sqlite3.Connection,
+    task: sqlite3.Row,
+    has_head_count: bool,
+    has_earned_risk: bool,
+) -> list[Fact]:
     key = task["record_key"]
     repo = task["repo_name"]
     batch_key = str(task["run_batch_id"]) if task["run_batch_id"] is not None else None
@@ -117,16 +320,26 @@ def _facts_for_task(conn: sqlite3.Connection, task: sqlite3.Row) -> list[Fact]:
             },
         )
     ]
-    facts.extend(_attempt_facts(conn, task, one))
+    facts.extend(_attempt_facts(conn, task, one, has_head_count, has_earned_risk))
     facts.extend(_finding_facts(conn, task, one))
     facts.extend(_outcome_facts(task, one))
     return facts
 
 
 def _attempt_facts(
-    conn: sqlite3.Connection, task: sqlite3.Row, one: _Maker
+    conn: sqlite3.Connection,
+    task: sqlite3.Row,
+    one: _Maker,
+    has_head_count: bool,
+    has_earned_risk: bool,
 ) -> list[Fact]:
+    """`attempt_opened`, an optional `attempt_closed`, then that attempt's
+    own `gate_result` facts. They stay contiguous, before the next
+    attempt's own facts start. A reader walking the list backward from any
+    one of them meets its own attempt's open or close fact first
+    (problem 1)."""
     facts = []
+    baseline = _baseline_comparison(conn, task["run_id"])
     for attempt in conn.execute(
         "SELECT * FROM attempts WHERE task_id = ? ORDER BY attempt_id",
         (task["task_id"],),
@@ -138,11 +351,12 @@ def _attempt_facts(
                 {"phase": attempt["phase"], "n": attempt["n"]},
             )
         )
-        if attempt["ended_at"] is not None:
+        closed_at = attempt["ended_at"]
+        if closed_at is not None:
             facts.append(
                 one(
                     "attempt_closed",
-                    attempt["ended_at"],
+                    closed_at,
                     {
                         "phase": attempt["phase"],
                         "n": attempt["n"],
@@ -156,6 +370,18 @@ def _attempt_facts(
                     },
                 )
             )
+        at = closed_at if closed_at is not None else attempt["started_at"]
+        facts.extend(
+            _gate_result_facts(
+                conn,
+                attempt,
+                baseline,
+                at,
+                one,
+                has_head_count=has_head_count,
+                has_earned_risk=has_earned_risk,
+            )
+        )
     return facts
 
 
