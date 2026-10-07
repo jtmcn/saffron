@@ -244,6 +244,9 @@ differ (`saffron/gates/suite.py:231-237`). Its comment says the subtraction
 - `docs/evidence/scripts/2026-09-20-fold-rebuild-time.py:139` reads an
   attempt's `failures` rows. On a ledger written after this change they are
   new failures only, so its measurement means something else there.
+- `docs/evidence/scripts/2026-10-04-new-failures.py:23-28` subtracts the
+  stored baseline from an attempt's rows again. On a ledger written after
+  this change it cancels twice.
 - The declared tier on `task_created`, which is `SA-0221`'s.
 - The migration, `SA-0222` and `SA-0223`. No production caller constructs a
   `Ledger` with a record, and this spec adds none.
@@ -301,8 +304,11 @@ failure twice and one new failure keeps two rows and counts three.
 with `ALTER TABLE ... DROP COLUMN`, so the test does not depend on how the
 schema text spells them. The v0.5 shape replaces the `attempt_id` reference
 as `tests/test_ledger.py:611-620` does. SQLite 3.51.0 breaks a `DROP COLUMN`
-on a table whose last column has a comment above it (`saffron/ledger.py:166-167`).
-Put a new column's comment below it.
+on a table whose last column has a comment above it (`saffron/ledger.py:143-145`).
+Keep every comment out of the gap above the new last column of `attempts`.
+Move the comment at `saffron/ledger.py:166-167` below the new column, beside
+that column's own comment. In `gate_results`, put the new column's
+comment below it.
 
 **Measured on a prototype at `d938eab5`.** A prototype passed all five
 witnesses, and each failed with its source reverted. Its diff measured 1619
