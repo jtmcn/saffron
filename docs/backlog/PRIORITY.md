@@ -521,6 +521,10 @@ exits 1 on a startup failure and shows float noise.
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 
+**Placed 2026-10-07**, from counting the `prose` gate's hits: **b-2d668f**,
+**b-817ef7**, **b-80cad7**, **b-37de22**, **b-c962c7**, **b-30fed0**, then
+**b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
+
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",
 `records/`, "index" and "projection". One was caught before code. The `terms`
