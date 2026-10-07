@@ -6,7 +6,7 @@ priority: 2
 depends_on: [SA-0218]
 consumes:
   - saffron/view/server.py:make_server
-estimated_lines: 543
+estimated_lines: 553
 estimate_measured: true
 touches:
   - saffron/view/server.py
@@ -51,17 +51,20 @@ acceptance:
       task's attempts' `costUsdEst`, each attempt counted once however many
       gate results it has, rounded to cents. A task with no costed attempt
       shows `0.00`. The witness drives a batched task in an end state at
-      `elevated`, whose five attempts carry three gate results, none, one,
-      no cost at all, and a cost equal to another attempt's. Its batch id
+      `elevated` with five attempts. One carries three gate results and the
+      cost `1.234`. The others carry no gate result, one gate result, no
+      cost at all, and a cost equal to another attempt's. Its batch id
       differs from every task id in the fixture. It drives an unbatched
       task in flight at `standard` with no pull request and two costed
-      attempts, and asserts its total. It drives a decoy task with its own
-      batch, cost and pull request.
+      attempts, and asserts its total. It drives a batched decoy task with
+      its own batch, cost and pull request. It drives an unbatched decoy
+      task with a higher id and its own state, risk, cost and pull request.
     witness: tests/test_view_server.py::test_a_task_page_heads_with_its_state_risk_batch_pull_request_and_cost
     wrong_versions:
       - The summary is read from `V2` alone, so the unbatched task's terms are empty.
       - The summary is read from `V5` alone, so the batched task's terms are empty.
       - "`V2` and `V5` run unbound, so the page shows the decoy task's batch and pull request."
+      - "`V2` is bound on `?task` but `V5` runs unbound, so the unbatched page shows the unbatched decoy's terms."
       - The cost sums `V3`'s rows, so an attempt counts once per gate result.
       - The total is read from `V2`'s `?costUsd`, so an unbatched task shows none.
       - Costs are summed over distinct values, so two equal costs count once.
@@ -141,9 +144,11 @@ acceptance:
       `n`, `gate`, `outcome` and `failures`. A failures table names `file`,
       `line`, `code` and `message`, and `findings` names `lens`, `severity`,
       `claim` and `verdict`. The page at `/` holds `batches`, `no-batch` and
-      `left-out` in that order. A task page holds `attempts`,
+      `left-out` in that order. A task page with attempts holds `attempts`,
       `gate-results`, its failures tables and `findings` in that order. The
-      witness serves each page with at least one row in every table.
+      witness's task has a failing gate result with failure lines, so a
+      failures table exists, and a finding. A task in a state the view
+      leaves out fills `left-out`. So every table it reads has a row.
     witness: tests/test_view_server.py::test_every_table_on_every_page_has_a_header_row_naming_its_columns
     wrong_versions:
       - Header rows only on the task page's tables.
@@ -186,8 +191,9 @@ The final review of `SA-0218` found, on the real ledger, that the task page
 cannot say it. `/task/226` ends in `GATE_ERROR` with no attempts, and its
 page is a title and an empty table.
 
-Line numbers below were read at `c0a3488f`, the head of `SA-0218`'s
-branch plus two backlog commits. That is the base this spec builds on.
+Line numbers below were read at `cc3f4622`. That is `SA-0218`'s branch
+plus the backlog commits and this spec, and it is the base this spec
+builds on.
 
 **What the page does now.** `_render_task`
 (`saffron/view/server.py:478-494`) shows the spec id in the title and the
@@ -307,13 +313,14 @@ equals its position. Set a task's state, risk and pull request with
 `_set_task`. Set an attempt's times, turns and cost with a raw `UPDATE`
 in the same shape, since `close_attempt` stamps the clock. The ledger
 keeps times as `%Y-%m-%d %H:%M:%S`. `V3` returns them as, for example,
-`2026-01-02T01:00:00Z`, measured on the host at `c0a3488f`. Pick costs
+`2026-01-02T01:00:00Z`, measured on the host at `cc3f4622`. Pick costs
 whose rounding tells the wrong versions apart. `1.234`, `2.004`, `0.459`
 and `0.459` sum to `4.156`, which rounds to `4.16`. Truncating gives
 `4.15`, and so does rounding each first. Summing distinct values gives
 `3.70`. The unbatched task's `0.415` and `0.237` round to `0.65`, and a
-total read from `V2` shows nothing there. A decoy task with its own batch,
-cost and pull request shows a query read unbound. Criterion 6 sets the
+total read from `V2` shows nothing there. A batched decoy shows `V2` read
+unbound. An unbatched decoy with a higher id shows `V5` read unbound,
+since unbound `V5` returns it first. Criterion 6 sets the
 batches' `started_at` with a raw `UPDATE` too.
 
 **Batch ids against task ids.** `_ledger` hands out batch ids from 4 and
@@ -331,10 +338,12 @@ gate-results rows and the failures table ids as sorted lists. `n` counts
 within one phase (`saffron/ledger.py:1353-1357`). So the attempt with no
 gate result must be a `REPAIRING` one, opened before the `REPAIRING` one
 with `lint`. That one's `n` is then 2. Assert each heading's whole text,
-so a heading that leaves out `n` fails.
+so a heading that leaves out `n` fails. Assert that each failing
+result's id differs from its attempt's id, so a table id built from the
+attempt id cannot match by coincidence.
 
-**Measured on a prototype at `a20e6839`.** A prototype passed all 24
+**Measured on a prototype over `cc3f4622`.** A prototype passed all 24
 tests in the file. Each of the six witnesses failed against the base
-`server.py`. Each of the 49 wrong versions above was applied to it as an
-edit, and each failed its own criterion's witness. Its diff was 2170
+`server.py`. Each of the 50 wrong versions above was applied to it as an
+edit, and each failed its own criterion's witness. Its diff was 2211
 changed tokens by the `size` gate, against the `feature` ceiling of 3000.
