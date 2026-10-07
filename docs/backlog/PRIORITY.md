@@ -521,6 +521,9 @@ exits 1 on a startup failure and shows float noise.
 **Placed 2026-10-07**, from reading the view in use: **b-5aa016**. The task
 page shows no spec, no diff size and no model.
 
+**Placed 2026-10-07**, from the same reading: **b-f6ebc2**. No attempt records
+the reasoning effort it ran at.
+
 **Placed 2026-10-02**, from grading Jev's scores: **b-ef334d**. Its noise score
 sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 
