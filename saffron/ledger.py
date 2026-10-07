@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from saffron.agents.findings import Finding, Severity
+from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, new_task_key
 
@@ -162,9 +163,10 @@ CREATE TABLE IF NOT EXISTS attempts (
     terminal_reason TEXT,
     num_turns       INTEGER,
     cost_usd_est    REAL,
-    cost_floor_usd_est REAL
-    -- The no-result path's priced floor (SA-0206), null from a `result`
-    -- event. Below the column: SQLite 3.51.0's DROP COLUMN breaks above it.
+    cost_floor_usd_est REAL,
+    earned_risk     TEXT
+    -- cost_floor_usd_est: the no-result path's priced floor (SA-0206).
+    -- earned_risk: the tier a suite judged this attempt at (§5.6).
 );
 
 -- Exactly one of attempt_id and run_id is set, and the null is the point: a
@@ -182,6 +184,9 @@ CREATE TABLE IF NOT EXISTS gate_results (
     tool           TEXT,
     duration_ms    INTEGER,
     summary        TEXT,
+    failures_at_head INTEGER,
+    -- The failure count before baseline subtraction (§3), null for a
+    -- baseline result naming a run.
     CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
 );
 
@@ -401,6 +406,12 @@ class Ledger:
         }
         if "tool" not in gate_existing:
             self._db.execute("ALTER TABLE gate_results ADD COLUMN tool TEXT")
+        # Item 170: the failure count before baseline subtraction. Added
+        # the same way as `tool`, before the rebuild copies it instead.
+        if "failures_at_head" not in gate_existing:
+            self._db.execute(
+                "ALTER TABLE gate_results ADD COLUMN failures_at_head INTEGER"
+            )
         # And on `attempts`: a ledger predating this column needs it added
         # here before `close_attempt` can write to it (SA-0206).
         attempts_existing = {
@@ -409,6 +420,9 @@ class Ledger:
         }
         if "cost_floor_usd_est" not in attempts_existing:
             self._db.execute("ALTER TABLE attempts ADD COLUMN cost_floor_usd_est REAL")
+        # Item 170: the tier the gate suite ran at (§5.6).
+        if "earned_risk" not in attempts_existing:
+            self._db.execute("ALTER TABLE attempts ADD COLUMN earned_risk TEXT")
         # The backfill the old schema comment promised. A ledger written before
         # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
         # a new attempt's id starts at 1 in that same integer namespace — so
@@ -480,11 +494,12 @@ class Ledger:
                    tool           TEXT,
                    duration_ms    INTEGER,
                    summary        TEXT,
+                   failures_at_head INTEGER,
                    CHECK ((attempt_id IS NULL) <> (run_id IS NULL))
                );
                INSERT INTO gate_results_new
                    SELECT gate_result_id, attempt_id, run_id, gate, status,
-                          tool, duration_ms, summary FROM gate_results;
+                          tool, duration_ms, summary, failures_at_head FROM gate_results;
                DROP TABLE gate_results;
                ALTER TABLE gate_results_new RENAME TO gate_results;
                COMMIT;"""
@@ -720,7 +735,7 @@ class Ledger:
             data = dict(payload)
             failures = data.pop("failures", [])
             cursor = self._db.execute(
-                "INSERT INTO gate_results (attempt_id, gate, status, tool, duration_ms, summary) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO gate_results (attempt_id, gate, status, tool, duration_ms, summary, failures_at_head) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     attempt_id,
                     data["gate"],
@@ -728,6 +743,9 @@ class Ledger:
                     data.get("tool"),
                     data.get("duration_ms"),
                     data.get("summary"),
+                    # `.get`: a fact written before this change has no such
+                    # key, and folds to null instead of raising (item 170).
+                    data.get("failures_at_head"),
                 ),
             )
             gate_result_id = _inserted_id(cursor)
@@ -739,6 +757,12 @@ class Ledger:
                 "INSERT INTO failures (gate_result_id, file, code, message, line) VALUES (?, ?, ?, ?, ?)",
                 rows,
             )
+            earned_risk = data.get("earned_risk")
+            if earned_risk is not None:
+                self._db.execute(
+                    "UPDATE attempts SET earned_risk = ? WHERE attempt_id = ?",
+                    (earned_risk, attempt_id),
+                )
             return gate_result_id
         if fact.kind == "task_state":
             # `set_task_state` rolls the spend up from closed attempts, and
@@ -1847,6 +1871,8 @@ class Ledger:
         *,
         run_id: int | None = None,
         attempt_id: int | None = None,
+        baseline: list[GateResult] | None = None,
+        earned_risk: str | None = None,
     ) -> int:
         if attempt_id is not None and run_id is not None:
             raise ValueError("a gate result names an attempt or a run, never both")
@@ -1883,13 +1909,24 @@ class Ledger:
                     )
             return gate_result_id
         owner = self._attempt_of(attempt_id, "record a gate result against")
+        # A passed `baseline`, an empty one included, is what gets subtracted.
+        # With none passed, the run's own stored baseline is read instead (§3).
+        base = (
+            baseline
+            if baseline is not None
+            else self.baseline_results(self.task_run(owner["task_id"]))
+        )
+        new = subtract_baseline([result], base)
+        kept = result.model_copy(update={"failures": [nf.failure for nf in new]})
         fact = self._build_fact(
             owner["task_id"],
             "gate_result",
             {
-                **result.model_dump(mode="json"),
+                **kept.model_dump(mode="json"),
                 "phase": owner["phase"],
                 "n": owner["n"],
+                "failures_at_head": len(result.failures),
+                "earned_risk": earned_risk,
             },
         )
         return cast(int, self._commit_and_append(fact))

@@ -2539,8 +2539,18 @@ def _drive_cell(
             # moved HEAD, because `run_rebuttal` buys two; that re-run decides
             # EXHAUSTED-or-not and is not a term in either query.
             attempt_id = ledger.attempts(task_id)[-1]["attempt_id"]
+            # A drifted or aborted suite trusts no subtraction (§5.4), so an
+            # empty baseline is passed, not the run's own stored rows (item 170).
+            judged_baseline = (
+                [] if (comparison.aborted or comparison.drift) else baseline.results
+            )
             for result in latest.results:
-                ledger.record_gate_result(result, attempt_id=attempt_id)
+                ledger.record_gate_result(
+                    result,
+                    attempt_id=attempt_id,
+                    baseline=judged_baseline,
+                    earned_risk=latest.effective_risk,
+                )
             # `None` unless `repair_loop` is calling: `_rebut_gates` calls
             # `_judge()` bare, since `against: "rebuttal"` has no owner yet (item 160).
             if attempt is not None:
