@@ -1663,8 +1663,8 @@ def test_a_task_page_totals_each_phase_and_the_task_with_unknowns_never_zero(
         started_at="2026-01-01 00:00:00",
         ended_at="2026-01-02 01:00:00",
         num_turns=30,
-        # 0.79 and 0.815, not 0.80 and 0.805: these cross a cent under a
-        # float round-trip, still summing to 1.605.
+        # 0.79 and 0.815, not the spec's 0.80 and 0.805: the same 1.605, but
+        # a sum of each cost through Decimal(float) reads 1.60 only with these.
         cost_usd_est=0.79,
     )
 
@@ -1779,6 +1779,64 @@ def test_a_task_page_totals_each_phase_and_the_task_with_unknowns_never_zero(
             "2.74 + 4 unknown",
             "25:37:05 + 4 unknown",
         ],
+    ]
+
+
+def test_each_phase_total_counts_only_its_own_columns_unknowns_and_sums_cost_exactly(
+    tmp_path: Path,
+) -> None:
+    """Turns, cost and wall time each lack a different number of attempts, so
+    a cell reading another column's unknown count shows the wrong one. The
+    costs 0.003 and 0.022 sum to 0.025 exactly, which rounds half up to
+    0.03. A float sum reads back as 0.024999999999999998 and shows 0.02."""
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-UNKNOWNS", "su", "bu")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    no_turns_no_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        no_turns_no_cost,
+        started_at="2026-01-02 02:00:00",
+        ended_at="2026-01-02 02:10:00",
+    )
+    no_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        no_cost,
+        started_at="2026-01-02 02:20:00",
+        ended_at="2026-01-02 02:25:00",
+        num_turns=4,
+    )
+    small_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        small_cost,
+        started_at="2026-01-02 02:30:00",
+        ended_at="2026-01-02 02:31:00",
+        num_turns=2,
+        cost_usd_est=0.003,
+    )
+    other_small_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        other_small_cost,
+        started_at="2026-01-02 02:40:00",
+        ended_at="2026-01-02 02:42:00",
+        num_turns=1,
+        cost_usd_est=0.022,
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+
+    row = ["4", "7 + 1 unknown", "0.03 + 2 unknown", "0:18:00"]
+    assert _parse(body).tables["phase-totals"] == [
+        ["IMPLEMENTING", *row],
+        ["all phases", *row],
     ]
 
 
