@@ -645,7 +645,7 @@ checkpoint, ends `ORPHANED` the first time at a `spec_sha`. The second such cut 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase. Five more ways in share the state.
 The spend ceiling stops the task before its next turn. Its gates go red after the
-rebuttal. A REBUT past the budget is cut short by its $7.00 cap. Its exported patch
+rebuttal. A REBUT is cut short by its $10.00 cap. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
 **`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
