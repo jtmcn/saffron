@@ -703,6 +703,72 @@ def test_a_handoff_replaces_the_stacking_resolver(tmp_path, monkeypatch):
     assert parent_branch == "saffron/TE-9"
 
 
+def test_the_cell_spec_carries_the_tier_the_spec_declared_and_none_where_it_declared_none(
+    tmp_path, monkeypatch
+):
+    """`run_task` hands `run_one_cell` a `CellSpec` whose `declared_risk` is
+    the spec's `declared_risk`. That is `None` where the frontmatter declared
+    no tier. The `CellSpec`'s `risk` is still the spec's `risk` (item 170)."""
+    from saffron.task import Handoff
+
+    captured: dict = {}
+
+    def _run_one_cell(cell_spec, **_kwargs):
+        captured["spec"] = cell_spec
+        return CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=1,
+            run_id=1,
+            task_dir=tmp_path / "out" / "TE-1",
+        )
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+
+    def _package(_outcome, **kwargs):
+        return package_phase.PackageResult(state="READY_FOR_REVIEW", pr_url="u")
+
+    monkeypatch.setattr(package_phase, "package", _package)
+
+    head = "---\nid: TE-1\ntitle: t\ntype: feature\ntouches:\n  - src/**\n"
+    tail = "---\n\n## Acceptance criteria\n- [ ] it works\n"
+    cases = [
+        (head + tail, None, "standard"),
+        (head + "risk:\n" + tail, None, "standard"),
+        (head + "risk: standard\n" + tail, "standard", "standard"),
+        (head + "risk: elevated\n" + tail, "elevated", "elevated"),
+    ]
+
+    for i, (text, declared, risk) in enumerate(cases):
+        spec = parse_spec(text)
+        ledger = Ledger(tmp_path / f"cell-spec-{i}.db")
+        task_module.run_task(
+            spec,
+            "s" * 40,
+            ceilings=ResolvedCeilings(
+                budget_usd=12.0,
+                max_attempts=4,
+                max_turns=60,
+                budget_source="default",
+                attempts_source="default",
+                turns_source="default",
+            ),
+            base=PinnedBase(
+                mirror=tmp_path / "mirror.git",
+                url="https://github.com/o/r.git",
+                base_sha="a" * 40,
+            ),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+            token=None,
+            handoff=Handoff(stacked_on=None, target_branch=None),
+        )
+        ledger.close()
+        assert captured["spec"].declared_risk == declared
+        assert captured["spec"].risk == risk
+
+
 # --- SA-0150: run_task on a stack batch's recorded spec text -------------
 
 _SY1_TEXT = (

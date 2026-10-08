@@ -229,6 +229,15 @@ Every verified blocker is fixed, deferred to `{KNOWN}`, or answered by the opera
 
 ## 2. Run each spec
 
+**A batch is the default.** The operator set this on 2026-10-07, in run 30.
+Start `saffron batch --repo . --budget <total>` over the order, with the token
+and listeners as in (a). Use `--stack` unless a parent is an open pull request
+outside the order (b-e0e1cf). Run `driver.py record` for each task once it
+packages. Review each pull request while the next cell runs, hold its fixes as
+local commits, and restack the layers above once the batch drains
+(b-cab612). The attended path below is the fallback, and taking it is the
+operator's call.
+
 `uv run .claude/skills/run-saffron-spec-loop/driver.py next` names the next
 spec, or exits 1 saying why none is left.
 

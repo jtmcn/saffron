@@ -84,6 +84,19 @@ class RefsRecord:
             "mktree", stdin=f"040000 tree {facts_tree}\t{_FACTS}\n"
         ).strip()
 
+    def push(self, task_key: str, remote: str) -> None:
+        """Push one task's own ref to `remote`, nothing else. A non-fast-forward
+        keeps raising `StaleWriter` through `_push`. A hook decline or a dead
+        remote surfaces as the plain `RecordError` `_push` already raises for
+        anything that is not `[rejected]`."""
+        self._push(remote, f"{TASKS}/{task_key}")
+
+    def fetch(self, remote: str) -> None:
+        """Pull every task ref from `remote`, pruning one this repo holds that
+        `remote` no longer does. Scoped to `refs/saffron/tasks/*` alone, so a
+        mirror's branches and its `refs/saffron/values/*` are left as they were."""
+        self._git("fetch", "--prune", remote, f"+{TASKS}/*:{TASKS}/*")
+
     def _push(self, remote: str, ref: str) -> None:
         # No `--force`: a non-fast-forward refusal is how a stale writer
         # learns it is stale, the primitive a cross-host budget depends on.

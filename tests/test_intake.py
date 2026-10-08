@@ -67,6 +67,24 @@ def test_defaults_are_the_documented_ones():
     assert spec.acceptance_criteria == []
 
 
+def test_a_spec_declares_a_tier_only_where_its_frontmatter_sets_one():
+    """`declared_risk` is `risk` where the frontmatter set it, and `None`
+    otherwise. `risk` keeps reading `standard` for an undeclared spec either
+    way, so the gate suite's `effective_risk(spec.risk, ...)` call still gets
+    a string (item 170)."""
+    head = "---\nid: TE-1\ntitle: t\ntype: chore\n"
+
+    omitted = parse_spec(head + "---\n")
+    empty = parse_spec(head + "risk:\n---\n")
+    standard = parse_spec(head + "risk: standard\n---\n")
+    elevated = parse_spec(head + "risk: elevated\n---\n")
+
+    assert omitted.declared_risk is None and omitted.risk == "standard"
+    assert empty.declared_risk is None and empty.risk == "standard"
+    assert standard.declared_risk == "standard" and standard.risk == "standard"
+    assert elevated.declared_risk == "elevated" and elevated.risk == "elevated"
+
+
 def test_a_missing_frontmatter_block_is_rejected():
     with pytest.raises(SpecError, match="frontmatter"):
         parse_spec("# Just a heading\n")

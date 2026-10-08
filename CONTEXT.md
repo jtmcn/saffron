@@ -182,10 +182,12 @@ runs on it. A spec offered again after a wait keeps the task it was minted.
 **Spec writer session**: A host-invoked session that revises one spec after its spec
 review routes it to `revise`. It runs in a critic cell at the predecessor's head, or
 at `base_sha` with no predecessor. Its attempt is labelled SPEC_WRITING. Its reply
-becomes a recorded spec text, which the spec review then reads.
+becomes a recorded spec text, which the spec review then reads. Under `saffron draft`
+it also writes the first text, from the item (§3.4).
 
 **Revision**: One spec writer session and the spec review of the text it returned. A
-stack batch runs at most three per spec, then escalates the spec. A revision starts
+stack batch runs at most three per spec, then escalates the spec. `saffron draft` runs
+at most one (§3.4). A stack batch's revision starts
 only while the budget left, less the reserve, covers a writer, a review and the spec's
 budget.
 
@@ -196,10 +198,10 @@ task ends `SPEC_WITHHELD`, and each spec that depends on it is refused. It count
 no abort.
 _Avoid_: "rejected", "blocked".
 
-**Recorded spec text**: A spec's text that a stack batch runs and that is not at
+**Recorded spec text**: A spec's text that a task records and that is not at
 `base_sha`. It is a `spec_texts` row and a `spec_text` fact, hashed when recorded.
 Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against
-the latest one. Only a revision writes one.
+the latest one. A revision, a follow-up and a draft each write one.
 
 **Spec loop**: A delegate's pass over the queued specs, each through an attended
 `saffron cell`, into one stack. Each step it does by hand is one the factory does
@@ -209,7 +211,7 @@ _Avoid_: "batch" (unattended, with one budget over every task), "night".
 **Spec chain**: A delegate's turning of a backlog item or a handed-over finding into
 a spec, through the `spec-writer` and `spec-reviewer` delegates, until its review
 rounds stop. It ends at a spec a cell can run and starts no cell. The spec loop
-runs that spec.
+runs that spec. `saffron draft` runs it as a task (§3.4).
 _Avoid_: "spec loop" (that runs specs), "spec creation loop".
 
 **Run**: One task's pin, owning the `base_sha` its gates and policy are read at, its
@@ -578,7 +580,8 @@ REBUT, so it becomes a question to the operator. There it is the delegate's, and
 advisory. In a stack batch the host starts one session per spec in a critic cell
 at the predecessor's head, or at `base_sha` with no predecessor. Its route runs
 the spec, revises it, or withholds it (`SPEC_WITHHELD`). A provider limit routes
-it to `wait`, and an unreadable read to `error`.
+it to `wait`, and an unreadable read to `error`. Each round it records keeps its
+findings one by one, as `spec_finding` facts (§3.4).
 `spec-reviewer` is the file and id of the agent definition that performs it, not
 a role.
 _Avoid_: "the reviewer" (that is the operator), "the critic" or "a lens" (both
@@ -660,7 +663,8 @@ _Avoid_: "offline", "network failure".
 **`SPEC_WITHHELD`**: A task whose spec review in a stack batch escalated, so no cell
 ran its spec. It escalates a `blocker` it could not revise, or a spec still unclean
 after three revisions. The review is a fact on the task. The spec is not queued again
-until it is edited.
+until it is edited. Under `saffron draft`, a writer reply that declares an id other
+than the task's is withheld too, with no further review (§3.4).
 _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by

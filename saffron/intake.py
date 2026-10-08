@@ -194,8 +194,8 @@ class Spec(BaseModel):
     estimated_lines: int | None = Field(default=None, gt=0, strict=True)
     # True when a prototype's diff was measured, so no hand overrun applies (b-b0a187).
     estimate_measured: bool = Field(default=False, strict=True)
-    # ponytail: not `RiskTier | None`, so no spec can declare no tier and
-    # `create_task` files the record's "standard" as though one had.
+    # `declared_risk` below is where "no tier was declared" is readable.
+    # This field and its default stay as every existing reader expects them.
     risk: RiskTier = "standard"
 
     body: str = ""
@@ -206,6 +206,14 @@ class Spec(BaseModel):
     def spec_type(self) -> SpecType:
         """`type` under the name `CellSpec` and the gate suite read it by."""
         return self.type
+
+    @property
+    def declared_risk(self) -> RiskTier | None:
+        """The tier the frontmatter set, as opposed to `risk`'s defaulted
+        value. `None` where the spec declared no tier at all. A fact filed
+        from this can tell a declared `standard` from no declaration
+        (item 170)."""
+        return self.risk if "risk" in self.model_fields_set else None
 
     @field_validator("consumes")
     @classmethod

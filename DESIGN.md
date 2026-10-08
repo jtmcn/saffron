@@ -306,7 +306,8 @@ Design notes:
   SPEC_WITHHELD    ◀── in a stack batch, before any cell: its spec review
                        escalated a blocker it could not revise, or the spec was
                        still unclean after three revisions (ADR 7). Under
-                       `saffron draft`, still unclean after one revision (§3.4)
+                       `saffron draft`, still unclean after one revision, or a
+                       writer reply that declared another spec's id (§3.4)
   SPEC_DRAFTED     ◀── `saffron draft`, before any cell: its spec review came
                        back clean, and the spec waits for the operator (§3.4)
 ```
@@ -329,7 +330,7 @@ The command reuses the stack batch's parts (ADR 7) in this order.
 4. A review that routes `revise` starts one revision. A second review that is still unclean escalates. The bound is two review rounds, the spec chain's own stop rule.
 5. The host writes the last recorded text to `.saffron/specs/` in `--repo`'s working tree. It commits nothing and opens no pull request. The operator reads, commits and merges the spec.
 
-The task ends `SPEC_DRAFTED` on a clean review and `SPEC_WITHHELD` on an escalation. Both write the file. An escalated draft is still the cheapest start for the operator's own edit. The exit codes keep their meaning: `0` drafted, `1` withheld, `2` infrastructure.
+The task ends `SPEC_DRAFTED` on a clean review. It ends `SPEC_WITHHELD` on an escalation, or when a writer reply declares an id other than the task's. Both write the file. An escalated draft is still the cheapest start for the operator's own edit. The exit codes keep their meaning: `0` drafted, `1` withheld, `2` infrastructure.
 
 **Every review round records its findings one by one.** Each is a `spec_finding` fact with its round, severity, tag, claim and file. A stack batch's spec review writes them too. A defect a later stage confirms can then name the round that raised it, or show that none did. A findings block stored as one text cannot.
 

@@ -5,7 +5,7 @@ import pytest
 
 from saffron import cli
 from saffron.agents.findings import Finding
-from saffron.gates.contract import GateResult
+from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
 from saffron.record.contract import Fact
 from saffron.record.fold import UnreadableTask, fold
@@ -241,6 +241,80 @@ def test_the_fold_keeps_each_attempts_cost_floor(tmp_path, record):
 
     assert _floors(source) == [0.4, 0.0, None, None]
     assert _floors(into) == [0.4, 0.0, None, None]
+    source.close()
+    into.close()
+
+
+def test_the_fold_keeps_new_failures_the_head_count_and_the_tier(tmp_path, record):
+    """`record_gate_result`'s `failures_at_head` and `earned_risk` are carried
+    on the `gate_result` fact and fold back exactly. A fact written before
+    this change carries neither key. Folding it leaves whatever tier an
+    earlier fact on the same attempt already gave it (item 170)."""
+    source = Ledger(tmp_path / "source.db", record=record)
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", policy_sha="p")
+    run_id = source.create_run(repo_id, base_sha="a" * 40)
+    task_id = source.create_task(
+        run_id, spec_id="SA-0099", spec_sha="s" * 64, branch="b"
+    )
+
+    a1 = source.open_attempt(task_id)
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="a.py", code="E1", message="boom", line=1)],
+        ),
+        attempt_id=a1,
+        earned_risk="standard",
+    )
+    a2 = source.open_attempt(task_id)
+    source.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="b.py", code="E2", message="bang", line=2)],
+        ),
+        attempt_id=a2,
+        earned_risk="elevated",
+    )
+
+    # A second, stale fact against `a1`, the shape every pre-change fact has.
+    # It follows `a1`'s real fact, so a fold must not let it clear the tier.
+    key = source.record_key(task_id)
+    facts = record.read(key)
+    first_gate_result = next(i for i, f in enumerate(facts) if f.kind == "gate_result")
+    stale_payload = dict(facts[first_gate_result].payload)
+    stale_payload["gate"] = "types"
+    stale_payload["failures"] = []
+    del stale_payload["failures_at_head"]
+    del stale_payload["earned_risk"]
+    stale = replace(facts[first_gate_result], payload=stale_payload)
+    record.append(key, stale)
+
+    into = Ledger(tmp_path / "into.db")
+    fold(record, into)
+
+    def _counts(ledger, attempt_id):
+        return [
+            r["failures_at_head"]
+            for r in ledger._db.execute(
+                "SELECT failures_at_head FROM gate_results "
+                "WHERE attempt_id = ? ORDER BY gate_result_id",
+                (attempt_id,),
+            )
+        ]
+
+    def _earned_risk(ledger, attempt_id):
+        return ledger._db.execute(
+            "SELECT earned_risk FROM attempts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()["earned_risk"]
+
+    # `a1` keeps the tier its first, real fact gave it: the second, stale
+    # fact carries no `earned_risk` key, and must not clear it.
+    assert _counts(into, a1) == [1, None]
+    assert _earned_risk(into, a1) == "standard"
+    assert _counts(into, a2) == [1]
+    assert _earned_risk(into, a2) == "elevated"
     source.close()
     into.close()
 

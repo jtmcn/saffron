@@ -124,6 +124,260 @@ def test_a_gate_error_is_not_recorded_as_a_failure(ledger, record, task):
     assert record.read(ledger.record_key(task_id))[-1].payload["status"] == "error"
 
 
+def test_an_attempts_gate_result_keeps_only_its_new_failures(ledger, record, task):
+    repo_id = ledger.upsert_repo("other", "/o2", "/m2.git", policy_sha="p" * 64)
+    run_id, task_id = task
+
+    # Member 5: a baseline failure stored on another run must never cancel
+    # this task's own head failure of the same identity.
+    other_run = ledger.create_run(repo_id, base_sha="z" * 40)
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="r.py", code="E3", message="other run", line=1)],
+        ),
+        run_id=other_run,
+    )
+
+    # The task's own run's baseline: a lint suite, a tests suite and a
+    # witness suite, each with one failure.
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[
+                Failure(file="a.py", code="E1", message="boom", line=3),
+                Failure(file="c.py", code="E2", message="dup", line=5),
+            ],
+        ),
+        run_id=run_id,
+    )
+    ledger.record_gate_result(
+        GateResult(
+            gate="tests",
+            status="fail",
+            failures=[Failure(file="m.py", code="T1", message="shared", line=7)],
+        ),
+        run_id=run_id,
+    )
+    ledger.record_gate_result(
+        GateResult(
+            gate="witness",
+            status="fail",
+            failures=[
+                Failure(
+                    file="w.py", code="survived-mutant", message="mutant lived", line=9
+                )
+            ],
+        ),
+        run_id=run_id,
+    )
+
+    a1 = ledger.open_attempt(task_id)
+
+    # Member 1: the baseline's match at a different line still cancels.
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="a.py", code="E1", message="boom", line=99)],
+        ),
+        attempt_id=a1,
+    )
+    # Member 2: two head copies of one baseline failure, one cancels, one new.
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[
+                Failure(file="c.py", code="E2", message="dup", line=5),
+                Failure(file="c.py", code="E2", message="dup", line=5),
+            ],
+        ),
+        attempt_id=a1,
+    )
+    # Member 4: identical file/code/message to the `tests` baseline failure,
+    # but under `lint`, and the gate is part of the identity, so this is new.
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="m.py", code="T1", message="shared", line=7)],
+        ),
+        attempt_id=a1,
+    )
+    # Member 5 (head side): identical to the other run's baseline failure.
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[Failure(file="r.py", code="E3", message="other run", line=1)],
+        ),
+        attempt_id=a1,
+    )
+    # Member 3: a `witness` failure coded `survived-mutant` at base never
+    # cancels its match at head.
+    ledger.record_gate_result(
+        GateResult(
+            gate="witness",
+            status="fail",
+            failures=[
+                Failure(
+                    file="w.py", code="survived-mutant", message="mutant lived", line=9
+                )
+            ],
+        ),
+        attempt_id=a1,
+    )
+    # Member 6: a gate with no failures.
+    ledger.record_gate_result(GateResult(gate="types", status="pass"), attempt_id=a1)
+
+    results = ledger.attempt_results(a1)
+    by_gate: dict[str, list[GateResult]] = {}
+    for result in results:
+        by_gate.setdefault(result.gate, []).append(result)
+
+    lint_results = by_gate["lint"]
+    assert [r.failures for r in lint_results] == [
+        [],
+        [Failure(file="c.py", code="E2", message="dup", line=5)],
+        [Failure(file="m.py", code="T1", message="shared", line=7)],
+        [Failure(file="r.py", code="E3", message="other run", line=1)],
+    ]
+    witness_result = by_gate["witness"][0]
+    assert witness_result.failures == [
+        Failure(file="w.py", code="survived-mutant", message="mutant lived", line=9)
+    ]
+    types_result = by_gate["types"][0]
+    assert types_result.failures == []
+
+    head_counts = [
+        row["failures_at_head"]
+        for row in ledger._db.execute(
+            "SELECT failures_at_head FROM gate_results WHERE attempt_id = ? ORDER BY gate_result_id",
+            (a1,),
+        )
+    ]
+    assert head_counts == [1, 2, 1, 1, 1, 0]
+
+    # The fact itself carries the same failures and the same count.
+    fact = record.read(ledger.record_key(task_id))[-1]
+    assert fact.payload["failures"] == []
+    assert fact.payload["failures_at_head"] == 0
+
+    # The baseline results are untouched: full failure lists, null counts.
+    baseline = ledger.baseline_results(run_id)
+    assert {r.gate: [f.code for f in r.failures] for r in baseline} == {
+        "lint": ["E1", "E2"],
+        "tests": ["T1"],
+        "witness": ["survived-mutant"],
+    }
+    baseline_counts = [
+        row["failures_at_head"]
+        for row in ledger._db.execute(
+            "SELECT failures_at_head FROM gate_results WHERE run_id = ? ORDER BY gate_result_id",
+            (run_id,),
+        )
+    ]
+    assert baseline_counts == [None, None, None]
+
+    # Member 7 & 8: an explicit `baseline` is what is subtracted, not
+    # whatever else is stored for the run.
+    third_run = ledger.create_run(repo_id, base_sha="y" * 40)
+    third_task = ledger.create_task(
+        third_run, spec_id="SA-0100", spec_sha="s" * 64, branch="b3"
+    )
+    one_copy = GateResult(
+        gate="lint",
+        status="fail",
+        failures=[Failure(file="d.py", code="E4", message="twice", line=1)],
+    )
+    # Two stored suites, each holding the failure once.
+    ledger.record_gate_result(one_copy, run_id=third_run)
+    ledger.record_gate_result(one_copy, run_id=third_run)
+    a3 = ledger.open_attempt(third_task)
+    two_copies = GateResult(
+        gate="lint",
+        status="fail",
+        failures=[
+            Failure(file="d.py", code="E4", message="twice", line=1),
+            Failure(file="d.py", code="E4", message="twice", line=1),
+        ],
+    )
+    ledger.record_gate_result(two_copies, attempt_id=a3, baseline=[one_copy])
+    ledger.record_gate_result(one_copy, attempt_id=a3, baseline=[])
+    third_results = ledger.attempt_results(a3)
+    assert third_results[0].failures == [
+        Failure(file="d.py", code="E4", message="twice", line=1)
+    ]
+    assert third_results[1].failures == [
+        Failure(file="d.py", code="E4", message="twice", line=1)
+    ]
+
+    # Member 9: a run with no stored baseline cancels nothing.
+    fourth_run = ledger.create_run(repo_id, base_sha="x" * 40)
+    fourth_task = ledger.create_task(
+        fourth_run, spec_id="SA-0101", spec_sha="s" * 64, branch="b4"
+    )
+    a4 = ledger.open_attempt(fourth_task)
+    ledger.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            failures=[
+                Failure(file="e.py", code="E5", message="none stored", line=1),
+                Failure(file="e.py", code="E5", message="none stored", line=1),
+            ],
+        ),
+        attempt_id=a4,
+    )
+    (fourth_result,) = ledger.attempt_results(a4)
+    assert len(fourth_result.failures) == 2
+    fourth_fact = record.read(ledger.record_key(fourth_task))[-1]
+    assert fourth_fact.payload["failures_at_head"] == 2
+
+
+def test_a_gate_result_carries_the_tier_its_suite_ran_at(ledger, record, task):
+    _, task_id = task
+    a1 = ledger.open_attempt(task_id)
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass"), attempt_id=a1, earned_risk="standard"
+    )
+    assert record.read(ledger.record_key(task_id))[-1].payload["earned_risk"] == (
+        "standard"
+    )
+    assert ledger.attempts(task_id)[0]["earned_risk"] == "standard"
+
+    a2 = ledger.open_attempt(task_id)
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass"), attempt_id=a2, earned_risk="elevated"
+    )
+    assert ledger.attempts(task_id)[1]["earned_risk"] == "elevated"
+
+    # A null tier leaves the column as it was, and the fact still carries
+    # the key, a null value included.
+    a3 = ledger.open_attempt(task_id)
+    ledger.record_gate_result(GateResult(gate="lint", status="pass"), attempt_id=a3)
+    assert "earned_risk" in record.read(ledger.record_key(task_id))[-1].payload
+    attempts = ledger.attempts(task_id)
+    assert [a["earned_risk"] for a in attempts] == ["standard", "elevated", None]
+
+    # A second result against the same attempt overwrites with the last
+    # non-null value, never clears, and touches only this attempt.
+    ledger.record_gate_result(
+        GateResult(gate="types", status="pass"), attempt_id=a1, earned_risk="elevated"
+    )
+    attempts = ledger.attempts(task_id)
+    assert [a["earned_risk"] for a in attempts] == ["elevated", "elevated", None]
+
+    # A third result against `a1`, this time with no `earned_risk` at all,
+    # must leave its already-set tier alone rather than clearing it to null.
+    ledger.record_gate_result(GateResult(gate="format", status="pass"), attempt_id=a1)
+    attempts = ledger.attempts(task_id)
+    assert [a["earned_risk"] for a in attempts] == ["elevated", "elevated", None]
+
+
 def test_a_ledger_with_no_record_still_writes_rows(tmp_path):
     # Every existing caller passes no record, and must be unaffected.
     plain = Ledger(tmp_path / "plain.db")

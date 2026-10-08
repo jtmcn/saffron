@@ -57,7 +57,7 @@ def replay(
         spec.id,
         spec_sha,
         branch=f"saffron/{spec.id}",
-        risk=spec.risk,
+        risk=spec.declared_risk,
         budget_usd=spec.budget_usd,
     )
 
