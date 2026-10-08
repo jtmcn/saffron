@@ -187,7 +187,7 @@ it also writes the first text, from the item (§3.4).
 
 **Revision**: One spec writer session and the spec review of the text it returned. A
 stack batch runs at most three per spec, then escalates the spec. `saffron draft` runs
-at most one (§3.4). A revision starts
+at most one (§3.4). A stack batch's revision starts
 only while the budget left, less the reserve, covers a writer, a review and the spec's
 budget.
 
