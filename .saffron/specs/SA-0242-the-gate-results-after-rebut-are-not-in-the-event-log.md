@@ -3,8 +3,8 @@ id: SA-0242
 title: The gate results after REBUT are not in the event log, so a red rebuttal names no gate
 type: bug
 priority: 2
-depends_on: [SA-0241]
-estimated_lines: 167
+depends_on: [SA-0235]
+estimated_lines: 176
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -87,12 +87,14 @@ acceptance:
       `GateResult` event per gate with `against` set to `rebuttal`. An
       errored gate keeps the status `error`, never `fail`. No gate in either
       suite carries a count, and the task ends `GATE_ERROR`. The drifted
-      suite's events name exactly the baseline's gates.
+      suite's events name exactly the gates in the head's results, a gate
+      the baseline lacks included.
     witness: tests/test_session.py::test_an_errored_or_drifted_rebuttal_re_run_logs_each_gate_with_no_count
     wrong_versions:
       - The count is withheld only from the errored gate, so the failing gate in the aborted suite carries a count.
       - An errored gate is written with the status `fail`.
       - An aborted or drifted re-run writes no `GateResult` events at all.
+      - The drifted re-run's events are taken from the baseline's gates, so a gate only the head ran is missing.
   - claim: >-
       The repair loop's own suites still emit `GateResult` events with
       `against` set to `attempt`, each set with its own number and count.
@@ -117,10 +119,16 @@ and 19.
 §5.6 says the rebuttal diff and the failing gate "are both kept for you to
 read". The ledger keeps the gate. The event log does not.
 
-**Where the re-run is judged.** `_rebut_gates` (`saffron/cell/session.py:3027-3043`)
+**Where the re-run is judged.** `_rebut_gates` (`saffron/cell/session.py:3027-3044`)
 calls `_judge()` with no argument at `:3031`. It then emits one `Attempt` through
 `attempt_event` at `:3034-3041`, with `phase="REBUT"` and the number
 `attempts + 1`.
+
+**When the re-run happens.** `run_rebut` calls `rerun_gates()` after the rebuttal
+and its extraction turn, and before any verdict (`saffron/phases/rebut.py:716`).
+The cap's `EXHAUSTED` is decided only after `run_rebut` returns. So under
+`SA-0231`, a cap cut after HEAD moved still logs green rebuttal events before
+`EXHAUSTED`.
 
 **Why that call emits no gate events.** `_judge` (`saffron/cell/session.py:2529`)
 writes every gate result to the ledger. It emits per-gate events only inside
@@ -187,14 +195,22 @@ witness and no mutant. Their spelling at head is yours, so expect `witness` to
 report `skip` for them. Criteria 4 and 5 are `preserves`, and both tests exist.
 
 **Parallel specs edit `saffron/cell/session.py` near here.** Keep this diff inside
-`attempt_event`, `_judge` and the body of `_rebut_gates` (`:3027-3043`). Leave the
-REBUT cap code below `:3043` alone. Leave `_over_budget` alone too.
+`attempt_event`, `_judge`, the body of `_rebut_gates`, and the `judge=` argument
+of the `repair_loop` call. Leave the REBUT cap code alone: the
+`cap = _RebutCap(...)` line and the `if cap is not None:` block after
+`run_rebut` returns. Leave `_over_budget` alone too.
 
 **Pass the re-run's number and `against` explicitly.** Thread both from
-`_rebut_gates` into `_judge`. `repair_loop` keeps calling `judge(attempt)`, so the
-loop path must still default to `attempt`. The count rule is the one at
-`saffron/cell/session.py:2558-2571`, and the re-run reuses it rather than copying
-it. Rewrite the comment at `:2555-2556`, which becomes false.
+`_rebut_gates` into `_judge`. Make `against` a required keyword on `_judge`, with
+no default, for the reason `GateResult.against` gives at `saffron/events.py:250-252`.
+Hand `repair_loop` `functools.partial(_judge, against="attempt")`, since it calls
+`judge(attempt)` with one argument (`saffron/cell/session.py:762`). The count rule
+is the one at `saffron/cell/session.py:2558-2571`, and the re-run reuses it rather
+than copying it. Rewrite the comment at `:2555-2556`, which becomes false.
+
+**Add no `FAMILIES` row.** `tests/test_events.py:1241-1242` pins
+`len(FAMILIES) == 70`, and that file is forbidden. If the red REBUT line's shape
+changes, edit the existing row at `saffron/events.py:946` in place.
 
 **The gate names travel on the REBUT `Attempt` event itself.** `describe` reads one
 event. A name list printed elsewhere never reaches a reader of the line, and
@@ -217,6 +233,15 @@ Use `rebut_commits=1` and a `fixed` rebuttal, or the re-run never happens. Share
 one `_`-prefixed helper across the three, and prefix every other helper too. A new
 test that passes with the source reverted fails `revert`.
 
+**Keep the shared helpers' signatures.** The forbidden `tests/test_events.py:49-60`
+imports `_drive`, `_results`, `_spec`, `_stub_the_runtime`, `_turn` and `_block`
+from `tests/test_session.py`. Change none of their signatures.
+
+**Criterion 3's drifted drive gains a gate.** Its events come from the head's
+results (`saffron/cell/session.py:2565`). `suite_drift` skips a gate only the
+head ran (`saffron/gates/baseline.py:67-89`). So add one passing gate to the
+head's suite that the baseline lacks, and assert it is among the events.
+
 **Gate names in the witnesses.** `_results` builds only `lint`. Build the others as
 `GateResult` values directly. For criterion 2, a `prose` failing identically at base
 and at the re-run reproduces run 19's case. Use two new-failing gates whose names
@@ -231,15 +256,15 @@ post-rebuttal re-run "emits nothing" (`tests/test_session.py:5180-5184`). On the
 prototype below, a re-run emitting under `attempt` still passed it. Its turn
 script at `:5191-5200` scripts three lens turns. REVIEW runs four, as
 `_through_rebut` at `:3935` scripts them. Criterion 1's witness is the one that
-holds the `attempt` set to the loop's own numbers. Leave criterion 4's test as it
-is. `census` compares test names, so rename nothing.
+holds the `attempt` set to the loop's own numbers. Correct that one docstring
+sentence, and leave criterion 4's assertions alone. `census` compares test names,
+so rename nothing.
 
-**Measured on a prototype.** A diff built to this spec at base measured 665
-changed tokens on `size_gate`, against the `bug` ceiling of 1300. It added 138
-lines and removed 9. The three new witnesses failed with the source reverted.
-Six wrong versions ran against their witnesses, and each failed. Three named
-gates wrongly: on the GATE line, from statuses, or twice. Three numbered the
-re-run wrongly: the loop's last number, `attempt` alone, or both sets.
+**Measured on a prototype.** A diff built to this spec at base measured 701
+changed tokens on `size_gate`, against the `bug` ceiling of 1300. It added 160
+lines and removed 35. The three new witnesses failed with the source reverted.
+Every wrong version listed under criteria 1 to 3 ran against its witness, and each
+failed it. So did a GATE line that names its gates, against criterion 5's.
 
 **`error` is not `fail`.** Carry each gate's contract status through unchanged.
 
