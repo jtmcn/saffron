@@ -4,7 +4,7 @@ title: "Nothing runs the `terms` gate over main, so main went red and only a cel
 status: open
 tier: 2
 filed: 2026-10-07
-specs: []
+specs: [SA-0255]
 prs: []
 commits: []
 cites: [§5.4]
