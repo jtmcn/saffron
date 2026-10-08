@@ -578,7 +578,8 @@ REBUT, so it becomes a question to the operator. There it is the delegate's, and
 advisory. In a stack batch the host starts one session per spec in a critic cell
 at the predecessor's head, or at `base_sha` with no predecessor. Its route runs
 the spec, revises it, or withholds it (`SPEC_WITHHELD`). A provider limit routes
-it to `wait`, and an unreadable read to `error`.
+it to `wait`, and an unreadable read to `error`. Each round it records keeps its
+findings one by one, as `spec_finding` facts (§3.4).
 `spec-reviewer` is the file and id of the agent definition that performs it, not
 a role.
 _Avoid_: "the reviewer" (that is the operator), "the critic" or "a lens" (both
