@@ -5,8 +5,11 @@ import type { View, Watch } from '../types'
 import { parse, summarize } from './progress'
 import type { CellEvent } from './progress'
 
-const PANE = 'cell-watch'
+const PLUGIN = 'cell-watch'
+const TOOL_NAME = 'watch'
+// A literal, because `claude plugin validate` reads a template matcher as `tool=?`.
 const TOOL = 'mcp__cell-watch__watch'
+const PANE = PLUGIN
 const POLL_MS = 3000
 const WINDOW_HOURS = 12
 const SPEC = /^SA-\d+$/
@@ -50,6 +53,7 @@ async function events($: EngineInterface, spec: string): Promise<CellEvent[] | u
 // announce false marks what the log already holds as seen, so starting a watch wakes nobody.
 async function check($: EngineInterface, announce: boolean): Promise<string[]> {
   const w: Watch = await read($, watch)
+  const prev: View = await read($, view)
   const spec = w.follow ? await newestSpec($) : w.spec
   if (!spec) {
     await update($, view, () => NO_VIEW)
@@ -66,20 +70,19 @@ async function check($: EngineInterface, announce: boolean): Promise<string[]> {
   await update($, view, () => next)
   $.ui.status(next.status)
 
+  const milestones = [...progress.milestones]
+  // A batch runs one task at a time (saffron/batch.py), so a newer spec's log means the last one packaged.
+  if (w.follow && prev.spec && prev.spec !== spec) {
+    milestones.unshift({ key: `handover:${prev.spec}:${spec}`, line: `${prev.spec} has packaged, and ${spec} started` })
+  }
   const seen = new Set<string>(await read($, announced))
-  const fresh = progress.milestones.filter(m => !seen.has(m.key))
+  const fresh = milestones.filter(m => !seen.has(m.key))
   if (fresh.length === 0) return []
   await update($, announced, list => [...list, ...fresh.map(m => m.key)].slice(-500))
   if (announce) {
     for (const m of fresh) {
       $.ui.toast(`${spec}: ${m.line}`)
-      if (w.wake) {
-        void $.prompt.submit({
-          text:
-            `cell-watch: ${spec} ${m.line}. Read from events.jsonl, not the process: ` +
-            `wait for the cell's exit notice before \`driver.py record\`.`,
-        })
-      }
+      if (w.wake) void $.prompt.submit({ text: `cell-watch (${spec}): ${m.line}. Read from events.jsonl, not the process.` })
     }
   }
   return fresh.map(m => m.line)
@@ -106,20 +109,28 @@ function arm($: EngineInterface) {
   })
 }
 
-async function begin($: EngineInterface, words: string[]): Promise<string> {
+// An empty spec follows the newest task.
+type Start = { spec: string; quiet: boolean; pane: boolean }
+
+async function idle(): Promise<void> {
   timer?.cancel()
   timer = undefined
   await settle()
-  if (words.includes('stop')) {
-    await update($, watch, () => NO_WATCH)
-    $.ui.status(undefined)
-    return 'cell-watch stopped.'
-  }
-  const spec = words.find(w => SPEC.test(w)) ?? ''
-  await update($, watch, () => ({ spec, follow: spec === '', wake: !words.includes('--quiet') }))
+}
+
+async function halt($: EngineInterface): Promise<string> {
+  await idle()
+  await update($, watch, () => NO_WATCH)
+  $.ui.status(undefined)
+  return 'cell-watch stopped.'
+}
+
+async function begin($: EngineInterface, { spec, quiet, pane }: Start): Promise<string> {
+  await idle()
+  await update($, watch, () => ({ spec, follow: spec === '', wake: !quiet }))
   const already = await poll($, false)
   arm($)
-  if (words.includes('--pane')) void $.ui.open({ id: PANE, title: 'Cell watch' })
+  if (pane) void $.ui.open({ id: PANE, title: 'Cell watch' })
   const v = await read($, view)
   const target = spec || `the newest task (${v.spec || `none in the last ${WINDOW_HOURS} h`})`
   const held = already.length ? ` Already in the log: ${already.join('; ')}.` : ''
@@ -134,17 +145,16 @@ export const register: Register = on => {
       argumentHint: '[SA-NNNN] [--quiet] [--pane] | stop',
     })
     await $.tool.register({
-      name: 'watch',
+      name: TOOL_NAME,
       description:
-        "Follow a Saffron task's events.jsonl and wake this session with a prompt on each milestone: " +
-        'a red baseline, a budget_usd stop, a Terminal event, a TaskOutcome. It replaces a Monitor over ' +
-        'tail -F | grep and never expires. With no spec it follows the newest task through a batch. ' +
-        'stop: true ends it. A wake-up is not the process ending: wait for the exit notice before driver.py record.',
+        "Follow a Saffron task's events.jsonl and wake this session with a prompt at each milestone: " +
+        'a red baseline, a budget_usd stop, a Terminal event, a TaskOutcome, and with no spec each ' +
+        'hand-over to the next task of a batch. Unlike a Monitor it never expires. ' +
+        'With no spec it follows the newest task. stop: true ends the watch and ignores spec.',
       inputSchema: {
         type: 'object',
         properties: {
           spec: { type: 'string', description: 'SA-NNNN to follow; omit to follow the newest task' },
-          quiet: { type: 'boolean', description: 'status line and toasts only, no wake-up prompt' },
           stop: { type: 'boolean', description: 'end the watch' },
         },
       },
@@ -156,22 +166,23 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'cell-watch' }, async ($, e) => ({
-    text: await begin($, e.args.trim().split(/\s+/).filter(Boolean)),
-  }))
+  on('command.run', { command: 'cell-watch' }, async ($, e) => {
+    const words = e.args.trim().split(/\s+/).filter(Boolean)
+    if (words.includes('stop')) return { text: await halt($) }
+    const stray = words.filter(w => !SPEC.test(w) && w !== '--quiet' && w !== '--pane')
+    if (stray.length) return { text: `cell-watch: ${stray.join(' ')} is neither an SA-NNNN id nor a flag.` }
+    const spec = words.find(w => SPEC.test(w)) ?? ''
+    return { text: await begin($, { spec, quiet: words.includes('--quiet'), pane: words.includes('--pane') }) }
+  })
 
   // The delegate is the model, and the model cannot type a slash command.
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const input = (e.input ?? {}) as { spec?: unknown; quiet?: unknown; stop?: unknown }
-    const words: string[] = []
-    if (input.stop === true) words.push('stop')
-    if (typeof input.spec === 'string' && input.spec) {
-      if (!SPEC.test(input.spec)) return { deny: `cell-watch: ${input.spec} is not an SA-NNNN id.` }
-      words.push(input.spec)
-    }
-    if (input.quiet === true) words.push('--quiet')
-    return { result: await begin($, words) }
-  }).catch(($, e, next) => ({ deny: `cell-watch did not start (${next.error.kind}); fall back to the Monitor.` }))
+    const input = (e.input ?? {}) as { spec?: unknown; stop?: unknown }
+    if (input.stop === true) return { result: await halt($) }
+    const spec = typeof input.spec === 'string' ? input.spec : ''
+    if (spec && !SPEC.test(spec)) return { deny: `cell-watch: ${spec} is not an SA-NNNN id.` }
+    return { result: await begin($, { spec, quiet: false, pane: false }) }
+  }).catch((_$, _e, next) => ({ deny: `cell-watch did not start (${next.error.kind}); fall back to the Monitor.` }))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)

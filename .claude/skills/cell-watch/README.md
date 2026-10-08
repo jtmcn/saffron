@@ -17,7 +17,7 @@ step. A `claude -p --agent delegate` session listed the tool on 2026-10-07.
 - `--pane` opens a pane of the task's lines.
 - `--quiet` keeps the status line and toasts and submits no prompt.
 - `/cell-watch stop` ends the watch.
-- The tool takes `{ spec?, quiet?, stop? }` and does the same.
+- The tool takes `{ spec?, stop? }` and does the same, always with wake-ups.
 
 The status line reads `SA-0222 · IMPLEMENT #1 · $6.26/$26.00`.
 
@@ -32,9 +32,11 @@ The mod submits one prompt for each milestone below.
 - A `Terminal` event.
 - A `TaskOutcome`, with spend against budget, and the reopening time of a rate
   limit.
+- In follow mode, a newer task's log. A batch runs one task at a time, so the
+  previous task's PACKAGE is done.
 
-The log is not the process. Wait for the cell's exit notice before
-`driver.py record`.
+The log is not the process. A `TaskOutcome` comes before PACKAGE, so the
+spec loop records a task on its exit notice or its hand-over.
 
 A detail field mixes host and cell text. The mod strips its control
 characters and caps it at 500 characters before any toast or prompt, as

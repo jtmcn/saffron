@@ -232,8 +232,11 @@ Every verified blocker is fixed, deferred to `{KNOWN}`, or answered by the opera
 **A batch is the default.** The operator set this on 2026-10-07, in run 30.
 Start `saffron batch --repo . --budget <total>` over the order, with the token
 and listeners as in (a). Use `--stack` unless a parent is an open pull request
-outside the order (b-e0e1cf). Run `driver.py record` for each task once it
-packages. Review each pull request while the next cell runs, hold its fixes as
+outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
+`{}`. It follows each task in turn and never expires. Run `driver.py record`
+for a task when its hand-over wake-up names the next spec, since PACKAGE is
+then done. Record the last task when the batch exits. Stop the watch once the batch
+exits. Without the tool, fall back to the Monitor in (a). Review each pull request while the next cell runs, hold its fixes as
 local commits, and restack the layers above once the batch drains
 (b-cab612). The attended path below is the fallback, and taking it is the
 operator's call.
@@ -265,10 +268,9 @@ PYTHONUNBUFFERED=1 SAFFRON_ALLOW_HOST_PROCESS=<listener> uv run --env-file <scra
 `<listener>` is the process `docs/HOST-HARDENING.md` lets this host tolerate.
 On a host that tolerates none, leave `SAFFRON_ALLOW_HOST_PROCESS=…` out
 (GOTCHAS, Starting cells). Watch it with `mcp__cell-watch__watch` and
-`{ "spec": "SA-NNNN" }`. The `cell-watch` mod reads the task's `events.jsonl`
-and wakes this session on a red baseline, a dollar stop, a terminal state or
-the outcome. It never expires. Call it again with `{ "stop": true }` once (b)
-records the cell.
+`{ "spec": "SA-NNNN" }`. Its description lists the milestones that wake this
+session. Its outcome wake-up comes before PACKAGE, so record on the exit
+notice (b). Call it with `{ "stop": true }` once (b) records the cell.
 
 If that tool is not in your list, watch with a Monitor:
 
@@ -299,15 +301,14 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-NNNN   # SA-NNNN
 
 It reads the ledger, never the transcript (§4.3), prints what the cell spent
 against the spec's budget, and exits 0 only for `READY_FOR_REVIEW`. Stop the
-Monitor now: `tail -F` outlives the cell. A **decided** state — one in
+watch now, since a Monitor's `tail -F` outlives the cell. A **decided** state — one in
 `scheduler.DONE_STATES` — settles the spec for this loop, and only
 `READY_FOR_REVIEW` joins the stack. A
 state that decided nothing keeps the spec pending, and `next` moves past it.
 Once the process has exited, an in-flight state is a **halt**: the cell stopped
 at a ceiling and nothing decided the task. `record` says so, and a halt goes
 to the operator (GOTCHAS, Recording). `record` also prints the lenses the
-REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c). Stop the
-cell-watch too, or point it at the next spec.
+REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`. A non-zero exit is noted and the loop carries on.
