@@ -4,7 +4,7 @@ title: "`run_wrong_versions` restates `run_lens`'s re-prompt line for line"
 status: open
 tier: 2
 filed: 2026-10-05
-specs: [SA-0202]
+specs: [SA-0202, SA-0252]
 prs: [675]
 commits: []
 cites: [§5.5]
