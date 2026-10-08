@@ -33,3 +33,6 @@ An `EXHAUSTED` task with a pull request counts as a stack layer in `stack`,
 ## Record
 
 - 2026-10-05: filed from the spec loop's run 28.
+- 2026-10-08: recurred in the spec loop's run 31 for a `READY_FOR_REVIEW`
+  task with no recorded PR (b-883f74). `size` refused SA-0226 as not
+  reviewable, and the delegate measured it with `_token_counts` by hand.

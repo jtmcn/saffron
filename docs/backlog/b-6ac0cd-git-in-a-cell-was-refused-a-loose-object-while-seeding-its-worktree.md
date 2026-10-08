@@ -48,3 +48,9 @@ this record says which lead failed and why.
   Batch 14's seeds all succeeded. Proposed direction: retry a failed seed
   once before failing the layer. b-60a399 keeps that failure from refusing
   the layer's descendants.
+- 2026-10-08: measured further in the spec loop's run 31 (b-6cd3c2). Four
+  seeds failed in one night on loose objects that `git fetch` in the
+  delegate's session had written. A retry failed, and so did a mirror rebuilt
+  from scratch, which hard-linked the same inodes. `cat` read the same file in
+  the same container, so only git's read of it fails. `git repack -d` in the
+  checkout cleared it, and every later seed passed.

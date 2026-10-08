@@ -39,3 +39,7 @@ events back through the follower.
 
 - 2026-10-05: filed during stage 2's first stack batch, at the operator's
   request.
+- 2026-10-08: recurred in the spec loop's run 31. The spec review wrote to
+  `batches/v0/spec-review/SA-NNNN/` with no task folder. So cell-watch kept
+  following the last loop's task, and its first hand-over named SA-0224.
+  The review's route was read from `spec_reviews` in the ledger by hand.

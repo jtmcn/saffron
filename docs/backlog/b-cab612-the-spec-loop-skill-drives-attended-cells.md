@@ -36,3 +36,7 @@ above with one command.
 ## Record
 
 - 2026-10-07: filed from the spec loop's run 30, at the operator's request.
+- 2026-10-08: run 31 ran a `--stack` batch. `driver.py snapshot` ordered
+  three specs, while `queue --stack` planned five. The driver refuses a child
+  whose parent is in the order, and the batch plans it. `record` still ran by
+  hand for each task.
