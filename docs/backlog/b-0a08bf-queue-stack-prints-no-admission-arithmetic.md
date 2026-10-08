@@ -4,7 +4,7 @@ title: "`saffron queue --stack` prints no admission arithmetic, so nothing shows
 status: open
 tier: 2
 filed: 2026-10-05
-specs: []
+specs: [SA-0254]
 prs: []
 commits: []
 cites: [§7.1]
