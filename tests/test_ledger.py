@@ -691,6 +691,70 @@ def test_a_ledger_that_predates_attempts_gains_the_reference(tmp_path):
     ledger.close()
 
 
+def test_a_ledger_that_predates_the_head_count_and_the_tier_gains_both(tmp_path):
+    """Both `gate_results.failures_at_head` and `attempts.earned_risk` are
+    added on open, whatever shape `gate_results` was in before: one that
+    already references `attempts`, and a v0.5 one the open also rebuilds
+    (item 170). Built by dropping the two columns from `SCHEMA` itself, so
+    this does not depend on how the schema text spells them."""
+    for name, before in (
+        ("modern", SCHEMA),
+        (
+            "v05",
+            SCHEMA.replace(
+                "attempt_id     INTEGER REFERENCES attempts(attempt_id),",
+                "attempt_id     INTEGER,",
+            ),
+        ),
+    ):
+        assert ("REFERENCES attempts" in before) == (name == "modern")
+        path = tmp_path / f"{name}.db"
+        old = sqlite3.connect(path)
+        old.executescript(before)
+        old.execute("ALTER TABLE gate_results DROP COLUMN failures_at_head")
+        old.execute("ALTER TABLE attempts DROP COLUMN earned_risk")
+        old.execute(
+            "INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')"
+        )
+        old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+        old.execute(
+            """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+               VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+        )
+        old.execute(
+            "INSERT INTO attempts (task_id, phase, n) VALUES (1, 'IMPLEMENT', 1)"
+        )
+        old.execute(
+            "INSERT INTO gate_results (attempt_id, gate, status) VALUES (1, 'lint', 'pass')"
+        )
+        old.commit()
+        old.close()
+
+        ledger = Ledger(path)
+        # The row written before the columns existed reads null in each.
+        old_gate_result = ledger._db.execute(
+            "SELECT failures_at_head FROM gate_results WHERE gate_result_id = 1"
+        ).fetchone()
+        assert old_gate_result["failures_at_head"] is None
+        assert ledger.attempts(1)[0]["earned_risk"] is None
+
+        # The row written after carries its values.
+        new_attempt = ledger.open_attempt(1, phase="IMPLEMENT")
+        ledger.record_gate_result(
+            GateResult(gate="lint", status="pass"),
+            attempt_id=new_attempt,
+            earned_risk="elevated",
+        )
+        (new_row,) = [a for a in ledger.attempts(1) if a["attempt_id"] == new_attempt]
+        assert new_row["earned_risk"] == "elevated"
+        new_gate_result = ledger._db.execute(
+            "SELECT failures_at_head FROM gate_results WHERE attempt_id = ?",
+            (new_attempt,),
+        ).fetchone()
+        assert new_gate_result["failures_at_head"] == 0
+        ledger.close()
+
+
 def test_the_batches_table_carries_exactly_the_fields_4_2_1_names(ledger):
     """§4.2.1: `(batch_id, started_at, ended_at, budget_usd, spent_usd_est,
     until_ts, status)` and no others — `concurrency` waits until K has a
@@ -727,6 +791,7 @@ def test_the_gate_results_table_carries_exactly_the_fields_4_1_names(ledger):
         "tool",
         "duration_ms",
         "summary",
+        "failures_at_head",
     }
 
 
@@ -1318,8 +1383,8 @@ def test_a_ledger_that_predates_the_cost_floor_column_gains_it(tmp_path):
     raises on the missing column (SA-0206)."""
     path = tmp_path / "old.db"
     before = SCHEMA.replace(
-        "    cost_usd_est    REAL,\n    cost_floor_usd_est REAL\n",
-        "    cost_usd_est    REAL\n",
+        "    cost_usd_est    REAL,\n    cost_floor_usd_est REAL,\n",
+        "    cost_usd_est    REAL,\n",
     )
     assert before != SCHEMA  # otherwise this proves nothing
     old = sqlite3.connect(path)

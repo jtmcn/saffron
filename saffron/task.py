@@ -541,6 +541,7 @@ def run_task(
         forbidden=spec.forbidden,
         acceptance=spec.acceptance,
         risk=spec.risk,
+        declared_risk=spec.declared_risk,
         stacked_on=stacked_on,
         budget_usd=ceilings.budget_usd,
         max_attempts=ceilings.max_attempts,

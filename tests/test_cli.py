@@ -44,6 +44,7 @@ from saffron.events import (
 from saffron.ledger import Ledger
 from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
+from saffron.record.fold import fold
 from saffron.record.memory import MemoryRecord
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
@@ -5391,6 +5392,59 @@ def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_p
     assert fresh_repo["origin"] == pinned.url
     assert fresh_repo["policy_sha"] is None
     fresh_ledger.close()
+
+
+def test_the_stack_mint_records_the_declared_tier_and_null_where_none(tmp_path):
+    """`cli._stack_mint` files the candidate's `declared_risk` on the
+    `task_created` fact, never its `risk`. The `tasks.risk` column reads
+    `standard` for a null tier in the live ledger. A fresh ledger the same
+    record folds into reads the same (item 170)."""
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "l.db", record=record)
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    mint = cli._stack_mint(pinned=pinned, repo=tmp_path / "checkout", ledger=ledger)
+
+    head = "---\nid: {id}\ntitle: t\ntype: chore\n"
+    cases = [
+        ("SY-1", head.format(id="SY-1") + "---\n", None),
+        ("SY-2", head.format(id="SY-2") + "risk:\n---\n", None),
+        ("SY-3", head.format(id="SY-3") + "risk: standard\n---\n", "standard"),
+        ("SY-4", head.format(id="SY-4") + "risk: elevated\n---\n", "elevated"),
+    ]
+
+    minted: dict[str, int] = {}
+    for spec_id, text, _declared in cases:
+        spec = intake.parse_spec(text)
+        candidate = Candidate(
+            path=Path(f"{spec_id}.md"), spec=spec, spec_sha="c" * 64, task_id=None
+        )
+        minted[spec_id] = mint(candidate)
+
+    for spec_id, _text, declared in cases:
+        task_id = minted[spec_id]
+        key = ledger.record_key(task_id)
+        assert key is not None
+        facts = record.read(key)
+        created = next(f for f in facts if f.kind == "task_created")
+        assert created.payload["risk"] == declared
+
+        (row,) = ledger._db.execute(
+            "SELECT risk FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchall()
+        assert row["risk"] == (declared if declared is not None else "standard")
+
+    ledger.close()
+
+    fresh = Ledger(tmp_path / "l2.db")
+    fold(record, fresh)
+    for spec_id, _text, declared in cases:
+        (row,) = fresh._db.execute(
+            "SELECT risk FROM tasks WHERE spec_id = ?", (spec_id,)
+        ).fetchall()
+        assert row["risk"] == (declared if declared is not None else "standard")
+    fresh.close()
 
 
 def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(

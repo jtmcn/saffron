@@ -1,12 +1,12 @@
 ---
 id: 170
 title: Three records of a night and no rule says which wins, so the ledger's claim to be authoritative is already false of the page an operator reads
-status: open
+status: partial
 tier: 1
 filed: 2026-09-17
 by_hand: true
 specs: [SA-0220, SA-0221, SA-0222, SA-0223, SA-0224]
-prs: []
+prs: [722, 724, 731, 733, 735]
 commits: []
 cites: [§4.1, §4.4, §4.6, §6]
 related: [43, 160, 165, 166, 167]
@@ -175,3 +175,11 @@ batch and run folds.
 at head. Of 1,820,645 attempt failures, 668 survive baseline subtraction. The
 design's §3 records the rule, and its §7 applies it to the migration. Item
 b-86fa07 files the `prose` gate's output, which wrote nearly all the rest.
+
+**2026-10-07.** Design step 3, the migration, is built across five layers.
+#722 keeps every failure at head and the earned tier on a gate-result fact.
+#724 files the declared tier, null where a spec declared none. #731 writes a
+stored task into the record, and #733 adds its gate results. #735 adds its
+stack rows, and its `saffron migrate` pushes each repo's tasks to its origin. On a copy of
+the live ledger, 239 tasks migrated with none refused, and the fold gave back
+5,320 gate results with no row differing. The batch and run folds remain.

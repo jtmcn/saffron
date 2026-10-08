@@ -221,6 +221,10 @@ counts each one expressed.
 repo's suite goes red. A seeding failure marks a layer missed and refuses
 its descendants.
 
+**Placed 2026-10-07**, at the operator's request in the spec loop's run 30:
+**b-cab612**. The operator made `saffron batch` the loop's default, and the
+skill still drives one attended cell per spec.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
@@ -413,6 +417,10 @@ admits every layer. A cut resumed turn undercounts its own spend.
 **Placed 2026-10-06**, at the operator's request: **b-e880ac**. Saffron takes
 the cell token from whoever starts it, so a delegate must hold the credential.
 
+**Placed 2026-10-07**, from the spec loop's run 30: **b-1e106d**, then
+**b-fbd181**. Nothing runs `terms` over `main`, so it went red unseen. A
+measured estimate priced two specs at half what landed, and `size` only advised.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -530,6 +538,10 @@ sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 **Placed 2026-10-07**, from counting the `prose` gate's hits: **b-2d668f**,
 **b-817ef7**, **b-80cad7**, **b-37de22**, **b-c962c7**, **b-30fed0**, then
 **b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
+
+**Placed 2026-10-07**, from the spec loop's run 30: **b-cd41ac**, **b-7338e7**,
+then **b-d22c5a**. A spec named helpers absent at its base. Two repo rows on one
+mirror prune each other. The docs name no `saffron migrate`.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
 the record on git refs took four names the tree already held: "event",

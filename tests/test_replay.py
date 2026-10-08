@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from saffron.ledger import Ledger
+from saffron.record.fold import fold
+from saffron.record.memory import MemoryRecord
 from saffron.replay import replay
 from saffron.repos import mirror as git_mirror
 
@@ -110,6 +112,63 @@ def test_replay_produces_a_queue_line(target, ledger, tmp_path):
     assert line.repo == "target"
     assert line.state == "READY_FOR_REVIEW"
     assert line.added == 30
+
+
+def test_a_replayed_task_records_the_declared_tier_and_null_where_none(
+    target, tmp_path
+):
+    """`replay` files the spec's `declared_risk` on the `task_created` fact,
+    never `risk`, which is always a string. The `tasks.risk` column and the
+    queue line's `risk` both read `standard` where that value is null. A
+    fresh ledger folded from the same record reads the same (item 170)."""
+    mirrors_dir = tmp_path / "mirrors"
+    cases = [
+        ("", None),
+        ("risk:\n", None),
+        ("risk: standard\n", "standard"),
+        ("risk: elevated\n", "elevated"),
+    ]
+
+    for i, (risk_line, declared) in enumerate(cases):
+        text = SPEC.replace(
+            "touches:\n  - src/**\n---\n",
+            f"touches:\n  - src/**\n{risk_line}---\n",
+        )
+        spec_path = tmp_path / f"spec-{i}.md"
+        spec_path.write_text(text)
+
+        record = MemoryRecord()
+        replay_ledger = Ledger(tmp_path / f"ledger-{i}.db", record=record)
+        line = replay(
+            target,
+            7,
+            ledger=replay_ledger,
+            out_dir=tmp_path / f"out-{i}",
+            mirrors_dir=mirrors_dir,
+            spec_path=spec_path,
+        )
+        assert line.risk == (declared if declared is not None else "standard")
+
+        (row,) = replay_ledger._db.execute(
+            "SELECT task_id, risk FROM tasks WHERE spec_id = 'SY-9001'"
+        ).fetchall()
+        assert row["risk"] == (declared if declared is not None else "standard")
+
+        key = replay_ledger.record_key(row["task_id"])
+        assert key is not None
+        facts = record.read(key)
+        created = next(f for f in facts if f.kind == "task_created")
+        assert created.payload["risk"] == declared
+
+        replay_ledger.close()
+
+        fresh = Ledger(tmp_path / f"fresh-{i}.db")
+        fold(record, fresh)
+        (frow,) = fresh._db.execute(
+            "SELECT risk FROM tasks WHERE spec_id = 'SY-9001'"
+        ).fetchall()
+        assert frow["risk"] == (declared if declared is not None else "standard")
+        fresh.close()
 
 
 def test_the_shifted_pre_existing_failure_is_not_reported_as_new(

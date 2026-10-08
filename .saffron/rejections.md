@@ -1704,3 +1704,67 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0207` (#697): every undeclared baseline result had no tool, so a filter
   on `result.tool` passed for the declared-gate filter.
   **Bucket 1**, `witness`. **Landed:** a review commit on #697.
+
+## 2026-10-07 — `SA-0220` to `SA-0224` (spec loop run 30, stack #722 to #735)
+
+- `SA-0220` (#722): two comments cited `DESIGN.md` §5.6 and §3 for the tier
+  and the head count, which §4.1 defines.
+  **Bucket 3**, conventions. **Landed:** a review commit on #722.
+- `SA-0220` (#722): a moved schema comment lost its null meaning and the
+  measured SQLite reason it sits below the last column.
+  **Bucket 3**, conventions. **Landed:** a review commit on #722.
+- `SA-0221` (#724): no test pinned `CellSpec.declared_risk`'s null default,
+  so a `standard` default passed every witness.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #724.
+- `SA-0222` (#731): the fold witness left `updated_at` out of its columns, so
+  a `task_state` fact timed at the run's start passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #731.
+- `SA-0222` (#731): every fixture attempt held a null `model`,
+  `terminal_reason` and floor, so dropping any of them passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #731.
+- `SA-0222` (#731): `migrated` and `refused` were compared sorted, so a
+  reversed source order passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #731. Open:
+  b-20043f, since #733 repeated it.
+- `SA-0222` (#731): no held fact differed in `batch_key` alone, so a compare
+  of kind, time and payload passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #731.
+- `SA-0222` (#731): an exhausted package's state was derived from `pr_url`,
+  so its fact claimed `READY_FOR_REVIEW`.
+  **Bucket 3**, correctness. **Landed:** a review commit on #731, by the
+  operator's choice.
+- `SA-0222` (#731): the module docstring named a `task_policy` fact no spec
+  writes, and cited the record design's sections as bare numbers.
+  **Bucket 3**, conventions. **Landed:** a review commit on #731.
+- `SA-0223` (#733): the fold witness never read the `gate_results` or
+  `failures` rows it rebuilt, so a null summary or duration passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #733.
+- `SA-0223` (#733): `migrated` and `refused` were compared sorted again, one
+  layer after #731's seats found the same hole.
+  **Bucket 1**, `witness`. **Open:** b-20043f.
+- `SA-0223` (#733): the doubled-attempt refusal was checked for its phase
+  only, so a reason with no attempt number passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #733.
+- `SA-0223` (#733): three docstrings claimed what the code lacks, among them
+  a null message that `identity` would raise on.
+  **Bucket 3**, conventions. **Landed:** a review commit on #733.
+- `SA-0223` (#733): eleven comments cited the spec's "problem N" numbering,
+  which means nothing once the spec retires.
+  **Bucket 2**, `CLAUDE.md`. **Landed:** a review commit on #733.
+- `SA-0223` (#733): the spec named five test helpers absent at its base.
+  **No bucket**. **Open:** b-cd41ac.
+- `SA-0224` (#735): the command witness filtered its output by prefix, so a
+  stray line passed "nothing else".
+  **Bucket 1**, `witness`. **Landed:** a review commit on #735.
+- `SA-0224` (#735): no origin held another writer's prefix, so refusing every
+  held key passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #735.
+- `SA-0224` (#735): `_migrate`'s docstring sent a declined push to exit 2,
+  while the code reports it per task and exits 1.
+  **Bucket 3**, conventions. **Landed:** a review commit on #735.
+- `SA-0223` and `SA-0224` (#733, #735): both landed near twice their measured
+  estimates and over the size ceiling, and `size` only advised at `standard`.
+  **Bucket 1**, `size`. **Open:** b-fbd181. The operator kept both.
+- Run 30: `terms` failed on `main` for a docstring the gate began reading,
+  and no check ran it over the tree.
+  **Bucket 1**, `terms`. **Landed:** #720. **Open:** b-1e106d.

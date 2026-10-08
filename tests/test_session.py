@@ -36,6 +36,7 @@ from saffron.intake import parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, rebut, review
 from saffron.phases import package as package_mod
+from saffron.record.memory import MemoryRecord
 from saffron.repos import image, mirror
 from saffron.repos import policy as policy_mod
 from tests.test_implement import _HEX_64, _no_reap
@@ -255,6 +256,11 @@ def test_stacked_on_defaults_to_unset():
     `worktree.prepare_worktree` checks out `base_sha` exactly as before this
     field existed."""
     assert _spec().stacked_on is None
+
+
+def test_a_cell_spec_declares_no_tier_unless_given_one():
+    """A caller that passes no tier files none, never `standard` (item 170)."""
+    assert _spec().declared_risk is None
 
 
 def test_stacked_on_carries_a_second_base_distinct_from_base_sha():
@@ -1333,6 +1339,9 @@ def _drive(
     # wall-scaling witness below. `None` leaves every prior caller unchanged.
     turn_seconds=None,
     on_state=None,
+    # A `Record` backend for the `Ledger` this drives, `None` by default so
+    # every caller that predates it still gets a ledger with no record.
+    record=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1463,7 +1472,7 @@ def _drive(
     monkeypatch.setattr("saffron.phases.implement.run_agent", _run_agent)
 
     # Left open: the caller reads its rows. tmp_path takes the file away.
-    ledger = Ledger(tmp_path / "ledger.db")
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
     if use_default_emit:
         outcome = session.run_one_cell(
             spec or _spec(),
@@ -3174,6 +3183,200 @@ def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_pa
     assert outcome.advisory_gates == ["lint", "size", "witness"]
 
 
+def _judged_attempt(ledger, task_id):
+    """The one attempt of `task_id` that a gate suite recorded against.
+    The plan turn and each REVIEW lens open no such row.
+
+    It must be the second attempt opened, not whichever one holds gate
+    results. `attempts[0]` instead of `attempts[-1]` would attach every
+    result to the plan attempt instead.
+    """
+    rows = ledger._db.execute(
+        "SELECT DISTINCT a.attempt_id FROM attempts a "
+        "JOIN gate_results g ON g.attempt_id = a.attempt_id "
+        "WHERE a.task_id = ?",
+        (task_id,),
+    ).fetchall()
+    assert len(rows) == 1, rows
+    judged = rows[0]["attempt_id"]
+    attempts = ledger.attempts(task_id)
+    implement_attempt = attempts[1]["attempt_id"]
+    assert judged == implement_attempt, (judged, [a["attempt_id"] for a in attempts])
+    return judged
+
+
+def _lint_row(ledger, attempt_id):
+    return ledger._db.execute(
+        "SELECT failures_at_head FROM gate_results "
+        "WHERE attempt_id = ? AND gate = 'lint'",
+        (attempt_id,),
+    ).fetchone()
+
+
+def test_an_attempts_rows_carry_its_suites_tier_and_only_its_new_failures(
+    monkeypatch, tmp_path
+):
+    """`SuiteRun.effective_risk` and the suite's own baseline both reach
+    `record_gate_result`. The judged attempt keeps only its own new
+    failures, never a rerun's other stored rows (item 170)."""
+    base = _results(Failure(file="a.py", code="E1", message="boom", line=1))
+    head = [
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="a.py", code="E1", message="boom", line=1),
+                Failure(file="b.py", code="E2", message="bang", line=2),
+            ],
+        )
+    ]
+    turns = [_turn(_block(_PLAN)), _turn()]
+    policy_lint = "gates:\n  lint: { blocking: false }\n"
+
+    # Elevated: `elevate_on` matches the changed `src/x.py`, though the
+    # spec itself asked for `standard`.
+    cell1 = _stub_the_runtime(monkeypatch, suites=(base, head, head))
+    outcome1, ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "elevated",
+        cell=cell1,
+        turns=turns,
+        policy=policy_lint + "elevate_on:\n  - src/**\n",
+        gates=("lint",),
+    )
+    assert outcome1.effective_risk == "elevated"
+    judged1 = _judged_attempt(ledger1, outcome1.task_id)
+    attempts1 = {
+        a["attempt_id"]: a["earned_risk"] for a in ledger1.attempts(outcome1.task_id)
+    }
+    assert attempts1[judged1] == "elevated"
+    assert all(v is None for k, v in attempts1.items() if k != judged1)
+    assert _lint_row(ledger1, judged1)["failures_at_head"] == 2
+    (lint1,) = [r for r in ledger1.attempt_results(judged1) if r.gate == "lint"]
+    assert lint1.failures == [Failure(file="b.py", code="E2", message="bang", line=2)]
+
+    # Standard: no `elevate_on` match.
+    cell2 = _stub_the_runtime(monkeypatch, suites=(base, head, head))
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "standard",
+        cell=cell2,
+        turns=turns,
+        policy=policy_lint,
+        gates=("lint",),
+    )
+    assert outcome2.effective_risk == "standard"
+    judged2 = _judged_attempt(ledger2, outcome2.task_id)
+    attempts2 = {
+        a["attempt_id"]: a["earned_risk"] for a in ledger2.attempts(outcome2.task_id)
+    }
+    assert attempts2[judged2] == "standard"
+    assert all(v is None for k, v in attempts2.items() if k != judged2)
+    assert _lint_row(ledger2, judged2)["failures_at_head"] == 2
+
+    # Drifted: the head's `lint` used a different `tool`. Nothing is
+    # subtracted, so every failure at head stays.
+    drifted_head = [
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 2.0",
+            failures=[
+                Failure(file="a.py", code="E1", message="boom", line=1),
+                Failure(file="b.py", code="E2", message="bang", line=2),
+            ],
+        )
+    ]
+    cell3 = _stub_the_runtime(monkeypatch, suites=(base, drifted_head, drifted_head))
+    outcome3, ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "drifted",
+        cell=cell3,
+        turns=turns,
+        policy=policy_lint,
+        gates=("lint",),
+    )
+    assert outcome3.state == "GATE_ERROR"
+    judged3 = _judged_attempt(ledger3, outcome3.task_id)
+    assert _lint_row(ledger3, judged3)["failures_at_head"] == 2
+    (lint3,) = [r for r in ledger3.attempt_results(judged3) if r.gate == "lint"]
+    assert len(lint3.failures) == 2
+
+    # Aborted: a `tests` result errors, so the whole suite aborts and every
+    # failure at head stays, the same as a drifted one.
+    aborted_head = [
+        *head,
+        GateResult(gate="tests", status="error", tool="pytest 8.0"),
+    ]
+    cell4 = _stub_the_runtime(monkeypatch, suites=(base, aborted_head, aborted_head))
+    outcome4, ledger4 = _drive(
+        monkeypatch,
+        tmp_path / "aborted",
+        cell=cell4,
+        turns=turns,
+        policy=policy_lint,
+        gates=("lint",),
+    )
+    assert outcome4.state == "GATE_ERROR"
+    judged4 = _judged_attempt(ledger4, outcome4.task_id)
+    assert _lint_row(ledger4, judged4)["failures_at_head"] == 2
+    (lint4,) = [r for r in ledger4.attempt_results(judged4) if r.gate == "lint"]
+    assert len(lint4.failures) == 2
+
+    # Rerun: the run already holds an earlier cell's stored baseline. This
+    # cell's own fresh baseline is what gets subtracted, not the stored rows.
+    rerun_dir = tmp_path / "rerun"
+    ledger5 = Ledger(rerun_dir / "ledger.db")
+    repo_id = ledger5.upsert_repo(
+        "repo", str(rerun_dir / "repo"), str(rerun_dir / "m.git"), None
+    )
+    minted_run = ledger5.create_run(repo_id, "b" * 40)
+    minted_task = ledger5.create_task(
+        minted_run, "SY-1", "a" * 64, branch="saffron/SY-1"
+    )
+    ledger5.record_gate_result(
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[Failure(file="a.py", code="E1", message="boom", line=1)],
+        ),
+        run_id=minted_run,
+    )
+    ledger5.close()
+
+    rerun_head = [
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="ruff 1.0",
+            failures=[
+                Failure(file="a.py", code="E1", message="boom", line=1),
+                Failure(file="a.py", code="E1", message="boom", line=1),
+                Failure(file="x.py", code="E9", message="new", line=5),
+            ],
+        )
+    ]
+    cell5 = _stub_the_runtime(monkeypatch, suites=(base, rerun_head, rerun_head))
+    outcome5, ledger5 = _drive(
+        monkeypatch,
+        rerun_dir,
+        cell=cell5,
+        turns=turns,
+        policy=policy_lint,
+        gates=("lint",),
+        spec=_spec(task_id=minted_task),
+    )
+    judged5 = _judged_attempt(ledger5, minted_task)
+    assert _lint_row(ledger5, judged5)["failures_at_head"] == 3
+    (lint5,) = [r for r in ledger5.attempt_results(judged5) if r.gate == "lint"]
+    assert lint5.failures == [
+        Failure(file="a.py", code="E1", message="boom", line=1),
+        Failure(file="x.py", code="E9", message="new", line=5),
+    ]
+
+
 def test_the_task_is_recorded_with_the_specs_declared_risk(monkeypatch, tmp_path):
     """The best the ledger's `risk` column can carry (§5.6): no diff exists yet
     at `create_task`, so an `elevate_on` match cannot be reflected here — only
@@ -3184,10 +3387,42 @@ def test_the_task_is_recorded_with_the_specs_declared_risk(monkeypatch, tmp_path
         tmp_path,
         cell=cell,
         turns=[_turn(_block(_PLAN)), _turn()],
-        spec=_spec(risk="elevated"),
+        spec=_spec(risk="elevated", declared_risk="elevated"),
     )
     (line,) = ledger.queue_lines()
     assert line["risk"] == "elevated"
+
+
+def test_the_task_created_fact_carries_the_cells_declared_tier_and_null_where_none(
+    monkeypatch, tmp_path
+):
+    """The `task_created` fact's `risk` is `CellSpec.declared_risk`, a null
+    value included. `CellSpec.risk` is never the source: it is always a
+    string. The fold still writes the column's defaulted `standard` where
+    the fact's tier is null (item 170)."""
+    for i, declared in enumerate([None, "standard", "elevated"]):
+        drive_dir = tmp_path / f"drive-{i}"
+        drive_dir.mkdir()
+        record = MemoryRecord()
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, ledger = _drive(
+            monkeypatch,
+            drive_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(risk="elevated", declared_risk=declared),
+            record=record,
+        )
+        key = ledger.record_key(outcome.task_id)
+        assert key is not None
+        facts = record.read(key)
+        created = next(f for f in facts if f.kind == "task_created")
+        assert created.payload["risk"] == declared
+
+        (row,) = ledger._db.execute(
+            "SELECT risk FROM tasks WHERE task_id = ?", (outcome.task_id,)
+        ).fetchall()
+        assert row["risk"] == (declared if declared is not None else "standard")
 
 
 def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(
