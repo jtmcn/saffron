@@ -638,8 +638,8 @@ Everything else is internal.
 `TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
 IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
 reasons ends the task in `PLAN_REJECTED` or `NOT_IMPLEMENTED`, except the two cut-off
-reasons. An IMPLEMENT turn cut by the turn ceiling or the wall clock with nothing committed
-ends `ORPHANED` the first time at a `spec_sha`. The second such cut ends `NOT_IMPLEMENTED`. The two names are deliberately distinct.
+reasons. A bound can cut an IMPLEMENT turn with nothing committed. The bound is the turn
+ceiling, the wall clock or the turn's own budget cap. Such a turn ends `ORPHANED` the first time at a `spec_sha`. The second such cut ends `NOT_IMPLEMENTED`. The two names are deliberately distinct.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase. Five more ways in share the state.
@@ -669,8 +669,8 @@ _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.
-An IMPLEMENT turn cut by the turn ceiling or the wall clock with nothing committed also ends
-here. It does so the first time at a `spec_sha`, so the spec re-queues once. Its cell is torn down as
+A bound can cut an IMPLEMENT turn with nothing committed: the turn ceiling, the wall
+clock or the turn's own budget cap. Such a turn also ends here. It does so the first time at a `spec_sha`, so the spec re-queues once. Its cell is torn down as
 usual, so `saffron gc` has nothing to reclaim. The second such cut ends `NOT_IMPLEMENTED`.
 
 **Ratify**: What the operator does to a proposed `touches` set at `SCOPE_REVIEW`.
