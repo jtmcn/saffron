@@ -4,7 +4,7 @@ title: A cell stopped with SIGTERM leaves its containers and its task in flight
 type: bug
 priority: 2
 depends_on: [SA-0229, SA-0218]
-estimated_lines: 254
+estimated_lines: 242
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -61,6 +61,7 @@ acceptance:
       - The handler raises `SystemExit(143)`, which escapes `main` rather than returning 143.
       - '`main` returns 143 for every `KeyboardInterrupt`, so a Ctrl-C with no SIGTERM reads as one.'
       - '`main` returns 130, the status Python gives an unhandled Ctrl-C.'
+      - The handler raises, but `main` re-raises the `KeyboardInterrupt` rather than returning 143.
       - The handler is installed for `batch` only.
       - The handler is installed and never put back, so the disposition after `main` is still its own.
   - claim: >-
@@ -178,8 +179,9 @@ does, so the cleanup above runs. Make these changes in `saffron/cli.py`.
    behind it still propagates out of `main`, as today.
 4. **The prose the change falsifies.** Rewrite the clause in `CLAUDE.md`,
    `README.md`, `docs/HOST-HARDENING.md` and the plist comment that says
-   SIGTERM discards the log. Add a `143` row to `README.md`'s exit code
-   table. The replacements are in the notes.
+   SIGTERM discards the log. Name `143` in the exit code lists at
+   `README.md:146-150`, `CLAUDE.md:91-92` and `saffron/cli.py:71-72`. The
+   replacements are in the notes.
 
 ## Out of scope
 
@@ -199,6 +201,24 @@ does, so the cleanup above runs. Make these changes in `saffron/cli.py`.
 - **A stack batch.** `saffron batch --stack` runs through the same `_batch`
   frame and its own `finally` (`saffron/batch.py:834-836`). No witness
   drives it.
+- **SIGTERM under launchd.** The plist runs `exec ... uv run saffron batch`
+  (`docs/host/dev.saffron.batch.plist:29`). Whether `uv` forwards SIGTERM to
+  Python is unmeasured. Whether teardown finishes inside launchd's exit
+  timeout is unmeasured too. So the docs speak of a SIGTERM that reaches the
+  Python process.
+- **Auto-clean on abort.** `DESIGN.md:502` (§4.3) says never auto-clean on
+  failure. The Ctrl-C path at base already calls `export_patch` and then
+  removes both volumes (`saffron/cell/session.py:3229-3259`), as Appendix J
+  principle 42 moved the artifact into the patch. This spec changes no
+  behaviour there. That §4.3 sentence is stale against this path, for the
+  operator to settle.
+- **The ignored disposition.** Teardown's child processes inherit the
+  ignored SIGTERM. Each is a short runtime call, so nothing depends on it.
+- **The batch's spend.** A run unwound by the exception is never attached
+  to the batch (`saffron/batch.py:268-287`), so the row misses its spend.
+  Ctrl-C does the same at base.
+- **The Python version.** The cell runs CPython 3.12. Its `Popen.__exit__`
+  holds the same exact-class test, read in 3.12.14 on this host.
 
 ## Notes for the agent
 
@@ -211,7 +231,9 @@ exist at your base and must stay green.
 
 **Witnesses red at base.** At base no handler is installed. Each in-process
 witness installs its own SIGTERM handler first, which only records, so the
-base run continues and fails on the exit code. Put it back afterwards. The
+base run continues and fails on the exit code. Restore it in a `finally`.
+Call `cli.main` inside `try` with `except BaseException` that fails the
+test, so a leaked `KeyboardInterrupt` fails one test, not the session. The
 process witness fails at base because the child dies by the signal, with
 return code -15 and empty stdout. The witness module imports nothing the
 change adds, so `revert` collects it with the source reverted.
@@ -228,55 +250,69 @@ lens turn. Assert the slice of the stub's `order` list from the last `turn:`
 entry on. Mid-REVIEW it holds `turn:saffron-critic-SY-1`, then the three
 critic removals, then `cell_down`'s five. Assert that the stub's `turns`
 list holds one more entry than the index, so no later turn started. Assert
-the proxy's `stop` entry and `patch.diff` under `_drive`'s out directory. Read the run and task
-states from `_drive`'s own ledger. Stub `ensure_mirror`, `real_remote`,
-`fetch_default_branch` and `package` as
+the proxy's `stop` entry and `patch.diff` under `_drive`'s out directory.
+Read the run and task states from `_drive`'s own ledger. Stub
+`ensure_mirror`, `real_remote`, `fetch_default_branch` and `package` as
 `test_the_exit_code_distinguishes_the_terminal_states` does. For criterion
 2, wrap `runtime.remove_container` after `_stub_the_runtime`. Send the
 second SIGTERM on the first call for `saffron-cell-SY-1` after the first
 signal.
 
-**Criterion 3.** Start `sys.executable -c` with a script string, stdout
-piped and `PYTHONUNBUFFERED` removed from its environment. The script
+**Criterion 3.** Start `sys.executable -c` with a script string and stdout
+piped. Its environment sets `CLAUDE_CODE_OAUTH_TOKEN` to a dummy and drops
+`PYTHONUNBUFFERED` and `SAFFRON_CELL_RUNTIME`. Without the token `_run_cell`
+raises (`saffron/cli.py:441-449`). Under podman `unattended_refusal` refuses
+the night (`saffron/cli.py:1549-1552`). The script
 replaces `cli.run_task`, `preflight.prepare_mirror`,
 `preflight.check_readiness`, `cli._resolve_queue`, `cli._protected_paths_at`
 and `cli._retirement_markers_at` by assignment. Then it calls
 `sys.exit(cli.main(...))`. Its `run_task` prints a line naming the spec. It
 starts a Python child that sleeps twenty seconds, with stdout to
 `DEVNULL`, inside `with subprocess.Popen(...)`. There it writes a marker
-file and sleeps. The batch resolves two candidates. Wait for the marker,
-send SIGTERM, and `communicate` with a ten-second timeout.
+file and sleeps. The batch resolves two candidates. Wait for the marker
+with a thirty-second deadline, failing as soon as `poll()` shows the child
+exited. Then send SIGTERM and `communicate` with a ten-second timeout.
 
-**The prose replacements.** Each is a whole sentence.
+**The prose replacements.** Edit only the words named, and keep the rest.
 
-- `CLAUDE.md:74-76`, the sentence from "Under launchd" to "human-readable
-  record.": "Under launchd it needs
-  `PYTHONUNBUFFERED=1`, or the log stays empty while the night runs and a
-  SIGKILL discards it. SIGTERM unwinds the cell and exits 143 (b-5df2a7)."
-- `README.md:150`, a row after the `2` row: "| `143` | stopped by SIGTERM,
-  after its teardown | stopped by SIGTERM, after its teardown |".
-- `README.md:139-140`: "Under launchd, `batch` needs
-  `PYTHONUNBUFFERED=1`. Without it the log stays empty while the night
-  runs, and a SIGKILL discards it. The log is the night's only
-  human-readable record."
-- `docs/HOST-HARDENING.md:205-210`, keeping the bold lead: "Python
-  block-buffers stdout into a file redirect, so without it the log stays
-  empty while the night runs. `launchctl unload`, logout and shutdown send
-  SIGTERM, which `saffron batch` unwinds, flushing the log as it exits 143
-  (b-5df2a7). Before that, a night killed this way left a **0-byte** log,
-  measured. A SIGKILL still discards whatever is buffered."
-- `docs/host/dev.saffron.batch.plist:35-39`, the comment: "Python
-  block-buffers stdout into a file redirect, so without this the log below
-  stays empty while the night runs, and a SIGKILL discards it. SIGTERM on
-  `unload`, logout and shutdown unwinds and flushes (b-5df2a7)."
+- In the sentence on `PYTHONUNBUFFERED=1` at `CLAUDE.md:74-76`, "or
+  SIGTERM discards the log" becomes "or a SIGKILL discards the log".
+
+- In `CLAUDE.md:91-92`, "`2` infrastructure failed" becomes "`2`
+  infrastructure failed, `143` stopped by SIGTERM after teardown".
+
+- In the comment above `CELL_EXIT` at `saffron/cli.py:71-79`, "(§3.3)."
+  becomes "(§3.3), 143 SIGTERM." Rewrap it to the line length.
+
+- In the sentence on `PYTHONUNBUFFERED=1` at `README.md:139-140`, "without
+  it SIGTERM discards the log" becomes "without it a SIGKILL discards the
+  log".
+
+- After the `RATE_LIMITED` row at `README.md:150`, add a row for 143. Both
+  cells read "stopped by SIGTERM, after its teardown".
+
+- Rewrite the paragraph on `launchctl unload` at
+  `docs/HOST-HARDENING.md:205-210` from "Measured:" on. It becomes
+  "Measured before b-5df2a7, a process killed that way left a **0-byte**
+  log. One that reaches Python now unwinds and flushes, exiting 143.
+  Forwarding by uv run and launchd's exit timeout are unmeasured, and a
+  silent agent turn delays the stop until its next line. A SIGKILL still
+  discards the buffer." Backtick uv run.
+
+- In the comment on `unload` at `docs/host/dev.saffron.batch.plist:35-39`,
+  the text from the dash to "done." becomes ". Measured before b-5df2a7, a
+  night killed that way left a 0-byte log. A SIGKILL still does."
 
 **Measured on a prototype, 2026-10-07.** All three new witnesses were
 written against `958db033` with this change, and passed. Each fails with
 `saffron/cli.py` reverted. Every wrong version listed above was applied
 and failed its own criterion's witness. `tests/test_cli.py` passed whole,
-and `ty` passed on both files. The prototype's whole diff, prose included,
-counted 1000 changed tokens by `size_gate`. The `README.md` table row,
-measured alone, adds 17.
+and `ty` passed on both files. Re-run at `a746f35d` with
+`CLAUDE_CODE_OAUTH_TOKEN` unset and `SAFFRON_CELL_RUNTIME=podman` in the
+host shell, all three passed. With `main` re-raising rather than returning
+143, all three reported `FAILED` and the session ran to its end. By
+`size_gate`, the code and tests counted 841 changed tokens and the prose
+edits above 125.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
