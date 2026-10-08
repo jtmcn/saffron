@@ -43,7 +43,7 @@ acceptance:
       reads files already committed, with nothing staged, as b-1e106d's hit
       was. It fails in both kinds of file the gate reads. The witness drives a
       Markdown file in scope, `README.md`, and a class docstring in
-      in-scope Python, `saffron/m.py`. Each carries `sandbox`, a phrase the
+      in-scope Python, `saffron/bypass.py`. Each carries `sandbox`, a phrase the
       gate reports. A tree whose `README.md` says `cell` instead passes.
     witness: tests/test_terms_hook.py::test_the_terms_hook_fails_a_tree_carrying_an_avoided_phrase
     wrong_versions:
@@ -53,6 +53,7 @@ acceptance:
       - An entry that greps for the `status` key alone, not for its `pass` value.
       - An entry that ends in `|| true`.
       - An entry whose literal uses compact JSON separators, which the gate never prints, so the clean tree fails.
+      - An entry that greps for `pass` alone, so a failing file whose path holds `pass`, as `saffron/bypass.py` does, lets the hook pass.
   - claim: >-
       The hook fails on a gate `error` as well. The witness runs it in a tree
       that is no git repository, where the gate cannot list its files and
@@ -208,7 +209,7 @@ reads a test file's comments and docstrings, not its strings.
 
 **Criterion 1's witness.** Assert the exit code, not the output. Three trees:
 `README.md` reading "The agent runs in a cell." exits 0. The same file with
-`sandbox` for `cell` exits non-zero. A `saffron/m.py` whose class
+`sandbox` for `cell` exits non-zero. A `saffron/bypass.py` whose class
 docstring carries `sandbox` exits non-zero. That is the shape of
 b-1e106d's hit.
 
