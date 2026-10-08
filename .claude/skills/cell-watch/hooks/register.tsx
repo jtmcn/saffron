@@ -6,6 +6,7 @@ import { parse, summarize } from './progress'
 import type { CellEvent } from './progress'
 
 const PANE = 'cell-watch'
+const TOOL = 'mcp__cell-watch__watch'
 const POLL_MS = 3000
 const WINDOW_HOURS = 12
 const SPEC = /^SA-\d+$/
@@ -105,6 +106,26 @@ function arm($: EngineInterface) {
   })
 }
 
+async function begin($: EngineInterface, words: string[]): Promise<string> {
+  timer?.cancel()
+  timer = undefined
+  await settle()
+  if (words.includes('stop')) {
+    await update($, watch, () => NO_WATCH)
+    $.ui.status(undefined)
+    return 'cell-watch stopped.'
+  }
+  const spec = words.find(w => SPEC.test(w)) ?? ''
+  await update($, watch, () => ({ spec, follow: spec === '', wake: !words.includes('--quiet') }))
+  const already = await poll($, false)
+  arm($)
+  if (words.includes('--pane')) void $.ui.open({ id: PANE, title: 'Cell watch' })
+  const v = await read($, view)
+  const target = spec || `the newest task (${v.spec || `none in the last ${WINDOW_HOURS} h`})`
+  const held = already.length ? ` Already in the log: ${already.join('; ')}.` : ''
+  return `Watching ${target}: ${v.status || 'no log yet'}.${held}`
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -112,32 +133,45 @@ export const register: Register = on => {
       description: 'Follow a Saffron task: /cell-watch [SA-NNNN] [--quiet] [--pane] | stop',
       argumentHint: '[SA-NNNN] [--quiet] [--pane] | stop',
     })
+    await $.tool.register({
+      name: 'watch',
+      description:
+        "Follow a Saffron task's events.jsonl and wake this session with a prompt on each milestone: " +
+        'a red baseline, a budget_usd stop, a Terminal event, a TaskOutcome. It replaces a Monitor over ' +
+        'tail -F | grep and never expires. With no spec it follows the newest task through a batch. ' +
+        'stop: true ends it. A wake-up is not the process ending: wait for the exit notice before driver.py record.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          spec: { type: 'string', description: 'SA-NNNN to follow; omit to follow the newest task' },
+          quiet: { type: 'boolean', description: 'status line and toasts only, no wake-up prompt' },
+          stop: { type: 'boolean', description: 'end the watch' },
+        },
+      },
+      isDeferred: false,
+    })
     // A hot reload drops the timer but keeps $.state, so a watch in progress resumes.
     const w = await read($, watch)
     if (w.spec || w.follow) arm($)
     return next(e)
   })
 
-  on('command.run', { command: 'cell-watch' }, async ($, e) => {
-    const words = e.args.trim().split(/\s+/).filter(Boolean)
-    timer?.cancel()
-    timer = undefined
-    await settle()
-    if (words.includes('stop')) {
-      await update($, watch, () => NO_WATCH)
-      $.ui.status(undefined)
-      return { text: 'cell-watch stopped.' }
+  on('command.run', { command: 'cell-watch' }, async ($, e) => ({
+    text: await begin($, e.args.trim().split(/\s+/).filter(Boolean)),
+  }))
+
+  // The delegate is the model, and the model cannot type a slash command.
+  on('tool.call', { tool: TOOL }, async ($, e) => {
+    const input = (e.input ?? {}) as { spec?: unknown; quiet?: unknown; stop?: unknown }
+    const words: string[] = []
+    if (input.stop === true) words.push('stop')
+    if (typeof input.spec === 'string' && input.spec) {
+      if (!SPEC.test(input.spec)) return { deny: `cell-watch: ${input.spec} is not an SA-NNNN id.` }
+      words.push(input.spec)
     }
-    const spec = words.find(w => SPEC.test(w)) ?? ''
-    await update($, watch, () => ({ spec, follow: spec === '', wake: !words.includes('--quiet') }))
-    const already = await poll($, false)
-    arm($)
-    if (words.includes('--pane')) void $.ui.open({ id: PANE, title: 'Cell watch' })
-    const v = await read($, view)
-    const target = spec || `the newest task (${v.spec || `none in the last ${WINDOW_HOURS} h`})`
-    const held = already.length ? ` Already in the log: ${already.join('; ')}.` : ''
-    return { text: `Watching ${target}: ${v.status || 'no log yet'}.${held}` }
-  })
+    if (input.quiet === true) words.push('--quiet')
+    return { result: await begin($, words) }
+  }).catch(($, e, next) => ({ deny: `cell-watch did not start (${next.error.kind}); fall back to the Monitor.` }))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)

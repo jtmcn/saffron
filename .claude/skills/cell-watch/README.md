@@ -3,8 +3,11 @@
 A Claude Code mod that follows a Saffron task through its `events.jsonl`. It
 reads each event's `kind` field, so no pattern over rendered lines decides a
 milestone. For an operator at the prompt, it does the work of the spec loop's
-Monitor over `tail -F | grep`. The model cannot start it, so an unattended
-loop still uses the Monitor.
+Monitor over `tail -F | grep`. The model starts it through the
+`mcp__cell-watch__watch` tool, so the delegate can watch its own cells.
+
+Claude Code loads it from the project's `.claude/skills/` with no install
+step. A `claude -p --agent delegate` session listed the tool on 2026-10-07.
 
 ## Use
 
@@ -14,6 +17,7 @@ loop still uses the Monitor.
 - `--pane` opens a pane of the task's lines.
 - `--quiet` keeps the status line and toasts and submits no prompt.
 - `/cell-watch stop` ends the watch.
+- The tool takes `{ spec?, quiet?, stop? }` and does the same.
 
 The status line reads `SA-0222 · IMPLEMENT #1 · $6.26/$26.00`.
 
