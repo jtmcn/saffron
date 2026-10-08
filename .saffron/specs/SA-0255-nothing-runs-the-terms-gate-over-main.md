@@ -4,7 +4,7 @@ title: Nothing runs the `terms` gate over main, so a widened rule turns main red
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 102
+estimated_lines: 103
 estimate_measured: true
 touches:
   - .pre-commit-config.yaml
@@ -40,8 +40,8 @@ acceptance:
   - claim: >-
       A `terms` hook in `.pre-commit-config.yaml`, run by its own `entry` in a
       git tree, exits 0 on a gate `pass` and non-zero on a gate `fail`. It
-      reads committed files, with nothing staged, as b-1e106d's hit was. It
-      fails in both kinds of file the gate reads. The witness drives a
+      reads files already committed, with nothing staged, as b-1e106d's hit
+      was. It fails in both kinds of file the gate reads. The witness drives a
       Markdown file in scope, `README.md`, and a class docstring in
       in-scope Python, `saffron/m.py`. Each carries `sandbox`, a phrase the
       gate reports. A tree whose `README.md` says `cell` instead passes.
@@ -62,12 +62,13 @@ acceptance:
       - An entry that fails only on a `fail` verdict, so an `error` passes.
   - claim: >-
       prek runs the hook on every file the gate reads, passes it no
-      filenames, and runs it at the commit stage. The witness takes every
+      filenames, and runs it at the commit stage. Its entry invokes the
+      declared gate's executable, `.saffron/gates/terms`. The witness takes every
       path tracked at the repo root that `in_scope` in
       `.saffron/gates/prose.py` accepts, the gate's own script among them.
       It asserts the hook's `files` matches each one. It asserts
-      `pass_filenames` is false, and that any `stages` the hook declares
-      include `pre-commit`.
+      `pass_filenames` is false, that any `stages` the hook declares
+      include `pre-commit`, and that the entry names `.saffron/gates/terms`.
     witness: tests/test_terms_hook.py::test_prek_runs_the_terms_hook_on_every_file_the_gate_reads
     wrong_versions:
       - A `files` pattern for Markdown alone, so a docstring edit like this item's never runs the hook.
@@ -76,6 +77,7 @@ acceptance:
       - A `files` pattern for the gate's own script alone, so a new hit in any other file never runs the hook.
       - "`pass_filenames: true`, which hands the gate arguments it refuses with a usage line and no verdict."
       - "`stages: [manual]`, which `prek run --all-files` skips, so CI never runs the hook."
+      - An entry of `uv run python .saffron/gates/prose.py terms`, which passes the other two witnesses but runs a command no cell runs.
 ---
 
 ## Context
@@ -135,6 +137,16 @@ exited 1, and so did a tree with no git repository. `prek run terms
 `sandbox` in `docs/backlog/PRIORITY.md`, `prek run terms` failed and printed
 the gate's `fail` line.
 
+**What the hook costs, accepted.** `terms` stays `blocking: false` in a
+cell (`.saffron/policy.yaml:29-30`). Advisory gates stop nothing
+(`CONTEXT.md:397-398`). CI runs `prek run --all-files`
+(`.github/workflows/ci.yml:18`). So a cell can reach `READY_FOR_REVIEW` with
+a `terms` hit and open a pull request that CI then fails. That is the
+intent: `main` must not go red on `terms`. The gate also lists untracked
+files, through `--others` (`.saffron/gates/prose.py:605-607`). An untracked
+in-scope file carrying an avoided phrase therefore blocks every commit of
+Markdown or Python, at about 17 seconds a run. That is accepted too.
+
 ## Problem
 
 `terms` runs over the whole tree only inside a cell, where subtraction hides
@@ -182,13 +194,16 @@ reverted, each witness finds no `terms` hook and fails, which `revert` needs.
 whatever form it takes. `CODE_DIRS` puts the copied scripts in scope, and
 they are free of avoided phrases, as the base measurement shows. For
 criterion 1's trees, run `git init`, `git add -A` and `git commit`, so
-nothing is staged when the hook runs. Give each
-git call and each hook run an environment with `GIT_CONFIG_GLOBAL` set to
-`os.devnull` and `GIT_CONFIG_NOSYSTEM` set to `1`, as `_git_in` in
-`tests/test_dead_gate.py` does. Name a user with `-c` on each git call, as
+nothing is staged when the hook runs. This environment is for the fixture
+trees only. Give each git call and each hook run there `GIT_CONFIG_GLOBAL`
+set to `os.devnull` and `GIT_CONFIG_NOSYSTEM` set to `1`. That is what
+`_git_in` in `tests/test_dead_gate.py` does. Name a user with `-c` on each git call, as
 `_git_in` does. For the `error` tree, skip `git init` and set
 `GIT_CEILING_DIRECTORIES` to `tmp_path`, so no parent repository answers.
-Keep every avoided phrase in the test file as a quoted string. The gate
+The `retired-vocabulary` hook reads the new test file too. Keep its
+retired term out of every line, or build it from parts as
+`tests/test_retired_vocabulary_hook.py:51-52` does. Keep every avoided
+phrase in the test file as a quoted string. The gate
 reads a test file's comments and docstrings, not its strings.
 
 **Criterion 1's witness.** Assert the exit code, not the output. Three trees:
@@ -200,7 +215,11 @@ b-1e106d's hit.
 **Criterion 3's witness.** Load `.saffron/gates/prose.py` by path inside the
 test, as `_prose` in `tests/test_prose_gate.py` does, and register the
 module in `sys.modules` before running it. List the tracked paths with
-`git ls-files` at the repo root. Assert that `.saffron/gates/prose.py` is
+`git ls-files` at the repo root, under the inherited environment, as
+`_tracked` in `tests/test_prose_gate.py:402-405` does. Do not give that call
+the fixture trees' environment. The cell grants `safe.directory` for `/work`
+only through its account's global git config
+(`images/cell-base.python.Dockerfile:77-78`). Assert that `.saffron/gates/prose.py` is
 among the paths `in_scope` accepts, then that `files` matches every one.
 
 **How the lists were measured.** On 2026-10-07 a prototype of this change
@@ -224,7 +243,7 @@ file from zero. Write none with an em dash, a semicolon, a contraction, the
 perfect tense or a sentence over 25 words. Run `python3 hooks/prose_limit.py
 --file tests/test_terms_hook.py` before you commit.
 
-**Size.** A prototype measured 406 tokens by `size_gate` over 110 changed
-lines: 14 in `.pre-commit-config.yaml` and 96 in the test. The `bug`
+**Size.** A prototype measured 410 tokens by `size_gate` over 111 changed
+lines: 14 in `.pre-commit-config.yaml` and 97 in the test. The `bug`
 ceiling is 1300 tokens (`saffron/gates/core/size.py:26`). Neither touched
 path is in `elevate_on`, so `size` stays advisory.
