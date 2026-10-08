@@ -412,6 +412,8 @@ def test_an_attempt_states_its_model_and_a_task_its_lines_only_where_the_ledger_
     _set_task(ledger, zero_lines, state="DRAFT", added=0, removed=0)
     added_only = ledger.create_task(run_id, "SA-0004", "sha4", "b4")
     _set_task(ledger, added_only, state="DRAFT", added=5, removed=None)
+    removed_only = ledger.create_task(run_id, "SA-0006", "sha6", "b6")
+    _set_task(ledger, removed_only, state="DRAFT", added=None, removed=4)
     no_lines = ledger.create_task(run_id, "SA-0005", "sha5", "b5")
     _set_task(ledger, no_lines, state="DRAFT", added=None, removed=None)
     ledger.close()
@@ -444,6 +446,11 @@ def test_an_attempt_states_its_model_and_a_task_its_lines_only_where_the_ledger_
     added_only_added = _literal(g, added_only_node, f"{FACTORY}linesAdded")
     assert added_only_added.toPython() == 5
     assert not _triples(g, added_only_node, f"{FACTORY}linesRemoved")
+
+    removed_only_node = f"{DATA}task-{removed_only}"
+    removed_only_removed = _literal(g, removed_only_node, f"{FACTORY}linesRemoved")
+    assert removed_only_removed.toPython() == 4
+    assert not _triples(g, removed_only_node, f"{FACTORY}linesAdded")
 
     no_lines_node = f"{DATA}task-{no_lines}"
     assert not _triples(g, no_lines_node, f"{FACTORY}linesAdded")

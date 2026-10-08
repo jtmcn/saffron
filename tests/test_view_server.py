@@ -169,10 +169,10 @@ class _PageParser(HTMLParser):
     `False` for a data row, by table id, in the document's row order.
     `table_ids` lists every table id in the order its `<table>` tag
     appears. `headings3` maps a table id to the `<h3>` text right before
-    it, when there is one. `summary` maps each `<dl id="summary">` term's
-    `<dt>` text to its `<dd>` text and the `href` of its `<a>`, if any.
-    Also every `<a href>`, the first `<h1>`'s text, the `<title>`'s text,
-    and `text`: the page's own data, untagged, without the stylesheet."""
+    it, when there is one. `dls` maps each `<dl id>` to its `<dt>` texts,
+    each with its `<dd>` text and `<a href>`. `summary` is `dls["summary"]`.
+    `texts_by_id` holds each `<p id>` and `<pre id>` text. Also every
+    `<a href>`, the first `<h1>`, the `<title>` and the untagged `text`."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -208,8 +208,7 @@ class _PageParser(HTMLParser):
         self._dd_href: str | None = None
         self._current_term: str | None = None
         self._in_style = False
-        # One active `<p id=...>`/`<pre id=...>` capture at a time.
-        # Neither element nests the other on this page.
+        # Open `<p id>`/`<pre id>` captures, innermost last.
         self._text_capture_stack: list[tuple[str, str, list[str]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -1383,7 +1382,7 @@ def test_a_task_summary_shows_the_lines_added_and_removed_the_ledger_holds(
 
     batch_id = ledger.create_batch(10.0)
     batch_run = ledger.create_run(repo_id, "batch-base", batch_id=batch_id)
-    # Minted before the real batched task, in the same batch. An unbound
+    # Created before the real batched task, in the same batch. An unbound
     # `V2`, ordered `?batch ?task` ascending, then reaches it first.
     batched_decoy = ledger.create_task(batch_run, "SA-DECOY-B", "sdb", "bdb")
     _set_task(ledger, batched_decoy, state="DRAFT", added=404, removed=404)
@@ -1405,7 +1404,11 @@ def test_a_task_summary_shows_the_lines_added_and_removed_the_ledger_holds(
         unbatched_run, "SA-UNB-ZERO", "su4", "bu4"
     )
     _set_task(ledger, zero_added_unbatched, state="DRAFT", added=0, removed=9)
-    # Minted last. An unbound `V5`, ordered `DESC(?task)`, reaches it first.
+    removed_only_unbatched = ledger.create_task(
+        unbatched_run, "SA-UNB-REMOVED", "su5", "bu5"
+    )
+    _set_task(ledger, removed_only_unbatched, state="DRAFT", added=None, removed=4)
+    # Created last. An unbound `V5`, ordered `DESC(?task)`, reaches it first.
     unbatched_decoy = ledger.create_task(unbatched_run, "SA-DECOY-U", "sdu", "bdu")
     _set_task(ledger, unbatched_decoy, state="DRAFT", added=505, removed=505)
 
@@ -1417,6 +1420,9 @@ def test_a_task_summary_shows_the_lines_added_and_removed_the_ledger_holds(
         added_only_status, added_only_body = _get(base, f"/task/{added_only_unbatched}")
         neither_status, neither_body = _get(base, f"/task/{neither_unbatched}")
         zero_added_status, zero_added_body = _get(base, f"/task/{zero_added_unbatched}")
+        removed_only_status, removed_only_body = _get(
+            base, f"/task/{removed_only_unbatched}"
+        )
         v2_status, v2_body, _ = _sparql(base, _V2)
         v5_status, v5_body, _ = _sparql(base, _V5)
 
@@ -1459,6 +1465,11 @@ def test_a_task_summary_shows_the_lines_added_and_removed_the_ledger_holds(
     zero_added_page = _parse(zero_added_body)
     assert zero_added_page.summary["lines added"] == ("0", None)
     assert zero_added_page.summary["lines removed"] == ("9", None)
+
+    assert removed_only_status == 200
+    removed_only_page = _parse(removed_only_body)
+    assert removed_only_page.summary.get("lines removed") == ("4", None)
+    assert "lines added" not in removed_only_page.summary
 
     v2_bindings = json.loads(v2_body)["results"]["bindings"]
     assert v2_bindings[0]["task"]["value"] == f"{DATA_NS}task-{batched_decoy}"

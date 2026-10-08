@@ -26,6 +26,7 @@ import pyoxigraph as ox
 from saffron.intake import DisclosedMutantError, SpecError, parse_spec
 from saffron.projection import DATA_NS, NS, VOCABULARY
 from saffron.report.pr_body import extract_problem
+from saffron.repos.mirror import _REGULAR_MODES
 from saffron.view.graph import LeftOut, ViewGraph, build, open_read_only
 
 FAILURE_LINE_CAP = 200
@@ -664,10 +665,9 @@ def _failures_blocks(
 
 
 _SPEC_DIR = ".saffron/specs/"
-_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 # Why a task's spec text could not be shown (§6.2). Never `str`: the four
-# reasons are a closed set, named in full where `_render_spec_section` uses them.
+# reasons are a closed set, named in full where `_task_spec` returns them.
 SpecUnavailableReason = Literal["absent", "hash mismatch", "unparseable", "unreadable"]
 
 
@@ -767,7 +767,7 @@ def _task_spec(
     location = _find_spec_entry(row["mirror_path"], row["base_sha"], row["spec_id"])
     if location == "absent" or location == "unreadable":
         return location
-    if location.mode not in _REGULAR_FILE_MODES:
+    if location.mode not in _REGULAR_MODES:
         return "unreadable"
 
     raw = _read_spec_blob(row["mirror_path"], row["base_sha"], location.path)

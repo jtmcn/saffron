@@ -187,13 +187,11 @@ def _what(
 def extract_problem(body: str) -> str:
     """The spec's `## Problem` section, verbatim, or nothing.
 
-    Operator-authored and out of a cell's reach by construction: the host parses
-    the spec at `base_sha` before the cell exists, and every render reads that
-    object rather than the worktree. Neutralized regardless, which `spec.title`
-    is not — a title is a phrase and this is prose long enough to carry a
-    `Fixes #12` written about the work, which would close an issue on merge that
-    nobody meant to close. Saffron's own work is not tracked as issues at all
-    (`docs/agents/issue-tracker.md`), so there is no reading of that keyword in a spec worth honouring.
+    The host parses the spec at `base_sha` before any cell exists, so a cell
+    never writes this text. It is neutralized anyway, unlike `spec.title`:
+    prose this long can carry a `Fixes #12` about the work, which would close
+    an issue on merge. Saffron tracks no work as issues
+    (`docs/agents/issue-tracker.md`), so no such keyword in a spec is meant.
     """
     section = _PROBLEM_SECTION.search(body)
     if section is None:
