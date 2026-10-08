@@ -4,7 +4,7 @@ title: A turn ceiling reached before the first commit still loses the work when 
 status: open
 tier: 1
 filed: 2026-09-14
-specs: [SA-0086, SA-0087]
+specs: [SA-0086, SA-0087, SA-0230]
 prs: []
 commits: []
 cites: []
