@@ -4,7 +4,7 @@ title: Reconcile still reaches a resumed task's row while PACKAGE runs
 status: open
 tier: 2
 filed: 2026-09-24
-specs: []
+specs: [SA-0243]
 prs: []
 commits: []
 cites: [§3.3, §4.2, §4.2.1, §5.7]
