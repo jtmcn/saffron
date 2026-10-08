@@ -4,7 +4,7 @@ title: A spec whose subject is a test gets no measured wrong version, and REVIEW
 status: open
 tier: 1
 filed: 2026-10-05
-specs: [SA-0200]
+specs: [SA-0200, SA-0233]
 prs: [674]
 commits: []
 cites: [§5.5]
