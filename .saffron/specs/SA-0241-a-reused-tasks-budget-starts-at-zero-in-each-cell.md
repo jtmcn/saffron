@@ -3,7 +3,7 @@ id: SA-0241
 title: A reused task's budget ceiling starts at zero in each cell, so a task can spend its budget once per cell
 type: bug
 priority: 2
-depends_on: [SA-0235]
+depends_on: [SA-0249]
 estimated_lines: 232
 estimate_measured: true
 touches:
