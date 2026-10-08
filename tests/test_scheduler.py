@@ -2251,7 +2251,7 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-07 for b-98a3be. `SA-0220`, `SA-0200`, `SA-0201`,
+    """Re-measured 2026-10-07 for b-f582ee. `SA-0220`, `SA-0232`, `SA-0200`, `SA-0201`,
     `SA-0208`, `SA-0215` and `SA-0225` are candidates. Refused: `SA-0202`-`SA-0207`,
     `SA-0216`-`SA-0219`, `SA-0221`-`SA-0224` and `SA-0226`-`SA-0229`.
 
@@ -2866,6 +2866,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0227",
         "SA-0228",
         "SA-0229",
+        "SA-0232",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -2879,6 +2880,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # spec in `done/` here as well. That is what makes the exact list a check.
     assert [c.spec.id for c in candidates] == [
         "SA-0220",
+        "SA-0232",
         "SA-0200",
         "SA-0201",
         "SA-0208",
