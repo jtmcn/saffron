@@ -4,7 +4,7 @@ title: A cell stopped with SIGTERM leaves its containers and its task in flight
 type: bug
 priority: 2
 depends_on: [SA-0229, SA-0218]
-estimated_lines: 242
+estimated_lines: 282
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -73,6 +73,7 @@ acceptance:
     wrong_versions:
       - The handler stays installed after its first delivery and raises again, so the networks and volumes are left.
       - The first delivery puts back the handler `main` found, so the second signal reaches it, which in production is the default and ends the process.
+      - The first delivery sets SIGTERM to its default rather than to ignored, so a second signal ends the process mid-teardown.
   - claim: >-
       A `saffron cell` process and a `saffron batch` process, each with stdout
       piped and a child process of its own still running, are sent SIGTERM
@@ -186,7 +187,7 @@ does, so the cleanup above runs. Make these changes in `saffron/cli.py`.
 ## Out of scope
 
 - **A SIGTERM during a silent turn.** The handler runs at the main thread's
-  next Python instruction. Measured on this host, a main thread waiting in
+  next Python instruction. Measured on macOS only, a main thread waiting in
   `stream_exec`'s `lines.get` ran it only when the next line arrived. So a
   signal sent while the agent prints nothing waits for its next line or
   bound.
@@ -253,13 +254,20 @@ list holds one more entry than the index, so no later turn started. Assert
 the proxy's `stop` entry and `patch.diff` under `_drive`'s out directory.
 Read the run and task states from `_drive`'s own ledger. Stub
 `ensure_mirror`, `real_remote`, `fetch_default_branch` and `package` as
-`test_the_exit_code_distinguishes_the_terminal_states` does. For criterion
-2, wrap `runtime.remove_container` after `_stub_the_runtime`. Send the
-second SIGTERM on the first call for `saffron-cell-SY-1` after the first
-signal.
+`test_the_exit_code_distinguishes_the_terminal_states` does. Call
+`monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")` as well, the
+autouse fixture at `tests/test_cli.py:56-59` does. No conftest sets it, and
+`_run_cell` raises without it (`saffron/cli.py:441-449`). For criterion 2,
+wrap `runtime.remove_container` after `_stub_the_runtime`. On the first call
+for `saffron-cell-SY-1` after the first signal, fail the test unless
+`signal.getsignal(signal.SIGTERM)` is `signal.SIG_IGN`. Only then send the
+second SIGTERM, so a build that set the default cannot end pytest itself.
 
-**Criterion 3.** Start `sys.executable -c` with a script string and stdout
-piped. Its environment sets `CLAUDE_CODE_OAUTH_TOKEN` to a dummy and drops
+**Criterion 3.** Start `sys.executable -c` with a script string. Pipe its
+stdout only. Set `cwd` to the repo root, as the cell installs the project
+with `--no-install-project` and imports `saffron` from `/work`. Pass
+`--home` under `tmp_path`, so no run writes `~/.saffron/ledger.db`. Its
+environment sets `CLAUDE_CODE_OAUTH_TOKEN` to a dummy and drops
 `PYTHONUNBUFFERED` and `SAFFRON_CELL_RUNTIME`. Without the token `_run_cell`
 raises (`saffron/cli.py:441-449`). Under podman `unattended_refusal` refuses
 the night (`saffron/cli.py:1549-1552`). The script
@@ -267,26 +275,45 @@ replaces `cli.run_task`, `preflight.prepare_mirror`,
 `preflight.check_readiness`, `cli._resolve_queue`, `cli._protected_paths_at`
 and `cli._retirement_markers_at` by assignment. Then it calls
 `sys.exit(cli.main(...))`. Its `run_task` prints a line naming the spec. It
-starts a Python child that sleeps twenty seconds, with stdout to
-`DEVNULL`, inside `with subprocess.Popen(...)`. There it writes a marker
-file and sleeps. The batch resolves two candidates. Wait for the marker
-with a thirty-second deadline, failing as soon as `poll()` shows the child
-exited. Then send SIGTERM and `communicate` with a ten-second timeout.
+starts a Python child that sleeps twenty seconds, with stdout and stderr
+both to `DEVNULL`, inside `with subprocess.Popen(...)`. There it writes a
+marker file and sleeps sixty seconds. The batch resolves two candidates.
+Wait for the marker with a thirty-second deadline, failing as soon as
+`poll()` shows the child exited. Then send SIGTERM and `communicate` with a
+ten-second timeout. Kill and reap the child in a `finally`.
 
 **The prose replacements.** Edit only the words named, and keep the rest.
 
-- In the sentence on `PYTHONUNBUFFERED=1` at `CLAUDE.md:74-76`, "or
-  SIGTERM discards the log" becomes "or a SIGKILL discards the log".
+- In the sentence on `PYTHONUNBUFFERED=1` at `CLAUDE.md:74-76`, replace
+  the text from "or SIGTERM" to the sentence's end with this.
+
+  ```text
+  or a SIGKILL loses whatever output is still buffered, and the log is the
+  night's only human-readable record.
+  ```
 
 - In `CLAUDE.md:91-92`, "`2` infrastructure failed" becomes "`2`
   infrastructure failed, `143` stopped by SIGTERM after teardown".
 
-- In the comment above `CELL_EXIT` at `saffron/cli.py:71-79`, "(§3.3)."
-  becomes "(§3.3), 143 SIGTERM." Rewrap it to the line length.
+- The comment above `CELL_EXIT` at `saffron/cli.py:71-79` becomes these
+  two lines.
 
-- In the sentence on `PYTHONUNBUFFERED=1` at `README.md:139-140`, "without
-  it SIGTERM discards the log" becomes "without it a SIGKILL discards the
-  log".
+  ```text
+  # Exit codes (§3.3): 0 reviewable, 1 the task did not make it, 2 infrastructure,
+  # 143 SIGTERM. A crash or setup failure takes 2 from `main`'s handler, never 1.
+  ```
+
+  Measured: any edit that keeps the block at
+  eight lines changes the identity of its existing `comment-block` hit, and
+  the `prose` hook counts a new hit.
+
+- The sentence on `PYTHONUNBUFFERED=1` at `README.md:139-140` becomes
+  this. It drops the dash the base line holds.
+
+  ```text
+  Under launchd, `batch` needs `PYTHONUNBUFFERED=1`. Without it, a SIGKILL loses whatever output
+  is still buffered, and the log is the night's only human-readable record.
+  ```
 
 - After the `RATE_LIMITED` row at `README.md:150`, add a row for 143. Both
   cells read "stopped by SIGTERM, after its teardown".
@@ -295,13 +322,19 @@ exited. Then send SIGTERM and `communicate` with a ten-second timeout.
   `docs/HOST-HARDENING.md:205-210` from "Measured:" on. It becomes
   "Measured before b-5df2a7, a process killed that way left a **0-byte**
   log. One that reaches Python now unwinds and flushes, exiting 143.
-  Forwarding by uv run and launchd's exit timeout are unmeasured, and a
-  silent agent turn delays the stop until its next line. A SIGKILL still
-  discards the buffer." Backtick uv run.
+  Forwarding by uv run and launchd's exit timeout are unmeasured, and on
+  macOS a silent agent turn delays the stop until its next line. A SIGKILL
+  still loses what is buffered." Backtick uv run.
 
 - In the comment on `unload` at `docs/host/dev.saffron.batch.plist:35-39`,
   the text from the dash to "done." becomes ". Measured before b-5df2a7, a
-  night killed that way left a 0-byte log. A SIGKILL still does."
+  night killed that way left a 0-byte log. A SIGKILL still loses what is
+  buffered."
+
+`python3 hooks/prose_limit.py --file` reported 0 new hits on `README.md`,
+`CLAUDE.md` and `saffron/cli.py` with all of these in place. It reads
+neither `docs/HOST-HARDENING.md` nor the plist, which it calls out of the
+gates' scope.
 
 **Measured on a prototype, 2026-10-07.** All three new witnesses were
 written against `958db033` with this change, and passed. Each fails with
@@ -310,15 +343,17 @@ and failed its own criterion's witness. `tests/test_cli.py` passed whole,
 and `ty` passed on both files. Re-run at `a746f35d` with
 `CLAUDE_CODE_OAUTH_TOKEN` unset and `SAFFRON_CELL_RUNTIME=podman` in the
 host shell, all three passed. With `main` re-raising rather than returning
-143, all three reported `FAILED` and the session ran to its end. By
-`size_gate`, the code and tests counted 841 changed tokens and the prose
-edits above 125.
+143, all three reported `FAILED` and the session ran to its end. Re-run
+at `c99f711b` with the token unset, all three passed, and all fail at base.
+Without the `setenv`, criteria 1 and 2 failed. Each of the fourteen wrong
+versions failed a witness, each as a `FAILED` line. By `size_gate`, the
+code and tests counted 862 changed tokens and the prose edits above 266.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words. Keep each docstring within ten lines. A comment on the handler
 names the `Popen.__exit__` reason in one or two lines.
 
-**Size.** The `bug` ceiling is 1300 changed tokens. Nothing here is in
-`elevate_on`, so `size` reports and does not block. Keep the test helpers
-shared between criteria 1 and 2.
+**Size.** The `bug` ceiling is 1300 changed tokens, and the prototype
+counted 1128. Nothing here is in `elevate_on`, so `size` reports and does
+not block. Keep the test helpers shared between criteria 1 and 2.
