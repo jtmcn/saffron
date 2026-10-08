@@ -15,7 +15,8 @@ import re
 import sqlite3
 import subprocess
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -558,6 +559,111 @@ def _attempts_rows(store: ox.Store, task_id: int) -> list[list[str]]:
     return rows
 
 
+_PHASE_TOTAL_COLUMNS = ["phase", "attempts", "turns", "cost", "wall time"]
+
+
+@dataclass
+class _PhaseAccumulator:
+    """One phase's (or the whole task's) running totals, built across its
+    attempts. `turns`, `cost` and `wall` each keep a known sum and an
+    unknown count. One attempt can lack one value and carry the others."""
+
+    attempts: int = 0
+    turns_known: int = 0
+    turns_unknown: int = 0
+    cost_known: Decimal = field(default_factory=lambda: Decimal(0))
+    cost_unknown: int = 0
+    wall_known: int = 0
+    wall_unknown: int = 0
+
+
+def _attempt_wall_seconds(sol: ox.QuerySolution) -> int | None:
+    """The attempt's `ended` minus its `started`, in whole seconds, or
+    `None` when either is unbound (`ended` is the one that is ever
+    missing: `started_at` is `NOT NULL` in the ledger)."""
+    started = sol["started"]
+    ended = sol["ended"]
+    if started is None or ended is None:
+        return None
+    start_dt = datetime.fromisoformat(cast(str, started.value))
+    end_dt = datetime.fromisoformat(cast(str, ended.value))
+    return int((end_dt - start_dt).total_seconds())
+
+
+def _format_wall_seconds(total_seconds: int) -> str:
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+
+def _accumulate_attempt(acc: _PhaseAccumulator, sol: ox.QuerySolution) -> None:
+    acc.attempts += 1
+    turns = sol["turns"]
+    if turns is not None:
+        acc.turns_known += int(cast(str, turns.value))
+    else:
+        acc.turns_unknown += 1
+    cost = sol["cost"]
+    if cost is not None:
+        acc.cost_known += Decimal(cast(str, cost.value))
+    else:
+        acc.cost_unknown += 1
+    wall = _attempt_wall_seconds(sol)
+    if wall is not None:
+        acc.wall_known += wall
+    else:
+        acc.wall_unknown += 1
+
+
+def _total_cell(unknown: int, total: int, rendered: str) -> str:
+    """The three forms a total takes: the sum alone when every attempt has
+    the value, `{unknown} unknown` alone when none do, and the sum plus
+    `{unknown} unknown` otherwise. Never zero when any attempt lacks it."""
+    if unknown == total:
+        return f"{unknown} unknown"
+    if unknown == 0:
+        return rendered
+    return f"{rendered} + {unknown} unknown"
+
+
+def _phase_total_row(label: str, acc: _PhaseAccumulator) -> list[str]:
+    return [
+        html.escape(label),
+        html.escape(str(acc.attempts)),
+        html.escape(_total_cell(acc.turns_unknown, acc.attempts, str(acc.turns_known))),
+        html.escape(
+            _total_cell(acc.cost_unknown, acc.attempts, _round_cents(acc.cost_known))
+        ),
+        html.escape(
+            _total_cell(
+                acc.wall_unknown, acc.attempts, _format_wall_seconds(acc.wall_known)
+            )
+        ),
+    ]
+
+
+def _phase_totals_rows(store: ox.Store, task_id: int) -> list[list[str]]:
+    """One row per phase, in the order each phase's first attempt appears
+    in `_attempt_solutions`, then one `all phases` row summing every
+    attempt of the task. Grouped on the bound `?phase` node, since two
+    phases of the same task never share one."""
+    order: list[str] = []
+    labels: dict[str, str] = {}
+    accs: dict[str, _PhaseAccumulator] = {}
+    overall = _PhaseAccumulator()
+    for sol in _attempt_solutions(store, task_id):
+        phase_iri = cast(ox.NamedNode, sol["phase"]).value
+        if phase_iri not in accs:
+            order.append(phase_iri)
+            labels[phase_iri] = _text(sol["phaseName"])
+            accs[phase_iri] = _PhaseAccumulator()
+        _accumulate_attempt(accs[phase_iri], sol)
+        _accumulate_attempt(overall, sol)
+    rows = [_phase_total_row(labels[phase_iri], accs[phase_iri]) for phase_iri in order]
+    rows.append(_phase_total_row("all phases", overall))
+    return rows
+
+
 def _finding_rows(store: ox.Store, task_id: int) -> list[list[str]]:
     substitutions: _Substitutions = {
         ox.Variable("task"): ox.NamedNode(_task_iri(task_id))
@@ -847,6 +953,11 @@ def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
         else:
             sections = [
                 _table(attempt_rows, _ATTEMPT_COLUMNS, table_id="attempts"),
+                _table(
+                    _phase_totals_rows(store, task_id),
+                    _PHASE_TOTAL_COLUMNS,
+                    table_id="phase-totals",
+                ),
                 _table(
                     _gate_result_rows(store, task_id),
                     _GATE_RESULT_COLUMNS,

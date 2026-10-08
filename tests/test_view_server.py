@@ -1646,6 +1646,142 @@ def test_the_attempts_table_names_each_attempts_model(tmp_path: Path) -> None:
     assert rows["REPAIRING"][-1] == "claude-opus-4,claude-sonnet-4"
 
 
+def test_a_task_page_totals_each_phase_and_the_task_with_unknowns_never_zero(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-TOTALS", "st", "bt")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    # SPEC_WRITING's first attempt starts earliest of all, placing it first.
+    # Its second attempt starts after every other phase's.
+    writing_one = ledger.open_attempt(task_id, "SPEC_WRITING")
+    _set_attempt(
+        ledger,
+        writing_one,
+        started_at="2026-01-01 00:00:00",
+        ended_at="2026-01-02 01:00:00",
+        num_turns=30,
+        # 0.79 and 0.815, not 0.80 and 0.805: these cross a cent under a
+        # float round-trip, still summing to 1.605.
+        cost_usd_est=0.79,
+    )
+
+    implementing_one = ledger.open_attempt(task_id, "IMPLEMENTING")
+    ledger.record_gate_result(_gate("lint", "fail"), attempt_id=implementing_one)
+    ledger.record_gate_result(_gate("types", "pass"), attempt_id=implementing_one)
+    ledger.record_gate_result(_gate("tests", "pass"), attempt_id=implementing_one)
+    _set_attempt(
+        ledger,
+        implementing_one,
+        started_at="2026-01-02 02:00:00",
+        ended_at="2026-01-02 02:10:00",
+        num_turns=7,
+    )
+    implementing_two = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        implementing_two,
+        started_at="2026-01-02 02:20:00",
+        ended_at="2026-01-02 02:30:00",
+        cost_usd_est=0.50,
+    )
+    implementing_three = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        implementing_three,
+        started_at="2026-01-02 02:40:00",
+        num_turns=4,
+        cost_usd_est=0.625,
+    )
+
+    review_one = ledger.open_attempt(task_id, "SPEC_REVIEW")
+    _set_attempt(
+        ledger,
+        review_one,
+        started_at="2026-01-02 03:00:00",
+        ended_at="2026-01-02 03:05:30",
+        num_turns=12,
+        cost_usd_est=0.005,
+    )
+    review_two = ledger.open_attempt(task_id, "SPEC_REVIEW")
+    _set_attempt(ledger, review_two, started_at="2026-01-02 03:10:00")
+    review_three = ledger.open_attempt(task_id, "SPEC_REVIEW")
+    _set_attempt(
+        ledger,
+        review_three,
+        started_at="2026-01-02 03:20:00",
+        ended_at="2026-01-02 03:21:35",
+        num_turns=3,
+        cost_usd_est=0.005,
+    )
+
+    reviewing_one = ledger.open_attempt(task_id, "REVIEWING")
+    _set_attempt(ledger, reviewing_one, started_at="2026-01-02 04:00:00")
+    reviewing_two = ledger.open_attempt(task_id, "REVIEWING")
+    _set_attempt(ledger, reviewing_two, started_at="2026-01-02 04:10:00")
+
+    writing_two = ledger.open_attempt(task_id, "SPEC_WRITING")
+    _set_attempt(
+        ledger,
+        writing_two,
+        started_at="2026-01-02 05:00:00",
+        ended_at="2026-01-02 05:10:00",
+        num_turns=8,
+        cost_usd_est=0.815,
+    )
+
+    # A decoy task's own SPEC_REVIEW attempt, with values that would
+    # visibly corrupt the sums above if a query bound no `?task`.
+    decoy_task = ledger.create_task(run_id, "SA-TOTALS-DECOY", "sd", "bd")
+    _set_task(ledger, decoy_task, state="DRAFT")
+    decoy_attempt = ledger.open_attempt(decoy_task, "SPEC_REVIEW")
+    _set_attempt(
+        ledger,
+        decoy_attempt,
+        started_at="2026-01-03 00:00:00",
+        ended_at="2026-01-03 00:00:50",
+        num_turns=999,
+        cost_usd_est=99.99,
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+    page = _parse(body)
+
+    # Right after the attempts table, per the claim, not somewhere else.
+    assert page.table_ids.index("phase-totals") == page.table_ids.index("attempts") + 1
+
+    assert page.tables["phase-totals"] == [
+        ["SPEC_WRITING", "2", "38", "1.61", "25:10:00"],
+        [
+            "IMPLEMENTING",
+            "3",
+            "11 + 1 unknown",
+            "1.13 + 1 unknown",
+            "0:20:00 + 1 unknown",
+        ],
+        [
+            "SPEC_REVIEW",
+            "3",
+            "15 + 1 unknown",
+            "0.01 + 1 unknown",
+            "0:07:05 + 1 unknown",
+        ],
+        ["REVIEWING", "2", "2 unknown", "2 unknown", "2 unknown"],
+        [
+            "all phases",
+            "10",
+            "64 + 4 unknown",
+            "2.74 + 4 unknown",
+            "25:37:05 + 4 unknown",
+        ],
+    ]
+
+
 def test_a_task_with_no_attempts_shows_its_summary_and_no_table(
     tmp_path: Path,
 ) -> None:
@@ -2121,6 +2257,7 @@ def test_every_table_on_every_page_has_a_header_row_naming_its_columns(
     failures_table_id = f"failures-{result_id}"
     assert task_page.table_ids == [
         "attempts",
+        "phase-totals",
         "gate-results",
         failures_table_id,
         "findings",
@@ -2129,6 +2266,7 @@ def test_every_table_on_every_page_has_a_header_row_naming_its_columns(
         task_page,
         {
             "attempts": ["phase", "n", "started", "ended", "turns", "cost", "model"],
+            "phase-totals": ["phase", "attempts", "turns", "cost", "wall time"],
             "gate-results": ["phase", "n", "gate", "outcome", "failures"],
             failures_table_id: ["file", "line", "code", "message"],
             "findings": ["lens", "severity", "claim", "verdict"],
