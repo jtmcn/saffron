@@ -26,13 +26,16 @@ import sqlite3
 from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, new_task_key
-from saffron.spec_review import SpecReviewFinding
+
+if TYPE_CHECKING:
+    # At runtime it would load the cell runtime and the phases into every ledger reader.
+    from saffron.spec_review import SpecReviewFinding
 
 # Every value `tasks.state` holds, held to `factory:TaskState` by a test (item 52).
 # `set_task_state` stays `str`: no defect measured so far was a bad write.
@@ -280,7 +283,7 @@ CREATE TABLE IF NOT EXISTS spec_reviews (
     PRIMARY KEY (task_key, n)
 );
 
--- One finding of one `spec_reviews` round (b-98a3be, `DESIGN.md` §3.4).
+-- One finding of one `spec_reviews` review round (b-98a3be, `DESIGN.md` §3.4).
 -- `criterion`, `file` and `line` carry no type, so SQLite's own affinity never rewrites a value (measured).
 CREATE TABLE IF NOT EXISTS spec_findings (
     task_key TEXT NOT NULL,
@@ -366,10 +369,10 @@ _SQLITE_INT64_MAX = 2**63 - 1
 def _spec_finding_field(value: Any) -> Any:
     """One of `spec_findings`' `criterion`, `file` or `line`, as the fact
     and the row alike must hold it. `None`, a `str`, or a non-`bool` `int`
-    in `sqlite3`'s signed 64-bit range pass through as given. Those are
-    the only values an untyped SQLite column keeps without coercion.
-    Everything else, a `list`, a `dict`, a `bool`, a `float`, or an
-    out-of-range `int`, is `json.dumps`-ed first."""
+    in `sqlite3`'s signed 64-bit range pass through as given. Everything
+    else is `json.dumps`-ed first, so the fact and the row agree: `sqlite3`
+    reads a `bool` back as an `int`, stores NaN as NULL and raises on an
+    `int` past 64 bits (measured)."""
     if value is None or isinstance(value, str):
         return value
     if (
@@ -1717,7 +1720,7 @@ class Ledger:
         more than the task's own `spec_reviews` rows, from 1, and filed under
         the task's own key like `record_stack_layer`'s row. After that fact,
         writes one `spec_finding` fact per entry of `findings`. Each is
-        numbered from 1 in block order, under this same round's own `n`
+        numbered from 1 in block order, under this same review round's own `n`
         (b-98a3be, `DESIGN.md` §3.4)."""
         n = (
             1

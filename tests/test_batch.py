@@ -4148,6 +4148,14 @@ def test_each_spec_review_round_records_each_of_its_findings(tmp_path):
     ]
     expected.sort(key=lambda row: (row["task_key"], row["n"], row["position"]))
     _assert_rows_match(_spec_findings(ledger), expected)
+    # The facts too: a fold re-normalizing raw facts would pass the rows alone.
+    facts = [
+        {"task_key": key, **fact.payload}
+        for key in sorted(k for k in keys.values() if k is not None)
+        for fact in record.read(key)
+        if fact.kind == "spec_finding"
+    ]
+    _assert_rows_match(facts, expected)
 
     for spec_id in ("TE-2", "TE-4", "TE-6", "TE-7"):
         assert [
