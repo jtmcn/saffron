@@ -4,7 +4,7 @@ title: The agent's API calls were refused though preflight's egress check passed
 status: open
 tier: 1
 filed: 2026-09-29
-specs: [SA-0193, SA-0195]
+specs: [SA-0193, SA-0195, SA-0235]
 prs: []
 commits: []
 cites: [§5.1.1]
