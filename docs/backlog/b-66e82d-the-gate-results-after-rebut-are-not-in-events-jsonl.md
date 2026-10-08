@@ -4,7 +4,7 @@ title: The gate results after REBUT are not in `events.jsonl`, so a red rebuttal
 status: open
 tier: 2
 filed: 2026-09-22
-specs: [SA-0118]
+specs: [SA-0118, SA-0242]
 prs: [433]
 commits: []
 cites: [§5.5]
