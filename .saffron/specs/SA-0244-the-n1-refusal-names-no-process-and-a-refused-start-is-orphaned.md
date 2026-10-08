@@ -4,7 +4,7 @@ title: The N1 refusal names ports and not the processes behind them, and a start
 type: bug
 priority: 2
 depends_on: [SA-0243]
-estimated_lines: 188
+estimated_lines: 195
 estimate_measured: true
 touches:
   - saffron/preflight.py
@@ -48,15 +48,18 @@ max_attempts: 3
 max_turns: 130
 acceptance:
   - claim: >-
-      The N1 refusal names, after each answering address, every command lsof
-      listed on that address's port, spelled as lsof printed it. The names
-      come from the one listing the probed ports came from. A port that
-      listing does not hold is named `no known process`. The witness brings
-      `cell_up` up against one lsof listing, and a different listing for any
-      later lsof call. Four addresses answer. The gateway and the LAN address
-      answer on a port that one truncated command holds. The gateway answers
-      on a port two commands hold, one of them holding a space. The gateway
-      answers on a port the listing lacks.
+      The N1 refusal names, after each answering address, every command
+      `listening_sockets` returns on that address's port, in the order it
+      returns them. Each is spelled as lsof printed it, and a tolerated
+      command is named too. The names come from the one listing the probed
+      ports came from. A port that listing does not hold reads
+      `(no known process)`. The witness brings `cell_up` up against one lsof
+      listing, and a different listing for any later lsof call, with
+      `SAFFRON_ALLOW_HOST_PROCESS` set to `limactl`. Four addresses answer.
+      The gateway and the LAN address answer on a port that one truncated
+      command holds. The gateway answers on a port that `limactl`, `Zoom`
+      and `Google Ch` share. The gateway answers on a port the listing
+      lacks.
     witness: tests/test_session.py::test_the_n1_refusal_names_the_processes_behind_each_answering_port
     wrong_versions:
       - A refusal that reads lsof again when the probe answers, so it names the second listing's process.
@@ -64,6 +67,8 @@ acceptance:
       - A port the listing lacks left bare, or dropped from the refusal.
       - Only the first answering address named, the rest left as bare addresses.
       - '`cell_up` handing the probe no listing, so every address reads `no known process`.'
+      - The names taken after the tolerated commands are filtered out, so `limactl` is missing from a port it shares.
+      - The names sorted again without regard to case, so `limactl` comes before `Zoom`.
   - claim: >-
       Each of the seven refusals `saffron/preflight.py` raises under
       `cell_up` raises `PreflightFailed`, a subclass of
@@ -71,14 +76,17 @@ acceptance:
       `host_probe_ports`, the LAN address refusal, the host-binding probe
       that did not run, the N1 refusal, and the upstream probe that did not
       run or could not reach. The witness drives each one. A
-      `CellRuntimeError` that `runtime.run_ephemeral` raises under the
-      upstream probe still reaches the caller as a plain `CellRuntimeError`.
+      `CellRuntimeError` that `runtime.run_ephemeral` raises still reaches
+      the caller as a plain `CellRuntimeError`. The witness drives that
+      under both probes that call it, `assert_proxy_reaches_upstream` and
+      `assert_host_is_unreachable`.
     witness: tests/test_preflight.py::test_each_refusal_cell_up_can_reach_is_a_preflight_failure
     wrong_versions:
       - The new class raised at the N1 refusal alone, the other six left plain.
       - The LAN address refusal left plain, since `cell_up` reaches it through `probe_addresses`.
       - A class that subclasses `RuntimeError` alone, so every `except runtime.CellRuntimeError` stops catching it.
-      - A probe that turns the runtime's own `CellRuntimeError` into the new class, so a dead runtime reads as a refusal.
+      - The upstream probe turning the runtime's own `CellRuntimeError` into the new class, so a dead runtime reads as a refusal.
+      - '`assert_host_is_unreachable`''s body converting every `CellRuntimeError` to the new class.'
       - The host-binding probe's "did not run" refusal left plain.
   - claim: >-
       When `cell_up` raises `PreflightFailed`, the task ends
@@ -140,8 +148,13 @@ and the N1 refusal (`:216`). Two are the upstream probe not running
 (`saffron/preflight.py:382-397`, `:513-514`).
 
 **Other `CellRuntimeError`s under `cell_up`.** The runtime's own calls raise
-the same class. `runtime.call` raises it when the binary will not run
-(`saffron/cell/runtime.py:289`, `:307`). The proxy raises it when it starts
+the same class. `_call` raises it when the binary will not run
+(`saffron/cell/runtime.py:273-290`). `_must` raises it on a non-zero exit
+(`saffron/cell/runtime.py:304-308`). `run_ephemeral` goes through `_call`
+alone (`saffron/cell/runtime.py:426`). So a runtime that runs and exits
+non-zero, or times out, comes back as a `Completed`. The probes then raise
+their own "did not run" refusal (`saffron/preflight.py:201`, `:265`). The
+proxy raises it when it starts
 with no address (`saffron/cell/proxy.py:74`). `proxy_address` raises it too
 (`saffron/cell/session.py:960-967`). The item names no call for its stopped
 container apiserver, and each call above is the runtime's own.
@@ -178,18 +191,24 @@ row that says a cell died. Make these changes.
 1. **The class.** Add `PreflightFailed` to `saffron/preflight.py`, as a
    subclass of `runtime.CellRuntimeError`. Raise it at each of the seven
    refusals above, in place of the plain class. Leave every runtime call
-   under them raising what it raises today.
-2. **The names.** The N1 refusal names, after each answering address, every
-   command the run's one lsof listing holds on that address's port. Use
-   the spelling `listening_sockets` returns. Name a port the listing lacks
-   `no known process`. Carry the listing from the one enumeration to the
-   probe. Do not run lsof again when the probe answers.
+   under them raising what it raises today. A runtime that runs and exits
+   non-zero under a probe meets that probe's "did not run" refusal. So it
+   now ends `PREFLIGHT_FAILED`, and that is intended.
+2. **The names.** The N1 refusal names, after each answering address,
+   every command `listening_sockets` returns on that address's port. That
+   list holds no loopback listener (`saffron/preflight.py:81`) and does hold
+   tolerated ones. Keep its spelling and its order. A port the list lacks
+   reads `(no known process)`. Carry the list from the one enumeration to
+   the probe. Do not run lsof again when the probe answers.
 3. **The state.** In `_drive_cell`, a `PreflightFailed` from `cell_up`
    writes what the baseline abort writes. Set the run's preflight `FAILED`
    and the task `PREFLIGHT_FAILED`, finish the run `COMPLETE`, and return a
    `PREFLIGHT_FAILED` outcome. Emit one `Preflight` event first, whose
    detail is the refusal's own text. Any other exception keeps today's
-   handling.
+   handling. Leave the outcome's `effective_risk` and `advisory_gates` at
+   their defaults. The baseline abort reads them off `latest`
+   (`saffron/cell/session.py:2066-2067`), which is unbound until the
+   baseline runs (`saffron/cell/session.py:2024`).
 
 ## Out of scope
 
@@ -198,25 +217,35 @@ row that says a cell died. Make these changes.
   half too. The operator scoped this spec to preflight's own refusals.
 - **The refusal's advice.** It still says to bind the service to
   `127.0.0.1`. It does not name `SAFFRON_ALLOW_HOST_PROCESS`.
-- **`saffron/task.py`, `saffron/batch.py` and `saffron/cli.py`.** Each
+- **`saffron/task.py`, `saffron/cli.py` and the plain batch loop.** Each
   already handles a returned `PREFLIGHT_FAILED`, as the Context shows.
+- **The stack batch.** Its `wrapped()` keeps only `RATE_LIMITED` and
+  `PROVIDER_UNREACHABLE` queued (`saffron/batch.py:736-742`). Any other
+  returned state that is not a layer is a miss, and its dependents are
+  refused (`saffron/batch.py:366-372`). So a refused start there becomes a
+  miss, where a raised `CellRuntimeError` is re-offered under `SA-0234`.
+  `saffron/batch.py` is forbidden here, and the operator files the
+  follow-up.
+- **The refusal's full text on the terminal.** It no longer reaches the
+  CLI's or the batch loop's exception line (`saffron/cli.py:296`,
+  `saffron/batch.py:283`). It reaches the terminal as a `preflight:` line,
+  which `describe` clips at `_DETAIL_BOUND`, 500 characters (`saffron/events.py:670`,
+  `:728-733`). `events.jsonl` keeps it whole. The operator adds that prefix
+  to the spec loop's watch list by hand.
 - **A `patch.diff` an earlier cell of the same spec left.** `run_task` would
   pass it to `push_unpackaged_work` after a refusal. The baseline abort has
   the same exposure at your base.
-- **`DESIGN.md` §3.3 and `CONTEXT.md`.** Both say only a baseline abort
-  writes `PREFLIGHT_FAILED`. The operator edits them by hand.
 
 ## Notes for the agent
 
 **Your base.** This spec stacks on `SA-0243`, the last of a chain that
 edits `saffron/cell/session.py`. Read each file at your base before you edit
 it, since the line numbers above move with each of them. Keep your hunks
-away from theirs. `SA-0243` moves the final state write into
-`saffron/task.py`. At `958db033` the baseline abort and the `ORPHANED`
-handler each write the task row inside `_drive_cell`. If your base moved
-either write, write the refusal's rows where the baseline abort writes its
-own. Then read them in criterion 3's witness through that same caller.
-Put the new handler as an `except` clause beside
+away from theirs. The new `except` clause in `_drive_cell` writes the
+`PREFLIGHT_FAILED` row, beside the baseline abort's own write
+(`saffron/cell/session.py:2058-2060`). `SA-0243` skips only the cell's
+last write for a `READY_FOR_REVIEW` outcome. Its `run_task` write runs only
+when PACKAGE raises, so it never sees this outcome. Put the new handler as an `except` clause beside
 `except RateLimited`, before `except BaseException`. Do not wrap the
 `cell_up(` call itself. Import `preflight` among `_drive_cell`'s own local
 imports.
@@ -226,19 +255,23 @@ each criterion declares a witness and no mutant, and `witness` will report
 `skip`.
 
 **The refusal's shape.** Write each answering address, a space, then its
-commands in parentheses, joined by `", "`. Order the commands as
-`listening_sockets` orders them. The addresses stay joined by `", "`, and
-the advice after them is unchanged. So the gateway on a port that
-`limactl` and `Google Ch` share reads `10.88.0.1:53 (Google Ch, limactl)`.
+commands in parentheses, joined by `", "`. Keep the order
+`listening_sockets` returns, which sorts by Python's own string order. Do
+not sort again. A port with no command reads `10.88.0.1:8000 (no known process)`.
+The addresses stay joined by `", "`, and the advice after them is
+unchanged. So the gateway on a port that `limactl`, `Zoom` and `Google Ch`
+share reads `10.88.0.1:53 (Google Ch, Zoom, limactl)`.
 
 **Criterion 1's witness.** Put it beside
 `test_no_cell_is_created_until_the_host_probe_has_passed` in
 `tests/test_session.py`, never at the end of the file. Call
 `_stub_the_runtime`, then set `host_probe_ports` and
 `assert_host_is_unreachable` back to the real functions. Stub
-`preflight._lan_address` to return `192.168.1.5`. Fake `subprocess.run` to
-return a `COMMAND` header and rows for `RAATServe` on 9200, and for
-`limactl` and `Google Ch` on 53. Any later call returns a listing naming
+`preflight._lan_address` to return `192.168.1.5`. Set
+`SAFFRON_ALLOW_HOST_PROCESS` to `limactl` with `monkeypatch.setenv`, so the
+host's own value never reaches the test. Fake `subprocess.run` to return a
+`COMMAND` header and rows for `RAATServe` on 9200, then `limactl`, `Zoom`
+and `Google Ch` on 53, in that order. Any later call returns a listing naming
 another command on 9200. Fake `runtime.run_ephemeral` to answer at
 `10.88.0.1:9200`, `192.168.1.5:9200`, `10.88.0.1:53` and `10.88.0.1:8000`.
 Call `session.cell_up` as `test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it`
@@ -251,8 +284,9 @@ seven refusals with `pytest.raises` on the new class and a `match` on its
 own text. Fake `subprocess.run` for the two lsof refusals. Replace the
 module's `socket` name for the LAN address. Script `runtime.run_ephemeral`
 for the other four. Last, make `run_ephemeral` raise a plain
-`CellRuntimeError` under `assert_proxy_reaches_upstream`, and assert the
-caller does not get the new class.
+`CellRuntimeError`. Call `assert_proxy_reaches_upstream`, then
+`assert_host_is_unreachable` with a port list, and assert neither caller
+gets the new class.
 
 **Criterion 3's witness.** Put it beside criterion 1's. Loop over the four
 preflight calls. Each pass calls `monkeypatch.undo()`, then
@@ -287,7 +321,8 @@ to name the refusal too. Change nothing else in `saffron/ledger.py`.
 
 **Measured on a prototype, 2026-10-07.** All three witnesses were written
 against `958db033` with the three changes above, and passed. The whole
-suite passed, 3834 tests. Each witness failed with `saffron/preflight.py` and
+suite passed, 3834 tests. The review's three new wrong versions were then
+added, and the two witnesses they target were tightened as above. Each witness failed with `saffron/preflight.py` and
 `saffron/cell/session.py` reverted, on an assertion or an `AttributeError`, never at collection.
 Each wrong version listed above was applied to the prototype and failed its
 own criterion's witness.
@@ -299,6 +334,6 @@ An edited comment counts as new. The prototype's first five-line reword of
 the stale block failed it, and a two-line one passed.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks. The
-prototype counted 751 changed tokens by `size_gate`, against the `bug`
+prototype counted 779 changed tokens by `size_gate`, against the `bug`
 ceiling of 1300. `estimated_lines` is those tokens over four. Keep comments
 short and the tests close to the shapes above.
