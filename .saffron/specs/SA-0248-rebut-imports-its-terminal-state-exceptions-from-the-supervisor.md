@@ -55,8 +55,8 @@ acceptance:
       and in no other module. Every `from ... import` of one, in `saffron/`
       and in `tests/`, names `saffron.cell.worktree`. `session.py` imports
       all three and `rebut.py` imports its two at module scope, and no module
-      in `saffron/` imports one inside a function. No module reaches one as
-      an attribute of a module other than `worktree`. The names bound in
+      in `saffron/` imports one inside a function. No attribute access names
+      one on a module other than `worktree`. The names bound in
       `session` and in `rebut` are `worktree`'s own classes.
       `CriticPatchEmpty` still subclasses `CriticPatchRejected`, and both
       `reason` methods return the text they return today. The witness parses
@@ -81,7 +81,8 @@ acceptance:
       the helper is false for nine turns with no rebuttal prompt, and true
       for a rebuttal prompt alone. It asserts that this test and
       `test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown` each
-      call the helper on their cell, and that neither reads the length of a
+      call the helper on their cell inside their `export_patch` stub, and
+      that neither reads the length of a
       `turns` list. Today both stubs answer from `len(cell.turns) > 5`.
     witness: tests/test_session.py::test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch
     preserves: true
@@ -94,6 +95,7 @@ acceptance:
       - "The verdict-prompt test's stub keeps `len(cell.turns) > 5` and never calls the helper."
       - "The verdict-prompt test's stub calls the helper and also keeps `len(cell.turns) > 5`."
       - "This test's own stub keeps a turn count."
+      - "A stub answers from `len(cell.export_calls) > 1` and never calls the helper, while the up-front helper assertions sit elsewhere in the same function."
   - claim: >-
       The verdict prompt still carries the reviewed diff and the
       post-rebuttal diff under their own headings, with its stub's boundary
@@ -152,7 +154,9 @@ acceptance:
 
 Backlog items **149** and **148**, under `DESIGN.md` §5.5 and §5.6. Both
 tidy the boundary between REBUT, the supervisor that drives it, and the
-tests that drive both. Every line below was read at `958db033`.
+tests that drive both. Every line below was read at `958db033`. Specs below
+this one in the stack move `session.py`, so find each place by the text
+quoted beside it.
 
 **Three exceptions live in the supervisor.**
 `saffron/cell/session.py:1221-1247` defines `CriticPatchRejected`, its
