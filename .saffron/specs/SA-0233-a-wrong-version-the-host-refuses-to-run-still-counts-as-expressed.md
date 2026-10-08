@@ -173,7 +173,8 @@ any other `unproven`.
   entry's `error` (`saffron/report/pr_body.py:597-599`).
 - **IMPLEMENT's and REBUT's code in `saffron/cell/session.py`.** `SA-0230`
   and `SA-0231` edit those regions. Change nothing outside the first loop
-  of `_apply_criterion_probes`.
+  of `_apply_criterion_probes`, except one sentence of its docstring that
+  names the `refusal` it now writes.
 
 ## Notes for the agent
 
@@ -189,7 +190,9 @@ Set the key on no other pair, and leave `summary` as it is.
 whose `refusal` is present and not null. Count `expressed` as the versions
 with an edit, less the refused ones. Print `wrong versions: <n> declared,
 <e> expressed, <r> refused`, then the unanswered clause as today. Update
-the docstring to say the clause counts what the host refused to run.
+the docstring to say the clause counts what `probe.probe_refusal`
+refused. The no-`tests`-gate and probe-cell-not-entered paths also run no
+edit, carry no `refusal`, and stay counted as expressed.
 
 **Criterion 1's witness.** Drive one criterion with six wrong versions
 through `_drive`, with `_PROBE_POLICY` and the `tests` gate. Its answer, in
@@ -233,7 +236,7 @@ measured on a prototype:
 
 **Criterion 3's witness.** One criterion, two wrong versions, both edits
 to files under `spec/`, with `_PROBE_POLICY`. Take the REVIEW line from
-`cell.watched` and assert it whole.
+`cell.watched` and assert it whole. Assert `cell.mutated == []` too.
 
 **Two tests already assert the old line or the old record.**
 - `tests/test_session.py::test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes`
