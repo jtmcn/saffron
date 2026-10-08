@@ -108,6 +108,7 @@ acceptance:
       - Any cap refusal turns the outcome into `EXHAUSTED`, so an errored re-run after a refused extraction turn ends `EXHAUSTED`, not `GATE_ERROR`.
       - Any cap refusal discards the `rebut_result`, so a red re-run after a refused extraction turn loses it.
       - The line spells $10.00 as a literal, so a cap set to $8.00 still reads $10.00.
+      - The override keys on the pool's spend reaching the cap, not on a refusal, so a claimed fix with no commit after an extraction that spends the cap reads as out of budget.
 ---
 
 ## Context
@@ -180,9 +181,9 @@ The operator decided both parts on 2026-10-07.
    only past the budget. Its one-line comment cites the re-measurement: 67
    REBUTs, a maximum of $9.29 (`SA-0223`), 2026-10-07. Pass `run_rebut` the
    cap's figure, not `critic_budget(...)`. The wrapper replaces it on every
-   call anyway. A REBUT over $10.00 with a large remainder now ends
-   `EXHAUSTED` where it used to reach `READY_FOR_REVIEW`. That is the cost
-   of a ceiling of its own.
+   call anyway. A REBUT the cap cuts short, where `run_rebut` would halt
+   at `REBUTTING`, now ends `EXHAUSTED` where a large remainder used to
+   carry it on. That is the cost of a ceiling of its own.
    REVIEW keeps `critic_budget` and its floor, unchanged
    (`saffron/cell/session.py:2805`).
 2. **A cut reads as a cut.** Say the pool refused a session and
@@ -212,10 +213,13 @@ The operator decided both parts on 2026-10-07.
 - **IMPLEMENT's salvage reserve.** That is `SA-0230`, which this spec
   depends on because both edit the budget constants at the top of
   `saffron/cell/session.py`.
-- **`DESIGN.md`, ADR 4 and `CONTEXT.md`.** §3.3, §4.3, §5.6 and §5.7 say
+- **`DESIGN.md`, ADR 4 and `CONTEXT.md`.** §3.3, §4.3, §5.6 and §5.7 said
   the cap applies past the budget only. ADR 4 and the `EXHAUSTED` entry in
-  `CONTEXT.md` say so too. The operator edits each by hand in this spec's
-  pull request.
+  `CONTEXT.md` said so too. The operator edited each by hand in
+  this spec's pull request.
+- **One more witness run.** Add a `_rebut_capped` run costing $6.00 then
+  $4.50, with `extracted=_CLAIMED_FIX` and `rebut_commits=0`. It is not cut,
+  so it halts at `REBUTTING` with the words it has at base.
 
 ## Notes for the agent
 
