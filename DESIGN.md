@@ -714,7 +714,8 @@ attempt. The status it got goes on the operator's line: what answered, not only
 that something did.
 
 A failure here is `error`, never `fail`: the repo's code is not what is wrong.
-It raises before a cell exists, aborts the run, and is charged to nobody (§4.3).
+It refuses the start before a cell exists. The task ends `PREFLIGHT_FAILED`, its run records
+preflight `FAILED`, and nothing is charged to anybody (§4.3).
 
 **This deliberately does not check the runtime's version, or the attach order
 that caused this one**. That ordering fix is a workaround for a defect in
