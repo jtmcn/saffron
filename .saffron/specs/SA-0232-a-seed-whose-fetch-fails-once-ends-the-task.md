@@ -47,8 +47,8 @@ acceptance:
   - claim: >-
       `prepare_worktree` retries a seed whose fetch from the mirror failed,
       once, but not on a timeout. It first prints that seed's stderr, then
-      pauses at least 60 seconds. The retry starts from the volume the failed
-      seed left behind and checks out the base. The witness drives three
+      pauses at least 60 seconds. The retry runs on the same volume, cleared
+      of everything but `lost+found`, and checks out the base. The witness drives three
       fetch failures with different text. The mirror is absent for the first
       seed. One loose object is missing from the mirror for the first seed.
       A `git` first on PATH fails the first fetch with a fresh random token.
@@ -219,6 +219,14 @@ the origin, and they are mode 0444. A rename moves only the mirror's link,
 so it needs no `chmod` and leaves the origin whole. For the token case,
 write a `git` script that fails `fetch` with a fresh `uuid4` hex and runs
 the real git otherwise. Put it first on PATH for the first seed alone.
+Match `fetch` anywhere in the argv, so `git -c ... fetch` is caught too.
+Exec the real git by an absolute path resolved before PATH is prepended,
+or the script calls itself. Give the script a second mode that fails
+`checkout` with a fresh `uuid4` hex, at the fetch mode's exit code. Drive
+it as one more seed that runs once. Then no list of git's own
+stderr text tells the two sides apart. Rules keyed on checkout text, such
+as retrying unless stderr holds `tree` or `branch`, are unmeasured until
+that seed is in.
 Fake `run_ephemeral` outright for the timeout case. Count only the runs whose script fetches, so a separate
 clearing run would not change the count. Patch the pause, so the suite
 pays nothing. Record the pause in the same log as the seeds, so its order
