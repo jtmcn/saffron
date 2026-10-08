@@ -4,7 +4,7 @@ title: The PR body says every failure at head was at base, though an advisory ga
 type: bug
 priority: 2
 depends_on: [SA-0225]
-estimated_lines: 181
+estimated_lines: 191
 estimate_measured: true
 touches:
   - saffron/gates/suite.py
@@ -76,9 +76,11 @@ acceptance:
       unchanged. With advisory new failures alone its heading and sentence
       name blocking gates only, and a section of its own lists the advisory
       ones. With both, that advisory section follows the blocking table. Each
-      advisory row is escaped as a blocking row is. The witness renders all
-      four arrangements and compares the whole span between the
-      verification sentence and the gate table.
+      advisory row goes through `_cell` as a blocking row does, so a pipe is
+      escaped, a newline becomes a space and an `@` mention is defused. The
+      witness renders all four arrangements with an advisory message holding
+      all three, and compares the whole span between the verification
+      sentence and the gate table.
     witness: tests/test_report.py::test_the_new_failures_section_names_advisory_new_failures_apart_from_blocking_ones
     wrong_versions:
       - With advisory failures alone, the section keeps the sentence saying every failure at head was at base.
@@ -87,6 +89,7 @@ acceptance:
       - The advisory section renders before the blocking table.
       - An advisory row's message is written without the table-cell escape, so its pipe splits the row.
       - The arrangement with no new failure takes the blocking-gates-only wording.
+      - The advisory row is built with a bare pipe replace and no `_cell`, so its newline and its mention reach the body.
   - claim: >-
       PACKAGE renders the body with the verifying suite's advisory new
       failures. A packaged head whose re-verification carries one new
@@ -98,6 +101,7 @@ acceptance:
       - PACKAGE passes no advisory failures to the renderer, so the body keeps the old sentence.
       - PACKAGE passes the comparison's blocking `new_failures` as the advisory ones, which are empty here.
       - PACKAGE treats an advisory new failure as blocking and ends the task `MERGE_FAILED`.
+      - PACKAGE reads the advisory failures off `comparison.run.results` with no subtraction, so the run's own `size` failure is listed instead.
 ---
 
 ## Context
@@ -200,7 +204,9 @@ are a blocking failure `NewFailure("tests", Failure(file="tests/test_a.py",
 code="failed", message="assert 1 == 2"))`, and an advisory one shaped as
 the `size` gate writes it (`saffron/gates/core/size.py:285-296`). That is
 `NewFailure("size", Failure(file="", code="diff-too-large", message="1651
-changed tokens | over 1300"))`, with a pipe to prove the escape.
+changed tokens | over 1300\nping @org"))`. Its pipe, newline and mention
+prove `_cell`. In the row below, `​` stands for the one zero-width
+space `neutralize` writes after the `@`. Spell it that way in the test.
 
 No new failure, unchanged from base:
 
@@ -233,7 +239,7 @@ New at head, in gates held advisory at this risk tier, so none blocks.
 
 | gate | where | code | message |
 |---|---|---|---|
-| `size` |  | `diff-too-large` | 1651 changed tokens \| over 1300 |
+| `size` |  | `diff-too-large` | 1651 changed tokens \| over 1300 ping @​org |
 ```
 
 Both: the blocking block above, one empty line, then the advisory section
@@ -254,8 +260,10 @@ legs, in one test.
   failure coded `diff-too-large`.
 - The same patch under `infra/` with `elevate_on: ["infra/**"]`.
   `new_failures` is that `size` failure and `advisory_failures` is empty.
-- `witness` at `standard`. A spec whose one criterion declares a mutant,
-  on a `_WitnessTree` with `killed=False` at both sides. `new_failures` is
+- `witness` at `standard`. A spec whose one criterion declares a mutant
+  and `preserves=True`, as the file's witness test builds it
+  (`tests/test_suite.py:277-282`). Without it the witness gate judges the
+  criterion green at base. Run it on a `_WitnessTree` with `killed=False` at both sides. `new_failures` is
   empty and `advisory_failures` is one `witness` failure coded
   `survived-mutant`.
 - The `lint` policy again, with an advisory `lint` failure at head. Its
@@ -270,11 +278,22 @@ newline, the separator `render_pr_body` adds.
 
 **Criterion 3's witness.** Use the `packageable` fixture. Patch
 `saffron.phases.package.reverify` to return a `SuiteComparison`. Its run
-holds one `size` result at `fail`, with `size` in its advisory set. Its
-`advisory_failures` holds one `size` failure, and its `new_failures` is
-empty. Build the comparison inside the test, since
+holds one `size` result at `fail`, with `size` in its advisory set. That
+result carries its own failure, with a message other than the advisory
+one. Its `advisory_failures` holds one `size` failure, and its
+`new_failures` is empty. Build the comparison inside the test, since
 `_reverified` takes no advisory failures. Then read `pr_body.md` as
 `test_a_re_verified_body_marks_the_verifying_suites_advisory_gates` does.
+Assert the advisory row is there and the run's own message is not.
+
+**Two limits, both accepted.** A `witness` failure coded
+`survived-mutant` is never cancelled by the baseline
+(`saffron/gates/baseline.py:24-31`). So at `standard` a survivor present at
+base is listed under the advisory heading as new, as §5.4 counts it. In
+PACKAGE the blocking list stays the cell's `outcome.new_failures`
+(`saffron/phases/package.py:886`). A blocking failure in re-verification
+ends the task `MERGE_FAILED` first (`saffron/phases/package.py:851-871`),
+so PACKAGE never renders the arrangement with both.
 
 **Tests already in the files stay as they are.** Every arrangement but
 the advisory ones renders as at base, so no existing assertion changes.
@@ -283,12 +302,12 @@ the advisory ones renders as at base, so no existing assertion changes.
 already. A longer one is a new `prose` hit, measured on the prototype. So
 leave it as it is and describe the keyword in `_new_failures`'s docstring.
 
-**Measured on a prototype over `958db033`.** The diff was 725 changed
+**Measured on a prototype over `958db033`.** The diff was 762 changed
 tokens by the `size` gate's counter, against the `bug` ceiling of 1300.
 `tests/test_suite.py`, `tests/test_report.py`, `tests/test_package.py`,
 `tests/test_replay.py` and `tests/test_session.py` passed, 515 tests.
 Each of the three witnesses failed with the source reverted. Each of the
-17 wrong versions above, applied as an edit, failed its own witness on an
+19 wrong versions above, applied as an edit, failed its own witness on an
 assertion. The prose limit counted no new hit in any of the six files.
 
 Commit after each witness passes. Uncommitted work dies with the cell.
