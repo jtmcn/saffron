@@ -183,8 +183,8 @@ now asks.
 
 ## Out of scope
 
-- **A single `unasked` append.** Keep one `result.unasked.append(row["task_id"])`
-  line in `reconcile`, so criterion 2's mutant matches exactly once. Route an
+- **A single `unasked` append.** Keep one append to `result.unasked` in
+  `reconcile`, so criterion 2's mutant matches exactly once. Route an
   `EXHAUSTED` row's no-answer case through it.
 - **The module docstring** (`saffron/reconcile.py:1-27`). `SA-0243`
   rewrites its account of PACKAGE's last word. Leave those lines as they
