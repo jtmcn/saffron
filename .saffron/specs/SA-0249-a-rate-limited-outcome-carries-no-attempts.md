@@ -50,8 +50,8 @@ acceptance:
       every other path. The witness walls a turn at four points. A walled
       plan turn and a walled implement turn each report 0. A walled repair
       turn after attempt 1 reports 1, and one after attempt 3 reports 3. The
-      same witness drives the six returns that come before the first suite.
-      Those are a failed preflight, a scope proposal, a rejected plan, a
+      same witness drives six returns that come before the first suite.
+      Those are a baseline that aborts, a scope proposal, a rejected plan, a
       failed plan turn, the spend ceiling after the plan and an implement
       turn with no commits. Each still reports 0. Every count is an `int`.
     witness: tests/test_session.py::test_a_rate_limit_counts_the_suites_judged_and_no_return_before_a_suite_counts_any
@@ -108,6 +108,7 @@ puts `attempts` on the outcome (`saffron/cell/session.py:3177`). A REBUT re-run 
 numbered one past it for its event (`saffron/cell/session.py:3031-3040`).
 That number never reaches the outcome. `CONTEXT.md`'s **Attempt** entry
 names the suite count as the one exception to its phase rule.
+`CellOutcome.attempts` leaves out the REBUT re-run's suite, unlike that count.
 
 **Not the ledger's unit.** `record_attempts` opens one `attempts` row per
 agent turn (`saffron/cell/session.py:242-262`). `ledger.attempts` returns
@@ -125,7 +126,7 @@ answers (`saffron/cell/session.py:2586-2600`). After it come the notes turn
 (`:2662-2671`), REVIEW's sessions (`:2827`) and REBUT's (`:3076`).
 
 **The other returns.** `_drive_cell` builds a `CellOutcome` at eight
-places. Six come before the loop and pass no `attempts`. Those
+places at `958db033`. Six come before the loop and pass no `attempts`. Those
 `CellOutcome` returns are `PREFLIGHT_FAILED` (`saffron/cell/session.py:2061`),
 `SCOPE_REVIEW` (`:2192`) and `PLAN_REJECTED` (`:2214`). The other three
 `CellOutcome` returns are a failed plan turn (`:2246`), the spend ceiling
@@ -133,6 +134,10 @@ after the plan (`:2302`) and no commits (`:2519`). No suite
 has run at any of them, so 0 is their true count. They keep it. The return
 after the loop passes the loop's count (`:3171-3187`). The handler is the
 only return that can follow a suite and still report 0.
+`SA-0244` adds a ninth, a `PreflightFailed` handler for a refused
+`cell_up` that returns `PREFLIGHT_FAILED`. That makes seven before the
+loop. It runs before any suite, so it stays at 0, and no witness here
+drives it.
 
 **Spend is read back already.** The handler reads spend from the ledger,
 since `spent` loses the walled turn (`saffron/cell/session.py:3189-3194`).
@@ -146,15 +151,16 @@ the limit.
 
 1. Keep the latest suite number `repair_loop` judged where the handler can
    read it. Bind it to 0 before the `try`, beside `spent`. Set it in
-   `_judge` only when `repair_loop` passes a number. REBUT's call passes
-   none and must not move it.
+   `_judge` only for a suite judged `against` `"attempt"`. `SA-0242`
+   hands `repair_loop` `_judge` with that value bound. Its REBUT call
+   passes `"rebuttal"` and the re-run's own number, and must not move it.
 2. Pass it as `attempts` on the handler's `CellOutcome`.
-3. Leave the six early returns and the return after the loop as they are.
+3. Leave the early returns and the return after the loop as they are.
 
 ## Out of scope
 
-- **The spend read-back.** `SA-0241` changes the handler's spend line
-  (`saffron/cell/session.py:3194`). Leave that line and `start_spend` alone.
+- **The spend read-back.** Leave the handler's spend line
+  (`saffron/cell/session.py:3194`) and `start_spend` alone. It is not this defect.
 - **`task.py`, the index and the ledger.** They carry the count through
   unchanged. Criterion 3 holds the row's half of that.
 - **Driving every unpackaged state through `run_task`.** Criterion 3's
@@ -194,7 +200,7 @@ the state and count. Each case asserts the pair and that the count is an
 **Criterion 1's cases.** Red suites come from `_results` with distinct
 `Failure`s, so the loop sees progress. For attempt 3, script
 `suites=([], red1, red2, red3)` and the plan, implement and two repair turns
-before the walled one. The failed preflight scripts one `error`
+before the walled one. The baseline that aborts scripts one `error`
 `GateResult` as the baseline. The scope proposal scripts
 `_turn(_block(_PROPOSAL))`. The rejected plan scripts two turns that are not
 a plan. The failed plan turn raises `implement.AgentFailed` carrying a
@@ -211,7 +217,11 @@ finding 1, then the walled turn or a verdict withdrawing it.
 against `958db033` with the fix above, and passed. Each failed with
 `session.py` reverted. Each wrong version listed above failed its own
 criterion's witness. `tests/test_session.py` and `tests/test_task.py` passed
-whole, and `ruff` and `ty` passed.
+whole, and `ruff` and `ty` passed. Both witnesses were then run again on
+`SA-0242`'s prototype with this fix keyed on `against`, and passed. With
+`SA-0242` alone, both failed. Criterion 2's first two wrong versions each
+failed its witness there. `SA-0231`'s REBUT cap was not in that tree, so
+that tree is not your full base.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
