@@ -663,7 +663,8 @@ _Avoid_: "offline", "network failure".
 **`SPEC_WITHHELD`**: A task whose spec review in a stack batch escalated, so no cell
 ran its spec. It escalates a `blocker` it could not revise, or a spec still unclean
 after three revisions. The review is a fact on the task. The spec is not queued again
-until it is edited.
+until it is edited. Under `saffron draft`, a writer reply that declares an id other
+than the task's is withheld too, with no further review (§3.4).
 _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
