@@ -3,7 +3,7 @@ id: SA-0232
 title: A seed whose fetch from the mirror fails once ends the task, though a retry a minute later reads the same object
 type: bug
 priority: 1
-estimated_lines: 133
+estimated_lines: 170
 estimate_measured: true
 touches:
   - saffron/cell/worktree.py
@@ -46,15 +46,16 @@ max_turns: 100
 acceptance:
   - claim: >-
       `prepare_worktree` retries a seed whose fetch from the mirror failed,
-      once. It first prints that seed's stderr, then pauses at least 60
-      seconds. The retry starts from the volume the failed seed left behind
-      and checks out the base. The witness drives two fetch failures with
-      different text. In one the mirror is absent for the first seed, and git
-      2.54.0 prints "does not appear to be a git repository". In the other a
-      loose object in the mirror is corrupt for the first seed, and it prints
-      "is corrupt". A seed whose fetch succeeded and whose checkout then failed,
-      on a base the mirror lacks, runs once. It never pauses, prints nothing,
-      and raises `CellRuntimeError`.
+      once, but not on a timeout. It first prints that seed's stderr, then
+      pauses at least 60 seconds. The retry starts from the volume the failed
+      seed left behind and checks out the base. The witness drives three
+      fetch failures with different text. The mirror is absent for the first
+      seed. One loose object is missing from the mirror for the first seed.
+      A `git` first on PATH fails the first fetch with a fresh random token.
+      Three other seeds each run once, never pause, print nothing and raise
+      `CellRuntimeError`. One checks out a base the mirror lacks. One names
+      a branch git refuses, "saffron/a..b". One is a run the runtime reports
+      as timed out, exit 124.
     witness: tests/test_worktree.py::test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume
     wrong_versions:
       - Every nonzero seed exit retried, so the base the mirror lacks is seeded twice.
@@ -64,6 +65,11 @@ acceptance:
       - No pause before the retry.
       - A pause of 5 seconds.
       - A silent retry, so the first seed's stderr is printed nowhere.
+      - The fetch left unmarked and every failure retried unless its stderr names the base's sha.
+      - The fetch left unmarked and every failure retried unless its stderr contains "tree".
+      - The fetch left unmarked and every exit 128 retried unless its stderr names the base's sha or contains "tree".
+      - The fetch left unmarked and a failure retried when its stderr contains "corrupt" or "does not appear to be a git repository".
+      - A timed-out seed retried as well as a failed fetch.
   - claim: >-
       A seed whose fetch fails on both attempts raises `CellRuntimeError`
       whose message carries "seeding the worktree failed". It does so after
@@ -126,9 +132,12 @@ reading the mirror or from the pack it sent, so each came from the fetch.
 **What git prints, measured** on the host's git 2.54.0 on 2026-10-07,
 with the seed's own steps in a scratch directory. Fetching from an absent
 mirror exits 128 with "does not appear to be a git repository". Fetching
-from a mirror with one corrupt loose object exits 128 with "is corrupt".
-Checking out a base the mirror lacks, after a good fetch, exits 128 with
-"unable to read tree". Re-running `git remote add origin` in a directory
+from a mirror missing one loose object exits 128. It prints "aborting due
+to possible repository corruption on the remote side" and "bad pack
+header", the live cases' own text. Checking out a base the mirror lacks,
+after a good fetch, exits 128 with "unable to read tree". Checking out
+onto the branch name "saffron/a..b" exits 128 with "is not a valid branch
+name". Re-running `git remote add origin` in a directory
 that already has the remote exits 3 with "remote origin already exists".
 So the exit code alone cannot tell a failed fetch from a missing base.
 
@@ -164,9 +173,13 @@ Retry it inside `prepare_worktree`:
   the item stays open for it.
 - **The refusal's cause.** b-6ac0cd owns the measurement. This spec
   survives the refusal and does not explain it.
-- **A seed that times out.** `runtime._call` returns exit code 124 on its
-  wall bound (`saffron/cell/runtime.py:280-287`). That is not a failed
-  fetch, and it is not retried.
+- **Retrying a seed that times out.** `runtime._call` returns exit code
+  124 on its wall bound (`saffron/cell/runtime.py:280-287`). That is not a
+  failed fetch. A retry would cost another 600 seconds. Whether the
+  timed-out container stops is unmeasured.
+- **DESIGN.md's seed steps.** §5.1 lists the seed as `git init`, remote
+  add, fetch, checkout and remote remove, at DESIGN.md:653. The operator
+  adds the retry to that sentence by hand in this spec's pull request.
 - **Every caller.** `saffron/cell/session.py` and
   `saffron/phases/package.py` keep their calls as they are.
 - **A layer's descendants.** b-60a399 keeps a failed seed from refusing
@@ -179,11 +192,12 @@ mutant can pin their spelling. Criteria 1 and 2 declare a witness alone.
 Criterion 3 passes today and must keep passing.
 
 **Telling a failed fetch apart.** The exit code cannot, as measured
-above. Stderr text is git's own wording. The measurement above used git
-2.54.0, and the cell image runs 2.39.5, where the wording is unmeasured.
-Mark the fetch step in the script itself, so the
-seed reports which step failed. The witnesses run real git, so they
-judge the outcome and not the mechanism.
+above. Stderr text is git's own wording, and it varies by version. Mark
+the fetch step in the script itself, so the seed reports which step
+failed. The witnesses run real git, so they judge the outcome. A stderr
+test tuned to the driven text fails them. The random token defeats any
+list of fetch messages. The refused branch name defeats a list of
+checkout messages that names a tree or a sha.
 
 **Clearing the volume.** Clear it inside the seed's own ephemeral
 container, so the volume's name and the caller's leak ledger do not
@@ -199,8 +213,13 @@ host directory. `test_a_stacked_worktree_holds_the_parents_real_commits_and_only
 builds a real bare mirror for it with `_seed_repo` and `git clone
 --bare`. Wrap the faked `run_ephemeral` so the first seed meets a broken
 mirror and the second a whole one. Rename the mirror away and back for
-the absent case. Overwrite one loose object's bytes and restore them for
-the corrupt case. Count only the runs whose script fetches, so a separate
+the absent case. Rename one loose object away and back for the missing
+case. `git clone --bare` from a local path hard-links its loose objects to
+the origin, and they are mode 0444. A rename moves only the mirror's link,
+so it needs no `chmod` and leaves the origin whole. For the token case,
+write a `git` script that fails `fetch` with a fresh `uuid4` hex and runs
+the real git otherwise. Put it first on PATH for the first seed alone.
+Fake `run_ephemeral` outright for the timeout case. Count only the runs whose script fetches, so a separate
 clearing run would not change the count. Patch the pause, so the suite
 pays nothing. Record the pause in the same log as the seeds, so its order
 is asserted. Assert the printed text against the first seed's own
@@ -209,11 +228,20 @@ stderr, not git's wording, so the test holds on any git.
 **Why not "Permission denied".** The live text is a loose object the
 mirror cannot open. A test cannot reproduce it where the suite runs as
 root, since root ignores mode bits (`tests/test_policy.py:109` skips for
-that reason). The corrupt loose object is the nearest failure the suite
-can drive anywhere.
+that reason). The cell image runs its tests as root. The missing loose
+object gives the live cases' other two messages anywhere.
+
+**Measured in the cell image.** On 2026-10-07 both prototype witnesses
+ran in `saffron/cell:saffron`, built on `saffron/cell-base:python`. That
+image reports git 2.47.3 and uid 0. The output was `2 passed in 1.09s`.
 
 **Write no parametrised test.** Criterion 1's witness is one `def` that
-drives both fetch failures and the missing base in turn.
+drives the three fetch failures and the three single seeds in turn.
+
+**Where the trace reaches.** The printed line reaches the batch log and
+the terminal. It does not reach `events.jsonl` or `saffron watch`.
+Routing it through `emit` would change the function's signature and edit
+callers this spec forbids. That routing is a follow-up for b-6ac0cd.
 
 **The existing failed-seed test.**
 `test_a_failed_seed_leaves_no_container_in_the_leak_ledger` fakes every
@@ -229,7 +257,9 @@ is past ten lines already, and each added line is a new
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks at the
 `bug` ceiling of 1300 tokens (`saffron/gates/core/size.py:26`). On
 2026-10-07 a prototype of this change and both new witnesses ran on a
-copy of the base. `size_gate` counted 533 tokens over 169 changed lines,
-48 in the source and 121 in the test. At 4 tokens a line that is 133
+copy of the base. `size_gate` counted 680 tokens over 214 changed lines,
+48 in the source and 166 in the test. At 4 tokens a line that is 170
 lines. Every wrong version above failed its criterion's witness on the
-prototype, and both new witnesses failed with the source reverted.
+prototype, and both new witnesses failed with the source reverted. A
+witness without the branch and token seeds let two of the unmarked
+versions pass: the exit-128 one and the "corrupt" one.
