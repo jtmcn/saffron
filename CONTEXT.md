@@ -224,9 +224,10 @@ The per-repo slice of a batch has no name and no row (backlog item 177).
 > went multi-repo. Budget is a batch property, and `base_sha` is a run property. If a
 > sentence works with either word, it is imprecise.
 
-**Preflight outcome**: What a run records when its first baseline suite ends: `PASSED`
-or `FAILED`.
-It lives in `runs.preflight`. A baseline that aborts in the cell writes `FAILED`, so
+**Preflight outcome**: What a run records when its first baseline suite ends, or when
+preflight refuses its start: `PASSED` or `FAILED`.
+It lives in `runs.preflight`. A baseline that aborts in the cell writes `FAILED`.
+So does a start that preflight refuses before any cell exists (`SA-0244`). So
 this is not the batch-start **Preflight** under Repos (backlog item 113). What a
 NULL means is open (backlog item b-eac388).
 
@@ -748,7 +749,8 @@ A task has a preflight of its own. Each `PreflightEvent` is one step of it, writ
 `events.Preflight`. The steps include the proxy, the image build, the port probe and the
 worktree coming online.
 A baseline that aborts inside the task's cell ends the task in
-`PREFLIGHT_FAILED`. That is fatal to the task, where the per-repo sense skips a repo.
+`PREFLIGHT_FAILED`. So does a step that refuses the start before the cell exists,
+such as the port probe. That is fatal to the task, where the per-repo sense skips a repo.
 
 ---
 

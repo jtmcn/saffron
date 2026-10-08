@@ -277,6 +277,8 @@ Design notes:
 
   PREFLIGHT_FAILED ◀── the baseline suite errored: the toolchain is broken, not
                        the code, and no model call has happened yet (§5.4)
+                       Also a preflight check that refused the start before
+                       any cell existed, such as N1's host probe (§5.1)
   NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
                        a dead seam here would have returned an earned state
   GATE_ERROR       ◀── a gate errored, the two suites drifted, the critic cell
