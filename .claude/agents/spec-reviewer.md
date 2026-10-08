@@ -28,7 +28,7 @@ costs $8–22 and about an hour. Your job is to find defects like that first.
   when `base` is `HEAD`. Never use `git log --all`, and never read a commit
   newer than `base`.
 - Bash is for those git commands and `driver.py history` only. You write no
-  file and run no test. Step 1b runs what needs running, because your seat is
+  file and run no test. The session that dispatched you runs what needs running, because your seat is
   one of several dispatched into a checkout another process drives.
 - Every finding carries evidence you read: a file:line at `base` and the
   quoted text. A claim you could not check is marked **unverified**.
@@ -72,7 +72,7 @@ trivial.
    the cell writes, and three such blockers were false (item 124). Without a
    named test it is a concern.
 
-   **A wrong implementation that turns on the arrangement goes to step 1b.**
+   **A wrong implementation that turns on the arrangement goes to the session that dispatched you.**
    Some criteria pin a selection, an ordering or a cut.
    Whether the arrangement excludes a wrong implementation is then settled by
    running it, not by reading. On `SA-0112` a reader found a different hole in

@@ -1,10 +1,10 @@
 ---
 id: b-98a3be
 title: The spec chain records no cost and no round per escaped defect, so no step can be cut on evidence
-status: open
+status: partial
 filed: 2026-10-07
 specs: [SA-0226, SA-0227, SA-0228, SA-0229]
-prs: []
+prs: [745, 747]
 commits: []
 cites: []
 related: [130, b-ef334d, b-8d5e55, b-0de0b3, b-43a061]
@@ -65,3 +65,6 @@ third.
 - 2026-10-07: filed from a read of the 2026-09-14 backtest, the 2026-10-02
   Jev grading, the chain records from 09-21 to 10-07, and the labelled rounds
   under `~/.saffron/batches/spec-loop/`.
+- 2026-10-08: SA-0226 (#745) and SA-0228 (#747) landed in the spec loop's run
+  31. A spec review's findings are rows, and the task page totals each
+  phase. SA-0227 and SA-0229 wait on SA-0226 merging.

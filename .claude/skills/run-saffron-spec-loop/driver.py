@@ -365,7 +365,11 @@ def _load() -> list[OrderRow]:
             else ""
         )
         raise SystemExit(
-            _fail(f"no order at {ORDER.relative_to(REPO)} — run `snapshot`{legacy}")
+            # The full command: run 31's operator read `snapshot` as `saffron snapshot`.
+            _fail(
+                f"no order at {ORDER.relative_to(REPO)} — run "
+                f"`uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot`{legacy}"
+            )
         )
     try:
         return _parse_order()

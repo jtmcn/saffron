@@ -215,8 +215,8 @@ GitHub issues remain in use only for research/evidence records under
 - **A spec edited to answer its review is held to every rule above.** The fix
   is spec text too, written by a reader who has just been thinking about the
   code rather than about `acceptance`, and it gets no second reader unless one
-  is arranged — the spec loop's step 1b re-reviews an edited spec before its
-  cell. Two shapes cost run 5 a cell and a repair turn (backlog item 159):
+  is arranged — `create-saffron-spec` re-reviews an edited spec before it
+  merges. Two shapes cost run 5 a cell and a repair turn (backlog item 159):
 
   *A test the edit asks for in prose is judged like any declared one*, by the
   rule above. So "it is not a declared criterion, because it passes at base; it

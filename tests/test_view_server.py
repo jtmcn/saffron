@@ -8,6 +8,7 @@ this file, rather than a collection error (`DESIGN.md` Appendix H).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import html
 import json
 import socket
@@ -124,6 +125,43 @@ def _finding(severity: Severity, claim: str) -> Finding:
     return Finding(lens="style", severity=severity, file="f.py", line=1, claim=claim)
 
 
+def _git(mirror: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-C", str(mirror), *args], capture_output=True, check=True
+    )
+
+
+def _init_mirror(tmp_path: Path, name: str = "spec-mirror") -> Path:
+    """A fresh git repo, under a local identity so a commit here never
+    reaches for the host's own `user.name`/`user.email`."""
+    mirror = tmp_path / name
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    _git(mirror, "config", "user.name", "t")
+    _git(mirror, "config", "user.email", "t@example.com")
+    return mirror
+
+
+def _write_spec_bytes(mirror: Path, filename: str, raw: bytes) -> None:
+    path = mirror / ".saffron" / "specs" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+
+
+def _commit_mirror(mirror: Path, message: str) -> str:
+    _git(mirror, "add", "-A")
+    _git(mirror, "commit", "-q", "-m", message)
+    return _git(mirror, "rev-parse", "HEAD").stdout.decode().strip()
+
+
+def _empty_tree_commit(mirror: Path) -> str:
+    """A commit whose tree holds nothing at all, not even `.saffron/`."""
+    empty_tree = _git(mirror, "hash-object", "-w", "-t", "tree", "/dev/null")
+    tree_sha = empty_tree.stdout.decode().strip()
+    commit = _git(mirror, "commit-tree", tree_sha, "-m", "empty")
+    return commit.stdout.decode().strip()
+
+
 class _PageParser(HTMLParser):
     """Every `<tr>`'s `<td>` texts, grouped by its enclosing `<table id>`,
     apart from each table's own `<th>` header row, kept in `header_rows`
@@ -131,10 +169,10 @@ class _PageParser(HTMLParser):
     `False` for a data row, by table id, in the document's row order.
     `table_ids` lists every table id in the order its `<table>` tag
     appears. `headings3` maps a table id to the `<h3>` text right before
-    it, when there is one. `summary` maps each `<dl id="summary">` term's
-    `<dt>` text to its `<dd>` text and the `href` of its `<a>`, if any.
-    Also every `<a href>`, the first `<h1>`'s text, the `<title>`'s text,
-    and `text`: the page's own data, untagged, without the stylesheet."""
+    it, when there is one. `dls` maps each `<dl id>` to its `<dt>` texts,
+    each with its `<dd>` text and `<a href>`. `summary` is `dls["summary"]`.
+    `texts_by_id` holds each `<p id>` and `<pre id>` text. Also every
+    `<a href>`, the first `<h1>`, the `<title>` and the untagged `text`."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -143,7 +181,11 @@ class _PageParser(HTMLParser):
         self.row_kinds: dict[str, list[bool]] = {}
         self.table_ids: list[str] = []
         self.headings3: dict[str, str] = {}
-        self.summary: dict[str, tuple[str, str | None]] = {}
+        self.dls: dict[str, dict[str, tuple[str, str | None]]] = {}
+        self.summary: dict[str, tuple[str, str | None]] = self.dls.setdefault(
+            "summary", {}
+        )
+        self.texts_by_id: dict[str, str] = {}
         self.hrefs: list[str] = []
         self.heading = ""
         self.title = ""
@@ -158,7 +200,7 @@ class _PageParser(HTMLParser):
         self._in_h3 = False
         self._h3_buffer = ""
         self._pending_h3: str | None = None
-        self._in_dl_summary = False
+        self._current_dl: dict[str, tuple[str, str | None]] | None = None
         self._in_dt = False
         self._in_dd = False
         self._dt_buffer = ""
@@ -166,6 +208,8 @@ class _PageParser(HTMLParser):
         self._dd_href: str | None = None
         self._current_term: str | None = None
         self._in_style = False
+        # Open `<p id>`/`<pre id>` captures, innermost last.
+        self._text_capture_stack: list[tuple[str, str, list[str]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = dict(attrs)
@@ -202,14 +246,19 @@ class _PageParser(HTMLParser):
             self._in_h3 = True
             self._h3_buffer = ""
         elif tag == "dl":
-            self._in_dl_summary = attr_map.get("id") == "summary"
-        elif tag == "dt" and self._in_dl_summary:
+            dl_id = attr_map.get("id")
+            self._current_dl = self.dls.setdefault(dl_id, {}) if dl_id else None
+        elif tag == "dt" and self._current_dl is not None:
             self._in_dt = True
             self._dt_buffer = ""
-        elif tag == "dd" and self._in_dl_summary:
+        elif tag == "dd" and self._current_dl is not None:
             self._in_dd = True
             self._dd_buffer = ""
             self._dd_href = None
+        elif tag in ("p", "pre"):
+            text_id = attr_map.get("id")
+            if text_id is not None:
+                self._text_capture_stack.append((tag, text_id, []))
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "table" and self._table_stack:
@@ -237,15 +286,25 @@ class _PageParser(HTMLParser):
             self._in_h3 = False
             self._pending_h3 = self._h3_buffer
         elif tag == "dl":
-            self._in_dl_summary = False
+            self._current_dl = None
         elif tag == "dt" and self._in_dt:
             self._in_dt = False
             self._current_term = self._dt_buffer.strip()
         elif tag == "dd" and self._in_dd:
             self._in_dd = False
-            if self._current_term is not None:
-                self.summary[self._current_term] = (self._dd_buffer, self._dd_href)
+            if self._current_term is not None and self._current_dl is not None:
+                self._current_dl[self._current_term] = (
+                    self._dd_buffer,
+                    self._dd_href,
+                )
             self._current_term = None
+        elif (
+            tag in ("p", "pre")
+            and self._text_capture_stack
+            and self._text_capture_stack[-1][0] == tag
+        ):
+            _, text_id, parts = self._text_capture_stack.pop()
+            self.texts_by_id[text_id] = "".join(parts)
 
     def handle_data(self, data: str) -> None:
         if self._in_style:
@@ -263,6 +322,8 @@ class _PageParser(HTMLParser):
             self._dt_buffer += data
         if self._in_dd:
             self._dd_buffer += data
+        if self._text_capture_stack:
+            self._text_capture_stack[-1][2].append(data)
 
 
 def _parse(body: str) -> _PageParser:
@@ -449,7 +510,7 @@ def test_the_index_lists_each_left_out_task_with_its_reason(tmp_path: Path) -> N
     (kept_attempt_row,) = [row for row in rows if row[0] == "REVIEWING"]
     assert kept_attempt_row[1] == "1"
     assert kept_attempt_row[2] != ""  # started
-    assert kept_attempt_row[3:] == ["", "", ""]  # ended, turns, cost
+    assert kept_attempt_row[3:] == ["", "", "", ""]  # ended, turns, cost, model
 
 
 def test_a_batch_page_lists_only_that_batchs_tasks(tmp_path: Path) -> None:
@@ -1312,6 +1373,111 @@ def test_a_task_page_heads_with_its_state_risk_batch_pull_request_and_cost(
     assert unbatched_decoy_pr not in unbatched_body
 
 
+def test_a_task_summary_shows_the_lines_added_and_removed_the_ledger_holds(
+    tmp_path: Path,
+) -> None:
+    from saffron.view.server import _V2, _V5
+
+    ledger, repo_id, spares = _ledger(tmp_path)
+
+    batch_id = ledger.create_batch(10.0)
+    batch_run = ledger.create_run(repo_id, "batch-base", batch_id=batch_id)
+    # Created before the real batched task, in the same batch. An unbound
+    # `V2`, ordered `?batch ?task` ascending, then reaches it first.
+    batched_decoy = ledger.create_task(batch_run, "SA-DECOY-B", "sdb", "bdb")
+    _set_task(ledger, batched_decoy, state="DRAFT", added=404, removed=404)
+    batched_task = ledger.create_task(batch_run, "SA-BOTH", "sb", "bb")
+    _set_task(ledger, batched_task, state="DRAFT", added=12, removed=0)
+
+    unbatched_run = ledger.create_run(repo_id, "unbatched-base")
+    both_unbatched = ledger.create_task(unbatched_run, "SA-UNB-BOTH", "su1", "bu1")
+    _set_task(ledger, both_unbatched, state="DRAFT", added=3, removed=7)
+    added_only_unbatched = ledger.create_task(
+        unbatched_run, "SA-UNB-ADDED", "su2", "bu2"
+    )
+    _set_task(ledger, added_only_unbatched, state="DRAFT", added=5, removed=None)
+    neither_unbatched = ledger.create_task(unbatched_run, "SA-UNB-NONE", "su3", "bu3")
+    _set_task(ledger, neither_unbatched, state="DRAFT", added=None, removed=None)
+    # A zero *added* count, the mirror of `batched_task`'s zero *removed*
+    # one, so a graph that treats 0 as falsy is caught on either column.
+    zero_added_unbatched = ledger.create_task(
+        unbatched_run, "SA-UNB-ZERO", "su4", "bu4"
+    )
+    _set_task(ledger, zero_added_unbatched, state="DRAFT", added=0, removed=9)
+    removed_only_unbatched = ledger.create_task(
+        unbatched_run, "SA-UNB-REMOVED", "su5", "bu5"
+    )
+    _set_task(ledger, removed_only_unbatched, state="DRAFT", added=None, removed=4)
+    # Created last. An unbound `V5`, ordered `DESC(?task)`, reaches it first.
+    unbatched_decoy = ledger.create_task(unbatched_run, "SA-DECOY-U", "sdu", "bdu")
+    _set_task(ledger, unbatched_decoy, state="DRAFT", added=505, removed=505)
+
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        batched_status, batched_body = _get(base, f"/task/{batched_task}")
+        both_status, both_body = _get(base, f"/task/{both_unbatched}")
+        added_only_status, added_only_body = _get(base, f"/task/{added_only_unbatched}")
+        neither_status, neither_body = _get(base, f"/task/{neither_unbatched}")
+        zero_added_status, zero_added_body = _get(base, f"/task/{zero_added_unbatched}")
+        removed_only_status, removed_only_body = _get(
+            base, f"/task/{removed_only_unbatched}"
+        )
+        v2_status, v2_body, _ = _sparql(base, _V2)
+        v5_status, v5_body, _ = _sparql(base, _V5)
+
+    assert batched_status == 200
+    assert both_status == 200
+    assert added_only_status == 200
+    assert neither_status == 200
+    assert zero_added_status == 200
+    assert v2_status == 200
+    assert v5_status == 200
+
+    batched_page = _parse(batched_body)
+    assert batched_page.summary["lines added"] == ("12", None)
+    assert batched_page.summary["lines removed"] == ("0", None)
+    # After the five existing terms, in that order, and ending the dl.
+    assert list(batched_page.summary.keys()) == [
+        "state",
+        "risk",
+        "batch",
+        "pull request",
+        "cost",
+        "lines added",
+        "lines removed",
+    ]
+
+    both_page = _parse(both_body)
+    assert both_page.summary["lines added"] == ("3", None)
+    assert both_page.summary["lines removed"] == ("7", None)
+
+    added_only_page = _parse(added_only_body)
+    assert added_only_page.summary["lines added"] == ("5", None)
+    assert "lines removed" not in added_only_page.summary
+    # The lone term still comes last, after the five existing ones.
+    assert list(added_only_page.summary.keys())[-1] == "lines added"
+
+    neither_page = _parse(neither_body)
+    assert "lines added" not in neither_page.summary
+    assert "lines removed" not in neither_page.summary
+
+    zero_added_page = _parse(zero_added_body)
+    assert zero_added_page.summary["lines added"] == ("0", None)
+    assert zero_added_page.summary["lines removed"] == ("9", None)
+
+    assert removed_only_status == 200
+    removed_only_page = _parse(removed_only_body)
+    assert removed_only_page.summary.get("lines removed") == ("4", None)
+    assert "lines added" not in removed_only_page.summary
+
+    v2_bindings = json.loads(v2_body)["results"]["bindings"]
+    assert v2_bindings[0]["task"]["value"] == f"{DATA_NS}task-{batched_decoy}"
+
+    v5_bindings = json.loads(v5_body)["results"]["bindings"]
+    assert v5_bindings[0]["task"]["value"] == f"{DATA_NS}task-{unbatched_decoy}"
+
+
 def test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost(
     tmp_path: Path,
 ) -> None:
@@ -1381,8 +1547,9 @@ def test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost(
             _dt("2026-01-02 01:05:00"),
             "2",
             "0.30",
+            "",
         ],
-        ["REVIEWING", "1", _dt("2026-01-02 02:00:00"), "", "", ""],
+        ["REVIEWING", "1", _dt("2026-01-02 02:00:00"), "", "", "", ""],
         [
             "IMPLEMENTING",
             "1",
@@ -1390,6 +1557,7 @@ def test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost(
             _dt("2026-01-02 03:10:00"),
             "7",
             "1.50",
+            "",
         ],
         [
             "REBUTTING",
@@ -1398,6 +1566,7 @@ def test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost(
             _dt("2026-01-02 04:15:00"),
             "4",
             "1.50",
+            "",
         ],
         [
             "REPAIRING",
@@ -1406,7 +1575,268 @@ def test_a_task_page_lists_each_attempt_once_with_its_times_turns_and_cost(
             _dt("2026-01-02 05:20:00"),
             "11",
             "0.75",
+            "",
         ],
+    ]
+
+
+def test_the_attempts_table_names_each_attempts_model(tmp_path: Path) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-MODELS", "sm", "bm")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    with_model = ledger.open_attempt(task_id, "IMPLEMENTING")
+    ledger.close_attempt(
+        with_model,
+        session_id=None,
+        model="claude-opus-4",
+        subtype="x",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+    no_model = ledger.open_attempt(task_id, "REVIEWING")
+    ledger.close_attempt(
+        no_model,
+        session_id=None,
+        model=None,
+        subtype="x",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+    joined_model = ledger.open_attempt(task_id, "REPAIRING")
+    ledger.close_attempt(
+        joined_model,
+        session_id=None,
+        model="claude-opus-4,claude-sonnet-4",
+        subtype="x",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+
+    # Its own attempt's own model, never reaching the task above.
+    decoy_task = ledger.create_task(run_id, "SA-MODEL-DECOY", "sd", "bd")
+    _set_task(ledger, decoy_task, state="DRAFT")
+    decoy_attempt = ledger.open_attempt(decoy_task, "IMPLEMENTING")
+    ledger.close_attempt(
+        decoy_attempt,
+        session_id=None,
+        model="decoy-model",
+        subtype="x",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+    assert "decoy-model" not in body
+    page = _parse(body)
+
+    assert page.header_rows["attempts"][-2:] == ["cost", "model"]
+
+    rows = {row[0]: row for row in page.tables["attempts"]}
+    assert rows["IMPLEMENTING"][-1] == "claude-opus-4"
+    assert rows["REVIEWING"][-1] == ""
+    assert rows["REPAIRING"][-1] == "claude-opus-4,claude-sonnet-4"
+
+
+def test_a_task_page_totals_each_phase_and_the_task_with_unknowns_never_zero(
+    tmp_path: Path,
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-TOTALS", "st", "bt")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    # SPEC_WRITING's first attempt starts earliest of all, placing it first.
+    # Its second attempt starts after every other phase's.
+    writing_one = ledger.open_attempt(task_id, "SPEC_WRITING")
+    _set_attempt(
+        ledger,
+        writing_one,
+        started_at="2026-01-01 00:00:00",
+        ended_at="2026-01-02 01:00:00",
+        num_turns=30,
+        # 0.79 and 0.815, not the spec's 0.80 and 0.805: the same 1.605, but
+        # a sum of each cost through Decimal(float) reads 1.60 only with these.
+        cost_usd_est=0.79,
+    )
+
+    implementing_one = ledger.open_attempt(task_id, "IMPLEMENTING")
+    ledger.record_gate_result(_gate("lint", "fail"), attempt_id=implementing_one)
+    ledger.record_gate_result(_gate("types", "pass"), attempt_id=implementing_one)
+    ledger.record_gate_result(_gate("tests", "pass"), attempt_id=implementing_one)
+    _set_attempt(
+        ledger,
+        implementing_one,
+        started_at="2026-01-02 02:00:00",
+        ended_at="2026-01-02 02:10:00",
+        num_turns=7,
+    )
+    implementing_two = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        implementing_two,
+        started_at="2026-01-02 02:20:00",
+        ended_at="2026-01-02 02:30:00",
+        cost_usd_est=0.50,
+    )
+    implementing_three = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        implementing_three,
+        started_at="2026-01-02 02:40:00",
+        num_turns=4,
+        cost_usd_est=0.625,
+    )
+
+    review_one = ledger.open_attempt(task_id, "SPEC_REVIEW")
+    _set_attempt(
+        ledger,
+        review_one,
+        started_at="2026-01-02 03:00:00",
+        ended_at="2026-01-02 03:05:30",
+        num_turns=12,
+        cost_usd_est=0.005,
+    )
+    review_two = ledger.open_attempt(task_id, "SPEC_REVIEW")
+    _set_attempt(ledger, review_two, started_at="2026-01-02 03:10:00")
+    review_three = ledger.open_attempt(task_id, "SPEC_REVIEW")
+    _set_attempt(
+        ledger,
+        review_three,
+        started_at="2026-01-02 03:20:00",
+        ended_at="2026-01-02 03:21:35",
+        num_turns=3,
+        cost_usd_est=0.005,
+    )
+
+    reviewing_one = ledger.open_attempt(task_id, "REVIEWING")
+    _set_attempt(ledger, reviewing_one, started_at="2026-01-02 04:00:00")
+    reviewing_two = ledger.open_attempt(task_id, "REVIEWING")
+    _set_attempt(ledger, reviewing_two, started_at="2026-01-02 04:10:00")
+
+    writing_two = ledger.open_attempt(task_id, "SPEC_WRITING")
+    _set_attempt(
+        ledger,
+        writing_two,
+        started_at="2026-01-02 05:00:00",
+        ended_at="2026-01-02 05:10:00",
+        num_turns=8,
+        cost_usd_est=0.815,
+    )
+
+    # A decoy task's own SPEC_REVIEW attempt, with values that would
+    # visibly corrupt the sums above if a query bound no `?task`.
+    decoy_task = ledger.create_task(run_id, "SA-TOTALS-DECOY", "sd", "bd")
+    _set_task(ledger, decoy_task, state="DRAFT")
+    decoy_attempt = ledger.open_attempt(decoy_task, "SPEC_REVIEW")
+    _set_attempt(
+        ledger,
+        decoy_attempt,
+        started_at="2026-01-03 00:00:00",
+        ended_at="2026-01-03 00:00:50",
+        num_turns=999,
+        cost_usd_est=99.99,
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+    page = _parse(body)
+
+    # Right after the attempts table, per the claim, not somewhere else.
+    assert page.table_ids.index("phase-totals") == page.table_ids.index("attempts") + 1
+
+    assert page.tables["phase-totals"] == [
+        ["SPEC_WRITING", "2", "38", "1.61", "25:10:00"],
+        [
+            "IMPLEMENTING",
+            "3",
+            "11 + 1 unknown",
+            "1.13 + 1 unknown",
+            "0:20:00 + 1 unknown",
+        ],
+        [
+            "SPEC_REVIEW",
+            "3",
+            "15 + 1 unknown",
+            "0.01 + 1 unknown",
+            "0:07:05 + 1 unknown",
+        ],
+        ["REVIEWING", "2", "2 unknown", "2 unknown", "2 unknown"],
+        [
+            "all phases",
+            "10",
+            "64 + 4 unknown",
+            "2.74 + 4 unknown",
+            "25:37:05 + 4 unknown",
+        ],
+    ]
+
+
+def test_each_phase_total_counts_only_its_own_columns_unknowns_and_sums_cost_exactly(
+    tmp_path: Path,
+) -> None:
+    """Turns, cost and wall time each lack a different number of attempts, so
+    a cell reading another column's unknown count shows the wrong one. The
+    costs 0.003 and 0.022 sum to 0.025 exactly, which rounds half up to
+    0.03. A float sum reads back as 0.024999999999999998 and shows 0.02."""
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-UNKNOWNS", "su", "bu")
+    _set_task(ledger, task_id, state="REPAIRING")
+
+    no_turns_no_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        no_turns_no_cost,
+        started_at="2026-01-02 02:00:00",
+        ended_at="2026-01-02 02:10:00",
+    )
+    no_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        no_cost,
+        started_at="2026-01-02 02:20:00",
+        ended_at="2026-01-02 02:25:00",
+        num_turns=4,
+    )
+    small_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        small_cost,
+        started_at="2026-01-02 02:30:00",
+        ended_at="2026-01-02 02:31:00",
+        num_turns=2,
+        cost_usd_est=0.003,
+    )
+    other_small_cost = ledger.open_attempt(task_id, "IMPLEMENTING")
+    _set_attempt(
+        ledger,
+        other_small_cost,
+        started_at="2026-01-02 02:40:00",
+        ended_at="2026-01-02 02:42:00",
+        num_turns=1,
+        cost_usd_est=0.022,
+    )
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, f"/task/{task_id}")
+    assert status == 200
+
+    row = ["4", "7 + 1 unknown", "0.03 + 2 unknown", "0:18:00"]
+    assert _parse(body).tables["phase-totals"] == [
+        ["IMPLEMENTING", *row],
+        ["all phases", *row],
     ]
 
 
@@ -1437,6 +1867,274 @@ def test_a_task_with_no_attempts_shows_its_summary_and_no_table(
     assert "no attempts" in body
 
     assert "no attempts" not in other_body
+
+
+def test_a_task_page_shows_its_specs_title_type_and_problem_read_at_the_runs_base(
+    tmp_path: Path,
+) -> None:
+    from saffron.intake import DisclosedMutantError, parse_spec
+    from saffron.report.pr_body import extract_problem
+
+    ledger, repo_id, spares = _ledger(tmp_path)
+    mirror = _init_mirror(tmp_path)
+
+    markup_text = (
+        "---\n"
+        'id: SA-0101\ntitle: "<b>A markup title</b>"\ntype: bug\n'
+        "---\n\n"
+        "## Problem\n\n"
+        "<i>Markup</i> problem text, cc @someone about it.\n"
+    )
+    long_text = (
+        "---\nid: SA-0102\ntitle: A long one\ntype: bug\n---\n\n"
+        "## Problem\n\n" + ("x" * 3000) + "\n"
+    )
+    none_text = (
+        "---\nid: SA-0103\ntitle: No problem here\ntype: bug\n---\n\n"
+        "## Out of scope\n\nNothing relevant.\n"
+    )
+    crlf_text = (
+        "---\nid: SA-0104\ntitle: A crlf one\ntype: bug\n---\n\n"
+        "## Problem\n\nA problem over two\nlines.\n"
+    )
+    crlf_bytes = crlf_text.replace("\n", "\r\n").encode()
+    mutant_text = (
+        "---\nid: SA-0105\ntitle: A disclosing one\ntype: bug\n"
+        "acceptance:\n"
+        "  - claim: it computes the total correctly\n"
+        "    witness: tests/test_x.py::test_total\n"
+        "    mutant:\n"
+        "      file: a.py\n"
+        "      find: 'return total'\n"
+        "      replace: 'return 0'\n"
+        "---\n\n"
+        "## Problem\n\n"
+        "The function miscalculates when `return total` runs.\n"
+    )
+
+    files = {
+        "SA-0101-markup.md": markup_text.encode(),
+        "SA-0102-long.md": long_text.encode(),
+        "SA-0103-none.md": none_text.encode(),
+        "SA-0104-crlf.md": crlf_bytes,
+        "SA-0105-mutant.md": mutant_text.encode(),
+    }
+    for filename, raw in files.items():
+        _write_spec_bytes(mirror, filename, raw)
+    base_sha = _commit_mirror(mirror, "specs")
+
+    spec_repo_id = ledger.upsert_repo("spec-repo", "spec-origin", str(mirror), None)
+    run_id = ledger.create_run(spec_repo_id, base_sha)
+
+    def _task_for(spec_id: str, filename: str) -> int:
+        sha = hashlib.sha256(files[filename]).hexdigest()
+        task_id = ledger.create_task(run_id, spec_id, sha, f"b-{spec_id}")
+        _set_task(ledger, task_id, state="DRAFT")
+        return task_id
+
+    markup_task = _task_for("SA-0101", "SA-0101-markup.md")
+    long_task = _task_for("SA-0102", "SA-0102-long.md")
+    none_task = _task_for("SA-0103", "SA-0103-none.md")
+    crlf_task = _task_for("SA-0104", "SA-0104-crlf.md")
+    mutant_task = _task_for("SA-0105", "SA-0105-mutant.md")
+
+    # No file starts with `SA-010-`: only `SA-0101-markup.md` shares the
+    # bare prefix `SA-010`, so dropping the hyphen check would match it.
+    boundary_task = ledger.create_task(run_id, "SA-010", "boundary-check", "b-SA-010")
+    _set_task(ledger, boundary_task, state="DRAFT")
+
+    # A later commit rewrites every spec. The repo's HEAD and its own
+    # latest run then carry different bytes than each task's own run.
+    for filename in files:
+        _write_spec_bytes(mirror, filename, b"rewritten\n")
+    rewrite_sha = _commit_mirror(mirror, "rewrite")
+    ledger.create_run(spec_repo_id, rewrite_sha)
+
+    # A later repo, registered after this one, whose mirror does not exist.
+    other_repo_id = ledger.upsert_repo(
+        "other", "other-origin", str(tmp_path / "no-such-mirror"), None
+    )
+    ledger.create_run(other_repo_id, "f" * 40)
+
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        markup_status, markup_body = _get(base, f"/task/{markup_task}")
+        long_status, long_body = _get(base, f"/task/{long_task}")
+        none_status, none_body = _get(base, f"/task/{none_task}")
+        crlf_status, crlf_body = _get(base, f"/task/{crlf_task}")
+        mutant_status, mutant_body = _get(base, f"/task/{mutant_task}")
+        boundary_status, boundary_body = _get(base, f"/task/{boundary_task}")
+
+    for status in (
+        markup_status,
+        long_status,
+        none_status,
+        crlf_status,
+        mutant_status,
+        boundary_status,
+    ):
+        assert status == 200
+
+    markup_spec = parse_spec(markup_text)
+    markup_page = _parse(markup_body)
+    assert markup_page.dls["spec"]["title"] == ("<b>A markup title</b>", None)
+    assert markup_page.dls["spec"]["type"] == ("bug", None)
+    assert html.escape("<b>A markup title</b>") in markup_body
+    assert "<b>A markup title</b>" not in markup_body
+    expected_markup_problem = extract_problem(markup_spec.body)
+    assert markup_page.texts_by_id["problem"] == expected_markup_problem
+    assert html.escape(expected_markup_problem) in markup_body
+
+    long_spec = parse_spec(long_text)
+    long_page = _parse(long_body)
+    expected_long_problem = extract_problem(long_spec.body)
+    assert long_page.texts_by_id["problem"] == expected_long_problem
+    assert "clipped at the problem ceiling" in long_page.texts_by_id["problem"]
+
+    none_page = _parse(none_body)
+    assert "problem" not in none_page.texts_by_id
+    assert none_page.dls["spec"]["title"] == ("No problem here", None)
+
+    crlf_spec = parse_spec(crlf_bytes.decode())
+    crlf_page = _parse(crlf_body)
+    expected_crlf_problem = extract_problem(crlf_spec.body)
+    assert "\r\n" in expected_crlf_problem
+    assert crlf_page.texts_by_id["problem"] == expected_crlf_problem
+
+    try:
+        parse_spec(mutant_text)
+        raise AssertionError("expected a disclosed mutant")
+    except DisclosedMutantError as exc:
+        mutant_spec = exc.spec
+    mutant_page = _parse(mutant_body)
+    assert mutant_page.dls["spec"]["title"] == ("A disclosing one", None)
+    assert mutant_page.texts_by_id["problem"] == extract_problem(mutant_spec.body)
+
+    # `SA-010` names no file: matching the bare prefix, with no hyphen
+    # required, would wrongly pick `SA-0101-markup.md` instead of absent.
+    boundary_page = _parse(boundary_body)
+    assert "spec" not in boundary_page.dls
+    assert boundary_page.texts_by_id["spec-unavailable"] == (
+        "spec text unavailable: absent"
+    )
+
+
+def test_a_task_page_says_why_its_spec_text_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger, repo_id, spares = _ledger(tmp_path)
+    mirror = _init_mirror(tmp_path)
+
+    good_bytes = (
+        b"---\nid: SA-0012\ntitle: Good\ntype: bug\n---\n\n## Problem\n\nFine.\n"
+    )
+    _write_spec_bytes(mirror, "SA-0012-good.md", good_bytes)
+
+    bad_bytes = (
+        b"---\nid: SA-0040\ntitle: Bad bytes\ntype: bug\n---\n\n## Problem\n\nBroken.\n"
+    ) + b"\xff\xfe"
+    _write_spec_bytes(mirror, "SA-0040-bad.md", bad_bytes)
+
+    unparseable_bytes = (
+        b"---\nid: SA-0050\ntitle: No type\n---\n\n## Problem\n\nMissing type.\n"
+    )
+    _write_spec_bytes(mirror, "SA-0050-notype.md", unparseable_bytes)
+
+    (mirror / ".saffron" / "specs" / "SA-0030-link.md").symlink_to(
+        "../../../outside.md"
+    )
+
+    base_sha = _commit_mirror(mirror, "specs")
+    repo_id2 = ledger.upsert_repo("spec-repo", "spec-origin", str(mirror), None)
+    run_id = ledger.create_run(repo_id2, base_sha)
+
+    # absent: the id has no hyphen boundary against `SA-0012-good.md`.
+    absent_boundary_task = ledger.create_task(run_id, "SA-001", "x", "b1")
+    _set_task(ledger, absent_boundary_task, state="DRAFT")
+
+    # absent: a commit whose tree holds nothing at all.
+    empty_commit = _empty_tree_commit(mirror)
+    empty_run = ledger.create_run(repo_id2, empty_commit)
+    absent_empty_task = ledger.create_task(empty_run, "SA-0012", "x", "b2")
+    _set_task(ledger, absent_empty_task, state="DRAFT")
+
+    # hash mismatch: `spec_sha` taken over bytes other than the file's own.
+    mismatch_task = ledger.create_task(
+        run_id, "SA-0012", hashlib.sha256(b"other bytes").hexdigest(), "b3"
+    )
+    _set_task(ledger, mismatch_task, state="DRAFT")
+
+    # unreadable: the repo's mirror path does not exist.
+    missing_mirror_repo = ledger.upsert_repo(
+        "missing", "missing-origin", str(tmp_path / "no-such-mirror"), None
+    )
+    missing_run = ledger.create_run(missing_mirror_repo, base_sha)
+    missing_mirror_task = ledger.create_task(missing_run, "SA-0012", "x", "b4")
+    _set_task(ledger, missing_mirror_task, state="DRAFT")
+
+    # unreadable: the run's `base_sha` is forty zeros, which the mirror lacks.
+    bad_sha_run = ledger.create_run(repo_id2, "0" * 40)
+    bad_sha_task = ledger.create_task(bad_sha_run, "SA-0012", "x", "b5")
+    _set_task(ledger, bad_sha_task, state="DRAFT")
+
+    # unreadable: the matching entry is a symlink, never read as a blob.
+    symlink_task = ledger.create_task(run_id, "SA-0030", "x", "b6")
+    _set_task(ledger, symlink_task, state="DRAFT")
+
+    # unreadable: the bytes hash but are not UTF-8.
+    bad_bytes_task = ledger.create_task(
+        run_id, "SA-0040", hashlib.sha256(bad_bytes).hexdigest(), "b7"
+    )
+    _set_task(ledger, bad_bytes_task, state="DRAFT")
+
+    # unparseable: `type` is left out of the frontmatter.
+    unparseable_task = ledger.create_task(
+        run_id, "SA-0050", hashlib.sha256(unparseable_bytes).hexdigest(), "b8"
+    )
+    _set_task(ledger, unparseable_task, state="DRAFT")
+
+    # unreadable: no git binary on `PATH`, fetched below once patched.
+    no_git_task = ledger.create_task(
+        run_id, "SA-0012", hashlib.sha256(good_bytes).hexdigest(), "b9"
+    )
+    _set_task(ledger, no_git_task, state="DRAFT")
+
+    _close(ledger, spares)
+
+    cases = [
+        ("absent", absent_boundary_task),
+        ("absent", absent_empty_task),
+        ("hash mismatch", mismatch_task),
+        ("unreadable", missing_mirror_task),
+        ("unreadable", bad_sha_task),
+        ("unreadable", symlink_task),
+        ("unreadable", bad_bytes_task),
+        ("unparseable", unparseable_task),
+    ]
+
+    with _running(tmp_path / "ledger.db") as base:
+        for reason, task_id in cases:
+            status, body = _get(base, f"/task/{task_id}")
+            assert status == 200, (reason, task_id)
+            page = _parse(body)
+            assert "spec" not in page.dls, (reason, task_id)
+            assert "problem" not in page.texts_by_id, (reason, task_id)
+            assert page.texts_by_id["spec-unavailable"] == (
+                f"spec text unavailable: {reason}"
+            ), (reason, task_id)
+
+        empty_path_dir = tmp_path / "empty-path"
+        empty_path_dir.mkdir()
+        monkeypatch.setenv("PATH", str(empty_path_dir))
+        no_git_status, no_git_body = _get(base, f"/task/{no_git_task}")
+
+    assert no_git_status == 200
+    no_git_page = _parse(no_git_body)
+    assert "spec" not in no_git_page.dls
+    assert no_git_page.texts_by_id["spec-unavailable"] == (
+        "spec text unavailable: unreadable"
+    )
 
 
 def test_gate_results_failure_lines_and_findings_sit_in_separate_tables(
@@ -1617,6 +2315,7 @@ def test_every_table_on_every_page_has_a_header_row_naming_its_columns(
     failures_table_id = f"failures-{result_id}"
     assert task_page.table_ids == [
         "attempts",
+        "phase-totals",
         "gate-results",
         failures_table_id,
         "findings",
@@ -1624,7 +2323,8 @@ def test_every_table_on_every_page_has_a_header_row_naming_its_columns(
     _assert_headers_and_widths(
         task_page,
         {
-            "attempts": ["phase", "n", "started", "ended", "turns", "cost"],
+            "attempts": ["phase", "n", "started", "ended", "turns", "cost", "model"],
+            "phase-totals": ["phase", "attempts", "turns", "cost", "wall time"],
             "gate-results": ["phase", "n", "gate", "outcome", "failures"],
             failures_table_id: ["file", "line", "code", "message"],
             "findings": ["lens", "severity", "claim", "verdict"],

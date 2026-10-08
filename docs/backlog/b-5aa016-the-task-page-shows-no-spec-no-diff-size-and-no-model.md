@@ -1,11 +1,12 @@
 ---
 id: b-5aa016
 title: "The task page shows no spec, no diff size and no model"
-status: open
+status: done
 tier: 3
 filed: 2026-10-07
+closed: 2026-10-08
 specs: [SA-0225]
-prs: [728]
+prs: [728, 746]
 commits: []
 cites: [§6.2, §4.1]
 related: [b-cf50dc, b-d269f4]
@@ -37,3 +38,9 @@ files sit in the repo's mirror at the run's `base_sha` and hash to that
   holds them.
 - The attempts table shows each attempt's model, blank where the ledger
   holds none.
+
+## Record
+
+- 2026-10-08: done by SA-0225, #746, in the spec loop's run 31. The task page
+  shows the spec's title, type and Problem, the lines added and removed, and
+  each attempt's model.

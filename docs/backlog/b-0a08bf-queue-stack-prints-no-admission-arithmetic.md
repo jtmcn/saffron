@@ -38,3 +38,6 @@ layer's spec review.
 ## Record
 
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
+- 2026-10-08: recurred in the spec loop's run 31. The delegate read
+  `saffron/cli.py` to learn that `--stack` holds back half of `--budget`
+  before choosing $320 for $157 of spec budgets.

@@ -35,3 +35,8 @@ Either way, a spec that lands at twice its estimate shows in the check's ratio.
 ## Record
 
 - 2026-10-07: filed from the spec loop's run 30 (#733, #735).
+- 2026-10-08: recurred in the spec loop's run 31. All three specs set
+  `estimate_measured: true`, so `check` priced each at 1.0. They landed at
+  1.6x to 1.7x: SA-0226 at 1506 tokens against 924, SA-0225 at 2881 against
+  1740, and SA-0228 at 943 against 564. SA-0225 ended 119 tokens under its
+  ceiling.

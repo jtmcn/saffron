@@ -1768,3 +1768,37 @@ seat finding the in-cell critic and the end review both passed.
 - Run 30: `terms` failed on `main` for a docstring the gate began reading,
   and no check ran it over the tree.
   **Bucket 1**, `terms`. **Landed:** #720. **Open:** b-1e106d.
+
+## 2026-10-08 — `SA-0226`, `SA-0225`, `SA-0228` (spec loop run 31, #745, #746, #747)
+
+- `SA-0226` (#745): the witness compared `spec_findings` rows and never the
+  `spec_finding` facts, so facts left raw passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #745. **Open:**
+  b-20043f.
+- `SA-0226` (#745): an annotation-only import loaded the cell runtime and the
+  phases into every ledger reader.
+  **Bucket 3**, conventions. **Landed:** a review commit on #745.
+- `SA-0226` (#745): two comments used bare "round", which `CONTEXT.md` avoids.
+  **Bucket 1**, `terms`, whose table lacks the word. **Landed:** a review
+  commit on #745.
+- `SA-0225` (#746): both line-count witnesses drove added-only and never
+  removed-only, so a removed guard needing added passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #746. **Open:**
+  b-20043f.
+- `SA-0225` (#746): the rename re-keyed `prose`'s docstring hit, and the cell
+  joined two lines to slip under it.
+  **Bucket 1**, `prose`. **Landed:** a review commit on #746. **Open:**
+  b-8acb05.
+- `SA-0225` (#746): a comment named the wrong function, a second "Minted"
+  sat outside a stack batch, and a comment contradicted its list.
+  **Bucket 3**, conventions. **Landed:** a review commit on #746.
+- `SA-0228` (#747): every fixture row lacked turns, cost and wall time on the
+  same attempts, so a cell reading another column's count passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #747. **Open:**
+  b-20043f.
+- `SA-0228` (#747): a float sum read back through `repr` passed, since every
+  fixture sum had an exact `repr`.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #747.
+- `SA-0228` (#747): the fixture comment gave a reason for its costs that
+  measured false as worded.
+  **Bucket 3**, conventions. **Landed:** a review commit on #747.

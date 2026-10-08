@@ -3,7 +3,7 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the seventeen kinds
+by `saffron/record/fold.py`, deletable at any time. Only the eighteen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
@@ -26,12 +26,16 @@ import sqlite3
 from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, new_task_key
+
+if TYPE_CHECKING:
+    # At runtime it would load the cell runtime and the phases into every ledger reader.
+    from saffron.spec_review import SpecReviewFinding
 
 # Every value `tasks.state` holds, held to `factory:TaskState` by a test (item 52).
 # `set_task_state` stays `str`: no defect measured so far was a bad write.
@@ -279,6 +283,21 @@ CREATE TABLE IF NOT EXISTS spec_reviews (
     PRIMARY KEY (task_key, n)
 );
 
+-- One finding of one `spec_reviews` review round (b-98a3be, `DESIGN.md` §3.4).
+-- `criterion`, `file` and `line` carry no type, so SQLite's own affinity never rewrites a value (measured).
+CREATE TABLE IF NOT EXISTS spec_findings (
+    task_key TEXT NOT NULL,
+    n        INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    severity TEXT NOT NULL,
+    fixes    TEXT,
+    claim    TEXT NOT NULL,
+    criterion,
+    file,
+    line,
+    PRIMARY KEY (task_key, n, position)
+);
+
 -- One spec text a stack batch runs that is not at `base_sha`: a spec review's
 -- revision, or a follow-up spec's own text, keyed like `spec_reviews` (ADR 7).
 CREATE TABLE IF NOT EXISTS spec_texts (
@@ -341,6 +360,28 @@ def _inserted_id(cursor: sqlite3.Cursor) -> int:
     if row_id is None:
         raise ValueError("INSERT reported no rowid")
     return row_id
+
+
+_SQLITE_INT64_MIN = -(2**63)
+_SQLITE_INT64_MAX = 2**63 - 1
+
+
+def _spec_finding_field(value: Any) -> Any:
+    """One of `spec_findings`' `criterion`, `file` or `line`, as the fact
+    and the row alike must hold it. `None`, a `str`, or a non-`bool` `int`
+    in `sqlite3`'s signed 64-bit range pass through as given. Everything
+    else is `json.dumps`-ed first, so the fact and the row agree: `sqlite3`
+    reads a `bool` back as an `int`, stores NaN as NULL and raises on an
+    `int` past 64 bits (measured)."""
+    if value is None or isinstance(value, str):
+        return value
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and _SQLITE_INT64_MIN <= value <= _SQLITE_INT64_MAX
+    ):
+        return value
+    return json.dumps(value)
 
 
 class Ledger:
@@ -571,12 +612,13 @@ class Ledger:
         """Delete every row under `record_key = key`, task row last. Makes
         `fold_task` an upsert, and a no-op on a task with no row yet.
         `stack_layers`, `end_reviews`, `qualifications`, `spec_reviews`,
-        `spec_texts` and `stack_finishes` are filed under `key`, so all six
-        deletes run first."""
+        `spec_findings`, `spec_texts` and `stack_finishes` are filed under
+        `key`, so all seven deletes run first."""
         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM spec_reviews WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM spec_findings WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM spec_texts WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM stack_finishes WHERE task_key = ?", (key,))
         row = self._db.execute(
@@ -880,6 +922,25 @@ class Ledger:
                     payload["block"],
                     payload["block_sha256"],
                     payload["error"],
+                ),
+            )
+            return None
+        if fact.kind == "spec_finding":
+            # `record_spec_review` already normalized `criterion`, `file`
+            # and `line`, so this inserts the payload verbatim.
+            self._db.execute(
+                "INSERT INTO spec_findings (task_key, n, position, severity, "
+                "fixes, claim, criterion, file, line) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["n"],
+                    payload["position"],
+                    payload["severity"],
+                    payload["fixes"],
+                    payload["claim"],
+                    payload["criterion"],
+                    payload["file"],
+                    payload["line"],
                 ),
             )
             return None
@@ -1653,10 +1714,14 @@ class Ledger:
         block: str | None,
         block_sha256: str | None,
         error: str | None,
+        findings: Sequence[SpecReviewFinding],
     ) -> None:
         """One review of one spec inside a stack batch (ADR 7). Numbered one
         more than the task's own `spec_reviews` rows, from 1, and filed under
-        the task's own key like `record_stack_layer`'s row."""
+        the task's own key like `record_stack_layer`'s row. After that fact,
+        writes one `spec_finding` fact per entry of `findings`. Each is
+        numbered from 1 in block order, under this same review round's own `n`
+        (b-98a3be, `DESIGN.md` §3.4)."""
         n = (
             1
             + self._db.execute(
@@ -1677,6 +1742,22 @@ class Ledger:
             },
         )
         self._commit_and_append(fact)
+        for position, finding in enumerate(findings, start=1):
+            finding_fact = self._build_fact(
+                task_id,
+                "spec_finding",
+                {
+                    "n": n,
+                    "position": position,
+                    "severity": finding.severity,
+                    "fixes": finding.fixes,
+                    "claim": finding.claim,
+                    "criterion": _spec_finding_field(finding.criterion),
+                    "file": _spec_finding_field(finding.file),
+                    "line": _spec_finding_field(finding.line),
+                },
+            )
+            self._commit_and_append(finding_fact)
 
     def record_spec_text(
         self,

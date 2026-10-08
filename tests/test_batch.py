@@ -3908,6 +3908,349 @@ def test_a_revisable_blocker_is_revised_and_reviewed_again_for_at_most_three_rou
     assert _task_routes(ledger3, mint3.tasks["TE-12"]) == ["run"]
 
 
+def _finding(severity, claim, *, fixes=None, criterion=None, file=None, line=None):
+    """One raw finding dict for a scripted review session's own
+    ```json block, for the `spec_finding`-recording witnesses below."""
+    return {
+        "severity": severity,
+        "claim": claim,
+        "fixes": fixes,
+        "criterion": criterion,
+        "file": file,
+        "line": line,
+    }
+
+
+class _FindingsReview:
+    """The `review` double for the `spec_finding`-recording witnesses. Each
+    call pops the spec's next scripted `SpecReviewSession`, or raises its
+    next scripted exception, and records `(spec id, layer's spec id or
+    None, kw)`."""
+
+    def __init__(self, table: dict[str, list]):
+        self._table = {sid: list(entries) for sid, entries in table.items()}
+        self.calls: list[tuple[str, str | None, dict]] = []
+
+    def __call__(self, candidate: Candidate, layer: Candidate | None, **kw):
+        spec_id = candidate.spec.id
+        self.calls.append((spec_id, layer.spec.id if layer else None, kw))
+        entry = self._table[spec_id].pop(0)
+        if isinstance(entry, Exception):
+            raise entry
+        return entry
+
+
+def _spec_findings(ledger: Ledger) -> list[dict]:
+    """Every `spec_findings` row, ordered by `(task_key, n, position)`, as
+    plain dicts so an assertion can compare them by value and by type."""
+    rows = ledger._db.execute(
+        "SELECT * FROM spec_findings ORDER BY task_key, n, position"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _assert_rows_match(actual: list[dict], expected: list[dict]) -> None:
+    """Field-by-field, value and type alike. `True == 1` under plain `==`,
+    so a `bool` kept as an `int` must fail this check on its type."""
+    assert len(actual) == len(expected), (actual, expected)
+    for row, want in zip(actual, expected, strict=True):
+        assert row.keys() == want.keys(), (row, want)
+        for key, value in want.items():
+            assert row[key] == value, (key, row, want)
+            assert type(row[key]) is type(value), (key, row, want)
+
+
+def _spec_finding_arrangement(ledger: Ledger, repo_id: int, clock: AdvancingClock):
+    """The one arrangement shared by both `spec_finding`-recording witnesses
+    (`tests/test_batch.py::test_each_spec_review_round_records_each_of_its_findings`,
+    `::test_the_spec_findings_fold_back_from_the_record_alone`). Eight
+    specs, with a clean round between any two whose round aborts, so the
+    breaker (`_BREAKER_THRESHOLD`, two in a row) never fires. Returns
+    `(order, mint, reviews, revise, runner)`."""
+    order = [
+        _candidate_x("TE-1"),
+        _candidate_x("TE-2"),
+        _candidate_x("TE-3"),
+        _candidate_x("TE-4"),
+        _candidate_x("TE-5"),
+        _candidate_x("TE-6"),
+        _candidate_x("TE-7"),
+        _candidate_x("TE-8"),
+    ]
+    mint = MintDouble(ledger, repo_id)
+    wait_resets_at = int(clock().timestamp()) + 60
+    reviews = _FindingsReview(
+        {
+            "TE-1": [
+                _review_session(
+                    [
+                        _finding("concern", "TE-1 r1 f1", fixes="witness"),
+                        _finding(
+                            "blocker",
+                            "TE-1 r1 f2",
+                            fixes="build",
+                            criterion=1,
+                            file="a.py",
+                            line=40,
+                        ),
+                        _finding("note", "TE-1 r1 f3", criterion=2, file="a.py"),
+                    ]
+                ),
+                _review_session([_finding("note", "TE-1 r2 f1", line=99)]),
+            ],
+            "TE-2": [
+                _review_session(
+                    [
+                        _finding(
+                            "concern", "TE-2 r1 f1", criterion=1, file="b.py", line=2
+                        )
+                    ],
+                    error="cell died",
+                )
+            ],
+            "TE-3": [
+                _review_session(
+                    [
+                        _finding(
+                            "concern",
+                            "TE-3 r1 f1",
+                            fixes="build",
+                            criterion=[1, 2],
+                            file={"path": "c.py"},
+                            line=[12, 40],
+                        ),
+                        _finding("note", "TE-3 r1 f2", criterion=True, line=2.5),
+                    ]
+                )
+            ],
+            "TE-4": [_review_session([], fenced=False)],
+            "TE-5": [
+                _review_session([], fenced=False, resets_at=wait_resets_at),
+                _review_session(
+                    [_finding("note", "TE-5 r2 f1", criterion=3, file="e.py", line=7)]
+                ),
+            ],
+            "TE-6": [RuntimeError("spec review crashed for TE-6")],
+            "TE-7": [_review_session([])],
+            "TE-8": [
+                _review_session(
+                    [
+                        _finding(
+                            "blocker",
+                            "TE-8 r1 f1",
+                            fixes="scope",
+                            criterion=1,
+                            file="h.py",
+                            line=5,
+                        ),
+                        _finding(
+                            "note", "TE-8 r1 f2", criterion="2", file="h.py", line=9
+                        ),
+                    ]
+                )
+            ],
+        }
+    )
+    revise = _RevisionWrite(ledger, clock, {"TE-1": [_written("te1-r2\n")]})
+    runner = _RevisionRunner(ledger, repo_id)
+    return order, mint, reviews, revise, runner
+
+
+def test_each_spec_review_round_records_each_of_its_findings(tmp_path):
+    """`run_stack_batch` records each spec review round's findings one by
+    one. Each becomes a `spec_finding` fact and a `spec_findings` row, `n`
+    and `position` from 1 in block order. It carries the finding's
+    `severity`, `fixes`, `claim`, `criterion`, `file` and `line` as read,
+    a null included. Any `criterion`, `file` or `line` that is not `None`,
+    a `str`, or an in-range non-`bool` `int` is stored as its JSON text. A
+    round's `spec_finding` facts are appended after its own `spec_review`
+    fact, and a round with no findings, or routed `error`, writes none."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    order, mint, reviews, revise, runner = _spec_finding_arrangement(
+        ledger, repo_id, clock
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+        review=reviews,
+        mint=mint,
+        revise=revise,
+        reserve_usd=8.0,
+    )
+
+    assert reason == "DRAINED"
+
+    routes = {
+        "TE-1": ["revise", "run"],
+        "TE-2": ["error"],
+        "TE-3": ["run"],
+        "TE-4": ["error"],
+        "TE-5": ["wait", "run"],
+        "TE-6": ["error"],
+        "TE-7": ["run"],
+        "TE-8": ["escalate"],
+    }
+    for spec_id, want in routes.items():
+        assert _task_routes(ledger, mint.tasks[spec_id]) == want, spec_id
+
+    keys = {
+        spec_id: ledger.record_key(task_id) for spec_id, task_id in mint.tasks.items()
+    }
+
+    def _row(spec_id, n, position, severity, fixes, claim, criterion, file, line):
+        return {
+            "task_key": keys[spec_id],
+            "n": n,
+            "position": position,
+            "severity": severity,
+            "fixes": fixes,
+            "claim": claim,
+            "criterion": criterion,
+            "file": file,
+            "line": line,
+        }
+
+    expected = [
+        _row("TE-1", 1, 1, "concern", "witness", "TE-1 r1 f1", None, None, None),
+        _row("TE-1", 1, 2, "blocker", "build", "TE-1 r1 f2", 1, "a.py", 40),
+        _row("TE-1", 1, 3, "note", None, "TE-1 r1 f3", 2, "a.py", None),
+        _row("TE-1", 2, 1, "note", None, "TE-1 r2 f1", None, None, 99),
+        _row(
+            "TE-3",
+            1,
+            1,
+            "concern",
+            "build",
+            "TE-3 r1 f1",
+            "[1, 2]",
+            '{"path": "c.py"}',
+            "[12, 40]",
+        ),
+        _row("TE-3", 1, 2, "note", None, "TE-3 r1 f2", "true", None, "2.5"),
+        _row("TE-5", 2, 1, "note", None, "TE-5 r2 f1", 3, "e.py", 7),
+        _row("TE-8", 1, 1, "blocker", "scope", "TE-8 r1 f1", 1, "h.py", 5),
+        _row("TE-8", 1, 2, "note", None, "TE-8 r1 f2", "2", "h.py", 9),
+    ]
+    expected.sort(key=lambda row: (row["task_key"], row["n"], row["position"]))
+    _assert_rows_match(_spec_findings(ledger), expected)
+    # The facts too: a fold re-normalizing raw facts would pass the rows alone.
+    facts = [
+        {"task_key": key, **fact.payload}
+        for key in sorted(k for k in keys.values() if k is not None)
+        for fact in record.read(key)
+        if fact.kind == "spec_finding"
+    ]
+    _assert_rows_match(facts, expected)
+
+    for spec_id in ("TE-2", "TE-4", "TE-6", "TE-7"):
+        assert [
+            row for row in _spec_findings(ledger) if row["task_key"] == keys[spec_id]
+        ] == []
+
+    te1_key = keys["TE-1"]
+    assert te1_key is not None
+    te1_facts = record.read(te1_key)
+    assert [
+        (f.kind, f.payload["n"])
+        for f in te1_facts
+        if f.kind in ("spec_review", "spec_finding")
+    ] == [
+        ("spec_review", 1),
+        ("spec_finding", 1),
+        ("spec_finding", 1),
+        ("spec_finding", 1),
+        ("spec_review", 2),
+        ("spec_finding", 2),
+    ]
+
+
+def test_the_spec_findings_fold_back_from_the_record_alone(tmp_path):
+    """Folding the record into a fresh ledger, and back into the source,
+    rebuilds every `spec_findings` row as written. `fold_task` given no
+    facts drops that task's rows and no other task's. Given a task's facts
+    less its first round's `spec_review` and `spec_finding` facts, it keeps
+    the second round's rows with their own `n`."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.fold import fold
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=record)
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
+    order, mint, reviews, revise, runner = _spec_finding_arrangement(
+        ledger, repo_id, clock
+    )
+
+    run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        review=reviews,
+        mint=mint,
+        revise=revise,
+        reserve_usd=8.0,
+    )
+
+    te1_key = ledger.record_key(mint.tasks["TE-1"])
+    assert te1_key is not None
+    source_rows = _spec_findings(ledger)
+
+    fresh = Ledger(tmp_path / "fresh.db")
+    other_repo = fresh.upsert_repo(
+        "other-repo", "/other/o", "/other/m.git", policy_sha="q" * 64
+    )
+    other_run = fresh.create_run(other_repo, base_sha="c" * 40)
+    fresh.create_task(
+        other_run, spec_id="ZZ-0", spec_sha="z" * 64, branch="saffron/ZZ-0"
+    )
+
+    fold(record, fresh)
+    assert _spec_findings(fresh) == source_rows
+
+    fold(record, ledger)
+    assert _spec_findings(ledger) == source_rows
+
+    fresh.fold_task(te1_key, [])
+    after_drop = _spec_findings(fresh)
+    assert [row for row in after_drop if row["task_key"] == te1_key] == []
+    assert [row for row in after_drop if row["task_key"] != te1_key] == [
+        row for row in source_rows if row["task_key"] != te1_key
+    ]
+
+    te1_facts = record.read(te1_key)
+    kept = [
+        fact
+        for fact in te1_facts
+        if not (fact.kind in ("spec_review", "spec_finding") and fact.payload["n"] == 1)
+    ]
+    fresh.fold_task(te1_key, kept)
+    te1_rows = [row for row in _spec_findings(fresh) if row["task_key"] == te1_key]
+    assert te1_rows == [
+        row for row in source_rows if row["task_key"] == te1_key and row["n"] == 2
+    ]
+
+
 def test_a_revision_waits_on_a_rate_limit_and_stops_on_an_error_a_raise_or_the_budget(
     ledger, repo_id
 ):

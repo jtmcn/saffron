@@ -375,6 +375,88 @@ def test_an_attempt_states_its_phase_number_turns_cost_and_times(
     assert started.toPython() == _expected_utc(raw_started)
 
 
+def test_an_attempt_states_its_model_and_a_task_its_lines_only_where_the_ledger_holds_them(
+    tmp_path: Path,
+) -> None:
+    from saffron.view.graph import build, open_read_only
+
+    ledger, repo_id = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base1")
+
+    model_task = ledger.create_task(run_id, "SA-0001", "sha1", "b1")
+    _set_task(ledger, model_task, state="REVIEWING")
+    with_model = ledger.open_attempt(model_task, "IMPLEMENTING")
+    ledger.close_attempt(
+        with_model,
+        session_id=None,
+        model="claude-opus-4,claude-sonnet-4",
+        subtype="x",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+    no_model = ledger.open_attempt(model_task, "REVIEWING")
+    ledger.close_attempt(
+        no_model,
+        session_id=None,
+        model=None,
+        subtype="x",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+
+    both_lines = ledger.create_task(run_id, "SA-0002", "sha2", "b2")
+    _set_task(ledger, both_lines, state="DRAFT", added=12, removed=7)
+    zero_lines = ledger.create_task(run_id, "SA-0003", "sha3", "b3")
+    _set_task(ledger, zero_lines, state="DRAFT", added=0, removed=0)
+    added_only = ledger.create_task(run_id, "SA-0004", "sha4", "b4")
+    _set_task(ledger, added_only, state="DRAFT", added=5, removed=None)
+    removed_only = ledger.create_task(run_id, "SA-0006", "sha6", "b6")
+    _set_task(ledger, removed_only, state="DRAFT", added=None, removed=4)
+    no_lines = ledger.create_task(run_id, "SA-0005", "sha5", "b5")
+    _set_task(ledger, no_lines, state="DRAFT", added=None, removed=None)
+    ledger.close()
+
+    conn = open_read_only(tmp_path / "ledger.db")
+    view = build(conn)
+    g = _parse(view)
+
+    with_model_node = f"{DATA}attempt-{with_model}"
+    no_model_node = f"{DATA}attempt-{no_model}"
+    model_literal = _literal(g, with_model_node, f"{FACTORY}model")
+    assert model_literal.toPython() == "claude-opus-4,claude-sonnet-4"
+    assert not _triples(g, no_model_node, f"{FACTORY}model")
+
+    both_node = f"{DATA}task-{both_lines}"
+    added = _literal(g, both_node, f"{FACTORY}linesAdded")
+    assert added.toPython() == 12
+    assert str(added.datatype) == "http://www.w3.org/2001/XMLSchema#integer"
+    removed = _literal(g, both_node, f"{FACTORY}linesRemoved")
+    assert removed.toPython() == 7
+    assert str(removed.datatype) == "http://www.w3.org/2001/XMLSchema#integer"
+
+    zero_node = f"{DATA}task-{zero_lines}"
+    zero_added = _literal(g, zero_node, f"{FACTORY}linesAdded")
+    assert zero_added.toPython() == 0
+    zero_removed = _literal(g, zero_node, f"{FACTORY}linesRemoved")
+    assert zero_removed.toPython() == 0
+
+    added_only_node = f"{DATA}task-{added_only}"
+    added_only_added = _literal(g, added_only_node, f"{FACTORY}linesAdded")
+    assert added_only_added.toPython() == 5
+    assert not _triples(g, added_only_node, f"{FACTORY}linesRemoved")
+
+    removed_only_node = f"{DATA}task-{removed_only}"
+    removed_only_removed = _literal(g, removed_only_node, f"{FACTORY}linesRemoved")
+    assert removed_only_removed.toPython() == 4
+    assert not _triples(g, removed_only_node, f"{FACTORY}linesAdded")
+
+    no_lines_node = f"{DATA}task-{no_lines}"
+    assert not _triples(g, no_lines_node, f"{FACTORY}linesAdded")
+    assert not _triples(g, no_lines_node, f"{FACTORY}linesRemoved")
+
+
 def test_a_task_in_an_unknown_state_is_left_out_and_the_rest_are_stated(
     tmp_path: Path,
 ) -> None:

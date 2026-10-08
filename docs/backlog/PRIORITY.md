@@ -225,6 +225,12 @@ its descendants.
 **b-cab612**. The operator made `saffron batch` the loop's default, and the
 skill still drives one attended cell per spec.
 
+**Placed 2026-10-08**, from the spec loop's run 31: **b-6cd3c2**, **b-a04cc8**,
+then **b-883f74**. A mirror hard-links the checkout's loose objects, and one
+bad inode failed four seeds in a night. A batch whose only runnable layer
+failed its seed reports `DRAINED`. A PACKAGE raise after green leaves no branch
+and no resume.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
@@ -421,6 +427,11 @@ the cell token from whoever starts it, so a delegate must hold the credential.
 **b-fbd181**. Nothing runs `terms` over `main`, so it went red unseen. A
 measured estimate priced two specs at half what landed, and `size` only advised.
 
+**Placed 2026-10-08**, from the spec loop's run 31: **b-8acb05**, **b-fe82d9**,
+then **b-aee31f**. A rename re-keys `prose`'s docstring hit, and joining lines
+slips it back under. An escalated stack finish names none of its failures.
+`migrate` drops `spec_findings`.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -514,6 +525,9 @@ has no vocabulary test. Four documentation lines lag the stack.
 before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
 cannot read a two-hyphen ordinal. Git in a cell was refused a loose object
 once.
+
+**Placed 2026-10-08**, from the spec loop's run 31: **b-385eba**. The
+regular-file git modes are spelled in three modules.
 
 **Placed 2026-10-05**, from stage 2's stack batches: **b-937778**,
 **b-050733**, then **b-0efc31**. The loop driver's `history` counts every

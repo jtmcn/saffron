@@ -217,6 +217,22 @@ def build(db: sqlite3.Connection, *, shapes_path: Path = DEFAULT_SHAPES) -> View
             g.add((task_node, prov.wasInformedBy, data[f"run-{row['run_id']}"]))
             if row["pr_url"] is not None:
                 g.add((task_node, rdfs.seeAlso, rdflib.URIRef(row["pr_url"])))
+            if row["added"] is not None:
+                g.add(
+                    (
+                        task_node,
+                        factory.linesAdded,
+                        rdflib.Literal(row["added"], datatype=xsd.integer),
+                    )
+                )
+            if row["removed"] is not None:
+                g.add(
+                    (
+                        task_node,
+                        factory.linesRemoved,
+                        rdflib.Literal(row["removed"], datatype=xsd.integer),
+                    )
+                )
             task_nodes[row["task_id"]] = task_node
             spec_ids[row["task_id"]] = row["spec_id"]
 
@@ -257,6 +273,8 @@ def build(db: sqlite3.Connection, *, shapes_path: Path = DEFAULT_SHAPES) -> View
                 g.add((attempt_node, factory.costUsdEst, _decimal(row["cost_usd_est"])))
             if row["ended_at"] is not None:
                 g.add((attempt_node, prov.endedAtTime, _utc_time(row["ended_at"])))
+            if row["model"] is not None:
+                g.add((attempt_node, factory.model, rdflib.Literal(row["model"])))
 
             # One suite and one diff per gated attempt. A baseline result names
             # a run, so this filter never matches one.

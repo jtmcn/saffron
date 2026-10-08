@@ -5,9 +5,9 @@ description: Use when asked to run the Saffron spec loop over the queued specs, 
 
 # Run the Saffron spec loop
 
-Every queued spec goes through an attended `saffron cell`, an independent
-review, and review commits; the pull requests are then linked into one stack
-for the operator. **Nothing is merged.** You are the operator's delegate
+One `saffron batch` runs every queued spec in a cell. Each pull request then
+gets an independent review and review commits, and the stack goes to the
+operator. **Nothing is merged.** You are the operator's delegate
 (`CONTEXT.md`), so ask them once, before the first cell, which pushes are yours:
 ordinary pushes to the loop's `saffron/SA-NNNN` branches, and force-pushes to
 them with a lease. They also cover marking the stack's PRs ready (step 3), and
@@ -21,7 +21,7 @@ each cell and tell the driver what happened. Exit `0` means the command did
 what it says, `1` everything else.
 
 When a step's output surprises you, [GOTCHAS.md](GOTCHAS.md) is grouped by
-step; it also says why this loop runs attended cells rather than `saffron batch`.
+step.
 
 ## 1. Snapshot the loop's order
 
@@ -46,11 +46,11 @@ every recorded outcome still true — a reviewable PR, a drop, an undecided cell
 A spec edited while its PR is open is held out of the new order and named. A
 spec that became runnable since the last snapshot, such as a child whose parent
 is now reviewable, is named and left out. `snapshot --force --add SA-NNNN`
-takes it in, once the operator agrees and it has had its step 1b review (item b-afec7c).
+takes it in, once the operator agrees (item b-afec7c).
 `status` and `next` call an order **stale** when a spec file moved or changed or
 a PR merged or closed, and `next` refuses a stale one. A spec queued since the
-snapshot is not in it: `snapshot --force --add SA-NNNN` adds it, after its step
-1b review. `--add` with no id takes every new spec.
+snapshot is not in it: `snapshot --force --add SA-NNNN` adds it.
+`--add` with no id takes every new spec.
 
 A new loop starts with `snapshot --new`. A drop is one loop's call, and
 `--force` carries it into the next (item 172). `--new` refuses while the last
@@ -60,172 +60,31 @@ loop has a pull request open.
 and the operator has seen `snapshot`'s table in your reply: each spec's title
 and budget, the total, and every spec it refused.
 
-## 1b. Review each spec before its first cell
+## 1b. Check each spec's ceilings
 
-Run the ceilings check over every spec in the order first:
+The loop runs no spec review of its own. A spec is reviewed when it is written,
+by `create-saffron-spec`'s writer and reviewer chain, and a `--stack` batch
+reviews each layer again before its cell. The operator removed the loop's
+review on 2026-10-07, in run 31.
+
+What stays is arithmetic. Run the ceilings check over every spec in the order:
 
 ```bash
 uv run .claude/skills/run-saffron-spec-loop/driver.py check SA-NNNN
 ```
 
-It applies three blocker rules and exits 1 on any of them. Two are check 4's
-turns and budget rules, applied to the rows `history` prints. The third
-prices a declared `estimated_lines` against the `size` ceiling of the spec's
-type. It first multiplies the estimate by the overrun landed specs measured,
-and prints the ratio and where it came from. A spec that sets
-`estimate_measured: true` measured its estimate from a prototype, so `check`
-prices it at 1.0 and says so. At or above 80% of the ceiling
-it blocks where `size` blocks in the cell, which is `elevated`. The remedy is
-a split into a parent and children, not a raised ceiling. At `standard` it
-prints a concern instead. A spec with no estimate says so. A blocker here is
-arithmetic rather than judgement, so it goes to the operator before the
-review rather than after it. For turns or budget, raise the ceiling, run the
-spec as written, or drop it. A concern it prints is advisory and exits 0,
-and a usage error, such as a spec id no file declares, also exits 1. A
-`review:` line means the spec's REVIEW is main's, so its budget leaves
-that ancestor's change out.
+It exits 1 on a blocker. Two rules compare `max_turns` and `budget_usd` with
+what `history` prints for cells of the same shape. The third prices
+`estimated_lines` against the `size` ceiling of the spec's type, times the
+overrun landed specs measured, or 1.0 when `estimate_measured: true`. At or
+above 80% of the ceiling it blocks at `elevated` and prints a concern at
+`standard`. A blocker goes to the operator before the cell: raise the ceiling,
+run the spec as written, split it, or drop it. A spec of a shape no past cell
+matches prints `no past cells of this shape to compare against`, which is a
+note rather than a pass.
 
-A spec of a shape no past cell matches prints `ceilings: no past cells of this
-shape to compare against`, with no verdict line under it. That is check 4's
-third outcome, a note rather than a pass, and the review still owes you the
-reading. The size rule reads no past cell, so such a spec still exits 1 when
-its `estimated_lines` blocks. The floor caveat and the different-`type` caveat stay with
-the review too.
-
-The review runs either way and still gets `history: run it yourself`, because
-check 5 reads the rows themselves. What this buys is the arithmetic settled
-before the review spends a turn on it, and a second reader of the same line.
-
-Every spec in the order then gets one spec review before any cell runs: one
-background subagent per spec, dispatched together. Use `subagent_type:
-spec-reviewer`, or `Plan` handed the body of
-`.claude/agents/spec-reviewer.md` if the session started before that file
-existed: `Plan` has no Edit or Write. Neither restricts Bash; the prompt
-limits it to reading. Prompt
-each with its spec's path, `base: origin/main`, and
-`history: run it yourself`. `snapshot` reads the specs from the checkout, so
-run this step from an up-to-date `main`; a spec that exists only on a branch
-is reviewed at that branch's head. `history --spec <ref or path>` reads that
-spec from the branch or file instead of the checkout.
-
-Verify each blocker before acting on it: read its line at `origin/main`.
-`spec-reviewer` marks each blocker by what its fix changes, and that word routes it:
-
-- `scope` goes to the operator before that spec's cell, as a question: fix
-  the spec, run it as written, or drop it.
-- `build` is yours to fix in the spec before the cell.
-- `witness` is yours to fix in rounds 1 to 3. From a spec's fourth review
-  round, it goes into that PR's `{KNOWN}` for the Spec seat instead.
-- A blocker with no word goes to the operator, as `scope` does.
-
-A concern that names a wrong implementation a witness would pass is yours to
-fix in the spec, as a `witness` blocker is. Add the case that kills it, and
-name the wrong version beside it. This holds when the arrangement is
-`unmeasured` because its code does not exist at `base`: work the case by
-arithmetic and say so in the spec. Run 15 sent `SA-0126`'s concern about the
-re-queue cap's key to the Spec seat instead. The in-cell lens found one term
-of it at the cost of a REBUT, and the seat found two more. A concern no witness
-can settle, such as what a prompt sentence means, goes into that PR's
-`{KNOWN}` for the Spec seat (step 2c). Other concerns and notes are kept for
-step 5. A spec edited here changes its `spec_sha`, so run `snapshot --force`
-after the edit merges.
-
-Save each reviewer's whole final report to a file, verbatim, and score it
-with Jev. Jev reads the report's findings block, and a summary cuts the claims
-it scores (run 13). The scores are informational and nothing reads them yet. A non-zero exit is noted and the
-loop carries on.
-
-```bash
-sed -n 's/^export \(TYPESAFE_API_KEY=\)/\1/p' ~/.secrets > <scratch>/jev.env   # once per loop
-chmod 600 <scratch>/jev.env
-uv run --env-file <scratch>/jev.env .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN \
-  --kind spec-review --report <saved review> --commit <the commit SHA the reviewer read>
-```
-
-The worktree guard refuses `source ~/.secrets`, and a user-settings allow rule
-permits exactly that `sed` line. Delete `jev.env` when the loop ends.
-
-**Only a spec that has not run.** Editing one whose pull request is already
-open — which is what an operator wants to do after reading its review — stops
-the ledger's task matching it, so `snapshot --force` holds it out of the order
-*and* refuses every dependent, and the held-out spec loses its recorded
-outcome, so step 3's `stack` silently omits its pull request. `status` names
-the cost now (item 137); it did not on 2026-09-16, and the recovery was a
-second pull request reverting the edit to the exact sha the task ran at. Hash
-the file before committing the revert and check it matches the order's
-`spec_sha`. If the edit must happen, let the pull request merge first.
-
-**An edited spec is reviewed again before its cell.** The fix is spec text with
-no reader, and the cell that runs into it pays. The loop's run 5 lost an attempt
-to two tests an edit asked for that pass at base. It lost a repair turn to a
-parametrised witness an edit offered (backlog item 159). Dispatch a second
-`spec-reviewer` on the edited spec file on its unmerged branch, and merge the
-edit once a review is clean. Its `base` is the commit a cell would now be cut
-from, which is `origin/main`, or the parent's pushed branch for a spec with
-`depends_on`. Before dispatching, walk every earlier concern against the edit:
-run 7's second blocker on `SA-0100` was its first review's concern. Name the
-operator's decisions and the deferred findings in the prompt, so the review
-spends itself on what is still open. Nobody else reads your own edit, and two
-of run 7's blockers were in the delegate's edits. An edit that tightens a
-witness names the wrong version it must kill. Run 14's "the integers 3 and 4"
-named none, and the cell's `==` let `3.0` pass.
-
-Review the whole spec, not the edit. Checks 5 and 6 read it entire, and a report
-whose six lines cover a diff is not one. Run 5's re-reviews also found a witness
-stub answering every subnet alike (#304). Two notes named code seams that do not
-exist (#306). Both sat in text the first review passed. An edited child needs
-one re-review rather than two, and the parent-branch review below is that one.
-
-**A review with no blocker and no concern ends the round.** Its notes go to
-step 5. From round 4, a review whose only blockers are `witness` ends it too. `SA-0100` took five reviews in run 7. Each of the middle three found
-a new witness hole. Expect more than one round on a spec with several
-criteria. Until the edit merges, `hold SA-NNNN --why "#N"` keeps `next` off
-the spec, whose old text a cell would otherwise run. The re-snapshot after the
-merge releases it.
-
-**An `unmeasured` arrangement is run, not reviewed again.**
-Check 3 reports one when a criterion pins a selection, an ordering or a cut.
-It names the wrong implementations the arrangement must exclude. Build that
-arrangement against the helper at `base`, and print what the helper selects and
-what each named wrong implementation would select. Run 10 did this for
-`SA-0112` in about two minutes, against `_history_lines` at `origin/main`:
-
-```
-printed: SA-T00 … SA-T11          (the twelve low-peak rows)
-far printed?  False                → the correct selection returns 0
-last printed? False
-no-sort selection includes far? True
-no-cut includes last?           True
-no-type-filter selection includes off? True
-```
-
-Each `True` on a wrong implementation is an arm the arrangement fails to watch.
-Report the output. It settles the question a further review would circle, and
-`SA-0112`'s cell then delivered exactly the arrangement it confirmed (item
-b-865399). An arrangement that needs changing is a spec edit, so the standing
-re-review rule above still applies to it.
-
-This measures the arrangement, not the delivered code. Mutating the
-implementation belongs to the pull request's Spec seat, which probes the diff
-with `driver.py probe` (`REVIEW-PROMPT.md`), and to item b-2750d5. Check 3
-handles the case where the helper does not exist at `base`.
-
-Two kinds of blocker failed the backtest, and reading the line at base does
-not filter them, because their premise holds there
-(`docs/evidence/2026-09-14-spec-reviewer-backtest.md`; BACKLOG items 123–124). One is a
-check 4 claim that the ceilings are below what similar cells spent; cells
-finished inside the ceilings called too low. The other is a check 3 claim that a
-witness is "already green at base" because the behaviour exists there; the cells
-wrote witnesses that failed at base. Put either kind to the operator as a
-forecast the backtest contradicted, not as a verified defect.
-
-A spec with `depends_on` is reviewed at `origin/main` too, where its parent's
-code does not exist yet, so a finding that rests on the parent is expected
-there. Review it again at its parent's pushed branch
-(`base: origin/saffron/<parent id>`) before its own cell starts.
-
-**Done when** every spec in the order has a report with six check lines.
-Every verified blocker is fixed, deferred to `{KNOWN}`, or answered by the operator. Every unmeasured fixture was run.
+**Done when** every spec in the order has a `check` line and every blocker is
+answered by the operator.
 
 ## 2. Run each spec
 
@@ -328,12 +187,14 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
 
-   Save both seats' whole reports, verbatim, and score them, the same command
-   as step 1b. A
-   non-zero exit is noted and the loop carries on.
+   Save both seats' whole reports, verbatim, and score them with Jev. Jev
+   reads each report's findings block, so a summary cuts the claims it scores
+   (run 13). A non-zero exit is noted and the loop carries on.
 
    ```bash
-   driver.py jev SA-NNNN --kind pr-review --report <spec seat> \
+   sed -n 's/^export \(TYPESAFE_API_KEY=\)/\1/p' ~/.secrets > <scratch>/jev.env   # once per loop
+   chmod 600 <scratch>/jev.env
+   uv run --env-file <scratch>/jev.env .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind pr-review --report <spec seat> \
      --report <standards seat> --commit <PR head> --base <the PR's base branch>
    ```
 
@@ -487,8 +348,8 @@ its chain. Write `HANDOFF-loop.md` in a fresh temp directory and give the
 operator its path.
 
 It says where `main` stands and what merged during the loop. It lists the
-stack and the step 5 PR. It names each spec still queued, with its step 1b
-state and the re-reviews it still owes. It carries these as well:
+stack and the step 5 PR. It names each spec still queued, with its `check`
+result. It carries these as well:
 
 - the operator's standing decisions, such as listeners, the push grant,
   budgets and scope calls
