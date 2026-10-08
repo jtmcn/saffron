@@ -8,20 +8,24 @@ also serves `GET /sparql` for a `SELECT` or an `ASK`, answers every `POST`
 
 from __future__ import annotations
 
+import hashlib
 import html
 import ipaddress
 import re
 import sqlite3
+import subprocess
 import urllib.parse
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import pyoxigraph as ox
 
+from saffron.intake import DisclosedMutantError, SpecError, parse_spec
 from saffron.projection import DATA_NS, NS, VOCABULARY
+from saffron.report.pr_body import extract_problem
 from saffron.view.graph import LeftOut, ViewGraph, build, open_read_only
 
 FAILURE_LINE_CAP = 200
@@ -451,6 +455,8 @@ class _TaskSummary:
     risk: str
     batch_id: int | None
     pr_url: str | None
+    added: str | None
+    removed: str | None
 
 
 def _task_summary(store: ox.Store, task_id: int) -> _TaskSummary:
@@ -464,6 +470,8 @@ def _task_summary(store: ox.Store, task_id: int) -> _TaskSummary:
                 continue
             batch = sol["batch"]
             pr = sol["pr"]
+            added = sol["added"]
+            removed = sol["removed"]
             return _TaskSummary(
                 spec_id=cast(str, spec.value),
                 state=_name(sol["state"]),
@@ -474,8 +482,18 @@ def _task_summary(store: ox.Store, task_id: int) -> _TaskSummary:
                     else None
                 ),
                 pr_url=cast(str, pr.value) if pr is not None else None,
+                added=_text(added) if added is not None else None,
+                removed=_text(removed) if removed is not None else None,
             )
-    return _TaskSummary(spec_id="", state="", risk="", batch_id=None, pr_url=None)
+    return _TaskSummary(
+        spec_id="",
+        state="",
+        risk="",
+        batch_id=None,
+        pr_url=None,
+        added=None,
+        removed=None,
+    )
 
 
 _CENTS = Decimal("0.01")
@@ -515,7 +533,7 @@ def _task_cost(store: ox.Store, task_id: int) -> str:
     return _round_cents(total)
 
 
-_ATTEMPT_COLUMNS = ["phase", "n", "started", "ended", "turns", "cost"]
+_ATTEMPT_COLUMNS = ["phase", "n", "started", "ended", "turns", "cost", "model"]
 
 
 def _attempts_rows(store: ox.Store, task_id: int) -> list[list[str]]:
@@ -533,6 +551,7 @@ def _attempts_rows(store: ox.Store, task_id: int) -> list[list[str]]:
                 html.escape(_text(sol["ended"])),
                 html.escape(_text(sol["turns"])),
                 html.escape(cost_text),
+                html.escape(_text(sol["model"])),
             ]
         )
     return rows
@@ -644,6 +663,154 @@ def _failures_blocks(
     return blocks
 
 
+_SPEC_DIR = ".saffron/specs/"
+_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
+
+# Why a task's spec text could not be shown (§6.2). Never `str`: the four
+# reasons are a closed set, named in full where `_render_spec_section` uses them.
+SpecUnavailableReason = Literal["absent", "hash mismatch", "unparseable", "unreadable"]
+
+
+@dataclass(frozen=True)
+class _SpecInfo:
+    """A task's own spec, read at its own run's `base_sha` from its own
+    repo's mirror, and hash-checked against `spec_sha`. `problem` is `None`
+    when the spec has no `## Problem` section."""
+
+    title: str
+    type: str
+    problem: str | None
+
+
+@dataclass(frozen=True)
+class _SpecLocation:
+    """One tree entry `_find_spec_entry` matched. `mode` is its git mode, a
+    symlink's never `100644` or `100755`. `path` is relative to the tree root."""
+
+    mode: str
+    path: str
+
+
+def _git_bytes(args: list[str]) -> subprocess.CompletedProcess[bytes] | None:
+    """One git subprocess, run in bytes mode so a CRLF spec is hashed and
+    decoded exactly as committed. Never `saffron.repos.mirror.file_at`,
+    whose runner sets `text=True` and turns CRLF into LF first. `None` for
+    an `OSError`, so a missing git binary reads as any other broken command."""
+    try:
+        return subprocess.run(args, capture_output=True, check=False)
+    except OSError:
+        return None
+
+
+def _find_spec_entry(
+    mirror_path: str, base_sha: str, spec_id: str
+) -> _SpecLocation | Literal["absent", "unreadable"]:
+    """The tree entry under `.saffron/specs/` at `base_sha` whose last path
+    segment starts with `spec_id` and a hyphen.
+
+    Found by listing that one directory, never by
+    `saffron.projection._find_spec_version`'s walk over every blob
+    `.saffron/specs` has ever held on any ref. `--` keeps `_SPEC_DIR` a
+    pathspec rather than a tree object of its own. A `base_sha` whose tree
+    has no such directory then lists nothing, read as `absent`, rather
+    than making the command itself fail."""
+    completed = _git_bytes(
+        ["git", "-C", mirror_path, "ls-tree", "-z", base_sha, "--", _SPEC_DIR]
+    )
+    if completed is None or completed.returncode != 0:
+        return "unreadable"
+    prefix = f"{spec_id}-".encode()
+    for entry in completed.stdout.split(b"\x00"):
+        if not entry:
+            continue
+        header, _, path_bytes = entry.partition(b"\t")
+        name = path_bytes.rsplit(b"/", 1)[-1]
+        if not name.startswith(prefix):
+            continue
+        mode = header.split(b" ", 1)[0].decode("ascii")
+        try:
+            path = path_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            return "unreadable"
+        return _SpecLocation(mode=mode, path=path)
+    return "absent"
+
+
+def _read_spec_blob(mirror_path: str, base_sha: str, path: str) -> bytes | None:
+    """The blob's raw bytes at `base_sha:path`, or `None` for a broken
+    command."""
+    completed = _git_bytes(
+        ["git", "-C", mirror_path, "cat-file", "blob", f"{base_sha}:{path}"]
+    )
+    if completed is None or completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def _task_spec(
+    conn: sqlite3.Connection, task_id: int
+) -> _SpecInfo | SpecUnavailableReason:
+    """§6.2: the task's own spec, read at its own run's `base_sha`, from its
+    own run's own repo. Never the latest run, never the latest repo, and
+    never a history-wide search."""
+    row = conn.execute(
+        """SELECT t.spec_id AS spec_id, t.spec_sha AS spec_sha,
+                  r.base_sha AS base_sha, repo.mirror_path AS mirror_path
+             FROM tasks t
+             JOIN runs r ON r.run_id = t.run_id
+             JOIN repos repo ON repo.repo_id = r.repo_id
+            WHERE t.task_id = ?""",
+        (task_id,),
+    ).fetchone()
+    assert row is not None, f"no task {task_id} to read a spec for"
+
+    location = _find_spec_entry(row["mirror_path"], row["base_sha"], row["spec_id"])
+    if location == "absent" or location == "unreadable":
+        return location
+    if location.mode not in _REGULAR_FILE_MODES:
+        return "unreadable"
+
+    raw = _read_spec_blob(row["mirror_path"], row["base_sha"], location.path)
+    if raw is None:
+        return "unreadable"
+    if hashlib.sha256(raw).hexdigest() != row["spec_sha"]:
+        return "hash mismatch"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return "unreadable"
+
+    try:
+        spec = parse_spec(text)
+    except DisclosedMutantError as exc:
+        # The frontmatter validated and the id is trustworthy. The refusal
+        # is about admitting the spec as a candidate, not about reading it.
+        spec = exc.spec
+    except SpecError:
+        return "unparseable"
+
+    return _SpecInfo(
+        title=spec.title, type=spec.type, problem=extract_problem(spec.body) or None
+    )
+
+
+def _render_spec_section(conn: sqlite3.Connection, task_id: int) -> str:
+    result = _task_spec(conn, task_id)
+    if isinstance(result, str):
+        return (
+            f'<p id="spec-unavailable">spec text unavailable: {html.escape(result)}</p>'
+        )
+    lines = [
+        '<dl id="spec">',
+        f"<dt>title</dt><dd>{html.escape(result.title)}</dd>",
+        f"<dt>type</dt><dd>{html.escape(result.type)}</dd>",
+        "</dl>",
+    ]
+    if result.problem is not None:
+        lines.append(f'<pre id="problem">{html.escape(result.problem)}</pre>')
+    return "\n".join(lines)
+
+
 def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
     summary = _task_summary(store, task_id)
     spec_id = html.escape(summary.spec_id)
@@ -653,41 +820,52 @@ def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
         else "none"
     )
     pr_html = _link(summary.pr_url, summary.pr_url) if summary.pr_url else "none"
-    summary_html = f"""<dl id="summary">
-<dt>state</dt><dd>{html.escape(summary.state)}</dd>
-<dt>risk</dt><dd>{html.escape(summary.risk)}</dd>
-<dt>batch</dt><dd>{batch_html}</dd>
-<dt>pull request</dt><dd>{pr_html}</dd>
-<dt>cost</dt><dd>{html.escape(_task_cost(store, task_id))}</dd>
-</dl>"""
-
-    attempt_rows = _attempts_rows(store, task_id)
-    if not attempt_rows:
-        body = "no attempts"
-    else:
-        sections = [
-            _table(attempt_rows, _ATTEMPT_COLUMNS, table_id="attempts"),
-            _table(
-                _gate_result_rows(store, task_id),
-                _GATE_RESULT_COLUMNS,
-                table_id="gate-results",
-            ),
-        ]
-        conn = open_read_only(ledger_path)
-        try:
-            blocks = _failures_blocks(store, conn, task_id)
-        finally:
-            conn.close()
-        for block in blocks:
-            sections.append(f"<h3>{html.escape(block.heading)}</h3>")
-            sections.append(
-                _table(block.rows, _FAILURE_COLUMNS, table_id=block.table_id)
-            )
-        findings_table = _table(
-            _finding_rows(store, task_id), _FINDING_COLUMNS, table_id="findings"
+    summary_terms = [
+        f"<dt>state</dt><dd>{html.escape(summary.state)}</dd>",
+        f"<dt>risk</dt><dd>{html.escape(summary.risk)}</dd>",
+        f"<dt>batch</dt><dd>{batch_html}</dd>",
+        f"<dt>pull request</dt><dd>{pr_html}</dd>",
+        f"<dt>cost</dt><dd>{html.escape(_task_cost(store, task_id))}</dd>",
+    ]
+    if summary.added is not None:
+        summary_terms.append(
+            f"<dt>lines added</dt><dd>{html.escape(summary.added)}</dd>"
         )
-        sections.append(findings_table)
-        body = "\n".join(sections)
+    if summary.removed is not None:
+        summary_terms.append(
+            f"<dt>lines removed</dt><dd>{html.escape(summary.removed)}</dd>"
+        )
+    summary_html = '<dl id="summary">\n' + "\n".join(summary_terms) + "\n</dl>"
+
+    conn = open_read_only(ledger_path)
+    try:
+        spec_html = _render_spec_section(conn, task_id)
+
+        attempt_rows = _attempts_rows(store, task_id)
+        if not attempt_rows:
+            body = "no attempts"
+        else:
+            sections = [
+                _table(attempt_rows, _ATTEMPT_COLUMNS, table_id="attempts"),
+                _table(
+                    _gate_result_rows(store, task_id),
+                    _GATE_RESULT_COLUMNS,
+                    table_id="gate-results",
+                ),
+            ]
+            blocks = _failures_blocks(store, conn, task_id)
+            for block in blocks:
+                sections.append(f"<h3>{html.escape(block.heading)}</h3>")
+                sections.append(
+                    _table(block.rows, _FAILURE_COLUMNS, table_id=block.table_id)
+                )
+            findings_table = _table(
+                _finding_rows(store, task_id), _FINDING_COLUMNS, table_id="findings"
+            )
+            sections.append(findings_table)
+            body = "\n".join(sections)
+    finally:
+        conn.close()
 
     return f"""<!doctype html>
 <meta charset="utf-8">
@@ -695,5 +873,6 @@ def _render_task(store: ox.Store, ledger_path: Path, task_id: int) -> str:
 {_STYLESHEET}
 <h1>Task {task_id} — {spec_id}</h1>
 {summary_html}
+{spec_html}
 {body}
 """

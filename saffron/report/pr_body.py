@@ -179,12 +179,12 @@ def _what(
         f"{attempts} attempt{'' if attempts == 1 else 's'} · ${spent_usd:.2f}",
         "",
     ]
-    if problem := _problem(spec.body):
+    if problem := extract_problem(spec.body):
         lines += [problem, ""]
     return "\n".join(lines)
 
 
-def _problem(body: str) -> str:
+def extract_problem(body: str) -> str:
     """The spec's `## Problem` section, verbatim, or nothing.
 
     Operator-authored and out of a cell's reach by construction: the host parses
@@ -193,8 +193,7 @@ def _problem(body: str) -> str:
     is not — a title is a phrase and this is prose long enough to carry a
     `Fixes #12` written about the work, which would close an issue on merge that
     nobody meant to close. Saffron's own work is not tracked as issues at all
-    (`docs/agents/issue-tracker.md`), so there is no reading of that keyword in a
-    spec worth honouring.
+    (`docs/agents/issue-tracker.md`), so there is no reading of that keyword in a spec worth honouring.
     """
     section = _PROBLEM_SECTION.search(body)
     if section is None:
