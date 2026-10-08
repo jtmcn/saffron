@@ -4,7 +4,7 @@ title: No task drafts a spec, so the spec chain's sessions and review rounds sta
 type: feature
 priority: 2
 depends_on: [SA-0226, SA-0224]
-estimated_lines: 513
+estimated_lines: 526
 estimate_measured: true
 touches:
   - saffron/draft.py
@@ -65,12 +65,16 @@ acceptance:
       the reply's parsed title, or `draft` when the reply does not parse as
       a spec. The first review reads that path and that text. The witness
       drives a reply that parses and one that does not. It drives each
-      under three items: one ending in a newline, one not, and one with a
-      leading blank line, trailing spaces and two trailing newlines.
+      under four items: one ending in a newline, one not, and one with a
+      leading blank line, trailing spaces and two trailing newlines. The
+      fourth holds a carriage return and line feed and a non-ASCII
+      character, and the prompt quotes it byte for byte.
     witness: tests/test_draft.py::test_the_draft_prompt_quotes_the_item_and_names_the_draft_for_its_title
     wrong_versions:
       - The item is stripped before it is quoted.
       - The item is stripped, and one newline is added before the closing tag.
+      - The item is rebuilt by joining its `splitlines()` with a newline, so a carriage return is dropped.
+      - Each carriage return is removed from the item.
       - The prompt names the id as `spec id SA-0042` rather than on an `id:` line.
       - The prompt opens with a `spec:` line rather than a `context:` line.
       - A reply that does not parse is named by `follow_up._slug("")`, so its file ends `-follow-up.md`.
@@ -92,16 +96,18 @@ acceptance:
       text. Any other revision is recorded as spec text 2, origin
       `revision`, at the same path, and round 2 reviews it. A `revise` in
       round 2 is recorded as `escalate`, ends `SPEC_WITHHELD`, and calls
-      `revise` no more. A recorded text that parses and declares an id
-      other than the task's ends `SPEC_WITHHELD` before any further review,
-      whether it is the draft or the revision. A raise from `write`,
-      `review` or `revise` sets `GATE_ERROR` and propagates. The witness
-      drives each of the four
-      routes in round 1, and in round 2 after a revision, with `revise`
+      `revise` no more. A recorded text that `intake.parse_spec` accepts
+      and that declares an id other than the task's ends `SPEC_WITHHELD`
+      before any further review, whether it is the draft or the revision.
+      A text `parse_spec` refuses is reviewed whatever its `id:` line says.
+      A raise from `write`, `review` or `revise` sets `GATE_ERROR` and
+      propagates. The witness drives each of the four routes in round 1, and in round 2 after a revision, with `revise`
       in round 2 as a fifth. Round 1's `error` is driven twice, by a
       session with no fenced block and by one carrying an error over a
       block holding a finding. It also drives a draft and a revision each
-      declaring `SA-0043`, a writer error and reset, a revision error and
+      declaring `SA-0043`. It drives a draft and a revision each holding an
+      `id: SA-0043` line and no title, which `parse_spec` refuses. It also
+      drives a writer error and reset, a revision error and
       reset, and a raise from `write`, from `review` in each round and from
       `revise`.
     witness: tests/test_draft.py::test_each_route_and_each_writer_stop_ends_the_draft_in_its_own_state
@@ -120,6 +126,8 @@ acceptance:
       - A draft declaring another id is reviewed as usual.
       - A revision declaring another id is reviewed in round 2.
       - A text declaring another id ends `GATE_ERROR`.
+      - The id is read by a regular expression from any text, parsed or not.
+      - The id is read by a bare YAML load of the frontmatter, parsed or not.
   - claim: >-
       Each session an adapter returns is one attempt on the task, opened
       and closed in call order. A writer or revision session is a
@@ -270,11 +278,14 @@ its runs of letters and digits with `-`, or returns `follow-up` for none
 3. **`saffron/ledger.py`.** `SPEC_TEXT_ORIGINS` gains `"draft"` as its
    third member. A `draft` path is checked by `_FOLLOW_UP_PATH` for the
    spec's own id, as a `follow_up` path is. Update the comments above both
-   constants. Also update three texts that name the old writers. One is
+   constants. Also update five texts that name the old writers. One is
    the comment above the spec texts table (`saffron/ledger.py:277-278`).
    One is the open attempt docstring (`saffron/ledger.py:1351-1352`). One
    is the docstring sentence naming two origins
-   (`saffron/ledger.py:1666-1667`).
+   (`saffron/ledger.py:1666-1667`). Two say a review is "inside a stack
+   batch": the comment above the spec reviews table
+   (`saffron/ledger.py:265`) and the review recorder's docstring
+   (`saffron/ledger.py:1633`).
 4. **`tests/test_ledger_fold_task.py:942`** pins the three-member tuple.
 
 ## Out of scope
@@ -314,11 +325,18 @@ in the list, popped and raised by the double. Give each finding its own
 claim, so order shows. A review that routes `revise` holds a `concern`, a
 `blocker` tagged `build` and a `note`, in that order. One that escalates
 holds a `blocker` tagged `scope`. A clean one holds a `note`, so `run`
-rounds write a row. A `wait` session has empty text and `resets_at` set.
-Use twenty-one arrangements. Six are round 1's: `run`, `escalate`, two
-`wait` and two `error`. Five are round 2's after a revision. Two declare
-`SA-0043`. The rest are two writer stops, two revision stops and four
-raises.
+rounds write a row. Both round-1 `wait` sessions set `resets_at` and no
+error. One has empty text. The other has a block holding a finding.
+Criterion 2's witness asserts that one ends `RATE_LIMITED`, and criterion
+3's asserts its rows. Use twenty-three arrangements. Six are round 1's:
+`run`, `escalate`, two `wait` and two `error`. Five are round 2's after a
+revision. Two declare `SA-0043` in a text that parses. Two hold that line
+in a text with no title, and each is reviewed. The rest are two writer
+stops, two revision stops and four raises.
+
+**Ending `SPEC_WITHHELD` on another id is new.** The docs name the case.
+The operator adds it by hand in this spec's pull request, to `DESIGN.md`
+§3.3 and to `CONTEXT.md`.
 
 **Criterion 2's witness asserts these per arrangement.** It checks the
 returned triple, the task's `state` column and the routes in `spec_reviews`
@@ -350,7 +368,7 @@ driven by a session with no fenced block alone.
 
 **Measured on a prototype.** A prototype at `9a9eef16`, with `SA-0226`'s
 source applied first, passed all five witnesses. With its source reverted,
-each failed. Its diff measured 2050 changed tokens. Each of the 41 wrong
+each failed. Its diff measured 2102 changed tokens. Each of the 45 wrong
 versions above was applied to it as an edit with a fresh bytecode cache.
 Each failed its own criterion's witness. The rest of the suite passed on
 it.
