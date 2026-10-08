@@ -2251,7 +2251,7 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-07 for SA-0246. The candidates and the refusals
+    """Re-measured 2026-10-07 for SA-0251. The candidates and the refusals
     are the two lists below, in the order the scan returns them.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
@@ -2884,6 +2884,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0248",
         "SA-0249",
         "SA-0250",
+        "SA-0251",
         "SA-0252",
         "SA-0253",
         "SA-0254",
@@ -2946,6 +2947,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0248",
         "SA-0249",
         "SA-0250",
+        "SA-0251",
         "SA-0252",
         "SA-0253",
         "SA-0254",
