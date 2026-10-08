@@ -203,7 +203,7 @@ of the `repair_loop` call. Leave the REBUT cap code alone: the
 **Pass the re-run's number and `against` explicitly.** Thread both from
 `_rebut_gates` into `_judge`. Make `against` a required keyword on `_judge`, with
 no default, for the reason `GateResult.against` gives at `saffron/events.py:250-252`.
-Hand `repair_loop` `functools.partial(_judge, against="attempt")`, since it calls
+Hand `repair_loop` `partial(_judge, against="attempt")` (the module imports `partial` already), since it calls
 `judge(attempt)` with one argument (`saffron/cell/session.py:762`). The count rule
 is the one at `saffron/cell/session.py:2558-2571`, and the re-run reuses it rather
 than copying it. Rewrite the comment at `:2555-2556`, which becomes false.
@@ -234,7 +234,7 @@ one `_`-prefixed helper across the three, and prefix every other helper too. A n
 test that passes with the source reverted fails `revert`.
 
 **Keep the shared helpers' signatures.** The forbidden `tests/test_events.py:49-60`
-imports `_drive`, `_results`, `_spec`, `_stub_the_runtime`, `_turn` and `_block`
+imports every name at `tests/test_events.py:49-60`, `_drive`, `_results`, `_spec`, `_stub_the_runtime`, `_turn` and `_block` among them
 from `tests/test_session.py`. Change none of their signatures.
 
 **Criterion 3's drifted drive gains a gate.** Its events come from the head's
