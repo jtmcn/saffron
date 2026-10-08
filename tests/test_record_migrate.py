@@ -1498,10 +1498,15 @@ def test_a_migrated_stack_folds_back_to_its_key_filed_rows(tmp_path: Path) -> No
     )
 
     source.record_spec_review(
-        task1, route="revise", block=None, block_sha256=None, error=None
+        task1, route="revise", block=None, block_sha256=None, error=None, findings=[]
     )
     source.record_spec_review(
-        task1, route="run", block="b" * 10, block_sha256="c" * 64, error=None
+        task1,
+        route="run",
+        block="b" * 10,
+        block_sha256="c" * 64,
+        error=None,
+        findings=[],
     )
 
     source.record_spec_text(

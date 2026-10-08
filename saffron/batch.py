@@ -567,6 +567,7 @@ def run_stack_batch(
                             block=None,
                             block_sha256=None,
                             error=f"{type(exc).__name__}: {exc}",
+                            findings=[],
                         )
                         ledger.set_task_state(task_id, "GATE_ERROR")
                         if not is_follow_up:
@@ -601,6 +602,7 @@ def run_stack_batch(
                         block=read.block,
                         block_sha256=read.block_sha256,
                         error=read.error,
+                        findings=read.findings,
                     )
                     # Decided by the route, whatever happens next: never a raise,
                     # a wait, or the `Refused` return below.
