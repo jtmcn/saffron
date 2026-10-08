@@ -3,7 +3,7 @@ id: SA-0238
 title: qualify reads an unreadable mirror path as an absent one
 type: bug
 priority: 2
-estimated_lines: 79
+estimated_lines: 86
 estimate_measured: true
 touches:
   - saffron/qualify.py
@@ -41,19 +41,20 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 14
 max_attempts: 3
-max_turns: 90
+max_turns: 100
 acceptance:
   - claim: >-
-      `qualify` lets every error `file_at` raises at a layer's head
-      propagate out of it, the error's own type and message unchanged, and
-      writes no `qualifications` row for the finding whose read raised. The
-      witness drives each way `file_at` raises: a tree, a submodule, a
-      symlink leaving the tree and a symlink to another symlink, each an
-      `UnreadablePath`. It also drives a regular file whose blob the mirror
-      lacks, a plain `GitError` from a failed `git show`. An absent path
-      still reads as no file, so its finding is `unanchored`. A regular
-      file and an in-tree symlink to one are still read, so a finding on
-      either anchors.
+      `qualify` lets an error `file_at` raises at a layer's head propagate
+      out of it, the error's own type and message unchanged. It writes no
+      `qualifications` row for the finding whose read raised. The witness
+      drives eight such reads. A tree, a submodule, a symlink leaving the
+      tree and a symlink to another symlink each raise `UnreadablePath`. A
+      regular file whose blob the mirror lacks raises a plain `GitError`
+      from `git show`. So does an in-tree symlink to that file, from the
+      resolved target's `git show`. A regular file whose bytes are not
+      UTF-8 raises `UnicodeDecodeError`. An absent path still reads as no
+      file, so its finding is `unanchored`. A regular file and an in-tree
+      symlink to one are still read, so a finding on either anchors.
     witness: tests/test_qualify.py::test_a_path_the_mirror_cannot_read_raises_out_of_qualify
     wrong_versions:
       - The read still catches `UnreadablePath` and answers `None`, so the four mode cases anchor nothing and raise nothing.
@@ -62,6 +63,7 @@ acceptance:
       - The read wraps every `GitError` in a `ValueError` or another type outside `GitError`.
       - The read raises for an absent path too, so `src/z.py` raises instead of filing `unanchored`.
       - The read answers an empty string for an error rather than raising.
+      - The read catches `UnicodeDecodeError` and answers `None`, as `saffron/task.py:561` does for `consumes`, so the non-UTF-8 file reads as absent.
       - The read is bound to the range's base rather than its head, so the readable findings stop anchoring.
       - The range records each input as `unanchored`, its reason the error's text, before it re-raises.
   - claim: >-
@@ -157,7 +159,14 @@ mutant could pin at head, so it declares a witness and no mutant. Expect
 `witness` to report `skip`. Criterion 2 is `preserves`, and that test
 exists at base.
 
-**The fixture, measured on 2026-10-07 (host git 2.54.0).** Give
+**Three raising reads stay undriven.** One is `ls-tree` failing
+(`saffron/repos/mirror.py:237`). Another is a symlink's own `git show`
+failing (`saffron/repos/mirror.py:255`). The last is a missing `git` binary,
+which `_run` wraps as `GitError` (`saffron/repos/mirror.py:52-56`). None
+needs its own handling once no catch stays, which is why criterion 1 names
+only the eight it drives.
+
+**The fixture, measured on 2026-10-07.** Give
 `_stack_mirror` and `_build` a keyword `unreadable`, false by default. Every
 existing test's mirror then stays as it is. When true, `_stack_mirror`
 seeds these at commit `A`, before its `add -A`, and none of them is in any
@@ -170,11 +179,24 @@ range's diff.
 - `src/hop.py`: a symlink to `out.py`, a symlink rather than a regular file.
 - `src/c_link.py`: a symlink to `c.py`, read through to `c.py` at `H2`.
 - `src/gone.py`: a regular file with one line no other file holds.
+- `src/gone_link.py`: a symlink to `gone.py`.
+- `src/latin.py`: written as bytes, starting `\xff\xfe`, which no UTF-8
+  decoder accepts. Every git call there decodes its output as text
+  (`saffron/repos/mirror.py:55`), so `git show` raises
+  `UnicodeDecodeError`.
 
 After `H2` commits, `_stack_mirror` deletes `src/gone.py`'s loose object
 under `.git/objects`, found with `rev-parse` of `<H2>:src/gone.py`. `ls-tree`
 still lists it, so `file_at` reaches `git show`, which exits 128. The tree
-case needs no seeding: `src` is a directory.
+case needs no seeding: `src` is a directory. No range's diff reads that
+blob, since `DIFF_FLAGS` passes `--no-renames`
+(`saffron/cell/worktree.py:146`).
+
+The cell image's git agrees, measured on 2026-10-07 in
+`saffron/cell-base:python` (git 2.47.3). `add -A` warned "adding embedded
+git repository: vendor/sub". `ls-tree` then listed `160000 commit …
+vendor/sub`. After the blob was deleted, `ls-tree` still listed
+`src/gone.py`, and `git show` exited 128 with "fatal: bad object".
 
 **The witness.** Build once with `unreadable=True`. For each case, set
 `built.layers` to one `LayerReview` for `TE-2`'s key, carrying one `spec`
@@ -184,8 +206,10 @@ join, no probe, and no in-cell concern is in play.
 - `src`, `vendor/sub`, `src/out.py` and `src/hop.py`, each at line 3:
   `pytest.raises(UnreadablePath)`, and the message starts with the path and
   ` at `.
-- `src/gone.py` at line 3: `pytest.raises(GitError)`, its type exactly
-  `GitError`, and the path in its message.
+- `src/gone.py` and `src/gone_link.py`, each at line 3:
+  `pytest.raises(GitError)`, its type exactly `GitError`, and
+  `src/gone.py` in its message.
+- `src/latin.py` at line 1: `pytest.raises(UnicodeDecodeError)`.
 - `src/z.py` at line 1: returns, with that finding alone in the pool as
   `unanchored` and no group.
 - `src/c.py` and `src/c_link.py`, each at line 11: returns, with that
@@ -193,7 +217,7 @@ join, no probe, and no in-cell concern is in play.
   at `H2` shares `beta_rate` with the diff.
 
 Give each finding its own claim. At the end, `TE-2`'s `qualifications` rows
-hold exactly the three that returned, in order, and none of the five that
+hold exactly the three that returned, in order, and none of the seven that
 raised. Import `GitError` and `UnreadablePath` from `saffron.repos.mirror` at
 module scope, since both exist at base. Keep `qualify` imported inside the
 test body, as the file's other tests do.
