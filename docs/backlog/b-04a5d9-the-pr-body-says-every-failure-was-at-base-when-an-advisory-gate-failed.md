@@ -4,7 +4,7 @@ title: The PR body says every failure at head was present at base, though an adv
 status: open
 tier: 2
 filed: 2026-09-25
-specs: []
+specs: [SA-0240]
 prs: []
 commits: []
 cites: [§5.4, §5.7]
