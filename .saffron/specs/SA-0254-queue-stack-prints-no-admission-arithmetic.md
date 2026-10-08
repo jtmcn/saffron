@@ -154,14 +154,16 @@ cost. This spec prints admission alone.
    witness's order it reads exactly as below.
 
    ```
-   admission: reserve 25% and writer 25% of --budget held back, spec review $8.00 per layer
+   admission: reserve 25% and writer 25% of --budget held back, spec review $8.00 per layer, no revision round
      --budget $20.00 admits SY-1 (budget $10.00)
      --budget $64.00 admits SY-2 (budget $14.00)
      --budget $92.00 admits SY-3 (budget $6.00)
      --budget $108.00 runs every layer and its spec review
    ```
 
-   Each share is a whole percent. Each amount has two decimals. A layer
+   Each share prints as a percent. Each amount has two decimals. Round it up
+   to the cent, with a tolerance of 1e-9 so a float error adds no cent. No
+   printed figure then sits below its threshold. A layer
    line never starts with two spaces and a spec id. The existing
    `test_queue_stack_prints_the_stack_order` reads such a line as a
    candidate (`tests/test_cli.py:2925`). Its filter sits at
