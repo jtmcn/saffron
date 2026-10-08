@@ -4,7 +4,7 @@ title: A crash between reconcile's two writes strands a merged row, and the sche
 type: bug
 priority: 2
 depends_on: [SA-0227, SA-0226]
-estimated_lines: 154
+estimated_lines: 155
 estimate_measured: true
 touches:
   - saffron/reconcile.py
@@ -67,8 +67,8 @@ acceptance:
       - Every untrusted answer is read as merged, so the row with no recorded head moves to `MERGED`.
       - "`tasks_by_repo` selects the merged head and `reconcile` never reads it, so every crashed row lands in `unasked`."
   - claim: >-
-      A merge `reconcile` observes with no crash still moves the row to
-      `MERGED` and records the head GitHub reported, in one scan. That holds
+      A merge `reconcile` observes with no crash still lists the row in
+      `merged` and records the head GitHub reported, in one scan. That holds
       whether `pushed_sha` differs from that head, equals it, or is absent.
     witness: tests/test_reconcile.py::test_a_merge_records_the_commit_its_pull_request_merged_at
     preserves: true
@@ -78,18 +78,21 @@ acceptance:
       names it in code or as a carve-out with a non-empty reason. The guard
       reports a column declared in neither. It also reports a column whose
       reader is `Ledger.__init__`, `Ledger._apply` or `Ledger._touch_task`,
-      sits under `saffron/record/`, or never names the column in code.
+      sits under `saffron/record/`, or never names the column in code. A
+      docstring or a comment that names it does not count.
       `merged_head_sha`'s reader is `reconcile` in `saffron/reconcile.py`. The
       witness adds an unread column, and the guard names it. It then
       declares as a reader, in turn, each of the three write paths, one
-      function under `saffron/record/` and one function that never names
-      its column. The guard names that column each time.
+      function under `saffron/record/`, one function that never names its
+      column, and one that names it only in its docstring. The guard names
+      that column each time.
     witness: tests/test_ledger.py::test_a_tasks_column_nothing_reads_fails_the_schema_guard
     wrong_versions:
       - The guard checks only that each declared column exists, so a column added with no entry passes.
       - The guard has no list of write paths, so `Ledger._apply` passes as `merged_head_sha`'s reader.
       - The guard accepts a reader under `saffron/record/`, so `_outcome_facts` passes as `merged_head_sha`'s reader.
       - The guard checks that the reader exists and never that it names the column, so `_next_state` passes as `merged_head_sha`'s reader.
+      - "The guard regex-searches `inspect.getsource`, so a docstring mention passes, and `Ledger.task_spend` passes as `spent_usd_est`'s reader."
       - "`merged_head_sha` stays a carve-out with no reader."
 ---
 
@@ -181,6 +184,25 @@ Criterion 3's witness is a new test beside it.
   writer, such as `Ledger.create_task`, names columns as payload keys. The
   guard cannot tell it from a reader, so choosing a true reader stays a
   judgement in the test's table.
+- **A wrong reader.** A whole-word match on a string constant also accepts
+  message text and a same-named column of another table. `Ledger.batch_budget`
+  passes for `budget_usd` on `SELECT budget_usd FROM batches`
+  (`saffron/ledger.py:1265`). `Ledger.close_batch` passes for `spent_usd_est`
+  on a `batches` update (`saffron/ledger.py:1138`). The `integrity` gate's
+  message passes for `added` (`saffron/gates/core/integrity.py:274`), and
+  `census`'s summary passes for `removed` (`saffron/gates/core/census.py:91`).
+  The guard catches a column nothing names, not a wrong reader.
+- **A head recorded before this change lands.** Nothing clears
+  `merged_head_sha`. `set_task_package` writes a new `pr_url` and leaves the
+  head alone (`saffron/ledger.py:1486-1516`). A crashed `CHANGES_REQUESTED`
+  row is in `REQUEUE_STATES` (`saffron/scheduler.py:111-120`). If it was
+  resumed at base after a crash, it carries its old head beside a new pull
+  request. With this change it completes `MERGED` on that old head without
+  asking about the new one. After the change, the shared scan
+  `cli._resolve_queue` calls `reconcile` (`saffron/cli.py:1329`) before
+  `build_queue` (`saffron/cli.py:1346`). So a crash after the change is
+  completed before a scan can resume the row. Only rows that predate it are
+  exposed.
 - **The head move a crashed scan lost.** The scan that crashed printed no
   `head_moved` line. The completion reports none either, since it asks
   nothing.
@@ -193,12 +215,14 @@ no criterion declares a mutant, and `witness` reports `skip` for
 criteria 1 and 3. Criterion 2 passes at base and must keep passing.
 `test_the_merged_head_is_written_before_the_state_moves`
 (`tests/test_reconcile.py:470-504`) must also keep passing. The head is
-still written first.
+still written first. Criterion 2's witness asserts the bucket and the
+head, not the state. `test_a_head_is_recorded_only_for_an_observed_merge`
+asserts an observed merge's `MERGED` state (`tests/test_reconcile.py:464-465`).
 
 **The parents come first.** `SA-0226` and `SA-0227` edit
 `saffron/ledger.py`. Their hunks are elsewhere in the file, so the line
-numbers above will differ at your base. Find `tasks_by_repo` by name. If a parent adds a `tasks` column, the guard
-declares it by the same rule as any other.
+numbers above will differ at your base. Find `tasks_by_repo` by name.
+Neither parent adds a `tasks` column.
 
 **Criterion 1's witness.** Build each crashed row with `_task` and a
 merged head, then drive the crash for real. Patch `ledger.set_task_state`
@@ -222,10 +246,14 @@ with that reason rather than naming either as its reader. Choose a reader that r
 the refused kinds, `Ledger.__init__` and `Ledger._apply` both name
 `merged_head_sha` in code, and `Ledger._touch_task` names `updated_at`.
 `_outcome_facts` names `merged_head_sha`, and `_next_state` does not.
-Patch the reader mapping inside a `monkeypatch.context()` per case, so
+`Ledger.task_spend` names `spent_usd_est` only in its docstring
+(`saffron/ledger.py:1428-1438`). Its code sums `cost_usd_est` from
+`attempts`. Patch the reader mapping inside a `monkeypatch.context()` per case, so
 each case starts from the real mapping.
 
-**Every new witness must fail with the source reverted.** Reverted,
+**Every new witness must fail with the source reverted.** The body of
+`reconcile` itself must spell the literal `"merged_head_sha"`, in a row
+subscript. A helper it calls does not count for the guard. Reverted,
 `reconcile` names no `merged_head_sha`. Criterion 3's witness and the
 grown schema test both fail on that. Criterion 1's crashed rows land in
 `unasked`.
@@ -235,7 +263,9 @@ both new witnesses ran on a copy of base `958db033`. With the source
 reverted, both failed and criterion 2's witness passed. Each wrong version
 listed above was applied in turn, and its criterion's witness failed. The
 grown schema test failed under "`tasks_by_repo` selects the merged head
-and `reconcile` never reads it" as well. The suites in
+and `reconcile` never reads it" as well. The `inspect.getsource` wrong
+version is killed by the `task_spend` case alone. Without that case the
+witness passed it. The suites in
 `tests/test_reconcile.py` and `tests/test_ledger.py` passed whole.
 
 **The `prose` gate** counts every new comment and docstring. Write none
@@ -245,5 +275,5 @@ sentence limit, so read each one back.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `bug` ceiling of 1300 tokens (`saffron/gates/core/size.py:26`). The
-prototype counted 615 tokens by `size_gate`, 11 changed lines in the
-source and 170 in the tests. At 4 tokens a line that is 154 lines.
+prototype counted 617 tokens by `size_gate`, 11 changed lines in the
+source and 171 in the tests. At 4 tokens a line that is 155 lines.
