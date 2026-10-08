@@ -74,6 +74,8 @@ The important inversion: **the product of this factory is not code, it is a revi
   ADR 7 narrows this, at the operator's request of 2026-09-23. A stack batch writes a follow-up spec only from a finding the host qualified, one generation deep.
   It also revises a queued spec, but only for a witness or buildability blocker.
   The money reason still holds, so one generation and a bound on revision rounds limit it. Qualification is the seam.
+  §3.4 narrows it again, at the operator's request of 2026-10-07. `saffron draft` writes a spec from one item the operator names.
+  The operator chooses the item and merges the spec, so no roadmap is read and nothing chooses work.
 - A bespoke diff viewer. GitHub already built the best one you will ever have (§6).
 - An ontology-*driven* orchestrator. The factory ontology (§4.6) **describes** the run record. It never controls execution. SHACL shapes validate the projection. They do not gate state transitions, and no scheduling decision reads a triple. (Stands for v1. The spike that could reopen it ran and left it standing. Appendix O's rule closed the question on 2026-09-04, `docs/evidence/2026-09-04-refusal-predicate-two-arms.md`.)
 - Publishing the vocabulary at a resolvable IRI, or `owl:imports` of external ontologies at run time. Cells have no network (§5.1). External vocabularies are vendored and committed.
@@ -303,12 +305,37 @@ Design notes:
                        Infrastructure, exit 2, re-queued (§5.1.1)
   SPEC_WITHHELD    ◀── in a stack batch, before any cell: its spec review
                        escalated a blocker it could not revise, or the spec was
-                       still unclean after three revisions (ADR 7)
+                       still unclean after three revisions (ADR 7). Under
+                       `saffron draft`, still unclean after one revision (§3.4)
+  SPEC_DRAFTED     ◀── `saffron draft`, before any cell: its spec review came
+                       back clean, and the spec waits for the operator (§3.4)
 ```
 
-Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `SPEC_WITHHELD`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`, `PROVIDER_UNREACHABLE`. Everything else is internal. The last four are named rather than folded into a neighbour. Folded, an abort or an attempt that produced nothing reads as an ordinary task outcome. That is principle 34 wearing a state name.
+Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `SPEC_WITHHELD`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`. Everything else is internal. The last four are named rather than folded into a neighbour. Folded, an abort or an attempt that produced nothing reads as an ordinary task outcome. That is principle 34 wearing a state name.
 
 `MERGE_TRAIN` is an end state and not a terminal one, as `APPROVED` is (item 52). A task there waits on the train, not on the operator. The rule behind every end state is that the task is no longer Saffron's to advance. The eight in-flight states from `DRAFT` to `REBUTTING` are the rest, and `CONTEXT.md` §6 names both sets.
+
+### 3.4 Drafting a spec from an item
+
+Until 2026-10-07 a delegate wrote every spec through the spec chain, outside the record. Its cost, its wall time and its review rounds lived only in hand-written evidence. So no step could be cut on evidence (backlog item b-98a3be).
+
+**`saffron draft <item> --repo <repo>` runs the spec chain as a task.** `<item>` is a file of text the operator chose. Core reads it as data and never parses it (§5.3). Core knows no backlog format. A repo that keeps one renders the item to a file first, so §2.1 holds.
+
+The command reuses the stack batch's parts (ADR 7) in this order.
+
+1. It mints a run and a task at the default branch's head, as a stack batch does.
+2. A spec writer session drafts the spec from the item, in the writer prompt's `context:` form. The id comes from `follow_up.next_spec_id`. The reply is a recorded spec text with the origin `draft`.
+3. A spec review session reads the recorded text. A clean review ends the chain.
+4. A review that routes `revise` starts one revision. A second review that is still unclean escalates. The bound is two review rounds, the spec chain's own stop rule.
+5. The host writes the last recorded text to `.saffron/specs/` in `--repo`'s working tree. It commits nothing and opens no pull request. The operator reads, commits and merges the spec.
+
+The task ends `SPEC_DRAFTED` on a clean review and `SPEC_WITHHELD` on an escalation. Both write the file. An escalated draft is still the cheapest start for the operator's own edit. The exit codes keep their meaning: `0` drafted, `1` withheld, `2` infrastructure.
+
+**Every review round records its findings one by one.** Each is a `spec_finding` fact with its round, severity, tag, claim and file. A stack batch's spec review writes them too. A defect a later stage confirms can then name the round that raised it, or show that none did. A findings block stored as one text cannot.
+
+**Cost and time come from the attempts.** Each session is a `SPEC_WRITING` or `SPEC_REVIEW` attempt with turns, cost and times (§4.1). Nothing new records them. What is new is a reader that sums them per spec.
+
+What stays with the delegate: choosing the item, the pre-flight checks that are not yet commands, and verifying a finding against the base before a revision applies it. The writer prompt asks the writer to verify each finding. Each check the factory takes over later is a gate or a prompt line, never a delegate step.
 
 ---
 
@@ -413,7 +440,7 @@ Everything above is the scheduler once the queue is deep. This is what v1 builds
 
 **The scan resolves to a task, not to a spec, and that is load-bearing rather than pedantic**. A spec with a task at this `spec_sha` in a re-queueing state **resumes that task row**. A spec with no such task gets a new one. Minting a fresh task per queued spec looks equivalent and is not. Gate 0 refuses a task when an open unmerged PR *from another task* already targets the spec. §4.2's footnote is explicit that this survives a `CHANGES_REQUESTED` re-queue only because **refusal is keyed on `task_id`, not on the spec**. A new task row at the same `spec_sha` is "another task" by its own id. So a spec-keyed scan admits the re-queue, and gate 0 refuses it on the PR it was sent back to fix. The same root would discard a ratified `SCOPE_REVIEW` `touches`, which lives on the task, and send the bug back through DIAGNOSE.
 
-**The filter is stated negatively and keyed on `spec_sha`**. A spec is queued unless it has a task **at this `spec_sha`** in a state that is *done with it*. Those states are `READY_FOR_REVIEW`, `APPROVED`, `MERGE_TRAIN`, `MERGED`, `MERGE_FAILED`, `REJECTED`, `EXHAUSTED`, `NOT_IMPLEMENTED`, `PLAN_REJECTED`, `SCOPE_REVIEW`, `SPEC_WITHHELD`. It re-queues on `CHANGES_REQUESTED`, `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `GATE_ERROR`, `PREFLIGHT_FAILED` and `ORPHANED`. The rule underneath is one line: **re-queue when nothing was learned about the spec**. That rule is what makes the list derivable rather than memorized. The positive form, "has a task at this `spec_sha`", is the one to reject. §3.3 sends `CHANGES_REQUESTED` back to the queue against an unchanged spec, so the positive form refuses the one case the re-queue arrow exists for. **Dropping the key instead of the form is the other wrong fix**, and it costs the edit case. Unscoped, a `REJECTED` spec you then rewrite is never queued again. `EXHAUSTED` stays out for the reason from the third side: something *was* learned, and running it again learns it twice. `MERGE_FAILED` stays out too. It reaches you (§3.3) with a branch and an open PR, and a fresh task tonight would duplicate work and trip gate 0.
+**The filter is stated negatively and keyed on `spec_sha`**. A spec is queued unless it has a task **at this `spec_sha`** in a state that is *done with it*. Those states are `READY_FOR_REVIEW`, `APPROVED`, `MERGE_TRAIN`, `MERGED`, `MERGE_FAILED`, `REJECTED`, `EXHAUSTED`, `NOT_IMPLEMENTED`, `PLAN_REJECTED`, `SCOPE_REVIEW`, `SPEC_WITHHELD`, `SPEC_DRAFTED`. It re-queues on `CHANGES_REQUESTED`, `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `GATE_ERROR`, `PREFLIGHT_FAILED` and `ORPHANED`. The rule underneath is one line: **re-queue when nothing was learned about the spec**. That rule is what makes the list derivable rather than memorized. The positive form, "has a task at this `spec_sha`", is the one to reject. §3.3 sends `CHANGES_REQUESTED` back to the queue against an unchanged spec, so the positive form refuses the one case the re-queue arrow exists for. **Dropping the key instead of the form is the other wrong fix**, and it costs the edit case. Unscoped, a `REJECTED` spec you then rewrite is never queued again. `EXHAUSTED` stays out for the reason from the third side: something *was* learned, and running it again learns it twice. `MERGE_FAILED` stays out too. It reaches you (§3.3) with a branch and an open PR, and a fresh task tonight would duplicate work and trip gate 0.
 
 > **The in-flight states are not on either list, and the scan must not treat that as "queue it"**. `DRAFT`, `QUEUED`, `DIAGNOSING`, `IMPLEMENTING`, `GATING`, `REPAIRING`, `REVIEWING` and `REBUTTING` at scan time mean a corpse. One batch runs at a time, so nothing is legitimately in flight when a scan happens. `ORPHANED` covers only the deaths the supervisor stamped and a first bound cut (§4.5). A host power cut leaves the task in `IMPLEMENTING`. **The scan stamps any in-flight task `ORPHANED` before filtering**. That is §4.3's reconcile step doing the job it is already named for, and the task then re-queues by the ordinary rule.
 

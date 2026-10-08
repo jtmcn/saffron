@@ -55,6 +55,7 @@ TaskState = Literal[
     "RATE_LIMITED",
     "PROVIDER_UNREACHABLE",
     "SPEC_WITHHELD",
+    "SPEC_DRAFTED",
     "APPROVED",
     "CHANGES_REQUESTED",
     "REJECTED",

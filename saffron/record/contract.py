@@ -39,6 +39,7 @@ KINDS = (
     "end_review",
     "qualification",
     "spec_review",
+    "spec_finding",
     "spec_text",
     "stack_finish",
 )

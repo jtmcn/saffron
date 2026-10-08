@@ -612,8 +612,9 @@ it to the vocabulary.
 **End state**: A state the task waits in, on the operator, GitHub, the merge train or
 the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
-`GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `APPROVED`,
-`CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
+`GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
+`SPEC_DRAFTED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`,
+`MERGE_TRAIN`.
 A re-queue resumes the same row from six end states, so an end state need not be
 final. Every terminal state is an end state.
 
@@ -625,7 +626,7 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
-`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`.
+`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -767,8 +768,8 @@ Each name is the `kind` written to `events.jsonl` with `Event` appended, because
 `task_package`, `task_push`, `task_merged_head`, `task_policy`, `attempt_opened`,
 `attempt_closed`, `gate_result`, `finding`, `rebuttal`, `decision`, `run_created`,
 `run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`,
-`stack_layer`, `end_review`, `qualification`, `spec_review`, `spec_text`,
-`stack_finish`.
+`stack_layer`, `end_review`, `qualification`, `spec_review`, `spec_finding`,
+`spec_text`, `stack_finish`.
 The set is the record's whole alphabet, so it holds kinds nothing appends yet.
 > A fact is an entry in the record on `refs/saffron/*`. An event is a line of
 > `events.jsonl`. The two words do not merge.

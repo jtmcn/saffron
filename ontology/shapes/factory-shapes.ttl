@@ -18,16 +18,16 @@ factory:TaskShape a sh:NodeShape ;
         sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
-            factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:APPROVED
-            factory:CHANGES_REQUESTED factory:REJECTED factory:MERGED
-            factory:ORPHANED factory:MERGE_TRAIN ) ] ;
+            factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:SPEC_DRAFTED
+            factory:APPROVED factory:CHANGES_REQUESTED factory:REJECTED
+            factory:MERGED factory:ORPHANED factory:MERGE_TRAIN ) ] ;
     sh:property [ sh:path factory:inState ; sh:maxCount 1 ; sh:class factory:TaskState ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] ;
     sh:property [ sh:path factory:linesAdded ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] ;
     sh:property [ sh:path factory:linesRemoved ; sh:maxCount 1 ; sh:datatype xsd:integer ; sh:minInclusive 0 ] .
 
-# Eleven states reach the operator and no others — set containment inside the end
+# Twelve states reach the operator and no others — set containment inside the end
 # states, which is the distinction §4.6 names as justifying the namespace. What
 # the operator's own decision produces is an end state and is not terminal: the
 # conflation is how MERGED read as reaching the operator and ORPHANED, which
@@ -38,7 +38,7 @@ factory:TerminalStateShape a sh:NodeShape ;
     sh:in ( factory:SCOPE_REVIEW factory:PLAN_REJECTED factory:EXHAUSTED
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
-            factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE ) .
+            factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:SPEC_DRAFTED ) .
 
 # Eight states in which Saffron advances the task, and no end state among them.
 # A batch scan stamps these ORPHANED, so one also typed an end state would read as done.
@@ -145,7 +145,8 @@ factory:FactKindShape a sh:NodeShape ;
             factory:run_created factory:run_finished factory:run_preflight
             factory:batch_created factory:batch_closed factory:repo_upserted
             factory:stack_layer factory:end_review factory:qualification
-            factory:spec_review factory:spec_text factory:stack_finish ) .
+            factory:spec_review factory:spec_finding factory:spec_text
+            factory:stack_finish ) .
 
 # A contract gate is a repo's executable for one core-supplied role. This states
 # the contract half only; nothing here forbids a role on a core gate, because
