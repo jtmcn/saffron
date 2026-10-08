@@ -4,7 +4,7 @@ title: A crash between `reconcile`'s two writes strands the row in `unasked` for
 status: open
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0246]
 prs: []
 commits: []
 cites: [§4.2.1, §6.1]
