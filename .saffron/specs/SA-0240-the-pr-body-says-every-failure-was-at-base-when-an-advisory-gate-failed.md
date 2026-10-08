@@ -102,6 +102,7 @@ acceptance:
       - PACKAGE passes the comparison's blocking `new_failures` as the advisory ones, which are empty here.
       - PACKAGE treats an advisory new failure as blocking and ends the task `MERGE_FAILED`.
       - PACKAGE reads the advisory failures off `comparison.run.results` with no subtraction, so the run's own `size` failure is listed instead.
+      - PACKAGE appends `comparison.advisory_failures` to the positional blocking list, so the row renders under `### New failures`.
 ---
 
 ## Context
@@ -205,8 +206,9 @@ code="failed", message="assert 1 == 2"))`, and an advisory one shaped as
 the `size` gate writes it (`saffron/gates/core/size.py:285-296`). That is
 `NewFailure("size", Failure(file="", code="diff-too-large", message="1651
 changed tokens | over 1300\nping @org"))`. Its pipe, newline and mention
-prove `_cell`. In the row below, `​` stands for the one zero-width
-space `neutralize` writes after the `@`. Spell it that way in the test.
+prove `_cell`. In the row below, a zero-width space follows the `@`, written by
+`neutralize`. It renders invisibly. Write it as the escape `\u200b` in the
+expected string.
 
 No new failure, unchanged from base:
 
@@ -284,12 +286,13 @@ one. Its `advisory_failures` holds one `size` failure, and its
 `new_failures` is empty. Build the comparison inside the test, since
 `_reverified` takes no advisory failures. Then read `pr_body.md` as
 `test_a_re_verified_body_marks_the_verifying_suites_advisory_gates` does.
-Assert the advisory row is there and the run's own message is not.
+Assert the advisory row is there and the run's own message is not. Assert `### New advisory failures` comes before the row, and that
+`### New failures` is absent.
 
 **Two limits, both accepted.** A `witness` failure coded
 `survived-mutant` is never cancelled by the baseline
 (`saffron/gates/baseline.py:24-31`). So at `standard` a survivor present at
-base is listed under the advisory heading as new, as §5.4 counts it. In
+base is listed under the advisory heading as new, as §5.4.1 counts it. In
 PACKAGE the blocking list stays the cell's `outcome.new_failures`
 (`saffron/phases/package.py:886`). A blocking failure in re-verification
 ends the task `MERGE_FAILED` first (`saffron/phases/package.py:851-871`),
