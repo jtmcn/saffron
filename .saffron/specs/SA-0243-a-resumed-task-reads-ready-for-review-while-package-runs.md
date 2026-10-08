@@ -79,8 +79,8 @@ acceptance:
       propagates. In all four the row's spend sums every attempt the task
       closed. A cell that ends `EXHAUSTED` with a standing blocker and no
       rebuttal result keeps the `EXHAUSTED` row its cell wrote. That holds
-      whether PACKAGE returns or raises a `PackageError`. The witness drives
-      all six cases.
+      whether PACKAGE returns or raises, a `PackageError` or another
+      exception. The witness drives all seven cases.
     witness: tests/test_task.py::test_a_task_bound_for_package_reads_its_state_only_once_package_ends
     wrong_versions:
       - '`READY_FOR_REVIEW` written in `run_task` just before PACKAGE is called, which reopens the window.'
@@ -89,6 +89,8 @@ acceptance:
       - '`READY_FOR_REVIEW` written when PACKAGE raises with `exhausted` set, which overwrites the `EXHAUSTED` row.'
       - Nothing rolling the spend up after the cell, so a row that PACKAGE settled misses the attempts closed after its last in-flight write.
       - A write on the raise path that itself raises, so a different exception replaces PACKAGE's own.
+      - '`READY_FOR_REVIEW` written for an exhausted-mode raise that is not a `PackageError`, which overwrites the `EXHAUSTED` row.'
+      - The raise path catches `Exception` only, so a `KeyboardInterrupt` during PACKAGE leaves the row in flight.
   - claim: >-
       A cell whose REBUT the cap cut short still ends with its row reading
       `EXHAUSTED`.
@@ -161,7 +163,8 @@ is called. Make these changes.
    and the returned `CellOutcome` exactly as they are.
 2. If `package()` raises with `exhausted` unset, `run_task` writes
    `READY_FOR_REVIEW` onto the row and re-raises the same exception. That
-   covers a `PackageError` and any other exception. With `exhausted` set,
+   covers any `BaseException`, a `PackageError` and a `KeyboardInterrupt`
+   included. With `exhausted` set,
    write nothing, as today. This keeps the row PACKAGE's raise leaves
    today.
 3. **The spend.** Make the `task_package` fact roll the spend up from the
@@ -236,11 +239,13 @@ it. Close the
 ledger, then run `cli.main(["--home", <case>, "reconcile", "--repo",
 <case>])`. Monkeypatch `saffron.cli.run_gh` to answer `OPEN` with
 `CHANGES_REQUESTED`, and `saffron.cli.package_phase.real_remote` to return
-the seeded URL. Assert the outcome is `READY_FOR_REVIEW` and the row reads
-`REVIEWING` or `REBUTTING`, outside `PR_PENDING_STATES` and
-`REQUEUE_STATES`.
+the seeded URL. Assert the outcome is `READY_FOR_REVIEW`. Assert the row
+reads exactly `REVIEWING` on the REVIEW path and exactly `REBUTTING` on both
+REBUT paths, outside `PR_PENDING_STATES` and `REQUEUE_STATES`.
 
-**Criterion 2's witness.** Seed a task in its own ledger per case, with two
+**Criterion 2's witness.** Its seventh case is `EXHAUSTED` with PACKAGE
+raising a `RuntimeError`, keeping the `EXHAUSTED` row. Drive a
+`KeyboardInterrupt` in one `READY_FOR_REVIEW` case too. Seed a task in its own ledger per case, with two
 closed attempts whose last close follows the last `set_task_state`. Replace
 `run_one_cell` and `package_phase.package` at module scope. The `package`
 double records the row's state when called. A returning double calls
