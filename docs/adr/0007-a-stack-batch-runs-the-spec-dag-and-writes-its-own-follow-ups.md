@@ -49,10 +49,10 @@ batch. A name a member takes from a layer below is not a join. This narrows ADR
 6 stack as before, on `depends_on[0]`.
 
 **A task that misses `READY_FOR_REVIEW` adds no layer.** Its `depends_on`
-descendants are refused with a reason. The batch goes on. A cell runtime
-failure in a spec's review or its cell is not a miss. The spec is offered
-again at once on the same predecessor, and the breaker bounds the re-offers
-(`SA-0234`).
+descendants are refused with a reason. The batch goes on. A `CellRuntimeError`
+raised by a spec's review or by its task's cell is not a miss. The spec is
+offered again at once on the same predecessor, and the breaker bounds the
+re-offers (`SA-0234`). A `GATE_ERROR` outcome is still a miss.
 
 **Spec review runs inside the batch.**
 

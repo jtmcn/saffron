@@ -98,7 +98,7 @@ measured in batch 13, in stage 2 of the delegate-loop plan. Every line
 number below was read at `958db033`. Your base also carries `SA-0226`,
 which edits the same function, so the lines shift.
 
-**What happened.** `SA-0206`'s spec review cell raised `CellRuntimeError:
+**What happened.** `SA-0206`'s spec review raised `CellRuntimeError:
 seeding the worktree failed`. Git in the cell got "Permission denied" on a
 loose object (b-6ac0cd). The batch marked `SA-0206` missed, and the log
 read "SA-0207 refused reaches SA-0206". A cell runtime failure says the
@@ -156,11 +156,13 @@ Treat a `CellRuntimeError` from a stack batch's `review` or `runner` as the
    `started`. `sleep` is the stack batch's mark, as in the
    `PROVIDER_UNREACHABLE` branch. The breaker is then the only bound, in
    both passes.
-3. **Three comments go stale.** The `started` comment names the states
+3. **Four comments go stale.** The `started` comment names the states
    taken back out (`saffron/batch.py:216-218`). The `mint` comment says a
    raise from `review` or `runner` is a miss (`saffron/batch.py:529`). The
    `review` comment says a raise from `review` is a miss
-   (`saffron/batch.py:559-560`). Correct each in one or two lines.
+   (`saffron/batch.py:559-560`). The `_is_layer` docstring names only the
+   two outcomes kept queued (`saffron/batch.py:370-371`). Correct each in
+   one or two lines.
 
 ## Out of scope
 
