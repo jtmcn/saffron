@@ -85,6 +85,8 @@ WATCH_PREFIXES = (
     # The CLI's own error line when a cell raises. Without it the teardown
     # line after it read as the cause (item 158).
     "saffron:",
+    # A start preflight refuses ends PREFLIGHT_FAILED, not a raise (SA-0244).
+    "preflight:",
 )
 
 if not (REPO / "DESIGN.md").is_file():  # the skill was moved; say so, do not guess

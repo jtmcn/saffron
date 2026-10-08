@@ -225,6 +225,12 @@ its descendants.
 **b-cab612**. The operator made `saffron batch` the loop's default, and the
 skill still drives one attended cell per spec.
 
+**Placed 2026-10-07**, from `SA-0230`'s spec review: **b-3bba0f**. The cut
+re-queue cap looks for an earlier row. A batch resumes the same row, so a
+second cut re-queues again at a full budget each time.
+Then **b-032c61**, from `SA-0244`'s review. A start preflight refuses in a
+stack batch is a miss, so the batch refuses the rest of the stack.
+
 **Placed 2026-10-08**, from the spec loop's run 31: **b-6cd3c2**, **b-a04cc8**,
 then **b-883f74**. A mirror hard-links the checkout's loose objects, and one
 bad inode failed four seeds in a night. A batch whose only runnable layer
