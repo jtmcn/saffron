@@ -183,12 +183,18 @@ now asks.
 
 ## Out of scope
 
+- **A single `unasked` append.** Keep one `result.unasked.append(row["task_id"])`
+  line in `reconcile`, so criterion 2's mutant matches exactly once. Route an
+  `EXHAUSTED` row's no-answer case through it.
 - **The module docstring** (`saffron/reconcile.py:1-27`). `SA-0243`
   rewrites its account of PACKAGE's last word. Leave those lines as they
   are, so the two pull requests touch separate hunks.
 - **The crash between the two merge writes.** `SA-0246` is drafted to
   complete a row whose `merged_head_sha` is set, without asking GitHub.
-  This spec depends on it. Do not move or re-guard that path.
+  This spec depends on it. Do not move that path. It covers an
+  `EXHAUSTED` row with a merged head too, since only a crash between the
+  two merge writes leaves one. Extend it to that row, and add the row to
+  criterion 1's witness.
 - **The ledger's account of PACKAGE's states.** The `set_task_package`
   docstring names `READY_FOR_REVIEW` and `MERGE_FAILED` only
   (`saffron/ledger.py:1494-1500`). `SA-0204` left it stale, and
