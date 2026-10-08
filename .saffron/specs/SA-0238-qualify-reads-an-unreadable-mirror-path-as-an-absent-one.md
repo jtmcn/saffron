@@ -63,9 +63,10 @@ acceptance:
       - The read wraps every `GitError` in a `ValueError` or another type outside `GitError`.
       - The read raises for an absent path too, so `src/z.py` raises instead of filing `unanchored`.
       - The read answers an empty string for an error rather than raising.
-      - The read catches `UnicodeDecodeError` and answers `None`, as `saffron/task.py:561` does for `consumes`, so the non-UTF-8 file reads as absent.
+      - The read catches `UnicodeDecodeError` and answers `None` (`saffron/task.py:561` catches it for `consumes`), so the non-UTF-8 file reads as absent.
       - The read is bound to the range's base rather than its head, so the readable findings stop anchoring.
       - The range records each input as `unanchored`, its reason the error's text, before it re-raises.
+      - The read re-raises with its own text prefixed, keeping the type, so the message changes.
   - claim: >-
       `cli._stack_follow_ups` turns a `RuntimeError` raised inside
       `follow_up.write_follow_ups` before `qualify` returns into one
@@ -203,13 +204,13 @@ vendor/sub`. After the blob was deleted, `ls-tree` still listed
 lens finding of severity `concern` and no probe, and call `built.run`. No
 join, no probe, and no in-cell concern is in play.
 
-- `src`, `vendor/sub`, `src/out.py` and `src/hop.py`, each at line 3:
-  `pytest.raises(UnreadablePath)`, and the message starts with the path and
-  ` at `.
-- `src/gone.py` and `src/gone_link.py`, each at line 3:
-  `pytest.raises(GitError)`, its type exactly `GitError`, and
-  `src/gone.py` in its message.
-- `src/latin.py` at line 1: `pytest.raises(UnicodeDecodeError)`.
+- `src`, `vendor/sub`, `src/out.py`, `src/hop.py`, `src/gone.py` and
+  `src/gone_link.py`, each at line 3, and `src/latin.py` at line 1: first
+  take the expected error with `pytest.raises` on
+  `file_at(built.mirror, built.shas["H2"], path)`. Then assert the raised
+  error's type is exactly that type and its `str` equals that `str`. The
+  first four are `UnreadablePath`, the next two a plain `GitError`, and the
+  last `UnicodeDecodeError`.
 - `src/z.py` at line 1: returns, with that finding alone in the pool as
   `unanchored` and no group.
 - `src/c.py` and `src/c_link.py`, each at line 11: returns, with that
