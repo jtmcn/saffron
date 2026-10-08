@@ -204,6 +204,11 @@ test fails when one copy is missed.
 
 ## Notes for the agent
 
+**One copy of the rule.** The helper holds the refusal rule, the options,
+the prompt and the three error strings once. It does not branch on whether a
+callback was passed to pick between two copies. Do not name the callback
+`watch`: `tests/test_events.py:2494-2520` fails on that name in `review.py`.
+
 **New or edit.** The helper is new code, and both callers' bodies are
 rewritten around it. So no criterion declares a mutant, and `witness`
 reports `skip`. Criteria 1 to 3 each name a new witness. Criteria 4 to 7 are
