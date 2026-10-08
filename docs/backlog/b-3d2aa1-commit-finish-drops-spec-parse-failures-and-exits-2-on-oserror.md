@@ -4,7 +4,7 @@ title: commit_finish drops spec parse failures silently, and an OSError from it 
 status: open
 tier: 2
 filed: 2026-10-01
-specs: [SA-0151]
+specs: [SA-0151, SA-0239]
 prs: [628]
 commits: []
 cites: []
