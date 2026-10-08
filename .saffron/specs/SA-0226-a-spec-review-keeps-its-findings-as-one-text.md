@@ -4,12 +4,13 @@ title: A spec review keeps its findings as one text, so no later defect can name
 type: feature
 priority: 2
 depends_on: [SA-0224]
-estimated_lines: 187
+estimated_lines: 212
 estimate_measured: true
 touches:
   - saffron/ledger.py
   - saffron/batch.py
   - tests/test_batch.py
+  - tests/test_record_migrate.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -56,11 +57,15 @@ acceptance:
       `spec_findings` row. Both carry the round's `n`, the finding's
       `position` from 1 in block order, and its `severity`, `fixes`,
       `claim`, `criterion`, `file` and `line` as read, a null included. A
-      round routed `error` writes none. The witness drives rounds routed
+      `criterion`, `file` or `line` that is not null, text or an integer is
+      stored as its JSON text, and nothing raises. A round's `spec_finding`
+      facts are appended after its `spec_review` fact. A round routed
+      `error` writes none. The witness drives rounds routed
       `revise`, `run` and `escalate`, a round with no findings, and a
       second round after a revision and after a `wait`. It drives each
       severity, each of the three tags and a null one, and `criterion`,
-      `file` and `line` each set and each null. Its three `error` rounds
+      `file` and `line` each set and each null. It drives `criterion` and
+      `line` as lists and `file` as an object. Its three `error` rounds
       are a session that reported an error over a block holding a finding,
       a session with no block, and a review that raised.
     witness: tests/test_batch.py::test_each_spec_review_round_records_each_of_its_findings
@@ -78,6 +83,11 @@ acceptance:
       - The findings are written in reverse block order.
       - "`file` and `line` are written null."
       - "`criterion` is written null."
+      - "`criterion` and `line` are swapped between their columns."
+      - A round's `spec_finding` facts are appended before its `spec_review` fact.
+      - A list or an object is passed to SQLite as it came, so the write raises.
+      - A list or an object is stored as Python's `str` of it.
+      - A list or an object is stored null.
   - claim: >-
       Folding the record into a fresh ledger, and back into the source,
       rebuilds every `spec_findings` row as written. `fold_task` given no
@@ -102,8 +112,8 @@ findings one by one. Each is a `spec_finding` fact with its round,
 severity, tag, claim and file. A stack batch's spec review writes them
 too." This spec builds that and nothing that reads it.
 
-Line numbers below were read at `d7a9ec6e`, with this spec's own commit on
-top.
+Line numbers below were read at `3d594729`, unless they name
+`origin/saffron/SA-0224`.
 
 **A round's findings are stored as one text.** `run_stack_batch` reads each
 review session with `spec_review.read_spec_review` and routes it with
@@ -111,27 +121,34 @@ review session with `spec_review.read_spec_review` and routes it with
 with `ledger.record_spec_review(task_id, route=..., block=read.block,
 block_sha256=read.block_sha256, error=read.error)` (`saffron/batch.py:598-604`).
 `read.findings` reaches no ledger call. The `spec_reviews` table holds
-`block` as one `TEXT` column (`saffron/ledger.py:266-275`). So no row names
+`block` as one `TEXT` column (`saffron/ledger.py:267-276`). So no row names
 one finding, and a later defect cannot point at the round that raised it.
 
 **The parsed findings already exist.** `read_spec_review`
 (`saffron/spec_review.py:205-263`) builds one `SpecReviewFinding` per entry
 (`:139-148`), with `severity`, `claim`, `fixes`, `criterion`, `file` and
-`line`. Every path that sets `error` returns `findings=[]` through `_error`
+`line`. It copies `criterion`, `file` and `line` with `raw.get` and checks
+no type (`:251-253`). So a reviewer's list or object reaches the ledger. Every path that sets `error` returns `findings=[]` through `_error`
 (`:192-202`). `spec_review_route` returns `error` only when `error` is set
 and `resets_at` is not (`:266-286`). So a round routed `error` has no
 parsed findings to write.
 
 **Where the round is recorded.** `Ledger.record_spec_review` is at
-`saffron/ledger.py:1623-1654`. It numbers the round one more than the
-task's own `spec_reviews` rows (`:1636-1643`). It writes one `spec_review`
-fact through `_commit_and_append` (`:539-544`). `_apply`'s
-`spec_review` branch (`saffron/ledger.py:845-860`) inserts the row from the
+`saffron/ledger.py:1624-1655`. It numbers the round one more than the
+task's own `spec_reviews` rows (`:1637-1644`). It writes one `spec_review`
+fact through `_commit_and_append` (`:540-545`). `_apply`'s
+`spec_review` branch (`saffron/ledger.py:846-861`) inserts the row from the
 payload's own `n`, so a fold keeps a dropped fact's numbering.
-`_drop_task_rows` (`saffron/ledger.py:554-565`) deletes each key-filed
-table's rows before `fold_task` (`:546-552`) re-applies a task's facts.
+`_drop_task_rows` (`saffron/ledger.py:555-566`) deletes each key-filed
+table's rows before `fold_task` (`:547-553`) re-applies a task's facts.
 `batch.py` calls `record_spec_review` in one other place, when `review`
 itself raised (`saffron/batch.py:563-570`).
+
+**A test at the cell's base calls it too.** `SA-0224`'s
+`tests/test_record_migrate.py` calls `source.record_spec_review(` with no
+findings at `:1457` and `:1460` on `origin/saffron/SA-0224`. That file does
+not exist at `3d594729`. It exists only at the cell's real base, once
+`SA-0224` merges. No other caller exists on that branch.
 
 **The kind exists already.** This spec's own pull request adds
 `spec_finding` to `KINDS` (`saffron/record/contract.py:42`), to
@@ -154,12 +171,18 @@ further call of its own.
    a keyword with no default. After the round's own fact, it writes one
    `spec_finding` fact per finding through `_commit_and_append`. The
    payload carries the round's `n`, `position` from 1 in the order given,
-   and the six fields as read.
+   and the six fields as read. Keep `None`, a `str` or an `int` as it is.
+   Any other `criterion`, `file` or `line` goes in as `json.dumps` of it.
+   So the fact and the row hold the same text.
 3. **The callers.** The read path at `saffron/batch.py:598-604` passes
-   `read.findings`. The raise path at `:564-570` passes an empty list.
+   `read.findings`. The raise path at `:564-570` passes an empty list. Both
+   `record_spec_review` calls in `tests/test_record_migrate.py` pass
+   `findings=[]`, or that test raises `TypeError` at head.
 4. **The fold.** `_apply` gains a `spec_finding` branch that inserts the row
    from the payload alone, `n` included. `_drop_task_rows` deletes the
    task's `spec_findings` rows beside its `spec_reviews` rows.
+5. **The docstring.** The module docstring's "Only the seventeen kinds
+   `_append` writes fold back" (`saffron/ledger.py:6-7`) becomes eighteen.
 
 ## Out of scope
 
@@ -169,13 +192,18 @@ further call of its own.
 - `spec_reviews.block` stays as it is. The rows add to it.
 - The migration. `SA-0222` to `SA-0224` write a stored ledger's rows into
   the record and know nothing of `spec_findings`. A ledger written after
-  this change and then migrated loses its findings rows.
+  this change and then migrated loses its findings rows. The operator
+  files a follow-up item extending `migrate` to `spec_findings` before any
+  cutover.
 - `saffron/follow_up.py`'s writer opens no review, so it writes no finding.
 - `CONTEXT.md`'s **Spec review** term gains a sentence saying each round
   records each finding as a `spec_finding` fact. The operator writes it by
   hand in this spec's pull request, since `CONTEXT.md` is protected.
 - The ledger module docstring's count of tables outside §4.1
   (`saffron/ledger.py:11-16`). Leave it, or add `spec_findings` to it.
+- `tests/test_fold.py:375` says "one of the seven kinds `_apply` never
+  places". That is eight at base and seven again after this change. It
+  needs no edit.
 
 ## Notes for the agent
 
@@ -212,11 +240,14 @@ Eight specs in this order are enough.
 
 - `TE-1`: round 1 holds three findings in this order. A `concern` tagged
   `witness` names no place. A `blocker` tagged `build` names criterion 1,
-  a file and a line. A `note` names criterion 2 and a file, and no line.
+  a file and line 40. A `note` names criterion 2 and a file, and no
+  line. Line 40 differs from every criterion number, so a swap shows.
   It routes `revise`. One written revision follows. Round 2 holds a `note`
   naming a line alone.
 - `TE-2`: a fenced block holding a `concern`, with `error="cell died"`.
-- `TE-3`: a `concern` tagged `build` and a `note`. It routes `run`.
+- `TE-3`: a `concern` tagged `build` whose criterion is `[1, 2]`, whose
+  file is `{"path": "c.py"}` and whose line is `[12, 40]`, then a `note`.
+  It routes `run`.
 - `TE-4`: no fenced block.
 - `TE-5`: no fenced block with `resets_at` set, routed `wait`, then a
   `note`.
@@ -228,12 +259,16 @@ Eight specs in this order are enough.
 one. A rejected review session carries empty text
 (`saffron/spec_review.py:346-348`), so it parses nothing. An escalation
 after the last revision is another (`saffron/batch.py:587`). It records the
-same read the `revise` route does.
+same read the `revise` route does. A float in a place field is a third,
+and the rule stores it as JSON text too. A `bool` is a fourth, which
+Python counts as an `int`, so it is kept as it is.
 
 **Criterion 1.** For each spec, compare the task's `spec_finding` facts and
 its `spec_findings` rows to the same expected list of tuples, field by
 field. Also assert each task's `spec_reviews` routes, so the arrangement
-cannot drift off the routes the claim names.
+cannot drift off the routes the claim names. For `TE-1`, assert the
+`(kind, n)` order of its `spec_review` and `spec_finding` facts as the
+record reads them back.
 
 **Criterion 2.** Read every key you need before the first fold, since a
 fold mints new task ids. Fold into a fresh ledger holding one task of
@@ -241,8 +276,8 @@ another repo, then back into the source. For the trimmed form, leave out
 the facts whose `n` is 1 among `TE-1`'s `spec_review` and `spec_finding`
 facts.
 
-**Measured on a prototype.** A prototype at this spec's base, with the
-kind added, passed both witnesses, and each failed with its source
-reverted. Its diff measured 748 changed tokens. Each of the 17 wrong
+**Measured on a prototype.** A prototype at `origin/saffron/SA-0224`,
+with the hand vocabulary commit applied, passed both witnesses, and each failed with its source
+reverted. Its diff measured 847 changed tokens. Each of the 22 wrong
 versions above was applied to it as an edit, and each failed its own
 criterion's witness. The rest of the suite passed on it.
