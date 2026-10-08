@@ -4,7 +4,7 @@ title: "An infrastructure error while seeding a layer's cell marks the layer mis
 status: open
 tier: 1
 filed: 2026-10-05
-specs: []
+specs: [SA-0234]
 prs: []
 commits: []
 cites: [§4.4, §7]
