@@ -4,7 +4,7 @@ title: An IMPLEMENT turn cut with nothing committed gets no salvage turn once th
 type: bug
 priority: 1
 depends_on: []
-estimated_lines: 250
+estimated_lines: 219
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -56,20 +56,23 @@ max_turns: 130
 acceptance:
   - claim: >-
       The IMPLEMENT turn runs under its own `max_budget_usd`. That is the
-      remainder, the budget less the plan turn's spend, less the amount held
-      for the salvage turn. The amount held is the smaller of
-      `SALVAGE_RESERVE_USD`, which is $1.00, and half the remainder. The plan
-      turn and the REPAIR turn after it keep the task's `budget_usd`. The
-      witness drives five cells, each with one REPAIR turn. Remainders of
-      $4.21, $2.00, $1.50, $1.00 and $0.50 cap the IMPLEMENT turn at $3.21,
-      $1.00, $0.75, $0.50 and $0.25. Today all five IMPLEMENT turns get the
-      whole budget.
+      remainder, the budget less the plan checkpoint's spend, a re-prompted
+      plan turn included, less the amount held for the salvage turn. The
+      amount held is the smaller of `SALVAGE_RESERVE_USD`, which is $1.00,
+      and half the remainder. The plan turn and the REPAIR turn after it keep
+      the task's `budget_usd`. The witness drives six cells, each with one
+      REPAIR turn. Remainders of $4.21, $2.00, $1.50, $1.00 and $0.50 cap the
+      IMPLEMENT turn at $3.21, $1.00, $0.75, $0.50 and $0.25. A sixth cell's
+      plan turn first replies off the schema for $2.00, then plans for $1.79.
+      Its $4.21 remainder caps the IMPLEMENT turn at $3.21 too. Today all six
+      IMPLEMENT turns get the whole budget.
     witness: tests/test_session.py::test_the_implement_turn_keeps_the_salvage_reserve_out_of_its_cap
     wrong_versions:
       - The reserve comes off only a remainder above $1.00, so the $1.50 cell gets $0.50 and the $1.00 cell $1.00.
       - The reserve comes off only a remainder of $2 or more, so the $1.50 cell gets $1.50.
       - The cap is the larger of the remainder less $1.00 and the smaller of the remainder and $1.00, so the $1.50 cell gets $1.00.
       - The cap is the budget less the amount held, ignoring the plan turn, so the $4.21 cell gets $7.00.
+      - The remainder reads `last_cost`, the plan turn's last reply, instead of the checkpoint's total, so the re-prompted cell gets $5.21.
       - Nothing is held, so the $4.21 cell gets $4.21.
       - Half the remainder is always held, so the $4.21 cell gets $2.105.
       - The whole $1.00 is always held, so the $0.50 cell gets a negative cap.
@@ -85,11 +88,11 @@ acceptance:
       budget-cap cut whose salvage turn recovers nothing ends `ORPHANED`, as
       the other two cuts do on their first time at a `spec_sha`. The witness
       drives SA-0087's shape, an $8 budget and a $3.79 plan turn, so $1.00 is
-      held. The cap cuts one IMPLEMENT turn at $3.25. The turn ceiling cuts
-      another and the wall clock a third, each at $3.00. A fourth cell has a
-      $2 budget and a $0.50 plan turn, so $0.75 is held, and the cap cuts its
-      IMPLEMENT turn at $0.77. All four salvage turns commit, and all four
-      tasks reach `READY_FOR_REVIEW`. A fifth cell's cap cut, in SA-0087's
+      held. The cap cuts one IMPLEMENT turn at $3.25, and the turn ceiling
+      cuts another at $3.00. Two cells have a $2 budget and a $0.50 plan
+      turn, so $0.75 is held. The wall clock cuts one IMPLEMENT turn at $0.77,
+      and the cap cuts the other at $0.77. All four salvage turns commit, and
+      all four tasks reach `READY_FOR_REVIEW`. A fifth cell's cap cut, in SA-0087's
       shape, is followed by a salvage turn that commits nothing. Today the
       cap cut ends `NOT_IMPLEMENTED` after two turns.
     witness: tests/test_session.py::test_an_implement_turn_its_budget_cap_cuts_is_salvaged_on_the_reserve
@@ -98,7 +101,8 @@ acceptance:
       - The salvage turn keeps the whole budget as its cap, $8.00.
       - The salvage turn's cap is what the budget has left, $0.96 after the $3.25 cap cut.
       - The salvage turn's cap is always `SALVAGE_RESERVE_USD`, so the $2 cell's salvage turn gets $1.00.
-      - Only the budget-cap cut's salvage turn runs on the amount held, so the turn-ceiling and wall salvage turns keep $8.00.
+      - Only the budget-cap cut's salvage turn runs on the amount held, so the turn-ceiling and wall salvage turns keep the whole budget.
+      - Only the budget-cap cut's salvage turn runs on the amount held, and the others on `SALVAGE_RESERVE_USD`, so the $2 wall cell's salvage turn gets $1.00.
       - A budget-cap cut salvages, but its failed salvage ends `NOT_IMPLEMENTED` rather than `ORPHANED`.
       - The announcing line names the wall clock for a budget-cap cut.
   - claim: >-
@@ -106,7 +110,9 @@ acceptance:
       salvage turn still gets the host checkpoint. This holds for each of
       the three bounds that earn a salvage turn. A dirty tree is committed by
       the host, the commits are measured again, and a commit carries the
-      task on to GATE with no salvage turn. Its watch lines then say the host
+      task on to GATE with no salvage turn. The host's commit message reads
+      "checkpoint: host-committed" and then "no room left for a salvage
+      turn", the note this branch names. Its watch lines then say the host
       checkpointed the work and recovered 1 commit, and none says "no room
       left to salvage". Green gates go on to `READY_FOR_REVIEW`. Red gates
       end the task `EXHAUSTED` with no REPAIR turn, not `ORPHANED`, so the
@@ -125,6 +131,7 @@ acceptance:
       - The no-room branch takes no checkpoint.
       - The checkpoint runs, but the commits are not measured again, so the task still ends `ORPHANED`.
       - The checkpoint runs only for a turn-ceiling cut.
+      - The no-room checkpoint commits with the salvage branch's note, "the salvage turn committed nothing".
       - A refused checkpoint's `CellRuntimeError` escapes the no-room branch.
   - claim: >-
       A turn-ceiling cut and a wall cut with no budget left and a clean tree
@@ -210,12 +217,16 @@ the free checkpoint.
   again. A commit emits the existing "recovered N commit(s)" `SALVAGE` line
   and no `Terminal`, and the task goes on to GATE. Zero commits emits `cut_off_no_salvage_room` as today.
   A refused checkpoint is caught as on the salvage branch (error is not
-  fail). Share one checkpoint with the salvage branch rather than copying
-  it.
+  fail). Give this branch its own checkpoint call, whose note is "no room
+  left for a salvage turn". It reaches the pull request body through
+  `commit_subjects` (`saffron/cell/session.py:2418-2419`). The salvage
+  branch's checkpoint and its note stay as they are.
 - **The comments.** The `TerminalReason` comments
   (`saffron/events.py:91-100`) and the comment above `SALVAGE_MAX_TURNS`
   (`saffron/phases/implement.py:50-59`) name two bounds. Name the budget cap
-  as the third.
+  as the third. The comment on `max_budget_usd` says one options dict
+  drives every turn (`saffron/phases/implement.py:185-188`). Say the
+  IMPLEMENT and salvage turns get caps of their own.
 
 ## Out of scope
 
@@ -243,7 +254,9 @@ $0.17, $0.15, $0.34, $0.32, $0.24, $0.23 and $0.40, in two to four turns
 `SA-0204`, rounds up to $1.00. The batch logs agree. Eight
 `events.jsonl` files announce a salvage turn or refuse one, and the one
 refusal is `SA-0087`'s. The in-cell cap held task 203's session to $0.04
-past it, well inside the reserve's $0.60 margin.
+past it. That leaves the full reserve a $0.60 margin over the largest
+salvage turn, for remainders of $2 or more. The $0.04 overshoot was
+measured on a REVIEW session, not on an IMPLEMENT turn.
 
 **Why half the remainder below $2.** A fixed $1.00 taken only from a
 remainder above $1.00 leaves a cliff. A $1.01 remainder would cap the
@@ -307,9 +320,13 @@ must keep passing.
 
 - *Criterion 1.* Script a failing suite for attempt 1, so each cell runs
   one REPAIR turn. Read `max_budget_usd` from `cell.turn_options` for the
-  plan, IMPLEMENT and REPAIR turns. Use five cells: an $8 budget after a
+  plan, IMPLEMENT and REPAIR turns. Use six cells: an $8 budget after a
   $3.79 plan turn, $3 after $1.00, $2 after $0.50, $1.50 after $0.50 and $1
-  after $0.50. Write the expected caps as literals, with `pytest.approx`.
+  after $0.50. The sixth has an $8 budget, a plan turn replying "not the
+  schema" for $2.00 and then a plan for $1.79. Tests near
+  `test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented`
+  script that reply. Its turns shift by one, so read its options from the
+  re-prompt on. Write the expected caps as literals, with `pytest.approx`.
   Derived from the constant, they would move with it.
 - *Criterion 2.* Shape the cap cut as `run_agent` raises it, an
   `AgentFailed` carrying an attempt with `session_id="sess-1"`, the subtype
@@ -321,11 +338,13 @@ must keep passing.
 - *Criterion 3.* Use `commits=[0, 1]`. Make `dirty_paths` return one path
   only while two turns have run and nothing is checkpointed. A tree that
   stays dirty fails `committed` at GATE. Bind the cell as a lambda default
-  inside a loop. For the red cell, script a green baseline and a failing
-  first attempt. For the refused cell, patch `worktree.commit_dirty` to
-  raise `runtime.CellRuntimeError`, as
+  inside a loop. Assert `cell.checkpointed` holds the one message. For the
+  red cell, script a green baseline and a failing first attempt. Give the
+  refused cell `commits=0`, as
   `test_a_checkpoint_the_repo_refuses_is_not_an_infrastructure_abort`
-  does.
+  does. With `[0, 1]` the stub reports a commit the refused checkpoint never
+  made. Patch `worktree.commit_dirty` to raise `runtime.CellRuntimeError`
+  as that test does.
 
 **What criterion 3 leaves undriven.** A refused checkpoint after a wall
 cut or a cap cut. The three bounds share one checkpoint call, so the
@@ -335,6 +354,8 @@ turn-ceiling cell reaches the code they would reach.
 and the three new witnesses ran on a plain copy of the base. With the
 source reverted, all three witnesses failed. Each wrong version above was
 applied to the prototype in turn, and each failed its criterion's witness.
+That held for the prototype with its own no-room checkpoint call and for
+one sharing a helper.
 Criterion 4's witness passed on the prototype. The whole suite failed
 there only on the 38 tests that fail on a plain copy of the base, which
 has no git repository.
@@ -350,9 +371,8 @@ sentence over 25 words. A docstring stays within ten lines.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks at the
 `bug` ceiling of 1300 tokens (`saffron/gates/core/size.py:26`). The
-prototype counted 998 changed tokens by `size_gate`. That is 104 lines in
-`session.py`, 16 in the two comment files and 152 in the test. The
-prototype shares one checkpoint between both branches. A copy on the
-no-room branch counted 793 instead. At 4 tokens a line, 998 is 250 lines.
-That is 77% of the ceiling, so keep the new tests as lean as the notes
-describe.
+prototype counted 875 changed tokens by `size_gate`. That is 70 lines in
+`session.py`, 20 in the two comment files and 166 in the test. At 4 tokens
+a line, 875 is 219 lines, 67% of the ceiling. A prototype sharing one
+checkpoint helper between the two branches counted 1077, 83%, past the
+80% margin. So the no-room branch carries its own checkpoint call.
