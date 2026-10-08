@@ -3,7 +3,7 @@ id: SA-0239
 title: The finishing commit writes through a symlink the tree holds and drops the specs it cannot parse
 type: bug
 priority: 2
-estimated_lines: 162
+estimated_lines: 168
 estimate_measured: true
 touches:
   - saffron/finish.py
@@ -75,21 +75,24 @@ acceptance:
   - claim: >-
       `commit_finish` emits one line per spec in `.saffron/specs/` that
       `discover_specs` could not parse at the finishing tree. Each line goes
-      through `emit` and names the file's path from the tree's root, never
-      the worktree's own path, with the reason `discover_specs` gave. The
-      witness drives five such files. Two are layers' texts the finish
-      wrote, one refused as a shape error and one as a disclosed mutant.
-      One is an unrun task's text the finish wrote. One is a layer's spec
-      already in the tree with no text of its own. One is a spec in the
-      tree that is no layer's. Every spec that parses gets no line.
+      through `emit` and names the file's path from the tree's root, with
+      the reason `discover_specs` gave. The worktree's own path appears
+      nowhere in a line, its reason included. The witness drives six such
+      files. Two are layers' texts the finish wrote, one refused as a shape
+      error and one as a disclosed mutant. One is an unrun task's text the
+      finish wrote. One is a layer's spec already in the tree with no text
+      of its own. One is a spec in the tree that is no layer's. One is a
+      dangling symlink in the tree that cannot be read. Every spec that
+      parses gets no line.
     witness: tests/test_finish.py::test_the_finish_emits_one_line_per_spec_it_cannot_parse
     wrong_versions:
       - Only the first failure is emitted.
       - A failure that carries a parsed spec, the disclosed mutant, is skipped.
-      - Only a failure on a path the finish wrote is emitted, which drops the two files already in the tree.
+      - Only a failure on a path the finish wrote is emitted, which drops the three files already in the tree.
       - The lines go to `print` and not to `emit`.
       - A line names the path and leaves out the reason.
       - A line names the absolute path inside the worktree, which is gone once the finish returns.
+      - The worktree's path is stripped from the file's name and left in the reason, which the unreadable file's reason names twice.
   - claim: >-
       `_stack_finish` still prints a `ValueError` from `commit_finish` as
       one line and the night still exits 0, which is how a symlink refusal
@@ -149,8 +152,11 @@ with nothing said.
 ## Problem
 
 A cell can commit a symlink at `.saffron`, `.saffron/specs`, a spec file
-or `done/`. The host's finish then writes or renames through it, outside
-the worktree, on any repo whose policy leaves `.saffron/**` writable.
+or `done/`. The host's finish then writes through it, or renames a spec
+into the directory it names, outside the worktree. That holds on any repo
+whose policy leaves `.saffron/**` writable. A rename follows a symlink at
+neither end of its own path, so a link at the source or destination file
+moves or is replaced. The finish refuses both ends all the same.
 Separately, a spec the finish cannot parse is skipped in silence. A layer
 whose spec is that file stays in the spec directory, and the night's log
 never says why.
@@ -167,6 +173,9 @@ never says why.
   renames, as b-8d654b's Done asks.
 - **A layer whose spec file is missing from the tree.** It yields no
   failure and no `by_id` entry. It stays as it is today.
+- **A spec directory that is a dangling symlink.** `discover_specs` raises
+  `SpecError`, a `ValueError`, before the mkdir (`saffron/intake.py:416-417`).
+  Nothing is written, and its message keeps the worktree's path.
 - **`publish_finish`'s worktree and `write_findings`.** Both write to paths
   the host chose, under `out_dir`, never a path the cell's tree holds.
 
@@ -183,12 +192,16 @@ the walk, since nothing below it can be a link. A dangling symlink is not
 missing: `lstat` reads the link itself. Never walk above `workdir`. Raise
 `ValueError` naming the symlinked component from the tree's root, such as
 `.saffron/specs`. Run it before each write, before the mkdir, and on both
-ends of each rename, each right before its own operation.
+ends of each rename, each right before its own operation. The gap between
+the `lstat` and the operation is safe. No cell runs by then, so the host
+is the only writer of `workdir`.
 
 **The failure lines.** Emit them after `discover_specs` and before the
 renames, one per failure, through `emit`. Name the path relative to
-`workdir` and give the failure's `reason`. Start each with `finish: `, as
-the line at `saffron/finish.py:143` does.
+`workdir` and give the failure's `reason`. A reason can name the absolute
+path itself, as an unreadable file's does (`saffron/intake.py:357-358`).
+So drop the worktree's path and its slash wherever the reason holds it.
+Start each with `finish: `, as the line at `saffron/finish.py:143` does.
 
 **The fixture.** Both witnesses use the `stack` fixture and batch B, with
 TE-21 as the unrun task. Plant each symlink or broken file inside the
@@ -221,13 +234,14 @@ that each case's component appears in the message. The batch with no
 symlink uses `tmp_path / "link" / "work"`, where `link` is a symlink to
 another directory under `tmp_path`.
 
-**Criterion 2's five files.** Record a revision for TE-7 at its own path
+**Criterion 2's six files.** Record a revision for TE-7 at its own path
 with text that has no frontmatter. Record one for TE-20 whose acceptance
 mutant's `find` also appears in its body. Record one for TE-21 at
 `.saffron/specs/TE-21-other.md` with no frontmatter. Plant `ten.md` and
-`TE-1-one.md` with a frontmatter fence that never closes. Assert one line
-names each of the five paths, that it carries the reason's text, and that
-no line names `tmp_path / "work"`. Assert exactly five lines, and a
+`TE-1-one.md` with a frontmatter fence that never closes. Plant
+`gone.md` as a relative symlink to a file that does not exist. Assert one
+line names each of the six paths, that it carries the reason's text, and
+that no line names `tmp_path / "work"`. Assert exactly six lines, and a
 commit.
 
 The host runs each wrong version listed under a criterion. Do not run them.
