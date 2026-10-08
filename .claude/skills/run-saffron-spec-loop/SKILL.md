@@ -232,8 +232,11 @@ Every verified blocker is fixed, deferred to `{KNOWN}`, or answered by the opera
 **A batch is the default.** The operator set this on 2026-10-07, in run 30.
 Start `saffron batch --repo . --budget <total>` over the order, with the token
 and listeners as in (a). Use `--stack` unless a parent is an open pull request
-outside the order (b-e0e1cf). Run `driver.py record` for each task once it
-packages. Review each pull request while the next cell runs, hold its fixes as
+outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
+`{}`. It follows each task in turn and never expires. Run `driver.py record`
+for a task when its hand-over wake-up names the next spec, since PACKAGE is
+then done. Record the last task when the batch exits. Stop the watch once the batch
+exits. Without the tool, fall back to the Monitor in (a). Review each pull request while the next cell runs, hold its fixes as
 local commits, and restack the layers above once the batch drains
 (b-cab612). The attended path below is the fallback, and taking it is the
 operator's call.
@@ -264,7 +267,12 @@ PYTHONUNBUFFERED=1 SAFFRON_ALLOW_HOST_PROCESS=<listener> uv run --env-file <scra
 
 `<listener>` is the process `docs/HOST-HARDENING.md` lets this host tolerate.
 On a host that tolerates none, leave `SAFFRON_ALLOW_HOST_PROCESS=…` out
-(GOTCHAS, Starting cells). Watch it with a Monitor:
+(GOTCHAS, Starting cells). Watch it with `mcp__cell-watch__watch` and
+`{ "spec": "SA-NNNN" }`. Its description lists the milestones that wake this
+session. Its outcome wake-up comes before PACKAGE, so record on the exit
+notice (b). Call it with `{ "stop": true }` once (b) records the cell.
+
+If that tool is not in your list, watch with a Monitor:
 
 ```bash
 tail -F /tmp/SA-NNNN.log | grep -E --line-buffered "$(uv run .claude/skills/run-saffron-spec-loop/driver.py pattern)"
@@ -293,7 +301,7 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py record SA-NNNN   # SA-NNNN
 
 It reads the ledger, never the transcript (§4.3), prints what the cell spent
 against the spec's budget, and exits 0 only for `READY_FOR_REVIEW`. Stop the
-Monitor now: `tail -F` outlives the cell. A **decided** state — one in
+watch now, since a Monitor's `tail -F` outlives the cell. A **decided** state — one in
 `scheduler.DONE_STATES` — settles the spec for this loop, and only
 `READY_FOR_REVIEW` joins the stack. A
 state that decided nothing keeps the spec pending, and `next` moves past it.
