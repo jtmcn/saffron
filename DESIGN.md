@@ -591,7 +591,7 @@ An isomorphic re-encoding of §4.1: one class per table, one datatype property p
 
 ### 4.7 The event log
 
-Each spec has one `events.jsonl`, shared by every task that spec runs. `saffron watch` follows it. It is a log for a person, and no control reads it.
+Each spec has one `events.jsonl`, shared by every task that spec runs. A stack batch adds two beside it, in `SA-NNNN.spec-review` and `SA-NNNN.spec-write`, for the spec's review and writer sessions (`SA-0253`). `saffron watch` follows them all. It is a log for a person, and no control reads it.
 
 **The kinds are the `Event` union in `saffron/events.py`.** Each kind is its own frozen dataclass, never one class with a `type` string. The union is the list. This section names no count, because a count here drifts each time a kind lands.
 
