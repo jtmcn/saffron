@@ -71,7 +71,8 @@ cap cannot cover does not start. A REBUT the cap cuts short ends `EXHAUSTED`
 with its blockers standing, never halted at `REBUTTING`.
 Amended 2026-10-07, `SA-0231`: the cap holds under the budget too, and is
 $10.00, the most any of 67 measured REBUTs spent ($9.29, `SA-0223`), rounded
-up. A REBUT it cuts short ends `EXHAUSTED` saying REBUT ran out of its budget.
+up. A REBUT it cuts short, where `run_rebut` would halt at
+`REBUTTING`, ends `EXHAUSTED` saying REBUT ran out of its budget.
 
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the
