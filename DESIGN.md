@@ -1040,9 +1040,10 @@ still credits its dependents. It follows that a mutant pins text the existing co
 already determines. A spec creating new code declares a witness and no mutant,
 accepting a `skip`. That is a real limit on the answer this gate gives, not a rule of
 thumb. This is a tripwire and not a boundary: paraphrase evades it, and the cell can
-read the spec file itself (item 80). What the cell cannot reach is any ref outside the
-branches. Its seed fetches `refs/heads/*` by an explicit refspec and takes no tags.
-So no other ref in the mirror reaches the cell, whatever git config names (`SA-0237`).
+read the spec file itself (item 80). The seed fetches the mirror's branches by an
+explicit refspec and takes no tags (`SA-0237`). So a ref outside `refs/heads/*`, such as
+the record's, stays out of the cell under either config measured to widen a bare fetch.
+Anything kept on a branch still reaches the cell.
 
 **What the gate does.** A spec's `acceptance:` already pairs a claim with the
 witness that guards it. Each entry can also declare a **mutant**: the
