@@ -208,9 +208,11 @@ TE-21 as the unrun task. Plant each symlink or broken file inside the
 worktree once `add_worktree` returns. Patch `git_mirror.add_worktree` with
 a wrapper that calls the real one and then plants. The mirror's history
 then needs no new commit. Make an `outside` directory under `tmp_path` for
-each symlink's target. Snapshot every path under it after the plant, and
-compare once `commit_finish` raises. Assert the mirror's `for-each-ref`
-output is unchanged, and that `worktree list` prints one line.
+each symlink's target. Snapshot every path under it and its bytes (`lstat`
+for a link) after the plant, and compare once `commit_finish` raises. A
+write through the file link changes bytes and creates no path. Assert the
+mirror's `for-each-ref` and `count-objects -v` output are unchanged, and that
+`worktree list` prints one line.
 
 **Criterion 1's nine cases.** Each runs in its own `monkeypatch.context()`
 with its own `workdir`.
