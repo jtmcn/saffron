@@ -5,6 +5,7 @@ type: feature
 priority: 2
 depends_on: [SA-0233]
 estimated_lines: 290
+estimate_measured: true
 touches:
   - saffron/cell/runtime.py
   - saffron/cell/egress_report.py
@@ -57,8 +58,8 @@ acceptance:
       with the runtime's `inspect`, and its whole log with the runtime's
       `logs`, both of that command's streams. It reads the cell's resolver
       file and the kernel's IPv4 route table, each by an exec in the task's
-      own cell. That exec reads at most 65536 bytes of the file, with a
-      timeout of at most 30 seconds. Each read is one `Teardown` event with
+      own cell. That exec runs the cell's own `head`, capped at 65536
+      bytes, with a timeout of at most 30 seconds. Each read is one `Teardown` event with
       `ok` true. Its detail starts with the read's label, `proxy state`,
       `proxy log`, `cell resolver` or `cell route`, and carries what the
       read returned. The witness scripts a 60-line log with lines on both
@@ -75,7 +76,7 @@ acceptance:
       - The log read from the command's stdout alone, so a runtime that writes the container's stderr to its own stderr loses those lines.
       - The resolver and the route read from the proxy container rather than the task's cell.
       - The route read with `ip route`, which the cell base image does not carry.
-      - The cell's two files read whole, so a cell that grew one to gigabytes fills the host's memory.
+      - The cell's two files read with `cat`, so the argv carries no byte cap at all.
       - The two execs left at `exec_`'s default timeout of 900 seconds.
       - The state read through `container_ip`, so only the proxy's address is kept.
       - The reads run on every `AgentFailed` the plan turn raises, so a first call that was served reads them too.
@@ -84,11 +85,11 @@ acceptance:
       - The reads run on a `rejected` window as well, since its attempt also says the provider served nothing.
   - claim: >-
       A read that fails is reported as failed and changes nothing else. The
-      witness fails each of the four reads in turn, in two ways: its runtime
-      call exits non-zero, and its runtime call raises `CellRuntimeError`.
-      In each of the eight cells, that read is one `Teardown` event with
+      witness fails each of the four reads in turn, in three ways. Its
+      runtime call exits non-zero, raises `CellRuntimeError`, or times out.
+      In each of the twelve cells, that read is one `Teardown` event with
       `ok` false. Its detail starts with the read's label and carries the
-      failure's text. The other three reads are still reported with `ok`
+      failure's text, which for a timeout says `timed out`. The other three reads are still reported with `ok`
       true. The outcome and the task row still say `PROVIDER_UNREACHABLE`,
       the run row reads `COMPLETE`, the proxy is still stopped and the
       cell's container is still removed.
@@ -97,6 +98,7 @@ acceptance:
       - A failed read skipped with no event.
       - A failed read reported with `ok` true.
       - A failed read whose detail drops the runtime's stderr or the exception's text.
+      - A timed-out read whose detail is its label alone, since a timeout's stderr can be empty.
       - One try around all four reads, so the first failure hides the reads after it.
       - A raise let out of the reads, so `run_one_cell` raises instead of returning, and `cell_down` never runs.
   - claim: >-
@@ -112,7 +114,7 @@ acceptance:
       - The binary spelled as a literal rather than read from the selected dialect.
       - A read built on `_must`, so a non-zero exit raises.
       - The log read with a follow flag, so it waits out its timeout.
-      - No timeout passed, so `_call` waits its default 120 seconds.
+      - A read built on `call` with no timeout, so it waits `call`'s default of 120 seconds.
 ---
 
 ## Context
@@ -190,21 +192,28 @@ changes.
 
 1. **Two runtime reads.** Add `inspect_container(name)` and
    `container_logs(name)` to `saffron/cell/runtime.py`. Each runs
-   `[dialect().binary, "inspect" | "logs", name]` through `_call` with a
-   timeout of at most 30 seconds, and returns the `Completed`. Add no
-   `Dialect` member. Both verbs are already spelled the same under both
-   dialects at base, by `container_ip` and `_proxy_log`.
+   `[dialect().binary, "inspect" | "logs", name]` through `_call` and
+   returns the `Completed`. Each owns its timeout, a `timeout_s` defaulting
+   to 30 seconds, and `egress_report.py` passes none. Add no `Dialect`
+   member. Both verbs are already spelled the same under both dialects at
+   base, by `container_ip` and `_proxy_log`. Podman's `logs` was never
+   measured, since the 2026-09-11 evidence measured only `inspect`. A
+   runtime that spells it otherwise shows up as a failed read.
 2. **The four reads.** Write `saffron/cell/egress_report.py` with one
    function taking the cell's container name. It makes the four reads in
    order. The proxy's state is `runtime.inspect_container(proxy.PROXY_NAME)`
    and its log is `runtime.container_logs(proxy.PROXY_NAME)`, stdout then
    stderr. The cell's resolver is `runtime.exec_(container, ["head", "-c",
    "65536", "/etc/resolv.conf"], ...)`. Its route is the same exec of
-   `/proc/net/route`. Each passes a timeout of at most 30 seconds. The cell
-   is untrusted and root inside, so the host bounds what it reads. It
-   returns one `(ok, detail)` pair per read. A read is failed when its call
-   exits non-zero or raises `CellRuntimeError`. Then `ok` is false and the
-   detail carries the stderr or the exception's text. Each read has its own
+   `/proc/net/route`. Each passes `timeout_s=30` to `exec_`. The byte cap
+   is the cell's own `head`, so a cell that replaced `head` is not held to
+   it. The host's only bound is that timeout. Its `subprocess.run` with
+   `capture_output` holds both streams in memory until the process ends
+   (`saffron/cell/runtime.py:279`).
+   It returns one `(ok, detail)` pair per read. A read is failed when its
+   call exits non-zero, times out or raises `CellRuntimeError`. Then `ok` is
+   false. The detail says `timed out` for a timeout, and otherwise carries
+   the stderr or the exception's text. Each read has its own
    try, so a failure never stops the next read. Each detail starts with
    its read's label from criterion 1.
 3. **When they run.** In `_drive_cell`, bind a flag false before the `try`,
@@ -278,9 +287,16 @@ and of `test_a_plan_turn_the_provider_served_nothing_ends_provider_unreachable`'
 second half. Run each under its own `tmp_path` subdirectory.
 
 **Criterion 2's witness.** One plain `def` looping over the four reads and
-the two failure forms. Make the failing read's stub return
-`runtime.Completed(1, "", <sentinel>)` or raise
-`runtime.CellRuntimeError(<sentinel>)`, and the other three succeed.
+the three failure forms. Make the failing read's stub return
+`runtime.Completed(1, "", <sentinel>)`, raise
+`runtime.CellRuntimeError(<sentinel>)`, or return
+`runtime.Completed(124, "", "", timed_out=True, bound="wall")`. The other
+three succeed.
+
+**Where the operator reads it.** The terminal line passes a teardown
+detail through `_clean` with `_DETAIL_BOUND`, 500 characters, and turns
+control characters to spaces (`saffron/events.py:864`). So the terminal shows the start of each read,
+and the whole log reaches the operator only in `events.jsonl`.
 
 **Criterion 3's witness.** Copy `_as_podman`'s shape in
 `tests/test_runtime.py`. Set `runtime._selected` to each of
@@ -298,6 +314,8 @@ contraction, the perfect tense or a sentence over 25 words. Keep each
 docstring within ten lines.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 tokens. `estimated_lines` is an author's count:
-about 85 source lines and 205 test lines. Keep comments to one or two
-lines.
+`feature` ceiling of 3000 tokens. A prototype of this spec at `f0f7b61e`
+counted 1161 changed tokens by `size_gate`, and `estimated_lines` is those
+tokens over four. Its three witnesses passed, and each failed with the
+source reverted. Keep comments to one or two lines and the tests close to
+the shapes above.
