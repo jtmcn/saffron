@@ -45,7 +45,8 @@ acceptance:
   - claim: >-
       When `EventLog.append` bounds an `Agent` event, the bounded event keeps
       each of `input_tokens`, `cache_read_input_tokens`,
-      `cache_creation_input_tokens` and `model` that the cell event carried.
+      `cache_creation_input_tokens` and `model` that the cell event carried,
+      within the bound criterion 3 names.
       They sit verbatim in a `usage` field on the bounded event, and
       `read_log` returns them. A key the cell event lacked is absent from
       `usage`, and a carried null stays null. No other key of the cell
@@ -165,6 +166,10 @@ per-message series with holes at its most useful points.
 
 ## Out of scope
 
+- **Tying the two key tuples.** `images/agent_runner.py:37-41` still
+  defines its own tuple, and nothing compares it with `STEP_USAGE_KEYS`.
+  Backlog item b-0efc31 owns that test. Carry the comment that names the
+  runner's tuple as the source over to `STEP_USAGE_KEYS` in `events.py`.
 - **The runner.** `images/agent_runner.py` keeps placing the counts on the
   first event. Changing it means an image rebuild, and the host can keep
   them alone.
