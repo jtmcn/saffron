@@ -151,11 +151,14 @@ Backlog item **b-98a3be**, under `DESIGN.md` §3.4. §3.4 says
 parent `SA-0227` builds the chain. This spec builds the command that drives
 it.
 
-Line numbers below were read at `37d24d50`. No file under `saffron/` differs there from `3d594729`.
+Every `saffron/cli.py` line below was read at `1d57b6f9`, the head of
+`SA-0224`, this spec's second parent. That head adds the `migrate` parser,
+its dispatch and `_migrate`. Every other file's lines were read at
+`a64e7b15`.
 
 **No command drafts a spec.** `main` registers `replay`, `cell`, `queue`,
-`batch`, `reconcile`, `watch`, `fold`, `chains` and `serve`
-(`saffron/cli.py:106-217`). None of them takes an item.
+`batch`, `reconcile`, `watch`, `fold`, `migrate`, `chains` and `serve`
+(`saffron/cli.py:107-227`). None of them takes an item.
 
 **What `SA-0227` adds.** Its spec sits beside this one
 (`.saffron/specs/SA-0227-no-task-drafts-a-spec-so-the-spec-chain-runs-outside-the-record.md`).
@@ -165,7 +168,8 @@ It adds `saffron/draft.py` with two names this spec calls.
   drives the chain on a task its caller minted with `spec_id`. It calls
   `write(prompt)` once. That prompt's first line begins `context:`, it
   holds an `id:` line, and it quotes the item between `<item>` and
-  `</item>` lines. It calls `review(path, text)` with the recorded path,
+  `</item>` lines. Its criterion 1 pins that quote byte for byte, on an
+  item holding a `\r\n` and a non-ASCII character. It calls `review(path, text)` with the recorded path,
   `.saffron/specs/<spec_id>-<slug>.md`, and the latest recorded text. It
   calls `revise(path, text, review_text)` at most once. It sets the task's
   end state itself. An adapter's raise sets `GATE_ERROR` and propagates. A
@@ -190,25 +194,25 @@ so this spec sets it.
 **The parts this command reuses.**
 
 - `_batch` runs `preflight.check_readiness` and builds a `PinnedBase` from
-  its `mirror`, `url` and `base_sha` (`saffron/cli.py:1554-1604`).
+  its `mirror`, `url` and `base_sha` (`saffron/cli.py:1573-1623`).
 - `follow_up.next_spec_id(origin_id, specs_dir, ledger, repo_id)` returns
   one more than the highest number of the origin's prefix. It reads the
   live files, their `done/` and this repo's tasks
   (`saffron/follow_up.py:50-78`).
 - `_stack_mint` upserts the repo at the pinned url. It opens a run at
-  `base_sha` and a task on it (`saffron/cli.py:1036-1061`).
-- `_stack_review` (`saffron/cli.py:878-949`) and `_stack_revise`
-  (`:952-1033`) each run one spec session cell. Given no layer, each seeds
+  `base_sha` and a task on it (`saffron/cli.py:1055-1080`).
+- `_stack_review` (`saffron/cli.py:897-968`) and `_stack_revise`
+  (`:971-1052`) each run one spec session cell. Given no layer, each seeds
   it at `base_sha`. Each reads its prompt and gates from that base's export
-  (`:900-903`, `:986-989`). Each reads only `candidate.spec.id` and
+  (`:919-922`, `:1005-1008`). Each reads only `candidate.spec.id` and
   `candidate.path.name` from its candidate.
 - A follow-up's writer runs one spec session cell through
   `end_review.layer_cell` and `spec_review.run_spec_writer`
-  (`saffron/cli.py:1126-1150`).
+  (`saffron/cli.py:1145-1169`).
 
 **The review's sentence is wrong for a draft.** Given a spec text, the
 review prompt says a revision replaces the queued file
-(`saffron/cli.py:923-931`). A draft has no queued file in either review.
+(`saffron/cli.py:942-950`). A draft has no queued file in either review.
 
 **A task at a spec's own sha reads as done.** `build_queue` skips a spec
 whose id and sha have a task in `DONE_STATES`
@@ -221,7 +225,7 @@ hide that spec from every batch once the operator commits it unchanged.
 1. **The subcommand.** `saffron draft <item> --repo <repo>`. `--repo`
    defaults to the current directory, as `batch`'s does. The command runs
    inside the handler that maps any raise to exit 2
-   (`saffron/cli.py:271-279`). Add `draft` to the module docstring's list.
+   (`saffron/cli.py:290-298`). Add `draft` to the module docstring's list.
 2. **Readiness.** Run it as `_batch` does, then build the `PinnedBase`. A
    failed readiness prints `draft: readiness failed at <step>: <detail>`
    and exits 2.
@@ -246,10 +250,10 @@ hide that spec from every batch once the operator commits it unchanged.
      which is the top layer's head. It exports `.saffron/` at `base_sha` under
      `out_dir / "spec-write" / <id>`, the directory `_stack_revise` uses.
      It loads that export's policy with `_spec_review_policy`, as the
-     review and revision cells do (`saffron/cli.py:866-875`). Its system
+     review and revision cells do (`saffron/cli.py:885-894`). Its system
      prompt is `spec_writer_system_prompt` of that policy. Its agent is named for the id, with `SPEC_WRITER_TIMEOUT_S`.
      Its prompt is the prompt it is given, then the `base:` line and the
-     snapshot sentence a revision prompt sends (`saffron/cli.py:1005-1006`).
+     snapshot sentence a revision prompt sends (`saffron/cli.py:1024-1025`).
      Each added line stands alone, with no blank line before them. That
      holds whether or not the given prompt ends in a newline.
    - `review` calls `_stack_review`'s callable with a candidate, no layer,
@@ -266,7 +270,8 @@ hide that spec from every batch once the operator commits it unchanged.
    byte for byte. Leave its three string literals as they are.
 7. **The end.** Print one line naming the id and the state.
    On `SPEC_DRAFTED` or `SPEC_WITHHELD`, write `Drafted.text` to
-   `Drafted.path` under `--repo`, then print that path. `SA-0227` makes
+   `Drafted.path` under `--repo` with `encoding="utf-8"`, matching the
+   decode, then print that path. `SA-0227` makes
    both the last recorded spec text's, so no ledger read is needed. Exit 0 for
    `SPEC_DRAFTED` and 1 for `SPEC_WITHHELD`. Every other state exits 2 and
    writes nothing. Commit nothing, stage nothing, and open no pull request.
@@ -279,9 +284,9 @@ imports nothing from `records`.
 - Rendering a backlog record to an item file. The operator passes a file
   (§3.4).
 - Closing the run. `_stack_mint` leaves its runs open too
-  (`saffron/cli.py:1036-1061`).
+  (`saffron/cli.py:1055-1080`).
 - The `runtime.unattended_refusal()` check a batch makes first
-  (`saffron/cli.py:1529-1533`). An operator starts a draft, so it is
+  (`saffron/cli.py:1548-1552`). An operator starts a draft, so it is
   attended.
 - A budget over the whole draft. Each session keeps its own caps in
   `saffron/spec_review.py`.
@@ -358,6 +363,6 @@ Assert its system prompt is the writer's under an empty `Policy`.
 **Measured on a prototype.** A prototype at this spec's commit, with
 `SA-0226`'s and `SA-0227`'s revised prototypes applied under it, passed all
 four witnesses. Each failed with `saffron/cli.py` reverted. Its diff
-measured 1721 changed tokens. Each of the 36 wrong versions above was
-applied to it as an edit under a fresh bytecode cache. Each failed its own
-criterion's witness. So did criterion 4's mutant.
+measured 1721 changed tokens. The 36 wrong versions above, plus
+criterion 4's declared mutant, were each applied to it as an edit under a
+fresh bytecode cache. Each failed its own criterion's witness.
