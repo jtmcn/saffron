@@ -70,6 +70,8 @@ acceptance:
       - Every tag fetched with `--tags` beside the branch refspec, so the tag arrives under either config.
       - Only the default branch fetched, as `git fetch --no-tags origin HEAD`, so the base off `main` never arrives and the checkout fails.
       - Only `main` fetched, by the refspec +refs/heads/main:refs/remotes/origin/main, so the base off `main` never arrives and the checkout fails.
+      - The fetch runs as GIT_CONFIG_COUNT=0, so the environment's config is dropped and a global gitconfig still widens the fetch.
+      - The fetch unsets GIT_CONFIG_COUNT with env -u, with the same result.
   - claim: >-
       A worktree seeded at a stacked task's parent head still holds the
       parent's commits, and a patch exported against that head holds only
@@ -144,6 +146,12 @@ Name what the seed fetches:
 
 ## Out of scope
 
+- **Two forbidden sentences.** `saffron/task.py:227` and
+  `tests/test_package.py:197` say the seed fetches the default refspec.
+  They stay true, since the named refspec is the one `remote add` writes.
+- **The image's git.** The measurements ran on host git 2.54. The cell
+  image's git (2.47.3, measured for `SA-0232`) is unmeasured for this fetch.
+
 - **The mutants ref.** Moving mutants out of spec frontmatter is item
   80's remaining work, parked for an operator decision. This spec
   closes the fetch path whatever that ref ends up holding.
@@ -185,9 +193,14 @@ with `_commit_file` on a new branch, `saffron/parent`, then check `main`
 out again in the origin. Write the two `refs/saffron/*` commits and the
 annotated tag with `git hash-object`, `git mktree`, `git commit-tree` and
 `git update-ref`. Take the mirror with `ensure_mirror`. Seed once per
-config, each into its own volume. Set the config through
-`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and `GIT_CONFIG_VALUE_0` with
-`monkeypatch.setenv`, after the fixture is built. The host-side seed
+config, each into its own volume. Drive `tagOpt` through a global
+gitconfig file named by `GIT_CONFIG_GLOBAL`, as tests/test_worktree.py:1762
+does. Drive the fetch refspec through `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0`
+and `GIT_CONFIG_VALUE_0`. Set both with `monkeypatch.setenv` after the
+fixture is built, and point `GIT_CONFIG_SYSTEM` at an empty file so the
+host's own config stays out. Patch `SA-0232`'s pause, so a wrong version
+whose fetch fails costs nothing. Isolating git config is not the build: the
+explicit refspec and `--no-tags` are. Quote the refspec in the script. The host-side seed
 inherits that environment. Assert the base's file, `git cat-file -e`
 failing on each of the four objects, and the ref list from
 `git for-each-ref`. Do not set `remote.origin.fetch` to `+refs/*:refs/*`.
