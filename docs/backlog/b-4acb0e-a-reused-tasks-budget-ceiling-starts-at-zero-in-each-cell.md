@@ -5,7 +5,7 @@ status: open
 tier: 2
 filed: 2026-09-27
 closed:
-specs: []
+specs: [SA-0241]
 prs: []
 commits: []
 cites: [§4.3]
@@ -33,3 +33,5 @@ holds a second cell on one task that stops at the task's ceiling.
 ## Record
 
 - 2026-09-27: filed from the spec loop's run 19.
+- 2026-10-07: specced as `SA-0241`. The operator kept each cell's own spend
+  apart from the task's, and a task resumed at its ceiling ends `EXHAUSTED`.
