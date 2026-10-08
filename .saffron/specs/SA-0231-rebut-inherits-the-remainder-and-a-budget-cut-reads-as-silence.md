@@ -4,7 +4,7 @@ title: REBUT inherits the task's remainder, and a rebuttal its budget cut reads 
 type: bug
 priority: 1
 depends_on: [SA-0230]
-estimated_lines: 160
+estimated_lines: 184
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -54,8 +54,10 @@ acceptance:
       `budget_usd`. Each session's `max_budget_usd` is $10.00 less what
       REBUT's earlier sessions cost, for the rebuttal turn, its extraction
       turn and the verdict. No session inherits the task's remainder or
-      `REVIEW_FLOOR_USD`. A REBUT whose rebuttal turn spends the cap ends
-      `EXHAUSTED`. The witness drives five budgets. Two leave a remainder
+      `REVIEW_FLOOR_USD`. A REBUT whose rebuttal turn spends the cap, and
+      which `run_rebut` would halt at `REBUTTING`, ends `EXHAUSTED`. A
+      re-run's own end stands, as criterion 2 says. The witness drives five
+      budgets. Two leave a remainder
       larger than the cap ($20.00) or between the floor and the cap ($3.75).
       One leaves less than the floor ($1.00), one exactly none ($0.75), and
       one less than none ($0.25). A `Budget` event follows only a REBUT that
@@ -77,16 +79,20 @@ acceptance:
       - A cap of $7.00, SA-0203's figure, which cuts the measured $9.29 REBUT.
       - A cap of $9.29, the measured maximum before rounding.
   - claim: >-
-      A REBUT the cap cut short ends `EXHAUSTED`, with its blockers standing
-      and no `rebut_result`, under the budget as well as past it. Its REBUT
-      phase line and the `why` in `rebuttal.json` both say REBUT ran out of
-      its $10.00 budget. Neither says the rebuttal moved no commit or made no
-      argument. The witness drives a cut at each of three sessions in each
-      of criterion 1's five budgets. They are a rebuttal turn the cap ends
-      with nothing committed, an extraction turn the cap refuses, and a
-      verdict session the cap ends. A rebuttal turn that fails for any other
-      reason, with nothing committed, still halts at `REBUTTING` with the
-      words it has at base, in all five budgets.
+      A REBUT the cap cut short, where `run_rebut` would halt at
+      `REBUTTING`, ends `EXHAUSTED`. Its blockers stand and it has no
+      `rebut_result`, under the budget as well as past it. Its REBUT phase
+      line and the `why` in `rebuttal.json` both say REBUT ran out of its
+      $10.00 budget, a figure read from `REBUT_CAP_USD`. Neither says the
+      rebuttal moved no commit or made no argument. A red re-run's
+      `EXHAUSTED` and an errored re-run's `GATE_ERROR` stand, each with its
+      `rebut_result`, after the cap refused the extraction turn. The witness
+      drives each case in each of criterion 1's five budgets. The cuts are a
+      rebuttal turn the cap ends with nothing committed, an extraction turn
+      the cap refuses, and a verdict session the cap ends. A rebuttal turn
+      that fails for another reason, before REBUT's sessions spend the cap,
+      still halts at `REBUTTING` with the words it has at base. With the
+      constant set to $8.00, the line says $8.00.
     witness: tests/test_session.py::test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence
     mutant:
       file: saffron/cell/session.py
@@ -99,6 +105,9 @@ acceptance:
       - The cut is read only from the rebuttal turn's error, so a verdict session the cap ends leaves the task at `REBUTTING`.
       - The cut is read from the session's `error_max_budget_usd` subtype, so an extraction turn the cap refuses before it starts leaves the task at `REBUTTING`.
       - The out-of-budget line is written only past the budget, and under it the task ends `EXHAUSTED` with the old words.
+      - Any cap refusal turns the outcome into `EXHAUSTED`, so an errored re-run after a refused extraction turn ends `EXHAUSTED`, not `GATE_ERROR`.
+      - Any cap refusal discards the `rebut_result`, so a red re-run after a refused extraction turn loses it.
+      - The line spells $10.00 as a literal, so a cap set to $8.00 still reads $10.00.
 ---
 
 ## Context
@@ -125,6 +134,13 @@ with nothing left raises `implement.AgentFailed` and marks the pool
 refused. So does a failed call that brings the spend to the pool
 (`saffron/cell/session.py:172-191`). The wrapper's figure replaces the one
 `run_rebut` passed in.
+
+**A re-run's own end.** A rebuttal that committed reaches the gate re-run
+even when the pool refused its extraction turn. An aborted or drifted
+re-run is `GATE_ERROR` (`saffron/cell/session.py:3042-3043`), a red one
+`EXHAUSTED`, and `run_rebut` returns either as it is
+(`saffron/phases/rebut.py:716-724`). The host turns only a `REBUTTING`
+result into `EXHAUSTED` (`saffron/cell/session.py:3147`).
 
 **How a cut reads today.** A rebuttal turn that fails comes back as an
 error with no rebuttals (`saffron/phases/rebut.py:210-215`). With HEAD
@@ -160,17 +176,23 @@ The operator decided both parts on 2026-10-07.
 
 1. **REBUT's budget is its own ceiling, always.** Build the pool for every
    REBUT, at any spend, and wrap every REBUT session in it. Set it to
-   $10.00. Rename the constant to drop the word overrun, since it no longer
-   applies only past the budget. Its one-line comment cites the
-   re-measurement: 67 REBUTs, a maximum of $9.29 (`SA-0223`), 2026-10-07. Pass `run_rebut` the cap's figure, not
-   `critic_budget(...)`. The wrapper replaces it on every call anyway.
+   $10.00. Rename the constant `REBUT_CAP_USD`, since it no longer applies
+   only past the budget. Its one-line comment cites the re-measurement: 67
+   REBUTs, a maximum of $9.29 (`SA-0223`), 2026-10-07. Pass `run_rebut` the
+   cap's figure, not `critic_budget(...)`. The wrapper replaces it on every
+   call anyway. A REBUT over $10.00 with a large remainder now ends
+   `EXHAUSTED` where it used to reach `READY_FOR_REVIEW`. That is the cost
+   of a ceiling of its own.
    REVIEW keeps `critic_budget` and its floor, unchanged
    (`saffron/cell/session.py:2805`).
 2. **A cut reads as a cut.** Say the pool refused a session and
    `run_rebut` returned `REBUTTING`. The task then ends `EXHAUSTED` with no
-   `rebut_result`, under the budget as past it. Replace `run_rebut`'s line
+   `rebut_result`, under the budget as past it. Any other result stands,
+   a red re-run's `EXHAUSTED` and an errored re-run's `GATE_ERROR` included,
+   with its `rebut_result`. Replace `run_rebut`'s line
    before `rebuttal.json` is written. The new line starts with "REBUT ran
-   out of its $10.00 budget", the figure read from the constant. The error
+   out of its $10.00 budget", the figure read from `REBUT_CAP_USD` when the
+   line is written. The error
    of the session the cap ended can follow it. It never carries the old
    line. `rebuttal.json` keeps `run_rebut`'s own `state`.
 3. **The `Budget` event is unchanged.** It still follows only a REBUT that
@@ -201,6 +223,14 @@ The operator decided both parts on 2026-10-07.
 and the change keeps that method's body as it is. Criterion 1's mutant
 drops the per-call ceiling, and criterion 2's stops a failed session that
 spends the pool from marking it refused.
+
+**`SA-0230` lands first, in the same file.** It adds an IMPLEMENT
+`max_budget_usd` near the top of `_drive_cell`. Re-grep each mutant's `find`
+after that merge, and match on text, never on the line numbers below. On
+2026-10-07 `SA-0230`'s prototype was applied under this spec's prototype.
+Each `find` still matched exactly once. Both new witnesses failed with
+only `SA-0230` applied, and every wrong version and both mutants still
+failed them.
 
 **Texts the change makes false.** The comment above the floor says REBUT's
 sessions share `REBUT_OVERRUN_CAP_USD` once past the budget
@@ -247,7 +277,7 @@ cost. That is the shape `SA-0087`'s REBUT row carried in the ledger.
 - Costs $10.25, $0.50 and $0.75. The ceilings are $10.00 alone, and the
   state `EXHAUSTED`.
 
-**Criterion 2's witness** runs four REBUTs per budget. Three are cuts.
+**Criterion 2's witness** runs six REBUTs per budget. Three are cuts.
 
 - The rebuttal turn raises the budget cut above at $10.00, with no commit
   after it, then $0.50 and $0.75.
@@ -265,14 +295,31 @@ Each cut asserts all of these.
   contain "REBUT ran out of its $10.00 budget".
 - Neither contains "moved no commit" or "made no argument".
 
-The fourth run's rebuttal turn raises `implement.AgentFailed`. It carries
+Two runs cost $10.25, $0.50 and $0.75, with one commit after the
+rebuttal, so the pool refuses the extraction turn. Each passes the helper
+`suites` of green, green, then the re-run.
+
+- An errored re-run, one `tests` result with status `error`, asserts
+  `GATE_ERROR`.
+- A red re-run, one lint failure, asserts `EXHAUSTED`.
+- Both assert a `rebut_result` that is not `None`, and a last REBUT line
+  without "ran out of".
+
+The sixth run's rebuttal turn raises `implement.AgentFailed`. It carries
 what `_cut_off_turn` (`tests/test_session.py:1253`) returns at a cost of
-$0.40, with no commit after it. It asserts the state `REBUTTING`. The
-last REBUT `PhaseStart`'s detail contains "moved no commit and made no argument" and not "ran out
-of".
+$0.40, with no commit after it. It asserts the state `REBUTTING`. The last
+REBUT line contains "moved no commit and made no argument" and not "ran
+out of".
+
+Last, outside the loop, set `session.REBUT_CAP_USD` to $8.00 with
+`monkeypatch.setattr`. Run the rebuttal-turn cut at $8.00 with a $20.00
+budget. Assert `EXHAUSTED` and a line containing "REBUT ran out of its
+$8.00 budget". At base the attribute does not exist, so the call raises
+inside the test rather than at collection.
 
 **Wrong versions.** On 2026-10-07 a prototype of this change was built at
-`958db033`, with the $10.00 cap and both re-figured SA-0203 tests. Every
+`958db033`, with the $10.00 cap and both re-figured SA-0203 tests. It was
+run again over `SA-0230`'s prototype. Every
 wrong version under criteria 1 and 2 was applied to it, and that
 criterion's witness failed. So did both mutants. Both new witnesses and the
 re-figured cut-short test failed with the source reverted to the base.
@@ -282,5 +329,5 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size.** `saffron/cell/**` is in `elevate_on`, so `size` blocks here. The
-prototype, counted by `size_gate`, came to 640 changed tokens against the
+prototype, counted by `size_gate`, came to 735 changed tokens against the
 `bug` ceiling of 1300. `estimated_lines` is those tokens over four.
