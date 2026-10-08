@@ -225,6 +225,12 @@ its descendants.
 **b-cab612**. The operator made `saffron batch` the loop's default, and the
 skill still drives one attended cell per spec.
 
+**Placed 2026-10-07**, from `SA-0230`'s spec review: **b-3bba0f**. The cut
+re-queue cap looks for an earlier row. A batch resumes the same row, so a
+second cut re-queues again at a full budget each time.
+Then **b-032c61**, from `SA-0244`'s review. A start preflight refuses in a
+stack batch is a miss, so the batch refuses the rest of the stack.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
