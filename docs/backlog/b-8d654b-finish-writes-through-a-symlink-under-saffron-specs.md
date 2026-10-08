@@ -4,7 +4,7 @@ title: The finishing commit writes through a symlink a cell committed under .saf
 status: open
 tier: 2
 filed: 2026-10-01
-specs: [SA-0151]
+specs: [SA-0151, SA-0239]
 prs: [628]
 commits: []
 cites: [§2]
