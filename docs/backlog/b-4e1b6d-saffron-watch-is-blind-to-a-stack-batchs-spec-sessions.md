@@ -4,7 +4,7 @@ title: "`saffron watch` shows nothing while a stack batch reviews or writes a sp
 status: open
 tier: 2
 filed: 2026-10-05
-specs: []
+specs: [SA-0253]
 prs: []
 commits: []
 cites: [§4.3]
