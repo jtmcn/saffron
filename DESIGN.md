@@ -333,7 +333,7 @@ The task ends `SPEC_DRAFTED` on a clean review and `SPEC_WITHHELD` on an escalat
 
 **Every review round records its findings one by one.** Each is a `spec_finding` fact with its round, severity, tag, claim and file. A stack batch's spec review writes them too. A defect a later stage confirms can then name the round that raised it, or show that none did. A findings block stored as one text cannot.
 
-**Cost and time come from the attempts.** Each session is a `SPEC_WRITING` or `SPEC_REVIEW` attempt with turns, cost and times (§4.1). Nothing new records them. What is new is a reader that sums them per spec.
+**Cost and time come from the attempts.** Each session is a `SPEC_WRITING` or `SPEC_REVIEW` attempt with turns, cost and times (§4.1). Nothing new records them. The reader that sums them per spec is the task page of the run record view (§6.2).
 
 What stays with the delegate: choosing the item, the pre-flight checks that are not yet commands, and verifying a finding against the base before a revision applies it. The writer prompt asks the writer to verify each finding. Each check the factory takes over later is a gate or a prompt line, never a delegate step.
 
@@ -1357,8 +1357,9 @@ The queue says which task needs you, and the view says why it ended there.
 a view projection of the ledger (ADR 9). A gate result opens onto the failure
 lines its gate reported, read from the ledger and capped at 200. A task page
 reads its spec from the repo's mirror at the run's `base_sha`. It shows the
-text only when that text hashes to the task's `spec_sha`. Diffs stay on GitHub,
-and the page writes nothing.
+text only when that text hashes to the task's `spec_sha`. A task page totals its attempts per phase and for the whole task: the count,
+turns, cost and wall time. A value an attempt lacks shows as unknown, never as
+zero. Diffs stay on GitHub, and the page writes nothing.
 
 ---
 
