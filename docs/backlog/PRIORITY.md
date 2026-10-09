@@ -432,6 +432,10 @@ then **b-aee31f**. A rename re-keys `prose`'s docstring hit, and joining lines
 slips it back under. An escalated stack finish names none of its failures.
 `migrate` drops `spec_findings`.
 
+**Placed 2026-10-08**, from diagnosing b-fe82d9: ~~**b-a63235**~~, then **b-fdbedc**. The finish no
+longer retires a spec, so the delegate retires each one and closes its item
+by hand. A step the repo declares would let the finish do both.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
