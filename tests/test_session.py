@@ -1284,15 +1284,17 @@ def _wall_cut_turn(cost=0.4, *, bound="wall"):
     )
 
 
-def _budget_cut_turn(cost=0.4):
+def _budget_cut_turn(
+    cost=0.4, subtype="error_max_budget_usd", terminal_reason="budget_exhausted"
+):
     """What `run_agent` raises when the in-cell `max_budget_usd` ends a turn:
     `subtype="error_max_budget_usd"`, `terminal_reason="budget_exhausted"`,
     the shape task 87's REBUT and task 203's seventeenth REVIEW session both
-    carried (backlog item 119)."""
+    carried (backlog item 119). Either field can be dropped to drive one."""
     attempt = implement.AttemptResult(
         session_id="sess-1",
-        subtype="error_max_budget_usd",
-        terminal_reason="budget_exhausted",
+        subtype=subtype,
+        terminal_reason=terminal_reason,
         num_turns=10,
         cost_usd_est=cost,
     )
@@ -2276,6 +2278,21 @@ def test_an_implement_turn_its_budget_cap_cuts_is_salvaged_on_the_reserve(
         ),
         (2.0, 0.50, _wall_cut_turn(cost=0.77), 0.75, "wall"),
         (2.0, 0.50, _budget_cut_turn(cost=0.77), 0.75, "the budget cap"),
+        # Each field alone still reads as the cap, so neither clause is dead.
+        (
+            8.0,
+            3.79,
+            _budget_cut_turn(cost=3.25, terminal_reason=None),
+            1.00,
+            "the budget cap",
+        ),
+        (
+            8.0,
+            3.79,
+            _budget_cut_turn(cost=3.25, subtype="error_during_execution"),
+            1.00,
+            "the budget cap",
+        ),
     ]
     for index, (budget, plan_cost, cut, held, word) in enumerate(cells):
         cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
