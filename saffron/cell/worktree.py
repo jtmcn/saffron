@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import shlex
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
@@ -21,6 +22,14 @@ WORKTREE_MOUNT = "/work"
 STATE_MOUNT = "/agent-state"
 GATES_MOUNT = "/gates"
 _MIRROR_MOUNT = "/mirror"
+
+# Printed to the seed's own stdout the moment `git fetch` fails. Never an
+# exit code: a faked `git checkout` can carry the same one (b-f582ee).
+_FETCH_FAILED_MARKER = "SAFFRON_SEED_FETCH_FAILED"
+
+# Every measured recovery came a minute or more after the refusal (b-f582ee).
+# An immediate retry is unmeasured.
+_RETRY_PAUSE_S = 60.0
 
 
 def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Mount]:
@@ -36,6 +45,49 @@ def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Moun
         runtime.Mount("volume", state_volume, STATE_MOUNT),
         runtime.Mount("bind", str(gates_dir), GATES_MOUNT, readonly=True),
     ]
+
+
+def _seed_script(branch: str, base_sha: str) -> str:
+    """The seed's `sh -euc` script: clear the volume, then clone in place.
+
+    Clearing runs first and runs every time, so a retry meets the same
+    volume state a first attempt would. The script stays byte-identical
+    across both attempts. Only the `git fetch` branch prints the marker.
+    Every other step keeps git's own exit code and stderr, which the final
+    raise below still reads.
+    """
+    return (
+        f"cd {WORKTREE_MOUNT} && "
+        "for f in * .[!.]* ..?*; do "
+        '[ -e "$f" ] || continue; '
+        '[ "$f" = lost+found ] && continue; '
+        'rm -rf -- "$f"; '
+        "done && "
+        "git init -q && "
+        f"git remote add origin {_MIRROR_MOUNT} && "
+        "if git fetch -q origin; then :; else "
+        f"printf '%s\\n' {_FETCH_FAILED_MARKER}; "
+        "exit 1; "
+        "fi && "
+        f"git checkout -q -b {branch} {base_sha} && "
+        "git remote remove origin && "
+        "git config user.email saffron@localhost && "
+        "git config user.name Saffron"
+    )
+
+
+def _run_seed(
+    image: str, mirror: Path, volume: str, branch: str, base_sha: str
+) -> runtime.Completed:
+    return runtime.run_ephemeral(
+        image,
+        ["sh", "-euc", _seed_script(branch, base_sha)],
+        mounts=[
+            runtime.Mount("bind", str(mirror), _MIRROR_MOUNT, readonly=True),
+            runtime.Mount("volume", volume, WORKTREE_MOUNT),
+        ],
+        timeout_s=600,
+    )
 
 
 def prepare_worktree(
@@ -83,26 +135,16 @@ def prepare_worktree(
         created.add(state)
     runtime.create_volume(state)
 
-    seed = runtime.run_ephemeral(
-        image,
-        [
-            "sh",
-            "-euc",
-            f"cd {WORKTREE_MOUNT} && "
-            "git init -q && "
-            f"git remote add origin {_MIRROR_MOUNT} && "
-            "git fetch -q origin && "
-            f"git checkout -q -b {branch} {base_sha} && "
-            "git remote remove origin && "
-            "git config user.email saffron@localhost && "
-            "git config user.name Saffron",
-        ],
-        mounts=[
-            runtime.Mount("bind", str(mirror), _MIRROR_MOUNT, readonly=True),
-            runtime.Mount("volume", volume, WORKTREE_MOUNT),
-        ],
-        timeout_s=600,
-    )
+    seed = _run_seed(image, mirror, volume, branch, base_sha)
+    if seed.returncode != 0 and _FETCH_FAILED_MARKER in seed.stdout:
+        # A fetch that failed once is worth one more read (§4.3). A seed
+        # that failed somewhere else gains nothing from repeating.
+        print(
+            "worktree seed's fetch failed, retrying once after "
+            f"{_RETRY_PAUSE_S:.0f}s: {seed.stderr.strip()}"
+        )
+        time.sleep(_RETRY_PAUSE_S)
+        seed = _run_seed(image, mirror, volume, branch, base_sha)
     if seed.returncode != 0:
         raise runtime.CellRuntimeError(
             f"seeding the worktree failed: {seed.stderr.strip()}"
