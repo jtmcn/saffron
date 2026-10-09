@@ -63,9 +63,10 @@ def _symlink(mirror: Path, path: str, target: str) -> None:
 
 
 def _seed_unreadable(mirror: Path) -> None:
-    """Seven paths `file_at` cannot read as text, plus `src/gone_link.py`'s
-    own target, planted before commit `A`'s own `add -A` so none is in any
-    range's diff. `src` itself needs no seeding: it is already a directory.
+    """Six paths `file_at` cannot read as text, plus `src/c_link.py`, an
+    in-tree symlink it can read. All are planted before commit `A`'s own
+    `add -A` so none is in any range's diff. `src` itself needs no seeding:
+    it is already a directory.
     """
     sub = mirror / "vendor" / "sub"
     sub.mkdir(parents=True)
@@ -93,9 +94,9 @@ def _stack_mirror(
 
     `A` seeds `alpha`, `beta` and `gamma`. `M` adds `m.py`. `H1` moves
     `alpha`'s line 2. `H2` moves `beta`'s line 2 and inserts a line into
-    `gamma` after its own line 5. `unreadable` additionally seeds the eight
-    paths `test_a_path_the_mirror_cannot_read_raises_out_of_qualify` drives,
-    untouched by every later commit.
+    `gamma` after its own line 5. `unreadable` additionally seeds the
+    paths `_seed_unreadable` names, untouched by every later commit, and
+    deletes `src/gone.py`'s blob after `H2`.
     """
     config = tmp_path / "gitconfig"
     config.write_text("[diff]\n    context = 0\n")
@@ -919,8 +920,8 @@ def test_a_path_the_mirror_cannot_read_raises_out_of_qualify(tmp_path, monkeypat
     """`qualify` passes `file_at` itself as `anchor`'s `read_head` (backlog
     item b-00534f). A read that raises is never caught: it comes out of
     `qualify` unchanged, and the finding whose read raised gets no
-    `qualifications` row at all. An absent path still reads as no file,
-    and a readable file or in-tree symlink still anchors."""
+    `qualifications` row at all. An absent path reads as no file, and a
+    readable file or in-tree symlink anchors."""
     from saffron.qualify import qualify
 
     built = _build(tmp_path, monkeypatch, unreadable=True)
@@ -941,8 +942,8 @@ def test_a_path_the_mirror_cannot_read_raises_out_of_qualify(tmp_path, monkeypat
             )
         ]
 
-    # `UnreadablePath` is an unreadable mode or an escaping symlink.
-    # `GitError` is a missing blob, and `UnicodeDecodeError` is bad bytes.
+    # `UnreadablePath`: a tree or submodule mode, a symlink out of the tree or to a
+    # non-regular file. `GitError`: a missing blob. `UnicodeDecodeError`: bad bytes.
     raising: list[tuple[str, int, str, type[Exception]]] = [
         ("src", 3, "r-tree", UnreadablePath),
         ("vendor/sub", 3, "r-sub", UnreadablePath),

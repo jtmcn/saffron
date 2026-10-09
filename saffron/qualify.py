@@ -119,7 +119,8 @@ def _qualify_range(
     """One range's findings, anchored over `base..head`, probed and decided,
     each recorded under `task_id` in the order given. Builds no group.
     `qualify` does, across every range's own call, so a later one can
-    extend an earlier one's."""
+    extend an earlier one's. A read the mirror cannot answer raises before
+    any finding in the range is recorded."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
     findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
@@ -206,7 +207,8 @@ def qualify(
     """The join's findings first, over the whole stack, then every layer's
     end-review findings and in-cell concerns, top down. Groups and pools
     the findings every range decides across the whole walk, so the join's
-    findings and the top layer's own can share one group."""
+    findings and the top layer's own can share one group. A read the mirror
+    cannot answer raises out of it, and ranges walked earlier keep their rows."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 
