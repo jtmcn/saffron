@@ -1674,7 +1674,7 @@ def test_a_wrong_versions_survivor_names_the_version_it_came_from():
 
 
 def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_ones():
-    """b-34d743: `expressed` counts only versions the host ran, never one
+    """b-34d743: `expressed` counts every version with an edit except one
     `probe.probe_refusal` refused. `refused` reads a version's own
     `refusal` key, never its summary text. The witness pins six
     arrangements of the line: none, some and all versions refused, each

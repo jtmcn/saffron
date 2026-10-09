@@ -10367,7 +10367,7 @@ def test_a_wrong_version_the_host_refuses_to_run_carries_its_refusal(
     monkeypatch, tmp_path
 ):
     """b-34d743: `probe.probe_refusal`'s own reason lands under `refusal`
-    on exactly the pairs the host declines to run. Six wrong versions drive
+    on exactly the pairs `probe.probe_refusal` refuses. Six wrong versions drive
     the witness: no edit, a declared test path, an escaping path, an
     absolute path, then two `src/x.py` edits. A stubbed mutator refuses the
     second of those, and a scripted `fail` kills the first. Only those two
@@ -10461,6 +10461,8 @@ def test_a_wrong_version_the_host_refuses_to_run_carries_its_refusal(
 
     @contextlib.contextmanager
     def _never(_container, mutant):
+        # `witness_gate` swallows the raise, so the entry is recorded first.
+        cell2.mutated.append(mutant)
         raise AssertionError("the mutator must not be entered")
         yield
 
@@ -10507,8 +10509,7 @@ def test_a_spec_whose_wrong_versions_all_edit_tests_reads_none_of_them_expressed
     monkeypatch, tmp_path
 ):
     """b-34d743: `SA-0200`'s own shape, where every wrong version edited a
-    declared test path and the old line still read most of them expressed.
-    Both versions here edit `spec/`-prefixed paths, so the line reads none
+    declared test path. Both versions here edit `spec/`-prefixed paths, so the line reads none
     expressed and the mutator is entered for neither."""
     from saffron.intake import Criterion
 
