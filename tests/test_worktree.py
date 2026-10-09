@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -554,6 +556,16 @@ def _fake_git(tmp_path, name, match, token, exit_code):
     return fake_dir
 
 
+def _raise_on_real_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Catches a regression to the module attribute, instead of a pause
+    for a real 60 seconds (mirrors tests/test_batch.py's own helper)."""
+
+    def _raise(seconds: float) -> None:
+        raise AssertionError(f"real time.sleep called with {seconds}")
+
+    monkeypatch.setattr(time, "sleep", _raise)
+
+
 def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
     tmp_path, monkeypatch, capsys
 ):
@@ -599,11 +611,7 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
         return result
 
     monkeypatch.setattr(runtime, "run_ephemeral", wrapped)
-    monkeypatch.setattr(
-        worktree.time,
-        "sleep",
-        lambda s: calls.append(("sleep", s, capsys.readouterr().out)),
-    )
+    _raise_on_real_sleep(monkeypatch)
 
     def run(case_hooks, base_sha, branch, n):
         nonlocal hooks, index
@@ -624,6 +632,7 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
             gates_dir=_gates_dir(tmp_path),
             state_volume=f"state{n}",
             created=set(),
+            sleep=lambda s: calls.append(("sleep", s, capsys.readouterr().out)),
         )
 
     retried = (
@@ -682,7 +691,7 @@ def test_a_seed_whose_fetch_fails_twice_raises_after_two_attempts(
 
     monkeypatch.setattr(runtime, "create_volume", lambda name: None)
     monkeypatch.setattr(runtime, "run_ephemeral", fetch_fails)
-    monkeypatch.setattr(worktree.time, "sleep", lambda s: calls.append("sleep"))
+    _raise_on_real_sleep(monkeypatch)
 
     def _never(*_a, **_k):
         raise AssertionError("run_detached must not be reached")
@@ -703,9 +712,18 @@ def test_a_seed_whose_fetch_fails_twice_raises_after_two_attempts(
             gates_dir=_gates_dir(tmp_path),
             state_volume="st",
             created=created,
+            sleep=lambda s: calls.append("sleep"),
         )
     assert calls == ["seed", "sleep", "seed"]
     assert created == {"st"}
+
+
+def test_prepare_worktree_s_sleep_keyword_defaults_to_the_real_clock():
+    """A caller that passes nothing still gets production timing, the same
+    default `follow()` and `run_stack_batch()` carry at saffron/watch.py:178
+    and saffron/batch.py:423, not a silent no-op."""
+    default = inspect.signature(worktree.prepare_worktree).parameters["sleep"].default
+    assert default is time.sleep
 
 
 def test_a_failed_seed_leaves_no_container_in_the_leak_ledger(monkeypatch, tmp_path):
@@ -2588,13 +2606,11 @@ def test_a_seed_fetches_no_non_branch_ref_whatever_the_git_config_names(
     arrive. Driven through `_no_cell_runtime`, so the git the seed execs
     reads the same environment a real seed would.
 
-    `_RETRY_PAUSE_S` and `time.sleep` are neutralised so a wrong version
-    whose fetch fails costs this test nothing.
+    The retry pause is given a no-op `sleep=` so a wrong version whose
+    fetch fails costs this test nothing.
     """
     mirror, base, objects = _mirror_with_non_branch_refs(tmp_path)
     volumes = _no_cell_runtime(monkeypatch, tmp_path)
-    monkeypatch.setattr(worktree, "_RETRY_PAUSE_S", 0.0)
-    monkeypatch.setattr(worktree.time, "sleep", lambda s: None)
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
 
     def seed(volume, container):
@@ -2609,6 +2625,7 @@ def test_a_seed_fetches_no_non_branch_ref_whatever_the_git_config_names(
             network="net",
             env={},
             gates_dir=_gates_dir(tmp_path),
+            sleep=lambda s: None,
         )
 
     # A widened fetch refspec, read from the environment rather than a file.

@@ -12,7 +12,7 @@ import base64
 import contextlib
 import shlex
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
 from saffron.cell import runtime
@@ -105,6 +105,9 @@ def prepare_worktree(
     state_volume: str | None = None,
     created: set[str] | None = None,
     cap_add: Sequence[str] = (),
+    # Injected rather than reached by the module attribute, so a test can
+    # drive the retry pause without waiting on a real clock (§4.3).
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Clone the mirror into the volume at the base it is given, on `branch`,
     cell running.
@@ -148,7 +151,7 @@ def prepare_worktree(
             "worktree seed's fetch failed, retrying once after "
             f"{_RETRY_PAUSE_S:.0f}s: {' '.join(seed.stderr.split())}"
         )
-        time.sleep(_RETRY_PAUSE_S)
+        sleep(_RETRY_PAUSE_S)
         seed = _run_seed(image, mirror, volume, branch, base_sha)
     if seed.returncode != 0:
         raise runtime.CellRuntimeError(
