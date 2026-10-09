@@ -4204,8 +4204,8 @@ def _rebut_capped(
     extracted: dict | None = None,
     suites=(),
 ):
-    """Drives one cell to `REBUTTING` already past `budget_usd`, so REBUT
-    runs under `_RebutCap` instead of being refused (SA-0203). `rebut_costs`
+    """Drives one cell to `REBUTTING` at any spend, under or past
+    `budget_usd`, with REBUT's sessions under `_RebutCap`. `rebut_costs`
     is the rebuttal turn, its extraction turn, then one verdict per lens
     that filed a blocker, built directly rather than through
     `_through_rebut`. A cost can be a scripted exception instead, read the
@@ -4550,7 +4550,7 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
 ):
     """SA-0231, criterion 2: a REBUT the cap cut short ends `EXHAUSTED`
     with no `rebut_result`, under budget_usd as well as past it. Its
-    record says the cap ran out of budget, not that the rebuttal moved
+    record says REBUT ran out of its budget, not that the rebuttal moved
     nothing and argued nothing. A gate re-run that failed on its own keeps
     its own words and its own `rebut_result`. So does a rebuttal turn that
     failed for an unrelated reason before the cap was spent."""
@@ -4597,6 +4597,9 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
                 assert cap_text in text
                 assert "moved no commit" not in text
                 assert "made no argument" not in text
+                if label != "extraction":
+                    # The error of the session the cap ended follows the line.
+                    assert "max_budget_usd" in text
 
         for suites, expected in (
             (errored_suite, "GATE_ERROR"),
