@@ -1,14 +1,16 @@
 ---
 id: b-3d2aa1
 title: commit_finish drops spec parse failures silently, and an OSError from it exits 2
-status: open
+status: superseded
 tier: 2
 filed: 2026-10-01
-specs: [SA-0151, SA-0239]
+closed: 2026-10-08
+specs: [SA-0151]
 prs: [628]
 commits: []
 cites: []
 related: [b-792ab2]
+superseded_by: b-a63235
 ---
 
 ## Problem
@@ -30,3 +32,6 @@ as `_stack_follow_ups` does.
 ## Record
 
 - 2026-10-01: filed from #628's review seats.
+- 2026-10-08: superseded by b-a63235. The finish no longer parses the spec
+  directory, so no layer stays unretired. The operator kept `_stack_finish`'s
+  catch narrow, which settles the second half.

@@ -393,7 +393,7 @@ reads an unreadable mirror path as an absent one, so a broken read becomes a
 finding's verdict.
 
 **Placed 2026-10-01**, from the spec loop's run 24: **b-426db4**,
-**b-dc5212**, **b-8d654b**, then **b-3d2aa1**. A Problem-item obligation no
+**b-dc5212**, **b-8d654b**, then ~~**b-3d2aa1**~~. A Problem-item obligation no
 criterion drove was dropped. `next` held back a child of a merged parent. The
 finishing commit writes through a symlink, unverified, and drops parse
 failures.
