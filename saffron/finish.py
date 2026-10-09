@@ -1,11 +1,15 @@
 """The stack batch's finishing layer (ADR 7).
 
-Reads a batch's layers and every spec text it will write. Checks each one
-before touching git, then commits them atop the top layer's own head. It
-also writes the batch's own `findings.json`, the backlog pool a delegate
-files by hand. `publish_finish` then moves a ref for the gate suite's own
-span, runs that suite, and pushes the commit to its own branch.
-`link_stack` links the pushed layers into one stack, and marks none ready.
+Reads a batch's layers and every spec text it will write. Checks each
+path's shape and hash before touching git, then cuts a worktree atop the
+top layer's own head. Once that worktree exists, each pending path is
+checked again, this time against the tree itself, right before its own
+write: a symlink below the worktree on that path refuses the write rather
+than following it off the host. It also writes the batch's own
+`findings.json`, the backlog pool a delegate files by hand.
+`publish_finish` then moves a ref for the gate suite's own span, runs that
+suite, and pushes the commit to its own branch. `link_stack` links the
+pushed layers into one stack, and marks none ready.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import stat
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -110,6 +115,25 @@ def _checked(row) -> tuple[str, str]:
     return path, text
 
 
+def _refuse_symlink(workdir: Path, path: str) -> None:
+    """Raise `ValueError` naming the first component of `path`, read below
+    `workdir` and never above it, that `lstat` finds to already be a
+    symlink. `lstat` reads the link itself, so a dangling symlink is caught
+    too. A component `lstat` finds missing ends the walk: nothing below an
+    absent path can already be a link."""
+    accumulated = workdir
+    rel = Path()
+    for part in Path(path).parts:
+        accumulated = accumulated / part
+        rel = rel / part
+        try:
+            found = accumulated.lstat()
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(found.st_mode):
+            raise ValueError(f"{rel} is a symlink, so the finish refuses to write it")
+
+
 def commit_finish(
     ledger: Ledger,
     batch_id: int,
@@ -122,8 +146,11 @@ def commit_finish(
     """One commit in `mirror`, atop the top layer's recorded `pushed_sha`.
 
     Writes each layer's and each task in `unrun`'s latest spec text, and
-    moves no spec into `done/` (ADR 7, amended). Returns the new sha, or
-    `None` for a batch with no layer or a tree the writes left unchanged."""
+    moves no spec into `done/` (ADR 7, amended). Raises `ValueError` naming
+    a pending path's symlinked component, read below the cut worktree,
+    before that path's own write. The checkout is a cell's committed tree,
+    so it stays untrusted too. Returns the new sha, or `None` for a batch
+    with no layer or a tree the writes left unchanged."""
     layers = ledger.stack_layers(batch_id)
     if not layers:
         return None
@@ -146,6 +173,7 @@ def commit_finish(
     git_mirror.add_worktree(mirror, top["pushed_sha"], workdir)
     try:
         for path, text in pending:
+            _refuse_symlink(workdir, path)
             (workdir / path).write_text(text)
 
         git_mirror._git(workdir, "add", "-A")
