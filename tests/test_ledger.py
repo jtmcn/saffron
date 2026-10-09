@@ -259,10 +259,10 @@ def test_package_writes_back_a_state_the_run_had_already_closed(tmp_path):
 
 
 def test_tasks_by_spec_id_carries_branch_and_pushed_sha_beside_state(tmp_path):
-    """The query `SA-0026`'s resolver needs and nothing before it returns:
-    `tasks_by_spec` stops at `task_id`/`spec_id`/`spec_sha`/`state`,
-    `tasks_by_repo` is `reconcile`'s four, with `pushed_sha` and no `branch`,
-    `queue_lines` is the printer's — none carries `branch` and `pushed_sha`
+    """The query `SA-0026`'s resolver needs and no other query returns.
+    `tasks_by_spec` stops at `task_id`/`spec_id`/`spec_sha`/`state`.
+    `tasks_by_repo` is what `reconcile` reads, with `pushed_sha` and no `branch`.
+    `queue_lines` is the printer's. None carries `branch` and `pushed_sha`
     beside `spec_id`."""
     ledger = Ledger(tmp_path / "l.db")
     repo_id = ledger.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
@@ -998,7 +998,7 @@ _TASKS_COLUMNS_NO_READER: dict[str, str] = {
 }
 
 # A mapped reader is never one of these three write paths
-# (backlog item b-3e0dbe).
+# (backlog item b-1c7019).
 _REFUSED_WRITE_PATHS = {
     ("saffron/ledger.py", "Ledger.__init__"),
     ("saffron/ledger.py", "Ledger._apply"),
@@ -1007,8 +1007,8 @@ _REFUSED_WRITE_PATHS = {
 
 
 def _resolve_reader(location: str):
-    """The function `path::qualname` names, imported fresh so a
-    monkeypatched mapping always resolves against the real module."""
+    """The function `path::qualname` names, resolved by import and
+    attribute walk."""
     path, qualname = location.split("::")
     module = importlib.import_module(path[: -len(".py")].replace("/", "."))
     obj = module
@@ -1048,7 +1048,8 @@ def _names_column(fn, column: str) -> bool:
 
 def _unread_tasks_columns(conn: sqlite3.Connection) -> set[str]:
     """Every `tasks` column with no entry in either mapping, by
-    `PRAGMA table_info`. A mapped column counts too if its reader is a
+    `PRAGMA table_info`, or with an entry in both. A mapped column counts
+    too if its reader is a
     write path in `_REFUSED_WRITE_PATHS`. So does one under
     `saffron/record/`, or one that never names the column in its own
     code."""
@@ -1056,6 +1057,8 @@ def _unread_tasks_columns(conn: sqlite3.Connection) -> set[str]:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
     for column in columns:
         if column in _TASKS_COLUMNS_NO_READER:
+            if column in _TASKS_COLUMN_READERS:
+                flagged.add(column)
             continue
         location = _TASKS_COLUMN_READERS.get(column)
         if location is None:
@@ -1077,7 +1080,7 @@ def test_the_schema_adds_no_column_that_nothing_reads(ledger):
     """§4.2.1's two explicit cuts: `batches` has no `concurrency`, and `tasks`
     gains no `priority` — both would be item 18's pattern wearing a schema, a
     column written at scan and read by nobody. Every other `tasks` column
-    now names a reader or a carve-out, and the guard over them agrees."""
+    names a reader or a carve-out, and the guard over them agrees."""
     batches_columns = {
         row["name"]
         for row in ledger._db.execute("PRAGMA table_info(batches)").fetchall()
@@ -1106,14 +1109,18 @@ def test_the_schema_adds_no_column_that_nothing_reads(ledger):
 
 
 def test_a_tasks_column_nothing_reads_fails_the_schema_guard(ledger, monkeypatch):
-    """`merged_head_sha`'s real mapping already names `reconcile`, so this
-    needs that fix to pass at all. An unread column fails the guard too,
-    and so does each refused kind substituted for a real reader, in turn
-    (backlog item b-3e0dbe)."""
+    """`merged_head_sha`'s real mapping names `reconcile`, so this passes
+    only while `reconcile` reads it. An unread column fails the guard too,
+    and so does a column in both mappings. Each refused kind substituted
+    for a real reader fails it in turn (backlog item b-1c7019)."""
     assert "merged_head_sha" not in _unread_tasks_columns(ledger._db)
 
     ledger._db.execute("ALTER TABLE tasks ADD COLUMN _never_read TEXT")
     assert "_never_read" in _unread_tasks_columns(ledger._db)
+
+    with monkeypatch.context() as patch:
+        patch.setitem(_TASKS_COLUMNS_NO_READER, "merged_head_sha", "both")
+        assert "merged_head_sha" in _unread_tasks_columns(ledger._db)
 
     refused = [
         ("merged_head_sha", "saffron/ledger.py::Ledger.__init__"),

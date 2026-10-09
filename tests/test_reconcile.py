@@ -534,7 +534,7 @@ def test_a_merge_a_crash_cut_short_completes_on_the_next_reconcile_without_askin
             pr_url=url,
             pushed_sha=_PUSHED,
         )
-        crashed[spec_id] = (task_id, url)
+        crashed[spec_id] = (task_id, url, state)
 
         monkeypatch.setattr(ledger, "set_task_state", raising_set_state)
         gh = _FakeGh(
@@ -544,9 +544,9 @@ def test_a_merge_a_crash_cut_short_completes_on_the_next_reconcile_without_askin
             reconcile(ledger, repo_id, gh=gh, spec_id=spec_id)
         monkeypatch.setattr(ledger, "set_task_state", real_set_state)
 
-    for _spec_id, (task_id, _url) in crashed.items():
+    for _spec_id, (task_id, _url, state) in crashed.items():
         assert _merged_head(ledger, task_id) == _FIXED
-        assert _state(ledger, task_id) in PR_PENDING_STATES
+        assert _state(ledger, task_id) == state
 
     plain_url = "https://github.com/jtmcn/saffron/pull/399"
     plain_id = _task(
@@ -561,8 +561,8 @@ def test_a_merge_a_crash_cut_short_completes_on_the_next_reconcile_without_askin
     dead_gh = _FakeGh({})
     result = reconcile(ledger, repo_id, gh=dead_gh)
 
-    assert set(result.merged) == {task_id for task_id, _url in crashed.values()}
-    for _spec_id, (task_id, url) in crashed.items():
+    assert set(result.merged) == {task_id for task_id, _url, _was in crashed.values()}
+    for _spec_id, (task_id, url, _was) in crashed.items():
         assert url not in dead_gh.calls
         assert _state(ledger, task_id) == "MERGED"
         assert _merged_head(ledger, task_id) == _FIXED

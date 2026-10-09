@@ -169,8 +169,8 @@ def reconcile(
             continue
         merged_head = row["merged_head_sha"]
         if merged_head:
-            # GitHub already said this merged. Asking again risks a
-            # deleted branch gh cannot resolve (b-3e0dbe).
+            # GitHub already said this merged. b-3e0dbe reports, unmeasured
+            # here, that gh fails once the branch is deleted.
             ledger.set_task_state(row["task_id"], "MERGED")
             result.merged.append(row["task_id"])
             continue
