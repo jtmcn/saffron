@@ -26,7 +26,7 @@ from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
-from saffron.repos.mirror import GitError, _git, file_at
+from saffron.repos.mirror import _git, file_at
 
 
 @dataclass(frozen=True)
@@ -58,13 +58,6 @@ class Qualification:
 
     groups: list[FollowUpGroup]
     pool: list[Qualified]
-
-
-def _read_head(mirror: Path, head: str, path: str) -> str | None:
-    try:
-        return file_at(mirror, head, path)
-    except GitError:
-        return None
 
 
 def _layer_task(ledger: Ledger, task_key: str) -> tuple[int, int]:
@@ -128,7 +121,7 @@ def _qualify_range(
     `qualify` does, across every range's own call, so a later one can
     extend an earlier one's."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
-    findings = anchor(inputs, diff, read_head=partial(_read_head, mirror, head))
+    findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
     probed = [f for f in findings if f.anchored and f.probe is not None]
     reasons: dict[tuple[str, str, str], str] = {}
