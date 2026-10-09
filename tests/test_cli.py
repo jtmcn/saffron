@@ -48,7 +48,7 @@ from saffron.record.fold import fold
 from saffron.record.memory import MemoryRecord
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
-from saffron.scheduler import Candidate, Refusal
+from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
 from tests.conftest import HostToolExecInTest
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
@@ -7568,3 +7568,607 @@ def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
     printed = capsys.readouterr().out.splitlines()
     assert "finish: nothing linked: GitError: gone" in printed
     assert "finish: linked nothing, no line reported a push" not in printed
+
+
+# SA-0229: `saffron draft`
+
+
+def _draft_git_repo(tmp_path, name, specs: dict[str, str] | None = None):
+    """A one-commit git repo under `tmp_path/name`, holding `.saffron/specs/`
+    seeded with `specs` (name -> text). `--allow-empty`, since one
+    arrangement holds no spec at all."""
+    repo = tmp_path / name
+    (repo / ".saffron" / "specs").mkdir(parents=True)
+    for filename, text in (specs or {}).items():
+        (repo / ".saffron" / "specs" / filename).write_text(text)
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(
+        repo,
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=T",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "base",
+    )
+    return repo
+
+
+def _spec_text(spec_id, title):
+    return f"---\nid: {spec_id}\ntitle: {title}\ntype: chore\n---\nbody\n"
+
+
+def _findings_block(findings):
+    return "```json\n" + json.dumps({"findings": findings}) + "\n```\n"
+
+
+def _writer_session(text, **fields):
+    fields.setdefault("cost_usd", 0.1)
+    fields.setdefault("error", None)
+    fields.setdefault("resets_at", None)
+    fields.setdefault("session_id", "w")
+    fields.setdefault("num_turns", 1)
+    return spec_review.SpecWriterSession(
+        text=text,
+        spec_sha="deadbeef" if text else None,
+        **fields,
+    )
+
+
+def _review_session(findings=None, *, no_block=False, **fields):
+    fields.setdefault("cost_usd", 0.1)
+    fields.setdefault("error", None)
+    fields.setdefault("resets_at", None)
+    fields.setdefault("session_id", "r")
+    fields.setdefault("num_turns", 1)
+    text = "no fenced block here\n" if no_block else _findings_block(findings or [])
+    return spec_review.SpecReviewSession(text=text, **fields)
+
+
+def _scripted_draft_adapters(monkeypatch, *, write, reviews=(), revise=None):
+    """Patches `cli._draft_adapters` to record its call and hand
+    `draft.draft_spec` three scripted callables. The real `draft_spec`
+    still runs. Only the cells underneath it are faked."""
+    calls = {"adapters": [], "write": [], "review": [], "revise": []}
+    reviews_iter = iter(reviews)
+
+    def _adapters(*, pinned, repo, out_dir, spec_id):
+        calls["adapters"].append(
+            {"pinned": pinned, "repo": repo, "out_dir": out_dir, "spec_id": spec_id}
+        )
+
+        def _write(prompt):
+            calls["write"].append(prompt)
+            if isinstance(write, BaseException):
+                raise write
+            return write
+
+        def _review(path, text):
+            calls["review"].append((path, text))
+            nxt = next(reviews_iter)
+            if isinstance(nxt, BaseException):
+                raise nxt
+            return nxt
+
+        def _revise(path, text, review_text):
+            calls["revise"].append((path, text, review_text))
+            if isinstance(revise, BaseException):
+                raise revise
+            return revise
+
+        return _write, _review, _revise
+
+    monkeypatch.setattr(cli, "_draft_adapters", _adapters)
+    return calls
+
+
+def test_saffron_draft_writes_the_last_recorded_text_and_exits_by_how_the_draft_ended(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron draft` exits by how the draft ended and writes the last
+    recorded text under `--repo`, untracked, only on `SPEC_DRAFTED` (exit 0)
+    or `SPEC_WITHHELD` (exit 1). Every other state, `GATE_ERROR`,
+    `RATE_LIMITED`, or a raise from any adapter, exits 2 and writes
+    nothing."""
+
+    def _run(idx, *, write, reviews=(), revise=None):
+        repo = _draft_git_repo(tmp_path, f"repo-{idx}", {"TE-001-x.md": "x\n"})
+        before_head = _rev_parse(repo, "HEAD")
+        home = tmp_path / f"home-{idx}"
+        item = tmp_path / f"item-{idx}.md"
+        item.write_text("an item worth drafting\n")
+
+        _readiness_passes(monkeypatch)
+        calls = _scripted_draft_adapters(
+            monkeypatch, write=write, reviews=reviews, revise=revise
+        )
+
+        code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
+        return code, repo, before_head, calls
+
+    # 1. Clean after a revision.
+    code, repo, before_head, calls = _run(
+        1,
+        write=_writer_session(_spec_text("TE-002", "First draft")),
+        reviews=[
+            _review_session(
+                [{"severity": "blocker", "claim": "needs a test", "fixes": "build"}]
+            ),
+            _review_session([{"severity": "note", "claim": "fine"}]),
+        ],
+        revise=_writer_session(_spec_text("TE-002", "Revised draft")),
+    )
+    assert code == 0
+    files = sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md"))
+    assert files == ["TE-001-x.md", "TE-002-first-draft.md"]
+    written = (repo / ".saffron" / "specs" / "TE-002-first-draft.md").read_text()
+    assert written == _spec_text("TE-002", "Revised draft")
+    assert _rev_parse(repo, "HEAD") == before_head
+    status = _git(repo, "status", "--porcelain")
+    assert status == "?? .saffron/specs/TE-002-first-draft.md"
+    assert len(calls["revise"]) == 1
+
+    # 2. Withheld after a revision.
+    code, repo, before_head, calls = _run(
+        2,
+        write=_writer_session(_spec_text("TE-002", "First draft two")),
+        reviews=[
+            _review_session(
+                [{"severity": "blocker", "claim": "needs a test", "fixes": "build"}]
+            ),
+            _review_session(
+                [{"severity": "blocker", "claim": "wrong shape", "fixes": "scope"}]
+            ),
+        ],
+        revise=_writer_session(_spec_text("TE-002", "Revised draft two")),
+    )
+    assert code == 1
+    written = (repo / ".saffron" / "specs" / "TE-002-first-draft-two.md").read_text()
+    assert written == _spec_text("TE-002", "Revised draft two")
+    assert _rev_parse(repo, "HEAD") == before_head
+    status = _git(repo, "status", "--porcelain")
+    assert status == "?? .saffron/specs/TE-002-first-draft-two.md"
+
+    # 3. Withheld at the first review. No revision ever runs.
+    code, repo, before_head, calls = _run(
+        3,
+        write=_writer_session(_spec_text("TE-002", "First draft three")),
+        reviews=[
+            _review_session(
+                [{"severity": "blocker", "claim": "wrong shape", "fixes": "scope"}]
+            )
+        ],
+    )
+    assert code == 1
+    written = (repo / ".saffron" / "specs" / "TE-002-first-draft-three.md").read_text()
+    assert written == _spec_text("TE-002", "First draft three")
+    assert calls["revise"] == []
+
+    # 4. The writer's reply declares another id, withheld with no review.
+    code, repo, before_head, calls = _run(
+        4,
+        write=_writer_session(_spec_text("TE-999", "Wrong id")),
+    )
+    assert code == 1
+    written = (repo / ".saffron" / "specs" / "TE-002-wrong-id.md").read_text()
+    assert written == _spec_text("TE-999", "Wrong id")
+    assert calls["review"] == []
+    assert calls["revise"] == []
+
+    # 5. A review with no fenced block errors the task.
+    code, repo, before_head, calls = _run(
+        5,
+        write=_writer_session(_spec_text("TE-002", "Five")),
+        reviews=[_review_session(no_block=True)],
+    )
+    assert code == 2
+    assert sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md")) == [
+        "TE-001-x.md"
+    ]
+
+    # 6. The writer hits a rate limit. No review ever runs.
+    code, repo, before_head, calls = _run(
+        6,
+        write=_writer_session("", resets_at=5),
+    )
+    assert code == 2
+    assert calls["review"] == []
+    assert sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md")) == [
+        "TE-001-x.md"
+    ]
+
+    # 7. The review hits a rate limit.
+    code, repo, before_head, calls = _run(
+        7,
+        write=_writer_session(_spec_text("TE-002", "Seven")),
+        reviews=[_review_session(resets_at=9)],
+    )
+    assert code == 2
+    assert sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md")) == [
+        "TE-001-x.md"
+    ]
+
+    # 8. `write` raises.
+    code, repo, before_head, calls = _run(8, write=RuntimeError("boom-write"))
+    assert code == 2
+    assert "RuntimeError" in capsys.readouterr().out
+    assert sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md")) == [
+        "TE-001-x.md"
+    ]
+
+    # 9. `review` raises.
+    code, repo, before_head, calls = _run(
+        9,
+        write=_writer_session(_spec_text("TE-002", "Nine")),
+        reviews=[RuntimeError("boom-review")],
+    )
+    assert code == 2
+    assert sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md")) == [
+        "TE-001-x.md"
+    ]
+
+    # 10. `revise` raises.
+    code, repo, before_head, calls = _run(
+        10,
+        write=_writer_session(_spec_text("TE-002", "Ten")),
+        reviews=[
+            _review_session(
+                [{"severity": "blocker", "claim": "needs a test", "fixes": "build"}]
+            )
+        ],
+        revise=RuntimeError("boom-revise"),
+    )
+    assert code == 2
+    assert sorted(p.name for p in (repo / ".saffron" / "specs").glob("*.md")) == [
+        "TE-001-x.md"
+    ]
+
+
+def _draft_specs_dir(repo, specs=(), done=()):
+    specs_dir = repo / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    for filename, text in dict(specs).items():
+        (specs_dir / filename).write_text(text)
+    if done:
+        done_dir = specs_dir / RETIRED_DIRNAME
+        done_dir.mkdir(parents=True, exist_ok=True)
+        for filename, text in dict(done).items():
+            (done_dir / filename).write_text(text)
+    return specs_dir
+
+
+def test_saffron_draft_numbers_its_spec_past_the_working_tree_its_retirees_and_this_repos_tasks(
+    tmp_path, monkeypatch
+):
+    """The drafted spec's id is one more than the highest number of its
+    prefix. It looks among the working tree's specs, their `done/`, and
+    this repo's own tasks alone."""
+    home = tmp_path / "home"
+    pinned_url = "https://github.com/o/r.git"
+    other_url = "https://github.com/o/other.git"
+
+    seed = Ledger(home / "ledger.db")
+    repo_id = seed.upsert_repo(
+        "r", pinned_url, str(tmp_path / "m.git"), policy_sha=None
+    )
+    run_id = seed.create_run(repo_id, "a" * 40)
+    seed.create_task(run_id, "TE-011", "s" * 64, "saffron/TE-011")
+    other_repo_id = seed.upsert_repo(
+        "other", other_url, str(tmp_path / "m2.git"), policy_sha=None
+    )
+    other_run_id = seed.create_run(other_repo_id, "b" * 40)
+    seed.create_task(other_run_id, "TE-040", "s" * 64, "saffron/TE-040")
+    seed.close()
+
+    item_text = "an item with a café\r\n"
+    item_bytes = item_text.encode("utf-8")
+    item_sha = hashlib.sha256(item_bytes).hexdigest()
+
+    write_prompts: list[str] = []
+
+    def _run(idx, *, specs, done=(), expected_id):
+        parent = tmp_path / f"parent-{idx}"
+        repo = parent / "repo"
+        _draft_specs_dir(repo, specs=specs, done=done)
+        item = parent / "item.md"
+        item.write_bytes(item_bytes)
+
+        _readiness_passes(monkeypatch)
+        calls = _scripted_draft_adapters(
+            monkeypatch,
+            write=_writer_session(_spec_text(expected_id, "Numbered")),
+            reviews=[_review_session([{"severity": "note", "claim": "fine"}])],
+        )
+        monkeypatch.chdir(parent)
+        code = main(["--home", str(home), "draft", "item.md", "--repo", str(repo)])
+        assert code == 0
+        write_prompts.extend(calls["write"])
+
+    # 1. The ledger's own TE-011 is the highest. A low live file seeds the
+    # prefix alone.
+    _run(1, specs={"TE-005-x.md": "x\n"}, expected_id="TE-012")
+
+    # 2. A live file beats the ledger's current highest (TE-012).
+    _run(2, specs={"TE-020-x.md": "x\n"}, expected_id="TE-021")
+
+    # 3. A retired file beats the ledger's current highest (TE-021).
+    _run(3, specs={}, done={"TE-030-x.md": "x\n"}, expected_id="TE-031")
+
+    for prompt in write_prompts:
+        assert item_text in prompt
+
+    final = Ledger(home / "ledger.db")
+    rows = {
+        row["spec_id"]: row
+        for row in final._db.execute(
+            "SELECT t.spec_id, t.spec_sha, t.state, r.base_sha FROM tasks t "
+            "JOIN runs r ON r.run_id = t.run_id WHERE r.repo_id = ? "
+            "ORDER BY t.task_id",
+            (repo_id,),
+        ).fetchall()
+    }
+    assert set(rows) == {"TE-011", "TE-012", "TE-021", "TE-031"}
+    for spec_id in ("TE-012", "TE-021", "TE-031"):
+        assert rows[spec_id]["spec_sha"] == item_sha
+        assert rows[spec_id]["state"] == "SPEC_DRAFTED"
+        assert rows[spec_id]["base_sha"] == "a" * 40
+
+    other_rows = final._db.execute(
+        "SELECT spec_id FROM tasks t JOIN runs r ON r.run_id = t.run_id "
+        "WHERE r.repo_id = ?",
+        (other_repo_id,),
+    ).fetchall()
+    assert [r["spec_id"] for r in other_rows] == ["TE-040"]
+    final.close()
+
+
+def test_saffron_draft_mints_nothing_without_readiness_or_a_single_id_prefix(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron draft` exits 2 with no run, no task and no adapter built.
+    This drives a failed readiness, a working tree with no id prefix or
+    more than one, and an item that is not UTF-8."""
+
+    def _no_adapters(**kwargs):
+        raise AssertionError("_draft_adapters must not be built")
+
+    def _assert_empty(home):
+        ledger = Ledger(home / "ledger.db")
+        runs = ledger._db.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        tasks = ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+        ledger.close()
+        assert runs == 0
+        assert tasks == 0
+
+    # 1. Readiness fails.
+    home = tmp_path / "home-readiness"
+    repo = tmp_path / "repo-readiness"
+    _draft_specs_dir(repo, specs={"TE-001-x.md": "x\n"})
+    item = tmp_path / "item-readiness.md"
+    item.write_text("an item\n")
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "mirror", "could not fetch"),
+    )
+    monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
+    code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
+    assert code == 2
+    printed = capsys.readouterr().out
+    assert "draft: readiness failed at mirror: could not fetch" in printed
+    _assert_empty(home)
+
+    # 2. The working tree's specs hold no id prefix.
+    home = tmp_path / "home-no-prefix"
+    repo = tmp_path / "repo-no-prefix"
+    _draft_specs_dir(repo, specs={"notes.md": "not a spec id\n"})
+    item = tmp_path / "item-no-prefix.md"
+    item.write_text("an item\n")
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
+    code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
+    assert code == 2
+    _assert_empty(home)
+
+    # 3. More than one id prefix. Each bare filename is itself a valid id,
+    # so either one minting on a swallowed raise would still be caught.
+    home = tmp_path / "home-two-prefixes"
+    repo = tmp_path / "repo-two-prefixes"
+    _draft_specs_dir(repo, specs={"TE-001.md": "x\n", "SY-002.md": "y\n"})
+    item = tmp_path / "item-two-prefixes.md"
+    item.write_text("an item\n")
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
+    code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
+    assert code == 2
+    _assert_empty(home)
+
+    # 4. The item is not UTF-8, beside a valid specs directory.
+    home = tmp_path / "home-bad-utf8"
+    repo = tmp_path / "repo-bad-utf8"
+    _draft_specs_dir(repo, specs={"TE-001-x.md": "x\n"})
+    item = tmp_path / "item-bad-utf8.md"
+    item.write_bytes(b"\xff\xfe not utf-8")
+    _readiness_passes(monkeypatch)
+    monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
+    code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
+    assert code == 2
+    _assert_empty(home)
+
+
+def test_a_draft_writes_reviews_and_revises_in_spec_cells_at_the_pinned_base(
+    tmp_path, monkeypatch
+):
+    """`cli._draft_adapters` returns `write`, `review` and `revise`, and
+    each runs one spec session cell seeded at the pinned `base_sha`, with
+    gates from that base's export. `write` shares `_stack_revise`'s own
+    snapshot sentence. `review`/`revise` delegate to `_stack_review`/
+    `_stack_revise` with no layer. `_stack_review`'s own revision sentence
+    stays byte-identical when no `sentence=` is given."""
+    from saffron.agents.artifacts import hash_artifact
+
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    mirror, bare_sha, base_sha = rig.mirror, rig.bare_sha, rig.base_sha
+    repo, out_dir = rig.repo, rig.out_dir
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+    unpriv_calls = rig.unpriv_calls
+
+    agent_calls: list[dict] = []
+
+    def _fake_run_agent(
+        container, *, prompt, options, spec_id, timeout_s, resume=None, **_kw
+    ):
+        agent_calls.append(
+            {
+                "container": container,
+                "prompt": prompt,
+                "spec_id": spec_id,
+                "timeout_s": timeout_s,
+            }
+        )
+        return implement.AttemptResult(
+            session_id="s",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.1,
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    writer_calls: list[dict] = []
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+        agent(container, prompt=prompt, options={})
+        writer_calls.append(
+            {"container": container, "system_prompt": system_prompt, "prompt": prompt}
+        )
+        text = f"drafted text {len(writer_calls)}\n"
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.1,
+            error=None,
+            resets_at=None,
+            session_id="w",
+            num_turns=1,
+            spec_sha=hash_artifact(text),
+        )
+
+    monkeypatch.setattr(spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    reviewer_calls: list[dict] = []
+
+    def _fake_run_spec_review(container, *, system_prompt, prompt, agent):
+        agent(container, prompt=prompt, options={})
+        reviewer_calls.append(
+            {"container": container, "system_prompt": system_prompt, "prompt": prompt}
+        )
+        return spec_review.SpecReviewSession(
+            text=_findings_block([]),
+            cost_usd=0.1,
+            error=None,
+            resets_at=None,
+            session_id="r",
+            num_turns=1,
+        )
+
+    monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+    write, review, revise = cli._draft_adapters(
+        pinned=pinned, repo=repo, out_dir=out_dir, spec_id="TE-900"
+    )
+
+    # `write`.
+    given_prompt = "context: this drafts a spec.\nid: TE-900\n<item>\nitem\n</item>"
+    w = write(given_prompt)
+    assert w.text == "drafted text 1\n"
+    assert len(cell_up_calls) == 1
+    assert cell_up_calls[0]["tree_base"] == base_sha
+    assert cell_up_calls[0]["branch"] == "saffron/TE-900"
+    assert cell_up_calls[0]["gates_dir"] == out_dir / "spec-write" / "TE-900"
+    assert cell_up_calls[0]["thread_env"] == {"X": "base"}
+    assert cell_up_calls[0]["cap_add"] == implement.UNPRIVILEGED_BASH_CAPS
+    assert len(unpriv_calls) == 1
+    assert writer_calls[0]["prompt"] == (
+        given_prompt + f"\nbase: {base_sha}\nThe checkout is a snapshot of the base.\n"
+    )
+    assert agent_calls[0]["spec_id"] == "TE-900"
+    assert agent_calls[0]["timeout_s"] == spec_review.SPEC_WRITER_TIMEOUT_S
+
+    # A prompt already ending in a newline gains no blank line.
+    write("ends in a newline\n")
+    assert writer_calls[1]["prompt"] == (
+        "ends in a newline\n"
+        f"base: {base_sha}\nThe checkout is a snapshot of the base.\n"
+    )
+
+    recorded_path = ".saffron/specs/TE-900-x.md"
+    recorded_text = "no frontmatter at all\n"
+
+    # `review`.
+    r = review(recorded_path, recorded_text)
+    assert r.text == _findings_block([])
+    assert len(cell_up_calls) == 3  # two writes, now one review
+    assert cell_up_calls[2]["tree_base"] == base_sha
+    assert cell_up_calls[2]["branch"] == "saffron/TE-900"
+    assert cell_up_calls[2]["gates_dir"] == out_dir / "spec-review" / "TE-900"
+    prompt = reviewer_calls[0]["prompt"]
+    assert f"spec: {recorded_path}\n" in prompt
+    assert f"base: {base_sha}\n" in prompt
+    assert cli._SPEC_SESSION_ACCOUNT_LINES in prompt
+    assert cli._DRAFT_REVIEW_SENTENCE in prompt
+    assert f"<spec>\n{recorded_text}\n</spec>\n" in prompt
+    assert cli._REVISION_SENTENCE not in prompt
+    assert agent_calls[-1]["spec_id"] == "TE-900"
+    assert agent_calls[-1]["timeout_s"] == spec_review.SPEC_REVIEW_TIMEOUT_S
+
+    # `revise`.
+    rv = revise(recorded_path, recorded_text, "a review's own text")
+    assert rv.text == "drafted text 3\n"
+    assert len(cell_up_calls) == 4
+    assert cell_up_calls[3]["tree_base"] == base_sha
+    assert cell_up_calls[3]["gates_dir"] == out_dir / "spec-write" / "TE-900"
+    prompt = writer_calls[2]["prompt"]
+    assert "review: the spec review between the review tags below.\n" in prompt
+    assert f"spec: {recorded_path}\n" in prompt
+    assert f"base: {base_sha}\n" in prompt
+    assert "The checkout is a snapshot of the base.\n" in prompt
+    assert "<review>\na review's own text\n</review>\n" in prompt
+    assert f"<spec>\n{recorded_text}\n</spec>\n" in prompt
+
+    # No layer was ever fetched: every cell above seeded at the pinned base.
+    assert fetch_calls == []
+
+    # `_stack_review` with no `sentence` keeps its own revision sentence,
+    # byte for byte, for every other caller.
+    review_run = cli._stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
+    sy1 = Candidate(
+        path=Path(recorded_path),
+        spec=intake.Spec(id="TE-900", title="t", type="chore"),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+    review_run(sy1, None, spec_text=recorded_text)
+    stack_prompt = reviewer_calls[-1]["prompt"]
+    assert cli._REVISION_SENTENCE in stack_prompt
+    assert cli._DRAFT_REVIEW_SENTENCE not in stack_prompt
+
+    # `write` pinned at the bare commit, which holds no `policy.yaml`:
+    # its system prompt is the writer's under an empty `Policy`.
+    bare_pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=bare_sha
+    )
+    bare_write, _bare_review, _bare_revise = cli._draft_adapters(
+        pinned=bare_pinned, repo=repo, out_dir=out_dir, spec_id="TE-901"
+    )
+    bare_write("context: another draft.\nid: TE-901\n<item>\ni\n</item>")
+    assert writer_calls[-1]["system_prompt"] == spec_review.spec_writer_system_prompt(
+        Policy(), prompts_dir=context.PROMPTS_DIR
+    )
