@@ -4,7 +4,7 @@ title: "`reconcile` never reads an `EXHAUSTED` row, so a merged draft leaves its
 status: open
 tier: 2
 filed: 2026-10-05
-specs: [SA-0204]
+specs: [SA-0204, SA-0251]
 prs: [678]
 commits: []
 cites: [§4.2.1, §6.1]

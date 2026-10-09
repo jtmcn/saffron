@@ -2251,9 +2251,8 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-07 for b-98a3be. `SA-0220`, `SA-0200`, `SA-0201`,
-    `SA-0208`, `SA-0215` and `SA-0225` are candidates. Refused: `SA-0202`-`SA-0207`,
-    `SA-0216`-`SA-0219`, `SA-0221`-`SA-0224` and `SA-0226`-`SA-0229`.
+    """Re-measured 2026-10-07 for SA-0251. The candidates and the refusals
+    are the two lists below, in the order the scan returns them.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -2866,6 +2865,30 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0227",
         "SA-0228",
         "SA-0229",
+        "SA-0230",
+        "SA-0231",
+        "SA-0232",
+        "SA-0233",
+        "SA-0234",
+        "SA-0235",
+        "SA-0237",
+        "SA-0238",
+        "SA-0239",
+        "SA-0240",
+        "SA-0242",
+        "SA-0243",
+        "SA-0244",
+        "SA-0245",
+        "SA-0246",
+        "SA-0247",
+        "SA-0248",
+        "SA-0249",
+        "SA-0250",
+        "SA-0251",
+        "SA-0252",
+        "SA-0253",
+        "SA-0254",
+        "SA-0255",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -2879,10 +2902,15 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
     # spec in `done/` here as well. That is what makes the exact list a check.
     assert [c.spec.id for c in candidates] == [
         "SA-0220",
+        "SA-0230",
+        "SA-0232",
         "SA-0200",
         "SA-0201",
         "SA-0208",
         "SA-0215",
+        "SA-0238",
+        "SA-0239",
+        "SA-0255",
         "SA-0225",
     ]
     assert [r.path.name[:7] for r in refusals] == [
@@ -2904,6 +2932,25 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0227",
         "SA-0228",
         "SA-0229",
+        "SA-0231",
+        "SA-0233",
+        "SA-0234",
+        "SA-0235",
+        "SA-0237",
+        "SA-0240",
+        "SA-0242",
+        "SA-0243",
+        "SA-0244",
+        "SA-0245",
+        "SA-0246",
+        "SA-0247",
+        "SA-0248",
+        "SA-0249",
+        "SA-0250",
+        "SA-0251",
+        "SA-0252",
+        "SA-0253",
+        "SA-0254",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.

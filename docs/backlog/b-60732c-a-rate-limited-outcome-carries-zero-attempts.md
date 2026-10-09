@@ -4,7 +4,7 @@ title: A `RATE_LIMITED` outcome carries 0 attempts, so its index row reads as a 
 status: open
 tier: 2
 filed: 2026-09-18
-specs: []
+specs: [SA-0249]
 prs: []
 commits: []
 cites: [§6]

@@ -4,7 +4,7 @@ title: Preflight's N1 refusal names ports and not the processes behind them, and
 status: open
 tier: 2
 filed: 2026-09-25
-specs: []
+specs: [SA-0244]
 prs: []
 commits: []
 cites: [§5.1, §4.1]

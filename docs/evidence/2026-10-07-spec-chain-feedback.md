@@ -127,3 +127,98 @@ reconcile pass cost 9.9 minutes and one review concern.
 - A brief should check `protected` before it assigns `touches`.
 - A parent and child from one split should be drafted in sequence. The child
   then reads the parent's spec rather than a description of it.
+
+## Twenty-four specs in one evening, `SA-0230` to `SA-0255`
+
+The operator asked for items 119 and 120 first, then every item that needed
+no decision of theirs, while they were away. The delegate triaged the open
+tier 1 and tier 2 items, then drafted, reviewed and stacked 24 specs.
+`SA-0241` was drafted and reviewed, then parked. `SA-0236` and two more of
+item 80's specs were designed and not drafted. Both wait on a decision.
+
+### Triage
+
+Seven read-only agents read 48 items against `958db033`.
+
+| Verdict | Items |
+|---|---|
+| Ready, drafted | 28 items into 25 specs |
+| Needs a decision | 80 (the mutants ref), 40/97, 42, 46, 49, b-3c7ce9, b-a8270f, b-4a63b7, b-e471bd, b-a7e5f3, b-490c9c, b-5b1f8a, the second half of b-a6bfb0 and of b-f582ee |
+| By hand | 67, b-970f53, b-60d804, b-c94a2f |
+| A measurement | 79, 93, b-abeb74 |
+| Stale | b-8170eb (b-031ac2 closed it), b-593d50 (its premise is false), most of b-a4df62 (ADR 7 built it) |
+
+### Decisions the delegate took
+
+Each is the operator's to overturn. The pull requests name them.
+
+- 119: hold back the smaller of $1.00 and half the remainder for the salvage
+  turn. The reserve came from 7 measured salvage turns, the most $0.40.
+- 120: REBUT always runs under its own cap, never the remainder. The cap
+  is $10.00, by `SA-0203`'s own rule on 67 REBUTs, the most $9.29.
+- b-f582ee, b-a6bfb0, b-34d743, b-04a5d9: the half or arm that needed no
+  design call.
+- b-60a399: infrastructure means `CellRuntimeError` alone.
+
+### Rounds
+
+| | Specs | Blockers | Concerns |
+|---|---|---|---|
+| First review | 25 | 7 | 67 |
+| Second review | 11 | 4 | 19 |
+
+Two first reviews found nothing to fix, `SA-0253` and `SA-0247`. Each
+review took 3 to 10 minutes. Each draft took 19 to 49 minutes. A third
+review never ran. The delegate fixed second-round findings by hand where
+they were text, and sent them to the writer once where they needed a
+prototype.
+
+### Each finding by class
+
+Counted over first reviews, blockers and concerns only.
+
+| Class | Count | Caught by |
+|---|---|---|
+| A fixture that cannot tell the change from a narrower build | 14 | pre-flight 1 |
+| The delegate's own hand edit to a protected file | 7 | pre-flight 12 |
+| A spec drafted against a base without its parent's code | 6 | none yet |
+| A witness green in the cell and red on the host, or the reverse | 5 | none yet |
+| Two criteria, or a criterion and an instruction, disagreeing | 4 | pre-flight 2 |
+| An operator decision the item left open | 4 | triage |
+| Dictated text the `prose` gate refuses | 1 | pre-flight 12 |
+
+The largest class is still the one pre-flight 1 names. The pre-flight asks
+which members of a set the witness drives. These findings were inputs that
+separate two builds of one transform. Examples are a remainder between $1
+and $2, a base off `main`, and a message holding a newline.
+
+### What the brief got wrong
+
+- Briefs named parallel siblings as parents with a line range. Six specs
+  drafted against `958db033` were wrong at their real base. The writers had
+  no tree with the parent's code to read.
+- One brief named `SA-0236`, which was then parked. Two specs carried it in
+  `depends_on` until the delegate caught it.
+- Item 120's first brief kept the $7.00 cap. The writer measured $9.29 and
+  the brief changed.
+
+### Tools this run needed
+
+- `fixpin2.py` re-pins the queue smoke test from the tree it runs in. It
+  replaces the per-layer hand merge that every earlier stacked run did.
+- `stack.py` rebases each branch's own commits onto its parent and re-pins.
+  It stopped once, on a `DESIGN.md` conflict between two specs' hand edits.
+- The shared scratchpad cost three writers a prototype. One applied another
+  writer's diff by mistake and reverted it.
+
+### What the next run changes
+
+- Draft a stacked child only after its parent's prototype exists, and hand
+  the writer that diff. That removes the largest new class.
+- Pre-flight 12 needs a command. Seven of the delegate's own sentences
+  overclaimed. A check that reads each hand edit against its spec's claims
+  would catch most of them.
+- Give each writer its own scratch directory in the brief, not a shared
+  scratchpad.
+- The reviewer's prompt still says the cell's git is 2.39.5. It is 2.47.3,
+  measured twice today.

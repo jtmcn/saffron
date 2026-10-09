@@ -4,7 +4,7 @@ title: REBUT gets whatever the task budget has left, and the halt it ends in rea
 status: open
 tier: 1
 filed: 2026-09-14
-specs: [SA-0087, SA-0088, SA-0089]
+specs: [SA-0087, SA-0088, SA-0089, SA-0231]
 prs: []
 commits: []
 cites: [§3.3, §4.2, §5.6]

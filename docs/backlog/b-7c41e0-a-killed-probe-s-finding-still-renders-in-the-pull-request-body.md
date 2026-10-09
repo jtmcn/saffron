@@ -4,7 +4,7 @@ title: A finding demoted by a killed probe renders in the pull request body as a
 status: open
 tier: 2
 filed: 2026-09-18
-specs: []
+specs: [SA-0247]
 prs: []
 commits: []
 cites: [§5.5, §5.7]

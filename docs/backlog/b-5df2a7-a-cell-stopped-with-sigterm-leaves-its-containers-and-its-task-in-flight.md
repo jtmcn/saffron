@@ -4,7 +4,7 @@ title: "A cell stopped with SIGTERM leaves its containers and its task in flight
 status: open
 tier: 2
 filed: 2026-10-06
-specs: []
+specs: [SA-0245]
 prs: []
 commits: []
 cites: [§4.5]

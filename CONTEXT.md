@@ -224,9 +224,10 @@ The per-repo slice of a batch has no name and no row (backlog item 177).
 > went multi-repo. Budget is a batch property, and `base_sha` is a run property. If a
 > sentence works with either word, it is imprecise.
 
-**Preflight outcome**: What a run records when its first baseline suite ends: `PASSED`
-or `FAILED`.
-It lives in `runs.preflight`. A baseline that aborts in the cell writes `FAILED`, so
+**Preflight outcome**: What a run records when its first baseline suite ends, or when
+preflight refuses its start: `PASSED` or `FAILED`.
+It lives in `runs.preflight`. A baseline that aborts in the cell writes `FAILED`.
+So does a start that preflight refuses before any cell exists (`SA-0244`). So
 this is not the batch-start **Preflight** under Repos (backlog item 113). What a
 NULL means is open (backlog item b-eac388).
 
@@ -638,13 +639,14 @@ Everything else is internal.
 `TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
 IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
 reasons ends the task in `PLAN_REJECTED` or `NOT_IMPLEMENTED`, except the two cut-off
-reasons. An IMPLEMENT turn cut by the turn ceiling or the wall clock with nothing committed
-ends `ORPHANED` the first time at a `spec_sha`. The second such cut ends `NOT_IMPLEMENTED`. The two names are deliberately distinct.
+reasons. A bound can cut an IMPLEMENT turn with nothing committed. The bound is the turn
+ceiling, the wall clock or the turn's own budget cap. A turn so cut, with nothing recovered by salvage or
+checkpoint, ends `ORPHANED` the first time at a `spec_sha`. The second such cut ends `NOT_IMPLEMENTED`. The two names are deliberately distinct.
 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase. Five more ways in share the state.
 The spend ceiling stops the task before its next turn. Its gates go red after the
-rebuttal. A REBUT past the budget is cut short by its $7.00 cap. Its exported patch
+rebuttal. A REBUT that would halt at `REBUTTING` is cut short by its $10.00 cap. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
 **`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
@@ -669,8 +671,9 @@ _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.
-An IMPLEMENT turn cut by the turn ceiling or the wall clock with nothing committed also ends
-here. It does so the first time at a `spec_sha`, so the spec re-queues once. Its cell is torn down as
+A bound can cut an IMPLEMENT turn with nothing committed: the turn ceiling, the wall
+clock or the turn's own budget cap. A turn so cut, with nothing recovered by salvage or checkpoint, also
+ends here. It does so the first time at a `spec_sha`, so the spec re-queues once. Its cell is torn down as
 usual, so `saffron gc` has nothing to reclaim. The second such cut ends `NOT_IMPLEMENTED`.
 
 **Ratify**: What the operator does to a proposed `touches` set at `SCOPE_REVIEW`.
@@ -746,7 +749,8 @@ A task has a preflight of its own. Each `PreflightEvent` is one step of it, writ
 `events.Preflight`. The steps include the proxy, the image build, the port probe and the
 worktree coming online.
 A baseline that aborts inside the task's cell ends the task in
-`PREFLIGHT_FAILED`. That is fatal to the task, where the per-repo sense skips a repo.
+`PREFLIGHT_FAILED`. So does a step that refuses the start before the cell exists,
+such as the port probe. That is fatal to the task, where the per-repo sense skips a repo.
 
 ---
 
