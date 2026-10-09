@@ -900,6 +900,7 @@ def package(
             verified_on=verified_on,
             effective_risk=outcome.effective_risk,
             advisory_gates=outcome.advisory_gates,
+            advisory_failures=comparison.advisory_failures,
             # `""` for a task that recorded none, so the body stays
             # byte-identical to one packaged before this existed.
             notes=outcome.notes,

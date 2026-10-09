@@ -111,12 +111,18 @@ class SuiteRun:
 @dataclass(frozen=True)
 class SuiteComparison:
     """At most one of the three outcomes is non-empty, checked in the order
-    below; all three empty is green."""
+    below; all three empty is green.
+
+    `advisory_failures` is not a fourth outcome. It is the same subtraction's
+    failures in a gate this run holds advisory (§5.4, §5.6). It is reported
+    alongside whichever of the three outcomes above applies, and blocks
+    nothing. Empty on an aborted or a drifted head, same as `new_failures`."""
 
     run: SuiteRun
     aborted: tuple[str, ...] = ()
     drift: tuple[str, ...] = ()
     new_failures: tuple[NewFailure, ...] = ()
+    advisory_failures: tuple[NewFailure, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -235,11 +241,13 @@ def _compare(head: SuiteRun, baseline: SuiteRun) -> SuiteComparison:
         # The suites differ in a way no failure can express, so the
         # subtraction is not to be trusted, let alone reported (§5.4).
         return SuiteComparison(head, drift=tuple(drift))
+    subtracted = subtract_baseline(head.results, baseline.results)
     return SuiteComparison(
         head,
         new_failures=tuple(
-            nf
-            for nf in subtract_baseline(head.results, baseline.results)
-            if nf.gate not in head.advisory_gates
+            nf for nf in subtracted if nf.gate not in head.advisory_gates
+        ),
+        advisory_failures=tuple(
+            nf for nf in subtracted if nf.gate in head.advisory_gates
         ),
     )
