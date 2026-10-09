@@ -72,12 +72,12 @@ TaskState = Literal[
 RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
 _PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
 
-# The closed set `record_spec_text` writes: a spec review's revision, or a
-# follow-up spec. Neither is at `base_sha` (ADR 7).
-SPEC_TEXT_ORIGINS = ("revision", "follow_up")
+# The closed set `record_spec_text` writes: a revision, a follow-up spec,
+# or a `saffron draft` task's own text. None is at `base_sha` (ADR 7).
+SPEC_TEXT_ORIGINS = ("revision", "follow_up", "draft")
 
-# A follow-up's file is named for its own spec id by the host. A revision's
-# is the queued spec's own file, tied to no id.
+# A follow-up's file is named for its own spec id by the host, as a draft's
+# is. A revision's is the queued spec's own file, tied to no id.
 _FOLLOW_UP_PATH = r"\.saffron/specs/{}-[A-Za-z0-9._-]+\.md"
 _REVISION_PATH = r"\.saffron/specs/[A-Za-z0-9][A-Za-z0-9._-]*\.md"
 
@@ -271,7 +271,7 @@ CREATE TABLE IF NOT EXISTS qualifications (
     PRIMARY KEY (task_key, position)
 );
 
--- One review of one spec inside a stack batch (`run_stack_batch`, ADR 7).
+-- One review of one spec, by a stack batch or `draft_spec` (ADR 7).
 -- Keyed on record keys, so a fold into a fresh ledger places it alone.
 CREATE TABLE IF NOT EXISTS spec_reviews (
     task_key     TEXT NOT NULL,
@@ -298,8 +298,8 @@ CREATE TABLE IF NOT EXISTS spec_findings (
     PRIMARY KEY (task_key, n, position)
 );
 
--- One spec text a stack batch runs that is not at `base_sha`: a spec review's
--- revision, or a follow-up spec's own text, keyed like `spec_reviews` (ADR 7).
+-- One spec text that is not at `base_sha`: a revision, a follow-up
+-- spec's own text, or a draft's own text, keyed like `spec_reviews` (ADR 7).
 CREATE TABLE IF NOT EXISTS spec_texts (
     task_key  TEXT NOT NULL,
     n         INTEGER NOT NULL,
@@ -1433,9 +1433,10 @@ class Ledger:
     def open_attempt(self, task_id: int, phase: str | None = None) -> int:
         """One agent turn. The phase defaults to the state the task is in — the
         caller sets that at each phase boundary and would otherwise have to
-        track it again at every turn (§4.1). Only `replay` and the stack
-        batch's spec review pass one. `replay` has no agent or phase to be
-        in, and the review opens a phase the task's own state is not."""
+        track it again at every turn (§4.1). Only `replay`, the stack
+        batch's spec review and `draft_spec` pass one. `replay` has no agent
+        or phase to be in. A spec review or spec writer session opens a
+        phase the task's own state is not."""
         resolved = self._db.execute(
             """SELECT t.state AS state,
                       1 + COALESCE((SELECT MAX(a.n) FROM attempts a
@@ -1716,12 +1717,12 @@ class Ledger:
         error: str | None,
         findings: Sequence[SpecReviewFinding],
     ) -> None:
-        """One review of one spec inside a stack batch (ADR 7). Numbered one
-        more than the task's own `spec_reviews` rows, from 1, and filed under
-        the task's own key like `record_stack_layer`'s row. After that fact,
-        writes one `spec_finding` fact per entry of `findings`. Each is
-        numbered from 1 in block order, under this same review round's own `n`
-        (b-98a3be, `DESIGN.md` §3.4)."""
+        """One review of one spec, by a stack batch or `draft_spec` (ADR 7).
+        Numbered one more than the task's own `spec_reviews` rows, from 1,
+        and filed under the task's own key like `record_stack_layer`'s row.
+        After that fact, writes one `spec_finding` fact per entry of
+        `findings`. Each is numbered from 1 in block order, under this same
+        review round's own `n` (b-98a3be, `DESIGN.md` §3.4)."""
         n = (
             1
             + self._db.execute(
@@ -1768,13 +1769,14 @@ class Ledger:
         path: str,
         text: str,
     ) -> int:
-        """Record one spec text a stack batch runs, not at `base_sha`: a spec
-        review's revision, or a follow-up spec's own text (ADR 7). Numbered
-        one more than the task's own `spec_texts` rows, starting at 1. Raises
-        `ValueError` for an origin outside `SPEC_TEXT_ORIGINS`, a task id
-        that names no task, or a `spec_id` the task does not carry. It also
-        raises for a `path` the origin's own pattern refuses, writing no row
-        and no fact."""
+        """Record one spec text that is not at `base_sha`: a spec review's
+        revision, a follow-up spec's own text, or a `saffron draft` task's
+        own text (ADR 7, `DESIGN.md` §3.4). Numbered one more than the
+        task's own `spec_texts` rows, starting at 1. Raises `ValueError`
+        for an origin outside `SPEC_TEXT_ORIGINS`, a task id that names no
+        task, or a `spec_id` the task does not carry. It also raises for a
+        `path` the origin's own pattern refuses, writing no row and no
+        fact."""
         if origin not in SPEC_TEXT_ORIGINS:
             raise ValueError(
                 f"spec text origin {origin!r} is not one of {SPEC_TEXT_ORIGINS}"
@@ -1788,7 +1790,7 @@ class Ledger:
             raise ValueError(f"task {task_id} does not carry spec id {spec_id!r}")
         pattern = (
             _FOLLOW_UP_PATH.format(re.escape(spec_id))
-            if origin == "follow_up"
+            if origin in ("follow_up", "draft")
             else _REVISION_PATH
         )
         if re.fullmatch(pattern, path) is None:
