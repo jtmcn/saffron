@@ -541,7 +541,7 @@ def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
     stack, tmp_path, monkeypatch
 ):
     """Each of the four components a pending write can meet as a symlink
-    below the worktree, and the two writes that still commit: one where a
+    below the worktree, and the two finishes that commit: one where a
     symlink sits on a path nothing pending writes, one where the worktree's
     own parent is itself a symlink."""
     from saffron.finish import commit_finish
