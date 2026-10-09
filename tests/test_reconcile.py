@@ -10,7 +10,12 @@ import subprocess
 import pytest
 
 from saffron.ledger import Ledger
-from saffron.reconcile import IN_FLIGHT_STATES, HeadMoved, reconcile
+from saffron.reconcile import (
+    IN_FLIGHT_STATES,
+    PR_PENDING_STATES,
+    HeadMoved,
+    reconcile,
+)
 
 
 @pytest.fixture
@@ -502,6 +507,70 @@ def test_the_merged_head_is_written_before_the_state_moves(ledger, monkeypatch):
     reconcile(ledger, repo_id, gh=gh)
 
     assert calls == ["head", "state"]
+
+
+def test_a_merge_a_crash_cut_short_completes_on_the_next_reconcile_without_asking(
+    ledger, monkeypatch
+):
+    """A crash between `record_merged_head` and `set_task_state` leaves a
+    merged head on a row still in a pending state. The next scan reads
+    that head back and completes the row with no `gh` call, whatever
+    pending state it was in (b-3e0dbe)."""
+    repo_id = _repo(ledger)
+    real_set_state = ledger.set_task_state
+
+    def raising_set_state(task_id, state):
+        raise RuntimeError("crash between the two writes")
+
+    crashed = {}
+    for i, state in enumerate(sorted(PR_PENDING_STATES)):
+        spec_id = f"SA-95{10 + i}"
+        url = f"https://github.com/jtmcn/saffron/pull/{310 + i}"
+        task_id = _task(
+            ledger,
+            repo_id,
+            spec_id=spec_id,
+            state=state,
+            pr_url=url,
+            pushed_sha=_PUSHED,
+        )
+        crashed[spec_id] = (task_id, url)
+
+        monkeypatch.setattr(ledger, "set_task_state", raising_set_state)
+        gh = _FakeGh(
+            {url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}}
+        )
+        with pytest.raises(RuntimeError):
+            reconcile(ledger, repo_id, gh=gh, spec_id=spec_id)
+        monkeypatch.setattr(ledger, "set_task_state", real_set_state)
+
+    for _spec_id, (task_id, _url) in crashed.items():
+        assert _merged_head(ledger, task_id) == _FIXED
+        assert _state(ledger, task_id) in PR_PENDING_STATES
+
+    plain_url = "https://github.com/jtmcn/saffron/pull/399"
+    plain_id = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9599",
+        state="READY_FOR_REVIEW",
+        pr_url=plain_url,
+        pushed_sha=_PUSHED,
+    )
+
+    dead_gh = _FakeGh({})
+    result = reconcile(ledger, repo_id, gh=dead_gh)
+
+    assert set(result.merged) == {task_id for task_id, _url in crashed.values()}
+    for _spec_id, (task_id, url) in crashed.items():
+        assert url not in dead_gh.calls
+        assert _state(ledger, task_id) == "MERGED"
+        assert _merged_head(ledger, task_id) == _FIXED
+    assert result.unasked == [plain_id]
+    assert _state(ledger, plain_id) == "READY_FOR_REVIEW"
+
+    third = reconcile(ledger, repo_id, gh=dead_gh)
+    assert third.merged == []
 
 
 def test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise(ledger):

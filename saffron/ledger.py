@@ -1053,14 +1053,16 @@ class Ledger:
         return grouped
 
     def tasks_by_repo(self, repo_id: int) -> list[sqlite3.Row]:
-        """`task_id`/`state`/`pr_url`/`pushed_sha` for every task in one repo,
-        ungrouped — what `reconcile` (`saffron/reconcile.py`) needs to update
-        one task at a time. `spec_id` and `prompt_sha` ride beside them for a
-        caller that wants to name the task and what it ran under."""
+        """`task_id`, `state`, `pr_url`, `pushed_sha` and `merged_head_sha`
+        for every task in one repo, ungrouped. What `reconcile`
+        (`saffron/reconcile.py`) needs to update one task at a time,
+        including a row whose head is already recorded after a crash.
+        `spec_id` and `prompt_sha` ride beside them for a caller that wants
+        to name the task and what it ran under."""
         return list(
             self._db.execute(
                 """SELECT t.task_id, t.spec_id, t.state, t.pr_url, t.pushed_sha,
-                          t.prompt_sha
+                          t.prompt_sha, t.merged_head_sha
                      FROM tasks t
                      JOIN runs r ON r.run_id = t.run_id
                     WHERE r.repo_id = ?
