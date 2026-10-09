@@ -253,7 +253,7 @@ def _failure_rows(failures: Sequence[NewFailure]) -> list[str]:
     """One `gate | where | code | message` table's header and rows.
 
     Shared between the blocking and the advisory table, `_cell`-escaped
-    identically, so the two cannot drift apart (§5.4, §5.6).
+    identically, so the two cannot diverge (§5.4, §5.6).
     """
     lines = ["| gate | where | code | message |", "|---|---|---|---|"]
     for gate, failure in failures:
@@ -297,7 +297,7 @@ def _new_failures(
         lines += [
             "### New advisory failures",
             "",
-            "New at head, in gates held advisory at this risk tier, so none blocks.",
+            "New at head, in gates held advisory for this run, so none blocks.",
             "",
             *_failure_rows(advisory_failures),
             "",

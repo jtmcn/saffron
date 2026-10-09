@@ -377,7 +377,9 @@ def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing()
         _Tree(changed=["src/x.py"], patch=oversized_src), standard_baseline
     )
     assert standard_comparison.new_failures == ()
-    assert [n.gate for n in standard_comparison.advisory_failures] == ["size"]
+    assert [
+        (n.gate, n.failure.code) for n in standard_comparison.advisory_failures
+    ] == [("size", "diff-too-large")]
 
     # 3. The same patch under `infra/`, elevated: `size` blocks instead.
     oversized_infra = "".join(
@@ -430,7 +432,7 @@ def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing()
     assert drift_comparison.drift != ()
     assert drift_comparison.advisory_failures == ()
 
-    abort_head = _Tree({**_lint(FAIL), "tests": None})
+    abort_head = _Tree({**_lint(FAIL, FAIL), "tests": None})
     abort_comparison = suite.against(abort_head, baseline)
     assert abort_comparison.aborted != ()
     assert abort_comparison.advisory_failures == ()

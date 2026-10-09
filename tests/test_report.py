@@ -262,7 +262,7 @@ def test_the_new_failures_section_names_advisory_new_failures_apart_from_blockin
     """§5.4/§5.6: an advisory new failure is still this change's business.
     It is only not a reason to block. `_new_failures` renders one of four
     exact arrangements. A passing `lint` result plus `SPEC` hold the rest
-    of the body still, so the span is the whole comparison."""
+    of the body still, so the span is the whole new-failures section."""
     blocking = NewFailure(
         "tests", Failure(file="tests/test_a.py", code="failed", message="assert 1 == 2")
     )
@@ -302,7 +302,7 @@ def test_the_new_failures_section_names_advisory_new_failures_apart_from_blockin
     )
     advisory_section = (
         "### New advisory failures\n\n"
-        "New at head, in gates held advisory at this risk tier, so none blocks.\n\n"
+        "New at head, in gates held advisory for this run, so none blocks.\n\n"
         "| gate | where | code | message |\n"
         "|---|---|---|---|\n"
         "| `size` |  | `diff-too-large` | 1651 changed tokens \\| over 1300 ping @​org |\n"
