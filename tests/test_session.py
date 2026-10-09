@@ -1284,6 +1284,21 @@ def _wall_cut_turn(cost=0.4, *, bound="wall"):
     )
 
 
+def _budget_cut_turn(cost=0.4):
+    """What `run_agent` raises when the in-cell `max_budget_usd` ends a turn:
+    `subtype="error_max_budget_usd"`, `terminal_reason="budget_exhausted"`,
+    the shape task 87's REBUT and task 203's seventeenth REVIEW session both
+    carried (backlog item 119)."""
+    attempt = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="error_max_budget_usd",
+        terminal_reason="budget_exhausted",
+        num_turns=10,
+        cost_usd_est=cost,
+    )
+    return implement.AgentFailed("the agent reached its own max_budget_usd", attempt)
+
+
 def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
@@ -2188,6 +2203,207 @@ def test_a_turn_cut_by_the_wall_with_nothing_committed_is_salvaged(
     assert len(announced) == 1
     assert "wall" in announced[0]
     assert "turn ceiling" not in announced[0]
+
+
+def test_the_implement_turn_keeps_the_salvage_reserve_out_of_its_cap(
+    monkeypatch, tmp_path
+):
+    """Backlog item 119: IMPLEMENT's own `max_budget_usd` is the remainder
+    left after the plan checkpoint, less whatever is held for the salvage
+    turn. The plan and REPAIR turns still share the task's whole budget as
+    their own cap, since only IMPLEMENT's copy of the options dict changes."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    shapes = [
+        (8.0, 3.79, 3.21),
+        (3.0, 1.00, 1.00),
+        (2.0, 0.50, 0.75),
+        (1.50, 0.50, 0.50),
+        (1.0, 0.50, 0.25),
+    ]
+    for index, (budget, plan_cost, expected_cap) in enumerate(shapes):
+        cell = _stub_the_runtime(
+            monkeypatch, commits=1, suites=([], _results(failing), [])
+        )
+        _drive(
+            monkeypatch,
+            tmp_path / f"cell-{index}",
+            cell=cell,
+            turns=[
+                _turn(_block(_PLAN), cost=plan_cost),
+                _turn(cost=0.01),
+                _turn(cost=0.01),
+            ],
+            spec=_spec(budget_usd=budget),
+        )
+        assert cell.turn_options[0]["max_budget_usd"] == pytest.approx(budget)
+        assert cell.turn_options[1]["max_budget_usd"] == pytest.approx(expected_cap)
+        assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(budget)
+
+    # The sixth shape: the plan turn's first reply misses the schema, and
+    # IMPLEMENT and REPAIR follow as turns three and four, not one and two.
+    cell = _stub_the_runtime(monkeypatch, commits=1, suites=([], _results(failing), []))
+    _drive(
+        monkeypatch,
+        tmp_path / "cell-schema-reprompt",
+        cell=cell,
+        turns=[
+            _turn("not the schema", cost=2.00),
+            _turn(_block(_PLAN), cost=1.79),
+            _turn(cost=0.01),
+            _turn(cost=0.01),
+        ],
+        spec=_spec(budget_usd=8.0),
+    )
+    assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(3.21)
+    assert cell.turn_options[3]["max_budget_usd"] == pytest.approx(8.0)
+
+
+def test_an_implement_turn_its_budget_cap_cuts_is_salvaged_on_the_reserve(
+    monkeypatch, tmp_path
+):
+    """The in-cell budget cap joins the turn ceiling and the wall clock as a
+    bound the salvage turn answers (backlog item 119). Every salvage turn
+    runs under the amount held for it, whichever of the three cut it off.
+    A salvage that recovers nothing still ends ORPHANED."""
+    cells = [
+        (8.0, 3.79, _budget_cut_turn(cost=3.25), 1.00, "the budget cap"),
+        (
+            8.0,
+            3.79,
+            implement.AgentFailed("max turns", _cut_off_turn(cost=3.00)),
+            1.00,
+            "the turn ceiling",
+        ),
+        (2.0, 0.50, _wall_cut_turn(cost=0.77), 0.75, "wall"),
+        (2.0, 0.50, _budget_cut_turn(cost=0.77), 0.75, "the budget cap"),
+    ]
+    for index, (budget, plan_cost, cut, held, word) in enumerate(cells):
+        cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / f"salvaged-{index}",
+            cell=cell,
+            turns=[_turn(_block(_PLAN), cost=plan_cost), cut, _turn(cost=0.02)],
+            spec=_spec(budget_usd=budget),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(held)
+        announced = [
+            line for line in cell.watched if "spending one turn to salvage" in line
+        ]
+        assert len(announced) == 1
+        assert word in announced[0]
+        for other in ("the budget cap", "the turn ceiling", "wall"):
+            if other != word:
+                assert other not in announced[0]
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "salvage-fails",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN), cost=3.79),
+            _budget_cut_turn(cost=3.25),
+            _turn(cost=0.02),
+        ],
+        spec=_spec(budget_usd=8.0),
+    )
+    assert outcome.state == "ORPHANED"
+
+
+def test_a_cut_with_no_room_left_still_takes_the_host_checkpoint(monkeypatch, tmp_path):
+    """A cut that leaves no room for a salvage turn still gets the free host
+    checkpoint the salvage turn would have taken (backlog item 119): green
+    gates carry the task on to GATE, and red gates exhaust it there, never
+    discarding the commit the checkpoint made."""
+    cuts = [
+        (
+            "turn ceiling",
+            lambda: implement.AgentFailed("max turns", _cut_off_turn(12.0)),
+        ),
+        ("wall", lambda: _wall_cut_turn(cost=12.0)),
+        ("budget cap", lambda: _budget_cut_turn(cost=12.0)),
+    ]
+    for name, make_cut in cuts:
+        cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+        monkeypatch.setattr(
+            "saffron.cell.worktree.dirty_paths",
+            lambda _c, cell=cell: (
+                ["saffron/cell/session.py"]
+                if len(cell.turns) == 2 and not cell.checkpointed
+                else []
+            ),
+        )
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name.replace(" ", "-"),
+            cell=cell,
+            turns=[_turn(_block(_PLAN), cost=0.1), make_cut()],
+            spec=_spec(budget_usd=12.0),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert cell.checkpointed == [
+            "checkpoint: host-committed — no room left for a salvage turn"
+        ]
+        assert any(
+            "SALVAGE: uncommitted work checkpointed by the host" in line
+            for line in cell.watched
+        )
+        assert any("recovered 1 commit" in line for line in cell.watched)
+        assert not any("no room left to salvage" in line for line in cell.watched)
+
+    failing = Failure(file="a.py", code="E501", message="too long")
+    red_cell = _stub_the_runtime(
+        monkeypatch, commits=[0, 1], suites=([], _results(failing))
+    )
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths",
+        lambda _c, cell=red_cell: (
+            ["saffron/cell/session.py"]
+            if len(cell.turns) == 2 and not cell.checkpointed
+            else []
+        ),
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "red-gates",
+        cell=red_cell,
+        turns=[
+            _turn(_block(_PLAN), cost=0.1),
+            implement.AgentFailed("max turns", _cut_off_turn(12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert red_cell.checkpointed == [
+        "checkpoint: host-committed — no room left for a salvage turn"
+    ]
+    # No REPAIR turn: `_repair` checks `_over_budget()` before it ever calls.
+    assert len(red_cell.turns) == 2
+
+    refused_cell = _stub_the_runtime(monkeypatch, commits=0)
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths", lambda _c: ["saffron/cell/session.py"]
+    )
+
+    def _refused(_container, _message):
+        raise runtime.CellRuntimeError("commit failed: hook refused the commit")
+
+    monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _refused)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "refused-checkpoint",
+        cell=refused_cell,
+        turns=[
+            _turn(_block(_PLAN), cost=0.1),
+            implement.AgentFailed("max turns", _cut_off_turn(12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    assert outcome.state == "ORPHANED"
+    assert any("the host checkpoint failed" in line for line in refused_cell.watched)
+    assert any("no room left to salvage" in line for line in refused_cell.watched)
 
 
 def test_every_cut_that_leaves_nothing_committed_halts_for_the_next_scan(

@@ -56,6 +56,9 @@ IMPLEMENT_PROMPT = context.turn_prompt("implement")
 # second attempt at the task. A run once spent 141 turns and $11.68 doing
 # correct work it never committed; a salvage that could itself run that long
 # would be the same defect one level down.
+
+# Since backlog item 119 the salvage turn also follows a turn cut off
+# by its own budget cap.
 SALVAGE_MAX_TURNS = 5
 
 SALVAGE_PROMPT = context.turn_prompt("salvage")
@@ -186,6 +189,8 @@ def agent_options(
         # turn of the session. The per-task ceiling is the host's sum in
         # session.py; this one only cuts a runaway turn short (§4.3).
         "max_budget_usd": budget_usd,
+        # IMPLEMENT and the salvage turn get a cap of their own, session.py's
+        # own copy of this dict (backlog item 119).
         "env": {
             # The repair loop resumes the same session across a gate suite, and
             # a suite is minutes. At the five-minute default the cache has

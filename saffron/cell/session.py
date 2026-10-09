@@ -82,6 +82,10 @@ WALL_CAP_S = 3600.0
 # REBUT_OVERRUN_CAP_USD below, so one answer to those findings still lands.
 REVIEW_FLOOR_USD = 2.0
 
+# The measured maximum of seven salvage turns, $0.40 on SA-0204, rounded up.
+# Held out of IMPLEMENT's own cap, so a cut with nothing committed keeps room.
+SALVAGE_RESERVE_USD = 1.0
+
 # One pool for the rebuttal, extraction and verdict turns once REBUT runs
 # past budget: the measured maximum REBUT spend, $6.40, rounded up.
 REBUT_OVERRUN_CAP_USD = 7.0
@@ -450,6 +454,21 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
     """
     return (
         attempt.terminal_reason == "max_turns" or attempt.subtype == "error_max_turns"
+    )
+
+
+def cut_off_at_budget_cap(attempt: AttemptResult) -> bool:
+    """The third bound `cut_by_bound` now checks, beside the turn ceiling and
+    the wall clock (backlog item 119). True when the in-cell `max_budget_usd`
+    is what ended this turn.
+
+    Both fields, the way `cut_off_at_turn_ceiling` checks both of its own:
+    a result missing one must still read as this bound, not slip past it
+    in silence.
+    """
+    return (
+        attempt.terminal_reason == "budget_exhausted"
+        or attempt.subtype == "error_max_budget_usd"
     )
 
 
@@ -2309,12 +2328,20 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
+        # Held back from IMPLEMENT's own cap so a cut with nothing committed
+        # still has room for the salvage turn (backlog item 119).
+        remainder_usd = spec.budget_usd - spent
+        held_for_salvage_usd = min(SALVAGE_RESERVE_USD, remainder_usd / 2)
+        implement_options = options | {
+            "max_budget_usd": remainder_usd - held_for_salvage_usd
+        }
+
         implement_failed = False
         try:
             implemented = agent(
                 container,
                 prompt=implement.IMPLEMENT_PROMPT,
-                options=options,
+                options=implement_options,
                 resume=session_id,
                 emit=emit,
                 last_cost_usd=last_cost,
@@ -2348,11 +2375,18 @@ def _drive_cell(
         )
 
         # Decided once, from the implement turn's own attempt: SA-0028's turn
-        # ceiling, or, since SA-0126, the wall clock.
+        # ceiling, SA-0126's wall clock, or item 119's own budget cap.
         turn_ceiling_cut = cut_off_at_turn_ceiling(implemented)
         wall_cut = implemented.bound == "wall"
-        cut_by_bound = turn_ceiling_cut or wall_cut
-        bound_word = "the turn ceiling" if turn_ceiling_cut else "the wall clock"
+        budget_cap_cut = cut_off_at_budget_cap(implemented)
+        cut_by_bound = turn_ceiling_cut or wall_cut or budget_cap_cut
+        bound_word = (
+            "the turn ceiling"
+            if turn_ceiling_cut
+            else "the wall clock"
+            if wall_cut
+            else "the budget cap"
+        )
 
         if commits == 0 and cut_by_bound:
             # The agent did not decide it was finished — a bound cut it off
@@ -2362,18 +2396,44 @@ def _drive_cell(
             # session, asking only for a commit. The budget ceiling is
             # checked *before* it is spent, never after (§4.3).
             if _over_budget():
-                emit(
-                    Terminal(
-                        timestamp=time.time(),
-                        spec_id=spec.spec_id,
-                        reason="cut_off_no_salvage_room",
-                        spent_usd_est=spent,
-                        detail=(
-                            f"${spent:.2f} of ${spec.budget_usd:.2f} — "
-                            f"cut off at {bound_word}"
-                        ),
+                # Still worth the free checkpoint the salvage branch takes
+                # below: losing dirty work to a spent budget is the gap closed.
+                no_room_note = "no room left for a salvage turn"
+                try:
+                    if worktree.dirty_paths(container):
+                        worktree.commit_dirty(
+                            container,
+                            f"checkpoint: host-committed — {no_room_note}",
+                        )
+                        _phase_start(
+                            "IMPLEMENT",
+                            "SALVAGE",
+                            "uncommitted work checkpointed by the host",
+                        )
+                except runtime.CellRuntimeError as broke:
+                    _phase_start(
+                        "IMPLEMENT", "SALVAGE", f"the host checkpoint failed — {broke}"
                     )
-                )
+                commits = worktree.commits_ahead(container, planned_sha)
+                if commits:
+                    _phase_start(
+                        "IMPLEMENT",
+                        "SALVAGE",
+                        f"recovered {commits} commit(s), ${spent:.2f} spent",
+                    )
+                else:
+                    emit(
+                        Terminal(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            reason="cut_off_no_salvage_room",
+                            spent_usd_est=spent,
+                            detail=(
+                                f"${spent:.2f} of ${spec.budget_usd:.2f} — "
+                                f"cut off at {bound_word}"
+                            ),
+                        )
+                    )
             else:
                 _phase_start(
                     "IMPLEMENT",
@@ -2389,7 +2449,7 @@ def _drive_cell(
                     system_prompt=system_prompt,
                     cwd=worktree.WORKTREE_MOUNT,
                     max_turns=salvage_turns,
-                    budget_usd=spec.budget_usd,
+                    budget_usd=held_for_salvage_usd,
                 )
                 salvage_note = "the salvage turn committed nothing"
                 try:
