@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -492,6 +494,196 @@ def test_a_cell_starts_from_a_base_the_mirror_only_learns_by_fetching(
         runtime.remove_container(container)
         runtime.remove_volume(volume)
         runtime.remove_volume(f"{volume}-state")
+
+
+# --- the seed's one retry on a failed fetch (b-f582ee) ---------------------
+
+
+def _hook_default(call):
+    return call()
+
+
+def _hook_rename(path):
+    """Hide `path` for one call by renaming it aside, then back."""
+
+    def hook(call):
+        aside = path.with_name(path.name + ".aside")
+        path.rename(aside)
+        try:
+            return call()
+        finally:
+            aside.rename(path)
+
+    return hook
+
+
+def _hook_git_first(fake_dir):
+    """Put `fake_dir` first on `PATH` for one call, then restore it."""
+
+    def hook(call):
+        old = os.environ["PATH"]
+        os.environ["PATH"] = f"{fake_dir}{os.pathsep}{old}"
+        try:
+            return call()
+        finally:
+            os.environ["PATH"] = old
+
+    return hook
+
+
+def _hook_timeout(call):
+    return runtime.Completed(124, "", "", timed_out=True, bound="wall")
+
+
+def _fake_git(tmp_path, name, match, token, exit_code):
+    """A `git` on `PATH` that fails only the subcommand `match`, with `token`
+    on stderr. It execs the real `git`, resolved by absolute path now,
+    before any caller puts this directory ahead of it."""
+    real_git = shutil.which("git")
+    fake_dir = tmp_path / name
+    fake_dir.mkdir()
+    script = fake_dir / "git"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'for a in "$@"; do [ "$a" = {match} ] && '
+        f"{{ echo {token} >&2; exit {exit_code}; }}; done\n"
+        f'exec {real_git} "$@"\n'
+    )
+    script.chmod(0o755)
+    return fake_dir
+
+
+def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
+    tmp_path, monkeypatch, capsys
+):
+    """One `def` drives every shape the retry decision meets.
+
+    Three fetch failures, each with different text, get retried once and
+    recovered. Four single seeds must never retry, pause or print. The last
+    of the four is a faked `git checkout`. It fails at the exact exit code
+    a failed fetch produces, with neither "tree" nor "branch" in its
+    stderr: the one case that catches a retry keyed on an exit code
+    instead of the step itself.
+    """
+    origin = tmp_path / "origin"
+    base = _seed_repo(origin)
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    missing_obj = next((mirror / "objects").glob("??/*"))
+    fetch_fake = _fake_git(tmp_path, "fetch-fake", "fetch", uuid.uuid4().hex, 1)
+    checkout_fake = _fake_git(
+        tmp_path, "checkout-fake", "checkout", uuid.uuid4().hex, 1
+    )
+
+    _no_cell_runtime(monkeypatch, tmp_path)
+    real_run_ephemeral = runtime.run_ephemeral
+    events: list[tuple] = []
+    hooks: list = []
+    index = 0
+
+    def wrapped(image, command, *, mounts=(), **kwargs):
+        nonlocal index
+        hook = hooks[index] if index < len(hooks) else _hook_default
+        index += 1
+        result = hook(
+            lambda: real_run_ephemeral(image, command, mounts=mounts, **kwargs)
+        )
+        events.append(("seed", result.stderr))
+        return result
+
+    monkeypatch.setattr(runtime, "run_ephemeral", wrapped)
+    monkeypatch.setattr(worktree.time, "sleep", lambda s: events.append(("sleep", s)))
+
+    def run(case_hooks, base_sha, branch, n):
+        nonlocal hooks, index
+        hooks, index = case_hooks, 0
+        events.clear()
+        runtime.create_volume(f"vol{n}")
+        return worktree.prepare_worktree(
+            mirror=mirror,
+            volume=f"vol{n}",
+            base_sha=base_sha,
+            branch=branch,
+            image="img",
+            container=f"c{n}",
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+            state_volume=f"state{n}",
+            created=set(),
+        )
+
+    retried = (
+        (_hook_rename(mirror), "absent mirror"),
+        (_hook_rename(missing_obj), "missing loose object"),
+        (_hook_git_first(fetch_fake), "a git first on PATH"),
+    )
+    for n, (hook, label) in enumerate(retried):
+        run([hook], base, "saffron/test", n)
+        out = capsys.readouterr().out
+        assert [kind for kind, _ in events] == ["seed", "sleep", "seed"], label
+        # A literal, not `worktree._RETRY_PAUSE_S`: the constant moving
+        # with the assertion would prove nothing about the stated minimum.
+        assert events[1][0] == "sleep", label
+        assert events[1][1] >= 60, label
+        assert events[0][1].strip() in out, label
+
+    single = (
+        (_hook_default, "deadbeef" * 5, "saffron/test", "a base the mirror lacks"),
+        (_hook_default, base, "saffron/a..b", "a refused branch name"),
+        (_hook_git_first(checkout_fake), base, "saffron/test", "a faked checkout"),
+    )
+    for n, (hook, sha, branch, label) in enumerate(single, start=len(retried)):
+        with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+            run([hook], sha, branch, n)
+        assert [kind for kind, _ in events] == ["seed"], label
+        assert capsys.readouterr().out == "", label
+
+    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+        run([_hook_timeout], base, "saffron/test", len(retried) + len(single))
+    assert [kind for kind, _ in events] == ["seed"]
+    assert capsys.readouterr().out == ""
+
+
+def test_a_seed_whose_fetch_fails_twice_raises_after_two_attempts(
+    monkeypatch, tmp_path
+):
+    """Both reads of the mirror come back the same way, so the seed stops
+    after one retry rather than reading it forever (b-f582ee)."""
+    calls: list[str] = []
+
+    def fetch_fails(*_a, **_k):
+        calls.append("seed")
+        return runtime.Completed(1, f"{worktree._FETCH_FAILED_MARKER}\n", "unreadable")
+
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+    monkeypatch.setattr(runtime, "run_ephemeral", fetch_fails)
+    monkeypatch.setattr(worktree.time, "sleep", lambda s: calls.append("sleep"))
+
+    def _never(*_a, **_k):
+        raise AssertionError("run_detached must not be reached")
+
+    monkeypatch.setattr(runtime, "run_detached", _never)
+
+    created: set[str] = set()
+    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="vol",
+            base_sha="a" * 40,
+            branch="saffron/SY-1",
+            image="img",
+            container="saffron-cell-SY-1",
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+            state_volume="st",
+            created=created,
+        )
+    assert calls == ["seed", "sleep", "seed"]
+    assert created == {"st"}
 
 
 def test_a_failed_seed_leaves_no_container_in_the_leak_ledger(monkeypatch, tmp_path):
