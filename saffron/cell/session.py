@@ -1732,11 +1732,11 @@ def _apply_criterion_probes(
     asks its criterion's witness (items b-2750d5, b-7e69d0). Runs in a
     Gate-only cell entered after `_probe_adequacy`'s own is torn down.
     `pairs` pairs each criterion-probe entry with its criterion, then each
-    wrong version with the criterion that declared it.
-
-    Writes each pair's outcome and summary in place. Appends a survivor's
-    `Finding` to the `adequacy` review in `reviews`, the same in-place
-    contract `_probe_adequacy` keeps.
+    wrong version with the criterion that declared it. Writes each pair's
+    outcome and summary in place, and a refused pair's own
+    `probe.probe_refusal` reason under `refusal` beside them. Appends a
+    survivor's `Finding` to the `adequacy` review in `reviews`, the same
+    in-place contract `_probe_adequacy` keeps.
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
@@ -1762,6 +1762,7 @@ def _apply_criterion_probes(
         refusal = probe_check.probe_refusal(entry["edit"]["file"], test_paths)
         if refusal is not None:
             _unproven([(criterion, entry)], refusal)
+            entry["refusal"] = refusal
             continue
         with_edit.append((criterion, entry))
 

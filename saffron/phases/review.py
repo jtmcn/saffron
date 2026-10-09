@@ -702,16 +702,21 @@ def run_wrong_versions(
 
 
 def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
-    """The one REVIEW line the wrong-version sessions add. The first clause
-    counts every version across every entry and how many of those named an
-    edit. The second names, in entry order, the witness of each entry whose
-    session never answered the schema. With none, the line matches the
-    first clause alone."""
+    """The one REVIEW line the wrong-version sessions add. The first
+    clause counts every version across every entry. It then counts how
+    many named an edit and were not refused, and how many
+    `probe.probe_refusal` refused to run. The last names, in entry order,
+    the witness of each entry whose session never answered the schema.
+    With none, the line matches the first clause alone."""
     versions = [
         v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])
     ]
-    expressed = sum(1 for v in versions if v["edit"] is not None)
-    line = f"wrong versions: {len(versions)} declared, {expressed} expressed"
+    refused = sum(1 for v in versions if v.get("refusal") is not None)
+    expressed = sum(1 for v in versions if v["edit"] is not None) - refused
+    line = (
+        f"wrong versions: {len(versions)} declared, {expressed} expressed, "
+        f"{refused} refused"
+    )
     unanswered = [e["witness"] for e in entries if e.get("error") is not None]
     if unanswered:
         line += "; no session answered: " + ", ".join(str(w) for w in unanswered)

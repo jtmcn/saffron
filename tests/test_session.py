@@ -9423,6 +9423,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
                     "reason": "hits the test file",
                     "outcome": "unproven",
                     "summary": "spec/t.py is a test; a probe must target source",
+                    "refusal": "spec/t.py is a test; a probe must target source",
                 },
             ],
         },
@@ -9492,7 +9493,8 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     ]
     assert lines == [
         "REVIEW: criterion probes: 0 named, 4 unnamed",
-        "REVIEW: wrong versions: 6 declared, 3 expressed; no session answered: t.py::d",
+        "REVIEW: wrong versions: 6 declared, 2 expressed, 1 refused; "
+        "no session answered: t.py::d",
     ]
 
     # A spec whose criteria declare no wrong version buys no such session,
@@ -10359,3 +10361,181 @@ def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_p
     assert len(digests_a) == 6
     assert digests_a == digests_b
     assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))
+
+
+def test_a_wrong_version_the_host_refuses_to_run_carries_its_refusal(
+    monkeypatch, tmp_path
+):
+    """b-34d743: `probe.probe_refusal`'s own reason lands under `refusal`
+    on exactly the pairs the host declines to run. Six wrong versions drive
+    the witness: no edit, a declared test path, an escaping path, an
+    absolute path, then two `src/x.py` edits. A stubbed mutator refuses the
+    second of those, and a scripted `fail` kills the first. Only those two
+    ever enter `cell.mutated`. A second drive, under a policy declaring no
+    test paths, shows that reason too and enters the mutator for neither of
+    its own two versions."""
+    from saffron.intake import Criterion, Mutant
+
+    on_test_path = {"file": "spec/t.py", "find": "x", "replace": "y"}
+    escapes_tree = {"file": "../outside.py", "find": "x", "replace": "y"}
+    absolute_path = {"file": "/abs/outside.py", "find": "x", "replace": "y"}
+    edit_killed = {"file": "src/x.py", "find": "assert x == 1", "replace": "k"}
+    edit_refused = {"file": "src/x.py", "find": "assert x == 1", "replace": "r"}
+
+    criterion = Criterion(
+        claim="a is true",
+        witness="t.py::a",
+        wrong_versions=["v1", "v2", "v3", "v4", "v5", "v6"],
+    )
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+
+    entered: list[dict] = []
+
+    @contextlib.contextmanager
+    def _mutate(_container, mutant):
+        entered.append(mutant)
+        cell.mutated.append(mutant)
+        if len(entered) == 2:
+            yield "the mutator's own reason"
+        else:
+            yield None
+
+    _stub_probe_gates(
+        monkeypatch, cell, gate_results=[_tests_result("fail")], mutate=_mutate
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"),
+                    (on_test_path, "hits the test file"),
+                    (escapes_tree, "escapes the tree"),
+                    (absolute_path, "an absolute path"),
+                    (edit_killed, "reason 5"),
+                    (edit_refused, "reason 6"),
+                )
+            )
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    (entry,) = entries
+    versions = entry["versions"]
+    assert [v.get("refusal") for v in versions] == [
+        None,
+        "spec/t.py is a test; a probe must target source",
+        "../outside.py is not a relative path inside the tree",
+        "/abs/outside.py is not a relative path inside the tree",
+        None,
+        None,
+    ]
+    assert "refusal" not in versions[0]
+    assert "refusal" not in versions[4]
+    assert "refusal" not in versions[5]
+    assert cell.mutated == [
+        Mutant.model_validate(edit_killed),
+        Mutant.model_validate(edit_refused),
+    ]
+
+    no_test_paths_policy = "gates: {tests: {}}\n"
+    criterion2 = Criterion(
+        claim="b is true", witness="t.py::b", wrong_versions=["w1", "w2"]
+    )
+    edit_bare = {"file": "src/x.py", "find": "assert x == 1", "replace": "z"}
+
+    @contextlib.contextmanager
+    def _never(_container, mutant):
+        raise AssertionError("the mutator must not be entered")
+        yield
+
+    cell2 = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::b"])],
+    )
+    _stub_probe_gates(monkeypatch, cell2, gate_results=[], mutate=_never)
+
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "no-test-paths",
+        cell=cell2,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"), (edit_bare, "a bare edit")
+                )
+            )
+        ],
+        spec=_spec(acceptance=[criterion2]),
+        policy=no_test_paths_policy,
+        gates=("tests",),
+    )
+    assert outcome2.state == "READY_FOR_REVIEW"
+
+    entries2 = json.loads(
+        (
+            tmp_path / "no-test-paths" / "out" / "SY-1" / "wrong-versions.json"
+        ).read_text()
+    )
+    (entry2,) = entries2
+    versions2 = entry2["versions"]
+    assert "refusal" not in versions2[0]
+    assert versions2[1]["refusal"] == (
+        "the repo declares no test paths, so source cannot be told from test"
+    )
+    assert cell2.mutated == []
+
+
+def test_a_spec_whose_wrong_versions_all_edit_tests_reads_none_of_them_expressed(
+    monkeypatch, tmp_path
+):
+    """b-34d743: `SA-0200`'s own shape, where every wrong version edited a
+    declared test path and the old line still read most of them expressed.
+    Both versions here edit `spec/`-prefixed paths, so the line reads none
+    expressed and the mutator is entered for neither."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="a is true", witness="t.py::a", wrong_versions=["v1", "v2"]
+    )
+    edit_1 = {"file": "spec/a.py", "find": "assert 1", "replace": "2"}
+    edit_2 = {"file": "spec/b.py", "find": "assert 1", "replace": "2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe")))
+        + [_turn(_wrong_version_answer((edit_1, "reason 1"), (edit_2, "reason 2")))],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.mutated == []
+
+    (line,) = [w for w in cell.watched if w.startswith("REVIEW: wrong versions:")]
+    assert line == "REVIEW: wrong versions: 2 declared, 0 expressed, 2 refused"

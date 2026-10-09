@@ -1293,7 +1293,7 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
 
     assert (
         review.describe_wrong_versions(entries)
-        == "wrong versions: 4 declared, 3 expressed"
+        == "wrong versions: 4 declared, 3 expressed, 0 refused"
     )
 
 
@@ -1670,4 +1670,99 @@ def test_a_wrong_versions_survivor_names_the_version_it_came_from():
         ),
         probe=edit,
         probe_verdict="survived",
+    )
+
+
+def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_ones():
+    """b-34d743: `expressed` counts only versions the host ran, never one
+    `probe.probe_refusal` refused. `refused` reads a version's own
+    `refusal` key, never its summary text. The witness pins six
+    arrangements of the line: none, some and all versions refused, each
+    with and without an unanswered entry. Its refused versions carry all
+    three of `probe_refusal`'s reasons."""
+
+    def _version(edit, outcome, summary, *, refusal=None):
+        version: dict[str, object] = {
+            "version": "v",
+            "edit": edit,
+            "reason": "r",
+            "outcome": outcome,
+            "summary": summary,
+        }
+        if refusal is not None:
+            version["refusal"] = refusal
+        return version
+
+    def _entry(witness, versions, *, error=None):
+        return {
+            "witness": witness,
+            "claim": "c",
+            "cost_usd": 0.1,
+            "error": error,
+            "versions": versions,
+        }
+
+    def _killed():
+        return _version({"file": "src/x.py"}, "killed", "killed")
+
+    def _unnamed():
+        return _version(None, "unproven", "this session named no edit")
+
+    def _stuck():
+        return _version(
+            {"file": "src/x.py"},
+            "unproven",
+            "this repo's head declares no `tests` gate, so nothing could "
+            "answer the probe",
+        )
+
+    def _refused(reason):
+        return _version({"file": "x"}, "unproven", reason, refusal=reason)
+
+    test_path_reason = "spec/t.py is a test; a probe must target source"
+    no_paths_reason = (
+        "the repo declares no test paths, so source cannot be told from test"
+    )
+    outside_reason = "../outside.py is not a relative path inside the tree"
+
+    none_refused = [_entry("t.py::a", [_killed(), _unnamed(), _killed()])]
+    some_refused = [
+        _entry("t.py::b", [_killed(), _refused(test_path_reason)]),
+        _entry(
+            "t.py::c",
+            [_unnamed(), _refused(no_paths_reason), _killed(), _stuck()],
+        ),
+    ]
+    all_refused = [
+        _entry(
+            "t.py::d",
+            [
+                _refused(test_path_reason),
+                _refused(no_paths_reason),
+                _refused(outside_reason),
+            ],
+        )
+    ]
+    unanswered = _entry("t.py::z", [_unnamed()], error="boom")
+
+    assert review.describe_wrong_versions(none_refused) == (
+        "wrong versions: 3 declared, 2 expressed, 0 refused"
+    )
+    assert review.describe_wrong_versions(some_refused) == (
+        "wrong versions: 6 declared, 3 expressed, 2 refused"
+    )
+    assert review.describe_wrong_versions(all_refused) == (
+        "wrong versions: 3 declared, 0 expressed, 3 refused"
+    )
+    assert review.describe_wrong_versions(none_refused + [unanswered]) == (
+        "wrong versions: 4 declared, 2 expressed, 0 refused; "
+        "no session answered: t.py::z"
+    )
+    assert review.describe_wrong_versions(some_refused + [unanswered]) == (
+        "wrong versions: 7 declared, 3 expressed, 2 refused; "
+        "no session answered: t.py::z"
+    )
+    assert review.describe_wrong_versions(all_refused + [unanswered]) == (
+        "wrong versions: 4 declared, 0 expressed, 3 refused; "
+        "no session answered: t.py::z"
     )
