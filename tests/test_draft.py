@@ -1,10 +1,8 @@
 """`saffron.draft` (backlog b-98a3be, `DESIGN.md` §3.4): running the spec
 chain as a task.
 
-`saffron.draft` does not exist at this spec's own tree base. It is
-imported inside each test body, never at module scope. A module-scope
-import would fail collection under `revert` (see `tests/test_follow_up.py`
-for the same rule on a different new module).
+`saffron.draft` is imported inside each test body, so a reverted tree
+fails each test and not collection.
 """
 
 from __future__ import annotations
@@ -17,6 +15,7 @@ import pytest
 
 from saffron import intake
 from saffron.agents.artifacts import hash_artifact
+from saffron.follow_up import _slug
 from saffron.ledger import Ledger
 from saffron.record.memory import MemoryRecord
 from saffron.spec_review import (
@@ -39,9 +38,18 @@ def _declares_other(text: str, spec_id: str) -> bool:
     return parsed.id != spec_id
 
 
+def _slug_of(text: str) -> str:
+    """The oracle's own slug, from `intake.parse_spec` and `_slug`,
+    never from `saffron.draft._slug_for_text`."""
+    try:
+        parsed = intake.parse_spec(text)
+    except intake.SpecError:
+        return "draft"
+    return _slug(parsed.title)
+
+
 _SPEC_ID = "SA-0001"
 _DRAFT_PATH = f".saffron/specs/{_SPEC_ID}-draft.md"
-_SOMETHING_PATH = f".saffron/specs/{_SPEC_ID}-something.md"
 
 
 def _task(ledger: Ledger, spec_id: str = _SPEC_ID) -> int:
@@ -357,14 +365,14 @@ def _run(tmp_path: Path, case: Case):
     """Run one `Case`. Returns its `Expected`, the ledger and task,
     the review and revise doubles, and the `Drafted` (or `None` for a
     raise, already checked here)."""
-    from saffron.draft import _slug_for_text, draft_spec
+    from saffron.draft import draft_spec
 
     expected = _expect(
         case.write,
         case.review,
         case.revise,
         _SPEC_ID,
-        slug_for_text=_slug_for_text,
+        slug_for_text=_slug_of,
         declares_other_id=_declares_other,
     )
     ledger = Ledger(tmp_path / f"{case.name}.db", record=MemoryRecord())
@@ -503,7 +511,6 @@ def test_the_draft_prompt_quotes_the_item_and_names_the_draft_for_its_title(
     tmp_path,
 ):
     from saffron.draft import draft_spec
-    from saffron.follow_up import _slug
 
     items = [
         "an item ending in a newline\nsecond line\n",
@@ -562,7 +569,13 @@ def test_the_seed_id_is_the_highest_file_id_of_the_one_prefix(tmp_path):
         (["SA-42-x.md"], ["SA-0042-x.md"], "SA-0042"),  # tied, longer spelling wins
         (["SA-0042-x.md"], ["SA-42-x.md"], "SA-0042"),  # tied, either way round
         (["SA-42-x.md", "SA-0042-y.md"], [], "SA-0042"),  # tied, one directory
-        (["SA-0001-x.md", "notes.md", "SA-0999.txt"], ["README.md"], "SA-0001"),
+        (["SA-9-x.md", "SA-10-y.md"], [], "SA-10"),  # numbers, not digit strings
+        (["SA-9999-x.md"], ["SA-10000-y.md"], "SA-10000"),  # past four places
+        (
+            ["SA-0001-x.md", "notes.md", "SA-0999.txt", "TE-0001.txt"],
+            ["README.md"],
+            "SA-0001",
+        ),
         ([], [], None),  # no file at all
         (["README.md"], [], None),  # README.md alone
         (["SA-0001-x.md"], ["TE-0002-y.md"], None),  # two prefixes, two dirs

@@ -28,7 +28,7 @@ from saffron.scheduler import RETIRED_DIRNAME
 # A file's name as `<prefix>-<digits>`, with an optional `-slug` before `.md`.
 _FILE_ID = re.compile(r"^([A-Za-z0-9]+)-([0-9]+)(?:-.*)?$")
 
-# The two clean-round states, beside `RATE_LIMITED` and `GATE_ERROR`.
+# The four states a draft ends in.
 DraftState = Literal["SPEC_DRAFTED", "SPEC_WITHHELD", "RATE_LIMITED", "GATE_ERROR"]
 
 # A route's state, once no further round follows it.
@@ -106,7 +106,8 @@ def _prompt(spec_id: str, item: str) -> str:
 
 def _slug_for_text(text: str) -> str:
     """`follow_up._slug` of `text`'s parsed title, or the literal
-    `draft` when `text` does not parse. Never `follow_up._slug("")`."""
+    `draft` when `text` does not parse. An unparsed reply never takes
+    `follow_up._slug("")`."""
     try:
         parsed = intake.parse_spec(text)
     except intake.SpecError:

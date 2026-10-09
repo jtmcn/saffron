@@ -73,7 +73,7 @@ RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
 _PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
 
 # The closed set `record_spec_text` writes: a revision, a follow-up spec,
-# or a `saffron draft` task's own text. None is at `base_sha` (ADR 7).
+# or a `draft_spec` task's own text. None is at `base_sha` (ADR 7).
 SPEC_TEXT_ORIGINS = ("revision", "follow_up", "draft")
 
 # A follow-up's file is named for its own spec id by the host, as a draft's
@@ -1433,8 +1433,9 @@ class Ledger:
     def open_attempt(self, task_id: int, phase: str | None = None) -> int:
         """One agent turn. The phase defaults to the state the task is in — the
         caller sets that at each phase boundary and would otherwise have to
-        track it again at every turn (§4.1). Only `replay`, the stack
-        batch's spec review and `draft_spec` pass one. `replay` has no agent
+        track it again at every turn (§4.1). Only `replay` and the spec review
+        and spec writer sessions (stack batch, follow-up, `draft_spec`) pass
+        one. `replay` has no agent
         or phase to be in. A spec review or spec writer session opens a
         phase the task's own state is not."""
         resolved = self._db.execute(
@@ -1770,7 +1771,7 @@ class Ledger:
         text: str,
     ) -> int:
         """Record one spec text that is not at `base_sha`: a spec review's
-        revision, a follow-up spec's own text, or a `saffron draft` task's
+        revision, a follow-up spec's own text, or a `draft_spec` task's
         own text (ADR 7, `DESIGN.md` §3.4). Numbered one more than the
         task's own `spec_texts` rows, starting at 1. Raises `ValueError`
         for an origin outside `SPEC_TEXT_ORIGINS`, a task id that names no
