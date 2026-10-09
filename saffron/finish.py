@@ -18,20 +18,19 @@ from pathlib import Path
 
 from saffron.cell.runtime import CellRuntimeError
 from saffron.follow_up import Pooled
-from saffron.intake import Spec, discover_specs
+from saffron.intake import Spec
 from saffron.ledger import _REVISION_PATH, Ledger
 from saffron.phases import package as package_phase
 from saffron.phases import review
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import Policy
-from saffron.scheduler import RETIRED_DIRNAME
 
 # The backlog pool file the finish writes beside its tree (`SA-0174`).
 FINDINGS_NAME = "findings.json"
 
 # ADR 7's one exception to the repo's own `protected` list: the finishing
-# commit touches only a spec directly in the spec directory or in `done/`.
-FINISH_TOUCHES = (".saffron/specs/*.md", ".saffron/specs/done/*.md")
+# commit touches only a spec directly in the spec directory, never `done/`.
+FINISH_TOUCHES = (".saffron/specs/*.md",)
 
 # The prefixes of `publish_finish`'s first line. `SA-0170` links a pushed
 # stack only once a line starts with `PUSHED`.
@@ -122,9 +121,9 @@ def commit_finish(
 ) -> str | None:
     """One commit in `mirror`, atop the top layer's recorded `pushed_sha`.
 
-    Writes each layer's and each task in `unrun`'s latest spec text, then
-    retires each layer's file into `done/`. Returns the new sha, or `None`
-    for a batch with no layer or a tree the writes left unchanged."""
+    Writes each layer's and each task in `unrun`'s latest spec text, and
+    moves no spec into `done/` (ADR 7, amended). Returns the new sha, or
+    `None` for a batch with no layer or a tree the writes left unchanged."""
     layers = ledger.stack_layers(batch_id)
     if not layers:
         return None
@@ -148,15 +147,6 @@ def commit_finish(
     try:
         for path, text in pending:
             (workdir / path).write_text(text)
-        specs_dir = workdir / ".saffron" / "specs"
-        discovered, _failures = discover_specs(specs_dir)
-        by_id = {d.spec.id: d.path for d in discovered}
-        done_dir = specs_dir / RETIRED_DIRNAME
-        done_dir.mkdir(exist_ok=True)
-        for layer in layers:
-            found = by_id.get(layer["spec_id"])
-            if found is not None:
-                found.rename(done_dir / found.name)
 
         git_mirror._git(workdir, "add", "-A")
         # Its exit code is the answer, so it alone runs unchecked.

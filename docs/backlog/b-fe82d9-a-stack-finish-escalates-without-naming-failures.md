@@ -30,3 +30,7 @@ judged into its batch folder, and the log line names the failures.
 ## Record
 
 - 2026-10-08: filed from the spec loop's run 31.
+- 2026-10-08: diagnosed by rerunning the suite on `ecf59477`. The commit only
+  moved SA-0225 and SA-0228 to `done/`. `test_the_backlog_records_hold`
+  failed on two items still `open` (b-5aa016, b-98a3be). b-a63235 removes the
+  move. The finish still names no failure, so this item stays open.

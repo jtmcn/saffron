@@ -114,11 +114,12 @@ The repo's gate suite runs on it in a cell before any push. That run empties
 alone. The commit writes `.saffron/specs/`, and a retired spec names
 suppression tokens as text. It is the one
 agent-written text a protected path takes, and the host writes it, never a
-cell. The host also moves each spec with a reviewable layer to
-`.saffron/specs/done/`, in the same finishing layer. That move asserts a
-retired spec's work is in the default branch. It reaches the default branch
-only when the operator merges the stack, so the operator's merge makes the
-assertion.
+cell. The host moves no spec to `.saffron/specs/done/`. Amended
+2026-10-08, b-fe82d9: the finishing layer once retired each spec with a
+reviewable layer. This repo's records rule wants an item closed in the tree
+that retires its spec, and the host cannot close an item. Batch 19's finish failed that
+rule on its own commit. The operator now retires each spec with the item it
+closes, in a commit above the stack.
 
 **The finishing layer's parent is the top layer's recorded head.** §5.7 says a
 parent's head is fetched, never remembered. The finish is not a task, and it
