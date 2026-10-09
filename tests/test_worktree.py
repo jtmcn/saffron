@@ -2495,9 +2495,9 @@ def _mirror_with_non_branch_refs(tmp_path):
 
     `main` stays at the root commit. The returned base is the parent
     branch's head. The returned objects are the two record commits and
-    their two blobs. Each comes from `hash-object`, `mktree` and
-    `commit-tree`, never an ordinary commit. No branch or tag but the
-    one named above ever points at it.
+    their two blobs. Each commit is built with `hash-object`, `mktree` and
+    `commit-tree`. No branch points at either. Only the annotated tag
+    points at the task commit.
     """
     origin = tmp_path / "origin"
     _seed_repo(origin)
@@ -2585,8 +2585,9 @@ def test_a_seed_fetches_no_non_branch_ref_whatever_the_git_config_names(
 ):
     """Measured at base: a bare `git fetch` lets either config below widen
     what the seed brings over, and the record commit, its blob and the tag
-    arrive. Driven through `_no_cell_runtime`, so the git the seed execs
-    reads the same environment a real seed would.
+    arrive. Driven through `_no_cell_runtime`, so the seed's git runs on
+    the host and reads the config this test sets. A real seed reads the
+    image's config instead.
 
     `_RETRY_PAUSE_S` and `time.sleep` are neutralised so a wrong version
     whose fetch fails costs this test nothing.
@@ -2634,9 +2635,9 @@ def test_a_cell_seeded_from_a_mirror_holding_non_branch_refs_holds_none_of_them(
     tmp_path, network
 ):
     """The same claim as the witness above, against the image's own git
-    rather than the host's. No config to drive here: at this spec's base,
-    `prepare_worktree` passes the seed's `run_ephemeral` no `env`, so this
-    proves the explicit refspec itself, not a config this cell never sets.
+    rather than the host's. `prepare_worktree` passes the seed's
+    `run_ephemeral` no `env`, so no config reaches the seed here. This
+    proves the explicit refspec under the image's git.
     """
     mirror, base, objects = _mirror_with_non_branch_refs(tmp_path)
     volume, container = "saffron-test-wt8", "saffron-test-cell8"
