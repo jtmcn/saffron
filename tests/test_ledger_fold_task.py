@@ -939,7 +939,7 @@ def _sha256(text: str) -> str:
 def test_a_spec_text_is_numbered_on_its_task_and_read_back_latest(tmp_path, record):
     from saffron.ledger import SPEC_TEXT_ORIGINS
 
-    assert SPEC_TEXT_ORIGINS == ("revision", "follow_up")
+    assert SPEC_TEXT_ORIGINS == ("revision", "follow_up", "draft")
     ledger = Ledger(tmp_path / "ledger.db", record=record)
     sy1 = _minimal(ledger, "SY-1")
     sy2 = _minimal(ledger, "SY-2")
