@@ -8123,9 +8123,12 @@ def test_a_draft_writes_reviews_and_revises_in_spec_cells_at_the_pinned_base(
     assert f"spec: {recorded_path}\n" in prompt
     assert f"base: {base_sha}\n" in prompt
     assert cli._SPEC_SESSION_ACCOUNT_LINES in prompt
-    assert cli._DRAFT_REVIEW_SENTENCE in prompt
-    assert f"<spec>\n{recorded_text}\n</spec>\n" in prompt
-    assert cli._REVISION_SENTENCE not in prompt
+    assert (
+        "No file is queued at this path. The text below is the spec a writer "
+        "session just drafted for this task's own review: review that text.\n"
+        f"<spec>\n{recorded_text}\n</spec>\n"
+    ) in prompt
+    assert "A revision replaces the queued file." not in prompt
     assert agent_calls[-1]["spec_id"] == "TE-900"
     assert agent_calls[-1]["timeout_s"] == spec_review.SPEC_REVIEW_TIMEOUT_S
 
@@ -8157,8 +8160,13 @@ def test_a_draft_writes_reviews_and_revises_in_spec_cells_at_the_pinned_base(
     )
     review_run(sy1, None, spec_text=recorded_text)
     stack_prompt = reviewer_calls[-1]["prompt"]
-    assert cli._REVISION_SENTENCE in stack_prompt
-    assert cli._DRAFT_REVIEW_SENTENCE not in stack_prompt
+    assert (
+        "A revision replaces the queued file. The text below is that revision: "
+        "review that text, and treat a change to what the spec is for as a "
+        "scope blocker.\n"
+        f"<spec>\n{recorded_text}\n</spec>\n"
+    ) in stack_prompt
+    assert "No file is queued at this path." not in stack_prompt
 
     # `write` pinned at the bare commit, which holds no `policy.yaml`:
     # its system prompt is the writer's under an empty `Policy`.

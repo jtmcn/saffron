@@ -152,8 +152,8 @@ def main(argv: list[str] | None = None) -> int:
 
     draft_parser = subcommands.add_parser(
         "draft",
-        help="run the spec chain over one item, attended, writing the "
-        "result into the tree rather than the record (§3.4)",
+        help="run the spec chain over one item as a recorded task, attended, "
+        "and write the spec into the working tree uncommitted (§3.4)",
     )
     draft_parser.add_argument("item", type=Path)
     draft_parser.add_argument("--repo", type=Path, default=Path.cwd())
@@ -906,15 +906,6 @@ def _spec_review_policy(exported: Path) -> Policy:
     return policy
 
 
-# `_stack_review`'s own revision sentence. A draft's review stands a
-# different one in for it. Every other caller keeps this one.
-_REVISION_SENTENCE = (
-    "A revision replaces the queued file. The text below is "
-    "that revision: review that text, and treat a change "
-    "to what the spec is for as a scope blocker.\n"
-)
-
-
 def _stack_review(
     *, pinned: PinnedBase, repo: Path, out_dir: Path
 ) -> Callable[..., spec_review.SpecReviewSession]:
@@ -964,7 +955,11 @@ def _stack_review(
         if spec_text is not None:
             # A draft names its own sentence, with no queued file to replace.
             prompt += (
-                sentence if sentence is not None else _REVISION_SENTENCE
+                sentence
+                if sentence is not None
+                else "A revision replaces the queued file. The text below is "
+                "that revision: review that text, and treat a change "
+                "to what the spec is for as a scope blocker.\n"
             ) + f"<spec>\n{spec_text}\n</spec>\n"
         agent = partial(
             implement.run_agent,
@@ -1040,7 +1035,7 @@ def _stack_revise(
             "review: the spec review between the review tags below.\n"
             f"spec: .saffron/specs/{candidate.path.name}\n"
             f"base: {head}\n"
-            "The checkout is a snapshot of the base.\n"
+            f"{_SNAPSHOT_SENTENCE}"
             "The text between the spec tags below is the spec's current "
             "text, and it replaces the file at that path.\n"
             "Keep the spec's id and its exact depends_on.\n"
@@ -1098,15 +1093,14 @@ def _stack_mint(
     return run
 
 
-# The sentence a draft's own review round reads in place of `_REVISION_SENTENCE`:
+# The sentence a draft's own review round reads in place of `_stack_review`'s own:
 # a draft has no queued file at all, so there is nothing for a revision to replace.
 _DRAFT_REVIEW_SENTENCE = (
     "No file is queued at this path. The text below is the spec a writer "
     "session just drafted for this task's own review: review that text.\n"
 )
 
-# The sentence `_stack_revise` sends every caller after its own `base:` line
-# (`saffron/cli.py:1024-1025`), reused verbatim by a draft's writer prompt.
+# Sent after the `base:` line by `_stack_revise` and by a draft's writer prompt.
 _SNAPSHOT_SENTENCE = "The checkout is a snapshot of the base.\n"
 
 
