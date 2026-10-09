@@ -3144,8 +3144,8 @@ def _drive_cell(
                     claude_md=claude_md,
                     prompts_dir=context.PROMPTS_DIR,
                     max_turns=spec.max_turns,
-                    # `rebut_agent` overrides this on every call, so this
-                    # is only what a turn sees before that override lands.
+                    # `rebut_agent` replaces this on every call, so no
+                    # REBUT session runs on it.
                     budget_usd=REBUT_CAP_USD,
                     # Measured, never reported (§4.3): from the head the
                     # rebuttal started at, so the implement turn's own
@@ -3163,9 +3163,10 @@ def _drive_cell(
                     emit=emit,
                     last_cost_usd=last_cost,
                 )
-            if cap.refused and result.state == "REBUTTING":
-                # The cap, not the agent, ended this REBUT, so the record
-                # must not read as the silence `rebut_state` describes.
+            # The cap, not the agent, ended this REBUT: its blockers stand,
+            # and the record must not read as the silence `rebut_state` names.
+            cut = cap.refused and result.state == "REBUTTING"
+            if cut:
                 detail = result.rebuttal.error or next(
                     (v.error for v in result.verdicts if v.error), None
                 )
@@ -3204,8 +3205,8 @@ def _drive_cell(
                 )
             outcome, why = result.state, result.why
 
-            # Unchanged from SA-0203: only a REBUT that started at or past
-            # budget_usd gets this line, under the cap as well as past it.
+            # Only a REBUT that started at or past budget_usd gets this
+            # line, whether or not the cap cut it.
             if overrun:
                 emit(
                     Budget(
@@ -3217,9 +3218,7 @@ def _drive_cell(
                         rebut_spent_usd_est=result.cost_usd,
                     )
                 )
-            if outcome == "REBUTTING" and cap.refused:
-                # The cap stopped a session, not the agent: the blockers
-                # stand unanswered, and the task ends decided, not hanging.
+            if cut:
                 outcome = "EXHAUSTED"
                 rebut_result = None
 
