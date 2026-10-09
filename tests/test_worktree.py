@@ -2483,3 +2483,194 @@ def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
     _host_git(tmp_path, monkeypatch)
     patch = worktree.export_patch("c", base)
     assert _hunk_count(patch) == 2
+
+
+# --- the seed fetches no non-branch ref, whatever git config names (SA-0237)
+
+
+def _mirror_with_non_branch_refs(tmp_path):
+    """A mirror holding a branch other than the default, and three refs no
+    branch reaches: `refs/saffron/mutants`, `refs/saffron/tasks/t-1`, and an
+    annotated tag on the second one's commit.
+
+    `main` stays at the root commit. The returned base is the parent
+    branch's head. The returned objects are the two record commits and
+    their two blobs. Each comes from `hash-object`, `mktree` and
+    `commit-tree`, never an ordinary commit. No branch or tag but the
+    one named above ever points at it.
+    """
+    origin = tmp_path / "origin"
+    _seed_repo(origin)
+    subprocess.run(
+        ["git", "-C", str(origin), "checkout", "-q", "-b", "saffron/parent"],
+        check=True,
+        capture_output=True,
+    )
+    base = _commit_file(origin, "parent.txt", "from the parent\n", "parent commit")
+    subprocess.run(
+        ["git", "-C", str(origin), "checkout", "-q", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    mirror = tmp_path / "m.git"
+    mirror_ops.ensure_mirror(origin, mirror)
+
+    def git(*args, input=None):
+        return subprocess.run(
+            ["git", "-C", str(mirror), *args],
+            input=input,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def record_commit(path, content, message):
+        blob = git("hash-object", "-w", "--stdin", input=content)
+        tree = git("mktree", input=f"100644 blob {blob}\t{path}\n")
+        commit = git(
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            tree,
+            "-m",
+            message,
+        )
+        return blob, commit
+
+    mutant_blob, mutant_commit = record_commit(
+        "mutant.json", "mutant data\n", "mutants commit"
+    )
+    git("update-ref", "refs/saffron/mutants", mutant_commit)
+
+    task_blob, task_commit = record_commit("task.json", "task data\n", "task commit")
+    git("update-ref", "refs/saffron/tasks/t-1", task_commit)
+    git(
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=T",
+        "tag",
+        "-a",
+        "v-record",
+        "-m",
+        "a tag on the record commit",
+        task_commit,
+    )
+
+    objects = [mutant_blob, mutant_commit, task_blob, task_commit]
+    return mirror, base, objects
+
+
+def _assert_holds_nothing_hidden(tree, objects):
+    assert (tree / "parent.txt").read_text() == "from the parent\n"
+    for obj in objects:
+        cat = subprocess.run(
+            ["git", "-C", str(tree), "cat-file", "-e", obj], capture_output=True
+        )
+        assert cat.returncode != 0, obj
+    refs = subprocess.run(
+        ["git", "-C", str(tree), "for-each-ref", "--format=%(refname)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert refs == ["refs/heads/saffron/test"]
+
+
+def test_a_seed_fetches_no_non_branch_ref_whatever_the_git_config_names(
+    tmp_path, monkeypatch
+):
+    """Measured at base: a bare `git fetch` lets either config below widen
+    what the seed brings over, and the record commit, its blob and the tag
+    arrive. Driven through `_no_cell_runtime`, so the git the seed execs
+    reads the same environment a real seed would.
+
+    `_RETRY_PAUSE_S` and `time.sleep` are neutralised so a wrong version
+    whose fetch fails costs this test nothing.
+    """
+    mirror, base, objects = _mirror_with_non_branch_refs(tmp_path)
+    volumes = _no_cell_runtime(monkeypatch, tmp_path)
+    monkeypatch.setattr(worktree, "_RETRY_PAUSE_S", 0.0)
+    monkeypatch.setattr(worktree.time, "sleep", lambda s: None)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+
+    def seed(volume, container):
+        runtime.create_volume(volume)
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image="img",
+            container=container,
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+
+    # A widened fetch refspec, read from the environment rather than a file.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "remote.origin.fetch")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "+refs/saffron/*:refs/saffron/*")
+    seed("vol-fetch", "c-fetch")
+    _assert_holds_nothing_hidden(volumes["vol-fetch"], objects)
+
+    # Every tag followed, through a global gitconfig file instead.
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_KEY_0", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_VALUE_0", raising=False)
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+    _set_global(config, "remote.origin.tagOpt", "--tags")
+    seed("vol-tags", "c-tags")
+    _assert_holds_nothing_hidden(volumes["vol-tags"], objects)
+
+
+@pytest.mark.cell
+def test_a_cell_seeded_from_a_mirror_holding_non_branch_refs_holds_none_of_them(
+    tmp_path, network
+):
+    """The same claim as the witness above, against the image's own git
+    rather than the host's. No config to drive here: at this spec's base,
+    `prepare_worktree` passes the seed's `run_ephemeral` no `env`, so this
+    proves the explicit refspec itself, not a config this cell never sets.
+    """
+    mirror, base, objects = _mirror_with_non_branch_refs(tmp_path)
+    volume, container = "saffron-test-wt8", "saffron-test-cell8"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        assert worktree.head_sha(container) == base
+        content = runtime.exec_(container, ["cat", "/work/parent.txt"])
+        assert content.stdout == "from the parent\n"
+        refs = runtime.exec_(
+            container,
+            ["git", "for-each-ref", "--format=%(refname)"],
+            workdir="/work",
+        )
+        assert refs.stdout.split() == ["refs/heads/saffron/test"]
+        for obj in objects:
+            cat = runtime.exec_(
+                container, ["git", "cat-file", "-e", obj], workdir="/work"
+            )
+            assert cat.returncode != 0, obj
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")
