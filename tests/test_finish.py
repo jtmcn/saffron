@@ -463,7 +463,7 @@ def stack(tmp_path, monkeypatch):
     )
 
 
-def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_retires_each_layers_spec(
+def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_spec(
     stack, tmp_path
 ):
     from saffron.finish import commit_finish
@@ -502,27 +502,25 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_retires_eac
             f"{stack.heads['TE-20']}..{sha}",
         ).splitlines()
     )
+    # Retiring to `done/` is the operator's, beside the item it closes (ADR 7).
     assert diff == sorted(
         [
-            "D\t.saffron/specs/ten.md",
-            "D\t.saffron/specs/TE-7-seven.md",
-            "A\t.saffron/specs/done/ten.md",
-            "A\t.saffron/specs/done/TE-7-seven.md",
-            "A\t.saffron/specs/done/TE-20-follow.md",
+            "M\t.saffron/specs/TE-7-seven.md",
+            "A\t.saffron/specs/TE-20-follow.md",
             "A\t.saffron/specs/TE-21-other.md",
         ]
     )
 
     assert "Seven r2" in _git(
-        stack.mirror, "show", f"{sha}:.saffron/specs/done/TE-7-seven.md"
+        stack.mirror, "show", f"{sha}:.saffron/specs/TE-7-seven.md"
     )
     assert "Twenty r1" in _git(
-        stack.mirror, "show", f"{sha}:.saffron/specs/done/TE-20-follow.md"
+        stack.mirror, "show", f"{sha}:.saffron/specs/TE-20-follow.md"
     )
     assert "Twenty-one" in _git(
         stack.mirror, "show", f"{sha}:.saffron/specs/TE-21-other.md"
     )
-    assert "Ten" in _git(stack.mirror, "show", f"{sha}:.saffron/specs/done/ten.md")
+    assert "Ten" in _git(stack.mirror, "show", f"{sha}:.saffron/specs/ten.md")
 
     empty_batch = stack.ledger.create_batch(10.0)
     before2 = _git(stack.mirror, "for-each-ref")
@@ -1790,7 +1788,6 @@ def test_the_finishing_suite_passes_the_spec_directory_and_fails_every_other_pat
     def _comparison(extra: tuple[str, list[str]] | None):
         files = [
             (".saffron/specs/example.md", [f"See {token} for its own context."]),
-            (".saffron/specs/done/retired.md", ["Retired."]),
         ]
         if extra is not None:
             files.append(extra)
@@ -1805,6 +1802,7 @@ def test_the_finishing_suite_passes_the_spec_directory_and_fails_every_other_pat
 
     for extra_path in (
         ".saffron/policy.yaml",
+        ".saffron/specs/done/retired.md",
         ".saffron/specs/sub/x.md",
         ".saffron/specs/x.txt",
         "CLAUDE.md",
