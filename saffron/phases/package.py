@@ -141,10 +141,10 @@ def fetch_default_branch(mirror: Path, url: str) -> tuple[str, str]:
     """
     default = default_branch(url, cwd=mirror)
     # Into refs/heads/<default>, not the default refspec: FETCH_HEAD alone
-    # updates nothing under refs/*, so worktree.py's `git fetch origin` seed
-    # (default refspec, mirror-local) never sees a base the operator has not
-    # pulled. --force: the base is defined as the remote's head, so a local
-    # ref that disagrees is stale by definition.
+    # updates nothing under refs/*. The seed in worktree.py fetches
+    # refs/heads/* by name now, so it never sees a base the operator did
+    # not pull. --force: the base is defined as the remote's head, so a
+    # local ref that disagrees is stale by definition.
     fetched = _run(
         mirror, "fetch", "--force", url, f"+refs/heads/{default}:refs/heads/{default}"
     )
