@@ -214,8 +214,8 @@ def _drive(
             # token at 22:00 produces a night with no record it was attempted.
             return "INFRASTRUCTURE", consecutive_aborts
 
-    # By spec id, or a re-offered `Candidate` starts twice. A `RATE_LIMITED`,
-    # `PROVIDER_UNREACHABLE` or `CellRuntimeError` with `sleep` set is taken back out.
+    # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, a spec that ended
+    # `RATE_LIMITED` or `PROVIDER_UNREACHABLE`, or raised `CellRuntimeError`, is taken back out (b-031ac2, b-60a399).
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -532,7 +532,7 @@ def run_stack_batch(
         if review is not None:
             if candidate.spec.id not in task_ids:
                 # Minted once per spec, never for a follow-up, already seeded.
-                # A raise here is always a miss, unlike one from `review` or `runner` (b-60a399).
+                # A raise here is always a miss, even a `CellRuntimeError`, which `review` and `runner` offer again (b-60a399).
                 assert mint is not None
                 try:
                     task_id = mint(candidate)
@@ -562,8 +562,8 @@ def run_stack_batch(
                     text_row = ledger.spec_text(task_id)
                     spec_text = text_row["text"] if text_row is not None else None
                     kwargs = {} if spec_text is None else {"spec_text": spec_text}
-                    # A raise from `review` is a miss unless it is a `CellRuntimeError`.
-                    # One from `runner` is below, no attempt for the session it never opened.
+                    # A raise from `review` records an `error` round and no attempt.
+                    # It is a miss unless it is a `CellRuntimeError`.
                     try:
                         session = review(candidate, pred, **kwargs)
                     except Exception as exc:

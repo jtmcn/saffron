@@ -6126,7 +6126,7 @@ def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
 
 
 class RaisingStackDoubles(StackDoubles):
-    """`StackDoubles`, with one exception queued per `(seat, spec id)`, where
+    """`StackDoubles`, with a queue of exceptions per `(seat, spec id)`, where
     `seat` is `review` or `runner`. Each call first pops and raises that
     key's next queued exception, recorded the same way `StackDoubles` would.
     Otherwise it falls back to `StackDoubles` (b-60a399)."""
@@ -6178,7 +6178,7 @@ def test_a_cell_runtime_failure_in_a_stack_batch_is_offered_again_not_missed(
     """A spec of the order whose `review` or `runner` raises `CellRuntimeError`
     stays queued, not missed. It runs again at once, against the same
     predecessor, and nothing that depends on it is refused. A plain
-    `RuntimeError` from either seat still misses, as it always did."""
+    `RuntimeError` from either seat is a miss, and its dependent is refused."""
     from saffron.batch import run_stack_batch
 
     order = [
@@ -6202,6 +6202,12 @@ def test_a_cell_runtime_failure_in_a_stack_batch_is_offered_again_not_missed(
         },
     )
     lines: list[str] = []
+    te1_states: list[str] = []
+
+    def review(candidate: Candidate, predecessor: Candidate | None = None, **kw):
+        if candidate.spec.id == "TE-1":
+            te1_states.append(_task_state(ledger, doubles.tasks["TE-1"]))
+        return doubles.review(candidate, predecessor, **kw)
 
     reason = run_stack_batch(
         order,
@@ -6210,13 +6216,14 @@ def test_a_cell_runtime_failure_in_a_stack_batch_is_offered_again_not_missed(
         None,
         doubles.runner,
         readiness_check=_ready,
-        review=doubles.review,
+        review=review,
         mint=doubles.mint,
         sleep=_fail_sleep,
         emit=lines.append,
     )
 
     assert reason == "DRAINED"
+    assert te1_states[1] == "GATE_ERROR"
     assert doubles.review_calls == [
         ("TE-1", None),
         ("TE-1", None),
@@ -6309,7 +6316,7 @@ def test_a_cell_runtime_failure_is_offered_again_only_until_the_breaker(
     """Each re-offer counts toward the breaker. Two `CellRuntimeError` raises
     in a row from the same seat end a stack batch `INFRASTRUCTURE`, after
     exactly two calls. Nothing is refused, and the dependent gets no call.
-    A plain batch passes no `sleep`, and never retries a `CellRuntimeError`."""
+    A plain batch passes no `sleep`, and never offers a `CellRuntimeError` again."""
     from saffron.batch import run_stack_batch
 
     order1 = [_candidate("TE-21"), _candidate("TE-22", depends_on=["TE-21"])]
