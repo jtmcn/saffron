@@ -81,6 +81,7 @@ def render_pr_body(
     verified_on: str = "base",
     effective_risk: str | None = None,
     advisory_gates: Sequence[str] = (),
+    advisory_failures: Sequence[NewFailure] = (),
     notes: str = "",
     wrong_versions: Sequence[Mapping[str, object]] = (),
     exhausted: bool = False,
@@ -114,7 +115,7 @@ def render_pr_body(
         ),
         _criteria(spec, results),
         _verification(verified_on),
-        _new_failures(new_failures),
+        _new_failures(new_failures, advisory_failures),
         _disagreements(reviews, rebut_result),
         None,  # _test_diff, sized last: it is the only unbounded section.
         _gate_table(results, advisory_gates),
@@ -248,19 +249,14 @@ def _rebuttal_errored(rebut_result: RebutResult | None) -> bool:
     return rebut_result is not None and rebut_result.rebuttal.error is not None
 
 
-def _new_failures(new_failures: list[NewFailure]) -> str:
-    """New failures lead, because they are the only thing here that is this
-    change's problem (DESIGN.md §5.4)."""
-    if not new_failures:
-        return "### No new failures\n\nEvery failure at head was already present at base.\n"
+def _failure_rows(failures: Sequence[NewFailure]) -> list[str]:
+    """One `gate | where | code | message` table's header and rows.
 
-    lines = [
-        "### New failures",
-        "",
-        "| gate | where | code | message |",
-        "|---|---|---|---|",
-    ]
-    for gate, failure in new_failures:
+    Shared between the blocking and the advisory table, `_cell`-escaped
+    identically, so the two cannot drift apart (§5.4, §5.6).
+    """
+    lines = ["| gate | where | code | message |", "|---|---|---|---|"]
+    for gate, failure in failures:
         where = (
             f"{failure.file}:{failure.line}"
             if failure.line is not None
@@ -270,7 +266,42 @@ def _new_failures(new_failures: list[NewFailure]) -> str:
             f"| `{_cell(gate)}` | {_cell(where)} | `{_cell(failure.code)}` "
             f"| {_cell(failure.message)} |"
         )
-    lines.append("")
+    return lines
+
+
+def _new_failures(
+    new_failures: list[NewFailure], advisory_failures: Sequence[NewFailure] = ()
+) -> str:
+    """New failures lead, because they are the only thing here that is this
+    change's problem (DESIGN.md §5.4).
+
+    `advisory_failures` are the same suite comparison's new failures in a
+    gate this run holds advisory (`size` and `witness` at `standard`, or a
+    gate declared `blocking: false`): reported in their own section, after
+    the blocking one, and never a reason this body says anything but green.
+    """
+    if not new_failures and not advisory_failures:
+        return "### No new failures\n\nEvery failure at head was already present at base.\n"
+
+    lines: list[str] = []
+    if new_failures:
+        lines += ["### New failures", "", *_failure_rows(new_failures), ""]
+    else:
+        lines += [
+            "### No new blocking failures",
+            "",
+            "Every failure at head in a blocking gate was already present at base.",
+            "",
+        ]
+    if advisory_failures:
+        lines += [
+            "### New advisory failures",
+            "",
+            "New at head, in gates held advisory at this risk tier, so none blocks.",
+            "",
+            *_failure_rows(advisory_failures),
+            "",
+        ]
     return "\n".join(lines)
 
 

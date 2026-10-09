@@ -2257,6 +2257,56 @@ def test_a_re_verified_body_marks_the_verifying_suites_advisory_gates(
     assert "(advisory) 12% slower" in body
 
 
+def test_a_packaged_body_names_the_verifying_suites_new_advisory_failure(
+    monkeypatch, packageable
+):
+    """PACKAGE passes the verifying suite's own `advisory_failures` to the
+    renderer, not the blocking `new_failures`, which are empty here.
+
+    Nor does it read something off `comparison.run.results` with no
+    subtraction: the body names the comparison's advisory failure and not
+    the result's own message (§5.4, §5.6). `_reverified` takes no advisory
+    failures, so the comparison is built here directly."""
+    run_only_failure = Failure(
+        file="",
+        code="diff-too-large",
+        message="a run-only message, not the advisory one",
+    )
+    size_result = GateResult(
+        gate="size",
+        status="fail",
+        tool="size 1.0",
+        summary="too big",
+        failures=[run_only_failure],
+    )
+    advisory_failure = NewFailure(
+        "size",
+        Failure(
+            file="", code="diff-too-large", message="1659 changed tokens | over 1300"
+        ),
+    )
+    comparison = SuiteComparison(
+        SuiteRun([size_result], "standard", frozenset({"size"})),
+        new_failures=(),
+        advisory_failures=(advisory_failure,),
+    )
+    monkeypatch.setattr("saffron.phases.package.reverify", lambda **_k: comparison)
+
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    assert result.state == "READY_FOR_REVIEW"
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert "### New advisory failures" in body
+    assert "### New failures" not in body
+    assert "1659 changed tokens \\| over 1300" in body
+    assert "a run-only message, not the advisory one" not in body
+    assert body.index("### New advisory failures") < body.index("1659 changed tokens")
+
+
 def test_a_blocking_failure_after_the_rebase_still_fails_the_merge(
     monkeypatch, packageable
 ):

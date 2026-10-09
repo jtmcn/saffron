@@ -15,6 +15,7 @@ from saffron.intake import Criterion, Mutant
 from saffron.repos.policy import GateDeclaration, Policy
 
 FAIL = {"file": "a.py", "code": "E501", "message": "too long"}
+FAIL_B = {"file": "b.py", "code": "E501", "message": "too long"}
 
 
 class _Tree:
@@ -320,3 +321,116 @@ def test_a_witness_left_unstrengthened_blocks_when_elevated_and_a_killed_mutant_
     # Declared `elevated`, killed: nothing new to report.
     comparison = _comparison(elevated_spec, elevated_policy, killed=True)
     assert comparison.new_failures == ()
+
+
+def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing():
+    """§5.4/§5.6: a new failure in a gate this run holds advisory is still
+    reported, in `advisory_failures`, counted against the baseline exactly as
+    `new_failures` is. It is never among `new_failures`, though, so it
+    blocks nothing. Five legs for the three ways a gate is held advisory.
+    """
+    from saffron.gates.core.size import _CEILINGS
+
+    # 1. A gate declared `blocking: false`: a blocking `tests` failure beside
+    #    it, and the baseline cancels one of two identical `lint` failures.
+    lint_advisory_policy = Policy(
+        gates={"lint": GateDeclaration(blocking=False), "tests": GateDeclaration()}
+    )
+    suite = _suite(("lint", "tests"), policy=lint_advisory_policy)
+    baseline = suite.baseline(_Tree(_lint(FAIL)))
+    head = _Tree(
+        {
+            **_lint(FAIL, FAIL, FAIL_B),
+            "tests": {
+                "status": "fail",
+                "tool": "tests 1.0",
+                "failures": [
+                    {"file": "tests/test_x.py", "code": "failed", "message": "boom"}
+                ],
+            },
+        }
+    )
+    comparison = suite.against(head, baseline)
+    assert [(n.gate, n.failure.file) for n in comparison.new_failures] == [
+        ("tests", "tests/test_x.py")
+    ]
+    assert [(n.gate, n.failure.file) for n in comparison.advisory_failures] == [
+        ("lint", "a.py"),
+        ("lint", "b.py"),
+    ]
+
+    # 2. `size` at `standard`: a patch over the `feature` ceiling under `src/`.
+    no_elevate_policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()}
+    )
+    over = _CEILINGS["feature"] + 1
+    oversized_src = "".join(
+        [
+            "diff --git a/src/x.py b/src/x.py\n",
+            f"--- a/src/x.py\n+++ b/src/x.py\n@@ -0,0 +1,{over} @@\n",
+            "+x\n" * over,
+        ]
+    )
+    standard_suite = _suite(policy=no_elevate_policy)
+    standard_baseline = standard_suite.baseline(_Tree())
+    standard_comparison = standard_suite.against(
+        _Tree(changed=["src/x.py"], patch=oversized_src), standard_baseline
+    )
+    assert standard_comparison.new_failures == ()
+    assert [n.gate for n in standard_comparison.advisory_failures] == ["size"]
+
+    # 3. The same patch under `infra/`, elevated: `size` blocks instead.
+    oversized_infra = "".join(
+        [
+            "diff --git a/infra/x.tf b/infra/x.tf\n",
+            f"--- a/infra/x.tf\n+++ b/infra/x.tf\n@@ -0,0 +1,{over} @@\n",
+            "+x\n" * over,
+        ]
+    )
+    elevate_policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
+        elevate_on=["infra/**"],
+    )
+    elevate_suite = _suite(policy=elevate_policy)
+    elevate_baseline = elevate_suite.baseline(_Tree())
+    elevate_comparison = elevate_suite.against(
+        _Tree(changed=["infra/x.tf"], patch=oversized_infra), elevate_baseline
+    )
+    assert [n.gate for n in elevate_comparison.new_failures] == ["size"]
+    assert elevate_comparison.advisory_failures == ()
+
+    # 4. `witness` at `standard`: a `preserves` criterion, unstrengthened,
+    #    `killed=False` at both sides.
+    criterion = Criterion(
+        claim="a keeps returning true",
+        witness=_WITNESS,
+        preserves=True,
+        mutant=Mutant(file="src/a.py", find="return True", replace="return False"),
+    )
+    standard_witness_spec = _Spec(risk="standard", acceptance=[criterion])
+    witness_suite = _suite(
+        ("lint", "tests"), policy=no_elevate_policy, spec=standard_witness_spec
+    )
+    witness_baseline = witness_suite.baseline(
+        _WitnessTree(changed=["src/a.py"], killed=False, witness=_WITNESS)
+    )
+    witness_comparison = witness_suite.against(
+        _WitnessTree(changed=["src/a.py"], killed=False, witness=_WITNESS),
+        witness_baseline,
+    )
+    assert witness_comparison.new_failures == ()
+    assert [(n.gate, n.failure.code) for n in witness_comparison.advisory_failures] == [
+        ("witness", "survived-mutant")
+    ]
+
+    # 5. A drifted and an aborted head each carry no advisory failures,
+    #    though an advisory `lint` failure is present at head in both.
+    drift_head = _Tree({**_lint(FAIL, FAIL), "tests": {"status": "skip"}})
+    drift_comparison = suite.against(drift_head, baseline)
+    assert drift_comparison.drift != ()
+    assert drift_comparison.advisory_failures == ()
+
+    abort_head = _Tree({**_lint(FAIL), "tests": None})
+    abort_comparison = suite.against(abort_head, baseline)
+    assert abort_comparison.aborted != ()
+    assert abort_comparison.advisory_failures == ()
