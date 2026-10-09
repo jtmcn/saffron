@@ -458,7 +458,7 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
 
 
 def cut_off_at_budget_cap(attempt: AttemptResult) -> bool:
-    """The third bound `cut_by_bound` now checks, beside the turn ceiling and
+    """The third bound `cut_by_bound` checks, beside the turn ceiling and
     the wall clock (backlog item 119). True when the in-cell `max_budget_usd`
     is what ended this turn.
 
