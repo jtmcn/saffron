@@ -136,8 +136,8 @@ uv run saffron reconcile --repo .
 uv run saffron replay <repo> <pr>
 ```
 
-Under launchd, `batch` needs `PYTHONUNBUFFERED=1` — without it SIGTERM discards the log,
-which is the night's only human-readable record.
+Under launchd, `batch` needs `PYTHONUNBUFFERED=1`. Without it, a SIGKILL loses whatever output
+is still buffered, and the log is the night's only human-readable record.
 
 ### Exit codes
 
@@ -148,6 +148,7 @@ Load-bearing, and the only thing a calling script reads:
 | `0` | the task is reviewable | the night stopped at `DRAINED`, `BUDGET` or `UNTIL` |
 | `1` | the task did not make it | never |
 | `2` | infrastructure failed, or the task is `RATE_LIMITED` | infrastructure failed, or the night is `INCOMPLETE` |
+| `143` | stopped by SIGTERM, after its teardown | stopped by SIGTERM, after its teardown |
 
 `INCOMPLETE` means a task came back with no end state. The machine did not break,
 so look at the task before the token or the mirror.

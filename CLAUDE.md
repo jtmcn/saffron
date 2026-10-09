@@ -72,9 +72,9 @@ uv run saffron draft <item-file> --repo .  # §3.4: a spec from one item, writte
 `saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a
 kill, so a night ends at the deadline plus at most one task (backlog item 67). A `--stack`
 night then runs its end review, paid from the reserve it held back (ADR 7). Under launchd it
-needs `PYTHONUNBUFFERED=1`, or SIGTERM discards the log — which is the night's only
-human-readable record. `docs/host/dev.saffron.batch.plist` and `docs/HOST-HARDENING.md` §4a
-carry the setup.
+needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses whatever output is still buffered, and the log is
+the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
+`docs/HOST-HARDENING.md` §4a carry the setup.
 
 `saffron cell` and `saffron batch` need `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in
 the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
@@ -89,7 +89,7 @@ env CLAUDE_CODE_OAUTH_TOKEN=(bash -c 'source ~/.secrets; printf %s $CLAUDE_CODE_
 ```
 
 Exit codes are load-bearing: `0` reviewable, `1` the task did not make it, `2` infrastructure
-failed (`saffron/cli.py`).
+failed, `143` stopped by SIGTERM after teardown (`saffron/cli.py`).
 PACKAGE opens the PR as a draft (§5.7): mark it ready with `gh pr ready <n>` before `gh pr merge`.
 
 ## Searching and rewriting code

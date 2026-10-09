@@ -204,10 +204,11 @@ whatever the file assigns, so the file's own style stops mattering.
 
 **`PYTHONUNBUFFERED=1`, because the log is the night's only account.** Python
 block-buffers stdout into a file redirect, and `launchctl unload`, logout and
-shutdown all send SIGTERM. Measured: a process killed that way leaves a
-**0-byte** log, and the same process with `PYTHONUNBUFFERED=1` leaves its
-output intact. Without this, an interrupted night loses the entire record of
-what it had done up to that point.
+shutdown all send SIGTERM. Measured before b-5df2a7, a process killed that way
+left a **0-byte** log. One that reaches Python now unwinds and flushes,
+exiting 143. Forwarding by `uv run` and launchd's exit timeout are unmeasured,
+and on macOS a silent agent turn delays the stop until its next line. A
+SIGKILL still loses what is buffered.
 
 **The two log files are the night's human-readable account.** Every line
 `saffron batch` prints lands there: the plan it set out with — candidate count,

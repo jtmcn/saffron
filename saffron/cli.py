@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -69,14 +70,8 @@ from saffron.watch import UnknownTask, follow, follow_every_task, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
-# The exit code is the only thing a script reads: 0 the task is reviewable,
-# 2 the infrastructure failed, 1 the task did not make it (§3.3). The map covers
-# states; a driver or runtime crash is the same class of failure and takes 2 by
-# the handler in `main`, or an abort would read as an ordinary task outcome.
-# Everything the setup path raises before a cell exists — an unreadable spec or
-# policy, a mirror that will not clone, a repo with no HEAD — is that same
-# infrastructure failure, and is caught there too rather than reaching the
-# operator as a traceback.
+# Exit codes (§3.3): 0 reviewable, 1 the task did not make it, 2 infrastructure,
+# 143 SIGTERM. A crash or setup failure takes 2 from `main`'s handler, never 1.
 CELL_EXIT = {
     "READY_FOR_REVIEW": 0,
     # Already the default for an unnamed state; named because PACKAGE returns it
@@ -95,6 +90,37 @@ CELL_EXIT = {
     # infrastructure failure, not the task's (b-031ac2).
     "PROVIDER_UNREACHABLE": 2,
 }
+
+
+def _sigterm_as_keyboard_interrupt(run: Callable[[], int]) -> int:
+    """Run `run` with SIGTERM raising `KeyboardInterrupt`, so the signal
+    unwinds `cell` and `batch` the way Ctrl-C already does (b-5df2a7).
+
+    `Popen.__exit__` fast-unwinds only on exactly that class (measured), so
+    the handler raises it bare and leaves a local flag behind: the only mark
+    that tells this handler's `KeyboardInterrupt` from one raised with
+    nothing behind it, which still propagates out unchanged.
+    """
+    previous = signal.getsignal(signal.SIGTERM)
+    seen_sigterm = False
+
+    def _handle(_signum: int, _frame: object) -> None:
+        nonlocal seen_sigterm
+        # Ignored, not reinstalled: a second delivery mid-teardown does
+        # nothing, rather than raising again and cutting the removals short.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        seen_sigterm = True
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, _handle)
+    try:
+        return run()
+    except KeyboardInterrupt:
+        if seen_sigterm:
+            return 143
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -270,10 +296,12 @@ def main(argv: list[str] | None = None) -> int:
     ledger = Ledger(args.home / "ledger.db")
     try:
         if args.command == "cell":
-            return _run_cell(args, ledger, out_dir)
+            return _sigterm_as_keyboard_interrupt(
+                lambda: _run_cell(args, ledger, out_dir)
+            )
 
         if args.command == "batch":
-            return _batch(args, ledger, out_dir)
+            return _sigterm_as_keyboard_interrupt(lambda: _batch(args, ledger, out_dir))
 
         if args.command == "draft":
             return _draft(args, ledger, out_dir)
