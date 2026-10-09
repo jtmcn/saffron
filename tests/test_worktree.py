@@ -532,7 +532,8 @@ def _hook_git_first(fake_dir):
 
 
 def _hook_timeout(call):
-    return runtime.Completed(124, "", "", timed_out=True, bound="wall")
+    out = f"{worktree._FETCH_FAILED_MARKER}\n"
+    return runtime.Completed(124, out, "", timed_out=True, bound="wall")
 
 
 def _fake_git(tmp_path, name, match, token, exit_code):
@@ -559,14 +560,17 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
     """One `def` drives every shape the retry decision meets.
 
     Three fetch failures, each with different text, get retried once and
-    recovered. Four single seeds must never retry, pause or print. The last
-    of the four is a faked `git checkout`. It fails at the exact exit code
-    a failed fetch produces, with neither "tree" nor "branch" in its
-    stderr: the one case that catches a retry keyed on an exit code
-    instead of the step itself.
+    recovered. Four single seeds run once and never pause or print: a base
+    the mirror lacks, a refused branch name, a faked `git checkout` at a
+    failed fetch's exit code, and a timeout.
     """
     origin = tmp_path / "origin"
     base = _seed_repo(origin)
+    # A tip past the base, so a retry checking out `FETCH_HEAD` misses it.
+    subprocess.run(
+        ["git", "-C", str(origin), "commit", "-q", "--allow-empty", "-m", "tip"],
+        check=True,
+    )
     mirror = tmp_path / "m.git"
     subprocess.run(
         ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
@@ -579,7 +583,7 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
 
     _no_cell_runtime(monkeypatch, tmp_path)
     real_run_ephemeral = runtime.run_ephemeral
-    events: list[tuple] = []
+    calls: list[tuple] = []
     hooks: list = []
     index = 0
 
@@ -590,17 +594,24 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
         result = hook(
             lambda: real_run_ephemeral(image, command, mounts=mounts, **kwargs)
         )
-        events.append(("seed", result.stderr))
+        if "git fetch" in command[-1]:
+            calls.append(("seed", result.stderr))
         return result
 
     monkeypatch.setattr(runtime, "run_ephemeral", wrapped)
-    monkeypatch.setattr(worktree.time, "sleep", lambda s: events.append(("sleep", s)))
+    monkeypatch.setattr(
+        worktree.time,
+        "sleep",
+        lambda s: calls.append(("sleep", s, capsys.readouterr().out)),
+    )
 
     def run(case_hooks, base_sha, branch, n):
         nonlocal hooks, index
         hooks, index = case_hooks, 0
-        events.clear()
+        calls.clear()
         runtime.create_volume(f"vol{n}")
+        (tmp_path / f"vol-vol{n}" / "lost+found").mkdir()
+        (tmp_path / f"vol-vol{n}" / "lost+found" / "keep").touch()
         return worktree.prepare_worktree(
             mirror=mirror,
             volume=f"vol{n}",
@@ -622,13 +633,24 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
     )
     for n, (hook, label) in enumerate(retried):
         run([hook], base, "saffron/test", n)
-        out = capsys.readouterr().out
-        assert [kind for kind, _ in events] == ["seed", "sleep", "seed"], label
+        assert [c[0] for c in calls] == ["seed", "sleep", "seed"], label
         # A literal, not `worktree._RETRY_PAUSE_S`: the constant moving
         # with the assertion would prove nothing about the stated minimum.
-        assert events[1][0] == "sleep", label
-        assert events[1][1] >= 60, label
-        assert events[0][1].strip() in out, label
+        assert calls[1][1] >= 60, label
+        printed = calls[1][2]
+        assert printed.count("\n") == 1, label
+        assert " ".join(calls[0][1].split()) in printed, label
+        vol = tmp_path / f"vol-vol{n}"
+        assert (vol / "lost+found" / "keep").exists(), label
+
+        def git(*args, vol=vol):
+            return subprocess.run(
+                ["git", "-C", str(vol), *args], capture_output=True, text=True
+            ).stdout.strip()
+
+        assert git("rev-parse", "HEAD") == base, label
+        assert git("branch", "--show-current") == "saffron/test", label
+        assert git("remote") == "", label
 
     single = (
         (_hook_default, "deadbeef" * 5, "saffron/test", "a base the mirror lacks"),
@@ -638,12 +660,12 @@ def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
     for n, (hook, sha, branch, label) in enumerate(single, start=len(retried)):
         with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
             run([hook], sha, branch, n)
-        assert [kind for kind, _ in events] == ["seed"], label
+        assert [c[0] for c in calls] == ["seed"], label
         assert capsys.readouterr().out == "", label
 
     with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
         run([_hook_timeout], base, "saffron/test", len(retried) + len(single))
-    assert [kind for kind, _ in events] == ["seed"]
+    assert [c[0] for c in calls] == ["seed"]
     assert capsys.readouterr().out == ""
 
 
@@ -668,7 +690,7 @@ def test_a_seed_whose_fetch_fails_twice_raises_after_two_attempts(
     monkeypatch.setattr(runtime, "run_detached", _never)
 
     created: set[str] = set()
-    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree failed"):
         worktree.prepare_worktree(
             mirror=tmp_path / "m.git",
             volume="vol",
@@ -862,8 +884,8 @@ def _no_cell_runtime(monkeypatch, tmp_path):
     """Fakes just enough of the cell runtime that `prepare_worktree` and the
     diff-reading helpers run their real git commands against a host
     directory instead of inside a container — the same commands, no cell and
-    no network. Only one volume/container pair is ever live in a test that
-    uses this, so a name -> directory mapping is all it takes.
+    no network. Every volume and container name in a test is distinct, so a
+    name -> directory mapping is all it takes.
     """
     volumes: dict[str, Path] = {}
     containers: dict[str, Path] = {}

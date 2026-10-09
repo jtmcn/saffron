@@ -23,8 +23,8 @@ STATE_MOUNT = "/agent-state"
 GATES_MOUNT = "/gates"
 _MIRROR_MOUNT = "/mirror"
 
-# Printed to the seed's own stdout the moment `git fetch` fails. Never an
-# exit code: a faked `git checkout` can carry the same one (b-f582ee).
+# Printed to the seed's own stdout the moment `git fetch` fails. A failed
+# fetch and a failed checkout both exit 128 (measured, b-f582ee).
 _FETCH_FAILED_MARKER = "SAFFRON_SEED_FETCH_FAILED"
 
 # Every measured recovery came a minute or more after the refusal (b-f582ee).
@@ -51,10 +51,10 @@ def _seed_script(branch: str, base_sha: str) -> str:
     """The seed's `sh -euc` script: clear the volume, then clone in place.
 
     Clearing runs first and runs every time, so a retry meets the same
-    volume state a first attempt would. The script stays byte-identical
-    across both attempts. Only the `git fetch` branch prints the marker.
-    Every other step keeps git's own exit code and stderr, which the final
-    raise below still reads.
+    volume state the first seed met. The script stays byte-identical
+    across both seeds. Only a failed `git fetch` prints the marker.
+    Every other step keeps git's own exit code and stderr for the raise
+    in `prepare_worktree`.
     """
     return (
         f"cd {WORKTREE_MOUNT} && "
@@ -136,12 +136,16 @@ def prepare_worktree(
     runtime.create_volume(state)
 
     seed = _run_seed(image, mirror, volume, branch, base_sha)
-    if seed.returncode != 0 and _FETCH_FAILED_MARKER in seed.stdout:
+    if (
+        seed.returncode != 0
+        and not seed.timed_out
+        and _FETCH_FAILED_MARKER in seed.stdout
+    ):
         # A fetch that failed once is worth one more read (§4.3). A seed
         # that failed somewhere else gains nothing from repeating.
         print(
             "worktree seed's fetch failed, retrying once after "
-            f"{_RETRY_PAUSE_S:.0f}s: {seed.stderr.strip()}"
+            f"{_RETRY_PAUSE_S:.0f}s: {' '.join(seed.stderr.split())}"
         )
         time.sleep(_RETRY_PAUSE_S)
         seed = _run_seed(image, mirror, volume, branch, base_sha)
