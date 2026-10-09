@@ -78,17 +78,17 @@ WALL_CAP_S = 3600.0
 # growing moves that number rather than dividing it. The floor is
 # what keeps "not gated" true when nothing is left: below it a lens would be
 # refused for having no room, and the task would reach the operator unreviewed.
-# REBUT also runs once past budget_usd now. Its sessions share
-# REBUT_OVERRUN_CAP_USD below, so one answer to those findings still lands.
+# REBUT keeps its own ceiling below, REBUT_CAP_USD, at any spend, not
+# only once budget_usd is spent.
 REVIEW_FLOOR_USD = 2.0
 
 # The measured maximum of seven salvage turns, $0.40 on SA-0204, rounded up.
 # Held out of IMPLEMENT's own cap, so a cut with nothing committed keeps room.
 SALVAGE_RESERVE_USD = 1.0
 
-# One pool for the rebuttal, extraction and verdict turns once REBUT runs
-# past budget: the measured maximum REBUT spend, $6.40, rounded up.
-REBUT_OVERRUN_CAP_USD = 7.0
+# One pool for every REBUT's own sessions, at any spend: the measured
+# maximum, $9.29 on SA-0223 (67 REBUTs, 2026-10-07), rounded up.
+REBUT_CAP_USD = 10.0
 
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
@@ -156,11 +156,11 @@ def critic_budget(budget_usd: float, spent: float) -> float:
 
 
 class _RebutCap:
-    """Shares one ceiling across a single REBUT's own sessions, once the
-    task meets or passes budget_usd: the rebuttal turn, its extraction
-    turn, and each lens verdict draw against the same pool. A call that
-    would get nothing, or less, is refused the way a failed turn already
-    reads to every caller here, with implement.AgentFailed.
+    """Shares one ceiling across a single REBUT's own sessions, at any
+    spend: the rebuttal turn, its extraction turn, and each lens verdict
+    draw against the same pool. A call that would get nothing, or less, is
+    refused the way a failed turn already reads to every caller here, with
+    implement.AgentFailed.
     """
 
     def __init__(self, cap: float) -> None:
@@ -3103,10 +3103,10 @@ def _drive_cell(
                     return "GATE_ERROR"
                 return "EXHAUSTED" if comparison.new_failures else None
 
-            # At or past budget_usd, REBUT's sessions share one cap instead of
-            # being refused outright. `cap` also says whether one was refused.
-            cap = _RebutCap(REBUT_OVERRUN_CAP_USD) if overrun else None
-            rebut_agent = cap.wrap(agent) if cap is not None else agent
+            # REBUT's sessions always share one cap, at any spend. `cap`
+            # also says whether one call was refused.
+            cap = _RebutCap(REBUT_CAP_USD)
+            rebut_agent = cap.wrap(agent)
 
             with contextlib.ExitStack() as critic_stack:
 
@@ -3144,7 +3144,9 @@ def _drive_cell(
                     claude_md=claude_md,
                     prompts_dir=context.PROMPTS_DIR,
                     max_turns=spec.max_turns,
-                    budget_usd=critic_budget(spec.budget_usd, spent),
+                    # `rebut_agent` overrides this on every call, so this
+                    # is only what a turn sees before that override lands.
+                    budget_usd=REBUT_CAP_USD,
                     # Measured, never reported (§4.3): from the head the
                     # rebuttal started at, so the implement turn's own
                     # commits cannot satisfy it.
@@ -3160,6 +3162,15 @@ def _drive_cell(
                     reviewed_diff=reviewed_diff,
                     emit=emit,
                     last_cost_usd=last_cost,
+                )
+            if cap.refused and result.state == "REBUTTING":
+                # The cap, not the agent, ended this REBUT, so the record
+                # must not read as the silence `rebut_state` describes.
+                detail = result.rebuttal.error or next(
+                    (v.error for v in result.verdicts if v.error), None
+                )
+                result.why = f"REBUT ran out of its ${REBUT_CAP_USD:.2f} budget" + (
+                    f" — {detail}" if detail else ""
                 )
             rebut_result = result
             spent += result.cost_usd
@@ -3193,7 +3204,9 @@ def _drive_cell(
                 )
             outcome, why = result.state, result.why
 
-            if cap is not None:
+            # Unchanged from SA-0203: only a REBUT that started at or past
+            # budget_usd gets this line, under the cap as well as past it.
+            if overrun:
                 emit(
                     Budget(
                         timestamp=time.time(),
@@ -3204,15 +3217,11 @@ def _drive_cell(
                         rebut_spent_usd_est=result.cost_usd,
                     )
                 )
-                if outcome == "REBUTTING" and cap.refused:
-                    # The cap stopped a session, not the agent: the blockers
-                    # stand unanswered, and the task ends decided, not hanging.
-                    outcome = "EXHAUSTED"
-                    rebut_result = None
-                    why = (
-                        f"the REBUT cap (${REBUT_OVERRUN_CAP_USD:.2f}) cut a "
-                        f"session short — {why}"
-                    )
+            if outcome == "REBUTTING" and cap.refused:
+                # The cap stopped a session, not the agent: the blockers
+                # stand unanswered, and the task ends decided, not hanging.
+                outcome = "EXHAUSTED"
+                rebut_result = None
 
             _phase_start("REBUT", "REBUT", why)
 
