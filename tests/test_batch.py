@@ -8,6 +8,7 @@ import pytest
 
 from saffron.agents.artifacts import hash_artifact
 from saffron.batch import ABORT_STATES, run_batch
+from saffron.cell.runtime import CellRuntimeError
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec
 from saffron.ledger import Ledger
@@ -6122,3 +6123,271 @@ def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
     assert len(finish_calls) == 5
     assert finish_calls[4][1] == []
     assert id_is_this_batch == [True] * 5
+
+
+class RaisingStackDoubles(StackDoubles):
+    """`StackDoubles`, with one exception queued per `(seat, spec id)`, where
+    `seat` is `review` or `runner`. Each call first pops and raises that
+    key's next queued exception, recorded the same way `StackDoubles` would.
+    Otherwise it falls back to `StackDoubles` (b-60a399)."""
+
+    def __init__(
+        self,
+        ledger: Ledger,
+        repo_id: int,
+        rows: dict,
+        raises: Mapping[tuple[str, str], Sequence[Exception]],
+        *,
+        order=None,
+    ):
+        super().__init__(ledger, repo_id, rows, order=order)
+        self.raises = {key: list(value) for key, value in raises.items()}
+        self.tasks: dict[str, int] = {}
+
+    def mint(self, candidate: Candidate) -> int:
+        task_id = super().mint(candidate)
+        self.tasks[candidate.spec.id] = task_id
+        return task_id
+
+    def review(self, candidate: Candidate, predecessor: Candidate | None = None, **kw):
+        spec_id = candidate.spec.id
+        queued = self.raises.get(("review", spec_id))
+        if queued:
+            self.review_calls.append(
+                (spec_id, predecessor.spec.id if predecessor else None)
+            )
+            self.order.append(f"review:{spec_id}")
+            raise queued.pop(0)
+        return super().review(candidate, predecessor, **kw)
+
+    def runner(self, candidate: Candidate, predecessor: Candidate | None = None):
+        spec_id = candidate.spec.id
+        queued = self.raises.get(("runner", spec_id))
+        if queued:
+            self.runner_calls.append(
+                (spec_id, predecessor.spec.id if predecessor else None)
+            )
+            self.order.append(f"runner:{spec_id}")
+            raise queued.pop(0)
+        return super().runner(candidate, predecessor)
+
+
+def test_a_cell_runtime_failure_in_a_stack_batch_is_offered_again_not_missed(
+    ledger, repo_id
+):
+    """A spec of the order whose `review` or `runner` raises `CellRuntimeError`
+    stays queued, not missed. It runs again at once, against the same
+    predecessor, and nothing that depends on it is refused. A plain
+    `RuntimeError` from either seat still misses, as it always did."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-1"),
+        _candidate("TE-2", depends_on=["TE-1"]),
+        _candidate("TE-3", depends_on=["TE-2"]),
+        _candidate("TE-5", depends_on=["TE-3"]),
+        _candidate("TE-4"),
+        _candidate("TE-6"),
+        _candidate("TE-7", depends_on=["TE-6"]),
+    ]
+    doubles = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        {},
+        {
+            ("review", "TE-1"): [CellRuntimeError("seeding the worktree failed")],
+            ("runner", "TE-2"): [CellRuntimeError("seeding the worktree failed")],
+            ("review", "TE-3"): [RuntimeError("boom")],
+            ("runner", "TE-6"): [RuntimeError("boom")],
+        },
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        100.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        review=doubles.review,
+        mint=doubles.mint,
+        sleep=_fail_sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert doubles.review_calls == [
+        ("TE-1", None),
+        ("TE-1", None),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-2"),
+        ("TE-4", "TE-2"),
+        ("TE-6", "TE-4"),
+    ]
+    assert doubles.runner_calls == [
+        ("TE-1", None),
+        ("TE-2", "TE-1"),
+        ("TE-2", "TE-1"),
+        ("TE-4", "TE-2"),
+        ("TE-6", "TE-4"),
+    ]
+    assert [line for line in lines if " refused " in line] == [
+        f"{'TE-5':<10} refused  reaches TE-3",
+        f"{'TE-7':<10} refused  reaches TE-6",
+    ]
+    assert _task_routes(ledger, doubles.tasks["TE-1"]) == ["error", "run"]
+
+
+def test_a_follow_ups_cell_runtime_failure_is_offered_again(ledger, repo_id):
+    """A follow-up whose `review` or `runner` raises `CellRuntimeError` is
+    offered again at once, against the same predecessor. One whose `review`
+    or `runner` raises a plain `RuntimeError` is not, and is listed unrun."""
+    from saffron.batch import run_stack_batch
+
+    rows = {
+        "__follow_ups__": [
+            {"id": "TE-8"},
+            {"id": "TE-9"},
+            {"id": "TE-10"},
+            {"id": "TE-12"},
+            {"id": "TE-11"},
+        ],
+    }
+    doubles = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        rows,
+        {
+            ("review", "TE-8"): [CellRuntimeError("seeding the worktree failed")],
+            ("runner", "TE-9"): [CellRuntimeError("seeding the worktree failed")],
+            ("runner", "TE-10"): [RuntimeError("boom")],
+            ("review", "TE-11"): [RuntimeError("boom")],
+        },
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        [_candidate("TE-13")],
+        ledger,
+        100.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        sleep=_fail_sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert doubles.review_calls == [
+        ("TE-13", None),
+        ("TE-8", "TE-13"),
+        ("TE-8", "TE-13"),
+        ("TE-9", "TE-8"),
+        ("TE-10", "TE-9"),
+        ("TE-12", "TE-9"),
+        ("TE-11", "TE-12"),
+    ]
+    assert doubles.runner_calls == [
+        ("TE-13", None),
+        ("TE-8", "TE-13"),
+        ("TE-9", "TE-8"),
+        ("TE-9", "TE-8"),
+        ("TE-10", "TE-9"),
+        ("TE-12", "TE-9"),
+    ]
+    assert "follow-ups unrun  TE-11" in lines
+
+
+def test_a_cell_runtime_failure_is_offered_again_only_until_the_breaker(
+    ledger, repo_id
+):
+    """Each re-offer counts toward the breaker. Two `CellRuntimeError` raises
+    in a row from the same seat end a stack batch `INFRASTRUCTURE`, after
+    exactly two calls. Nothing is refused, and the dependent gets no call.
+    A plain batch passes no `sleep`, and never retries a `CellRuntimeError`."""
+    from saffron.batch import run_stack_batch
+
+    order1 = [_candidate("TE-21"), _candidate("TE-22", depends_on=["TE-21"])]
+    doubles1 = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        {},
+        {
+            ("runner", "TE-21"): [
+                CellRuntimeError("seeding the worktree failed"),
+                CellRuntimeError("seeding the worktree failed"),
+            ],
+        },
+    )
+    lines1: list[str] = []
+    reason1 = run_stack_batch(
+        order1,
+        ledger,
+        100.0,
+        None,
+        doubles1.runner,
+        readiness_check=_ready,
+        review=doubles1.review,
+        mint=doubles1.mint,
+        sleep=_fail_sleep,
+        emit=lines1.append,
+    )
+    assert reason1 == "INFRASTRUCTURE"
+    assert doubles1.review_calls == [("TE-21", None)]
+    assert doubles1.runner_calls == [("TE-21", None), ("TE-21", None)]
+    assert not any(" refused " in line for line in lines1)
+
+    order2 = [_candidate("TE-31"), _candidate("TE-32", depends_on=["TE-31"])]
+    doubles2 = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        {},
+        {
+            ("review", "TE-31"): [
+                CellRuntimeError("seeding the worktree failed"),
+                CellRuntimeError("seeding the worktree failed"),
+            ],
+        },
+    )
+    lines2: list[str] = []
+    reason2 = run_stack_batch(
+        order2,
+        ledger,
+        100.0,
+        None,
+        doubles2.runner,
+        readiness_check=_ready,
+        review=doubles2.review,
+        mint=doubles2.mint,
+        sleep=_fail_sleep,
+        emit=lines2.append,
+    )
+    assert reason2 == "INFRASTRUCTURE"
+    assert doubles2.review_calls == [("TE-31", None), ("TE-31", None)]
+    assert doubles2.runner_calls == []
+    assert not any(" refused " in line for line in lines2)
+
+    run_one = _spend(ledger, repo_id, 1.0)
+    runner3 = FakeRunner(
+        [
+            CellRuntimeError("seeding the worktree failed"),
+            _outcome(state="READY_FOR_REVIEW", run_id=run_one),
+        ]
+    )
+    candidates3 = [_candidate("TE-41"), _candidate("TE-42")]
+    reason3 = run_batch(
+        candidates3,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner3,
+        rescan=lambda: candidates3,
+        readiness_check=_ready,
+    )
+    assert reason3 == "DRAINED"
+    assert runner3.calls == candidates3

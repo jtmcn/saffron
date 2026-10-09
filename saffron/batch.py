@@ -36,6 +36,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, cast
 
 from saffron import spec_review
+from saffron.cell.runtime import CellRuntimeError
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec, SpecError, parse_spec
 from saffron.ledger import Ledger
@@ -213,8 +214,8 @@ def _drive(
             # token at 22:00 produces a night with no record it was attempted.
             return "INFRASTRUCTURE", consecutive_aborts
 
-    # By spec id, or a re-offered `Candidate` starts twice. A `RATE_LIMITED` or
-    # `PROVIDER_UNREACHABLE` one with `sleep` set is taken back out (b-031ac2).
+    # By spec id, or a re-offered `Candidate` starts twice. A `RATE_LIMITED`,
+    # `PROVIDER_UNREACHABLE` or `CellRuntimeError` with `sleep` set is taken back out.
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -282,6 +283,10 @@ def _drive(
             # Otherwise a night that died here leaves a stop reason and no cause.
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
+            if isinstance(exc, CellRuntimeError) and sleep is not None:
+                # The runtime broke, not the spec. Offered again at once,
+                # bounded only by the breaker above (b-60a399).
+                started.discard(candidate.spec.id)
         else:
             if isinstance(outcome, Refused):
                 # No run to attach, and the breaker's count stands exactly
@@ -368,7 +373,8 @@ def _is_layer(result: CellOutcome | Refused) -> bool:
     """`run_stack_batch`'s one predicate. A result adds a layer only when it
     is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
     `EXHAUSTED`, any other state, or a `Refused`. `wrapped()` keeps
-    `RATE_LIMITED` and `PROVIDER_UNREACHABLE` queued rather than record a miss."""
+    `RATE_LIMITED`, `PROVIDER_UNREACHABLE` and a `CellRuntimeError` queued
+    rather than record a miss."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 
@@ -526,7 +532,7 @@ def run_stack_batch(
         if review is not None:
             if candidate.spec.id not in task_ids:
                 # Minted once per spec, never for a follow-up, already seeded.
-                # A raise here is a miss, as one from `review` or `runner` is.
+                # A raise here is always a miss, unlike one from `review` or `runner` (b-60a399).
                 assert mint is not None
                 try:
                     task_id = mint(candidate)
@@ -556,8 +562,8 @@ def run_stack_batch(
                     text_row = ledger.spec_text(task_id)
                     spec_text = text_row["text"] if text_row is not None else None
                     kwargs = {} if spec_text is None else {"spec_text": spec_text}
-                    # A raise from `review` is a miss, as one from `runner`
-                    # is below, with no attempt for the session it never opened.
+                    # A raise from `review` is a miss unless it is a `CellRuntimeError`.
+                    # One from `runner` is below, no attempt for the session it never opened.
                     try:
                         session = review(candidate, pred, **kwargs)
                     except Exception as exc:
@@ -570,7 +576,7 @@ def run_stack_batch(
                             findings=[],
                         )
                         ledger.set_task_state(task_id, "GATE_ERROR")
-                        if not is_follow_up:
+                        if not is_follow_up and not isinstance(exc, CellRuntimeError):
                             missed[candidate.spec.id] = frozenset({candidate.spec.id})
                             remaining.remove(original)
                         raise
@@ -730,8 +736,9 @@ def run_stack_batch(
                 emit(f"{candidate.spec.id:<10} revised  {rounds[candidate.spec.id]}")
         try:
             result = runner(candidate, pred)
-        except Exception:
-            if not is_follow_up:
+        except Exception as exc:
+            # A raise from `runner` is a miss unless it is a `CellRuntimeError`.
+            if not is_follow_up and not isinstance(exc, CellRuntimeError):
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
                 remaining.remove(original)
             raise
