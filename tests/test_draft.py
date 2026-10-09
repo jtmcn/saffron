@@ -217,15 +217,6 @@ class Expected:
     findings: list[list]
 
 
-# A route's state, once no further round follows it.
-_ROUTE_STATE = {
-    "wait": "RATE_LIMITED",
-    "error": "GATE_ERROR",
-    "run": "SPEC_DRAFTED",
-    "escalate": "SPEC_WITHHELD",
-}
-
-
 def _expect(
     write: SpecWriterSession | BaseException,
     review: list,
@@ -234,6 +225,7 @@ def _expect(
     *,
     slug_for_text,
     declares_other_id,
+    route_state,
 ) -> Expected:
     """The same chain `draft_spec` walks, built from the primitives it
     calls, never from its own code. A divergence shows as a failed
@@ -292,7 +284,7 @@ def _expect(
     if raised is not None:
         return done("GATE_ERROR", path, text, raises=True, raised=raised)
     if route1 != "revise":
-        return done(_ROUTE_STATE[route1], path, text)
+        return done(route_state[route1], path, text)
 
     revise_calls.append((path, text, review[0].text))
     rv = revise[0]
@@ -312,7 +304,7 @@ def _expect(
     route2, raised = one_round(1, review[1], path, text, force_escalate=True)
     if raised is not None:
         return done("GATE_ERROR", path, text, raises=True, raised=raised)
-    return done(_ROUTE_STATE[route2], path, text)
+    return done(route_state[route2], path, text)
 
 
 def _build_cases() -> list[Case]:
@@ -357,7 +349,7 @@ def _run(tmp_path: Path, case: Case):
     """Run one `Case`. Returns its `Expected`, the ledger and task,
     the review and revise doubles, and the `Drafted` (or `None` for a
     raise, already checked here)."""
-    from saffron.draft import _slug_for_text, draft_spec
+    from saffron.draft import _ROUTE_STATE, _slug_for_text, draft_spec
 
     expected = _expect(
         case.write,
@@ -366,6 +358,7 @@ def _run(tmp_path: Path, case: Case):
         _SPEC_ID,
         slug_for_text=_slug_for_text,
         declares_other_id=_declares_other,
+        route_state=_ROUTE_STATE,
     )
     ledger = Ledger(tmp_path / f"{case.name}.db", record=MemoryRecord())
     task_id = _task(ledger)
@@ -412,6 +405,39 @@ def test_each_route_and_each_writer_stop_ends_the_draft_in_its_own_state(tmp_pat
         assert review_d.calls == expected.review_calls, case.name
         assert revise_d.calls == expected.revise_calls, case.name
         ledger.close()
+
+
+def test_the_expected_route_state_tracks_saffron_draft_s_own_table(
+    tmp_path, monkeypatch
+):
+    """`_run` imports `route_state` from `saffron.draft._ROUTE_STATE`,
+    beside `_slug_for_text`'s own import. Moving one route's state there
+    must move the task's own end state, and what `_expect` predicts for
+    it, for both lookups: round 1's own and round 2's own."""
+    import saffron.draft
+
+    # A clean write, one "run" review, no revision: only round 1 ends this.
+    monkeypatch.setitem(saffron.draft._ROUTE_STATE, "run", "RATE_LIMITED")
+    round1 = Case("route_state_round1", _writer(), [_reviewer(_NOTE)], [])
+    expected1, ledger1, task_id1, _rd1, _vd1, drafted1 = _run(tmp_path, round1)
+    assert expected1.state == "RATE_LIMITED"
+    assert drafted1.state == "RATE_LIMITED"
+    assert _state(ledger1, task_id1) == "RATE_LIMITED"
+    ledger1.close()
+
+    # A "revise" round, a revision, then an "escalate" round: only round 2 ends this.
+    monkeypatch.setitem(saffron.draft._ROUTE_STATE, "escalate", "SPEC_DRAFTED")
+    round2 = Case(
+        "route_state_round2",
+        _writer(),
+        [_reviewer(_REVISE), _reviewer(_ESCALATE)],
+        [_writer()],
+    )
+    expected2, ledger2, task_id2, _rd2, _vd2, drafted2 = _run(tmp_path, round2)
+    assert expected2.state == "SPEC_DRAFTED"
+    assert drafted2.state == "SPEC_DRAFTED"
+    assert _state(ledger2, task_id2) == "SPEC_DRAFTED"
+    ledger2.close()
 
 
 def test_each_session_is_one_attempt_and_each_round_records_its_own_findings(
