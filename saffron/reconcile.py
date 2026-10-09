@@ -167,6 +167,13 @@ def reconcile(
         state, pr_url = row["state"], row["pr_url"]
         if not pr_url or state not in PR_PENDING_STATES:
             continue
+        merged_head = row["merged_head_sha"]
+        if merged_head:
+            # GitHub already said this merged. Asking again risks a
+            # deleted branch gh cannot resolve (b-3e0dbe).
+            ledger.set_task_state(row["task_id"], "MERGED")
+            result.merged.append(row["task_id"])
+            continue
         pr = _pr_status(pr_url, gh)
         if pr is None:
             result.unasked.append(row["task_id"])
