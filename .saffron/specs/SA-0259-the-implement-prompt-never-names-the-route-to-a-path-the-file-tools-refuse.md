@@ -76,15 +76,17 @@ acceptance:
   - claim: >-
       IMPLEMENT's system prompt, as the cell builds it, names each `touches`
       entry in the measured set, in one section. The section says the
-      Write tool is refused on them, and that Edit and shell redirects
-      were refused on one of them. It says to write each with a python3
-      script run through Bash. `constraints_block`, which the end review
-      also reads, carries no route for those same `touches`.
-      A spec with no such entry gets a prompt byte for byte equal to the
-      one `build_system_prompt` assembles from today's four values. The
-      witness drives two cells. One touches "src/**", "tests/**", two near
-      misses, ".pre-commit-config.yaml" and "sub/.claude/skills/x.md". The
-      other drops the last two and is compared whole.
+      Write tool is refused on them. It says Edit and shell redirects were
+      refused on ".pre-commit-config.yaml" in one cell. It says to write
+      each with a python3 script run through Bash. The salvage turn's
+      system prompt carries the same section. `constraints_block`, which
+      the end review also reads, carries no route for those same
+      `touches`. A spec with no such entry gets a prompt byte for byte
+      equal to the one `build_system_prompt` assembles from today's four
+      values. The witness drives two cells. One touches "src/**",
+      "tests/**", two near misses, ".pre-commit-config.yaml" and
+      "sub/.claude/skills/x.md", and is cut off and salvaged. The other
+      drops the last two and is compared whole.
     witness: tests/test_session.py::test_the_implement_prompt_routes_each_unwritable_touch_and_no_other
     wrong_versions:
       - The section built and never added to the prompt the cell sends.
@@ -93,6 +95,7 @@ acceptance:
       - A section that never names shell redirects.
       - A section that never names python3 or Bash.
       - The section appended inside `constraints_block`, so the end review's prompt carries the route too.
+      - The section added only to IMPLEMENT's own `agent_options` call, so the salvage turn's prompt lacks it.
   - claim: >-
       Core records the SDK version the set was measured at, and it equals
       the one `ARG SDK_VERSION` line in `images/cell-base.python.Dockerfile`.
@@ -145,15 +148,18 @@ and the protected list into the `{constraints}` value
 
 Name, in IMPLEMENT's prompt, each `touches` entry the file tools refuse.
 Say the Write tool is refused on it, as the record measured over the
-set. Say Edit and shell redirects were refused on one of them, as
-`SA-0255` saw in a cell. Say to write it with a python3 script run
-through Bash. A spec with no such
-entry keeps today's prompt exactly.
+set. Say Edit and shell redirects were refused on
+`.pre-commit-config.yaml` in one cell, as `SA-0255` saw. Say to write it
+with a python3 script run through Bash. A spec with no such entry keeps
+today's prompt exactly.
 
 Build the section in `saffron/agents/context.py` from the spec's
 `touches`. Add it to the `constraints` value `_drive_cell` passes for
-IMPLEMENT alone. Leave `constraints_block` as it is, so the end review's
-prompt does not change.
+IMPLEMENT alone. Every session resumed from IMPLEMENT then carries it,
+the salvage turn included, since salvage rebuilds its options from the
+same `system_prompt` (`saffron/cell/session.py:2446-2447`). Leave
+`constraints_block` as it is, so the end review's prompt does not
+change.
 
 The refused names are one constant in `saffron/agents/context.py`, built
 from the record's "Refused" section. A comment of one or two lines cites
@@ -200,6 +206,10 @@ from the record's tables and its "Written" section.
 **Criterion 3** drives `_drive` twice in one plain test, with `_spec`,
 `_stub_the_runtime`, `_turn`, `_block` and `_PLAN` from
 `tests/test_session.py`. The IMPLEMENT prompt is `cell.system_prompts[0]`.
+The first cell copies the shape of
+`test_a_turn_cut_off_at_the_ceiling_with_nothing_committed_is_salvaged`,
+so its third turn is the salvage turn. Assert its system prompt equals
+the first one.
 Build the expected prompt for the second cell with `build_system_prompt`,
 the template file and `constraints_block`, as `_drive_cell` does today.
 Compare the whole string with `==`.
@@ -219,6 +229,6 @@ skipped as undecidable.
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
-**Size.** A prototype with every witness measured 583 tokens with
+**Size.** A prototype with every witness measured 627 tokens with
 `size_gate`'s counter, against the `feature` ceiling of 3000.
 `estimated_lines` is that count over four, plus a margin for comments.
