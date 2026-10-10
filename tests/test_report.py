@@ -973,6 +973,64 @@ def test_an_unanchored_finding_still_appears():
     assert row.rstrip().endswith("| no |")
 
 
+def test_the_findings_table_names_each_probe_verdict_and_the_filed_severity():
+    """Criterion 2 (backlog item b-7c41e0): the `### Findings` table gains a
+    `probe` column, and the severity cell names the severity the lens filed
+    in parentheses exactly when a verdict changed it. A finding with no
+    probe shows the mark `_disagreements` uses for a missing verdict, and a
+    host-filed survivor shows its verdict with no filed severity."""
+    from saffron.phases import review
+
+    decided = []
+    for filed in ("blocker", "concern", "note"):
+        for verdict in ("survived", "killed", "unproven"):
+            finding = _finding(
+                lens="adequacy", severity=filed, claim=f"{filed} {verdict}"
+            )
+            review.apply_probe_verdict(finding, verdict)
+            decided.append(finding)
+    no_probe = _finding(lens="adequacy", severity="concern", claim="no probe at all")
+    survivor = _finding(
+        lens="adequacy",
+        severity="blocker",
+        claim="host filed survivor",
+        probe_verdict="survived",
+    )
+
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[LensReview(lens="adequacy", findings=[*decided, no_probe, survivor])],
+    )
+
+    section = rendered.split("### Findings\n\n", 1)[1].split("\n\n", 1)[0]
+    assert section.splitlines() == [
+        "| lens | severity | probe | where | claim | anchored |",
+        "|---|---|---|---|---|---|",
+        "| `adequacy` | `blocker` | `survived` | a.py:3 | blocker survived | yes |",
+        "| `adequacy` | `note` (filed `blocker`) | `killed` | a.py:3 "
+        "| blocker killed | yes |",
+        "| `adequacy` | `blocker` | `unproven` | a.py:3 | blocker unproven | yes |",
+        "| `adequacy` | `blocker` (filed `concern`) | `survived` | a.py:3 "
+        "| concern survived | yes |",
+        "| `adequacy` | `note` (filed `concern`) | `killed` | a.py:3 "
+        "| concern killed | yes |",
+        "| `adequacy` | `concern` | `unproven` | a.py:3 | concern unproven | yes |",
+        "| `adequacy` | `blocker` (filed `note`) | `survived` | a.py:3 "
+        "| note survived | yes |",
+        "| `adequacy` | `note` | `killed` | a.py:3 | note killed | yes |",
+        "| `adequacy` | `note` | `unproven` | a.py:3 | note unproven | yes |",
+        "| `adequacy` | `concern` | — | a.py:3 | no probe at all | yes |",
+        "| `adequacy` | `blocker` | `survived` | a.py:3 | host filed survivor | yes |",
+    ]
+
+
 def test_the_test_file_diff_is_shown_separately():
     """§7's second countermeasure for gate gaming. Filtered by the repo's
     declared `integrity.test_paths` — not one line of language knowledge in

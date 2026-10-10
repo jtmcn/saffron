@@ -10075,6 +10075,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
                 "only that witness ran under the edit."
             ),
             "file": "src/x.py",
+            "filed_severity": None,
             "finding": 1,
             "lens": "adequacy",
             "line": 3,

@@ -47,6 +47,8 @@ _UNCHECKED = (
     "boxes: an unticked one means nobody looked, not that the criterion failed. A "
     "spec declares witnesses with an `acceptance:` block."
 )
+# One mark for a table cell with nothing recorded in it.
+_NONE_MARK = "—"
 
 
 def neutralize(text: str) -> str:
@@ -356,10 +358,10 @@ def _disagreements(
         else:
             rebuttal = rebuttals.get(number)
             implementer_cell = (
-                rebuttal.action + ": " + rebuttal.argument if rebuttal else "—"
+                rebuttal.action + ": " + rebuttal.argument if rebuttal else _NONE_MARK
             )
         if verdict is None:
-            critic_cell = "—"
+            critic_cell = _NONE_MARK
         elif verdict.verdict == "contradicted":
             # The spec's own two lines disagree, not the critic and the
             # implementer, so the cell names the quotes rather than a side.
@@ -388,12 +390,23 @@ def _findings(reviews: Sequence[LensReview]) -> str:
     lines = [
         "### Findings",
         "",
-        "| lens | severity | where | claim | anchored |",
-        "|---|---|---|---|---|",
+        "| lens | severity | probe | where | claim | anchored |",
+        "|---|---|---|---|---|---|",
     ]
     for lens, finding in rows:
+        severity_cell = f"`{finding.severity}`"
+        if (
+            finding.filed_severity is not None
+            and finding.filed_severity != finding.severity
+        ):
+            severity_cell += f" (filed `{finding.filed_severity}`)"
+        probe_cell = (
+            f"`{finding.probe_verdict}`"
+            if finding.probe_verdict is not None
+            else _NONE_MARK
+        )
         lines.append(
-            f"| `{_cell(lens)}` | `{finding.severity}` "
+            f"| `{_cell(lens)}` | {severity_cell} | {probe_cell} "
             f"| {_cell(finding.file)}:{finding.line} | {_cell(finding.claim)} "
             f"| {'yes' if finding.anchored else 'no'} |"
         )
@@ -498,7 +511,7 @@ def _gate_table(results: list[GateResult], advisory_gates: Sequence[str] = ()) -
         duration = (
             f"{result.duration_ms / 1000:.1f}s"
             if result.duration_ms is not None
-            else "—"
+            else _NONE_MARK
         )
         # In the summary column, not between `gate` and `status`: those two
         # cells are what a reader — and `test_the_gate_table_holds_every_

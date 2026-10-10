@@ -833,9 +833,12 @@ def distinct_probes(findings: Sequence[Finding]) -> list[Mutant]:
 def apply_probe_verdict(finding: Finding, verdict: probe.Verdict) -> None:
     """Decide one finding from its probe's verdict (backlog item 117):
     `survived` promotes to `blocker`, `killed` demotes to `note`, `unproven`
-    leaves the severity the lens filed. `Finding` is not frozen, so this
-    mutates in place — `finding` keeps its `id()`, which is what lets REBUT's
-    later `ledger.record_findings` lookup still find it."""
+    leaves the severity the lens filed. The severity the lens filed is kept
+    on `filed_severity` before any of that happens, so a reader can still
+    tell what changed. `Finding` is not frozen, so this mutates in
+    place — `finding` keeps its `id()`, which is what lets REBUT's later
+    `ledger.record_findings` lookup still find it."""
+    finding.filed_severity = finding.severity
     finding.probe_verdict = verdict
     if verdict == "survived":
         finding.severity = "blocker"
