@@ -4,7 +4,7 @@ title: A cell stopped with SIGTERM leaves its containers and its task in flight
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 179
+estimated_lines: 184
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -41,7 +41,8 @@ risk: standard
 acceptance:
   - claim: >-
       `saffron cell` sent a real SIGTERM mid-IMPLEMENT, and again mid-REVIEW,
-      returns 143 from `main`. Its run reads `ABORTED`, its task reads
+      returns 143 from `main`. Each time the signal raises
+      `KeyboardInterrupt` itself, not a subclass. Its run reads `ABORTED`, its task reads
       `ORPHANED`, and its patch is exported to the task directory. No agent
       turn starts after the signal. The teardown that follows removes the
       critic cell's container and two volumes when REVIEW was running. It
@@ -55,6 +56,7 @@ acceptance:
       - The handler raises an `Exception` subclass, which `main`'s catch-all turns into exit 2.
       - The handler only records the signal and returns, so the cell runs on to its end.
       - The handler raises `SystemExit(143)`, which escapes `main` rather than returning 143.
+      - The handler raises a subclass of `KeyboardInterrupt`, which `main` still turns into 143.
       - '`main` returns 143 for every `KeyboardInterrupt`, so a Ctrl-C with no SIGTERM reads as one.'
       - '`main` returns 130, the status Python gives an unhandled Ctrl-C.'
       - The handler raises, but `main` re-raises the `KeyboardInterrupt` rather than returning 143.
@@ -83,7 +85,7 @@ acceptance:
 ## Context
 
 Backlog item **b-5df2a7**, placed in tier 2 on 2026-10-06. It cites
-`DESIGN.md` §4.5. Every line number below was read at `6b033c04`.
+`DESIGN.md` §4.5. Every line number below was read at `3983d5a5`.
 
 **What happened.** The operator stopped `SA-0218`'s first cell mid-REVIEW
 with SIGTERM. The process exited 143 and printed no teardown line. Three
@@ -121,11 +123,14 @@ the ledger (`saffron/cli.py:310-311`). So a `KeyboardInterrupt` or a
 
 **Why `KeyboardInterrupt`, that exact class.** An agent turn runs in
 `exec_stream`, inside `with proc:` (`saffron/cell/runtime.py:550`).
-`Popen.__exit__` skips its wait for the child only when the exception's
-class `==` `KeyboardInterrupt`. Any other class, a subclass included,
-waits for the child to exit. Read in CPython 3.12.14 and 3.14.7 on this
-host, 2026-10-10. No witness in this spec observes that wait. `SA-0258`'s
-process witness does.
+`Popen.__exit__` first closes the child's pipes. Then, when the
+exception's class `==` `KeyboardInterrupt`, it waits at most 0.25
+seconds for the child. It waits not at all if an interrupted `wait` or
+`communicate` already spent that time. For any other class, a subclass
+included, it calls `wait()` and blocks until the child exits. Read in
+CPython 3.12.14 and 3.14.7 on this host, 2026-10-10. No witness in this
+spec observes that wait. Criterion 1 observes the class the signal
+raises, and `SA-0258`'s process witness observes the wait.
 
 **What the shell sees.** The console script is `saffron.cli:main`
 (`pyproject.toml:21`). An unhandled `KeyboardInterrupt` ends Python by
@@ -170,12 +175,13 @@ cleanup above runs. Make these changes in `saffron/cli.py`.
   `:1906-1909`).
 - **PACKAGE and the Gate-only cell.** A SIGTERM during either unwinds as
   a Ctrl-C there does today. No witness sends the signal while they run.
-- **Auto-clean on abort.** `DESIGN.md:506` (§4.3) says never auto-clean
-  on failure. The Ctrl-C path at base already exports the patch and then
-  removes both volumes (`saffron/cell/session.py:3330-3346`). Principle
-  42 (`DESIGN.md:1788`, Appendix J) is why the patch goes first. This spec
-  routes SIGTERM into that path and changes nothing in it. The §4.3
-  sentence is stale against this path, for the operator to settle.
+- **Auto-clean on abort.** §4.3 says a failed or aborted task keeps its
+  exported patch, not its volume (`DESIGN.md:506`). It says every exit
+  from `run_one_cell` writes `patch.diff`, then removes the container and
+  both volumes. It also says a SIGTERM takes that path from this spec on.
+  The Ctrl-C path at base already does so
+  (`saffron/cell/session.py:3330-3346`). This spec routes SIGTERM into it
+  and changes nothing in it.
 - **The ignored disposition.** Teardown's child processes inherit the
   ignored SIGTERM. Each is a short runtime call.
 
@@ -195,10 +201,11 @@ both criteria make. It does these things in order.
 
 1. Call `monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")`. No
    conftest sets it, and `_run_cell` raises without it
-   (`saffron/cli.py:453-461`). Stub `ensure_mirror`, `real_remote` and
+   (`saffron/cli.py:453-461`). The autouse fixture that sets it lives in
+   `tests/test_cli.py:56-59` and reaches no other module. Stub `ensure_mirror`, `real_remote` and
    `fetch_default_branch` as
    `test_the_exit_code_distinguishes_the_terminal_states` does
-   (`tests/test_cli.py:122-130`).
+   (`tests/test_cli.py:124-131`).
 2. Call `_stub_the_runtime` from `tests/test_session.py`, and let the
    caller wrap a runtime call after it. Replace `task.run_one_cell` with a
    function that runs `_drive` over that stub and returns its outcome.
@@ -220,7 +227,11 @@ Each criterion asserts on the result, the reading and the list.
 **Sending the signal.** Feed `_drive` a generator of turns: the plan
 turn, the implement turn and a clean lens turn. Before the turn at the
 chosen index, it sends SIGTERM to this process with `os.kill`. The
-handler raises at once, from inside the generator. The agent stub inside `_drive` (`tests/test_session.py:1350`) works that
+handler raises at once, from inside the generator. Wrap that `os.kill`
+in `try` with `except BaseException`, record the exception's class in a
+list, and re-raise. Each signalled run asserts the list is exactly
+`[KeyboardInterrupt]`, compared as classes. `result == 143` alone passes
+a subclass, since `except KeyboardInterrupt` catches it too. The agent stub inside `_drive` (`tests/test_session.py:1350`) works that
 way. It records the turn (`tests/test_session.py:1431`) before it asks
 the generator for the next step (`tests/test_session.py:1445`). So index 1 lands mid-IMPLEMENT
 with two turns recorded, and index 2 lands on REVIEW's first lens turn
@@ -260,11 +271,11 @@ a new hit.
 **Measured on a prototype, 2026-10-10.** Both witnesses were written
 against `6b033c04` with this change, and passed under CPython 3.12.14
 and 3.14.7. Both fail with `saffron/cli.py` reverted. Each of the
-thirteen wrong versions above was applied as one edit and failed its own
+fourteen wrong versions above was applied as one edit and failed its own
 criterion's witness on an assertion, under both versions.
 `tests/test_cli.py` passed whole, and `ruff`, `ty`, `dead`, `structure`
-and `prose` passed on both files. By `size_gate`, the change counted 715
-changed tokens: 215 in `saffron/cli.py` and 500 in the test.
+and `prose` passed on both files. By `size_gate`, the change counted 735
+changed tokens: 215 in `saffron/cli.py` and 520 in the test.
 
 **The `prose` gate** reads every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a

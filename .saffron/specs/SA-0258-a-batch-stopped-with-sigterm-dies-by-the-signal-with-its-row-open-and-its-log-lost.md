@@ -4,7 +4,7 @@ title: A batch stopped with SIGTERM dies by the signal, with its row open and it
 type: bug
 priority: 2
 depends_on: [SA-0245]
-estimated_lines: 111
+estimated_lines: 114
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -47,7 +47,8 @@ acceptance:
   - claim: >-
       A `saffron batch` process, with stdout piped and no
       `PYTHONUNBUFFERED`, is sent SIGTERM from outside while its first task
-      holds a live child process inside a `with subprocess.Popen` block.
+      holds a live child process, its stdout and stderr both discarded,
+      inside a `with subprocess.Popen` block.
       It exits 143 within ten seconds. The last line on its stdout is the
       one its first task printed before the signal. No second task starts,
       and its batch row closes with an `ended_at` and the stop reason
@@ -74,7 +75,7 @@ acceptance:
 ## Context
 
 Backlog item **b-5df2a7**, placed in tier 2 on 2026-10-06. It cites
-`DESIGN.md` §4.5. Every line number below was read at `6b033c04`, which
+`DESIGN.md` §4.5. Every line number below was read at `3983d5a5`, which
 is before `SA-0245`. Lines in `saffron/cli.py` move once it lands.
 
 **This spec is the second of two.** `SA-0245` makes SIGTERM to `saffron
@@ -142,14 +143,21 @@ SIGTERM to `saffron batch` must unwind the way Ctrl-C does.
 - **A stack batch.** `saffron batch --stack` runs through the same
   `_batch` frame and its own `finally` (`saffron/batch.py:843-845`). No
   witness drives it.
+- **An agent turn's piped child.** A real turn pipes the agent's stdout
+  to a reader thread (`saffron/cell/runtime.py:538-543`). That thread
+  reads inside `with proc:` (`saffron/cell/runtime.py:550`). `Popen.__exit__` closes
+  that pipe before its class check, and the close waits on the blocked
+  reader. Measured on macOS, 2026-10-10, that stop waited until the child
+  exited. The witness's child discards its output, so it drives none of
+  this, and this spec changes none of it.
 - **A `saffron cell` process.** `SA-0245`'s witnesses drive `cell`
   in-process. No witness here starts a `cell` process.
 - **The batch's spend.** A run unwound by the exception is never attached
   to the batch (`saffron/batch.py:269-300`), so the row misses its
   spend. Ctrl-C does the same at base.
 - **`DESIGN.md:484`** (§4.2.1) already says a batch stopped by SIGTERM
-  exits 143, and credits `SA-0245`. This spec is what makes it true.
-  `DESIGN.md` is protected, so the credit stays as it is.
+  exits 143, and credits `SA-0245` and `SA-0258`. This spec is what makes
+  the batch half true. `DESIGN.md` is protected, and it needs no edit.
 
 ## Notes for the agent
 
@@ -225,12 +233,15 @@ rest.
 - Rewrite the paragraph on `launchctl unload` at
   `docs/HOST-HARDENING.md:205-210` from "Measured:" on. It becomes
   "Measured before b-5df2a7, a process killed that way left a **0-byte**
-  log. One that reaches Python now unwinds and flushes, exiting 143.
-  Forwarding by `uv run` and launchd's exit timeout are unmeasured. A
-  silent agent turn holds the stop until the agent next writes or exits.
-  A SIGKILL still loses what is buffered." Measured on macOS,
-  2026-10-10: the handler ran at once, and `Popen.__exit__` then waited
-  on the turn's blocked stdout reader until the child exited.
+  log. One that reaches Python now unwinds and flushes, exiting 143. Its
+  log then ends with no `batch:` stop line, and its row closes
+  `INFRASTRUCTURE`. Forwarding by `uv run` and launchd's exit timeout are
+  unmeasured. On macOS, a stop during a silent agent turn waited until the
+  agent's process exited. A SIGKILL still loses what is buffered."
+  Measured on macOS, 2026-10-10: the handler ran at once, and
+  `Popen.__exit__` then waited on the turn's blocked stdout reader until
+  the child exited. The stop line is printed at `saffron/cli.py:1969`,
+  only once the batch loop returns, which a SIGTERM never lets it do.
 
 - In the comment on `unload` at `docs/host/dev.saffron.batch.plist:35-39`,
   the text from the dash to "empty." becomes ". Measured before
@@ -246,7 +257,7 @@ witness on an assertion, under both versions. `ruff`, `ty`, `dead`,
 `structure` and `prose` passed. `python3 hooks/prose_limit.py --file`
 reported 0 new hits on `README.md`, `CLAUDE.md`, `saffron/cli.py` and
 the test. It reads neither `docs/HOST-HARDENING.md` nor the plist. By
-`size_gate`, the change counted 441 changed tokens, 272 of them in the
+`size_gate`, the change counted 454 changed tokens, 272 of them in the
 test.
 
 **The `prose` gate** reads every new comment and docstring. Write none
