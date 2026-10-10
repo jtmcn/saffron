@@ -36,9 +36,8 @@ repos:
         # The gate scans its own roots; these are the files that change its answer.
         files: ^(.*\.py|\.saffron/specs/.*\.md)$
 
-  # `terms` ran nowhere over the whole tree outside a cell, so a phrase in a
-  # file no commit stages went red on `main` unseen. Run the gate's own
-  # executable, so the hook and a cell run one command, and read its status.
+  # `terms` ran over the whole tree only inside a cell, so a phrase in a
+  # file no commit stages went red on `main` unseen.
   - repo: local
     hooks:
       - id: terms
@@ -49,9 +48,8 @@ repos:
           | tee /dev/stderr
           | grep -q "\"status\": \"pass\""'
         pass_filenames: false
-        # The gate reads every in-scope Markdown and Python file; those
-        # extensions are the whole of what moves its answer.
-        files: \.(md|py)$
+        # The gate reads only Markdown and Python files. Its wrapper moves the answer too.
+        files: ^(.*\.(md|py)|\.saffron/gates/terms)$
 
   # Local for ty's reason: the `structure` gate parses ast-grep's JSON, and the
   # rule syntax is pre-1.0, so the hook runs the one version `pyproject.toml`

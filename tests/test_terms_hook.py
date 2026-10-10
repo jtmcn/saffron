@@ -1,13 +1,13 @@
 """Witnesses for the `terms` hook (backlog item b-1e106d).
 
-The `terms` gate ran nowhere over the whole tree outside a cell, where
+The `terms` gate ran over the whole tree only inside a cell, where
 baseline subtraction hides a failure already on `main`. These tests run the
 hook's own `entry`, split the way prek and `sh -c` split it. They run it
 against disposable trees under `tmp_path`, never against this repo's own
 tree.
 
-The module is loaded fresh inside each test that needs it, never at module
-scope: the `revert` gate re-runs a new witness with the script deleted.
+`prose.py` is loaded by path inside the test that needs it, as
+`tests/test_prose_gate.py` loads it.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def _commit(root: Path, message: str) -> None:
 
 
 def _run_entry(tree: Path, env: dict[str, str] | None = None) -> int:
-    """The hook's whole `entry`, run exactly as prek would run it."""
+    """The hook's whole `entry`, split and run as prek runs it."""
     shell, flag, script = shlex.split(_hook_config()["entry"])
     assert (shell, flag) == ("sh", "-c")
     done = subprocess.run(
