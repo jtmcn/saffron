@@ -503,7 +503,7 @@ Every phase is bounded on five axes, all enforced host-side:
 
 Five, and the last two are the ones you only discover by running this overnight. Rev 2 had three. Splitting **idle** from **completion** matters because they want opposite treatment: silence *before* the agent claims to be done is a stall, and silence *after* is almost always a lingering child process. Collapsing them means a finished agent burns the full idle timeout and then gets treated as a failure.
 
-**A timeout must never discard committed work**. Whichever bound fires, the supervisor evaluates what is in the worktree (commits exist or they do not). It does not throw the attempt away because the process did not exit cleanly. The corollary, and it is the same rule from a different angle: **never auto-clean on failure**. A failed or aborted task keeps its worktree and volume so you can look at them. `saffron gc` (§4.5) reclaims them on the 24-hour rule, and that delay is the feature.
+**A timeout must never discard committed work**. Whichever bound fires, the supervisor evaluates what is in the worktree (commits exist or they do not). It does not throw the attempt away because the process did not exit cleanly. The corollary, and it is the same rule from a different angle: **never auto-clean on failure**. What a failed or aborted task keeps is its exported patch, not its volume (Appendix J, principle 42). Every exit from `run_one_cell` writes `patch.diff` to the task directory, then removes the container and both volumes. From `SA-0245` on, a SIGTERM takes that path as a Ctrl-C does. `saffron gc` (§4.5) reclaims what a SIGKILL leaves, on the 24-hour rule.
 
 #### Doneness is measured, never reported
 
