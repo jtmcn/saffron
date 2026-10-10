@@ -4,7 +4,7 @@ title: A batch stopped with SIGTERM dies by the signal, with its row open and it
 type: bug
 priority: 2
 depends_on: [SA-0245]
-estimated_lines: 114
+estimated_lines: 117
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -57,7 +57,7 @@ acceptance:
     wrong_versions:
       - The handler raises `SystemExit(143)`, so `Popen.__exit__` waits out the live child past the ten seconds.
       - The handler raises a subclass of `KeyboardInterrupt`, which `Popen.__exit__` also waits on, since it compares the exact class.
-      - The handler raises an `Exception` subclass, so the batch's per-task catch starts the second task.
+      - The handler raises an `Exception` subclass, so `Popen.__exit__` waits out the live child past the ten seconds.
       - The handler ends the process with `os._exit(143)`, so the buffered line and the row's close are both lost.
       - The handler is installed for `cell` only, so the batch process dies by the signal with its stdout lost.
   - claim: >-
@@ -149,7 +149,8 @@ SIGTERM to `saffron batch` must unwind the way Ctrl-C does.
   that pipe before its class check, and the close waits on the blocked
   reader. Measured on macOS, 2026-10-10, that stop waited until the child
   exited. The witness's child discards its output, so it drives none of
-  this, and this spec changes none of it.
+  this, and this spec changes none of it. Backlog `item b-52e670` holds
+  it.
 - **A `saffron cell` process.** `SA-0245`'s witnesses drive `cell`
   in-process. No witness here starts a `cell` process.
 - **The batch's spend.** A run unwound by the exception is never attached
@@ -200,7 +201,19 @@ Wait for the marker with a thirty-second deadline, and fail as soon as
 `poll()` shows the process exited. Then send SIGTERM and `communicate`
 with a ten-second timeout. Catch `subprocess.TimeoutExpired` there and
 let an assertion fail, not the exception. Kill and reap the process in a
-`finally`. Read the batch row from the ledger under `--home`.
+`finally`. Read the batch row from the ledger under `--home`. The
+twenty-second child is left to exit on its own, since it holds no pipe.
+
+**No second task.** Every wrong version above fails on the exit code,
+the last line or the ten seconds. None is caught by the clause that no
+second task starts. It stays in the claim. The `Exception` subclass does
+start one, and the witness fails it on the ten seconds.
+
+**`SA-0245`'s `batch` assertion.** `SA-0245`'s criterion 1 witness ends
+with a `batch` run. It asserts the handler during `_batch` equals the one
+in place before `main`. Your wrap makes that false. Flip it to `!=` and
+change its comment to say `batch` runs under the handler. No gate of this
+spec judges that test, since it is neither added here nor declared here.
 
 **Witness red at base.** At your base `batch` has no handler. The
 process dies by the signal with return code -15 and empty stdout.
@@ -244,20 +257,22 @@ rest.
   only once the batch loop returns, which a SIGTERM never lets it do.
 
 - In the comment on `unload` at `docs/host/dev.saffron.batch.plist:35-39`,
-  the text from the dash to "empty." becomes ". Measured before
-  b-5df2a7, a night killed that way left a 0-byte log. A SIGKILL still
-  loses what is buffered."
+  replace the text from the space before the dash through "empty.". The
+  comment's second line then ends "logout and shutdown. Measured before
+  b-5df2a7, a" and the rest reads "night killed that way left a 0-byte
+  log. A SIGKILL still loses what is buffered. -->"
 
 **Measured on a prototype, 2026-10-10.** The witness was written over a
 prototype of `SA-0245` at `6b033c04`. It passed under CPython 3.12.14 and
-3.14.7. It fails with `saffron/cli.py`
+3.14.7 on macOS, and under 3.12.14 on Linux aarch64 in the `saffron/cell`
+image. There the `SystemExit` and subclass wrong versions failed it too. It fails with `saffron/cli.py`
 reverted to that prototype, returning -15 with empty stdout. Each of the
 five wrong versions above was applied as one edit and failed the
 witness on an assertion, under both versions. `ruff`, `ty`, `dead`,
 `structure` and `prose` passed. `python3 hooks/prose_limit.py --file`
 reported 0 new hits on `README.md`, `CLAUDE.md`, `saffron/cli.py` and
 the test. It reads neither `docs/HOST-HARDENING.md` nor the plist. By
-`size_gate`, the change counted 454 changed tokens, 272 of them in the
+`size_gate`, the change counted 467 changed tokens, 285 of them in the
 test.
 
 **The `prose` gate** reads every new comment and docstring. Write none

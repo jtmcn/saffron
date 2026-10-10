@@ -4,7 +4,7 @@ title: A cell stopped with SIGTERM leaves its containers and its task in flight
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 184
+estimated_lines: 194
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -51,6 +51,8 @@ acceptance:
       behind it still propagates out of `main`. In all three runs, the
       SIGTERM handler in place once `main` returns or raises is the one
       installed when `main` was called, and that handler heard nothing.
+      While `main` runs `batch`, the SIGTERM handler is still the one in
+      place when `main` was called.
     witness: tests/test_sigterm.py::test_a_cell_sent_sigterm_tears_down_and_closes_its_task
     wrong_versions:
       - The handler raises an `Exception` subclass, which `main`'s catch-all turns into exit 2.
@@ -64,6 +66,7 @@ acceptance:
       - The disposition is put back to SIGTERM's default rather than to the handler `main` found.
       - The handler calls the handler `main` found before it raises.
       - The mark that a SIGTERM arrived outlives the call, so a later bare `KeyboardInterrupt` in the same process returns 143.
+      - The handler is installed around `batch` too.
   - claim: >-
       A second SIGTERM, sent mid-IMPLEMENT while the first one's teardown
       removes the cell's own container, cuts nothing short. Every removal
@@ -169,7 +172,8 @@ cleanup above runs. Make these changes in `saffron/cli.py`.
   the signal. Then `Popen.__exit__` closed stdout under the blocked
   reader, and that close waited until the child exited 30 seconds later.
   So a cell stopped while its agent prints nothing unwinds once the agent
-  next writes or exits. This spec changes nothing there.
+  next writes or exits. This spec changes nothing there. Backlog
+  `item b-52e670` holds it.
 - **SIGKILL.** Nothing can catch it. The next cell of the same spec
   pre-cleans what one leaves (`saffron/cell/session.py:1399-1404`,
   `:1906-1909`).
@@ -218,7 +222,8 @@ both criteria make. It does these things in order.
    one test, not the session.
 5. In the `finally`, read `signal.getsignal(signal.SIGTERM)` first. Only
    then put back the handler from before step 3. The witness compares
-   that reading to step 3's handler with `is`. Read after the restore,
+   that reading to step 3's handler with `==`, which for a function is
+identity. Read after the restore,
    it would hide a `main` that never put its own handler back. Run 32's
    cell did exactly that, and the wrong version survived.
 
@@ -244,13 +249,21 @@ the run and task states from `_drive`'s own ledger. Run the bare
 the first turn. It must come back as the result, of type
 `KeyboardInterrupt`.
 
+**The `batch` run.** Last, replace `cli._batch` with a function that
+records `signal.getsignal(signal.SIGTERM)` and returns 0. Call
+`cli.main` with a `batch` argv, and assert the recorded handler equals
+the one in place before the call. `SA-0258` wraps `batch` and flips this
+assertion in its own change.
+
 **Criterion 2.** Wrap `runtime.remove_container` after
 `_stub_the_runtime`. On its first call for `saffron-cell-SY-1` after the
 first signal, fail the test if `signal.getsignal(signal.SIGTERM)` is
 `signal.SIG_DFL`. Only then send the second SIGTERM, so a build that set
 the default cannot end pytest itself. The pre-clean also removes that
 container before any turn (`saffron/cell/session.py:1909`). So key the
-wrapper on a flag the generator sets as it sends the first signal.
+wrapper on a flag the generator sets as it sends the first signal. A
+no-op Python handler in place of `SIG_IGN` is equivalent in-process, and
+no witness tells the two apart.
 
 **Witnesses red at base.** At base the record-only handler hears the
 signal and the cell runs on. So each run returns 2, and the list holds
@@ -269,13 +282,14 @@ identity of its existing `comment-block` hit, and the `prose` hook counts
 a new hit.
 
 **Measured on a prototype, 2026-10-10.** Both witnesses were written
-against `6b033c04` with this change, and passed under CPython 3.12.14
-and 3.14.7. Both fail with `saffron/cli.py` reverted. Each of the
-fourteen wrong versions above was applied as one edit and failed its own
+against `6b033c04` with this change. They passed under CPython 3.12.14
+and 3.14.7 on macOS, and under 3.12.14 on Linux aarch64 in the
+`saffron/cell` image. Both fail with `saffron/cli.py` reverted. Each of the
+fifteen wrong versions above was applied as one edit and failed its own
 criterion's witness on an assertion, under both versions.
 `tests/test_cli.py` passed whole, and `ruff`, `ty`, `dead`, `structure`
-and `prose` passed on both files. By `size_gate`, the change counted 735
-changed tokens: 215 in `saffron/cli.py` and 520 in the test.
+and `prose` passed on both files. By `size_gate`, the change counted 776
+changed tokens: 215 in `saffron/cli.py` and 561 in the test.
 
 **The `prose` gate** reads every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
