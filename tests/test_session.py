@@ -16,7 +16,7 @@ from typing import cast
 import pytest
 
 from saffron.agents import artifacts, context
-from saffron.cell import runtime, session
+from saffron.cell import proxy, runtime, session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import (
     Agent,
@@ -26,6 +26,7 @@ from saffron.events import (
     PhaseStart,
     Preflight,
     TaskOutcome,
+    Teardown,
     describe,
 )
 from saffron.gates.baseline import NewFailure
@@ -1070,6 +1071,17 @@ def _stub_the_runtime(
         return runtime.Completed(0, "", "")
 
     monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+
+    # SA-0235's egress reads, called only on the one path where the plan
+    # turn's first call was served nothing, so a plain default covers the rest.
+    monkeypatch.setattr(
+        "saffron.cell.runtime.inspect_container",
+        lambda *a, **k: runtime.Completed(0, "", ""),
+    )
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_logs",
+        lambda *a, **k: runtime.Completed(0, "", ""),
+    )
 
     # The order these run in is load-bearing, so it is recorded rather than
     # described: the runtime's routing depends on it (§5.1.1, evidence
@@ -6185,6 +6197,233 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
     assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
     assert len(cell.turns) == 2
     assert any("ended_without_finishing" in str(c) for c in captured)
+
+
+_EGRESS_LABELS = ["proxy state", "proxy log", "cell resolver", "cell route"]
+
+
+def _rigged_cell(monkeypatch):
+    """A stubbed cell whose four egress reads succeed and record their own
+    call, order and content both, with no real runtime touched."""
+    cell = _stub_the_runtime(monkeypatch)
+    calls: list[tuple] = []
+    out_lines = [f"out-{i}" for i in range(30)]
+    err_lines = [f"err-{i}" for i in range(30)]
+
+    def _inspect(name, **k):
+        # `read_egress` passes no `timeout_s`, so `inspect_container` owns the bound.
+        calls.append(("inspect", name, k))
+        cell.order.append("read:proxy_state")
+        cell.preflight.append("read-proxy-state")
+        return runtime.Completed(0, '{"state":"running"}', "")
+
+    def _logs(name, **k):
+        calls.append(("logs", name, k))
+        cell.order.append("read:proxy_log")
+        cell.preflight.append("read-proxy-log")
+        return runtime.Completed(0, "\n".join(out_lines), "\n".join(err_lines))
+
+    def _exec(container, command, **k):
+        cell.execs.append((container, tuple(command), ""))
+        if command[-1] == "/etc/resolv.conf":
+            calls.append(("exec", container, tuple(command), k.get("timeout_s")))
+            cell.order.append("read:resolver")
+            cell.preflight.append("read-resolver")
+            return runtime.Completed(0, "nameserver 10.89.0.1\n", "")
+        if command[-1] == "/proc/net/route":
+            calls.append(("exec", container, tuple(command), k.get("timeout_s")))
+            cell.order.append("read:route")
+            cell.preflight.append("read-route")
+            return runtime.Completed(0, "Iface\tDestination\n", "")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.inspect_container", _inspect)
+    monkeypatch.setattr("saffron.cell.runtime.container_logs", _logs)
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+    return cell, calls, out_lines, err_lines
+
+
+def test_a_first_call_the_provider_never_served_reports_the_proxy_and_the_cell_before_teardown(
+    monkeypatch, tmp_path
+):
+    """SA-0235: the plan turn's first call served nothing. Four reads run
+    before `cell_down` takes the cell or the proxy away, each its own
+    `Teardown` event. Six other failures reach none of them."""
+    container = f"saffron-cell-{_spec().spec_id}"
+
+    cell, calls, out_lines, err_lines = _rigged_cell(monkeypatch)
+    captured: list = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "served-nothing",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+        capture=captured,
+    )
+    assert outcome.state == _task_state(ledger) == "PROVIDER_UNREACHABLE"
+
+    reads = [e for e in captured if isinstance(e, Teardown) and e.step == "egress_read"]
+    assert len(reads) == 4
+    assert all(r.ok for r in reads)
+    for read, label in zip(reads, _EGRESS_LABELS, strict=True):
+        assert read.detail.startswith(label)
+    assert '"state":"running"' in reads[0].detail
+    for line in out_lines + err_lines:
+        assert line in reads[1].detail
+    assert reads[1].detail.index("out-0") < reads[1].detail.index("err-0")
+    assert "nameserver 10.89.0.1" in reads[2].detail
+    assert "Iface\tDestination" in reads[3].detail
+
+    assert calls[0] == ("inspect", proxy.PROXY_NAME, {})
+    assert calls[1] == ("logs", proxy.PROXY_NAME, {})
+    assert calls[2] == (
+        "exec",
+        container,
+        ("head", "-c", "65536", "/etc/resolv.conf"),
+        30,
+    )
+    assert calls[3] == (
+        "exec",
+        container,
+        ("head", "-c", "65536", "/proc/net/route"),
+        30,
+    )
+
+    stop_at = cell.preflight.index("stop")
+    for name in ("read-proxy-state", "read-proxy-log", "read-resolver", "read-route"):
+        assert cell.preflight.index(name) < stop_at
+
+    # The *last* removal: the pre-clean before the attempt starts removes a
+    # same-named leftover first, and that one precedes everything.
+    removed_at = max(
+        i
+        for i, entry in enumerate(cell.order)
+        if entry == f"removed:container:{container}"
+    )
+    for name in ("read:proxy_state", "read:proxy_log", "read:resolver", "read:route"):
+        assert cell.order.index(name) < removed_at
+
+    ordinary_crash = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=1,
+        cost_usd_est=0.0,
+        is_error=True,
+    )
+    served_scripts = {
+        "green": [_turn(_block(_PLAN)), _turn()],
+        "tokens-served": [implement.AgentFailed("api_error", attempt=ordinary_crash)],
+        "rejected": [
+            implement.AgentFailed(
+                "api_error",
+                attempt=_served_nothing(
+                    rate_limit_status="rejected", rate_limit_resets_at=1755800000
+                ),
+            )
+        ],
+        "schema-reprompt": [
+            _turn("not the schema", cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+        "scope-reprompt": [
+            _turn(_block(_PROPOSAL | {"proposed_touches": ["src/x.py"]}), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+        "implement-turn": [
+            _turn(_block(_PLAN), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+    }
+    for name, turns in served_scripts.items():
+        served_cell, served_calls, _out, _err = _rigged_cell(monkeypatch)
+        _drive(monkeypatch, tmp_path / name, cell=served_cell, turns=turns)
+        assert served_calls == [], name
+        assert not any(
+            command[-1] in ("/etc/resolv.conf", "/proc/net/route")
+            for _container, command, _stdin in served_cell.execs
+        ), name
+
+
+def test_a_read_that_fails_is_reported_and_masks_neither_the_outcome_nor_teardown(
+    monkeypatch, tmp_path
+):
+    """A failed read is reported false with its own detail. The other
+    three still land true, and the outcome, the ledger and teardown's own
+    cleanup are unchanged (SA-0235)."""
+    sentinel = "boom"
+
+    def _break(form):
+        if form == "exit":
+            return lambda *a, **k: runtime.Completed(1, "", sentinel)
+        if form == "raise":
+
+            def _raise(*a, **k):
+                raise runtime.CellRuntimeError(sentinel)
+
+            return _raise
+        return lambda *a, **k: runtime.Completed(
+            124, "", "", timed_out=True, bound="wall"
+        )
+
+    container = f"saffron-cell-{_spec().spec_id}"
+    reads = ["inspect", "logs", "resolv", "route"]
+    for index, read in enumerate(reads):
+        for form in ("exit", "raise", "timeout"):
+            cell = _stub_the_runtime(monkeypatch)
+            broken = _break(form)
+            if read == "inspect":
+                monkeypatch.setattr("saffron.cell.runtime.inspect_container", broken)
+            elif read == "logs":
+                monkeypatch.setattr("saffron.cell.runtime.container_logs", broken)
+            else:
+                target = "/etc/resolv.conf" if read == "resolv" else "/proc/net/route"
+
+                def _exec(
+                    _container,
+                    command,
+                    _target=target,
+                    _broken=broken,
+                    _cell=cell,
+                    **k,
+                ):
+                    _cell.execs.append((_container, tuple(command), ""))
+                    if command[-1] == _target:
+                        return _broken(_container, command, **k)
+                    return runtime.Completed(0, "", "")
+
+                monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+
+            captured: list = []
+            outcome, ledger = _drive(
+                monkeypatch,
+                tmp_path / f"{read}-{form}",
+                cell=cell,
+                turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+                capture=captured,
+            )
+            assert outcome.state == "PROVIDER_UNREACHABLE", (read, form)
+            reads_seen = [
+                e
+                for e in captured
+                if isinstance(e, Teardown) and e.step == "egress_read"
+            ]
+            assert len(reads_seen) == 4, (read, form)
+            for i, event in enumerate(reads_seen):
+                assert event.detail.startswith(_EGRESS_LABELS[i]), (read, form)
+                if i == index:
+                    assert event.ok is False, (read, form)
+                    expected = "timed out" if form == "timeout" else sentinel
+                    assert expected in event.detail, (read, form)
+                else:
+                    assert event.ok is True, (read, form)
+            assert _task_state(ledger) == "PROVIDER_UNREACHABLE", (read, form)
+            (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+            assert run_row["status"] == "COMPLETE", (read, form)
+            assert "stop" in cell.preflight, (read, form)
+            # Two removals: the pre-clean before the attempt, then teardown's own.
+            removals = cell.order.count(f"removed:container:{container}")
+            assert removals == 2, (read, form)
 
 
 def _task_outcome(tmp_path, spec_id="SY-1"):

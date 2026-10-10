@@ -2015,6 +2015,10 @@ def _drive_cell(
     # even when it fires before that assignment runs.
     spent = 0.0
 
+    # Set only when the plan turn's first call was served nothing (SA-0235).
+    # Read in the finally, while the cell and the proxy are still up.
+    plan_first_call_unserved = False
+
     try:
         cell_up(
             repo=repo,
@@ -2255,6 +2259,7 @@ def _drive_cell(
             served_nothing = bool(
                 failed.attempt and failed.attempt.provider_served_nothing
             )
+            plan_first_call_unserved = served_nothing
             state = "PROVIDER_UNREACHABLE" if served_nothing else "NOT_IMPLEMENTED"
             _phase_start(
                 "IMPLEMENT",
@@ -3309,6 +3314,13 @@ def _drive_cell(
             )
 
         _teardown("start")
+        # Only where the first call was never served, and before `cell_down`
+        # takes the cell and the proxy both away (SA-0235, §5.1.1).
+        if plan_first_call_unserved:
+            from saffron.cell import egress_report
+
+            for ok, detail in egress_report.read_egress(container):
+                _teardown("egress_read", ok=ok, detail=detail)
         # Before `cell_down`, on every path the exception one included: the
         # export execs inside the cell, so it must precede the container's
         # removal as well as the volume's. An EXHAUSTED run with commits is

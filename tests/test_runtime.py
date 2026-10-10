@@ -447,6 +447,41 @@ def test_container_ip_is_none_when_absent():
     assert runtime._first_address('{"networks":[]}', "10.88.0.") is None
 
 
+def _recording_call(seen: list, want: runtime.Completed):
+    """A plain function, not a loop closure (B023): records one argv and
+    hands back the outcome it was told to."""
+
+    def fake_call(argv, timeout_s):
+        seen.append((list(argv), timeout_s))
+        return want
+
+    return fake_call
+
+
+def test_a_containers_state_and_log_are_read_through_the_selected_runtime(
+    monkeypatch,
+):
+    """SA-0235's two reads. Each builds one argv, the selected dialect's
+    binary plus the verb and the name, under a bounded timeout, and
+    returns `_call`'s own Completed unchanged."""
+    for dialect in (apple.DIALECT, podman.DIALECT):
+        monkeypatch.setattr(runtime, "_selected", dialect)
+        for verb, func in (
+            ("inspect", runtime.inspect_container),
+            ("logs", runtime.container_logs),
+        ):
+            for want in (
+                runtime.Completed(0, "ok", ""),
+                runtime.Completed(1, "", "no such container"),
+            ):
+                seen: list = []
+                monkeypatch.setattr(runtime, "_call", _recording_call(seen, want))
+                got = func("saffron-proxy")
+                assert seen == [([dialect.binary, verb, "saffron-proxy"], seen[0][1])]
+                assert seen[0][1] <= 30
+                assert got is want
+
+
 def test_call_is_the_public_form_of_the_private_helper():
     done = runtime.call(["true"], timeout_s=10)
     assert done.returncode == 0
