@@ -3302,14 +3302,7 @@ def _drive_cell(
             resets_at=resets_at,
         )
     except preflight.PreflightFailed as refused:
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec.spec_id,
-                step="refused",
-                detail=str(refused),
-            )
-        )
+        _preflight("refused", str(refused))
         ledger.set_run_preflight(run_id, "FAILED")
         ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
         ledger.finish_run(run_id, "COMPLETE")
@@ -3321,7 +3314,7 @@ def _drive_cell(
         )
     except BaseException:
         # ABORTED, not COMPLETE: a run row left open reads as still going.
-        # A refusal is caught above now, so this is Ctrl-C or a dead runtime.
+        # A refusal returns above. Anything else, Ctrl-C included, lands here.
         ledger.finish_run(run_id, "ABORTED")
         # The cell died, so the task is ORPHANED (§4.5) — left QUEUED it reads
         # in `queue_lines` as never started, which is the founding defect.

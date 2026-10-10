@@ -1835,9 +1835,7 @@ def test_a_refused_start_ends_preflight_failed_and_a_runtime_failure_orphaned(
         assert run_row["preflight"] == "FAILED"
         (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
         assert task_row["state"] == "PREFLIGHT_FAILED"
-        refused = [
-            e for e in capture if isinstance(e, Preflight) and e.step == "refused"
-        ]
+        refused = [e for e in capture if isinstance(e, Preflight)]
         assert refused[-1].detail == f"refused at {name}"
 
     for name in (

@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS batches (
 );
 
 -- A run's own preflight outcome: its baseline suite, or a refused start
--- before one ran (CONTEXT.md §2). NULL: the run reached neither.
+-- before one ran (CONTEXT.md §2). What NULL means is open (b-eac388).
 CREATE TABLE IF NOT EXISTS runs (
     run_id     INTEGER PRIMARY KEY,
     repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
