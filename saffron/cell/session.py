@@ -1087,7 +1087,7 @@ def cell_up(
     # probe covering nothing is what a silent failure looks like. The
     # tolerated listeners print every run, including when there are none —
     # an exception that goes quiet is the invisibility it was granted around.
-    ports, tolerated = preflight.host_probe_ports()
+    ports, tolerated, sockets = preflight.host_probe_ports()
     gateways = [runtime.gateway(leg.subnet) for leg in legs]
     # Every gateway, then the LAN address each probe shares.
     addresses = dict.fromkeys([*gateways, *preflight.probe_addresses(gateways[0])])
@@ -1101,7 +1101,9 @@ def cell_up(
     # The ports printed above, probed from each network at its own
     # gateway. No cell exists yet, and none will until this returns.
     for leg, gw in zip(legs, gateways, strict=True):
-        preflight.assert_host_is_unreachable(image.BASE_TAG, leg.network, ports, gw)
+        preflight.assert_host_is_unreachable(
+            image.BASE_TAG, leg.network, ports, gw, sockets
+        )
 
     created.add(volume)
     runtime.create_volume(volume)
@@ -1889,6 +1891,7 @@ def _drive_cell(
     on_state: Callable[[LiveState], None] | None = None,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
+    from saffron import preflight
     from saffron.agents import artifacts, context
     from saffron.cell import runtime, worktree
     from saffron.gates.core.criteria import witnesses_green_at_base
@@ -3298,12 +3301,27 @@ def _drive_cell(
             advisory_gates=sorted(latest.advisory_gates),
             resets_at=resets_at,
         )
+    except preflight.PreflightFailed as refused:
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec.spec_id,
+                step="refused",
+                detail=str(refused),
+            )
+        )
+        ledger.set_run_preflight(run_id, "FAILED")
+        ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
+        ledger.finish_run(run_id, "COMPLETE")
+        return CellOutcome(
+            state="PREFLIGHT_FAILED",
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=task_dir,
+        )
     except BaseException:
-        # A run row left open is a run that reads as still going. Preflight
-        # raising is the path an operator hits first, so it is the one most
-        # worth closing honestly — ABORTED, not COMPLETE. BaseException, not
-        # Exception: this is the attended driver, and Ctrl-C is the likeliest
-        # abort of all. The exception is re-raised untouched.
+        # ABORTED, not COMPLETE: a run row left open reads as still going.
+        # A refusal is caught above now, so this is Ctrl-C or a dead runtime.
         ledger.finish_run(run_id, "ABORTED")
         # The cell died, so the task is ORPHANED (§4.5) — left QUEUED it reads
         # in `queue_lines` as never started, which is the founding defect.

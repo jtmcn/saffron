@@ -15,6 +15,7 @@ from typing import cast
 
 import pytest
 
+from saffron import preflight
 from saffron.agents import artifacts, context
 from saffron.cell import proxy, runtime, session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
@@ -1124,7 +1125,7 @@ def _stub_the_runtime(
     )
     monkeypatch.setattr(
         "saffron.preflight.host_probe_ports",
-        _ordered("enumerate", ([8000], ["rapportd:49152"])),
+        _ordered("enumerate", ([8000], ["rapportd:49152"], [("rapportd", 8000)])),
     )
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
 
@@ -1717,6 +1718,151 @@ def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_pat
         "read-failed",
         "stop",
     ]
+
+
+def test_the_n1_refusal_names_the_processes_behind_each_answering_port(
+    monkeypatch, tmp_path
+):
+    """The refusal names, after each answering address, every command the
+    one enumeration found on its port. The operator then never reaches for
+    lsof by hand (backlog item b-e0cd57)."""
+    real_host_probe_ports = preflight.host_probe_ports
+    real_assert_host_is_unreachable = preflight.assert_host_is_unreachable
+    _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr("saffron.preflight.host_probe_ports", real_host_probe_ports)
+    monkeypatch.setattr(
+        "saffron.preflight.assert_host_is_unreachable",
+        real_assert_host_is_unreachable,
+    )
+    monkeypatch.setattr(preflight, "_lan_address", lambda: "192.168.1.5")
+    monkeypatch.setenv("SAFFRON_ALLOW_HOST_PROCESS", "limactl")
+
+    listing = (
+        "COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\n"
+        "RAATServe  1111 joel   3u   IPv4 0x1111111111111111      0t0  "
+        "TCP *:9200 (LISTEN)\n"
+        "limactl    2222 joel   4u   IPv4 0x2222222222222222      0t0  "
+        "TCP *:53 (LISTEN)\n"
+        "Zoom       3333 joel   5u   IPv4 0x3333333333333333      0t0  "
+        "TCP *:53 (LISTEN)\n"
+        "Google Ch  4444 joel   6u   IPv4 0x4444444444444444      0t0  "
+        "TCP *:53 (LISTEN)\n"
+    )
+    later = (
+        "COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\n"
+        "sneaky     5555 joel   3u   IPv4 0x5555555555555555      0t0  "
+        "TCP *:9200 (LISTEN)\n"
+    )
+    calls = iter([listing, later])
+
+    def _run_lsof(*a, **k):
+        return subprocess.CompletedProcess(a, 0, next(calls), "")
+
+    monkeypatch.setattr(subprocess, "run", _run_lsof)
+
+    def _host_ephemeral(image, command, *, network=None, timeout_s=None, **kw):
+        return runtime.Completed(
+            0,
+            "|".join(
+                [
+                    "10.88.0.1:9200",
+                    "192.168.1.5:9200",
+                    "10.88.0.1:53",
+                    "10.88.0.1:8000",
+                ]
+            ),
+            "",
+        )
+
+    monkeypatch.setattr(runtime, "run_ephemeral", _host_ephemeral)
+
+    with pytest.raises(preflight.PreflightFailed) as raised:
+        session.cell_up(
+            repo=tmp_path / "repo",
+            mirror=tmp_path / "mirror",
+            tree_base="a" * 40,
+            branch="saffron/SY-1",
+            network="net",
+            critic_network="cnet",
+            volume="vol",
+            state="state",
+            container="c",
+            gates_dir=tmp_path / "gates",
+            thread_env={},
+            created=set(),
+            note=lambda *a: None,
+        )
+    message = str(raised.value)
+    assert "10.88.0.1:9200 (RAATServe)" in message
+    assert "192.168.1.5:9200 (RAATServe)" in message
+    assert "10.88.0.1:53 (Google Ch, Zoom, limactl)" in message
+    assert "10.88.0.1:8000 (no known process)" in message
+    assert "sneaky" not in message
+
+
+def test_a_refused_start_ends_preflight_failed_and_a_runtime_failure_orphaned(
+    monkeypatch, tmp_path
+):
+    """A `PreflightFailed` from any of the four calls `cell_up` makes through
+    preflight ends the task `PREFLIGHT_FAILED`, never `ORPHANED`. A plain
+    `CellRuntimeError` from the same call, or from the image build before it,
+    still ends `ORPHANED` (backlog item b-e0cd57)."""
+    refusal_calls = [
+        "saffron.preflight.assert_proxy_reaches_upstream",
+        "saffron.preflight.host_probe_ports",
+        "saffron.preflight.probe_addresses",
+        "saffron.preflight.assert_host_is_unreachable",
+    ]
+    for name in refusal_calls:
+        monkeypatch.undo()
+        cell = _stub_the_runtime(monkeypatch)
+
+        def _refuse(*a, _name=name, **k):
+            raise preflight.PreflightFailed(f"refused at {_name}")
+
+        monkeypatch.setattr(name, _refuse)
+        capture: list = []
+        outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / "preflight-failed" / name.rsplit(".", 1)[-1],
+            cell=cell,
+            turns=[],
+            capture=capture,
+        )
+        assert outcome.state == "PREFLIGHT_FAILED"
+        (run_row,) = ledger._db.execute("SELECT status, preflight FROM runs").fetchall()
+        assert run_row["status"] == "COMPLETE"
+        assert run_row["preflight"] == "FAILED"
+        (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+        assert task_row["state"] == "PREFLIGHT_FAILED"
+        refused = [
+            e for e in capture if isinstance(e, Preflight) and e.step == "refused"
+        ]
+        assert refused[-1].detail == f"refused at {name}"
+
+    for name in (
+        "saffron.repos.image.build_cell_image",
+        "saffron.preflight.assert_host_is_unreachable",
+    ):
+        monkeypatch.undo()
+        cell = _stub_the_runtime(monkeypatch)
+
+        def _dead(*a, **k):
+            raise runtime.CellRuntimeError("the runtime is dead")
+
+        monkeypatch.setattr(name, _dead)
+        subdir = tmp_path / "orphaned" / name.rsplit(".", 1)[-1]
+        with pytest.raises(runtime.CellRuntimeError):
+            _drive(monkeypatch, subdir, cell=cell, turns=[])
+        reopened = Ledger(subdir / "ledger.db")
+        (run_row,) = reopened._db.execute(
+            "SELECT status, preflight FROM runs"
+        ).fetchall()
+        assert run_row["status"] == "ABORTED"
+        assert run_row["preflight"] is None
+        (task_row,) = reopened._db.execute("SELECT state FROM tasks").fetchall()
+        assert task_row["state"] == "ORPHANED"
+        reopened.close()
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):
@@ -7200,7 +7346,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
 
     host_probed: list[tuple[str, str]] = []
 
-    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY):
+    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY, sockets=()):
         host_probed.append((network, gateway))
 
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)

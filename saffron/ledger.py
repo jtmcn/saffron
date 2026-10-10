@@ -112,8 +112,8 @@ CREATE TABLE IF NOT EXISTS batches (
                                          'INFRASTRUCTURE', 'INCOMPLETE'))
 );
 
--- A run's own preflight outcome, read off its baseline suite (CONTEXT.md §2).
--- NULL: the run never reached the baseline suite.
+-- A run's own preflight outcome: its baseline suite, or a refused start
+-- before one ran (CONTEXT.md §2). NULL: the run reached neither.
 CREATE TABLE IF NOT EXISTS runs (
     run_id     INTEGER PRIMARY KEY,
     repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
