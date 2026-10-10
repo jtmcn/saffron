@@ -159,7 +159,8 @@ def reconcile(
 
     for row in rows:
         state, pr_url = row["state"], row["pr_url"]
-        if not pr_url or state not in PR_PENDING_STATES:
+        # `EXHAUSTED` is askable too, below, through its own narrower rule.
+        if not pr_url or (state not in PR_PENDING_STATES and state != "EXHAUSTED"):
             continue
         merged_head = row["merged_head_sha"]
         if merged_head:
@@ -176,7 +177,9 @@ def reconcile(
         head, pushed = pr.get("headRefOid"), row["pushed_sha"]
         if isinstance(head, str) and head and pushed and head != pushed:
             result.head_moved.append(HeadMoved(row["task_id"], pushed, head))
-        new_state = _next_state(pr)
+        candidate = _next_state(pr)
+        # A merge is the only answer that moves an `EXHAUSTED` row (b-8e30bd).
+        new_state = candidate if state != "EXHAUSTED" or candidate == "MERGED" else None
         if new_state is None or new_state == state:
             continue
         # Bucket first: a state outside `_BUCKET` must not raise *after* the
