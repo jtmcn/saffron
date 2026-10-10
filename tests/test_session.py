@@ -6590,6 +6590,222 @@ def test_a_rate_limited_outcome_carries_the_reset_time(monkeypatch, tmp_path):
             assert isinstance(outcome.resets_at, int), resets_at
 
 
+def test_a_rate_limit_counts_the_suites_judged_and_no_return_before_a_suite_counts_any(
+    monkeypatch, tmp_path
+):
+    """`CellOutcome.attempts` on a `RATE_LIMITED` outcome is the gate suite
+    number `repair_loop` reached, never the ledger's per-turn count. A wall on
+    the plan or implement turn reports 0, one after attempt 1's repair turn
+    reports 1, and one after attempt 3's reports 3. Every return that
+    precedes the first suite reports 0 too, limited or not (b-60732c)."""
+
+    def _wall():
+        return implement.AgentFailed("api_error", attempt=_rejected())
+
+    red1 = _results(Failure(file="a.py", code="E501", message="one"))
+    red2 = _results(Failure(file="b.py", code="E501", message="two"))
+    red3 = _results(Failure(file="c.py", code="E501", message="three"))
+    errored = [GateResult(gate="tests", status="error", summary="toolchain missing")]
+
+    no_suites: tuple[list[GateResult], ...] = ()
+    cases: list[
+        tuple[
+            str,
+            tuple[list[GateResult], ...],
+            int,
+            list,
+            session.CellSpec | None,
+            str,
+            int,
+        ]
+    ] = [
+        ("plan turn walled", no_suites, 1, [_wall()], None, "RATE_LIMITED", 0),
+        (
+            "implement turn walled",
+            no_suites,
+            1,
+            [_turn(_block(_PLAN)), _wall()],
+            None,
+            "RATE_LIMITED",
+            0,
+        ),
+        (
+            "repair after attempt 1 walled",
+            ([], red1),
+            1,
+            [_turn(_block(_PLAN)), _turn(), _wall()],
+            None,
+            "RATE_LIMITED",
+            1,
+        ),
+        (
+            "repair after attempt 3 walled",
+            ([], red1, red2, red3),
+            1,
+            [_turn(_block(_PLAN)), _turn(), _turn(), _turn(), _wall()],
+            None,
+            "RATE_LIMITED",
+            3,
+        ),
+        (
+            "baseline that aborts",
+            (errored,),
+            1,
+            [],
+            None,
+            "PREFLIGHT_FAILED",
+            0,
+        ),
+        (
+            "scope proposal",
+            no_suites,
+            1,
+            [_turn(_block(_PROPOSAL))],
+            None,
+            "SCOPE_REVIEW",
+            0,
+        ),
+        (
+            "rejected plan",
+            no_suites,
+            1,
+            [_turn("not a plan"), _turn("still not a plan")],
+            None,
+            "PLAN_REJECTED",
+            0,
+        ),
+        (
+            "failed plan turn",
+            no_suites,
+            1,
+            [implement.AgentFailed("api_error", attempt=_turn())],
+            None,
+            "NOT_IMPLEMENTED",
+            0,
+        ),
+        (
+            "spend ceiling after the plan",
+            no_suites,
+            1,
+            [_turn(_block(_PLAN))],
+            _spec(budget_usd=0.05),
+            "EXHAUSTED",
+            0,
+        ),
+        (
+            "no commits",
+            no_suites,
+            0,
+            [_turn(_block(_PLAN)), _turn()],
+            None,
+            "NOT_IMPLEMENTED",
+            0,
+        ),
+    ]
+    for name, suites, commits, turns, spec, expected_state, expected_attempts in cases:
+        cell = _stub_the_runtime(monkeypatch, suites=suites, commits=commits)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name.replace(" ", "-"),
+            cell=cell,
+            turns=turns,
+            spec=spec,
+        )
+        assert outcome.state == expected_state, name
+        assert outcome.attempts == expected_attempts, name
+        assert isinstance(outcome.attempts, int), name
+
+
+def test_a_rate_limit_after_the_loop_counts_the_loops_suites_and_not_rebuts_rerun(
+    monkeypatch, tmp_path
+):
+    """Two turns after a loop that reached 2, the notes turn and REVIEW's
+    first lens, each report 2. A REBUT verdict session after a loop that
+    reached 1 reports 1, never the rebuttal re-run's own suite, numbered
+    one past the loop's last (b-60732c). The same two loops, carried with
+    no limit at all to `READY_FOR_REVIEW`, report the same counts."""
+
+    def _wall():
+        return implement.AgentFailed("api_error", attempt=_rejected())
+
+    red1 = _results(Failure(file="a.py", code="E501", message="one"))
+    two_suites = ([], red1, [])
+    rebuttal_turn = _turn("It is intentional.")
+    argued_turn = _turn(
+        structured_output={
+            "rebuttals": [{"finding": 1, "action": "argued", "argument": "by design"}]
+        }
+    )
+
+    cell = _stub_the_runtime(monkeypatch, suites=two_suites)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "notes-walled",
+        cell=cell,
+        spec=_spec(forbidden=["docs/**"]),
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(), _wall()],
+    )
+    assert outcome.state == "RATE_LIMITED", "notes walled"
+    assert outcome.attempts == 2, "notes walled"
+    assert isinstance(outcome.attempts, int), "notes walled"
+
+    cell = _stub_the_runtime(monkeypatch, suites=two_suites)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "lens-walled",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(), _wall()],
+    )
+    assert outcome.state == "RATE_LIMITED", "lens walled"
+    assert outcome.attempts == 2, "lens walled"
+    assert isinstance(outcome.attempts, int), "lens walled"
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "verdict-walled",
+        cell=cell,
+        turns=_through_rebut(rebuttal_turn, argued_turn, _wall()),
+    )
+    assert outcome.state == "RATE_LIMITED", "verdict walled"
+    assert outcome.attempts == 1, "verdict walled"
+    assert isinstance(outcome.attempts, int), "verdict walled"
+
+    cell = _stub_the_runtime(monkeypatch, suites=two_suites)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "loop-green",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW", "loop green"
+    assert outcome.attempts == 2, "loop green"
+    assert isinstance(outcome.attempts, int), "loop green"
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "rebut-withdrawn",
+        cell=cell,
+        turns=_through_rebut(
+            rebuttal_turn,
+            argued_turn,
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW", "rebut withdrawn"
+    assert outcome.attempts == 1, "rebut withdrawn"
+    assert isinstance(outcome.attempts, int), "rebut withdrawn"
+
+
 def _served_nothing(cost=0.0, **overrides):
     """What `run_agent` hands back when the provider served a turn nothing:
     `api_error`, every count zero (SA-0152's own shape)."""
