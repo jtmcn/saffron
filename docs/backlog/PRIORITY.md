@@ -251,6 +251,10 @@ First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
 **Placed 2026-10-06**, from stopping a cell by hand: **b-5df2a7**. SIGTERM skips
 the cell's teardown, so its containers and its task stay in flight.
 
+**Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: **b-52e670**. A
+SIGTERM during a silent agent turn waits for the turn to end, because the
+unwind closes a pipe a reader thread holds.
+
 **Placed 2026-10-06**, from the run record view's final review: **b-cf50dc**.
 The task page never says how the task ended.
 

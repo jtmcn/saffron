@@ -4,7 +4,7 @@ title: "The in-cell agent is refused every write to `.pre-commit-config.yaml`, t
 status: open
 tier: 1
 filed: 2026-10-09
-specs: []
+specs: [SA-0259]
 prs: [790]
 commits: []
 cites: [§5.3]

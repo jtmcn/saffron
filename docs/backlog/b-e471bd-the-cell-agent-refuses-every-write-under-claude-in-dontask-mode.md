@@ -4,7 +4,7 @@ title: The cell's agent refuses every write under `.claude/` in dontAsk mode, so
 status: open
 tier: 1
 filed: 2026-09-25
-specs: []
+specs: [SA-0259]
 prs: []
 commits: []
 cites: [§5.3, §4.2]

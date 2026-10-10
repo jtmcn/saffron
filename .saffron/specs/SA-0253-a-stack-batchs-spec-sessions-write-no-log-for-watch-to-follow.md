@@ -3,7 +3,7 @@ id: SA-0253
 title: A stack batch's spec review and spec writer write no log, so `saffron watch` shows nothing while they run
 type: bug
 priority: 2
-depends_on: [SA-0245]
+depends_on: [SA-0258]
 estimated_lines: 81
 estimate_measured: true
 touches:
