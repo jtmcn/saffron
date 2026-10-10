@@ -136,6 +136,8 @@ def test_prek_runs_the_terms_hook_on_every_file_the_gate_reads():
     for path in _tracked():
         if prose.in_scope(path):
             assert re.search(hook["files"], path), path
+    # The gate's own wrapper moves its answer too.
+    assert re.search(hook["files"], ".saffron/gates/terms")
 
     assert hook["pass_filenames"] is False
     stages = hook.get("stages")
