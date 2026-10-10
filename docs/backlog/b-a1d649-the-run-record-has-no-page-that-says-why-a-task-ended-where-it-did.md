@@ -1,11 +1,12 @@
 ---
 id: b-a1d649
 title: "The run record has no page that says why a task ended where it did"
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-10-10
 specs: [SA-0215, SA-0216, SA-0217, SA-0218]
-prs: [688]
+prs: [688, 700, 701, 707, 708]
 commits: []
 cites: [§6, §6.2]
 related: [b-b51c9c]
@@ -29,3 +30,9 @@ findings from the view projection (`DESIGN.md` §6.2). The design is
 `docs/superpowers/specs/2026-10-05-run-record-view-design.md`, and the plan is
 `docs/superpowers/plans/2026-10-05-run-record-view.md`, Tasks 3 to 5.
 `SA-0215` builds the view projection, and a second spec builds the server.
+
+## Record
+
+- 2026-10-10: done. `SA-0215` (#700), `SA-0216` (#701), `SA-0217` (#707) and
+  `SA-0218` (#708) merged, and `saffron serve` renders the view. Their specs
+  sat in the queue until this retirement.

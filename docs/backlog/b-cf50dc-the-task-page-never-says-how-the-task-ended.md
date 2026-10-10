@@ -1,11 +1,12 @@
 ---
 id: b-cf50dc
 title: "The task page never says how the task ended"
-status: open
+status: done
 tier: 2
 filed: 2026-10-06
+closed: 2026-10-10
 specs: [SA-0219]
-prs: [708]
+prs: [708, 712]
 commits: []
 cites: [§6.2]
 related: [b-a1d649, b-d269f4]
@@ -35,3 +36,8 @@ A task page heads with the task's state, risk, batch, pull request and total
 cost. Each attempt shows its start, turns and cost. Gate results, failure
 lines and findings sit in separate tables, and every table has a header row.
 Batch and task lists are ordered by id as a number.
+
+## Record
+
+- 2026-10-10: done by `SA-0219` (#712). Its spec sat in the queue until this
+  retirement.

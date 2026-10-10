@@ -255,10 +255,10 @@ the cell's teardown, so its containers and its task stay in flight.
 SIGTERM during a silent agent turn waits for the turn to end, because the
 unwind closes a pipe a reader thread holds.
 
-**Placed 2026-10-06**, from the run record view's final review: **b-cf50dc**.
+**Placed 2026-10-06**, from the run record view's final review: ~~**b-cf50dc**~~.
 The task page never says how the task ended.
 
-**Placed 2026-10-05**, from ADR 9: **b-a1d649**. No page says why a task ended
+**Placed 2026-10-05**, from ADR 9: ~~**b-a1d649**~~. No page says why a task ended
 where it did.
 
 **Placed 2026-10-02**, from the spec loop's run 26: **b-209696**. A session
