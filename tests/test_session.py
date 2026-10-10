@@ -6211,15 +6211,14 @@ def _rigged_cell(monkeypatch):
     err_lines = [f"err-{i}" for i in range(30)]
 
     def _inspect(name, **k):
-        # No `timeout_s` passed: `inspect_container` owns its own default,
-        # and `read_egress` relies on it rather than naming it again.
-        calls.append(("inspect", name))
+        # `read_egress` passes no `timeout_s`, so `inspect_container` owns the bound.
+        calls.append(("inspect", name, k))
         cell.order.append("read:proxy_state")
         cell.preflight.append("read-proxy-state")
         return runtime.Completed(0, '{"state":"running"}', "")
 
     def _logs(name, **k):
-        calls.append(("logs", name))
+        calls.append(("logs", name, k))
         cell.order.append("read:proxy_log")
         cell.preflight.append("read-proxy-log")
         return runtime.Completed(0, "\n".join(out_lines), "\n".join(err_lines))
@@ -6268,11 +6267,15 @@ def test_a_first_call_the_provider_never_served_reports_the_proxy_and_the_cell_b
     assert all(r.ok for r in reads)
     for read, label in zip(reads, _EGRESS_LABELS, strict=True):
         assert read.detail.startswith(label)
+    assert '"state":"running"' in reads[0].detail
     for line in out_lines + err_lines:
         assert line in reads[1].detail
+    assert reads[1].detail.index("out-0") < reads[1].detail.index("err-0")
+    assert "nameserver 10.89.0.1" in reads[2].detail
+    assert "Iface\tDestination" in reads[3].detail
 
-    assert calls[0] == ("inspect", proxy.PROXY_NAME)
-    assert calls[1] == ("logs", proxy.PROXY_NAME)
+    assert calls[0] == ("inspect", proxy.PROXY_NAME, {})
+    assert calls[1] == ("logs", proxy.PROXY_NAME, {})
     assert calls[2] == (
         "exec",
         container,
@@ -6418,7 +6421,9 @@ def test_a_read_that_fails_is_reported_and_masks_neither_the_outcome_nor_teardow
             (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
             assert run_row["status"] == "COMPLETE", (read, form)
             assert "stop" in cell.preflight, (read, form)
-            assert f"removed:container:{container}" in cell.order, (read, form)
+            # Two removals: the pre-clean before the attempt, then teardown's own.
+            removals = cell.order.count(f"removed:container:{container}")
+            assert removals == 2, (read, form)
 
 
 def _task_outcome(tmp_path, spec_id="SY-1"):

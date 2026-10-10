@@ -625,8 +625,8 @@ def container_ip(name: str, subnet_prefix: str = SUBNET_PREFIX) -> str | None:
 def inspect_container(name: str, timeout_s: float = 30) -> Completed:
     """A container's own state, for a caller that reads more than its address.
 
-    `container_ip` already runs this verb. This is the same call, returned
-    whole rather than reduced to one field."""
+    `container_ip` runs the same verb with its own argv and bound, and keeps
+    only the address."""
     return _call([dialect().binary, "inspect", name], timeout_s=timeout_s)
 
 
