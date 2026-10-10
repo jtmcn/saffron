@@ -1772,7 +1772,8 @@ def test_a_probe_verdict_keeps_the_severity_the_lens_filed():
     """Criterion 1 (backlog item b-7c41e0): `apply_probe_verdict` writes the
     severity the lens filed onto `filed_severity` before it decides a new
     one. `survived` promotes to `blocker`, `killed` demotes to `note`, and
-    `unproven` leaves the decided severity equal to the filed one."""
+    `unproven` leaves the decided severity equal to the filed one. A finding
+    no verdict reached carries no filed severity."""
     expected_decided = {"survived": "blocker", "killed": "note"}
     for filed in ("blocker", "concern", "note"):
         for verdict in ("survived", "killed", "unproven"):
@@ -1786,3 +1787,11 @@ def test_a_probe_verdict_keeps_the_severity_the_lens_filed():
                 finding.probe_verdict,
                 finding.filed_severity,
             ) == (decided, verdict, filed), (filed, verdict)
+    untouched = Finding(
+        lens="adequacy", severity="concern", file="a.py", line=1, claim="c"
+    )
+    assert (untouched.severity, untouched.probe_verdict, untouched.filed_severity) == (
+        "concern",
+        None,
+        None,
+    )

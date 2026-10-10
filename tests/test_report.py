@@ -976,7 +976,7 @@ def test_an_unanchored_finding_still_appears():
 def test_the_findings_table_names_each_probe_verdict_and_the_filed_severity():
     """Criterion 2 (backlog item b-7c41e0): the `### Findings` table gains a
     `probe` column, and the severity cell names the severity the lens filed
-    in parenthesis exactly when a verdict changed it. A finding with no
+    in parentheses exactly when a verdict changed it. A finding with no
     probe shows the mark `_disagreements` uses for a missing verdict, and a
     host-filed survivor shows its verdict with no filed severity."""
     from saffron.phases import review
