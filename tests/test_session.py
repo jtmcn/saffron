@@ -6509,6 +6509,10 @@ def _rejected(resets_at=1755800000, cost=0.0):
     )
 
 
+def _wall():
+    return implement.AgentFailed("api_error", attempt=_rejected())
+
+
 def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
     """The plan turn comes back as `AgentFailed`, not as a result, so the guard
     that read the returned attempt never ran and the provider's wall was stamped
@@ -6598,9 +6602,6 @@ def test_a_rate_limit_counts_the_suites_judged_and_no_return_before_a_suite_coun
     the plan or implement turn reports 0, one after attempt 1's repair turn
     reports 1, and one after attempt 3's reports 3. Every return that
     precedes the first suite reports 0 too, limited or not (b-60732c)."""
-
-    def _wall():
-        return implement.AgentFailed("api_error", attempt=_rejected())
 
     red1 = _results(Failure(file="a.py", code="E501", message="one"))
     red2 = _results(Failure(file="b.py", code="E501", message="two"))
@@ -6724,9 +6725,6 @@ def test_a_rate_limit_after_the_loop_counts_the_loops_suites_and_not_rebuts_reru
     reached 1 reports 1, never the rebuttal re-run's own suite, numbered
     one past the loop's last (b-60732c). The same two loops, carried with
     no limit at all to `READY_FOR_REVIEW`, report the same counts."""
-
-    def _wall():
-        return implement.AgentFailed("api_error", attempt=_rejected())
 
     red1 = _results(Failure(file="a.py", code="E501", message="one"))
     two_suites = ([], red1, [])

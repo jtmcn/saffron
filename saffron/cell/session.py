@@ -2594,8 +2594,8 @@ def _drive_cell(
             # gate-only cell now, never the implementer's own run.
             latest = comparison.run
             if against == "attempt":
-                # REBUT's re-run passes "rebuttal" instead, so it never
-                # moves this (CONTEXT.md's Attempt entry).
+                # Counts the loop's suites only, unlike CONTEXT.md's Attempt
+                # entry, so REBUT's "rebuttal" re-run never moves this.
                 suite_attempt = attempt
             # The turn that just closed, which is the repair turn under §5.4's
             # loop — the join the no-progress rule and §8 need, and the whole
