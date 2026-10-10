@@ -365,6 +365,20 @@ def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
     def _package_raises(outcome, *, spec, repo, **kwargs):
         raise package_phase.PackageError("gh is unavailable")
 
+    def _mint_sy5(kwargs: dict) -> None:
+        """The raise path's write needs this row (b-dce9a4). `run_one_cell`
+        is replaced here, so nothing else creates it."""
+        ledger = kwargs["ledger"]
+        repo_id = ledger.upsert_repo("r", "o-sy5", "m-sy5", None)
+        run_id = ledger.create_run(repo_id, "a" * 40)
+        ledger._db.execute(
+            "INSERT INTO tasks "
+            "(task_id, run_id, spec_id, spec_sha, state, branch, record_key) "
+            "VALUES (6, ?, 'SY-5', ?, 'READY_FOR_REVIEW', 'saffron/SY-5', 'seed-sy5')",
+            (run_id, "a" * 64),
+        )
+        ledger._db.commit()
+
     monkeypatch.setattr(package_phase, "package", _package_raises)
     with pytest.raises(package_phase.PackageError):
         _drive(
@@ -374,6 +388,7 @@ def test_a_later_package_replaces_the_unpackaged_row_and_keeps_its_link(
             state="READY_FOR_REVIEW",
             task_id=6,
             out_dir=out_dir,
+            on_cell=_mint_sy5,
         )
     assert {row["spec_id"] for row in _rows(out_dir)} == {"SY-4"}
 
@@ -1931,11 +1946,13 @@ def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
             rebut_result=None,
         )
 
-    def _run(spec_id, task_id, name, outcome, package_fn, push_fn):
+    def _run(spec_id, task_id, name, outcome, package_fn, push_fn, seed=None):
         monkeypatch.setattr(task_module, "run_one_cell", lambda *a, **k: outcome)
         monkeypatch.setattr(package_phase, "package", package_fn)
         monkeypatch.setattr(package_phase, "push_unpackaged_work", push_fn)
         ledger = Ledger(tmp_path / f"{name}.db")
+        if seed is not None:
+            seed(ledger)
         result = task_module.run_task(
             _one_spec(spec_id),
             "s" * 40,
@@ -2066,6 +2083,20 @@ def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
         spent_usd=1.0,
         attempts=1,
     )
+
+    def _mint_te4(ledger: Ledger) -> None:
+        """The raise path's write needs this row (b-dce9a4). The outcome
+        here is canned, so nothing else creates it."""
+        repo_id = ledger.upsert_repo("r", "o-te4", "m-te4", None)
+        run_id = ledger.create_run(repo_id, "a" * 40)
+        ledger._db.execute(
+            "INSERT INTO tasks "
+            "(task_id, run_id, spec_id, spec_sha, state, branch, record_key) "
+            "VALUES (104, ?, 'TE-4', ?, 'READY_FOR_REVIEW', 'saffron/TE-4', 'seed-te4')",
+            (run_id, "a" * 64),
+        )
+        ledger._db.commit()
+
     with pytest.raises(package_phase.PackageError):
         _run(
             "TE-4",
@@ -2074,5 +2105,203 @@ def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
             ready_outcome,
             _package_raises,
             _push_records_4,
+            seed=_mint_te4,
         )
     assert push_calls_4 == []
+
+
+def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
+    tmp_path, monkeypatch
+):
+    """b-dce9a4: `run_task` settles a `READY_FOR_REVIEW` row only once
+    PACKAGE ends, whichever way it ends. An `EXHAUSTED` row is the cell's
+    own last write, and PACKAGE never revises it, whether it returns or
+    raises. Every `READY_FOR_REVIEW` case rolls the task's spend up from its
+    closed attempts. PACKAGE sees the row as the cell left it."""
+    from saffron.task import Handoff
+
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=1,
+        claim="broken",
+        anchored=True,
+    )
+
+    # name, spec_id, seed state, exhausted, a return value or a raised
+    # one (one of the last two always `None`), the row's final state.
+    cases: list[
+        tuple[
+            str,
+            str,
+            str,
+            bool,
+            package_phase.PackageResult | None,
+            BaseException | None,
+            str,
+        ]
+    ] = [
+        (
+            "returns",
+            "TE-1",
+            "REVIEWING",
+            False,
+            package_phase.PackageResult(
+                state="READY_FOR_REVIEW",
+                pr_url="https://x/pull/1",
+                pushed_sha="c" * 40,
+                branch="saffron/TE-1",
+            ),
+            None,
+            "READY_FOR_REVIEW",
+        ),
+        (
+            "merge-failed",
+            "TE-2",
+            "REVIEWING",
+            False,
+            package_phase.PackageResult(state="MERGE_FAILED", branch="saffron/TE-2"),
+            None,
+            "MERGE_FAILED",
+        ),
+        (
+            "package-error",
+            "TE-3",
+            "REVIEWING",
+            False,
+            None,
+            package_phase.PackageError("gh is unavailable"),
+            "READY_FOR_REVIEW",
+        ),
+        (
+            "keyboard-interrupt",
+            "TE-4",
+            "REVIEWING",
+            False,
+            None,
+            KeyboardInterrupt(),
+            "READY_FOR_REVIEW",
+        ),
+        (
+            "exhausted-returns",
+            "TE-5",
+            "EXHAUSTED",
+            True,
+            package_phase.PackageResult(state="EXHAUSTED", note="refused"),
+            None,
+            "EXHAUSTED",
+        ),
+        (
+            "exhausted-package-error",
+            "TE-6",
+            "EXHAUSTED",
+            True,
+            None,
+            package_phase.PackageError("gh is unavailable"),
+            "EXHAUSTED",
+        ),
+        (
+            "exhausted-runtime-error",
+            "TE-7",
+            "EXHAUSTED",
+            True,
+            None,
+            RuntimeError("boom"),
+            "EXHAUSTED",
+        ),
+    ]
+
+    for name, spec_id, seed_state, exhausted, result, exc, final_state in cases:
+        ledger = Ledger(tmp_path / f"{name}.db")
+        repo_id = ledger.upsert_repo("r", f"o-{name}", "/m.git", None)
+        run_id = ledger.create_run(repo_id, "a" * 40)
+        task_id = ledger.create_task(
+            run_id, spec_id, "a" * 64, branch=f"saffron/{spec_id}"
+        )
+        ledger.set_task_state(task_id, seed_state)
+        for cost in (1.0, 2.0):
+            attempt_id = ledger.open_attempt(task_id, phase="REVIEW")
+            ledger.close_attempt(
+                attempt_id,
+                session_id="s",
+                subtype="success",
+                terminal_reason="completed",
+                num_turns=1,
+                cost_usd_est=cost,
+            )
+
+        outcome = CellOutcome(
+            state="EXHAUSTED" if exhausted else "READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=tmp_path / "out" / spec_id,
+            spent_usd=3.0,
+            attempts=2,
+            reviews=[LensReview(lens="correctness", findings=[blocker])]
+            if exhausted
+            else [],
+            rebut_result=None,
+        )
+        monkeypatch.setattr(
+            task_module, "run_one_cell", lambda *a, outcome=outcome, **k: outcome
+        )
+
+        seen: list[str] = []
+
+        def _package(
+            _outcome, *, ledger, spec, repo, result=result, exc=exc, seen=seen, **kwargs
+        ):
+            (now,) = [r for r in ledger.queue_lines() if r["spec_id"] == spec.id]
+            seen.append(now["state"])
+            if exc is not None:
+                raise exc
+            assert result is not None
+            ledger.set_task_package(
+                _outcome.task_id,
+                result.state,
+                result.branch,
+                result.pushed_sha,
+                result.pr_url,
+                added=result.added,
+                removed=result.removed,
+            )
+            return result
+
+        monkeypatch.setattr(package_phase, "package", _package)
+        monkeypatch.setattr(
+            package_phase,
+            "push_unpackaged_work",
+            lambda *a, **k: package_phase.PushResult(pushed=False, note="unused"),
+        )
+
+        run_kwargs: dict = dict(
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=repo_id,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=tmp_path / "out",
+            token=None,
+            handoff=Handoff(stacked_on=None, target_branch=None),
+        )
+        spec = _one_spec(spec_id)
+
+        # `EXHAUSTED` absorbs its own `PackageError`. A `RuntimeError` reaches
+        # the `BaseException` handler, which re-raises it.
+        propagates = exc is not None and not (
+            exhausted and isinstance(exc, package_phase.PackageError)
+        )
+        if propagates:
+            with pytest.raises(BaseException) as excinfo:
+                task_module.run_task(spec, "s" * 40, **run_kwargs)
+            assert excinfo.value is exc
+        else:
+            task_module.run_task(spec, "s" * 40, **run_kwargs)
+
+        (row,) = [r for r in ledger.queue_lines() if r["spec_id"] == spec_id]
+        assert row["state"] == final_state
+        assert seen == [seed_state]
+        if not exhausted:
+            assert row["spent_usd_est"] == pytest.approx(3.0)
+        ledger.close()

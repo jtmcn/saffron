@@ -454,6 +454,11 @@ resumed row keeps a stale merged head. The end review grades heads from
 before the review commits. A `run` route prints nothing. The driver's
 `stack` misreads a stack batch's chain, and its `record` refuses a follow-up.
 
+**Placed 2026-10-10**, from the spec loop's run 33: **b-c9a913**, then
+**b-27bacc**. A criterion probe is judged against its declared witness
+alone, so a blocker another test kills stands after REBUT. A stack batch's
+follow-ups are pooled for their own `depends_on`.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -550,6 +555,12 @@ once.
 
 **Placed 2026-10-08**, from the spec loop's run 31: **b-385eba**. The
 regular-file git modes are spelled in three modules.
+
+**Placed 2026-10-10**, from the spec loop's run 33: **b-97357c**,
+**b-55186d**, **b-b94076**, then **b-dcf1ec**. Two of `SA-0243`'s witnesses
+leave a side untested. The fold writes its spend rollup twice. A closed
+`EXHAUSTED` draft reports `head_moved` on every scan. A preflight hit with
+no socket list names no process.
 
 **Placed 2026-10-05**, from stage 2's stack batches: **b-937778**,
 **b-050733**, then **b-0efc31**. The loop driver's `history` counts every

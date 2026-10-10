@@ -1,12 +1,13 @@
 ---
 id: 149
 title: A phase module reaches into the supervisor for the exceptions that decide its own terminal states
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-10-10
 by_hand: false
 specs: [SA-0088, SA-0248]
-prs: [277]
+prs: [277, 801]
 commits: []
 cites: [§5.5, §5.6]
 related: [118, 140]
@@ -37,3 +38,6 @@ Nothing in `SA-0088`'s `touches` offered a shared home — `worktree.py` is
 `CriticPatchRejected` and `CriticPatchUnrepresentable` moved to a lower
 `saffron/cell/` module both files can import at module scope, and the local
 import deleted.
+
+## Record
+- 2026-10-10: done by `SA-0248` (#801), from the spec loop's run 33.

@@ -12,18 +12,12 @@ would be catastrophic — an untrustworthy answer read as "not merged" would
 stamp `REJECTED` on a healthy branch — so every failure path below returns
 `None`, and the caller counts it rather than acting on it.
 
-**A live task is skipped by its state, and that is not the whole of it.** The
-in-flight guard covers a first run: `pr_url` is NULL until PACKAGE's last write,
-so there is nothing here to ask about. A *resumed* task is the gap. `_drive_cell`
-writes `READY_FOR_REVIEW` and calls `finish_run` before `cli._run_cell` invokes
-PACKAGE, so for as long as PACKAGE runs the row reads `READY_FOR_REVIEW` while
-still carrying the **previous** attempt's `pr_url` — whose `reviewDecision` is
-the `CHANGES_REQUESTED` that requeued it. Reconciling in that window writes a
-`REQUEUE_STATES` value onto a task whose cell is alive. It writes `APPROVED` if
-the old pull request is ready, since PACKAGE returns it to draft only at its end. Harmless in v0.5, where
-no scan starts a cell and PACKAGE overwrites the row immediately after; it stops
-being harmless the moment `SA-0020` gives a scan teeth. Backlog item 29 carries
-it; do not close that item by widening this module's state guard alone.
+**A live task is skipped by its state**, and that is not the whole of it. A
+first run carries no `pr_url`, since `set_task_package` writes one only once
+PACKAGE ends. A cell bound for PACKAGE leaves its row in flight, `REVIEWING`
+or `REBUTTING`, until PACKAGE ends (backlog item b-dce9a4). The gap left is a
+stamping scan that marks a live cell's row `ORPHANED`. A wider state guard
+here does not close it.
 """
 
 from __future__ import annotations
@@ -43,9 +37,8 @@ def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 
-# Worth asking about only while undecided. `MERGED`/`REJECTED` are excluded
-# so "never moves backwards" holds even once a merged branch is deleted and
-# `gh pr view` starts erroring on it.
+# Undecided states. An `EXHAUSTED` row is asked too, below, and moves only on a merge.
+# `MERGED`/`REJECTED` stay out, so a row never moves backwards once gh errors on it.
 PR_PENDING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "CHANGES_REQUESTED"})
 
 # §4.2.1: a corpse only at a batch scan's own premise (one batch runs at a
@@ -165,7 +158,8 @@ def reconcile(
 
     for row in rows:
         state, pr_url = row["state"], row["pr_url"]
-        if not pr_url or state not in PR_PENDING_STATES:
+        # `EXHAUSTED` is askable too, below, through its own narrower rule.
+        if not pr_url or (state not in PR_PENDING_STATES and state != "EXHAUSTED"):
             continue
         merged_head = row["merged_head_sha"]
         if merged_head:
@@ -178,11 +172,14 @@ def reconcile(
         if pr is None:
             result.unasked.append(row["task_id"])
             continue
-        # Before the state check: a merge is the last time this row is asked.
+        # Before the state check, so a merge still reports a moved head.
+        # A non-merged `EXHAUSTED` row is asked every scan, so it can report each time.
         head, pushed = pr.get("headRefOid"), row["pushed_sha"]
         if isinstance(head, str) and head and pushed and head != pushed:
             result.head_moved.append(HeadMoved(row["task_id"], pushed, head))
-        new_state = _next_state(pr)
+        candidate = _next_state(pr)
+        # A merge is the only answer that moves an `EXHAUSTED` row (b-8e30bd).
+        new_state = candidate if state != "EXHAUSTED" or candidate == "MERGED" else None
         if new_state is None or new_state == state:
             continue
         # Bucket first: a state outside `_BUCKET` must not raise *after* the

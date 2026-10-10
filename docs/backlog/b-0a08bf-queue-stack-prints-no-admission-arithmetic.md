@@ -41,3 +41,5 @@ layer's spec review.
 - 2026-10-08: recurred in the spec loop's run 31. The delegate read
   `saffron/cli.py` to learn that `--stack` holds back half of `--budget`
   before choosing $320 for $157 of spec budgets.
+- 2026-10-10: the spec loop's run 33 read the split from the batch's first
+  line, `reserve $125.00, writer $125.00` of $500.

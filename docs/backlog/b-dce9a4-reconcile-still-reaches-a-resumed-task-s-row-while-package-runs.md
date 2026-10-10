@@ -1,11 +1,12 @@
 ---
 id: b-dce9a4
 title: Reconcile still reaches a resumed task's row while PACKAGE runs
-status: open
+status: done
 tier: 2
 filed: 2026-09-24
+closed: 2026-10-10
 specs: [SA-0243]
-prs: []
+prs: [795]
 commits: []
 cites: [§3.3, §4.2, §4.2.1, §5.7]
 related: [29]
@@ -58,3 +59,4 @@ Every gate that reads the row still reads a state that says what is true.
 
 - 2026-09-24: filed after checking item 29's closure against the tree, where
   the window stands as written and nothing owns it.
+- 2026-10-10: done by `SA-0243` (#795), from the spec loop's run 33.

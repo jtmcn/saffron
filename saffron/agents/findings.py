@@ -112,7 +112,12 @@ class Finding(BaseModel):
     `ledger.record_findings` ever sees this finding. Never `verdict` — that
     name is REBUT's own, on the ledger's `verdict` column (`CONTEXT.md`).
     `None` for a finding with no probe, or one REVIEW never got to probe.
-    Read by `rebut._blocker_line` and `review.describe_probes`."""
+    Read by `rebut._blocker_line`, `review.describe_probes` and
+    `pr_body._findings`."""
+    filed_severity: Severity | None = None
+    """The severity the lens filed, kept by `review.apply_probe_verdict`
+    before it decides `severity` from the verdict. `None` for a finding no
+    verdict was applied to."""
 
 
 @dataclass(frozen=True)

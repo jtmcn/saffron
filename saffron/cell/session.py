@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from saffron.agents.findings import Finding, anchor
 from saffron.cell import runtime
+from saffron.cell.worktree import (
+    CriticPatchEmpty,
+    CriticPatchRejected,
+    CriticPatchUnrepresentable,
+)
 from saffron.events import (
     Attempt,
     Baseline,
@@ -713,10 +718,12 @@ def attempt_event(
 ) -> Attempt:
     """One `Attempt` line for a suite comparison, in GATE and REBUT alike.
 
-    `commits`/`spent_usd_est` are not the suite's to know — the implement turn
-    holds them — so both are `None`, the log's word for "not computed", never a
-    `0` a reader would take for a measurement (item 47).
-    """
+    `commits`/`spent_usd_est` are not the suite's to know, so both are
+    `None`, the log's word for "not computed" (item 47).
+
+    `gates` is non-empty only on the call `decision=None` makes, REBUT's
+    own, never a GATE suite's. Derived from `comparison.new_failures`,
+    never from a gate's status (b-66e82d)."""
     if comparison.aborted:
         return Attempt(
             timestamp=time.time(),
@@ -737,6 +744,11 @@ def attempt_event(
             spent_usd_est=None,
             drift=comparison.drift,
         )
+    names = (
+        ()
+        if decision is not None
+        else tuple(dict.fromkeys(nf.gate for nf in comparison.new_failures))
+    )
     return Attempt(
         timestamp=time.time(),
         spec_id=spec_id,
@@ -746,6 +758,7 @@ def attempt_event(
         spent_usd_est=None,
         new_failures=len(comparison.new_failures),
         decision=decision,
+        gates=names,
     )
 
 
@@ -1079,7 +1092,7 @@ def cell_up(
     # probe covering nothing is what a silent failure looks like. The
     # tolerated listeners print every run, including when there are none —
     # an exception that goes quiet is the invisibility it was granted around.
-    ports, tolerated = preflight.host_probe_ports()
+    ports, tolerated, sockets = preflight.host_probe_ports()
     gateways = [runtime.gateway(leg.subnet) for leg in legs]
     # Every gateway, then the LAN address each probe shares.
     addresses = dict.fromkeys([*gateways, *preflight.probe_addresses(gateways[0])])
@@ -1093,7 +1106,9 @@ def cell_up(
     # The ports printed above, probed from each network at its own
     # gateway. No cell exists yet, and none will until this returns.
     for leg, gw in zip(legs, gateways, strict=True):
-        preflight.assert_host_is_unreachable(image.BASE_TAG, leg.network, ports, gw)
+        preflight.assert_host_is_unreachable(
+            image.BASE_TAG, leg.network, ports, gw, sockets
+        )
 
     created.add(volume)
     runtime.create_volume(volume)
@@ -1235,34 +1250,6 @@ def assert_bash_is_unprivileged(container: str) -> None:
             "the unprivileged bash self-check did not leave root: "
             f"exit {done.returncode}, {done.stdout!r}"
         )
-
-
-class CriticPatchRejected(RuntimeError):
-    """The exported patch does not apply against its own base in a fresh
-    critic cell tree (CONTEXT.md §5, backlog item 118). The agent's problem,
-    not the toolchain's — the export ran clean, `git apply` just refused it —
-    so `EXHAUSTED` is the state that fits, the same one four red gate
-    attempts would reach."""
-
-    def reason(self, where: str, what: str = "the exported patch") -> str:
-        return f"{what} did not apply in {where} — {self}"
-
-
-class CriticPatchEmpty(CriticPatchRejected):
-    """The attempt's commits net to no change, so there was no patch to apply.
-    Still the agent's `EXHAUSTED`, but its reason must not say "did not apply"
-    (backlog item 132)."""
-
-    def reason(self, where: str, what: str = "the exported patch") -> str:
-        return str(self)
-
-
-class CriticPatchUnrepresentable(RuntimeError):
-    """The patch could never have applied: `worktree.DIFF_FLAGS` carries no
-    `--binary`/`--full-index`, so a binary change comes back as a
-    `_NO_FULL_INDEX` stub no base can apply — the same marker PACKAGE's own
-    `apply_patch` already reads as infrastructure. Saffron's ceiling, not the
-    agent's: `GATE_ERROR`, charged to nobody."""
 
 
 def _apply_and_commit_patch(container: str, patch: str) -> None:
@@ -1881,6 +1868,7 @@ def _drive_cell(
     on_state: Callable[[LiveState], None] | None = None,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
+    from saffron import preflight
     from saffron.agents import artifacts, context
     from saffron.cell import runtime, worktree
     from saffron.gates.core.criteria import witnesses_green_at_base
@@ -2014,6 +2002,14 @@ def _drive_cell(
     # unwind from anywhere in the body, and the accumulated total must survive
     # even when it fires before that assignment runs.
     spent = 0.0
+
+    # Bound beside `spent`, for the same reason: the latest suite number
+    # `repair_loop` judged, read by `except RateLimited` below (b-60732c).
+    suite_attempt = 0
+
+    # Set only when the plan turn's first call was served nothing (SA-0235).
+    # Read in the finally, while the cell and the proxy are still up.
+    plan_first_call_unserved = False
 
     try:
         cell_up(
@@ -2255,6 +2251,7 @@ def _drive_cell(
             served_nothing = bool(
                 failed.attempt and failed.attempt.provider_served_nothing
             )
+            plan_first_call_unserved = served_nothing
             state = "PROVIDER_UNREACHABLE" if served_nothing else "NOT_IMPLEMENTED"
             _phase_start(
                 "IMPLEMENT",
@@ -2587,13 +2584,19 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
-        def _judge(attempt: int | None = None) -> SuiteComparison:
-            nonlocal latest
+        def _judge(
+            attempt: int, *, against: Literal["attempt", "rebuttal"]
+        ) -> SuiteComparison:
+            nonlocal latest, suite_attempt
             comparison = suite.against(tree, baseline)
             # Kept for the `CellOutcome`'s own gates, effective_risk and
             # advisory_gates. Not for the critic: its table comes from the
             # gate-only cell now, never the implementer's own run.
             latest = comparison.run
+            if against == "attempt":
+                # Counts the loop's suites only, unlike CONTEXT.md's Attempt
+                # entry, so REBUT's "rebuttal" re-run never moves this.
+                suite_attempt = attempt
             # The turn that just closed, which is the repair turn under §5.4's
             # loop — the join the no-progress rule and §8 need, and the whole
             # point of not collapsing every attempt onto the task. Under §5.6
@@ -2613,35 +2616,32 @@ def _drive_cell(
                     baseline=judged_baseline,
                     earned_risk=latest.effective_risk,
                 )
-            # `None` unless `repair_loop` is calling: `_rebut_gates` calls
-            # `_judge()` bare, since `against: "rebuttal"` has no owner yet (item 160).
-            if attempt is not None:
-                # `None`, not a measured `0`, for an aborted/drifted suite or
-                # a skipped/errored/advisory gate: none of those ran a count.
-                counted = (
-                    None
-                    if comparison.aborted or comparison.drift
-                    else Counter(nf.gate for nf in comparison.new_failures)
-                )
-                for result in latest.results:
-                    count = None
-                    if (
-                        counted is not None
-                        and result.status not in ("skip", "error")
-                        and result.gate not in latest.advisory_gates
-                    ):
-                        count = counted.get(result.gate, 0)
-                    emit(
-                        GateResultEvent(
-                            timestamp=time.time(),
-                            spec_id=spec.spec_id,
-                            gate=result.gate,
-                            status=result.status,
-                            against="attempt",
-                            attempt=attempt,
-                            new_failures=count,
-                        )
+            # `None`, not a measured `0`, for an aborted/drifted suite or
+            # a skipped/errored/advisory gate: none of those ran a count.
+            counted = (
+                None
+                if comparison.aborted or comparison.drift
+                else Counter(nf.gate for nf in comparison.new_failures)
+            )
+            for result in latest.results:
+                count = None
+                if (
+                    counted is not None
+                    and result.status not in ("skip", "error")
+                    and result.gate not in latest.advisory_gates
+                ):
+                    count = counted.get(result.gate, 0)
+                emit(
+                    GateResultEvent(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        gate=result.gate,
+                        status=result.status,
+                        against=against,
+                        attempt=attempt,
+                        new_failures=count,
                     )
+                )
             return comparison
 
         def _repair(new: Sequence[NewFailure]) -> str | None:
@@ -2692,7 +2692,7 @@ def _drive_cell(
             return None
 
         outcome, attempts, new_failures = repair_loop(
-            judge=_judge,
+            judge=partial(_judge, against="attempt"),
             max_attempts=spec.max_attempts,
             repair=_repair,
             spec_id=spec.spec_id,
@@ -3089,9 +3089,9 @@ def _drive_cell(
                 """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
                 not re-enter the repair loop. An errored gate is still
                 infrastructure and still not charged to the task (§5.4)."""
-                comparison = _judge()
-                # The suite after the loop's last, so the gate count
-                # continues rather than restarting at 1 (item 47).
+                # The suite after the loop's last, so the count continues
+                # rather than restarting at 1, under its own "rebuttal" (item 47).
+                comparison = _judge(attempts + 1, against="rebuttal")
                 emit(
                     attempt_event(
                         comparison,
@@ -3235,7 +3235,9 @@ def _drive_cell(
                 session_id=session_id,
             )
         )
-        ledger.set_task_state(task_id, outcome)
+        # `run_task` settles `READY_FOR_REVIEW` once PACKAGE ends (b-dce9a4).
+        if outcome != "READY_FOR_REVIEW":
+            ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")
         return CellOutcome(
             state=outcome,
@@ -3280,16 +3282,25 @@ def _drive_cell(
             run_id=run_id,
             task_dir=task_dir,
             spent_usd=spent_read_back,
+            attempts=suite_attempt,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),
             resets_at=resets_at,
         )
+    except preflight.PreflightFailed as refused:
+        _preflight("refused", str(refused))
+        ledger.set_run_preflight(run_id, "FAILED")
+        ledger.set_task_state(task_id, "PREFLIGHT_FAILED")
+        ledger.finish_run(run_id, "COMPLETE")
+        return CellOutcome(
+            state="PREFLIGHT_FAILED",
+            task_id=task_id,
+            run_id=run_id,
+            task_dir=task_dir,
+        )
     except BaseException:
-        # A run row left open is a run that reads as still going. Preflight
-        # raising is the path an operator hits first, so it is the one most
-        # worth closing honestly — ABORTED, not COMPLETE. BaseException, not
-        # Exception: this is the attended driver, and Ctrl-C is the likeliest
-        # abort of all. The exception is re-raised untouched.
+        # ABORTED, not COMPLETE: a run row left open reads as still going.
+        # A refusal returns above. Anything else, Ctrl-C included, lands here.
         ledger.finish_run(run_id, "ABORTED")
         # The cell died, so the task is ORPHANED (§4.5) — left QUEUED it reads
         # in `queue_lines` as never started, which is the founding defect.
@@ -3309,6 +3320,13 @@ def _drive_cell(
             )
 
         _teardown("start")
+        # Only where the first call was never served, and before `cell_down`
+        # takes the cell and the proxy both away (SA-0235, §5.1.1).
+        if plan_first_call_unserved:
+            from saffron.cell import egress_report
+
+            for ok, detail in egress_report.read_egress(container):
+                _teardown("egress_read", ok=ok, detail=detail)
         # Before `cell_down`, on every path the exception one included: the
         # export execs inside the cell, so it must precede the container's
         # removal as well as the volume's. An EXHAUSTED run with commits is

@@ -1,11 +1,12 @@
 ---
 id: b-708c8a
 title: "`run_wrong_versions` restates `run_lens`'s re-prompt line for line"
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-10-10
 specs: [SA-0202, SA-0252]
-prs: [675]
+prs: [675, 800]
 commits: []
 cites: [§5.5]
 related: [97, b-7251b5]
@@ -34,3 +35,4 @@ re-prompt tests for both callers pass unchanged.
 ## Record
 
 - 2026-10-05: filed from the spec loop's run 28.
+- 2026-10-10: done by `SA-0252` (#800), from the spec loop's run 33.

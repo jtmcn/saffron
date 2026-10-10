@@ -192,4 +192,6 @@ What the item leaves behind is in `CONTEXT.md` §5's new **Gate-only cell** entr
 and in items 140-143 and 148-150 — the duplication three cell lifecycles bought,
 a judged suite that lands in no record, a subnet space nothing enumerates, and
 three small seams the reviews could not reach from inside their specs' `touches`.
-
+- 2026-10-10: `SA-0248` (#801) moved the critic patch exceptions into
+  `saffron/cell/worktree.py`. `CriticPatchApplyFailed`, named above, no
+  longer exists.

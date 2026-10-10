@@ -372,11 +372,119 @@ def test_run_rebut_hands_the_verdict_session_the_diff_its_lens_reviewed():
     assert "## The diff, after the rebuttal\n\nthe diff after the rebuttal" in prompt
 
 
+def test_the_critic_patch_exceptions_are_imported_from_worktree_alone():
+    """Backlog item 149: `CriticPatchRejected`, `CriticPatchEmpty` and
+    `CriticPatchUnrepresentable` live once, in `saffron.cell.worktree`, below
+    both the supervisor and this phase. Every importer in `saffron/` and in
+    `tests/` names that module. `session` and `rebut` bind its own classes
+    rather than defining copies. Nothing in `saffron/` reaches for one from
+    inside a function."""
+    import ast
+
+    from saffron.cell import session, worktree
+    from saffron.cell.worktree import (
+        CriticPatchEmpty,
+        CriticPatchRejected,
+        CriticPatchUnrepresentable,
+    )
+    from saffron.phases import rebut as rebut_module
+
+    names = {"CriticPatchRejected", "CriticPatchEmpty", "CriticPatchUnrepresentable"}
+    root = Path(__file__).resolve().parents[1]
+    worktree_path = root / "saffron" / "cell" / "worktree.py"
+    session_path = root / "saffron" / "cell" / "session.py"
+    rebut_path = root / "saffron" / "phases" / "rebut.py"
+
+    class_homes: dict[str, list[Path]] = {name: [] for name in names}
+    module_scope: dict[str, list[tuple[Path, str]]] = {name: [] for name in names}
+    function_scope: dict[str, list[tuple[Path, str]]] = {name: [] for name in names}
+    bad_attributes: list[tuple[Path, str, str]] = []
+
+    for base in (root / "saffron", root / "tests"):
+        for path in sorted(base.rglob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            # ast gives no parent links. Telling a top-level import from a
+            # function-local one needs one, so map each child's up front.
+            parent_of: dict[int, ast.AST] = {}
+            for parent in ast.walk(tree):
+                for child in ast.iter_child_nodes(parent):
+                    parent_of[id(child)] = parent
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name in names:
+                    class_homes[node.name].append(path)
+                elif isinstance(node, ast.ImportFrom):
+                    at_module_scope = isinstance(parent_of.get(id(node)), ast.Module)
+                    for alias in node.names:
+                        if alias.name in names:
+                            record = (path, node.module or "")
+                            bucket = module_scope if at_module_scope else function_scope
+                            bucket[alias.name].append(record)
+                elif isinstance(node, ast.Attribute) and node.attr in names:
+                    owner = ast.unparse(node.value)
+                    if owner.rsplit(".", 1)[-1] != "worktree":
+                        bad_attributes.append((path, owner, node.attr))
+
+    for name in names:
+        assert class_homes[name] == [worktree_path], (
+            f"{name} must be defined only in {worktree_path}, found in "
+            f"{class_homes[name]}"
+        )
+
+    for name in names:
+        for path, module in module_scope[name] + function_scope[name]:
+            assert module == "saffron.cell.worktree", (
+                f"{path} imports {name} from {module!r}, not saffron.cell.worktree"
+            )
+        for path, _module in function_scope[name]:
+            assert not path.is_relative_to(root / "saffron"), (
+                f"{path} imports {name} inside a function"
+            )
+
+    for name in names:
+        assert (session_path, "saffron.cell.worktree") in module_scope[name], (
+            f"session.py must import {name} from worktree at module scope"
+        )
+    for name in ("CriticPatchRejected", "CriticPatchUnrepresentable"):
+        assert (rebut_path, "saffron.cell.worktree") in module_scope[name], (
+            f"rebut.py must import {name} from worktree at module scope"
+        )
+
+    assert bad_attributes == [], (
+        f"found access to {bad_attributes} off a module other than worktree"
+    )
+
+    # `session` and `rebut` bind worktree's own classes, not copies: read
+    # through each module's own `__dict__`, never a dotted access to it.
+    session_names = vars(session)
+    rebut_names = vars(rebut_module)
+    assert session_names["CriticPatchRejected"] is CriticPatchRejected
+    assert session_names["CriticPatchEmpty"] is CriticPatchEmpty
+    assert session_names["CriticPatchUnrepresentable"] is CriticPatchUnrepresentable
+    assert rebut_names["CriticPatchRejected"] is CriticPatchRejected
+    assert rebut_names["CriticPatchUnrepresentable"] is CriticPatchUnrepresentable
+    assert worktree.CriticPatchRejected is CriticPatchRejected
+
+    assert issubclass(CriticPatchEmpty, CriticPatchRejected)
+    assert issubclass(CriticPatchUnrepresentable, RuntimeError)
+    assert not issubclass(CriticPatchUnrepresentable, CriticPatchRejected)
+
+    assert (
+        CriticPatchRejected("boom").reason("a critic cell")
+        == "the exported patch did not apply in a critic cell — boom"
+    )
+    assert (
+        CriticPatchRejected("boom").reason("a critic cell", "the post-rebuttal patch")
+        == "the post-rebuttal patch did not apply in a critic cell — boom"
+    )
+    assert CriticPatchEmpty("boom").reason("a critic cell") == "boom"
+
+
 def test_a_post_rebuttal_patch_that_will_not_apply_ends_exhausted():
     """§5.5, unchanged at REBUT: a bad patch is the agent's problem, produced
     as a `RebutResult` — the rebuttal turn and gate re-run are already paid
     for, so the exception must not escape uncharged."""
-    from saffron.cell.session import CriticPatchRejected
+    from saffron.cell.worktree import CriticPatchRejected
 
     def _critic_container():
         raise CriticPatchRejected("error: patch does not apply")
@@ -388,7 +496,7 @@ def test_a_post_rebuttal_patch_that_will_not_apply_ends_exhausted():
 
 def test_a_post_rebuttal_patch_with_no_change_ends_exhausted_and_says_so():
     # Backlog item 132's REBUT half: an empty patch is not one that did not apply.
-    from saffron.cell.session import CriticPatchEmpty
+    from saffron.cell.worktree import CriticPatchEmpty
 
     def _critic_container():
         raise CriticPatchEmpty("the attempt's commits net to no change")
@@ -402,7 +510,7 @@ def test_a_post_rebuttal_patch_with_no_change_ends_exhausted_and_says_so():
 def test_a_post_rebuttal_binary_change_ends_gate_error():
     """§5.5's one carve-out: a binary change the export cannot carry is
     Saffron's own ceiling, charged to nobody."""
-    from saffron.cell.session import CriticPatchUnrepresentable
+    from saffron.cell.worktree import CriticPatchUnrepresentable
 
     def _critic_container():
         raise CriticPatchUnrepresentable("fatal: cannot apply binary patch")

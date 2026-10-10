@@ -1,12 +1,13 @@
 ---
 id: 148
 title: Two witnesses tell the pre- from the post-rebuttal tree by counting turns, in hand-maintained copies
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-10-10
 by_hand: false
 specs: [SA-0088, SA-0091, SA-0248]
-prs: [277, 284]
+prs: [277, 284, 801]
 commits: []
 cites: []
 related: [118, 140]
@@ -37,3 +38,6 @@ narrows the exposure without removing the threshold.
 
 One shared helper, or a boundary keyed off the rebuttal's own commit rather than
 a turn count, so adding a turn anywhere cannot silently re-point either stub.
+
+## Record
+- 2026-10-10: done by `SA-0248` (#801), from the spec loop's run 33.

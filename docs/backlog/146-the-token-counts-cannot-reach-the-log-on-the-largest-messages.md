@@ -1,12 +1,13 @@
 ---
 id: 146
 title: The per-turn token counts ride on the one event most likely to be dropped from the log
-status: open
+status: done
 tier: 2
 filed: 2026-09-16
+closed: 2026-10-10
 by_hand: false
 specs: [SA-0090, SA-0250]
-prs: [278]
+prs: [278, 797]
 commits: []
 cites: [§7.1]
 related: [126]
@@ -38,3 +39,6 @@ elsewhere.
 The counts carried somewhere the bound cannot drop them — their own small event,
 or a field on the envelope rather than inside `event` — with a test that a
 message over `BOUND_CHARS` still reports its counts.
+
+## Record
+- 2026-10-10: done by `SA-0250` (#797), from the spec loop's run 33.

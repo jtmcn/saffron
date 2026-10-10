@@ -1,11 +1,12 @@
 ---
 id: b-e0cd57
 title: Preflight's N1 refusal names ports and not the processes behind them, and a start that fails preflight leaves an `ORPHANED` task row
-status: open
+status: done
 tier: 2
 filed: 2026-09-25
+closed: 2026-10-10
 specs: [SA-0244]
-prs: []
+prs: [796]
 commits: []
 cites: [§5.1, §4.1]
 related: []
@@ -42,3 +43,4 @@ for a task that never started.
 - 2026-09-26: recurred in the spec loop's run 18, the third run in a row.
   RAATServer on 9200 and limactl on 53 failed `SA-0142`'s first start. The
   refusal named ports, and `lsof` found the processes.
+- 2026-10-10: done by `SA-0244` (#796), from the spec loop's run 33.

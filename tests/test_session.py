@@ -15,8 +15,9 @@ from typing import cast
 
 import pytest
 
+from saffron import preflight
 from saffron.agents import artifacts, context
-from saffron.cell import runtime, session
+from saffron.cell import proxy, runtime, session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import (
     Agent,
@@ -26,6 +27,7 @@ from saffron.events import (
     PhaseStart,
     Preflight,
     TaskOutcome,
+    Teardown,
     describe,
 )
 from saffron.gates.baseline import NewFailure
@@ -1071,6 +1073,17 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
 
+    # SA-0235's egress reads, called only on the one path where the plan
+    # turn's first call was served nothing, so a plain default covers the rest.
+    monkeypatch.setattr(
+        "saffron.cell.runtime.inspect_container",
+        lambda *a, **k: runtime.Completed(0, "", ""),
+    )
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_logs",
+        lambda *a, **k: runtime.Completed(0, "", ""),
+    )
+
     # The order these run in is load-bearing, so it is recorded rather than
     # described: the runtime's routing depends on it (§5.1.1, evidence
     # 2026-08-28), and so does what the probe is told to look at.
@@ -1112,7 +1125,7 @@ def _stub_the_runtime(
     )
     monkeypatch.setattr(
         "saffron.preflight.host_probe_ports",
-        _ordered("enumerate", ([8000], ["rapportd:49152"])),
+        _ordered("enumerate", ([8000], ["rapportd:49152"], [("rapportd", 8000)])),
     )
     monkeypatch.setattr("saffron.repos.image.build_cell_image", lambda repo: "img")
 
@@ -1705,6 +1718,149 @@ def test_no_cell_is_created_until_the_host_probe_has_passed(monkeypatch, tmp_pat
         "read-failed",
         "stop",
     ]
+
+
+def test_the_n1_refusal_names_the_processes_behind_each_answering_port(
+    monkeypatch, tmp_path
+):
+    """The refusal names, after each answering address, every command the
+    one enumeration found on its port. The operator then never reaches for
+    lsof by hand (backlog item b-e0cd57)."""
+    real_host_probe_ports = preflight.host_probe_ports
+    real_assert_host_is_unreachable = preflight.assert_host_is_unreachable
+    _stub_the_runtime(monkeypatch)
+    monkeypatch.setattr("saffron.preflight.host_probe_ports", real_host_probe_ports)
+    monkeypatch.setattr(
+        "saffron.preflight.assert_host_is_unreachable",
+        real_assert_host_is_unreachable,
+    )
+    monkeypatch.setattr(preflight, "_lan_address", lambda: "192.168.1.5")
+    monkeypatch.setenv("SAFFRON_ALLOW_HOST_PROCESS", "limactl")
+
+    listing = (
+        "COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\n"
+        "RAATServe  1111 joel   3u   IPv4 0x1111111111111111      0t0  "
+        "TCP *:9200 (LISTEN)\n"
+        "limactl    2222 joel   4u   IPv4 0x2222222222222222      0t0  "
+        "TCP *:53 (LISTEN)\n"
+        "Zoom       3333 joel   5u   IPv4 0x3333333333333333      0t0  "
+        "TCP *:53 (LISTEN)\n"
+        "Google Ch  4444 joel   6u   IPv4 0x4444444444444444      0t0  "
+        "TCP *:53 (LISTEN)\n"
+    )
+    later = (
+        "COMMAND     PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\n"
+        "sneaky     5555 joel   3u   IPv4 0x5555555555555555      0t0  "
+        "TCP *:9200 (LISTEN)\n"
+    )
+    calls = iter([listing, later])
+
+    def _run_lsof(*a, **k):
+        return subprocess.CompletedProcess(a, 0, next(calls), "")
+
+    monkeypatch.setattr(subprocess, "run", _run_lsof)
+
+    def _host_ephemeral(image, command, *, network=None, timeout_s=None, **kw):
+        return runtime.Completed(
+            0,
+            "|".join(
+                [
+                    "10.88.0.1:9200",
+                    "192.168.1.5:9200",
+                    "10.88.0.1:53",
+                    "10.88.0.1:8000",
+                ]
+            ),
+            "",
+        )
+
+    monkeypatch.setattr(runtime, "run_ephemeral", _host_ephemeral)
+
+    with pytest.raises(preflight.PreflightFailed) as raised:
+        session.cell_up(
+            repo=tmp_path / "repo",
+            mirror=tmp_path / "mirror",
+            tree_base="a" * 40,
+            branch="saffron/SY-1",
+            network="net",
+            critic_network="cnet",
+            volume="vol",
+            state="state",
+            container="c",
+            gates_dir=tmp_path / "gates",
+            thread_env={},
+            created=set(),
+            note=lambda *a: None,
+        )
+    message = str(raised.value)
+    assert "10.88.0.1:9200 (RAATServe)" in message
+    assert "192.168.1.5:9200 (RAATServe)" in message
+    assert "10.88.0.1:53 (Google Ch, Zoom, limactl)" in message
+    assert "10.88.0.1:8000 (no known process)" in message
+    assert "sneaky" not in message
+
+
+def test_a_refused_start_ends_preflight_failed_and_a_runtime_failure_orphaned(
+    monkeypatch, tmp_path
+):
+    """A `PreflightFailed` from any of the four calls `cell_up` makes through
+    preflight ends the task `PREFLIGHT_FAILED`, never `ORPHANED`. A plain
+    `CellRuntimeError` from the same call, or from the image build before it,
+    still ends `ORPHANED` (backlog item b-e0cd57)."""
+    refusal_calls = [
+        "saffron.preflight.assert_proxy_reaches_upstream",
+        "saffron.preflight.host_probe_ports",
+        "saffron.preflight.probe_addresses",
+        "saffron.preflight.assert_host_is_unreachable",
+    ]
+    for name in refusal_calls:
+        monkeypatch.undo()
+        cell = _stub_the_runtime(monkeypatch)
+
+        def _refuse(*a, _name=name, **k):
+            raise preflight.PreflightFailed(f"refused at {_name}")
+
+        monkeypatch.setattr(name, _refuse)
+        capture: list = []
+        outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / "preflight-failed" / name.rsplit(".", 1)[-1],
+            cell=cell,
+            turns=[],
+            capture=capture,
+        )
+        assert outcome.state == "PREFLIGHT_FAILED"
+        (run_row,) = ledger._db.execute("SELECT status, preflight FROM runs").fetchall()
+        assert run_row["status"] == "COMPLETE"
+        assert run_row["preflight"] == "FAILED"
+        (task_row,) = ledger._db.execute("SELECT state FROM tasks").fetchall()
+        assert task_row["state"] == "PREFLIGHT_FAILED"
+        refused = [e for e in capture if isinstance(e, Preflight)]
+        assert refused[-1].detail == f"refused at {name}"
+
+    for name in (
+        "saffron.repos.image.build_cell_image",
+        "saffron.preflight.assert_host_is_unreachable",
+    ):
+        monkeypatch.undo()
+        cell = _stub_the_runtime(monkeypatch)
+
+        def _dead(*a, **k):
+            raise runtime.CellRuntimeError("the runtime is dead")
+
+        monkeypatch.setattr(name, _dead)
+        subdir = tmp_path / "orphaned" / name.rsplit(".", 1)[-1]
+        with pytest.raises(runtime.CellRuntimeError):
+            _drive(monkeypatch, subdir, cell=cell, turns=[])
+        reopened = Ledger(subdir / "ledger.db")
+        (run_row,) = reopened._db.execute(
+            "SELECT status, preflight FROM runs"
+        ).fetchall()
+        assert run_row["status"] == "ABORTED"
+        assert run_row["preflight"] is None
+        (task_row,) = reopened._db.execute("SELECT state FROM tasks").fetchall()
+        assert task_row["state"] == "ORPHANED"
+        reopened.close()
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):
@@ -2836,7 +2992,10 @@ def test_a_cell_given_a_task_runs_on_it_and_its_run_and_mints_neither(
         r["task_id"]: r["state"]
         for r in ledger4._db.execute("SELECT task_id, state FROM tasks").fetchall()
     }
-    assert states == {older_task: outcome4.state, minted_task: outcome3.state}
+    # Both cells end `READY_FOR_REVIEW`, so PACKAGE's own write is the row's
+    # last word and the cell's own leaves `REVIEWING` standing (b-dce9a4).
+    assert (outcome3.state, outcome4.state) == ("READY_FOR_REVIEW", "READY_FOR_REVIEW")
+    assert states == {older_task: "REVIEWING", minted_task: "REVIEWING"}
     assert states[older_task] != "GATE_ERROR"
     run_count = ledger4._db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()[0]
     assert run_count == 2
@@ -4182,17 +4341,32 @@ def _through_rebut(*rebut_turns):
     ]
 
 
+def _rebuttal_fixed_prefix() -> str:
+    """REBUT's own rebuttal turn prompt, up to `{blockers}`: the text that
+    identifies it among `cell.turns`, however many turns IMPLEMENT or
+    REVIEW ran first."""
+    return rebut.REBUT_PROMPT.split("{blockers}")[0]
+
+
 def _rebut_turn_options(cell) -> list[dict]:
     """`cell.turn_options`, filtered to REBUT's own sessions: the rebuttal
     turn, its extraction turn, and each lens verdict, in the order they
     ran (SA-0203). Identified by prompt, the way `cell.turns` records it."""
-    fixed = rebut.REBUT_PROMPT.split("{blockers}")[0]
+    fixed = _rebuttal_fixed_prefix()
     return [
         options
         for prompt, options in zip(cell.turns, cell.turn_options, strict=True)
         if prompt in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT)
         or prompt.startswith(fixed)
     ]
+
+
+def _rebuttal_turn_has_run(cell) -> bool:
+    """Whether REBUT's own rebuttal turn has already run. Read from the
+    prompts in `cell.turns`, not from a turn count that moves whenever
+    IMPLEMENT or REVIEW gains a turn of its own."""
+    fixed = _rebuttal_fixed_prefix()
+    return any(prompt.startswith(fixed) for prompt in cell.turns)
 
 
 def _rebut_capped(
@@ -4497,6 +4671,105 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     )
     assert outcome6.state == "EXHAUSTED"
     assert outcome6.rebut_result is not None
+
+
+def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
+    monkeypatch, tmp_path
+):
+    """b-dce9a4: a resumed task carries a stale `CHANGES_REQUESTED` pull
+    request into its next cell. A cell that ends `READY_FOR_REVIEW` leaves
+    the row at `REVIEWING` or `REBUTTING` instead, whether REVIEW found no
+    blocker or REBUT's verdict withdrew or confirmed it. `saffron reconcile`
+    run before PACKAGE writes then finds nothing in `PR_PENDING_STATES` to
+    requeue."""
+    from saffron import cli, scheduler
+    from saffron.reconcile import PR_PENDING_STATES
+
+    url = "https://example.invalid/r.git"
+
+    def _seed(case):
+        ledger = Ledger(case / "ledger.db")
+        repo_id = ledger.upsert_repo("r", url, "/m.git", None)
+        run_id = ledger.create_run(repo_id, "a" * 40)
+        task_id = ledger.create_task(run_id, "SY-1", "a" * 64, branch="saffron/SY-1")
+        ledger.set_task_package(
+            task_id, "READY_FOR_REVIEW", "saffron/SY-1", "c" * 40, f"{url}/pull/1"
+        )
+        ledger.set_task_state(task_id, "CHANGES_REQUESTED")
+        ledger.close()
+        return task_id
+
+    def _state(case, task_id):
+        ledger = Ledger(case / "ledger.db")
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        ledger.close()
+        return row["state"]
+
+    def _reconcile(case):
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            lambda argv: subprocess.CompletedProcess(
+                argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
+            ),
+        )
+        monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: url)
+        assert cli.main(["--home", str(case), "reconcile", "--repo", str(case)]) == 0
+
+    review_case = tmp_path / "review"
+    task_id = _seed(review_case)
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        review_case,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=task_id),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    ledger.close()
+    _reconcile(review_case)
+    assert _state(review_case, task_id) == "REVIEWING"
+
+    # The two REBUT paths: a withdrawn verdict and a confirmed one each end
+    # `READY_FOR_REVIEW` too, through REBUT's own row instead.
+    for name, verdict in (("withdraw", "withdrawn"), ("confirm", "confirmed")):
+        case = tmp_path / name
+        rebut_task_id = _seed(case)
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        _rebuttable(monkeypatch, cell, rebut_commits=1)
+        outcome, ledger = _drive(
+            monkeypatch,
+            case,
+            cell=cell,
+            turns=_through_rebut(
+                _turn("It is intentional."),
+                _turn(
+                    structured_output={
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                ),
+                _turn(
+                    structured_output={
+                        "verdicts": [
+                            {"finding": 1, "verdict": verdict, "reason": "fair"}
+                        ]
+                    }
+                ),
+            ),
+            spec=_spec(task_id=rebut_task_id),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        ledger.close()
+        _reconcile(case)
+        assert _state(case, rebut_task_id) == "REBUTTING"
+
+    assert not ({"REVIEWING", "REBUTTING"} & PR_PENDING_STATES)
+    assert not ({"REVIEWING", "REBUTTING"} & scheduler.REQUEUE_STATES)
 
 
 def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_path):
@@ -5528,6 +5801,273 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
     assert rebut.attempt == 3
 
 
+def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1):
+    """Drives one cell through REBUT with `use_default_emit=True`. Returns
+    its outcome plus every event `read_log` reads back from the real
+    `events.jsonl` under `tmp_path / "out" / "SY-1"`, which b-66e82d's
+    three witnesses share. `_ANCHORING_DIFF` throughout, since REBUT needs
+    REVIEW's own blocker to anchor to the diff. Build `turns` with
+    `_through_rebut` when the loop settles in one attempt, or by hand
+    otherwise, as the gate count test above already does.
+    """
+    from saffron.events import read_log
+
+    cell = _stub_the_runtime(monkeypatch, suites=suites, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=turns,
+        use_default_emit=True,
+    )
+    return outcome, list(read_log(tmp_path / "out" / "SY-1"))
+
+
+def test_a_green_rebuttal_re_run_logs_each_gate_result_against_the_rebuttal(
+    monkeypatch, tmp_path
+):
+    """b-66e82d, criterion 1: a green re-run after REBUT writes one
+    `GateResult` event per gate, each `against="rebuttal"`. Each carries
+    the REBUT `Attempt` line's own number, not the loop's.
+
+    Counts follow the repair loop's own rule. A passing blocking gate
+    (`committed`) carries a measured zero, as does one failing identically
+    at base (`types`). An advisory gate (`size`) and the skipped ones
+    (`integrity`, `census`, `criteria`) carry none. The green line itself
+    stays byte-identical, naming no gate."""
+    from saffron.events import GateResult as GateResultEvent
+
+    f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
+    base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
+    suites = (base, base + _results(f_lint), base, base)
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path,
+        suites=suites,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(),  # the repair turn after attempt 1
+            _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn("Fixed it."),
+            _turn(structured_output=_CLAIMED_FIX),
+            # A green re-run reaches the critic's own verdict session.
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed it"}
+                    ]
+                }
+            ),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    gate_attempt_positions = [
+        i for i, e in enumerate(events) if isinstance(e, Attempt) and e.phase == "GATE"
+    ]
+    (rebut_position,) = [
+        i for i, e in enumerate(events) if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    rebut_attempt = events[rebut_position]
+    assert [events[i].attempt for i in gate_attempt_positions] == [1, 2]
+    assert all(events[i].gates == () for i in gate_attempt_positions)
+    assert rebut_attempt.attempt == 3
+    assert rebut_attempt.new_failures == 0
+    assert rebut_attempt.gates == ()
+    assert describe(rebut_attempt) == "gates: 0 new failures after the rebuttal"
+
+    rebuttal_positions = [
+        i
+        for i, e in enumerate(events)
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    ]
+    assert rebuttal_positions
+    assert max(gate_attempt_positions) < min(rebuttal_positions)
+    assert max(rebuttal_positions) < rebut_position
+
+    rebuttal_results = [events[i] for i in rebuttal_positions]
+    attempt_results = [
+        e for e in events if isinstance(e, GateResultEvent) and e.against == "attempt"
+    ]
+    assert all(e.attempt == 3 for e in rebuttal_results)
+    assert all(e.attempt != 3 for e in attempt_results)
+
+    by_gate = {e.gate: e for e in rebuttal_results}
+    assert (by_gate["types"].status, by_gate["types"].new_failures) == ("fail", 0)
+    assert (by_gate["committed"].status, by_gate["committed"].new_failures) == (
+        "pass",
+        0,
+    )
+    for skipped in ("integrity", "census", "criteria"):
+        assert by_gate[skipped].new_failures is None
+    assert by_gate["size"].status == "pass" and by_gate["size"].new_failures is None
+
+
+def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_path):
+    """b-66e82d, criterion 2: a red re-run after REBUT names, on its own
+    REBUT `Attempt` line, each gate that contributed a new failure, once.
+    That is `lint` (two failures) and `dead` (one). Never `types` (one
+    failure, identical to base) nor `committed` (passing). The count still
+    leads the names, and each failing gate's own event carries its own
+    count, not the suite's total of three. A second drive fails `lint` alone,
+    SA-0118's own one-gate case.
+    """
+    from saffron.events import GateResult as GateResultEvent
+
+    f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
+    base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
+    rebuttal_suite = base + [
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="l 1",
+            failures=[
+                f_lint,
+                Failure(file="c.py", code="E502", message="also too long"),
+            ],
+        ),
+        GateResult(
+            gate="dead",
+            status="fail",
+            tool="d 1",
+            failures=[Failure(file="d.py", code="V1", message="unused")],
+        ),
+    ]
+    suites = (base, base, rebuttal_suite)
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path,
+        suites=suites,
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert outcome.state == "EXHAUSTED"
+
+    (rebut_attempt,) = [
+        e for e in events if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    assert rebut_attempt.new_failures == 3
+    assert list(rebut_attempt.gates) == ["lint", "dead"]
+    assert describe(rebut_attempt) == (
+        "gates: 3 new failures after the rebuttal — lint, dead"
+    )
+
+    rebuttal_results = {
+        e.gate: e
+        for e in events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    }
+    assert (rebuttal_results["lint"].status, rebuttal_results["lint"].new_failures) == (
+        "fail",
+        2,
+    )
+    assert (rebuttal_results["dead"].status, rebuttal_results["dead"].new_failures) == (
+        "fail",
+        1,
+    )
+    assert (
+        rebuttal_results["types"].status,
+        rebuttal_results["types"].new_failures,
+    ) == ("fail", 0)
+    assert (
+        rebuttal_results["committed"].status,
+        rebuttal_results["committed"].new_failures,
+    ) == ("pass", 0)
+
+    one_outcome, one_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "one",
+        suites=(base, base, base + _results(f_lint)),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert one_outcome.state == "EXHAUSTED"
+    (one_rebut,) = [
+        e for e in one_events if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    assert one_rebut.gates == ("lint",)
+    assert describe(one_rebut) == "gates: 1 new failures after the rebuttal — lint"
+    one_results = {
+        e.gate: (e.status, e.new_failures)
+        for e in one_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    }
+    assert one_results["lint"] == ("fail", 1)
+    assert one_results["types"] == ("fail", 0)
+    assert one_results["committed"] == ("pass", 0)
+
+
+def test_an_errored_or_drifted_rebuttal_re_run_logs_each_gate_with_no_count(
+    monkeypatch, tmp_path
+):
+    """b-66e82d, criterion 3: a re-run after REBUT whose suite aborted, or
+    drifted, still logs one `GateResult` event per gate, `against=
+    "rebuttal"`, with no count anywhere. The task ends `GATE_ERROR` either
+    way. An errored gate keeps its own status, never `fail`.
+
+    A drifted suite's events name exactly the gates in the head's own
+    results. `extra`, which the baseline never ran, is one of them.
+    """
+    from saffron.events import GateResult as GateResultEvent
+
+    core = {"scope", "integrity", "size", "committed", "census", "criteria"}
+
+    errored_suite = [
+        GateResult(gate="tests", status="error", summary="toolchain missing"),
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="l 1",
+            failures=[Failure(file="a.py", code="E501", message="too long")],
+        ),
+    ]
+    aborted_outcome, aborted_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "aborted",
+        suites=([], [], errored_suite),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert aborted_outcome.state == "GATE_ERROR"
+    aborted_results = [
+        e
+        for e in aborted_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    ]
+    aborted_by_gate = {e.gate: e for e in aborted_results}
+    assert aborted_by_gate["tests"].status == "error"
+    assert aborted_by_gate["lint"].status == "fail"
+    assert all(e.new_failures is None for e in aborted_results)
+    assert {e.gate for e in aborted_results} == core | {"tests", "lint"}
+
+    base_suite = [GateResult(gate="tests", status="pass", tool="pytest 1")]
+    drift_suite = [
+        GateResult(gate="tests", status="skip"),
+        GateResult(gate="extra", status="pass", tool="x 1"),
+    ]
+    drift_outcome, drift_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "drift",
+        suites=(base_suite, base_suite, drift_suite),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert drift_outcome.state == "GATE_ERROR"
+    drift_results = [
+        e
+        for e in drift_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    ]
+    assert all(e.new_failures is None for e in drift_results)
+    drift_by_gate = {e.gate: e for e in drift_results}
+    assert drift_by_gate["tests"].status == "skip"
+    assert drift_by_gate["extra"].status == "pass"
+    assert {e.gate for e in drift_results} == core | {"tests", "extra"}
+
+
 def _gate_result_events(monkeypatch, tmp_path, *, cell, turns, **kwargs):
     """Drives one cell; returns its outcome plus every `events.GateResult` it
     emitted, in order — what SA-0102's three witnesses share. Imported here,
@@ -5567,11 +6107,13 @@ def test_each_baseline_gate_result_reaches_the_log_as_its_own_event(
 def test_each_attempts_gate_results_carry_their_own_attempt_number(
     monkeypatch, tmp_path
 ):
-    """AC2, folded into one drive through REBUT: `types` fails identically at
-    baseline and both attempts, cancelling to a measured zero; `lint`, new
-    only at attempt 1, carries a 1; attempt 1's set survives attempt 2's
-    being written; and the post-rebuttal re-run emits nothing — no borrowed
-    attempt 3."""
+    """AC2, folded into one drive that ends at `REVIEWING`, before REBUT.
+
+    `types` fails identically at baseline and both attempts, cancelling to
+    a measured zero. `lint`, new only at attempt 1, carries a 1. Attempt
+    1's set survives attempt 2's being written. The drive never reaches the
+    re-run after REBUT, so criterion 1's witness holds the rebuttal set.
+    """
     f_types = Failure(file="a.py", code="T1", message="bad type")
     f_lint = Failure(file="b.py", code="E501", message="too long")
     base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
@@ -5967,6 +6509,10 @@ def _rejected(resets_at=1755800000, cost=0.0):
     )
 
 
+def _wall():
+    return implement.AgentFailed("api_error", attempt=_rejected())
+
+
 def test_a_wall_on_the_plan_turn_is_not_the_task_failing(monkeypatch, tmp_path):
     """The plan turn comes back as `AgentFailed`, not as a result, so the guard
     that read the returned attempt never ran and the provider's wall was stamped
@@ -6046,6 +6592,216 @@ def test_a_rate_limited_outcome_carries_the_reset_time(monkeypatch, tmp_path):
         assert outcome.resets_at == expected, resets_at
         if expected is not None:
             assert isinstance(outcome.resets_at, int), resets_at
+
+
+def test_a_rate_limit_counts_the_suites_judged_and_no_return_before_a_suite_counts_any(
+    monkeypatch, tmp_path
+):
+    """`CellOutcome.attempts` on a `RATE_LIMITED` outcome is the gate suite
+    number `repair_loop` reached, never the ledger's per-turn count. A wall on
+    the plan or implement turn reports 0, one after attempt 1's repair turn
+    reports 1, and one after attempt 3's reports 3. Every return that
+    precedes the first suite reports 0 too, limited or not (b-60732c)."""
+
+    red1 = _results(Failure(file="a.py", code="E501", message="one"))
+    red2 = _results(Failure(file="b.py", code="E501", message="two"))
+    red3 = _results(Failure(file="c.py", code="E501", message="three"))
+    errored = [GateResult(gate="tests", status="error", summary="toolchain missing")]
+
+    no_suites: tuple[list[GateResult], ...] = ()
+    cases: list[
+        tuple[
+            str,
+            tuple[list[GateResult], ...],
+            int,
+            list,
+            session.CellSpec | None,
+            str,
+            int,
+        ]
+    ] = [
+        ("plan turn walled", no_suites, 1, [_wall()], None, "RATE_LIMITED", 0),
+        (
+            "implement turn walled",
+            no_suites,
+            1,
+            [_turn(_block(_PLAN)), _wall()],
+            None,
+            "RATE_LIMITED",
+            0,
+        ),
+        (
+            "repair after attempt 1 walled",
+            ([], red1),
+            1,
+            [_turn(_block(_PLAN)), _turn(), _wall()],
+            None,
+            "RATE_LIMITED",
+            1,
+        ),
+        (
+            "repair after attempt 3 walled",
+            ([], red1, red2, red3),
+            1,
+            [_turn(_block(_PLAN)), _turn(), _turn(), _turn(), _wall()],
+            None,
+            "RATE_LIMITED",
+            3,
+        ),
+        (
+            "baseline that aborts",
+            (errored,),
+            1,
+            [],
+            None,
+            "PREFLIGHT_FAILED",
+            0,
+        ),
+        (
+            "scope proposal",
+            no_suites,
+            1,
+            [_turn(_block(_PROPOSAL))],
+            None,
+            "SCOPE_REVIEW",
+            0,
+        ),
+        (
+            "rejected plan",
+            no_suites,
+            1,
+            [_turn("not a plan"), _turn("still not a plan")],
+            None,
+            "PLAN_REJECTED",
+            0,
+        ),
+        (
+            "failed plan turn",
+            no_suites,
+            1,
+            [implement.AgentFailed("api_error", attempt=_turn())],
+            None,
+            "NOT_IMPLEMENTED",
+            0,
+        ),
+        (
+            "spend ceiling after the plan",
+            no_suites,
+            1,
+            [_turn(_block(_PLAN))],
+            _spec(budget_usd=0.05),
+            "EXHAUSTED",
+            0,
+        ),
+        (
+            "no commits",
+            no_suites,
+            0,
+            [_turn(_block(_PLAN)), _turn()],
+            None,
+            "NOT_IMPLEMENTED",
+            0,
+        ),
+    ]
+    for name, suites, commits, turns, spec, expected_state, expected_attempts in cases:
+        cell = _stub_the_runtime(monkeypatch, suites=suites, commits=commits)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name.replace(" ", "-"),
+            cell=cell,
+            turns=turns,
+            spec=spec,
+        )
+        assert outcome.state == expected_state, name
+        assert outcome.attempts == expected_attempts, name
+        assert isinstance(outcome.attempts, int), name
+
+
+def test_a_rate_limit_after_the_loop_counts_the_loops_suites_and_not_rebuts_rerun(
+    monkeypatch, tmp_path
+):
+    """Two turns after a loop that reached 2, the notes turn and REVIEW's
+    first lens, each report 2. A REBUT verdict session after a loop that
+    reached 1 reports 1, never the rebuttal re-run's own suite, numbered
+    one past the loop's last (b-60732c). The same two loops, carried with
+    no limit at all to `READY_FOR_REVIEW`, report the same counts."""
+
+    red1 = _results(Failure(file="a.py", code="E501", message="one"))
+    two_suites = ([], red1, [])
+    rebuttal_turn = _turn("It is intentional.")
+    argued_turn = _turn(
+        structured_output={
+            "rebuttals": [{"finding": 1, "action": "argued", "argument": "by design"}]
+        }
+    )
+
+    cell = _stub_the_runtime(monkeypatch, suites=two_suites)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "notes-walled",
+        cell=cell,
+        spec=_spec(forbidden=["docs/**"]),
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(), _wall()],
+    )
+    assert outcome.state == "RATE_LIMITED", "notes walled"
+    assert outcome.attempts == 2, "notes walled"
+    assert isinstance(outcome.attempts, int), "notes walled"
+
+    cell = _stub_the_runtime(monkeypatch, suites=two_suites)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "lens-walled",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn(), _wall()],
+    )
+    assert outcome.state == "RATE_LIMITED", "lens walled"
+    assert outcome.attempts == 2, "lens walled"
+    assert isinstance(outcome.attempts, int), "lens walled"
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "verdict-walled",
+        cell=cell,
+        turns=_through_rebut(rebuttal_turn, argued_turn, _wall()),
+    )
+    assert outcome.state == "RATE_LIMITED", "verdict walled"
+    assert outcome.attempts == 1, "verdict walled"
+    assert isinstance(outcome.attempts, int), "verdict walled"
+
+    cell = _stub_the_runtime(monkeypatch, suites=two_suites)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "loop-green",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+    assert outcome.state == "READY_FOR_REVIEW", "loop green"
+    assert outcome.attempts == 2, "loop green"
+    assert isinstance(outcome.attempts, int), "loop green"
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "rebut-withdrawn",
+        cell=cell,
+        turns=_through_rebut(
+            rebuttal_turn,
+            argued_turn,
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW", "rebut withdrawn"
+    assert outcome.attempts == 1, "rebut withdrawn"
+    assert isinstance(outcome.attempts, int), "rebut withdrawn"
 
 
 def _served_nothing(cost=0.0, **overrides):
@@ -6185,6 +6941,233 @@ def test_a_turn_that_fails_after_a_completed_turn_keeps_not_implemented(
     assert outcome.state == _task_state(ledger) == "NOT_IMPLEMENTED"
     assert len(cell.turns) == 2
     assert any("ended_without_finishing" in str(c) for c in captured)
+
+
+_EGRESS_LABELS = ["proxy state", "proxy log", "cell resolver", "cell route"]
+
+
+def _rigged_cell(monkeypatch):
+    """A stubbed cell whose four egress reads succeed and record their own
+    call, order and content both, with no real runtime touched."""
+    cell = _stub_the_runtime(monkeypatch)
+    calls: list[tuple] = []
+    out_lines = [f"out-{i}" for i in range(30)]
+    err_lines = [f"err-{i}" for i in range(30)]
+
+    def _inspect(name, **k):
+        # `read_egress` passes no `timeout_s`, so `inspect_container` owns the bound.
+        calls.append(("inspect", name, k))
+        cell.order.append("read:proxy_state")
+        cell.preflight.append("read-proxy-state")
+        return runtime.Completed(0, '{"state":"running"}', "")
+
+    def _logs(name, **k):
+        calls.append(("logs", name, k))
+        cell.order.append("read:proxy_log")
+        cell.preflight.append("read-proxy-log")
+        return runtime.Completed(0, "\n".join(out_lines), "\n".join(err_lines))
+
+    def _exec(container, command, **k):
+        cell.execs.append((container, tuple(command), ""))
+        if command[-1] == "/etc/resolv.conf":
+            calls.append(("exec", container, tuple(command), k.get("timeout_s")))
+            cell.order.append("read:resolver")
+            cell.preflight.append("read-resolver")
+            return runtime.Completed(0, "nameserver 10.89.0.1\n", "")
+        if command[-1] == "/proc/net/route":
+            calls.append(("exec", container, tuple(command), k.get("timeout_s")))
+            cell.order.append("read:route")
+            cell.preflight.append("read-route")
+            return runtime.Completed(0, "Iface\tDestination\n", "")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.inspect_container", _inspect)
+    monkeypatch.setattr("saffron.cell.runtime.container_logs", _logs)
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+    return cell, calls, out_lines, err_lines
+
+
+def test_a_first_call_the_provider_never_served_reports_the_proxy_and_the_cell_before_teardown(
+    monkeypatch, tmp_path
+):
+    """SA-0235: the plan turn's first call served nothing. Four reads run
+    before `cell_down` takes the cell or the proxy away, each its own
+    `Teardown` event. Six other failures reach none of them."""
+    container = f"saffron-cell-{_spec().spec_id}"
+
+    cell, calls, out_lines, err_lines = _rigged_cell(monkeypatch)
+    captured: list = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "served-nothing",
+        cell=cell,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+        capture=captured,
+    )
+    assert outcome.state == _task_state(ledger) == "PROVIDER_UNREACHABLE"
+
+    reads = [e for e in captured if isinstance(e, Teardown) and e.step == "egress_read"]
+    assert len(reads) == 4
+    assert all(r.ok for r in reads)
+    for read, label in zip(reads, _EGRESS_LABELS, strict=True):
+        assert read.detail.startswith(label)
+    assert '"state":"running"' in reads[0].detail
+    for line in out_lines + err_lines:
+        assert line in reads[1].detail
+    assert reads[1].detail.index("out-0") < reads[1].detail.index("err-0")
+    assert "nameserver 10.89.0.1" in reads[2].detail
+    assert "Iface\tDestination" in reads[3].detail
+
+    assert calls[0] == ("inspect", proxy.PROXY_NAME, {})
+    assert calls[1] == ("logs", proxy.PROXY_NAME, {})
+    assert calls[2] == (
+        "exec",
+        container,
+        ("head", "-c", "65536", "/etc/resolv.conf"),
+        30,
+    )
+    assert calls[3] == (
+        "exec",
+        container,
+        ("head", "-c", "65536", "/proc/net/route"),
+        30,
+    )
+
+    stop_at = cell.preflight.index("stop")
+    for name in ("read-proxy-state", "read-proxy-log", "read-resolver", "read-route"):
+        assert cell.preflight.index(name) < stop_at
+
+    # The *last* removal: the pre-clean before the attempt starts removes a
+    # same-named leftover first, and that one precedes everything.
+    removed_at = max(
+        i
+        for i, entry in enumerate(cell.order)
+        if entry == f"removed:container:{container}"
+    )
+    for name in ("read:proxy_state", "read:proxy_log", "read:resolver", "read:route"):
+        assert cell.order.index(name) < removed_at
+
+    ordinary_crash = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=1,
+        cost_usd_est=0.0,
+        is_error=True,
+    )
+    served_scripts = {
+        "green": [_turn(_block(_PLAN)), _turn()],
+        "tokens-served": [implement.AgentFailed("api_error", attempt=ordinary_crash)],
+        "rejected": [
+            implement.AgentFailed(
+                "api_error",
+                attempt=_served_nothing(
+                    rate_limit_status="rejected", rate_limit_resets_at=1755800000
+                ),
+            )
+        ],
+        "schema-reprompt": [
+            _turn("not the schema", cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+        "scope-reprompt": [
+            _turn(_block(_PROPOSAL | {"proposed_touches": ["src/x.py"]}), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+        "implement-turn": [
+            _turn(_block(_PLAN), cost=0.0),
+            implement.AgentFailed("api_error", attempt=_served_nothing()),
+        ],
+    }
+    for name, turns in served_scripts.items():
+        served_cell, served_calls, _out, _err = _rigged_cell(monkeypatch)
+        _drive(monkeypatch, tmp_path / name, cell=served_cell, turns=turns)
+        assert served_calls == [], name
+        assert not any(
+            command[-1] in ("/etc/resolv.conf", "/proc/net/route")
+            for _container, command, _stdin in served_cell.execs
+        ), name
+
+
+def test_a_read_that_fails_is_reported_and_masks_neither_the_outcome_nor_teardown(
+    monkeypatch, tmp_path
+):
+    """A failed read is reported false with its own detail. The other
+    three still land true, and the outcome, the ledger and teardown's own
+    cleanup are unchanged (SA-0235)."""
+    sentinel = "boom"
+
+    def _break(form):
+        if form == "exit":
+            return lambda *a, **k: runtime.Completed(1, "", sentinel)
+        if form == "raise":
+
+            def _raise(*a, **k):
+                raise runtime.CellRuntimeError(sentinel)
+
+            return _raise
+        return lambda *a, **k: runtime.Completed(
+            124, "", "", timed_out=True, bound="wall"
+        )
+
+    container = f"saffron-cell-{_spec().spec_id}"
+    reads = ["inspect", "logs", "resolv", "route"]
+    for index, read in enumerate(reads):
+        for form in ("exit", "raise", "timeout"):
+            cell = _stub_the_runtime(monkeypatch)
+            broken = _break(form)
+            if read == "inspect":
+                monkeypatch.setattr("saffron.cell.runtime.inspect_container", broken)
+            elif read == "logs":
+                monkeypatch.setattr("saffron.cell.runtime.container_logs", broken)
+            else:
+                target = "/etc/resolv.conf" if read == "resolv" else "/proc/net/route"
+
+                def _exec(
+                    _container,
+                    command,
+                    _target=target,
+                    _broken=broken,
+                    _cell=cell,
+                    **k,
+                ):
+                    _cell.execs.append((_container, tuple(command), ""))
+                    if command[-1] == _target:
+                        return _broken(_container, command, **k)
+                    return runtime.Completed(0, "", "")
+
+                monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+
+            captured: list = []
+            outcome, ledger = _drive(
+                monkeypatch,
+                tmp_path / f"{read}-{form}",
+                cell=cell,
+                turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+                capture=captured,
+            )
+            assert outcome.state == "PROVIDER_UNREACHABLE", (read, form)
+            reads_seen = [
+                e
+                for e in captured
+                if isinstance(e, Teardown) and e.step == "egress_read"
+            ]
+            assert len(reads_seen) == 4, (read, form)
+            for i, event in enumerate(reads_seen):
+                assert event.detail.startswith(_EGRESS_LABELS[i]), (read, form)
+                if i == index:
+                    assert event.ok is False, (read, form)
+                    expected = "timed out" if form == "timeout" else sentinel
+                    assert expected in event.detail, (read, form)
+                else:
+                    assert event.ok is True, (read, form)
+            assert _task_state(ledger) == "PROVIDER_UNREACHABLE", (read, form)
+            (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
+            assert run_row["status"] == "COMPLETE", (read, form)
+            assert "stop" in cell.preflight, (read, form)
+            # Two removals: the pre-clean before the attempt, then teardown's own.
+            removals = cell.order.count(f"removed:container:{container}")
+            assert removals == 2, (read, form)
 
 
 def _task_outcome(tmp_path, spec_id="SY-1"):
@@ -6590,7 +7573,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
 
     host_probed: list[tuple[str, str]] = []
 
-    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY):
+    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY, sockets=()):
         host_probed.append((network, gateway))
 
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
@@ -7570,11 +8553,71 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     monkeypatch, tmp_path
 ):
     """Item 118's REBUT half: verdicts run in a critic cell, never the
-    container the rebuttal just ran in, and that cell's tree is rebuilt from
-    the *post-rebuttal* patch — not REVIEW's already-applied one.
-    `export_patch` grows only once the implementer has taken its rebuttal and
-    extraction turns, so the two critic cells' applied patches are told
-    apart."""
+    container the rebuttal ran in. That cell's tree is rebuilt from the
+    *post-rebuttal* patch, not REVIEW's already-applied one.
+    `export_patch` grows only after the implementer's rebuttal turn, so the
+    two critic cells' applied patches are told apart."""
+    import ast
+    import inspect
+
+    # `_rebuttal_turn_has_run` itself: false while nothing seen is the
+    # rebuttal turn, however many turns already ran, true the moment one is.
+    no_rebuttal_yet = SimpleNamespace(
+        turns=[
+            implement.PLAN_PROMPT,
+            implement.IMPLEMENT_PROMPT,
+            review.REVIEW_PROMPT,
+            review.REVIEW_PROMPT,
+            review.REVIEW_PROMPT,
+            review.REVIEW_PROMPT,
+            rebut.VERDICT_TURN_PROMPT,
+            rebut.EXTRACT_PROMPT,
+            "a plain reply carrying no prompt of its own",
+        ]
+    )
+    assert len(no_rebuttal_yet.turns) == 9
+    assert _rebuttal_turn_has_run(no_rebuttal_yet) is False
+    rebuttal_alone = SimpleNamespace(turns=[_rebuttal_fixed_prefix() + "1. a blocker"])
+    assert _rebuttal_turn_has_run(rebuttal_alone) is True
+    # Not the last turn either. The extraction turn and each verdict follow
+    # it in real use, and a helper that reads only `turns[-1]` would miss it.
+    rebuttal_then_more = SimpleNamespace(
+        turns=[
+            _rebuttal_fixed_prefix() + "1. a blocker",
+            rebut.EXTRACT_PROMPT,
+            rebut.VERDICT_TURN_PROMPT,
+        ]
+    )
+    assert _rebuttal_turn_has_run(rebuttal_then_more) is True
+
+    def _export_patch_stub_reads_the_prompt_not_a_count(test_func) -> bool:
+        """Whether `test_func`'s own `_export_patch` stub branches on exactly
+        `_rebuttal_turn_has_run(cell)` and never reads `.turns`, read from
+        its parsed source rather than from running it."""
+        tree = ast.parse(inspect.getsource(test_func))
+        stub = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_export_patch"
+        )
+        decides_by_helper = any(
+            isinstance(node, (ast.If, ast.IfExp))
+            and ast.unparse(node.test) == "_rebuttal_turn_has_run(cell)"
+            for node in ast.walk(stub)
+        )
+        reads_turns = any(
+            isinstance(node, ast.Attribute) and node.attr == "turns"
+            for node in ast.walk(stub)
+        )
+        return decides_by_helper and not reads_turns
+
+    assert _export_patch_stub_reads_the_prompt_not_a_count(
+        test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch
+    )
+    assert _export_patch_stub_reads_the_prompt_not_a_count(
+        test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown
+    )
+
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=1)
 
@@ -7585,9 +8628,9 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 4 lenses, rebuttal, extraction = 8 turns by the
-        # time REBUT asks for a critic cell; every earlier export is REVIEW's.
-        return grown if len(cell.turns) > 5 else _ANCHORING_DIFF
+        # True only once REBUT's own rebuttal turn has run. Every export
+        # before that point is REVIEW's.
+        return grown if _rebuttal_turn_has_run(cell) else _ANCHORING_DIFF
 
     monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
 
@@ -7755,9 +8798,9 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # 8 turns precede REBUT's critic cell: plan, implement, 4 lenses, rebuttal
-        # and extraction. Every earlier export is REVIEW's, as in the test above.
-        if len(cell.turns) > 5:
+        # True only once REBUT's own rebuttal turn has run, as in the test
+        # above. Every export before that point is REVIEW's.
+        if _rebuttal_turn_has_run(cell):
             return after_rebuttal
         # Keyed on the container too, not the turn alone: a second export taken
         # from the implementer's own `.git` is item 118's defect, and a stub
@@ -9321,6 +10364,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
                 "only that witness ran under the edit."
             ),
             "file": "src/x.py",
+            "filed_severity": None,
             "finding": 1,
             "lens": "adequacy",
             "line": 3,

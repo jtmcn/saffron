@@ -39,3 +39,6 @@ test drives an end review over a layer whose branch moved after PACKAGE.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-10-10: recurred in the spec loop's run 33. Batch 21's end review graded
+  the packaged heads again. Seven of its eight findings were already fixed
+  on the branches. The eighth became b-55186d.

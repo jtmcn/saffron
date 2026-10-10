@@ -36,3 +36,7 @@ read as a contradiction of SKILL.md step 1.
 - 2026-09-26: filed from the spec loop's run 18.
 - 2026-10-09: recurred in the spec loop's run 32. The snapshot again
   stranded six children whose other parent merged.
+- 2026-10-10: recurred in the spec loop's run 33. `SA-0248` names `SA-0244`,
+  in the order, and `SA-0237`, merged, so the snapshot left out it and its
+  child `SA-0249`. `--force --add` refused both as not new, and `record`
+  refused both as not in the order. The batch ran them as #801 and #802.

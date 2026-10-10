@@ -60,6 +60,18 @@ from saffron.gates.contract import GateStatus
 # disk is "a small constant multiple of this", never this exactly.
 BOUND_CHARS = 8192
 
+# The three per-message counts a non-result event's first block names
+# (agent_runner.py's `_STEP_USAGE_KEYS`), output tokens left off (SA-0090).
+STEP_USAGE_KEYS = (
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+# Separate from BOUND_CHARS: 256 levels of list nesting already serializes
+# to this many characters, under asdict's own recursion limit of 1000.
+_USAGE_BOUND_CHARS = 512
+
 # CONTEXT.md §2 sanctions splitting GATE <-> REPAIR here, and only here, because
 # a gate attempt and a repair turn render as different lines.
 Phase = Literal["DIAGNOSE", "IMPLEMENT", "GATE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"]
@@ -212,9 +224,9 @@ class Attempt:
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
     mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
-    `list[str]` at the call site. Named apart from `Baseline.aborted`: that one
-    means the toolchain was already broken before an agent ran; these mean it
-    broke, or moved, between two suites of the same attempt."""
+    `list[str]` at the call site. `Baseline.aborted` instead means the toolchain
+    broke before an agent ran. `gates` holds each new-failing gate on REBUT's
+    red line only (b-66e82d), where `Baseline.gates` holds every gate."""
 
     timestamp: float
     spec_id: str
@@ -232,6 +244,7 @@ class Attempt:
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
     aborted: tuple[str, ...] = ()
     drift: tuple[str, ...] = ()
+    gates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,29 +290,27 @@ class Budget:
 
 @dataclass(frozen=True, slots=True)
 class Agent:
-    """One line of the cell's stdout, or a host-authored fact about that
-    stream. One of four shapes: `event` — a parsed cell event, verbatim,
-    under one key, never re-typed (no Agent SDK type is imported here or
-    anywhere outside `agent_runner.py`), and whose JSON serialization is at
-    most `BOUND_CHARS` characters; `line` — a
-    raw line that was not an event at all, from a process sharing the
-    runner's stdout inside an untrusted cell, quarantined by `raw=True`
-    rather than dropped; `line` again but for a different reason, when
-    `bounded` is set instead — a parsed event whose own `json.dumps`
-    serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
-    dict truncated to a size budget is not a smaller version of the same
-    event, so `event` is `None` here rather than a partial one), stored as
-    that serialization sliced to `BOUND_CHARS` characters, with
-    `original_chars` naming how large it really was; or `detail` — a
-    host-authored fact with no cell event behind it (a reap outcome, a pipe
-    closing), which can still quote the cell runtime's stderr. `raw` is the field that must survive the log: a raw line
-    that loses its flag on round-trip is a quarantine that stopped being one.
-    `bounded` is the same kind of fact for the fourth shape — a bounded event
-    that loses its flag reads as a whole one, which is worse than the
-    unbounded line it replaced (item 46). `describe()` renders a bounded
-    event as `agent: (bounded, N chars) <line, cut again to 160 for the
-    terminal>` — the same truncation the raw shape gets, on top of the one
-    already applied for storage."""
+    """One line of the cell's stdout, or a host-authored fact about that stream. One of
+    four shapes: `event` — a parsed cell event, verbatim, under one key, never re-typed
+    (no Agent SDK type is imported here or anywhere outside `agent_runner.py`), and
+    whose JSON serialization is at most `BOUND_CHARS` characters; `line` — a raw line
+    that was not an event at all, from a process sharing the runner's stdout inside an
+    untrusted cell, quarantined by `raw=True` rather than dropped; `line` again but for
+    a different reason, when `bounded` is set instead — a parsed event whose own
+    `json.dumps` serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
+    dict truncated to a size budget is not a smaller version of the same event, so
+    `event` is `None` here rather than a partial one), stored as that serialization
+    sliced to `BOUND_CHARS` characters, with `original_chars` naming how large it really
+    was; or `detail` — a host-authored fact with no cell event behind it (a reap
+    outcome, a pipe closing), which can still quote the cell runtime's stderr. `raw` is
+    the field that must survive the log: a raw line that loses its flag on round-trip is
+    a quarantine that stopped being one. `bounded` is the same kind of fact for the
+    fourth shape — a bounded event that loses its flag reads as a whole one, which is
+    worse than the unbounded line it replaced (item 46). `describe()` renders a bounded
+    event as `agent: (bounded, N chars) <line, cut again to 160 for the terminal>` — the
+    same truncation the raw shape gets, on top of the one already applied for storage. A
+    bounded event's own counts and `model` survive separately in `usage`, kept verbatim.
+    `usage` is `None` when none were carried, or their `json.dumps` exceeds `_USAGE_BOUND_CHARS`."""
 
     timestamp: float
     spec_id: str
@@ -309,6 +320,7 @@ class Agent:
     detail: str = ""
     bounded: bool = False
     original_chars: int | None = None
+    usage: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,7 +364,11 @@ class TaskOutcome:
 @dataclass(frozen=True, slots=True)
 class Teardown:
     """One fact from the cell's teardown — the patch export, a proxy denial or
-    failure, or a container/network/volume that would not go away."""
+    failure, or a container/network/volume that would not go away.
+
+    When the plan turn's first call was unserved, four more events land here
+    too, read before the cell or the proxy goes down: proxy state, proxy
+    log, cell resolver, cell route (`SA-0235`)."""
 
     timestamp: float
     spec_id: str
@@ -393,6 +409,20 @@ _KINDS: dict[str, type[Event]] = {
 }
 
 
+def _bounded_usage(event: dict) -> dict | None:
+    """The counts and `model` a bounded event's own cell-authored dict
+    carried, kept verbatim. Present or absent, never by truthiness, so a
+    null count and a `0` both survive. An uncarried key is never
+    backfilled. `None` when nothing was carried, or when the kept dict's
+    own `json.dumps` exceeds `_USAGE_BOUND_CHARS`."""
+    usage = {key: event[key] for key in (*STEP_USAGE_KEYS, "model") if key in event}
+    if not usage:
+        return None
+    if len(json.dumps(usage)) > _USAGE_BOUND_CHARS:
+        return None
+    return usage
+
+
 class EventLog:
     """Appends `Event`s to one task's `events.jsonl`, and nothing else.
 
@@ -428,11 +458,10 @@ class EventLog:
                         line=serialized[:BOUND_CHARS],
                         bounded=True,
                         original_chars=len(serialized),
+                        usage=_bounded_usage(event.event),
                     )
-            # Both reads of the cell's dict sit in this try. `json.dumps` above
-            # handles nesting 5000 deep; `asdict` raises RecursionError at 1000,
-            # so an event too deep to copy is dropped — unless it was bounded,
-            # in which case `asdict` copies a string and the cut event is kept.
+            # Every read of the cell's dict sits in this try. `asdict` drops an event 1000 deep,
+            # but a bounded one copies a string and a `usage` held to `_USAGE_BOUND_CHARS`.
             payload = {"kind": type(event).__name__, **asdict(event)}
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:
@@ -789,14 +818,20 @@ def describe(event: Event) -> str:
                 f"failures -> {event.decision}"
             )
         if event.new_failures is not None:
+            if event.gates:
+                names = ", ".join(event.gates)
+                return (
+                    f"gates: {event.new_failures} new failures after the "
+                    f"rebuttal — {names}"
+                )
             return f"gates: {event.new_failures} new failures after the rebuttal"
         if event.commits is None or event.spent_usd_est is None:
             return f"{event.phase}: attempt {event.attempt}"
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):
-        # One per gate at the baseline and each attempt's suite; the line omits
-        # `against`, `attempt` and `new_failures`, so only position tells them apart.
+        # One per gate at the baseline, each attempt and the re-run after REBUT. The line
+        # omits `against`, `attempt` and `new_failures`, so only position tells them apart.
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):
@@ -943,7 +978,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("gates: attempt N, K new failures -> decision", _RL, Attempt),
     _Family("gates: … errored — infrastructure", _RL, Attempt),
     _Family("gates: … distrusting the subtraction", _RL, Attempt),
-    _Family("gates: N new failures after the rebuttal", _S, Attempt),
+    _Family("gates: N new failures after the rebuttal (— gate, …)", _S, Attempt),
     _Family("gates: {gate}={status}", _S, GateResult),
     _Family("REPAIR: the session failed", _S, PhaseStart),
     _Family("REPAIR: uncommitted work checkpointed", _S, PhaseStart),
@@ -965,6 +1000,9 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("teardown: proxy DENIED", _S, Teardown),
     _Family("teardown: proxy FAILED", _S, Teardown),
     _Family("teardown: … survived", _S, Teardown),
+    _Family(
+        "teardown: {proxy state|proxy log|cell resolver|cell route}:", _S, Teardown
+    ),
     _Family("agent: (raw)", _IA, Agent),
     _Family("agent: (request digest)", _IA, Agent),
     _Family("agent: (event dict rendering)", _IC, Agent),

@@ -31,7 +31,7 @@ import socket
 import subprocess
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +50,11 @@ _LOOPBACK = ("127.", "[::1]", "localhost")
 # A host listener the operator has decided to accept, named by the COMMAND lsof
 # reports, comma-separated. Empty by default: an unnamed listener still fails.
 _ALLOW_ENV = "SAFFRON_ALLOW_HOST_PROCESS"
+
+
+class PreflightFailed(runtime.CellRuntimeError):
+    """A start refused before any cell exists, named so a caller can close the
+    task honestly instead of reading a refusal as a dead runtime."""
 
 
 def tolerated_processes() -> frozenset[str]:
@@ -102,9 +107,9 @@ def probed_ports(
     return ports, [f"{c}:{p}" for c, p in sockets if p not in ports]
 
 
-def host_probe_ports() -> tuple[list[int], list[str]]:
-    """What the probe covers, enumerated rather than guessed — and what it does
-    not cover because the operator named it.
+def host_probe_ports() -> tuple[list[int], list[str], list[tuple[str, int]]]:
+    """What the probe covers, what it excludes because the operator named it,
+    and the listing itself, so a refusal never needs lsof run twice.
 
     Seven remembered ports is a spot-check whose result reads as a proof: the
     v0.5 run that found a service on 8000 had four more on 8001+ that no list
@@ -117,17 +122,19 @@ def host_probe_ports() -> tuple[list[int], list[str]]:
     try:
         done = subprocess.run(_LSOF, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:
-        raise runtime.CellRuntimeError(
+        raise PreflightFailed(
             f"the host's listening ports could not be enumerated ({exc}) — the "
             "probe would then cover nothing, which is not a probe that passed."
         ) from exc
     if not done.stdout.startswith("COMMAND"):
-        raise runtime.CellRuntimeError(
+        raise PreflightFailed(
             f"{' '.join(_LSOF)} produced no listing (exit {done.returncode}): "
             f"{(done.stderr or done.stdout).strip()[:200]!r}. A host with no TCP "
             "listener at all is likelier to be lsof failing than to be true."
         )
-    return probed_ports(listening_sockets(done.stdout), tolerated_processes())
+    sockets = listening_sockets(done.stdout)
+    ports, tolerated = probed_ports(sockets, tolerated_processes())
+    return ports, tolerated, sockets
 
 
 def _lan_address() -> str:
@@ -142,7 +149,7 @@ def _lan_address() -> str:
             sock.connect(("8.8.8.8", 80))
             return str(sock.getsockname()[0])
     except OSError as exc:
-        raise runtime.CellRuntimeError(
+        raise PreflightFailed(
             f"the host's LAN address could not be determined ({exc}) — the probe "
             "would then cover only the gateway, which is not a probe that passed."
         ) from exc
@@ -198,11 +205,25 @@ def probe_host_bindings(
         timeout_s=300,
     )
     if done.returncode != 0:
-        raise runtime.CellRuntimeError(
+        raise PreflightFailed(
             f"the host-binding probe did not run: {done.stderr.strip()}. "
             "A probe that did not run is not a probe that passed."
         )
     return [hit for hit in done.stdout.strip().split("|") if hit]
+
+
+def _named_hits(hits: list[str], sockets: Sequence[tuple[str, int]]) -> list[str]:
+    """Each `address:port` hit, followed by the commands `host_probe_ports`'s
+    one enumeration found on that port, in the order it returned them."""
+    by_port: dict[int, list[str]] = {}
+    for command, port in sockets:
+        by_port.setdefault(port, []).append(command)
+    named = []
+    for hit in hits:
+        port = int(hit.rpartition(":")[2])
+        commands = ", ".join(by_port.get(port, []))
+        named.append(f"{hit} ({commands or 'no known process'})")
+    return named
 
 
 def assert_host_is_unreachable(
@@ -210,12 +231,13 @@ def assert_host_is_unreachable(
     network: str,
     ports: list[int] | None = None,
     gateway: str = runtime.GATEWAY,
+    sockets: Sequence[tuple[str, int]] = (),
 ) -> None:
     reachable = probe_host_bindings(image_tag, network, ports, gateway)
     if reachable:
-        raise runtime.CellRuntimeError(
+        raise PreflightFailed(
             "host services answered from inside a cell at "
-            + ", ".join(reachable)
+            + ", ".join(_named_hits(reachable, sockets))
             + " — bind them to 127.0.0.1. N1 is not satisfied until this is empty."
         )
 
@@ -262,11 +284,11 @@ def assert_proxy_reaches_upstream(
     # A probe that did not run is not a probe that failed, and the two want
     # different fixes. A python traceback is the evidence that it ran at all.
     if done.timed_out or "Traceback" not in done.stderr:
-        raise runtime.CellRuntimeError(
+        raise PreflightFailed(
             f"the upstream probe did not run ({'timed out' if done.timed_out else 'no output from the probe'}): "
             f"{_last_line(done)}. A probe that did not run is not a probe that passed."
         )
-    raise runtime.CellRuntimeError(
+    raise PreflightFailed(
         f"the proxy at {proxy_ip} could not reach {proxy.UPSTREAM_HOST}: "
         f"{_last_line(done)}. The cell would meet this as an API error a whole "
         "attempt later — check the proxy's own route out, and the allowlist if "
