@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from saffron.agents.findings import Finding, anchor
 from saffron.cell import runtime
+from saffron.cell.worktree import (
+    CriticPatchEmpty,
+    CriticPatchRejected,
+    CriticPatchUnrepresentable,
+)
 from saffron.events import (
     Attempt,
     Baseline,
@@ -1245,34 +1250,6 @@ def assert_bash_is_unprivileged(container: str) -> None:
             "the unprivileged bash self-check did not leave root: "
             f"exit {done.returncode}, {done.stdout!r}"
         )
-
-
-class CriticPatchRejected(RuntimeError):
-    """The exported patch does not apply against its own base in a fresh
-    critic cell tree (CONTEXT.md §5, backlog item 118). The agent's problem,
-    not the toolchain's — the export ran clean, `git apply` just refused it —
-    so `EXHAUSTED` is the state that fits, the same one four red gate
-    attempts would reach."""
-
-    def reason(self, where: str, what: str = "the exported patch") -> str:
-        return f"{what} did not apply in {where} — {self}"
-
-
-class CriticPatchEmpty(CriticPatchRejected):
-    """The attempt's commits net to no change, so there was no patch to apply.
-    Still the agent's `EXHAUSTED`, but its reason must not say "did not apply"
-    (backlog item 132)."""
-
-    def reason(self, where: str, what: str = "the exported patch") -> str:
-        return str(self)
-
-
-class CriticPatchUnrepresentable(RuntimeError):
-    """The patch could never have applied: `worktree.DIFF_FLAGS` carries no
-    `--binary`/`--full-index`, so a binary change comes back as a
-    `_NO_FULL_INDEX` stub no base can apply — the same marker PACKAGE's own
-    `apply_patch` already reads as infrastructure. Saffron's ceiling, not the
-    agent's: `GATE_ERROR`, charged to nobody."""
 
 
 def _apply_and_commit_patch(container: str, patch: str) -> None:
