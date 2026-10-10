@@ -1627,6 +1627,267 @@ def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
     ]
 
 
+# --- the one re-prompt helper both callers share (backlog item b-708c8a) ---
+
+
+def _spy_parse_or_reprompt(monkeypatch):
+    """Wraps `review._parse_or_reprompt` with a call-counting spy. It
+    delegates to the real helper, read off the `review` module at call
+    time, never imported at the top of this file. Every behaviour a
+    witness below checks held at the base, through each caller's own
+    copy of this rule. The spy is what a reverted `review.py` fails here,
+    since the attribute it wraps does not exist there yet. Returns the
+    list the spy counts its own calls into."""
+    calls: list[None] = []
+    real = review._parse_or_reprompt
+
+    def spy(*args, **kwargs):
+        calls.append(None)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(review, "_parse_or_reprompt", spy)
+    return calls
+
+
+def _one_wrong_version_criteria(n):
+    return [
+        Criterion(claim=f"claim {i}", witness=f"t.py::{i}", wrong_versions=[f"v{i}"])
+        for i in range(n)
+    ]
+
+
+def _run_lens_calls(agent, events, n):
+    """`n` independent `run_lens` calls, one lens each, sharing one agent
+    and one events list."""
+    results = []
+    for _ in range(n):
+        results.append(
+            review.run_lens(
+                "cell",
+                lens="correctness",
+                system_prompt="s",
+                max_turns=20,
+                budget_usd=2.0,
+                agent=agent,
+                spec_id="SY-1",
+                emit=events.append,
+            )
+        )
+    return results
+
+
+def _run_wrong_version_entries(agent, n, emit=lambda _e: None):
+    """`run_wrong_versions` over `n` criteria that each declare one wrong
+    version, sharing one agent, `_run_lens_calls`'s own shape. `emit`
+    defaults to a sink, and a caller that cares passes one that keeps
+    what it is given."""
+    return review.run_wrong_versions(
+        "cell",
+        acceptance=_one_wrong_version_criteria(n),
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=emit,
+    )
+
+
+def test_both_callers_refuse_a_reprompt_on_the_one_rule(monkeypatch):
+    """Criterion 1: `_parse_or_reprompt` re-prompts a first turn that
+    left exactly what it spent, and refuses one that left less or carries
+    no session id. Both callers follow this one rule."""
+    calls = _spy_parse_or_reprompt(monkeypatch)
+    bad = "I could not find anything wrong."
+
+    record: list[dict] = []
+    events: list[object] = []
+    agent = _probe_agent(
+        _wv_turn("s-a", bad, 1.0),
+        _wv_turn("s-a", _block([]), 0.2),
+        _wv_turn("s-b", bad, 1.5),
+        _wv_turn(None, bad, 0.3),
+        record=record,
+    )
+    reviews = _run_lens_calls(agent, events, 3)
+
+    assert [r.error for r in reviews] == [
+        None,
+        "not the schema: no <output> block in the response",
+        "not the schema: no <output> block in the response",
+    ]
+    assert [r.cost_usd for r in reviews] == [
+        pytest.approx(1.2),
+        pytest.approx(1.5),
+        pytest.approx(0.3),
+    ]
+    assert len(record) == 4
+    assert [call["kwargs"].get("resume") for call in record] == [
+        None,
+        "s-a",
+        None,
+        None,
+    ]
+    assert len(events) == 1
+
+    wv_record: list[dict] = []
+    wv_events: list[Any] = []
+    good = _wrong_version_block([{"edit": None, "reason": "fine"}])
+    wv_agent = _probe_agent(
+        _wv_turn("s-a", bad, 1.0),
+        _wv_turn("s-a", good, 0.2),
+        _wv_turn("s-b", bad, 1.5),
+        _wv_turn(None, bad, 0.3),
+        record=wv_record,
+    )
+    entries = _run_wrong_version_entries(wv_agent, 3, emit=wv_events.append)
+
+    assert [e["error"] for e in entries] == [
+        None,
+        "not the schema: no <output> block in the response",
+        "not the schema: no <output> block in the response",
+    ]
+    assert [e["cost_usd"] for e in entries] == [
+        pytest.approx(1.2),
+        pytest.approx(1.5),
+        pytest.approx(0.3),
+    ]
+    assert len(wv_record) == 4
+    assert [call["kwargs"].get("resume") for call in wv_record] == [
+        None,
+        "s-a",
+        None,
+        None,
+    ]
+    assert len(wv_events) == 0
+
+    assert len(calls) == 6
+
+
+def test_both_callers_build_one_reprompt_turn(monkeypatch):
+    """Criterion 2: the re-prompt turn each caller builds is the same turn,
+    whoever asked for it. Only `run_lens` additionally announces it."""
+    calls = _spy_parse_or_reprompt(monkeypatch)
+    bad = "I could not find anything wrong."
+    retry_error = "no <output> block in the response"
+
+    def check_retry_call(first_call, second_call, emit_fn):
+        expected = implement.agent_options(
+            system_prompt=first_call["options"]["system_prompt"],
+            max_turns=7,
+            budget_usd=1.7,
+            tools=review.REVIEW_TOOLS,
+        )
+        assert second_call["options"] == {
+            **expected,
+            "max_budget_usd": pytest.approx(1.7),
+        }
+        assert second_call["prompt"] == f"{retry_error}\n\n{EXTRACTION_PROMPT}"
+        assert second_call["kwargs"]["resume"] == "s-1"
+        assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
+        assert second_call["kwargs"]["emit"] is emit_fn
+
+    # the lens: its own re-prompt plus the `PhaseStart` only it announces.
+    events: list[Any] = []
+    emit_fn = events.append
+    agent = _probe_agent(
+        _wv_turn("s-1", bad, 0.3), _wv_turn("s-1", _block([]), 0.2), record=events
+    )
+    review.run_lens(
+        "cell",
+        lens="correctness",
+        system_prompt="s",
+        max_turns=7,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=emit_fn,
+    )
+
+    assert [type(item) for item in events] == [dict, review.PhaseStart, dict]
+    first_call, phase_start, second_call = events
+    assert phase_start.spec_id == "SY-1"
+    assert phase_start.phase == "REVIEW"
+    assert phase_start.label == "REVIEW"
+    assert (
+        phase_start.detail
+        == f"correctness: not the schema, re-prompting once — {retry_error}"
+    )
+    check_retry_call(first_call, second_call, emit_fn)
+
+    # `run_wrong_versions`: the same turn, with no announcement at all.
+    wv_events: list[object] = []
+    wv_emit_fn = wv_events.append
+    good = _wrong_version_block([{"edit": None, "reason": "fine"}])
+    wv_agent = _probe_agent(
+        _wv_turn("s-1", bad, 0.3), _wv_turn("s-1", good, 0.2), record=wv_events
+    )
+    criterion = Criterion(claim="claim", witness="t.py::a", wrong_versions=["v"])
+    review.run_wrong_versions(
+        "cell",
+        acceptance=[criterion],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=7,
+        budget_usd=2.0,
+        agent=wv_agent,
+        spec_id="SY-1",
+        emit=wv_emit_fn,
+    )
+
+    assert [type(item) for item in wv_events] == [dict, dict]
+    wv_first_call, wv_second_call = wv_events
+    check_retry_call(wv_first_call, wv_second_call, wv_emit_fn)
+
+    assert len(calls) == 2
+
+
+def test_both_callers_spell_each_reprompt_error_alike(monkeypatch):
+    """Criterion 3: once a re-prompt fires, both callers file the same
+    three outcomes alike. A re-prompt that raises `AgentFailed` is charged
+    both turns, or the first turn alone when its failure carries no turn
+    of its own. A re-prompt whose answer is still not the schema is charged
+    both turns either way."""
+    calls = _spy_parse_or_reprompt(monkeypatch)
+    bad = "I could not find anything wrong."
+    malformed = "Here it is.\n<output>\nnot valid json at all\n</output>"
+
+    def script():
+        return [
+            _wv_turn("s-1", bad, 0.3),
+            implement.AgentFailed("retry cut off", _wv_turn("s-1", "", 0.25)),
+            _wv_turn("s-2", bad, 0.3),
+            implement.AgentFailed("retry gone"),
+            _wv_turn("s-3", malformed, 0.3),
+            _wv_turn("s-3", "Still nothing concrete.", 0.2),
+        ]
+
+    expected_errors = [
+        "re-prompted once, then retry cut off",
+        "re-prompted once, then retry gone",
+        "not the schema, even after a re-prompt: no <output> block in the response",
+    ]
+    expected_costs = [pytest.approx(0.55), pytest.approx(0.3), pytest.approx(0.5)]
+
+    events: list[object] = []
+    agent = _probe_agent(*script(), record=events)
+    reviews = _run_lens_calls(agent, events, 3)
+    assert [r.error for r in reviews] == expected_errors
+    assert [r.cost_usd for r in reviews] == expected_costs
+
+    wv_agent = _probe_agent(*script())
+    entries = _run_wrong_version_entries(wv_agent, 3)
+    assert [e["error"] for e in entries] == expected_errors
+    assert [e["cost_usd"] for e in entries] == expected_costs
+
+    assert len(calls) == 6
+
+
 def test_a_wrong_versions_survivor_names_the_version_it_came_from():
     """`survivor_finding`'s optional `version` keyword (backlog item b-7e69d0).
     Given one, the claim names the wrong version that survived rather than

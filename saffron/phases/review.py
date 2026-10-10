@@ -11,6 +11,7 @@ the spec, the diff and the gate results are all passed explicitly.
 
 from __future__ import annotations
 
+import functools
 import json
 import time
 from collections import Counter
@@ -231,59 +232,37 @@ def _from_report(lens: str, findings: list[_Reported], cost_usd: float) -> LensR
     return LensReview(lens, findings=built, cost_usd=cost_usd)
 
 
-def run_lens(
+def _parse_or_reprompt[T](
     container: str,
+    attempt: implement.AttemptResult,
+    parse: Callable[[str], T],
     *,
-    lens: str,
     system_prompt: str,
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
-    spec_id: str,
-    emit: Callable[[Event], None] = lambda event: print(describe(event)),
-) -> LensReview:
-    """One lens, one fresh session — never the implementer's and never another
-    lens's, so the critic judges only the diff in front of it (§5.5).
+    emit: Callable[[Event], None],
+    on_reprompt: Callable[[str], None] | None = None,
+) -> tuple[T | None, str | None, float]:
+    """The one re-prompt both `run_lens` and `run_wrong_versions` need. A
+    turn whose output is not the schema resumes its own session once, on
+    the budget it left. A re-prompt given less than the failed turn spent is
+    refused, and so is one carrying no session id. `on_reprompt`, when
+    given, runs with the error before the second turn starts, for the
+    lens's own announcement.
 
-    The single exception: output that is not the schema resumes that same
-    session once, to repair the *shape* of the turn that just ran — mirroring
-    `session.py`'s `PlanNotSchema` re-prompt. That turn still sees only its
-    own prior output, over the same diff; it is not exposed to the
-    implementer's transcript or to another lens's, so the isolation this
-    docstring is otherwise about still holds.
+    Returns the parsed answer, or the error, and every turn's summed cost.
     """
-    options = implement.agent_options(
-        system_prompt=system_prompt,
-        max_turns=max_turns,
-        budget_usd=budget_usd,
-        tools=REVIEW_TOOLS,
-    )
     try:
-        attempt = agent(container, prompt=REVIEW_PROMPT, options=options, emit=emit)
-    except implement.AgentFailed as failed:
-        # A lens that crashed still cost money, and a lens that did not run must
-        # never read as a lens that found nothing.
-        cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
-        return LensReview(lens, cost_usd=cost, error=str(failed))
-    try:
-        findings = _parse_report(lens, parse_output_block(attempt.text))
+        return parse(attempt.text), None, attempt.cost_usd_est
     except (ValueError, ValidationError) as exc:
         remaining = budget_usd - attempt.cost_usd_est
-        # A retry given less than the turn that just failed spent cannot
-        # finish, so it is refused rather than started.
+        # A re-prompt given less than the failed turn spent cannot finish,
+        # so it is refused rather than started.
         if remaining < attempt.cost_usd_est or not attempt.session_id:
-            return LensReview(
-                lens, cost_usd=attempt.cost_usd_est, error=f"not the schema: {exc}"
-            )
-        emit(
-            PhaseStart(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                phase="REVIEW",
-                label="REVIEW",
-                detail=f"{lens}: not the schema, re-prompting once — {exc}",
-            )
-        )
+            return None, f"not the schema: {exc}", attempt.cost_usd_est
+        if on_reprompt is not None:
+            on_reprompt(str(exc))
         retry_options = implement.agent_options(
             system_prompt=system_prompt,
             max_turns=max_turns,
@@ -303,20 +282,75 @@ def run_lens(
             cost = attempt.cost_usd_est + (
                 failed.attempt.cost_usd_est if failed.attempt else 0.0
             )
-            return LensReview(
-                lens, cost_usd=cost, error=f"re-prompted once, then {failed}"
-            )
+            return None, f"re-prompted once, then {failed}", cost
         total_cost = attempt.cost_usd_est + retry.cost_usd_est
         try:
-            findings = _parse_report(lens, parse_output_block(retry.text))
+            return parse(retry.text), None, total_cost
         except (ValueError, ValidationError) as exc2:
-            return LensReview(
-                lens,
-                cost_usd=total_cost,
-                error=f"not the schema, even after a re-prompt: {exc2}",
+            return None, f"not the schema, even after a re-prompt: {exc2}", total_cost
+
+
+def run_lens(
+    container: str,
+    *,
+    lens: str,
+    system_prompt: str,
+    max_turns: int,
+    budget_usd: float,
+    agent: Callable[..., implement.AttemptResult],
+    spec_id: str,
+    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+) -> LensReview:
+    """One lens, one fresh session — never the implementer's and never another
+    lens's, so the critic judges only the diff in front of it (§5.5).
+
+    The single exception: output that is not the schema resumes its session
+    once to repair its *shape*, through `_parse_or_reprompt`, as `session.py`'s
+    `PlanNotSchema` re-prompt does. That turn still sees only its own prior
+    output, over the same diff; it is not exposed to the implementer's
+    transcript or to another lens's, so the isolation this docstring is
+    otherwise about still holds.
+    """
+    options = implement.agent_options(
+        system_prompt=system_prompt,
+        max_turns=max_turns,
+        budget_usd=budget_usd,
+        tools=REVIEW_TOOLS,
+    )
+    try:
+        attempt = agent(container, prompt=REVIEW_PROMPT, options=options, emit=emit)
+    except implement.AgentFailed as failed:
+        # A lens that crashed still cost money, and a lens that did not run must
+        # never read as a lens that found nothing.
+        cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+        return LensReview(lens, cost_usd=cost, error=str(failed))
+
+    def announce(exc_text: str) -> None:
+        emit(
+            PhaseStart(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                phase="REVIEW",
+                label="REVIEW",
+                detail=f"{lens}: not the schema, re-prompting once — {exc_text}",
             )
-        return _from_report(lens, findings, total_cost)
-    return _from_report(lens, findings, attempt.cost_usd_est)
+        )
+
+    findings, error, cost = _parse_or_reprompt(
+        container,
+        attempt,
+        lambda text: _parse_report(lens, parse_output_block(text)),
+        system_prompt=system_prompt,
+        max_turns=max_turns,
+        budget_usd=budget_usd,
+        agent=agent,
+        emit=emit,
+        on_reprompt=announce,
+    )
+    if error is not None:
+        return LensReview(lens, cost_usd=cost, error=error)
+    assert findings is not None  # `error is None` only when `parse` returned
+    return _from_report(lens, findings, cost)
 
 
 def run_review(
@@ -610,11 +644,11 @@ def run_wrong_versions(
     spec's own declared order (backlog item b-7e69d0). A criterion declaring
     none buys no session, exactly like `run_criterion_probes`.
 
-    An answer that is not the schema gets one re-prompt, on `run_lens`'s own
-    rule: refused when the ceiling left is less than the failed turn spent, or
-    the turn carries no session id. The retry resumes that same session with
-    the error then `EXTRACTION_PROMPT`, on the budget the first turn left. An
-    `AgentFailed` turn is never re-prompted.
+    An answer that is not the schema gets one re-prompt, through
+    `_parse_or_reprompt`: refused when the ceiling left is less than the
+    failed turn spent, or the turn carries no session id. The retry resumes
+    that same session with the error then `EXTRACTION_PROMPT`, on the budget
+    the first turn left. An `AgentFailed` turn is never re-prompted.
     """
     entries = []
     for criterion in acceptance:
@@ -643,61 +677,21 @@ def run_wrong_versions(
             cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
             entries.append(_unresolved_wrong_versions(criterion, cost, str(failed)))
             continue
-        try:
-            report = _parse_wrong_version_report(attempt.text, declared)
-        except (ValueError, ValidationError) as exc:
-            remaining = budget_usd - attempt.cost_usd_est
-            # Refused on `run_lens`'s own rule: a retry given less budget
-            # than the failed turn spent cannot finish.
-            if remaining < attempt.cost_usd_est or not attempt.session_id:
-                entries.append(
-                    _unresolved_wrong_versions(
-                        criterion, attempt.cost_usd_est, f"not the schema: {exc}"
-                    )
-                )
-                continue
-            retry_options = implement.agent_options(
-                system_prompt=system_prompt,
-                max_turns=max_turns,
-                budget_usd=remaining,
-                tools=REVIEW_TOOLS,
-            )
-            try:
-                retry = agent(
-                    container,
-                    prompt=f"{exc}\n\n{EXTRACTION_PROMPT}",
-                    options=retry_options,
-                    resume=attempt.session_id,
-                    emit=emit,
-                    last_cost_usd=attempt.cost_usd_est,
-                )
-            except implement.AgentFailed as failed:
-                cost = attempt.cost_usd_est + (
-                    failed.attempt.cost_usd_est if failed.attempt else 0.0
-                )
-                entries.append(
-                    _unresolved_wrong_versions(
-                        criterion, cost, f"re-prompted once, then {failed}"
-                    )
-                )
-                continue
-            total_cost = attempt.cost_usd_est + retry.cost_usd_est
-            try:
-                report2 = _parse_wrong_version_report(retry.text, declared)
-            except (ValueError, ValidationError) as exc2:
-                entries.append(
-                    _unresolved_wrong_versions(
-                        criterion,
-                        total_cost,
-                        f"not the schema, even after a re-prompt: {exc2}",
-                    )
-                )
-                continue
-            entries.append(_resolved_wrong_versions(criterion, total_cost, report2))
-            continue
-        entries.append(
-            _resolved_wrong_versions(criterion, attempt.cost_usd_est, report)
+        report, error, cost = _parse_or_reprompt(
+            container,
+            attempt,
+            functools.partial(_parse_wrong_version_report, declared=declared),
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            budget_usd=budget_usd,
+            agent=agent,
+            emit=emit,
         )
+        if error is not None:
+            entries.append(_unresolved_wrong_versions(criterion, cost, error))
+            continue
+        assert report is not None  # `error is None` only when `parse` returned
+        entries.append(_resolved_wrong_versions(criterion, cost, report))
     return entries
 
 
