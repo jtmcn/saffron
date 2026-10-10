@@ -246,7 +246,7 @@ def _parse_or_reprompt[T](
 ) -> tuple[T | None, str | None, float]:
     """The one re-prompt both `run_lens` and `run_wrong_versions` need. A
     turn whose output is not the schema resumes its own session once, on
-    the budget it left. A retry given less than the failed turn spent is
+    the budget it left. A re-prompt given less than the failed turn spent is
     refused, and so is one carrying no session id. `on_reprompt`, when
     given, runs with the error before the second turn starts, for the
     lens's own announcement.
@@ -257,6 +257,8 @@ def _parse_or_reprompt[T](
         return parse(attempt.text), None, attempt.cost_usd_est
     except (ValueError, ValidationError) as exc:
         remaining = budget_usd - attempt.cost_usd_est
+        # A re-prompt given less than the failed turn spent cannot finish,
+        # so it is refused rather than started.
         if remaining < attempt.cost_usd_est or not attempt.session_id:
             return None, f"not the schema: {exc}", attempt.cost_usd_est
         if on_reprompt is not None:
@@ -302,12 +304,12 @@ def run_lens(
     """One lens, one fresh session — never the implementer's and never another
     lens's, so the critic judges only the diff in front of it (§5.5).
 
-    The single exception: output that is not the schema resumes that same
-    session once, to repair the *shape* of the turn that ran, through
-    `_parse_or_reprompt`. That turn still sees only its own prior output,
-    over the same diff; it is not exposed to the implementer's transcript or
-    to another lens's, so the isolation this docstring is otherwise about
-    still holds.
+    The single exception: output that is not the schema resumes its session
+    once to repair its *shape*, through `_parse_or_reprompt`, as `session.py`'s
+    `PlanNotSchema` re-prompt does. That turn still sees only its own prior
+    output, over the same diff; it is not exposed to the implementer's
+    transcript or to another lens's, so the isolation this docstring is
+    otherwise about still holds.
     """
     options = implement.agent_options(
         system_prompt=system_prompt,

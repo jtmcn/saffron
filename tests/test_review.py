@@ -1634,7 +1634,7 @@ def _spy_parse_or_reprompt(monkeypatch):
     """Wraps `review._parse_or_reprompt` with a call-counting spy. It
     delegates to the real helper, read off the `review` module at call
     time, never imported at the top of this file. Every behaviour a
-    witness below checks already holds today, through each caller's own
+    witness below checks held at the base, through each caller's own
     copy of this rule. The spy is what a reverted `review.py` fails here,
     since the attribute it wraps does not exist there yet. Returns the
     list the spy counts its own calls into."""
@@ -1658,7 +1658,7 @@ def _one_wrong_version_criteria(n):
 
 def _run_lens_calls(agent, events, n):
     """`n` independent `run_lens` calls, one lens each, sharing one agent
-    and one events list, criterion 1's own shape."""
+    and one events list."""
     results = []
     for _ in range(n):
         results.append(
@@ -1697,10 +1697,9 @@ def _run_wrong_version_entries(agent, n, emit=lambda _e: None):
 
 
 def test_both_callers_refuse_a_reprompt_on_the_one_rule(monkeypatch):
-    """Criterion 1: `_parse_or_reprompt` refuses a re-prompt when the
-    ceiling left equals what the failed turn spent. The same refusal
-    applies when the failed turn carries no session id at all, in both
-    callers, on one rule."""
+    """Criterion 1: `_parse_or_reprompt` re-prompts a first turn that
+    left exactly what it spent, and refuses one that left less or carries
+    no session id. Both callers follow this one rule."""
     calls = _spy_parse_or_reprompt(monkeypatch)
     bad = "I could not find anything wrong."
 
@@ -1782,12 +1781,10 @@ def test_both_callers_build_one_reprompt_turn(monkeypatch):
             budget_usd=1.7,
             tools=review.REVIEW_TOOLS,
         )
-        assert second_call["options"]["system_prompt"] == expected["system_prompt"]
-        assert second_call["options"]["tools"] == expected["tools"]
-        assert second_call["options"]["max_turns"] == expected["max_turns"]
-        assert second_call["options"]["max_budget_usd"] == pytest.approx(
-            expected["max_budget_usd"]
-        )
+        assert second_call["options"] == {
+            **expected,
+            "max_budget_usd": pytest.approx(1.7),
+        }
         assert second_call["prompt"] == f"{retry_error}\n\n{EXTRACTION_PROMPT}"
         assert second_call["kwargs"]["resume"] == "s-1"
         assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
@@ -1852,9 +1849,9 @@ def test_both_callers_build_one_reprompt_turn(monkeypatch):
 
 def test_both_callers_spell_each_reprompt_error_alike(monkeypatch):
     """Criterion 3: once a re-prompt fires, both callers file the same
-    three outcomes alike. A retry that raises `AgentFailed` is charged
+    three outcomes alike. A re-prompt that raises `AgentFailed` is charged
     both turns, or the first turn alone when its failure carries no turn
-    of its own. A retry whose answer is still not the schema is charged
+    of its own. A re-prompt whose answer is still not the schema is charged
     both turns either way."""
     calls = _spy_parse_or_reprompt(monkeypatch)
     bad = "I could not find anything wrong."
