@@ -1,4 +1,4 @@
-# The paths the in-cell agent cannot write
+# The paths the in-cell agent's file tools refuse
 
 Measured on 2026-10-10 for backlog item b-f8fa24. The script is at the end.
 
@@ -56,6 +56,26 @@ A suffix, a prefix or a sibling extension escapes it. No Saffron option
 grants these paths, since every tool was both offered and auto-approved.
 `SA-0255`'s agent tried `Edit`, `Write` and a `Bash` heredoc on
 `.pre-commit-config.yaml`, and each was refused.
+
+## What gets past it
+
+Two more runs, each over six paths. Five were refused paths and one was the control.
+
+- **An allow rule does not lift it.** `allowed_tools` gained `Write(./**)`,
+  `Edit(./**)`, `Write(.pre-commit-config.yaml)` and `Write(.claude/**)`. A
+  second run used an absolute `Write(/<work>/**)`. Both runs refused all five
+  paths, at $0.15 and $0.25.
+- **A Python write through `Bash` is not refused.** The agent ran a `python3`
+  one-liner calling `pathlib.Path.write_text` per path. All six were written,
+  with no denial, at $0.52.
+
+The same route shows in two past cells. `SA-0116`'s agent wrote under
+`.claude/skills/` through `python3` in `Bash` 80 times, and `SA-0196`'s did so
+32 times. Both specs merged. `SA-0255`'s agent tried a heredoc, `printf` and
+`dangerouslyDisableSandbox`, and never a Python write.
+
+So the refusal guards the file tools and shell redirects only. It is a guard
+inside the agent, and §2 says no control there is a boundary.
 
 ## What this does not show
 
