@@ -1,11 +1,12 @@
 ---
 id: b-60732c
 title: A `RATE_LIMITED` outcome carries 0 attempts, so its index row reads as a task that never tried
-status: open
+status: done
 tier: 2
 filed: 2026-09-18
+closed: 2026-10-10
 specs: [SA-0249]
-prs: []
+prs: [802]
 commits: []
 cites: [§6]
 related: [165]
@@ -42,3 +43,4 @@ This needs a spec whose `touches` include `saffron/cell/session.py`.
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #339.
+- 2026-10-10: done by `SA-0249` (#802), from the spec loop's run 33.

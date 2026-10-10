@@ -1,11 +1,12 @@
 ---
 id: b-8e30bd
 title: "`reconcile` never reads an `EXHAUSTED` row, so a merged draft leaves its task `EXHAUSTED` and its dependents refused"
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-10-10
 specs: [SA-0204, SA-0251]
-prs: [678]
+prs: [678, 798]
 commits: []
 cites: [§4.2.1, §6.1]
 related: [b-038aef]
@@ -32,3 +33,4 @@ dependent spec is then a candidate.
 ## Record
 
 - 2026-10-05: filed from the spec loop's run 28.
+- 2026-10-10: done by `SA-0251` (#798), from the spec loop's run 33.
