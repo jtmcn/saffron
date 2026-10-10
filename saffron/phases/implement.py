@@ -116,15 +116,7 @@ _TOKEN_USAGE_KEYS = (
     "cache_creation_input_tokens",
 )
 
-# The three per-message counts a non-result event's first block names
-# (agent_runner.py's `_STEP_USAGE_KEYS`), output tokens left off (SA-0090).
-_STEP_USAGE_KEYS = (
-    "input_tokens",
-    "cache_read_input_tokens",
-    "cache_creation_input_tokens",
-)
-
-# Dollars per million tokens, by model and `_STEP_USAGE_KEYS` name.
+# Dollars per million tokens, by model and `events.STEP_USAGE_KEYS` name.
 # SA-0161's fit (2026-09-25), the only real price values in this module.
 PRICES_PER_MTOK: dict[str, dict[str, float]] = {
     "claude-sonnet-5": {
@@ -143,7 +135,7 @@ def _priced_usd(event: dict) -> float:
     if not rates:
         return 0.0
     total = 0.0
-    for key in _STEP_USAGE_KEYS:
+    for key in events.STEP_USAGE_KEYS:
         count = event.get(key)
         if count is not None:
             total += count * rates.get(key, 0.0)
