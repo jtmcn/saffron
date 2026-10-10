@@ -1893,3 +1893,60 @@ seat finding the in-cell critic and the end review both passed.
   per-edit decision.
   **Bucket 1**, `terms`. **Landed:** the operator's `CONTEXT.md` sentence
   on #780.
+
+## 2026-10-10, `SA-0235` to `SA-0252` (spec loop run 33, stack #793 to #802)
+
+- `SA-0235` (#793): a pre-clean removed the container before the code under
+  test did, so the removal witness passed with the removal deleted.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #793.
+- `SA-0235` (#793): one witness checked only the labels of the state, resolver
+  and route facts, so a wrong value passed. The timeout went unpinned.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #793.
+- `SA-0235` (#793): the `Teardown` docstring used "facts" for events.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #793.
+- `SA-0242` (#794): criterion 2's witness never drove a suite of one gate,
+  so the inverted side survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #794.
+- `SA-0242` (#794): the C4 docstring and the `describe()` comment stayed false,
+  and item 160 was cited as resolved.
+  **Bucket 3**, conventions. **Landed:** a review commit on #794.
+- `SA-0242` (#794), `SA-0248` (#801): an argued blocker stood because the
+  host judged its probe against the declared witness alone, and another test
+  killed it.
+  **Bucket 1**, `witness`. **Landed:** b-c9a913.
+- `SA-0243` (#795): the PACKAGE double never read the row, so the spec's own
+  first wrong version passed all seven cases.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #795.
+- `SA-0243` (#795): four comments and docstrings were false on the raise path.
+  **Bucket 3**, conventions. **Landed:** a review commit on #795.
+- `SA-0243` (#795): two witnesses left a side untested, cut to fit the `size`
+  ceiling.
+  **Bucket 1**, `witness`. **Landed:** b-97357c.
+- `SA-0243` (#795): the fold's spend subquery was written twice.
+  **Bucket 3**, conventions. **Landed:** b-55186d.
+- `SA-0244` (#796): the witness filtered events on `step == "refused"`, so an
+  extra `Preflight` event after the refusal passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #796.
+- `SA-0244` (#796): a hit with no socket list names no process.
+  **Bucket 2**, judgement. **Landed:** b-dcf1ec.
+- `SA-0250` (#797): an `events.py` comment the diff made false.
+  **Bucket 3**, conventions. **Landed:** a review commit on #797.
+- `SA-0251` (#798): the comment above `PR_PENDING_STATES` stayed false.
+  **Bucket 3**, conventions. **Landed:** a review commit on #798.
+- `SA-0251` (#798): a closed `EXHAUSTED` draft reports `head_moved` on every
+  scan, and no witness drives it.
+  **Bucket 1**, `witness`. **Landed:** b-b94076.
+- `SA-0247` (#799): criterion 1's witness never checked an unprobed finding,
+  so `filed_severity` defaulting to `severity` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #799.
+- `SA-0252` (#800): criterion 2's witness compared four option keys, so a
+  wrong `permission_mode` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #800.
+- `SA-0252` (#800): criterion 1's docstring stated the inverted rule.
+  **Bucket 3**, conventions. **Landed:** a review commit on #800.
+- `SA-0248` (#801): the C1 AST check skipped a dotted attribute, and the C2
+  stub check accepted any helper call.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #801.
+- `SA-0249` (#802): a comment cited `CONTEXT.md`'s Attempt entry for the count
+  it departs from.
+  **Bucket 3**, conventions. **Landed:** a review commit on #802.

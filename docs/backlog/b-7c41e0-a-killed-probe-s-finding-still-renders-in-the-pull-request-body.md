@@ -1,11 +1,12 @@
 ---
 id: b-7c41e0
 title: A finding demoted by a killed probe renders in the pull request body as a plain note
-status: open
+status: done
 tier: 2
 filed: 2026-09-18
+closed: 2026-10-10
 specs: [SA-0247]
-prs: []
+prs: [799]
 commits: []
 cites: [§5.5, §5.7]
 related: [117]
@@ -26,3 +27,6 @@ any other. A reader cannot tell it from a note the lens filed.
 
 The body's findings table marks each finding's `probe_verdict`, and a demoted
 finding shows the severity its lens filed beside the one it now has.
+
+## Record
+- 2026-10-10: done by `SA-0247` (#799), from the spec loop's run 33.

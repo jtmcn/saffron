@@ -1,11 +1,12 @@
 ---
 id: b-a6bfb0
 title: The agent's API calls were refused though preflight's egress check passed
-status: open
+status: done
 tier: 1
 filed: 2026-09-29
+closed: 2026-10-10
 specs: [SA-0193, SA-0195, SA-0235]
-prs: []
+prs: [793]
 commits: []
 cites: [§5.1.1]
 related: [b-8170eb]
@@ -39,3 +40,4 @@ Preflight's egress probe runs from a cell started the way the agent's is
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-10-10: done by `SA-0235` (#793), from the spec loop's run 33.

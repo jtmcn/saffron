@@ -39,3 +39,6 @@ criterion. A test holds the floor.
   asked criterion 4's test for the nine rows whole, a no-change call on repo `r`
   and an existing empty directory. The cell (#670) dropped all three, and no gate
   or lens noticed. #670's Spec seat found each as a surviving wrong build.
+- 2026-10-10: recurred in the spec loop's run 33. Seats found a witness that
+  missed part of its claim on #793, #794, #795, #796, #799, #800 and #801,
+  each after the in-cell critic.
