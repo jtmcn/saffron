@@ -1432,8 +1432,8 @@ class Ledger:
     def set_task_state(self, task_id: int, state: str) -> None:
         """Also rolls the task's spend up from its attempts. Derived rather than
         passed, so the figure can never disagree with the rows it is made of.
-        A `READY_FOR_REVIEW` outcome's own write lands through
-        `set_task_package` instead (b-dce9a4)."""
+        A `READY_FOR_REVIEW` outcome lands through `set_task_package` when
+        PACKAGE returns, and through this call when it raises (b-dce9a4)."""
         self._commit_and_append(
             self._build_fact(task_id, "task_state", {"state": state})
         )
@@ -1565,9 +1565,11 @@ class Ledger:
         """PACKAGE's own write-back, after `finish_run` (§5.7). The state it
         sets, `READY_FOR_REVIEW` or `MERGE_FAILED`, is not the task's last
         word: `reconcile` revises a `READY_FOR_REVIEW` row once GitHub
-        decides. `added`/`removed` are `None` on the paths that return
-        before `diff_stat` ran. Also rolls the spend up from the task's
-        attempts, as `set_task_state` does (b-dce9a4)."""
+        decides. `MERGE_FAILED` is not revised, since it is outside
+        `PR_PENDING_STATES`: it reaches the operator with no pull request.
+        `added`/`removed` are `None` on the paths that return before
+        `diff_stat` ran. Also rolls the spend up from the task's attempts,
+        as `set_task_state` does (b-dce9a4)."""
         fact = self._build_fact(
             task_id,
             "task_package",

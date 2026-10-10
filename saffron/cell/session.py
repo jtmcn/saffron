@@ -3247,7 +3247,7 @@ def _drive_cell(
                 session_id=session_id,
             )
         )
-        # PACKAGE's own write settles READY_FOR_REVIEW instead (b-dce9a4).
+        # `run_task` settles `READY_FOR_REVIEW` once PACKAGE ends (b-dce9a4).
         if outcome != "READY_FOR_REVIEW":
             ledger.set_task_state(task_id, outcome)
         ledger.finish_run(run_id, "COMPLETE")

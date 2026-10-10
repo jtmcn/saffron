@@ -15,8 +15,9 @@ stamp `REJECTED` on a healthy branch — so every failure path below returns
 **A live task is skipped by its state**, and that is not the whole of it. A
 first run carries no `pr_url`, since `set_task_package` writes one only once
 PACKAGE ends. A cell bound for PACKAGE leaves its row in flight, `REVIEWING`
-or `REBUTTING`, until that write lands (backlog item b-dce9a4). A wider state
-guard here does not close every such gap.
+or `REBUTTING`, until PACKAGE ends (backlog item b-dce9a4). The gap left is a
+stamping scan that marks a live cell's row `ORPHANED`. A wider state guard
+here does not close it.
 """
 
 from __future__ import annotations

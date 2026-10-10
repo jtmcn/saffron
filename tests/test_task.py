@@ -2116,7 +2116,8 @@ def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
     """b-dce9a4: `run_task` settles a `READY_FOR_REVIEW` row only once
     PACKAGE ends, whichever way it ends. An `EXHAUSTED` row is the cell's
     own last write, and PACKAGE never revises it, whether it returns or
-    raises. Every case rolls the task's spend up from its closed attempts."""
+    raises. Every `READY_FOR_REVIEW` case rolls the task's spend up from its
+    closed attempts. PACKAGE sees the row as the cell left it."""
     from saffron.task import Handoff
 
     blocker = Finding(
@@ -2246,7 +2247,13 @@ def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
             task_module, "run_one_cell", lambda *a, outcome=outcome, **k: outcome
         )
 
-        def _package(_outcome, *, ledger, spec, repo, result=result, exc=exc, **kwargs):
+        seen: list[str] = []
+
+        def _package(
+            _outcome, *, ledger, spec, repo, result=result, exc=exc, seen=seen, **kwargs
+        ):
+            (now,) = [r for r in ledger.queue_lines() if r["spec_id"] == spec.id]
+            seen.append(now["state"])
             if exc is not None:
                 raise exc
             assert result is not None
@@ -2280,8 +2287,8 @@ def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
         )
         spec = _one_spec(spec_id)
 
-        # EXHAUSTED absorbs its own `PackageError`, as it always did, but a
-        # `RuntimeError` reaches no handler either way and still propagates.
+        # `EXHAUSTED` absorbs its own `PackageError`. A `RuntimeError` reaches
+        # the `BaseException` handler, which re-raises it.
         propagates = exc is not None and not (
             exhausted and isinstance(exc, package_phase.PackageError)
         )
@@ -2294,6 +2301,7 @@ def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
 
         (row,) = [r for r in ledger.queue_lines() if r["spec_id"] == spec_id]
         assert row["state"] == final_state
+        assert seen == [seed_state]
         if not exhausted:
             assert row["spent_usd_est"] == pytest.approx(3.0)
         ledger.close()

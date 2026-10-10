@@ -2848,8 +2848,8 @@ def test_a_cell_given_a_task_runs_on_it_and_its_run_and_mints_neither(
         r["task_id"]: r["state"]
         for r in ledger4._db.execute("SELECT task_id, state FROM tasks").fetchall()
     }
-    # Both cells end READY_FOR_REVIEW, so PACKAGE's own write is the row's
-    # last word and the cell's own leaves REVIEWING standing (b-dce9a4).
+    # Both cells end `READY_FOR_REVIEW`, so PACKAGE's own write is the row's
+    # last word and the cell's own leaves `REVIEWING` standing (b-dce9a4).
     assert (outcome3.state, outcome4.state) == ("READY_FOR_REVIEW", "READY_FOR_REVIEW")
     assert states == {older_task: "REVIEWING", minted_task: "REVIEWING"}
     assert states[older_task] != "GATE_ERROR"
@@ -4575,7 +4575,7 @@ def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
     assert _state(review_case, task_id) == "REVIEWING"
 
     # The two REBUT paths: a withdrawn verdict and a confirmed one each end
-    # READY_FOR_REVIEW too, through REBUT's own row instead.
+    # `READY_FOR_REVIEW` too, through REBUT's own row instead.
     for name, verdict in (("withdraw", "withdrawn"), ("confirm", "confirmed")):
         case = tmp_path / name
         rebut_task_id = _seed(case)
