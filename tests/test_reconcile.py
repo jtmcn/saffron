@@ -9,6 +9,7 @@ import subprocess
 
 import pytest
 
+from saffron.intake import load_spec
 from saffron.ledger import Ledger
 from saffron.reconcile import (
     IN_FLIGHT_STATES,
@@ -55,9 +56,13 @@ class _FakeGh:
     """`answers[url]` is the JSON body `gh pr view` would print, or `None`
     for a `gh` call that fails outright (returncode != 0). Like real `gh`, it
     prints only the fields `--json` asked for, so code that forgets to ask for
-    one reads it as absent."""
+    one reads it as absent.
 
-    def __init__(self, answers: dict[str, dict | None]) -> None:
+    A `str` answer is returned verbatim as stdout with a zero exit, for a
+    body `gh` printed that does not parse as JSON. A `list` answer is dumped
+    as JSON with a zero exit, for a body that parses but is the wrong shape."""
+
+    def __init__(self, answers: dict[str, dict | str | list | None]) -> None:
         self.answers = answers
         self.calls: list[str] = []
 
@@ -67,6 +72,10 @@ class _FakeGh:
         answer = self.answers.get(argv[3])
         if answer is None:
             return subprocess.CompletedProcess(argv, 1, "", "not found")
+        if isinstance(answer, str):
+            return subprocess.CompletedProcess(argv, 0, answer, "")
+        if isinstance(answer, list):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
         asked = argv[argv.index("--json") + 1].split(",")
         shown = {key: value for key, value in answer.items() if key in asked}
         return subprocess.CompletedProcess(argv, 0, json.dumps(shown), "")
@@ -96,7 +105,7 @@ def test_the_real_six_tasks_reconcile_to_their_real_pull_request_states(ledger):
         )
         for spec_id, url in _REAL_SIX
     }
-    answers: dict[str, dict | None] = {
+    answers: dict[str, dict | str | list | None] = {
         url: {"state": "MERGED", "reviewDecision": None}
         for spec_id, url in _REAL_SIX
         if spec_id != "SA-0018"
@@ -571,6 +580,173 @@ def test_a_merge_a_crash_cut_short_completes_on_the_next_reconcile_without_askin
 
     third = reconcile(ledger, repo_id, gh=dead_gh)
     assert third.merged == []
+
+
+# --- An `EXHAUSTED` draft that merges anyway (backlog item b-8e30bd) ---
+
+
+def test_a_merged_draft_moves_its_exhausted_task_to_merged(ledger):
+    """A draft PACKAGE opened for a task that ran out of budget can still
+    merge. The merged answer applies through the writes a pending row's
+    merge already uses. A crash-recovered row with its head on the
+    ledger completes with no `gh` call."""
+    repo_id = _repo(ledger)
+    moved_url = "https://github.com/jtmcn/saffron/pull/301"
+    moved = _task(ledger, repo_id, spec_id="SA-9601", state="REVIEWING")
+    ledger.set_task_package(
+        moved,
+        "EXHAUSTED",
+        branch="saffron/SA-9601",
+        pushed_sha=_PUSHED,
+        pr_url=moved_url,
+    )
+    crashed_url = "https://github.com/jtmcn/saffron/pull/302"
+    crashed = _task(ledger, repo_id, spec_id="SA-9602", state="REBUTTING")
+    ledger.set_task_package(
+        crashed,
+        "EXHAUSTED",
+        branch="saffron/SA-9602",
+        pushed_sha=_PUSHED,
+        pr_url=crashed_url,
+    )
+    ledger.record_merged_head(crashed, _FIXED)
+    gh = _FakeGh(
+        {moved_url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}}
+    )
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert set(result.merged) == {moved, crashed}
+    assert _state(ledger, moved) == "MERGED"
+    assert _state(ledger, crashed) == "MERGED"
+    assert _merged_head(ledger, moved) == _FIXED
+    assert result.head_moved == [HeadMoved(moved, _PUSHED, _FIXED)]
+    assert crashed_url not in gh.calls
+
+
+def test_an_exhausted_task_moves_on_no_answer_but_a_merge(ledger):
+    """Every other answer about an `EXHAUSTED` row's pull request leaves it
+    `EXHAUSTED`. The nine rows with a pull request drive every answer
+    `_pr_status` can give: the six it returns as an object, and the three
+    it turns into `None`."""
+    repo_id = _repo(ledger)
+
+    def _exhausted(spec_id, url):
+        task_id = _task(ledger, repo_id, spec_id=spec_id, state="REVIEWING")
+        ledger.set_task_package(
+            task_id,
+            "EXHAUSTED",
+            branch=f"saffron/{spec_id}",
+            pushed_sha=_PUSHED,
+            pr_url=url,
+        )
+        return task_id
+
+    claimed = {
+        "closed": ({"state": "CLOSED", "reviewDecision": None}, "SA-9701"),
+        "changes-requested": (
+            {"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"},
+            "SA-9702",
+        ),
+        "marked-ready": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": False},
+            "SA-9703",
+        ),
+        "open-draft": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": True},
+            "SA-9704",
+        ),
+        "open-no-isdraft-field": ({"state": "OPEN", "reviewDecision": None}, "SA-9705"),
+        "unrecognised-state": (
+            {"state": "SOMETHING_NEW", "reviewDecision": None},
+            "SA-9706",
+        ),
+    }
+    answers: dict[str, dict | str | list | None] = {}
+    task_ids: dict[str, int] = {}
+    for i, (label, (pr, spec_id)) in enumerate(claimed.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{700 + i}"
+        task_ids[label] = _exhausted(spec_id, url)
+        answers[url] = pr
+
+    unanswerable = {
+        "nonzero-exit": (None, "SA-9710"),
+        "unparseable": ("not json", "SA-9711"),
+        "wrong-shape": ([], "SA-9712"),
+    }
+    for i, (label, (answer, spec_id)) in enumerate(unanswerable.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{710 + i}"
+        task_ids[label] = _exhausted(spec_id, url)
+        answers[url] = answer
+
+    no_pr_null = _task(ledger, repo_id, spec_id="SA-9720", state="EXHAUSTED")
+    no_pr_empty = _task(
+        ledger, repo_id, spec_id="SA-9721", state="EXHAUSTED", pr_url=""
+    )
+
+    gh = _FakeGh(answers)
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    for label in claimed:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "EXHAUSTED"
+        assert task_id not in result.unasked
+    for label in unanswerable:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "EXHAUSTED"
+        assert task_id in result.unasked
+    assert result.merged == result.rejected == result.changes_requested == []
+    assert result.approved == []
+    assert sorted(gh.calls) == sorted(answers)
+    assert _state(ledger, no_pr_null) == "EXHAUSTED"
+    assert _state(ledger, no_pr_empty) == "EXHAUSTED"
+
+
+def test_a_merged_exhausted_parent_admits_its_child_to_the_queue(tmp_path, ledger):
+    """`build_queue` refuses a child whose only parent row is a dead
+    `EXHAUSTED` state. Once `reconcile` reads a merged answer for that
+    parent's draft, the same scan admits the child and refuses nothing."""
+    from saffron.scheduler import build_queue
+
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    parent_id, child_id = "SA-9801", "SA-9802"
+    (specs_dir / "parent.md").write_text(
+        f"---\nid: {parent_id}\ntitle: Parent\ntype: chore\n---\n\nParent body.\n"
+    )
+    (specs_dir / "child.md").write_text(
+        f"---\nid: {child_id}\ntitle: Child\ntype: chore\n"
+        f"depends_on: [{parent_id}]\n---\n\nChild body.\n"
+    )
+
+    parent_spec, parent_sha = load_spec(specs_dir / "parent.md")
+    repo_id = _repo(ledger)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    parent_task = ledger.create_task(
+        run_id, spec_id=parent_spec.id, spec_sha=parent_sha, branch="saffron/SA-9801"
+    )
+    url = "https://github.com/jtmcn/saffron/pull/901"
+    ledger.set_task_package(
+        parent_task,
+        "EXHAUSTED",
+        branch="saffron/SA-9801",
+        pushed_sha=_PUSHED,
+        pr_url=url,
+    )
+
+    before_candidates, before_refusals = build_queue(specs_dir, repo_id, ledger)
+    assert [c.spec.id for c in before_candidates] == []
+    assert len(before_refusals) == 1
+    assert before_refusals[0].path == specs_dir / "child.md"
+    assert "EXHAUSTED" in before_refusals[0].reason
+
+    gh = _FakeGh({url: {"state": "MERGED", "reviewDecision": None}})
+    reconcile(ledger, repo_id, gh=gh)
+
+    assert _state(ledger, parent_task) == "MERGED"
+    after_candidates, after_refusals = build_queue(specs_dir, repo_id, ledger)
+    assert [c.spec.id for c in after_candidates] == [child_id]
+    assert after_refusals == []
 
 
 def test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise(ledger):
