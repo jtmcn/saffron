@@ -60,6 +60,18 @@ from saffron.gates.contract import GateStatus
 # disk is "a small constant multiple of this", never this exactly.
 BOUND_CHARS = 8192
 
+# The three per-message counts a non-result event's first block names
+# (agent_runner.py's `_STEP_USAGE_KEYS`), output tokens left off (SA-0090).
+STEP_USAGE_KEYS = (
+    "input_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+# Separate from BOUND_CHARS: 256 levels of list nesting already serializes
+# to this many characters, under asdict's own recursion limit of 1000.
+_USAGE_BOUND_CHARS = 512
+
 # CONTEXT.md §2 sanctions splitting GATE <-> REPAIR here, and only here, because
 # a gate attempt and a repair turn render as different lines.
 Phase = Literal["DIAGNOSE", "IMPLEMENT", "GATE", "REPAIR", "REVIEW", "REBUT", "PACKAGE"]
@@ -278,29 +290,27 @@ class Budget:
 
 @dataclass(frozen=True, slots=True)
 class Agent:
-    """One line of the cell's stdout, or a host-authored fact about that
-    stream. One of four shapes: `event` — a parsed cell event, verbatim,
-    under one key, never re-typed (no Agent SDK type is imported here or
-    anywhere outside `agent_runner.py`), and whose JSON serialization is at
-    most `BOUND_CHARS` characters; `line` — a
-    raw line that was not an event at all, from a process sharing the
-    runner's stdout inside an untrusted cell, quarantined by `raw=True`
-    rather than dropped; `line` again but for a different reason, when
-    `bounded` is set instead — a parsed event whose own `json.dumps`
-    serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
-    dict truncated to a size budget is not a smaller version of the same
-    event, so `event` is `None` here rather than a partial one), stored as
-    that serialization sliced to `BOUND_CHARS` characters, with
-    `original_chars` naming how large it really was; or `detail` — a
-    host-authored fact with no cell event behind it (a reap outcome, a pipe
-    closing), which can still quote the cell runtime's stderr. `raw` is the field that must survive the log: a raw line
-    that loses its flag on round-trip is a quarantine that stopped being one.
-    `bounded` is the same kind of fact for the fourth shape — a bounded event
-    that loses its flag reads as a whole one, which is worse than the
-    unbounded line it replaced (item 46). `describe()` renders a bounded
-    event as `agent: (bounded, N chars) <line, cut again to 160 for the
-    terminal>` — the same truncation the raw shape gets, on top of the one
-    already applied for storage."""
+    """One line of the cell's stdout, or a host-authored fact about that stream. One of
+    four shapes: `event` — a parsed cell event, verbatim, under one key, never re-typed
+    (no Agent SDK type is imported here or anywhere outside `agent_runner.py`), and
+    whose JSON serialization is at most `BOUND_CHARS` characters; `line` — a raw line
+    that was not an event at all, from a process sharing the runner's stdout inside an
+    untrusted cell, quarantined by `raw=True` rather than dropped; `line` again but for
+    a different reason, when `bounded` is set instead — a parsed event whose own
+    `json.dumps` serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
+    dict truncated to a size budget is not a smaller version of the same event, so
+    `event` is `None` here rather than a partial one), stored as that serialization
+    sliced to `BOUND_CHARS` characters, with `original_chars` naming how large it really
+    was; or `detail` — a host-authored fact with no cell event behind it (a reap
+    outcome, a pipe closing), which can still quote the cell runtime's stderr. `raw` is
+    the field that must survive the log: a raw line that loses its flag on round-trip is
+    a quarantine that stopped being one. `bounded` is the same kind of fact for the
+    fourth shape — a bounded event that loses its flag reads as a whole one, which is
+    worse than the unbounded line it replaced (item 46). `describe()` renders a bounded
+    event as `agent: (bounded, N chars) <line, cut again to 160 for the terminal>` — the
+    same truncation the raw shape gets, on top of the one already applied for storage. A
+    bounded event's own counts and `model` survive separately in `usage`, kept verbatim.
+    `usage` is `None` when none were carried, or keeping them would stay too large."""
 
     timestamp: float
     spec_id: str
@@ -310,6 +320,7 @@ class Agent:
     detail: str = ""
     bounded: bool = False
     original_chars: int | None = None
+    usage: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,6 +409,20 @@ _KINDS: dict[str, type[Event]] = {
 }
 
 
+def _bounded_usage(event: dict) -> dict | None:
+    """The counts and `model` a bounded event's own cell-authored dict
+    carried, kept verbatim. Present or absent, never by truthiness, so a
+    null count and a `0` both survive. An uncarried key is never
+    backfilled. `None` when nothing was carried, or when the kept dict's
+    own `json.dumps` exceeds `_USAGE_BOUND_CHARS`."""
+    usage = {key: event[key] for key in (*STEP_USAGE_KEYS, "model") if key in event}
+    if not usage:
+        return None
+    if len(json.dumps(usage)) > _USAGE_BOUND_CHARS:
+        return None
+    return usage
+
+
 class EventLog:
     """Appends `Event`s to one task's `events.jsonl`, and nothing else.
 
@@ -433,6 +458,7 @@ class EventLog:
                         line=serialized[:BOUND_CHARS],
                         bounded=True,
                         original_chars=len(serialized),
+                        usage=_bounded_usage(event.event),
                     )
             # Both reads of the cell's dict sit in this try. `json.dumps` above
             # handles nesting 5000 deep; `asdict` raises RecursionError at 1000,

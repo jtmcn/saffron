@@ -928,6 +928,150 @@ def test_a_bounded_event_renders_its_size_and_a_terminal_cut():
     assert describe(agent) == "agent: (bounded, 20000 chars) " + "b" * 160
 
 
+# --- item 146: a bounded event's own per-message counts survive in `usage` -
+
+
+def test_a_bounded_event_keeps_its_per_turn_counts_and_model(tmp_path):
+    """The per-message counts and `model` a cell event carried ride on the
+    event most likely to be cut by `BOUND_CHARS`. `usage` keeps each one
+    verbatim: present or absent, never by truthiness. A null count and a
+    lone `0` both survive. An uncarried key is never backfilled."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    huge = "z" * (BOUND_CHARS * 2)
+    carried = {
+        "input_tokens": 101,
+        "cache_read_input_tokens": 202,
+        "cache_creation_input_tokens": 303,
+        "model": "claude-sonnet-5",
+    }
+    nulled = {
+        "input_tokens": None,
+        "cache_read_input_tokens": None,
+        "cache_creation_input_tokens": None,
+        "model": None,
+    }
+    lone_zero = {"input_tokens": 0}
+
+    log = EventLog(tmp_path)
+    for extra in (carried, nulled, lone_zero):
+        log.append(
+            Agent(
+                timestamp=1.0,
+                spec_id="X",
+                raw=False,
+                event={"type": "text", "text": huge, **extra},
+            )
+        )
+    first, second, third = _read(tmp_path, Agent)
+    assert first.usage == carried
+    assert second.usage == nulled
+    assert third.usage == lone_zero
+
+
+def test_only_a_bounded_event_with_counts_carries_them(tmp_path):
+    """A bounded event whose cell event carried none of the four keys has a
+    null `usage`. An event under the bound is written as before: its
+    counts stay inside `event`, and `usage` is null there too."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    huge = "z" * (BOUND_CHARS * 2)
+    small_event = {
+        "type": "text",
+        "text": "hi",
+        "input_tokens": 7,
+        "model": "claude-sonnet-5",
+    }
+
+    log = EventLog(tmp_path)
+    log.append(
+        Agent(
+            timestamp=1.0, spec_id="X", raw=False, event={"type": "text", "text": huge}
+        )
+    )
+    log.append(Agent(timestamp=2.0, spec_id="X", raw=False, event=small_event))
+
+    bounded, unbounded = _read(tmp_path, Agent)
+    assert bounded.usage is None
+    assert unbounded.bounded is False
+    assert unbounded.event == small_event
+    assert unbounded.usage is None
+
+
+def test_carried_counts_are_held_to_their_own_bound(tmp_path):
+    """The kept keys are held to their own bound: 512, separate from
+    `BOUND_CHARS`. An oversized `usage` is dropped rather than reaching
+    `asdict`'s own deepcopy, which raises past 1000 levels of nesting. A
+    list nested 256 deep already serializes to 512 characters, measured."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    def model_of(total: int) -> str:
+        base = len(json.dumps({"model": ""}))
+        return "m" * (total - base)
+
+    huge = "z" * (BOUND_CHARS * 2)
+    deep = json.loads("[" * 1000 + "]" * 1000)
+
+    log = EventLog(tmp_path)
+    log.append(
+        Agent(
+            timestamp=1.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": huge, "model": model_of(512)},
+        )
+    )
+    log.append(
+        Agent(
+            timestamp=2.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": huge, "model": model_of(513)},
+        )
+    )
+    log.append(
+        Agent(
+            timestamp=3.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": huge, "input_tokens": deep},
+        )
+    )
+    log.append(
+        Agent(
+            timestamp=4.0,
+            spec_id="X",
+            raw=False,
+            event={"type": "text", "text": huge, "model": "m" * 5_000_000},
+        )
+    )
+
+    assert log.failed is False
+    at_512, at_513, deep_case, huge_model = _read(tmp_path, Agent)
+    assert at_512.usage == {"model": model_of(512)}
+    assert at_513.usage is None
+    assert deep_case.usage is None
+    assert huge_model.usage is None
+
+    for line in (tmp_path / "events.jsonl").read_text().splitlines():
+        assert len(line) < BOUND_CHARS * 2 + 1024
+
+
+def test_a_bounded_event_renders_the_same_line_with_counts():
+    """`describe` renders a bounded event that carries a `usage` exactly as
+    it renders one without. The counts never reach the terminal line."""
+    agent = Agent(
+        timestamp=1.0,
+        spec_id="X",
+        raw=False,
+        line="b" * 8192,
+        bounded=True,
+        original_chars=20000,
+        usage={"input_tokens": 1, "model": "m"},
+    )
+    assert describe(agent) == "agent: (bounded, 20000 chars) " + "b" * 160
+
+
 # --- SA-0040: `describe()` and the mapping table ---------------------------
 
 # One event per render branch `describe()` has — the exact-line proof
