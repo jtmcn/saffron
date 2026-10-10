@@ -388,12 +388,21 @@ def _findings(reviews: Sequence[LensReview]) -> str:
     lines = [
         "### Findings",
         "",
-        "| lens | severity | where | claim | anchored |",
-        "|---|---|---|---|---|",
+        "| lens | severity | probe | where | claim | anchored |",
+        "|---|---|---|---|---|---|",
     ]
     for lens, finding in rows:
+        severity_cell = f"`{finding.severity}`"
+        if (
+            finding.filed_severity is not None
+            and finding.filed_severity != finding.severity
+        ):
+            severity_cell += f" (filed `{finding.filed_severity}`)"
+        probe_cell = (
+            f"`{finding.probe_verdict}`" if finding.probe_verdict is not None else "—"
+        )
         lines.append(
-            f"| `{_cell(lens)}` | `{finding.severity}` "
+            f"| `{_cell(lens)}` | {severity_cell} | {probe_cell} "
             f"| {_cell(finding.file)}:{finding.line} | {_cell(finding.claim)} "
             f"| {'yes' if finding.anchored else 'no'} |"
         )
