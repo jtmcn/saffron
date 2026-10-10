@@ -1,11 +1,12 @@
 ---
 id: b-04a5d9
 title: The PR body says every failure at head was present at base, though an advisory gate's new failure is dropped before it counts
-status: open
+status: done
 tier: 2
 filed: 2026-09-25
+closed: 2026-10-09
 specs: [SA-0240]
-prs: []
+prs: [787]
 commits: []
 cites: [§5.4, §5.7]
 related: []
@@ -33,3 +34,5 @@ failure and reads the body.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-10-09: done by `SA-0240` (#787) in the spec loop's run 32. The body
+  lists an advisory gate's new failures apart from the blocking ones.

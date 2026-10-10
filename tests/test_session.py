@@ -1284,6 +1284,23 @@ def _wall_cut_turn(cost=0.4, *, bound="wall"):
     )
 
 
+def _budget_cut_turn(
+    cost=0.4, subtype="error_max_budget_usd", terminal_reason="budget_exhausted"
+):
+    """What `run_agent` raises when the in-cell `max_budget_usd` ends a turn:
+    `subtype="error_max_budget_usd"`, `terminal_reason="budget_exhausted"`,
+    the shape task 87's REBUT and task 203's seventeenth REVIEW session both
+    carried (backlog item 119). Either field can be dropped to drive one."""
+    attempt = implement.AttemptResult(
+        session_id="sess-1",
+        subtype=subtype,
+        terminal_reason=terminal_reason,
+        num_turns=10,
+        cost_usd_est=cost,
+    )
+    return implement.AgentFailed("the agent reached its own max_budget_usd", attempt)
+
+
 def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
@@ -2188,6 +2205,222 @@ def test_a_turn_cut_by_the_wall_with_nothing_committed_is_salvaged(
     assert len(announced) == 1
     assert "wall" in announced[0]
     assert "turn ceiling" not in announced[0]
+
+
+def test_the_implement_turn_keeps_the_salvage_reserve_out_of_its_cap(
+    monkeypatch, tmp_path
+):
+    """Backlog item 119: IMPLEMENT's own `max_budget_usd` is the remainder
+    left after the plan checkpoint, less whatever is held for the salvage
+    turn. The plan and REPAIR turns still share the task's whole budget as
+    their own cap, since only IMPLEMENT's copy of the options dict changes."""
+    failing = Failure(file="a.py", code="E501", message="too long")
+    shapes = [
+        (8.0, 3.79, 3.21),
+        (3.0, 1.00, 1.00),
+        (2.0, 0.50, 0.75),
+        (1.50, 0.50, 0.50),
+        (1.0, 0.50, 0.25),
+    ]
+    for index, (budget, plan_cost, expected_cap) in enumerate(shapes):
+        cell = _stub_the_runtime(
+            monkeypatch, commits=1, suites=([], _results(failing), [])
+        )
+        _drive(
+            monkeypatch,
+            tmp_path / f"cell-{index}",
+            cell=cell,
+            turns=[
+                _turn(_block(_PLAN), cost=plan_cost),
+                _turn(cost=0.01),
+                _turn(cost=0.01),
+            ],
+            spec=_spec(budget_usd=budget),
+        )
+        assert cell.turn_options[0]["max_budget_usd"] == pytest.approx(budget)
+        assert cell.turn_options[1]["max_budget_usd"] == pytest.approx(expected_cap)
+        assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(budget)
+
+    # The sixth shape: the plan turn's first reply misses the schema, and
+    # IMPLEMENT and REPAIR follow as turns three and four, not one and two.
+    cell = _stub_the_runtime(monkeypatch, commits=1, suites=([], _results(failing), []))
+    _drive(
+        monkeypatch,
+        tmp_path / "cell-schema-reprompt",
+        cell=cell,
+        turns=[
+            _turn("not the schema", cost=2.00),
+            _turn(_block(_PLAN), cost=1.79),
+            _turn(cost=0.01),
+            _turn(cost=0.01),
+        ],
+        spec=_spec(budget_usd=8.0),
+    )
+    assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(3.21)
+    assert cell.turn_options[3]["max_budget_usd"] == pytest.approx(8.0)
+
+
+def test_an_implement_turn_its_budget_cap_cuts_is_salvaged_on_the_reserve(
+    monkeypatch, tmp_path
+):
+    """The in-cell budget cap joins the turn ceiling and the wall clock as a
+    bound the salvage turn answers (backlog item 119). Every salvage turn
+    runs under the amount held for it, whichever of the three cut it off.
+    A salvage that recovers nothing still ends ORPHANED."""
+    cells = [
+        (8.0, 3.79, _budget_cut_turn(cost=3.25), 1.00, "the budget cap"),
+        (
+            8.0,
+            3.79,
+            implement.AgentFailed("max turns", _cut_off_turn(cost=3.00)),
+            1.00,
+            "the turn ceiling",
+        ),
+        (2.0, 0.50, _wall_cut_turn(cost=0.77), 0.75, "wall"),
+        (2.0, 0.50, _budget_cut_turn(cost=0.77), 0.75, "the budget cap"),
+        # Each field alone still reads as the cap, so neither clause is dead.
+        (
+            8.0,
+            3.79,
+            _budget_cut_turn(cost=3.25, terminal_reason=None),
+            1.00,
+            "the budget cap",
+        ),
+        (
+            8.0,
+            3.79,
+            _budget_cut_turn(cost=3.25, subtype="error_during_execution"),
+            1.00,
+            "the budget cap",
+        ),
+    ]
+    for index, (budget, plan_cost, cut, held, word) in enumerate(cells):
+        cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / f"salvaged-{index}",
+            cell=cell,
+            turns=[_turn(_block(_PLAN), cost=plan_cost), cut, _turn(cost=0.02)],
+            spec=_spec(budget_usd=budget),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(held)
+        announced = [
+            line for line in cell.watched if "spending one turn to salvage" in line
+        ]
+        assert len(announced) == 1
+        assert word in announced[0]
+        for other in ("the budget cap", "the turn ceiling", "wall"):
+            if other != word:
+                assert other not in announced[0]
+
+    cell = _stub_the_runtime(monkeypatch, commits=0)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "salvage-fails",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN), cost=3.79),
+            _budget_cut_turn(cost=3.25),
+            _turn(cost=0.02),
+        ],
+        spec=_spec(budget_usd=8.0),
+    )
+    assert outcome.state == "ORPHANED"
+
+
+def test_a_cut_with_no_room_left_still_takes_the_host_checkpoint(monkeypatch, tmp_path):
+    """A cut that leaves no room for a salvage turn still gets the free host
+    checkpoint the salvage turn would have taken (backlog item 119): green
+    gates carry the task on to GATE, and red gates exhaust it there, never
+    discarding the commit the checkpoint made."""
+    cuts = [
+        (
+            "turn ceiling",
+            lambda: implement.AgentFailed("max turns", _cut_off_turn(12.0)),
+        ),
+        ("wall", lambda: _wall_cut_turn(cost=12.0)),
+        ("budget cap", lambda: _budget_cut_turn(cost=12.0)),
+    ]
+    for name, make_cut in cuts:
+        cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+        monkeypatch.setattr(
+            "saffron.cell.worktree.dirty_paths",
+            lambda _c, cell=cell: (
+                ["saffron/cell/session.py"]
+                if len(cell.turns) == 2 and not cell.checkpointed
+                else []
+            ),
+        )
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name.replace(" ", "-"),
+            cell=cell,
+            turns=[_turn(_block(_PLAN), cost=0.1), make_cut()],
+            spec=_spec(budget_usd=12.0),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert cell.checkpointed == [
+            "checkpoint: host-committed — no room left for a salvage turn"
+        ]
+        assert any(
+            "SALVAGE: uncommitted work checkpointed by the host" in line
+            for line in cell.watched
+        )
+        assert any("recovered 1 commit" in line for line in cell.watched)
+        assert not any("no room left to salvage" in line for line in cell.watched)
+
+    failing = Failure(file="a.py", code="E501", message="too long")
+    red_cell = _stub_the_runtime(
+        monkeypatch, commits=[0, 1], suites=([], _results(failing))
+    )
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths",
+        lambda _c, cell=red_cell: (
+            ["saffron/cell/session.py"]
+            if len(cell.turns) == 2 and not cell.checkpointed
+            else []
+        ),
+    )
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "red-gates",
+        cell=red_cell,
+        turns=[
+            _turn(_block(_PLAN), cost=0.1),
+            implement.AgentFailed("max turns", _cut_off_turn(12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert red_cell.checkpointed == [
+        "checkpoint: host-committed — no room left for a salvage turn"
+    ]
+    # No REPAIR turn: `_repair` checks `_over_budget()` before it ever calls.
+    assert len(red_cell.turns) == 2
+
+    refused_cell = _stub_the_runtime(monkeypatch, commits=0)
+    monkeypatch.setattr(
+        "saffron.cell.worktree.dirty_paths", lambda _c: ["saffron/cell/session.py"]
+    )
+
+    def _refused(_container, _message):
+        raise runtime.CellRuntimeError("commit failed: hook refused the commit")
+
+    monkeypatch.setattr("saffron.cell.worktree.commit_dirty", _refused)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "refused-checkpoint",
+        cell=refused_cell,
+        turns=[
+            _turn(_block(_PLAN), cost=0.1),
+            implement.AgentFailed("max turns", _cut_off_turn(12.0)),
+        ],
+        spec=_spec(budget_usd=12.0),
+    )
+    assert outcome.state == "ORPHANED"
+    assert any("the host checkpoint failed" in line for line in refused_cell.watched)
+    assert any("no room left to salvage" in line for line in refused_cell.watched)
 
 
 def test_every_cut_that_leaves_nothing_committed_halts_for_the_next_scan(
@@ -3971,8 +4204,8 @@ def _rebut_capped(
     extracted: dict | None = None,
     suites=(),
 ):
-    """Drives one cell to `REBUTTING` already past `budget_usd`, so REBUT
-    runs under `_RebutCap` instead of being refused (SA-0203). `rebut_costs`
+    """Drives one cell to `REBUTTING` at any spend, under or past
+    `budget_usd`, with REBUT's sessions under `_RebutCap`. `rebut_costs`
     is the rebuttal turn, its extraction turn, then one verdict per lens
     that filed a blocker, built directly rather than through
     `_through_rebut`. A cost can be a scripted exception instead, read the
@@ -4107,10 +4340,9 @@ def test_a_rebut_past_the_budget_leaves_one_budget_line_naming_its_spend(
 def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
     monkeypatch, tmp_path
 ):
-    """SA-0203, criterion 3: past the budget, REBUT's sessions share one
-    $7.00 cap, each session's own `max_budget_usd` the cap less what the
-    phase's earlier sessions already cost. A REBUT that starts under the
-    budget is unchanged."""
+    """SA-0203, criterion 3: REBUT's sessions share one $10.00 cap, each
+    session's own `max_budget_usd` the cap less what the phase's earlier
+    sessions already cost."""
 
     def _caps(path, *costs, budget_usd):
         outcome, _ledger, cell, capture = _rebut_capped(
@@ -4122,52 +4354,43 @@ def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
             capture,
         )
 
-    caps, state, _capture = _caps("a", 3.00, 2.50, 1.00, budget_usd=0.25)
-    assert caps == pytest.approx([7.00, 4.00, 1.50])
+    caps, state, _capture = _caps("a", 6.00, 2.50, 1.00, budget_usd=0.25)
+    assert caps == pytest.approx([10.00, 4.00, 1.50])
     assert state == "READY_FOR_REVIEW"
 
-    caps, state, _capture = _caps("b", 3.00, 2.50, 1.00, budget_usd=0.75)
-    assert caps == pytest.approx([7.00, 4.00, 1.50])
+    caps, state, _capture = _caps("b", 6.00, 2.50, 1.00, budget_usd=0.75)
+    assert caps == pytest.approx([10.00, 4.00, 1.50])
     assert state == "READY_FOR_REVIEW"
 
-    caps, state, _capture = _caps("c", 7.25, 0.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([7.00])
+    caps, state, _capture = _caps("c", 10.25, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([10.00])
     assert state == "EXHAUSTED"
 
     caps, state, _capture = _caps(
         "d",
-        implement.AgentFailed("provider crashed", _cut_off_turn(cost=7.25)),
+        implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
         0.50,
         0.75,
         budget_usd=0.25,
     )
-    assert caps == pytest.approx([7.00])
+    assert caps == pytest.approx([10.00])
     assert state == "EXHAUSTED"
 
-    caps, state, _capture = _caps("e", 3.00, 4.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([7.00, 4.00])
+    caps, state, _capture = _caps("e", 6.00, 4.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([10.00, 4.00])
     assert state == "EXHAUSTED"
 
-    caps, state, _capture = _caps("e0", 7.00, 0.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([7.00])
+    caps, state, _capture = _caps("e0", 10.00, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([10.00])
     assert state == "EXHAUSTED"
 
-    caps, state, _capture = _caps("e1", 6.75, 0.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([7.00, 0.25])
+    caps, state, _capture = _caps("e1", 9.75, 0.50, 0.75, budget_usd=0.25)
+    assert caps == pytest.approx([10.00, 0.25])
     assert state == "EXHAUSTED"
 
-    caps, state, _capture = _caps("f", 2.00, 1.00, 1.50, 0.50, budget_usd=0.25)
-    assert caps == pytest.approx([7.00, 5.00, 4.00, 2.50])
+    caps, state, _capture = _caps("f", 5.00, 1.00, 1.50, 0.50, budget_usd=0.25)
+    assert caps == pytest.approx([10.00, 5.00, 4.00, 2.50])
     assert state == "READY_FOR_REVIEW"
-
-    caps, state, capture = _caps("g", 1.50, 0.50, 0.75, budget_usd=1.00)
-    assert caps == pytest.approx([2.00, 2.00, 2.00])
-    assert state == "READY_FOR_REVIEW"
-    assert not any(isinstance(e, Budget) for e in capture)
-
-    caps, state, capture = _caps("h", 1.50, 0.50, 0.75, budget_usd=20.00)
-    assert caps == pytest.approx([19.25, 19.25, 19.25])
-    assert not any(isinstance(e, Budget) for e in capture)
 
 
 def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
@@ -4190,22 +4413,22 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
         )
 
     cut_short: list[tuple[str, tuple, dict]] = [
-        ("a", (7.25, 0.50, 0.75), {}),
+        ("a", (10.25, 0.50, 0.75), {}),
         (
             "b",
             (
-                implement.AgentFailed("provider crashed", _cut_off_turn(cost=7.25)),
+                implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
                 0.50,
                 0.75,
             ),
             {},
         ),
-        ("c", (3.00, 4.50, 0.75), {}),
+        ("c", (6.00, 4.50, 0.75), {}),
         # The last verdict is the session the cap cuts, and no call follows it.
         (
             "f",
             (
-                3.00,
+                6.00,
                 2.50,
                 implement.AgentFailed("budget spent", _cut_off_turn(cost=1.50)),
             ),
@@ -4219,7 +4442,9 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
         [*_, rebut_start] = [
             e for e in capture if isinstance(e, PhaseStart) and e.phase == "REBUT"
         ]
-        assert "$7.00" in rebut_start.detail
+        assert "REBUT ran out of its $10.00 budget" in rebut_start.detail
+        assert "moved no commit" not in rebut_start.detail
+        assert "made no argument" not in rebut_start.detail
         assert len(review.anchored_blockers(outcome.reviews)) == 1
         (queued,) = ledger.queue_lines()
         assert queued["state"] == "EXHAUSTED"
@@ -4234,7 +4459,7 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
         assert budgets[0].limit == pytest.approx(0.25)
 
     outcome_d, ledger_d, cell_d, capture_d = _run(
-        "d", 7.25, 0.50, 0.75, rebut_commits=0
+        "d", 10.25, 0.50, 0.75, rebut_commits=0
     )
     assert outcome_d.state == "EXHAUSTED"
     assert outcome_d.rebut_result is None
@@ -4250,7 +4475,7 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     assert budgets_d[0].limit == pytest.approx(0.25)
 
     caps = [o["max_budget_usd"] for o in _rebut_turn_options(cell_d)]
-    assert caps == pytest.approx([7.00])
+    assert caps == pytest.approx([10.00])
     assert rebut.VERDICT_TURN_PROMPT not in cell_d.turns
 
     outcome5, *_rest5 = _run(
@@ -4261,7 +4486,7 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
 
     outcome6, *_rest6 = _run(
         "f",
-        7.25,
+        10.25,
         0.50,
         0.75,
         suites=(
@@ -4272,6 +4497,171 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     )
     assert outcome6.state == "EXHAUSTED"
     assert outcome6.rebut_result is not None
+
+
+def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_path):
+    """SA-0231, criterion 1: REBUT's sessions share one $10.00 cap, at any
+    spend. Each call's own max_budget_usd is the cap less what REBUT's
+    earlier sessions already cost. A rebuttal turn that spends the cap ends
+    EXHAUSTED, even where run_rebut would halt at REBUTTING. A Budget event
+    still follows only a REBUT that started at or past budget_usd. A REBUT
+    that only crosses it during its own spend gets none."""
+    for budget_usd in (20.00, 3.75, 1.00, 0.75, 0.25):
+        path = str(budget_usd).replace(".", "_")
+        outcome, _ledger, cell, capture = _rebut_capped(
+            monkeypatch,
+            tmp_path / f"ready-{path}",
+            3.00,
+            2.50,
+            1.00,
+            budget_usd=budget_usd,
+        )
+        caps = [o["max_budget_usd"] for o in _rebut_turn_options(cell)]
+        assert caps == pytest.approx([10.00, 7.00, 4.50])
+        assert outcome.state == "READY_FOR_REVIEW"
+        budgets_seen = [e for e in capture if isinstance(e, Budget)]
+        if budget_usd <= 0.75:
+            assert len(budgets_seen) == 1
+        else:
+            assert budgets_seen == []
+
+        outcome2, _ledger2, cell2, capture2 = _rebut_capped(
+            monkeypatch,
+            tmp_path / f"cut-{path}",
+            10.25,
+            0.50,
+            0.75,
+            budget_usd=budget_usd,
+        )
+        caps2 = [o["max_budget_usd"] for o in _rebut_turn_options(cell2)]
+        assert caps2 == pytest.approx([10.00])
+        assert outcome2.state == "EXHAUSTED"
+        # A cut session must not itself buy a Budget event: the line says
+        # only whether the task started at or past its own budget.
+        budgets_seen2 = [e for e in capture2 if isinstance(e, Budget)]
+        if budget_usd <= 0.75:
+            assert len(budgets_seen2) == 1
+        else:
+            assert budgets_seen2 == []
+
+
+def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
+    monkeypatch, tmp_path
+):
+    """SA-0231, criterion 2: a REBUT the cap cut short ends `EXHAUSTED`
+    with no `rebut_result`, under budget_usd as well as past it. Its
+    record says REBUT ran out of its budget, not that the rebuttal moved
+    nothing and argued nothing. A gate re-run that failed on its own keeps
+    its own words and its own `rebut_result`. So does a rebuttal turn that
+    failed for an unrelated reason before the cap was spent."""
+    errored_suite = (
+        [],
+        [],
+        [GateResult(gate="tests", status="error", summary="toolchain missing")],
+    )
+    red_suite = (
+        [],
+        [],
+        _results(Failure(file="a.py", code="E501", message="too long")),
+    )
+
+    def _last_rebut_detail(capture):
+        [*_, rebut_start] = [
+            e for e in capture if isinstance(e, PhaseStart) and e.phase == "REBUT"
+        ]
+        return rebut_start.detail
+
+    cap_text = f"REBUT ran out of its ${session.REBUT_CAP_USD:.2f} budget"
+    for budget_usd in (20.00, 3.75, 1.00, 0.75, 0.25):
+        path = str(budget_usd).replace(".", "_")
+        cuts = [
+            ("rebuttal", (_budget_cut_turn(cost=10.00), 0.50, 0.75), 0),
+            ("extraction", (10.25, 0.50, 0.75), 1),
+            ("verdict", (4.00, 4.50, _budget_cut_turn(cost=1.50)), 1),
+        ]
+        for label, costs, rebut_commits in cuts:
+            outcome, ledger, _cell, capture = _rebut_capped(
+                monkeypatch,
+                tmp_path / f"cut-{label}-{path}",
+                *costs,
+                budget_usd=budget_usd,
+                rebut_commits=rebut_commits,
+            )
+            assert outcome.state == "EXHAUSTED"
+            assert outcome.rebut_result is None
+            assert len(review.anchored_blockers(outcome.reviews)) == 1
+            (queued,) = ledger.queue_lines()
+            assert queued["state"] == "EXHAUSTED"
+            record = json.loads((outcome.task_dir / "rebuttal.json").read_text())
+            for text in (_last_rebut_detail(capture), record["why"]):
+                assert cap_text in text
+                assert "moved no commit" not in text
+                assert "made no argument" not in text
+                if label != "extraction":
+                    # The error of the session the cap ended follows the line.
+                    assert "max_budget_usd" in text
+
+        for suites, expected in (
+            (errored_suite, "GATE_ERROR"),
+            (red_suite, "EXHAUSTED"),
+        ):
+            outcome, _ledger, _cell, capture = _rebut_capped(
+                monkeypatch,
+                tmp_path / f"rerun-{expected}-{path}",
+                10.25,
+                0.50,
+                0.75,
+                budget_usd=budget_usd,
+                rebut_commits=1,
+                suites=suites,
+            )
+            assert outcome.state == expected
+            assert outcome.rebut_result is not None
+            assert "ran out of" not in _last_rebut_detail(capture)
+
+        outcome, _ledger, _cell, capture = _rebut_capped(
+            monkeypatch,
+            tmp_path / f"silence-{path}",
+            implement.AgentFailed("provider crashed", _cut_off_turn(cost=0.40)),
+            0.50,
+            0.75,
+            budget_usd=budget_usd,
+            rebut_commits=0,
+        )
+        assert outcome.state == "REBUTTING"
+        detail = _last_rebut_detail(capture)
+        assert "moved no commit and made no argument" in detail
+        assert "ran out of" not in detail
+
+        # Both calls succeed outright and only their sum reaches the cap.
+        # A claimed fix with no commit must still read as silence.
+        outcome, _ledger, _cell, capture = _rebut_capped(
+            monkeypatch,
+            tmp_path / f"spent-not-refused-{path}",
+            6.00,
+            4.50,
+            0.75,
+            budget_usd=budget_usd,
+            rebut_commits=0,
+            extracted=_CLAIMED_FIX,
+        )
+        assert outcome.state == "REBUTTING"
+        detail = _last_rebut_detail(capture)
+        assert "moved no commit and made no argument" in detail
+        assert "ran out of" not in detail
+
+    monkeypatch.setattr(session, "REBUT_CAP_USD", 8.00)
+    outcome, _ledger, _cell, capture = _rebut_capped(
+        monkeypatch,
+        tmp_path / "custom-cap",
+        _budget_cut_turn(cost=8.00),
+        0.50,
+        0.75,
+        budget_usd=20.00,
+        rebut_commits=0,
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert "REBUT ran out of its $8.00 budget" in _last_rebut_detail(capture)
 
 
 def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
@@ -9033,6 +9423,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
                     "reason": "hits the test file",
                     "outcome": "unproven",
                     "summary": "spec/t.py is a test; a probe must target source",
+                    "refusal": "spec/t.py is a test; a probe must target source",
                 },
             ],
         },
@@ -9102,7 +9493,8 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
     ]
     assert lines == [
         "REVIEW: criterion probes: 0 named, 4 unnamed",
-        "REVIEW: wrong versions: 6 declared, 3 expressed; no session answered: t.py::d",
+        "REVIEW: wrong versions: 6 declared, 2 expressed, 1 refused; "
+        "no session answered: t.py::d",
     ]
 
     # A spec whose criteria declare no wrong version buys no such session,
@@ -9969,3 +10361,182 @@ def test_changing_only_claude_md_at_base_changes_both_digests(monkeypatch, tmp_p
     assert len(digests_a) == 6
     assert digests_a == digests_b
     assert all(a != c for a, c in zip(digests_a, digests_c, strict=True))
+
+
+def test_a_wrong_version_the_host_refuses_to_run_carries_its_refusal(
+    monkeypatch, tmp_path
+):
+    """b-34d743: `probe.probe_refusal`'s own reason lands under `refusal`
+    on exactly the pairs `probe.probe_refusal` refuses. Six wrong versions drive
+    the witness: no edit, a declared test path, an escaping path, an
+    absolute path, then two `src/x.py` edits. A stubbed mutator refuses the
+    second of those, and a scripted `fail` kills the first. Only those two
+    ever enter `cell.mutated`. A second drive, under a policy declaring no
+    test paths, shows that reason too and enters the mutator for neither of
+    its own two versions."""
+    from saffron.intake import Criterion, Mutant
+
+    on_test_path = {"file": "spec/t.py", "find": "x", "replace": "y"}
+    escapes_tree = {"file": "../outside.py", "find": "x", "replace": "y"}
+    absolute_path = {"file": "/abs/outside.py", "find": "x", "replace": "y"}
+    edit_killed = {"file": "src/x.py", "find": "assert x == 1", "replace": "k"}
+    edit_refused = {"file": "src/x.py", "find": "assert x == 1", "replace": "r"}
+
+    criterion = Criterion(
+        claim="a is true",
+        witness="t.py::a",
+        wrong_versions=["v1", "v2", "v3", "v4", "v5", "v6"],
+    )
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+
+    entered: list[dict] = []
+
+    @contextlib.contextmanager
+    def _mutate(_container, mutant):
+        entered.append(mutant)
+        cell.mutated.append(mutant)
+        if len(entered) == 2:
+            yield "the mutator's own reason"
+        else:
+            yield None
+
+    _stub_probe_gates(
+        monkeypatch, cell, gate_results=[_tests_result("fail")], mutate=_mutate
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"),
+                    (on_test_path, "hits the test file"),
+                    (escapes_tree, "escapes the tree"),
+                    (absolute_path, "an absolute path"),
+                    (edit_killed, "reason 5"),
+                    (edit_refused, "reason 6"),
+                )
+            )
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    (entry,) = entries
+    versions = entry["versions"]
+    assert [v.get("refusal") for v in versions] == [
+        None,
+        "spec/t.py is a test; a probe must target source",
+        "../outside.py is not a relative path inside the tree",
+        "/abs/outside.py is not a relative path inside the tree",
+        None,
+        None,
+    ]
+    assert "refusal" not in versions[0]
+    assert "refusal" not in versions[4]
+    assert "refusal" not in versions[5]
+    assert cell.mutated == [
+        Mutant.model_validate(edit_killed),
+        Mutant.model_validate(edit_refused),
+    ]
+
+    no_test_paths_policy = "gates: {tests: {}}\n"
+    criterion2 = Criterion(
+        claim="b is true", witness="t.py::b", wrong_versions=["w1", "w2"]
+    )
+    edit_bare = {"file": "src/x.py", "find": "assert x == 1", "replace": "z"}
+
+    @contextlib.contextmanager
+    def _never(_container, mutant):
+        # `witness_gate` swallows the raise, so the entry is recorded first.
+        cell2.mutated.append(mutant)
+        raise AssertionError("the mutator must not be entered")
+        yield
+
+    cell2 = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::b"])],
+    )
+    _stub_probe_gates(monkeypatch, cell2, gate_results=[], mutate=_never)
+
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "no-test-paths",
+        cell=cell2,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (None, "nothing changes"), (edit_bare, "a bare edit")
+                )
+            )
+        ],
+        spec=_spec(acceptance=[criterion2]),
+        policy=no_test_paths_policy,
+        gates=("tests",),
+    )
+    assert outcome2.state == "READY_FOR_REVIEW"
+
+    entries2 = json.loads(
+        (
+            tmp_path / "no-test-paths" / "out" / "SY-1" / "wrong-versions.json"
+        ).read_text()
+    )
+    (entry2,) = entries2
+    versions2 = entry2["versions"]
+    assert "refusal" not in versions2[0]
+    assert versions2[1]["refusal"] == (
+        "the repo declares no test paths, so source cannot be told from test"
+    )
+    assert cell2.mutated == []
+
+
+def test_a_spec_whose_wrong_versions_all_edit_tests_reads_none_of_them_expressed(
+    monkeypatch, tmp_path
+):
+    """b-34d743: `SA-0200`'s own shape, where every wrong version edited a
+    declared test path. Both versions here edit `spec/`-prefixed paths, so the line reads none
+    expressed and the mutator is entered for neither."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="a is true", witness="t.py::a", wrong_versions=["v1", "v2"]
+    )
+    edit_1 = {"file": "spec/a.py", "find": "assert 1", "replace": "2"}
+    edit_2 = {"file": "spec/b.py", "find": "assert 1", "replace": "2"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "no probe")))
+        + [_turn(_wrong_version_answer((edit_1, "reason 1"), (edit_2, "reason 2")))],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.mutated == []
+
+    (line,) = [w for w in cell.watched if w.startswith("REVIEW: wrong versions:")]
+    assert line == "REVIEW: wrong versions: 2 declared, 0 expressed, 2 refused"

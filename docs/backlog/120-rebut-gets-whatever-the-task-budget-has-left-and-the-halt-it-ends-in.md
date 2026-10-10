@@ -1,11 +1,11 @@
 ---
 id: 120
 title: REBUT gets whatever the task budget has left, and the halt it ends in reads as a corpse
-status: open
+status: partial
 tier: 1
 filed: 2026-09-14
 specs: [SA-0087, SA-0088, SA-0089, SA-0231]
-prs: []
+prs: [778]
 commits: []
 cites: [§3.3, §4.2, §5.6]
 related: []
@@ -40,3 +40,10 @@ REBUT's budget decided on purpose, as a reserve or a ceiling
 of its own, rather than inherited as a remainder. A rebuttal that ran out of
 budget is reported as that. And `REBUTTING` after the cell exits is named as a
 halt everywhere it is read, or gets the terminal state §5.6 says §3.3 lacks.
+
+## Record
+
+- 2026-10-09: `SA-0231` (#778) landed in the spec loop's run 32. REBUT draws
+  on a fixed cap of its own at any spend, and a rebuttal the cap cut reads as
+  out of budget. A `REBUTTING` halt after the cell exits has no terminal state
+  yet, so the item stays partial.

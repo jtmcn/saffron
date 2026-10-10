@@ -4,7 +4,7 @@ title: The spec chain records no cost and no round per escaped defect, so no ste
 status: partial
 filed: 2026-10-07
 specs: [SA-0226, SA-0227, SA-0228, SA-0229]
-prs: [745, 747]
+prs: [745, 747, 781, 782]
 commits: []
 cites: []
 related: [130, b-ef334d, b-8d5e55, b-0de0b3, b-43a061]
@@ -68,3 +68,7 @@ third.
 - 2026-10-08: SA-0226 (#745) and SA-0228 (#747) landed in the spec loop's run
   31. A spec review's findings are rows, and the task page totals each
   phase. SA-0227 and SA-0229 wait on SA-0226 merging.
+- 2026-10-09: `SA-0227` (#781) and `SA-0229` (#782) landed in the spec loop's
+  run 32. `saffron draft` runs the spec chain as a task, and each session is a
+  charged attempt. Points 1 to 4 still need the measurement, so the item stays
+  partial.

@@ -26,7 +26,7 @@ from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
-from saffron.repos.mirror import GitError, _git, file_at
+from saffron.repos.mirror import _git, file_at
 
 
 @dataclass(frozen=True)
@@ -58,13 +58,6 @@ class Qualification:
 
     groups: list[FollowUpGroup]
     pool: list[Qualified]
-
-
-def _read_head(mirror: Path, head: str, path: str) -> str | None:
-    try:
-        return file_at(mirror, head, path)
-    except GitError:
-        return None
 
 
 def _layer_task(ledger: Ledger, task_key: str) -> tuple[int, int]:
@@ -126,9 +119,10 @@ def _qualify_range(
     """One range's findings, anchored over `base..head`, probed and decided,
     each recorded under `task_id` in the order given. Builds no group.
     `qualify` does, across every range's own call, so a later one can
-    extend an earlier one's."""
+    extend an earlier one's. A read the mirror cannot answer raises before
+    any finding in the range is recorded."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
-    findings = anchor(inputs, diff, read_head=partial(_read_head, mirror, head))
+    findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
     probed = [f for f in findings if f.anchored and f.probe is not None]
     reasons: dict[tuple[str, str, str], str] = {}
@@ -213,7 +207,8 @@ def qualify(
     """The join's findings first, over the whole stack, then every layer's
     end-review findings and in-cell concerns, top down. Groups and pools
     the findings every range decides across the whole walk, so the join's
-    findings and the top layer's own can share one group."""
+    findings and the top layer's own can share one group. A read the mirror
+    cannot answer raises out of it, and ranges walked earlier keep their rows."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 

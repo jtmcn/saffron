@@ -1,11 +1,12 @@
 ---
 id: b-00534f
 title: "`qualify` reads an unreadable mirror path as an absent one"
-status: open
+status: done
 tier: 2
 filed: 2026-09-30
+closed: 2026-10-09
 specs: [SA-0238]
-prs: []
+prs: [785]
 commits: []
 cites: []
 related: [b-792ab2]
@@ -39,3 +40,5 @@ the finding.
 - 2026-09-30: filed from the spec loop's run 23.
 - 2026-10-07: specced as `SA-0238`. `qualify` lets a mirror read error
   propagate, and the follow-up adapter reports it as one stopped line.
+- 2026-10-09: done by `SA-0238` (#785) in the spec loop's run 32. `qualify`
+  raises on a read the mirror cannot answer and records nothing for it.

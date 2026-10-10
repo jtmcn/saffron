@@ -477,7 +477,9 @@ It sees the claim, the list and the diff, and is never told which test is its wi
 version it cannot express as an edit is recorded as such. The host applies each edit in the
 gate-only cell criterion probes use and runs that criterion's witness. Every outcome is
 recorded in `wrong-versions.json`. A survivor that anchors to the diff is a blocker for REBUT
-(`SA-0187`, `SA-0190`).
+(`SA-0187`, `SA-0190`). The host declines to run an edit to a declared test path or outside the
+tree. It records why under the version's `refusal` key, and REVIEW's line counts it as refused.
+That is not a task **Refusal** (`SA-0233`).
 _Avoid_ "mutant" for one. A mutant is exact text withheld from the implementer, and a wrong
 version is prose the implementer reads. _Avoid_ "criterion probe" for its edit. A criterion
 probe's session is shown no list.

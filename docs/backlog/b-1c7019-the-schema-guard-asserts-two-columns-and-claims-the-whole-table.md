@@ -1,11 +1,12 @@
 ---
 id: b-1c7019
 title: The guard against a column nothing reads asserts two names and claims the whole schema
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-10-09
 specs: [SA-0246]
-prs: []
+prs: [788]
 commits: []
 cites: [§4.2.1]
 related: [18, 97]
@@ -42,3 +43,5 @@ column then argues for itself in the tree rather than in a body.
 
 - 2026-09-19: filed from the spec loop's run 10 (#381). The column it failed to
   notice is `SA-0111`'s, and the carve-out for it is argued in #381's body.
+- 2026-10-09: done by `SA-0246` (#788) in the spec loop's run 32. The guard
+  resolves a reader for every column, and `merged_head_sha` now has one.

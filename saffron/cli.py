@@ -1,5 +1,5 @@
-"""`saffron`: cell, batch, queue, reconcile, watch, fold, migrate, chains,
-serve, replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, queue, reconcile, watch, fold, migrate,
+chains, serve, replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from functools import partial
 from pathlib import Path
 
 from saffron import (
+    draft,
     end_review,
     finish,
     follow_up,
@@ -149,6 +150,14 @@ def main(argv: list[str] | None = None) -> int:
     # one pull request stack (ADR 7, `DESIGN.md` §4.2.1).
     batch_parser.add_argument("--stack", action="store_true")
 
+    draft_parser = subcommands.add_parser(
+        "draft",
+        help="run the spec chain over one item as a recorded task, attended, "
+        "and write the spec into the working tree uncommitted (§3.4)",
+    )
+    draft_parser.add_argument("item", type=Path)
+    draft_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     reconcile_parser = subcommands.add_parser(
         "reconcile",
         help="ask GitHub what happened to this repo's open pull requests",
@@ -265,6 +274,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "batch":
             return _batch(args, ledger, out_dir)
+
+        if args.command == "draft":
+            return _draft(args, ledger, out_dir)
 
         if args.command == "queue":
             return _queue(args, ledger)
@@ -908,6 +920,7 @@ def _stack_review(
         layer: Candidate | None,
         *,
         spec_text: str | None = None,
+        sentence: str | None = None,
     ) -> spec_review.SpecReviewSession:
         if layer is None:
             head = pinned.base_sha
@@ -940,14 +953,14 @@ def _stack_review(
             f"{_SPEC_SESSION_ACCOUNT_LINES}"
         )
         if spec_text is not None:
-            # A revision replaces the queued file for this round: the
-            # sentence below is what tells the review to read it instead.
+            # A draft names its own sentence, with no queued file to replace.
             prompt += (
-                "A revision replaces the queued file. The text below is "
+                sentence
+                if sentence is not None
+                else "A revision replaces the queued file. The text below is "
                 "that revision: review that text, and treat a change "
                 "to what the spec is for as a scope blocker.\n"
-                f"<spec>\n{spec_text}\n</spec>\n"
-            )
+            ) + f"<spec>\n{spec_text}\n</spec>\n"
         agent = partial(
             implement.run_agent,
             spec_id=candidate.spec.id,
@@ -1022,7 +1035,7 @@ def _stack_revise(
             "review: the spec review between the review tags below.\n"
             f"spec: .saffron/specs/{candidate.path.name}\n"
             f"base: {head}\n"
-            "The checkout is a snapshot of the base.\n"
+            f"{_SNAPSHOT_SENTENCE}"
             "The text between the spec tags below is the spec's current "
             "text, and it replaces the file at that path.\n"
             "Keep the spec's id and its exact depends_on.\n"
@@ -1078,6 +1091,174 @@ def _stack_mint(
         )
 
     return run
+
+
+# The sentence a draft's own review round reads in place of `_stack_review`'s own:
+# a draft has no queued file at all, so there is nothing for a revision to replace.
+_DRAFT_REVIEW_SENTENCE = (
+    "No file is queued at this path. The text below is the spec a writer "
+    "session just drafted for this task's own review: review that text.\n"
+)
+
+# Sent after the `base:` line by `_stack_revise` and by a draft's writer prompt.
+_SNAPSHOT_SENTENCE = "The checkout is a snapshot of the base.\n"
+
+
+def _draft_write_prompt(prompt: str, base_sha: str) -> str:
+    """`prompt`, then a `base:` line and `_SNAPSHOT_SENTENCE`, each on its
+    own line. A newline goes before the first only when `prompt` lacks one,
+    never unconditionally."""
+    body = prompt if prompt.endswith("\n") else prompt + "\n"
+    return body + f"base: {base_sha}\n" + _SNAPSHOT_SENTENCE
+
+
+def _draft_candidate(spec_id: str, path: str, text: str) -> Candidate:
+    """A throwaway `Candidate` for `_stack_review`/`_stack_revise`.
+    Both read only `.spec.id` and `.path.name` off it. `text` is never
+    parsed, only hashed, for the field neither adapter reads."""
+    return Candidate(
+        path=Path(path),
+        spec=Spec(id=spec_id, title="draft", type="chore"),
+        spec_sha=hashlib.sha256(text.encode()).hexdigest(),
+        task_id=None,
+    )
+
+
+def _draft_adapters(
+    *, pinned: PinnedBase, repo: Path, out_dir: Path, spec_id: str
+) -> tuple[draft.WriteFn, draft.ReviewFn, draft.ReviseFn]:
+    """`draft.draft_spec`'s three adapters, each a cell `SA-0227` never
+    opens. `review` and `revise` delegate to `_stack_review` and
+    `_stack_revise` with no layer, seeding at the pinned `base_sha`.
+    `write` shares the follow-up writer's own cell and session calls, seeded
+    at the pinned `base_sha` rather than a top layer's head.
+    """
+    review_run = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
+    revise_run = _stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+
+    def write(prompt: str) -> spec_review.SpecWriterSession:
+        exported = git_mirror.export_saffron_dir(
+            pinned.mirror, pinned.base_sha, out_dir / "spec-write" / spec_id
+        )
+        policy = _spec_review_policy(exported)
+        system_prompt = spec_review.spec_writer_system_prompt(
+            policy, prompts_dir=context.PROMPTS_DIR
+        )
+        full_prompt = _draft_write_prompt(prompt, pinned.base_sha)
+        fields = end_review.LayerFields(
+            spec_id=spec_id,
+            branch=_branch(spec_id),
+            pr_url="",
+            base=pinned.base_sha,
+            head=pinned.base_sha,
+            known="",
+        )
+        agent = partial(
+            implement.run_agent,
+            spec_id=spec_id,
+            timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+        )
+        with end_review.layer_cell(
+            fields,
+            repo=repo,
+            mirror=pinned.mirror,
+            gates_dir=exported,
+            thread_env=policy.thread_env,
+            spec_session=True,
+        ) as container:
+            return spec_review.run_spec_writer(
+                container, system_prompt=system_prompt, prompt=full_prompt, agent=agent
+            )
+
+    def review(path: str, text: str) -> spec_review.SpecReviewSession:
+        candidate = _draft_candidate(spec_id, path, text)
+        return review_run(
+            candidate, None, spec_text=text, sentence=_DRAFT_REVIEW_SENTENCE
+        )
+
+    def revise(path: str, text: str, review_text: str) -> spec_review.SpecWriterSession:
+        candidate = _draft_candidate(spec_id, path, text)
+        return revise_run(candidate, None, text, review_text)
+
+    return write, review, revise
+
+
+def _draft(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron draft <item> --repo .`: run the spec chain as a task
+    (`DESIGN.md` §3.4), attended.
+
+    Readiness runs first, as `_batch` runs it, but is reported and returned
+    here directly. The item is read and decoded once, before any run or
+    task exists. A decode error or a bad working tree then reaches `main`
+    with nothing left behind. The run and the task mint only once both
+    checks pass.
+    """
+    repo = args.repo.resolve()
+    with tempfile.TemporaryDirectory() as scratch:
+        readiness = preflight.check_readiness(
+            repo,
+            _mirror_path(repo, args.home),
+            scratch=Path(scratch),
+            home=args.home,
+            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+        )
+    if not readiness.ok:
+        print(f"draft: readiness failed at {readiness.step}: {readiness.detail}")
+        return 2
+    assert readiness.mirror is not None
+    assert readiness.url is not None
+    assert readiness.base_sha is not None
+    pinned = PinnedBase(
+        mirror=readiness.mirror, url=readiness.url, base_sha=readiness.base_sha
+    )
+
+    # Relative to the current directory, as argparse gave it, never
+    # joined to `--repo`. Decoded once, so the prompt and `spec_sha` agree.
+    item_bytes = args.item.read_bytes()
+    item_text = item_bytes.decode("utf-8")
+
+    # The real working tree, never an export: an uncommitted spec still
+    # holds its id.
+    specs_dir = repo / ".saffron" / "specs"
+    seed_id = draft.seed_spec_id(specs_dir)
+
+    repo_id = ledger.upsert_repo(
+        repo.name, pinned.url, str(pinned.mirror), policy_sha=None
+    )
+    spec_id = follow_up.next_spec_id(seed_id, specs_dir, ledger, repo_id)
+
+    run_id = ledger.create_run(repo_id, pinned.base_sha)
+    task_id = ledger.create_task(
+        run_id,
+        spec_id,
+        hashlib.sha256(item_bytes).hexdigest(),
+        _branch(spec_id),
+        prompt_sha=context.prompt_sha(),
+    )
+
+    write, review, revise = _draft_adapters(
+        pinned=pinned, repo=repo, out_dir=out_dir, spec_id=spec_id
+    )
+    drafted = draft.draft_spec(
+        ledger,
+        task_id,
+        spec_id=spec_id,
+        item=item_text,
+        write=write,
+        review=review,
+        revise=revise,
+    )
+
+    print(f"{spec_id:<10} {drafted.state}")
+    if drafted.state not in ("SPEC_DRAFTED", "SPEC_WITHHELD"):
+        return 2
+    assert drafted.path is not None
+    assert drafted.text is not None
+    dest = repo / drafted.path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(drafted.text, encoding="utf-8")
+    print(f"→ {dest}")
+    return 0 if drafted.state == "SPEC_DRAFTED" else 1
 
 
 def _stack_follow_ups(

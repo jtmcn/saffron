@@ -1,11 +1,12 @@
 ---
 id: b-1e106d
 title: "Nothing runs the `terms` gate over main, so main went red and only a cell's baseline line said so"
-status: open
+status: done
 tier: 2
 filed: 2026-10-07
+closed: 2026-10-09
 specs: [SA-0255]
-prs: []
+prs: [790]
 commits: []
 cites: [§5.4]
 related: [b-86fa07]
@@ -31,3 +32,6 @@ fails where `main` would go red. Or `make check` runs both gates over the tree.
 ## Record
 
 - 2026-10-07: filed from the spec loop's run 30. #720 reworded the docstring.
+- 2026-10-09: done by `SA-0255` (#790) in the spec loop's run 32. A prek hook
+  runs `terms` over the whole tree. The cell could not write the hook, so the
+  delegate committed the block from its notes (b-f8fa24).

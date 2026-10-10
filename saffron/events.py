@@ -89,11 +89,11 @@ Ceiling = Literal["budget_usd", "max_attempts", "max_turns"]
 CeilingSource = Literal["flag", "spec", "default"]
 
 TerminalReason = Literal[
-    # Cut off at the turn ceiling or the wall clock (SA-0126), with no budget
-    # left to attempt a salvage turn.
+    # Cut off at the turn ceiling, the wall clock (SA-0126), or the budget
+    # cap (item 119), with no budget left for a salvage turn.
     "cut_off_no_salvage_room",
-    # Cut off at the turn ceiling or the wall clock, a salvage turn ran, and
-    # nothing was recovered.
+    # Cut off at the turn ceiling, the wall clock, or the budget cap, a
+    # salvage turn ran, and nothing was recovered.
     "cut_off_salvage_failed",
     # Ended without finishing and produced nothing — an idle bound, a
     # provider wall, or a crash. `subtype`/`terminal_reason` carry which.

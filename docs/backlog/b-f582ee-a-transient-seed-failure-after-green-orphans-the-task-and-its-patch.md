@@ -1,11 +1,11 @@
 ---
 id: b-f582ee
 title: A transient seed failure after green records `ORPHANED`, and nothing resumes the green patch
-status: open
+status: partial
 tier: 1
 filed: 2026-09-30
 specs: [SA-0161, SA-0232]
-prs: []
+prs: [779]
 commits: []
 cites: [§5.1]
 related: [b-8170eb, 45]
@@ -43,3 +43,9 @@ command can package it, and says which command does.
 - 2026-09-30: filed from the spec loop's run 23.
 - 2026-10-05: run 28 saw the same refusal while a cell seeded its
   worktree, on `f61da02f`. A retry worked (b-6ac0cd).
+- 2026-10-09: `SA-0232` (#779) landed in the spec loop's run 32. A seed whose
+  fetch fails is retried once on a cleared volume after a pause. Resuming an
+  `ORPHANED` task's green patch is still open.
+- 2026-10-09: recurred in run 32 on the mirror's loose object 6c8cc03b. It
+  failed `SA-0233`'s PACKAGE seed and `SA-0251`'s first seed. `git repack -d`
+  and moving the mirror aside cleared it again.

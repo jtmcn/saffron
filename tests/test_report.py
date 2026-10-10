@@ -244,6 +244,82 @@ def test_a_gate_absent_from_advisory_gates_is_not_marked():
     assert "(advisory)" not in rendered
 
 
+_VERIFICATION_SENTENCE = (
+    "Gates ran at `base_sha`, and were not re-run: the base had not "
+    "moved, so the packaged tree is byte-identical to the one they saw.\n"
+)
+
+
+def _new_failures_span(rendered):
+    """What `_new_failures` returned, plus the one-newline separator
+    `render_pr_body` joins sections with. The text between the sentence
+    under `## Verification` and `### Gates`."""
+    after = rendered.split(_VERIFICATION_SENTENCE + "\n", 1)[1]
+    return after.split("### Gates", 1)[0]
+
+
+def test_the_new_failures_section_names_advisory_new_failures_apart_from_blocking_ones():
+    """§5.4/§5.6: an advisory new failure is still this change's business.
+    It is only not a reason to block. `_new_failures` renders one of four
+    exact arrangements. A passing `lint` result plus `SPEC` hold the rest
+    of the body still, so the span is the whole new-failures section."""
+    blocking = NewFailure(
+        "tests", Failure(file="tests/test_a.py", code="failed", message="assert 1 == 2")
+    )
+    advisory = NewFailure(
+        "size",
+        Failure(
+            file="",
+            code="diff-too-large",
+            message="1651 changed tokens | over 1300\nping @org",
+        ),
+    )
+    lint_pass = [
+        GateResult(gate="lint", status="pass", tool="lint 1.0", summary="clean")
+    ]
+
+    def render(new=(), adv=()):
+        return render_pr_body(
+            SPEC,
+            lint_pass,
+            list(new),
+            base_sha="a" * 40,
+            head_sha="b" * 40,
+            added=1,
+            removed=1,
+            transcript_path="/t",
+            advisory_failures=list(adv),
+        )
+
+    no_new = (
+        "### No new failures\n\nEvery failure at head was already present at base.\n"
+    )
+    blocking_block = (
+        "### New failures\n\n"
+        "| gate | where | code | message |\n"
+        "|---|---|---|---|\n"
+        "| `tests` | tests/test_a.py | `failed` | assert 1 == 2 |\n"
+    )
+    advisory_section = (
+        "### New advisory failures\n\n"
+        "New at head, in gates held advisory for this run, so none blocks.\n\n"
+        "| gate | where | code | message |\n"
+        "|---|---|---|---|\n"
+        "| `size` |  | `diff-too-large` | 1651 changed tokens \\| over 1300 ping @​org |\n"
+    )
+    advisory_alone = (
+        "### No new blocking failures\n\n"
+        "Every failure at head in a blocking gate was already present at base.\n\n"
+        + advisory_section
+    )
+    both = blocking_block + "\n" + advisory_section
+
+    assert _new_failures_span(render()) == no_new + "\n"
+    assert _new_failures_span(render((blocking,))) == blocking_block + "\n"
+    assert _new_failures_span(render(adv=(advisory,))) == advisory_alone + "\n"
+    assert _new_failures_span(render((blocking,), (advisory,))) == both + "\n"
+
+
 def test_the_body_and_the_template_declare_the_same_spine():
     """One shape, two producers. `.github/pull_request_template.md` is what a
     person fills in; this body is rendered from the ledger. They cannot be one

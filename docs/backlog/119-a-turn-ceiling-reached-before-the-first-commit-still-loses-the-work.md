@@ -1,11 +1,11 @@
 ---
 id: 119
 title: A turn ceiling reached before the first commit still loses the work when the budget is spent, and planning can spend half of it first
-status: open
+status: partial
 tier: 1
 filed: 2026-09-14
 specs: [SA-0086, SA-0087, SA-0230]
-prs: []
+prs: [777]
 commits: []
 cites: []
 related: [18, 120]
@@ -37,3 +37,10 @@ the salvage turn's cost reserved out of IMPLEMENT's
 answer on whether the plan checkpoint's spend belongs in the budget IMPLEMENT is
 judged against. Raising the spec's ceilings (#256) was the workaround, and it
 moved the shortfall to REBUT (item 120).
+
+## Record
+
+- 2026-10-09: `SA-0230` (#777) landed in the spec loop's run 32. A turn
+  ceiling cut with nothing committed gets its salvage turn or the host
+  checkpoint whatever the budget has left. The plan turn's share of the budget
+  is still undecided, so the item stays partial.

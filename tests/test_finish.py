@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -533,6 +535,133 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_sp
     )
     assert result is None
     assert _git(stack.mirror, "for-each-ref") == before2
+
+
+def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
+    stack, tmp_path, monkeypatch
+):
+    """Each of the four components a pending write can meet as a symlink
+    below the worktree, and the two finishes that commit: one where a
+    symlink sits on a path nothing pending writes, one where the worktree's
+    own parent is itself a symlink."""
+    from saffron.finish import commit_finish
+    from saffron.repos import mirror as git_mirror
+
+    real_add_worktree = git_mirror.add_worktree
+    unrun = [stack.tasks["TE-24"], stack.tasks["TE-21"]]
+
+    def _snapshot(root: Path) -> dict[str, bytes | str]:
+        if not root.exists():
+            return {}
+        snap: dict[str, bytes | str] = {}
+        for p in sorted(root.rglob("*")):
+            rel = str(p.relative_to(root))
+            if p.is_symlink():
+                snap[rel] = os.readlink(p)
+            elif p.is_file():
+                snap[rel] = p.read_bytes()
+        return snap
+
+    def _refused_case(name: str, component: str, plant) -> None:
+        outside = tmp_path / f"{name}-outside"
+        outside.mkdir()
+        workdir = tmp_path / f"{name}-work"
+        after: dict[str, dict[str, bytes | str]] = {}
+
+        def _wrapped(mirror, sha, dest):
+            dest = real_add_worktree(mirror, sha, dest)
+            plant(dest, outside)
+            after["snapshot"] = _snapshot(outside)
+            return dest
+
+        before_refs = _git(stack.mirror, "for-each-ref")
+        before_objects = _git(stack.mirror, "count-objects", "-v")
+        with monkeypatch.context() as m:
+            m.setattr(git_mirror, "add_worktree", _wrapped)
+            with pytest.raises(ValueError) as excinfo:
+                commit_finish(
+                    stack.ledger,
+                    stack.batch_b,
+                    unrun,
+                    mirror=stack.mirror,
+                    workdir=workdir,
+                )
+
+        message = str(excinfo.value)
+        assert component in message
+        idx = message.index(component) + len(component)
+        assert (idx == len(message)) or message[idx] not in "/\\"
+        assert str(workdir) not in message
+        assert _snapshot(outside) == after["snapshot"]
+        assert _git(stack.mirror, "for-each-ref") == before_refs
+        assert _git(stack.mirror, "count-objects", "-v") == before_objects
+        assert len(_git(stack.mirror, "worktree", "list").splitlines()) == 1
+
+    def _plant_saffron_dir(dest: Path, outside: Path) -> None:
+        moved = outside / "saffron"
+        shutil.move(str(dest / ".saffron"), str(moved))
+        (dest / ".saffron").symlink_to(moved)
+
+    def _plant_specs_dir(dest: Path, outside: Path) -> None:
+        shutil.move(str(dest / ".saffron" / "specs"), str(dest / "specs-moved"))
+        (dest / ".saffron" / "specs").symlink_to(Path("..") / "specs-moved")
+
+    def _plant_committed_file(dest: Path, outside: Path) -> None:
+        target = outside / "seven.md"
+        target.write_text("outside seven\n")
+        (dest / ".saffron" / "specs" / "TE-7-seven.md").unlink()
+        (dest / ".saffron" / "specs" / "TE-7-seven.md").symlink_to(target)
+
+    def _plant_dangling(dest: Path, outside: Path) -> None:
+        (dest / ".saffron" / "specs" / "TE-21-other.md").symlink_to(
+            outside / "never-there.md"
+        )
+
+    _refused_case("saffron-dir", ".saffron", _plant_saffron_dir)
+    _refused_case("specs-dir", ".saffron/specs", _plant_specs_dir)
+    _refused_case(
+        "committed-file", ".saffron/specs/TE-7-seven.md", _plant_committed_file
+    )
+    _refused_case("dangling", ".saffron/specs/TE-21-other.md", _plant_dangling)
+
+    # A symlink on a path nothing pending writes does not block the finish:
+    # TE-1-one.md is in the base tree, and no pending row writes it.
+    outside = tmp_path / "unwritten-outside"
+    outside.mkdir()
+    target = outside / "one.md"
+    target.write_text("base one\n")
+
+    def _wrapped_unwritten(mirror, sha, dest):
+        dest = real_add_worktree(mirror, sha, dest)
+        (dest / ".saffron" / "specs" / "TE-1-one.md").unlink()
+        (dest / ".saffron" / "specs" / "TE-1-one.md").symlink_to(target)
+        return dest
+
+    with monkeypatch.context() as m:
+        m.setattr(git_mirror, "add_worktree", _wrapped_unwritten)
+        sha = commit_finish(
+            stack.ledger,
+            stack.batch_b,
+            unrun,
+            mirror=stack.mirror,
+            workdir=tmp_path / "unwritten-work",
+        )
+    assert sha is not None
+    assert target.read_bytes() == b"base one\n"
+
+    # The worktree's own parent is a symlink: the check never walks above it.
+    link_parent = tmp_path / "link"
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    link_parent.symlink_to(real_parent)
+    sha2 = commit_finish(
+        stack.ledger,
+        stack.batch_b,
+        unrun,
+        mirror=stack.mirror,
+        workdir=link_parent / "work",
+    )
+    assert sha2 is not None
 
 
 def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_before_any_commit(

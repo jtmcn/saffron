@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import os
+import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -494,6 +496,218 @@ def test_a_cell_starts_from_a_base_the_mirror_only_learns_by_fetching(
         runtime.remove_volume(f"{volume}-state")
 
 
+# --- the seed's one retry on a failed fetch (b-f582ee) ---------------------
+
+
+def _hook_default(call):
+    return call()
+
+
+def _hook_rename(path):
+    """Hide `path` for one call by renaming it aside, then back."""
+
+    def hook(call):
+        aside = path.with_name(path.name + ".aside")
+        path.rename(aside)
+        try:
+            return call()
+        finally:
+            aside.rename(path)
+
+    return hook
+
+
+def _hook_git_first(fake_dir):
+    """Put `fake_dir` first on `PATH` for one call, then restore it."""
+
+    def hook(call):
+        old = os.environ["PATH"]
+        os.environ["PATH"] = f"{fake_dir}{os.pathsep}{old}"
+        try:
+            return call()
+        finally:
+            os.environ["PATH"] = old
+
+    return hook
+
+
+def _hook_timeout(call):
+    out = f"{worktree._FETCH_FAILED_MARKER}\n"
+    return runtime.Completed(124, out, "", timed_out=True, bound="wall")
+
+
+def _fake_git(tmp_path, name, match, token, exit_code):
+    """A `git` on `PATH` that fails only the subcommand `match`, with `token`
+    on stderr. It execs the real `git`, resolved by absolute path now,
+    before any caller puts this directory ahead of it."""
+    real_git = shutil.which("git")
+    fake_dir = tmp_path / name
+    fake_dir.mkdir()
+    script = fake_dir / "git"
+    script.write_text(
+        "#!/bin/sh\n"
+        f'for a in "$@"; do [ "$a" = {match} ] && '
+        f"{{ echo {token} >&2; exit {exit_code}; }}; done\n"
+        f'exec {real_git} "$@"\n'
+    )
+    script.chmod(0o755)
+    return fake_dir
+
+
+def test_a_seed_whose_fetch_fails_once_is_retried_on_a_cleared_volume(
+    tmp_path, monkeypatch, capsys
+):
+    """One `def` drives every shape the retry decision meets.
+
+    Three fetch failures, each with different text, get retried once and
+    recovered. Four single seeds run once and never pause or print: a base
+    the mirror lacks, a refused branch name, a faked `git checkout` at a
+    failed fetch's exit code, and a timeout.
+    """
+    origin = tmp_path / "origin"
+    base = _seed_repo(origin)
+    # A tip past the base, so a retry checking out `FETCH_HEAD` misses it.
+    subprocess.run(
+        ["git", "-C", str(origin), "commit", "-q", "--allow-empty", "-m", "tip"],
+        check=True,
+    )
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "clone", "--bare", "-q", str(origin), str(mirror)], check=True
+    )
+    missing_obj = next((mirror / "objects").glob("??/*"))
+    fetch_fake = _fake_git(tmp_path, "fetch-fake", "fetch", uuid.uuid4().hex, 1)
+    checkout_fake = _fake_git(
+        tmp_path, "checkout-fake", "checkout", uuid.uuid4().hex, 1
+    )
+
+    _no_cell_runtime(monkeypatch, tmp_path)
+    real_run_ephemeral = runtime.run_ephemeral
+    calls: list[tuple] = []
+    hooks: list = []
+    index = 0
+
+    def wrapped(image, command, *, mounts=(), **kwargs):
+        nonlocal index
+        hook = hooks[index] if index < len(hooks) else _hook_default
+        index += 1
+        result = hook(
+            lambda: real_run_ephemeral(image, command, mounts=mounts, **kwargs)
+        )
+        if "git fetch" in command[-1]:
+            calls.append(("seed", result.stderr))
+        return result
+
+    monkeypatch.setattr(runtime, "run_ephemeral", wrapped)
+    monkeypatch.setattr(
+        worktree.time,
+        "sleep",
+        lambda s: calls.append(("sleep", s, capsys.readouterr().out)),
+    )
+
+    def run(case_hooks, base_sha, branch, n):
+        nonlocal hooks, index
+        hooks, index = case_hooks, 0
+        calls.clear()
+        runtime.create_volume(f"vol{n}")
+        (tmp_path / f"vol-vol{n}" / "lost+found").mkdir()
+        (tmp_path / f"vol-vol{n}" / "lost+found" / "keep").touch()
+        return worktree.prepare_worktree(
+            mirror=mirror,
+            volume=f"vol{n}",
+            base_sha=base_sha,
+            branch=branch,
+            image="img",
+            container=f"c{n}",
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+            state_volume=f"state{n}",
+            created=set(),
+        )
+
+    retried = (
+        (_hook_rename(mirror), "absent mirror"),
+        (_hook_rename(missing_obj), "missing loose object"),
+        (_hook_git_first(fetch_fake), "a git first on PATH"),
+    )
+    for n, (hook, label) in enumerate(retried):
+        run([hook], base, "saffron/test", n)
+        assert [c[0] for c in calls] == ["seed", "sleep", "seed"], label
+        # A literal, not `worktree._RETRY_PAUSE_S`: the constant moving
+        # with the assertion would prove nothing about the stated minimum.
+        assert calls[1][1] >= 60, label
+        printed = calls[1][2]
+        assert printed.count("\n") == 1, label
+        assert " ".join(calls[0][1].split()) in printed, label
+        vol = tmp_path / f"vol-vol{n}"
+        assert (vol / "lost+found" / "keep").exists(), label
+
+        def git(*args, vol=vol):
+            return subprocess.run(
+                ["git", "-C", str(vol), *args], capture_output=True, text=True
+            ).stdout.strip()
+
+        assert git("rev-parse", "HEAD") == base, label
+        assert git("branch", "--show-current") == "saffron/test", label
+        assert git("remote") == "", label
+
+    single = (
+        (_hook_default, "deadbeef" * 5, "saffron/test", "a base the mirror lacks"),
+        (_hook_default, base, "saffron/a..b", "a refused branch name"),
+        (_hook_git_first(checkout_fake), base, "saffron/test", "a faked checkout"),
+    )
+    for n, (hook, sha, branch, label) in enumerate(single, start=len(retried)):
+        with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+            run([hook], sha, branch, n)
+        assert [c[0] for c in calls] == ["seed"], label
+        assert capsys.readouterr().out == "", label
+
+    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree"):
+        run([_hook_timeout], base, "saffron/test", len(retried) + len(single))
+    assert [c[0] for c in calls] == ["seed"]
+    assert capsys.readouterr().out == ""
+
+
+def test_a_seed_whose_fetch_fails_twice_raises_after_two_attempts(
+    monkeypatch, tmp_path
+):
+    """Both reads of the mirror come back the same way, so the seed stops
+    after one retry rather than reading it forever (b-f582ee)."""
+    calls: list[str] = []
+
+    def fetch_fails(*_a, **_k):
+        calls.append("seed")
+        return runtime.Completed(1, f"{worktree._FETCH_FAILED_MARKER}\n", "unreadable")
+
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+    monkeypatch.setattr(runtime, "run_ephemeral", fetch_fails)
+    monkeypatch.setattr(worktree.time, "sleep", lambda s: calls.append("sleep"))
+
+    def _never(*_a, **_k):
+        raise AssertionError("run_detached must not be reached")
+
+    monkeypatch.setattr(runtime, "run_detached", _never)
+
+    created: set[str] = set()
+    with pytest.raises(runtime.CellRuntimeError, match="seeding the worktree failed"):
+        worktree.prepare_worktree(
+            mirror=tmp_path / "m.git",
+            volume="vol",
+            base_sha="a" * 40,
+            branch="saffron/SY-1",
+            image="img",
+            container="saffron-cell-SY-1",
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+            state_volume="st",
+            created=created,
+        )
+    assert calls == ["seed", "sleep", "seed"]
+    assert created == {"st"}
+
+
 def test_a_failed_seed_leaves_no_container_in_the_leak_ledger(monkeypatch, tmp_path):
     """The seed is an *ephemeral* container between the two creates. Recording
     the cell's name before it reports a container nothing ever created, and
@@ -670,8 +884,8 @@ def _no_cell_runtime(monkeypatch, tmp_path):
     """Fakes just enough of the cell runtime that `prepare_worktree` and the
     diff-reading helpers run their real git commands against a host
     directory instead of inside a container — the same commands, no cell and
-    no network. Only one volume/container pair is ever live in a test that
-    uses this, so a name -> directory mapping is all it takes.
+    no network. Every volume and container name in a test is distinct, so a
+    name -> directory mapping is all it takes.
     """
     volumes: dict[str, Path] = {}
     containers: dict[str, Path] = {}
@@ -2269,3 +2483,195 @@ def test_export_patch_keeps_hunks_apart_under_a_wide_inter_hunk_context(
     _host_git(tmp_path, monkeypatch)
     patch = worktree.export_patch("c", base)
     assert _hunk_count(patch) == 2
+
+
+# --- the seed fetches no non-branch ref, whatever git config names (SA-0237)
+
+
+def _mirror_with_non_branch_refs(tmp_path):
+    """A mirror holding a branch other than the default, and three refs no
+    branch reaches: `refs/saffron/mutants`, `refs/saffron/tasks/t-1`, and an
+    annotated tag on the second one's commit.
+
+    `main` stays at the root commit. The returned base is the parent
+    branch's head. The returned objects are the two record commits and
+    their two blobs. Each commit is built with `hash-object`, `mktree` and
+    `commit-tree`. No branch points at either. Only the annotated tag
+    points at the task commit.
+    """
+    origin = tmp_path / "origin"
+    _seed_repo(origin)
+    subprocess.run(
+        ["git", "-C", str(origin), "checkout", "-q", "-b", "saffron/parent"],
+        check=True,
+        capture_output=True,
+    )
+    base = _commit_file(origin, "parent.txt", "from the parent\n", "parent commit")
+    subprocess.run(
+        ["git", "-C", str(origin), "checkout", "-q", "main"],
+        check=True,
+        capture_output=True,
+    )
+
+    mirror = tmp_path / "m.git"
+    mirror_ops.ensure_mirror(origin, mirror)
+
+    def git(*args, input=None):
+        return subprocess.run(
+            ["git", "-C", str(mirror), *args],
+            input=input,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def record_commit(path, content, message):
+        blob = git("hash-object", "-w", "--stdin", input=content)
+        tree = git("mktree", input=f"100644 blob {blob}\t{path}\n")
+        commit = git(
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            tree,
+            "-m",
+            message,
+        )
+        return blob, commit
+
+    mutant_blob, mutant_commit = record_commit(
+        "mutant.json", "mutant data\n", "mutants commit"
+    )
+    git("update-ref", "refs/saffron/mutants", mutant_commit)
+
+    task_blob, task_commit = record_commit("task.json", "task data\n", "task commit")
+    git("update-ref", "refs/saffron/tasks/t-1", task_commit)
+    git(
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=T",
+        "tag",
+        "-a",
+        "v-record",
+        "-m",
+        "a tag on the record commit",
+        task_commit,
+    )
+
+    objects = [mutant_blob, mutant_commit, task_blob, task_commit]
+    return mirror, base, objects
+
+
+def _assert_holds_nothing_hidden(tree, objects):
+    assert (tree / "parent.txt").read_text() == "from the parent\n"
+    for obj in objects:
+        cat = subprocess.run(
+            ["git", "-C", str(tree), "cat-file", "-e", obj], capture_output=True
+        )
+        assert cat.returncode != 0, obj
+    refs = subprocess.run(
+        ["git", "-C", str(tree), "for-each-ref", "--format=%(refname)"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert refs == ["refs/heads/saffron/test"]
+
+
+def test_a_seed_fetches_no_non_branch_ref_whatever_the_git_config_names(
+    tmp_path, monkeypatch
+):
+    """Measured at base: a bare `git fetch` lets either config below widen
+    what the seed brings over, and the record commit, its blob and the tag
+    arrive. Driven through `_no_cell_runtime`, so the seed's git runs on
+    the host and reads the config this test sets. A real seed reads the
+    image's config instead.
+
+    `_RETRY_PAUSE_S` and `time.sleep` are neutralised so a wrong version
+    whose fetch fails costs this test nothing.
+    """
+    mirror, base, objects = _mirror_with_non_branch_refs(tmp_path)
+    volumes = _no_cell_runtime(monkeypatch, tmp_path)
+    monkeypatch.setattr(worktree, "_RETRY_PAUSE_S", 0.0)
+    monkeypatch.setattr(worktree.time, "sleep", lambda s: None)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+
+    def seed(volume, container):
+        runtime.create_volume(volume)
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image="img",
+            container=container,
+            network="net",
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+
+    # A widened fetch refspec, read from the environment rather than a file.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "remote.origin.fetch")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "+refs/saffron/*:refs/saffron/*")
+    seed("vol-fetch", "c-fetch")
+    _assert_holds_nothing_hidden(volumes["vol-fetch"], objects)
+
+    # Every tag followed, through a global gitconfig file instead.
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_KEY_0", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_VALUE_0", raising=False)
+    config = _point_global_config_outside_the_repo(tmp_path, monkeypatch)
+    _set_global(config, "remote.origin.tagOpt", "--tags")
+    seed("vol-tags", "c-tags")
+    _assert_holds_nothing_hidden(volumes["vol-tags"], objects)
+
+
+@pytest.mark.cell
+def test_a_cell_seeded_from_a_mirror_holding_non_branch_refs_holds_none_of_them(
+    tmp_path, network
+):
+    """The same claim as the witness above, against the image's own git
+    rather than the host's. `prepare_worktree` passes the seed's
+    `run_ephemeral` no `env`, so no config reaches the seed here. This
+    proves the explicit refspec under the image's git.
+    """
+    mirror, base, objects = _mirror_with_non_branch_refs(tmp_path)
+    volume, container = "saffron-test-wt8", "saffron-test-cell8"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        assert worktree.head_sha(container) == base
+        content = runtime.exec_(container, ["cat", "/work/parent.txt"])
+        assert content.stdout == "from the parent\n"
+        refs = runtime.exec_(
+            container,
+            ["git", "for-each-ref", "--format=%(refname)"],
+            workdir="/work",
+        )
+        assert refs.stdout.split() == ["refs/heads/saffron/test"]
+        for obj in objects:
+            cat = runtime.exec_(
+                container, ["git", "cat-file", "-e", obj], workdir="/work"
+            )
+            assert cat.returncode != 0, obj
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")

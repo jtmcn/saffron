@@ -1,11 +1,12 @@
 ---
 id: b-8d654b
 title: The finishing commit writes through a symlink a cell committed under .saffron/specs/
-status: open
+status: done
 tier: 2
 filed: 2026-10-01
+closed: 2026-10-09
 specs: [SA-0151, SA-0239]
-prs: [628]
+prs: [628, 786]
 commits: []
 cites: [§2]
 related: [b-3d2aa1]
@@ -29,3 +30,6 @@ renames, checked with `lstat` before the write, and a test drives one.
 ## Record
 
 - 2026-10-01: filed from #628's review seats. `SA-0167`'s gate suite is one home for the fix.
+- 2026-10-09: done by `SA-0239` (#786) in the spec loop's run 32. The finish
+  refuses to write through a symlinked path component. A file where a
+  directory belongs still raises uncaught, which b-8c17dc tracks.

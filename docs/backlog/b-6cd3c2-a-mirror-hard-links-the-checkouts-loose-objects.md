@@ -48,3 +48,6 @@ repository and asserts that no object file's inode appears in both.
 - 2026-10-08: filed from the spec loop's run 31. It answers b-6ac0cd's open
   question in part: a retry does not clear it, a rebuilt mirror does not, and
   a repack does.
+- 2026-10-09: recurred in the spec loop's run 32. The mirror's loose object
+  6c8cc03b failed `SA-0233`'s PACKAGE seed and `SA-0251`'s first seed. `git
+  repack -d` and moving the mirror aside cleared it again.

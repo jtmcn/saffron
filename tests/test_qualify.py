@@ -11,6 +11,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from saffron import probe as probe_check
 from saffron.agents.findings import Finding, Severity
 from saffron.cell import session
@@ -21,6 +23,7 @@ from saffron.ledger import Ledger
 from saffron.phases import review
 from saffron.probe import Verdict
 from saffron.record.memory import MemoryRecord
+from saffron.repos.mirror import GitError, UnreadablePath, file_at
 
 _EMAIL = "-c", "user.email=t@example.com", "-c", "user.name=Test"
 
@@ -47,12 +50,53 @@ def _write(mirror: Path, path: str, lines: list[str]) -> None:
     full.write_text("\n".join(lines) + "\n")
 
 
-def _stack_mirror(tmp_path: Path, monkeypatch) -> tuple[Path, dict[str, str]]:
+def _write_bytes(mirror: Path, path: str, data: bytes) -> None:
+    full = mirror / path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.write_bytes(data)
+
+
+def _symlink(mirror: Path, path: str, target: str) -> None:
+    full = mirror / path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    full.symlink_to(target)
+
+
+def _seed_unreadable(mirror: Path) -> None:
+    """Six paths `file_at` cannot read as text, plus `src/c_link.py`, an
+    in-tree symlink it can read. All are planted before commit `A`'s own
+    `add -A` so none is in any range's diff. `src` itself needs no seeding:
+    it is already a directory.
+    """
+    sub = mirror / "vendor" / "sub"
+    sub.mkdir(parents=True)
+    _git(sub, "init", "-q")
+    _git(sub, "commit", "-q", "--allow-empty", "-m", "sub")
+    _symlink(mirror, "src/out.py", "../../outside.py")
+    _symlink(mirror, "src/hop.py", "out.py")
+    _symlink(mirror, "src/c_link.py", "c.py")
+    _write(mirror, "src/gone.py", ["gone_only_line"])
+    _symlink(mirror, "src/gone_link.py", "gone.py")
+    _write_bytes(mirror, "src/latin.py", b"\xff\xfe")
+
+
+def _delete_loose_object(mirror: Path, sha: str, path: str) -> None:
+    """`sha:path`'s blob, removed from `.git/objects` so `ls-tree` still
+    lists `path` but `git show` can no longer read it."""
+    blob = _git(mirror, "rev-parse", f"{sha}:{path}").strip()
+    (mirror / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+
+def _stack_mirror(
+    tmp_path: Path, monkeypatch, *, unreadable: bool = False
+) -> tuple[Path, dict[str, str]]:
     """The git history the four commits in the spec's notes describe.
 
     `A` seeds `alpha`, `beta` and `gamma`. `M` adds `m.py`. `H1` moves
     `alpha`'s line 2. `H2` moves `beta`'s line 2 and inserts a line into
-    `gamma` after its own line 5.
+    `gamma` after its own line 5. `unreadable` additionally seeds the
+    paths `_seed_unreadable` names, untouched by every later commit, and
+    deletes `src/gone.py`'s blob after `H2`.
     """
     config = tmp_path / "gitconfig"
     config.write_text("[diff]\n    context = 0\n")
@@ -70,6 +114,8 @@ def _stack_mirror(tmp_path: Path, monkeypatch) -> tuple[Path, dict[str, str]]:
     _write(mirror, "src/a.py", _numbered("alpha"))
     _write(mirror, "src/b.py", _numbered("beta"))
     _write(mirror, "src/c.py", gamma)
+    if unreadable:
+        _seed_unreadable(mirror)
     shas = {"A": commit("A")}
 
     _write(mirror, "src/m.py", ["moved_main_only"])
@@ -85,6 +131,8 @@ def _stack_mirror(tmp_path: Path, monkeypatch) -> tuple[Path, dict[str, str]]:
     _write(mirror, "src/b.py", _numbered("beta", {2: "beta_rate"}))
     _write(mirror, "src/c.py", gamma_h2)
     shas["H2"] = commit("H2")
+    if unreadable:
+        _delete_loose_object(mirror, shas["H2"], "src/gone.py")
     return mirror, shas
 
 
@@ -336,8 +384,9 @@ def _build(
     join: bool = False,
     te0: bool = False,
     raise_on: frozenset[str] = frozenset(),
+    unreadable: bool = False,
 ) -> _Built:
-    mirror, shas = _stack_mirror(tmp_path, monkeypatch)
+    mirror, shas = _stack_mirror(tmp_path, monkeypatch, unreadable=unreadable)
     ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
     repo_id = ledger.upsert_repo(
         "acme", "https://example/o", "/m.git", policy_sha="p" * 64
@@ -865,3 +914,72 @@ def test_the_joins_qualifications_come_first_under_the_top_layer(tmp_path, monke
 
     te1 = rows("TE-1")
     assert [r["claim"] for r in te1] == ["c-a", "c-m", "c-c"]
+
+
+def test_a_path_the_mirror_cannot_read_raises_out_of_qualify(tmp_path, monkeypatch):
+    """`qualify` passes `file_at` itself as `anchor`'s `read_head` (backlog
+    item b-00534f). A read that raises is never caught: it comes out of
+    `qualify` unchanged, and the finding whose read raised gets no
+    `qualifications` row at all. An absent path reads as no file, and a
+    readable file or in-tree symlink anchors."""
+    from saffron.qualify import qualify
+
+    built = _build(tmp_path, monkeypatch, unreadable=True)
+    te2_task_id = built.ledger._db.execute(
+        "SELECT task_id FROM tasks WHERE spec_id = 'TE-2'"
+    ).fetchone()["task_id"]
+    te2_key = _key(built.ledger, te2_task_id)
+
+    def _one_finding_layer(file: str, line: int, claim: str) -> None:
+        built.layers = [
+            LayerReview(
+                te2_key,
+                [
+                    review.LensReview(
+                        "spec", [_finding("spec", "concern", file, line, claim)]
+                    )
+                ],
+            )
+        ]
+
+    # `UnreadablePath`: a tree or submodule mode, a symlink out of the tree or to a
+    # non-regular file. `GitError`: a missing blob. `UnicodeDecodeError`: bad bytes.
+    raising: list[tuple[str, int, str, type[Exception]]] = [
+        ("src", 3, "r-tree", UnreadablePath),
+        ("vendor/sub", 3, "r-sub", UnreadablePath),
+        ("src/out.py", 3, "r-out", UnreadablePath),
+        ("src/hop.py", 3, "r-hop", UnreadablePath),
+        ("src/gone.py", 3, "r-gone", GitError),
+        ("src/gone_link.py", 3, "r-gone-link", GitError),
+        ("src/latin.py", 1, "r-latin", UnicodeDecodeError),
+    ]
+    for path, line, claim, exc_type in raising:
+        with pytest.raises(exc_type) as expected:
+            file_at(built.mirror, built.shas["H2"], path)
+
+        _one_finding_layer(path, line, claim)
+        with pytest.raises(exc_type) as caught:
+            built.run(qualify)
+
+        assert type(caught.value) is exc_type
+        assert str(caught.value) == str(expected.value)
+
+    _one_finding_layer("src/z.py", 1, "r-absent")
+    result = built.run(qualify)
+    assert result.groups == []
+    assert [(q.finding.claim, q.outcome) for q in result.pool] == [
+        ("r-absent", "unanchored")
+    ]
+
+    for path, claim in (("src/c.py", "r-c"), ("src/c_link.py", "r-c-link")):
+        _one_finding_layer(path, 11, claim)
+        result = built.run(qualify)
+        assert result.pool == []
+        assert len(result.groups) == 1
+        group = result.groups[0]
+        assert group.task_key == te2_key
+        assert group.file == path
+        assert [q.finding.claim for q in group.findings] == [claim]
+
+    rows = built.ledger.qualifications(te2_task_id)
+    assert [r["claim"] for r in rows] == ["r-absent", "r-c", "r-c-link"]

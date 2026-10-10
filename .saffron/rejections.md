@@ -1802,3 +1802,94 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0228` (#747): the fixture comment gave a reason for its costs that
   measured false as worded.
   **Bucket 3**, conventions. **Landed:** a review commit on #747.
+
+## 2026-10-09, `SA-0227` to `SA-0255` (spec loop run 32, stack #777 to #790)
+
+- `SA-0230` (#777): the budget-cap witness set both fields, so an `and` for
+  the `or`, or either clause deleted, passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #777.
+- `SA-0230` (#777): two comments kept claims the diff made false, and a third
+  said "now".
+  **Bucket 3**, conventions. **Landed:** a review commit on #777.
+- `SA-0231` (#778): dropping the verdict-error fallback after the cut line
+  passed every witness.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #778.
+- `SA-0231` (#778): the helper docstring the spec named stayed false, and the
+  cut-short predicate was spelled twice.
+  **Bucket 3**, conventions. **Landed:** a review commit on #778.
+- `SA-0232` (#779): the retry witness never read the retried volume, the
+  print's order, the kept lost+found or the full message.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #779.
+- `SA-0232` (#779): a seed that timed out after printing the fetch marker was
+  retried.
+  **Bucket 3**, the correctness lens. **Landed:** a review commit on #779.
+- `SA-0232` (#779): four docstrings and comments went stale, cited a test
+  double as the reason, or said "attempts" for seed runs.
+  **Bucket 3**, conventions. **Landed:** a review commit on #779.
+- `SA-0227` (#781): the seed-id witness never ordered two numbers of
+  different widths, and its oracle slugged with the code under test.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #781.
+- `SA-0227` (#781): `open_attempt`'s docstring omitted two callers, and two
+  texts named a command absent at that head.
+  **Bucket 3**, conventions. **Landed:** a review commit on #781.
+- `SA-0229` (#782): the draft review's sentence was asserted through the
+  constant the code sends, so a rewrite passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #782.
+- `SA-0229` (#782): the help text inverted `DESIGN.md` §3.4, and the cell
+  hoisted literals the spec said to leave inline.
+  **Bucket 3**, conventions. **Landed:** a review commit on #782.
+- `SA-0234` (#783): the `GATE_ERROR` on a `CellRuntimeError` from `review`
+  had no witness.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #783.
+- `SA-0234` (#783): four comments misstated which raises miss, and a
+  docstring said "retries".
+  **Bucket 3**, conventions. **Landed:** a review commit on #783.
+- `SA-0234` (#783): a PACKAGE raise after `READY_FOR_REVIEW` is offered
+  again, so the whole cell is paid twice. The operator kept it.
+  **No bucket**. **Open:** b-883f74.
+- `SA-0237` (#784): a witness docstring claimed the host-driven seed reads a
+  real seed's environment, and two texts pinned a fact to the base.
+  **Bucket 3**, conventions. **Landed:** a review commit on #784.
+- `SA-0238` (#785): two helper docstrings miscounted the seeded paths, and a
+  witness docstring said "still".
+  **Bucket 3**, conventions. **Landed:** a review commit on #785.
+- `SA-0239` (#786): a docstring said "the checkout", which Worktree avoids,
+  and `terms` passed it.
+  **Bucket 1**, `terms`, whose table lacks the phrase. **Landed:** a review
+  commit on #786. **Open:** b-4b386f.
+- `SA-0239` (#786): the module docstring and the refusal misstated what
+  refuses the write.
+  **Bucket 3**, conventions. **Landed:** a review commit on #786.
+- `SA-0240` (#787): the aborted leg's head added no advisory failure over
+  base, and the size leg never read its code.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #787.
+- `SA-0240` (#787): the body called every advisory gate advisory "at this
+  risk tier", the spec's own words. The operator approved new ones.
+  **Bucket 3**, conventions. **Landed:** a review commit on #787.
+- `SA-0246` (#788): the crash witness accepted any pending state, and no case
+  put a column in both mappings.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #788.
+- `SA-0246` (#788): a comment cited the wrong item, and another stated an
+  unmeasured `gh` failure as fact.
+  **Bucket 3**, conventions. **Landed:** a review commit on #788.
+- `SA-0255` (#790): the hook's files pattern missed the gate's own wrapper,
+  and nothing pinned it.
+  **Bucket 1**, `witness`. **Landed:** two review commits on #790.
+- `SA-0255` (#790): the hook's preamble ran three lines with a semicolon,
+  and no gate reads a YAML comment.
+  **Bucket 1**, `prose`. **Landed:** a review commit on #790. **Open:**
+  b-7f105f.
+- `SA-0255` (#790): the test module copied a sibling's `revert` reason that
+  is false here.
+  **Bucket 3**, conventions. **Landed:** a review commit on #790. **Open:**
+  b-a99c76.
+- `SA-0233` (#780): the never-entered mutator's raise was swallowed, so its
+  witness could not fail.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #780.
+- `SA-0233` (#780): two docstrings overclaimed what `expressed` and
+  `refusal` cover.
+  **Bucket 3**, conventions. **Landed:** a review commit on #780.
+- `SA-0233` (#780): the new `refusal` key reused `CONTEXT.md`'s Refusal for a
+  per-edit decision.
+  **Bucket 1**, `terms`. **Landed:** the operator's `CONTEXT.md` sentence
+  on #780.

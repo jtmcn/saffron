@@ -1,11 +1,12 @@
 ---
 id: b-34d743
 title: A spec whose subject is a test gets no measured wrong version, and REVIEW's line still counts them expressed
-status: open
+status: done
 tier: 1
 filed: 2026-10-05
+closed: 2026-10-09
 specs: [SA-0200, SA-0233]
-prs: [674]
+prs: [674, 780]
 commits: []
 cites: [§5.5]
 related: [b-3c17ab, b-7251b5]
@@ -38,3 +39,6 @@ refused ones apart from the expressed ones. A test drives a spec whose only
 ## Record
 
 - 2026-10-05: filed from the spec loop's run 28.
+- 2026-10-09: done by `SA-0233` (#780) in the spec loop's run 32. REVIEW's
+  line counts the versions the host refused apart from the expressed ones.
+  Running a wrong version against a test file stays with b-3c17ab.

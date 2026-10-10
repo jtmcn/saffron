@@ -78,13 +78,17 @@ WALL_CAP_S = 3600.0
 # growing moves that number rather than dividing it. The floor is
 # what keeps "not gated" true when nothing is left: below it a lens would be
 # refused for having no room, and the task would reach the operator unreviewed.
-# REBUT also runs once past budget_usd now. Its sessions share
-# REBUT_OVERRUN_CAP_USD below, so one answer to those findings still lands.
+# REBUT keeps its own ceiling below, REBUT_CAP_USD, at any spend, not
+# only once budget_usd is spent.
 REVIEW_FLOOR_USD = 2.0
 
-# One pool for the rebuttal, extraction and verdict turns once REBUT runs
-# past budget: the measured maximum REBUT spend, $6.40, rounded up.
-REBUT_OVERRUN_CAP_USD = 7.0
+# The measured maximum of seven salvage turns, $0.40 on SA-0204, rounded up.
+# Held out of IMPLEMENT's own cap, so a cut with nothing committed keeps room.
+SALVAGE_RESERVE_USD = 1.0
+
+# One pool for every REBUT's own sessions, at any spend: the measured
+# maximum, $9.29 on SA-0223 (67 REBUTs, 2026-10-07), rounded up.
+REBUT_CAP_USD = 10.0
 
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
@@ -152,11 +156,11 @@ def critic_budget(budget_usd: float, spent: float) -> float:
 
 
 class _RebutCap:
-    """Shares one ceiling across a single REBUT's own sessions, once the
-    task meets or passes budget_usd: the rebuttal turn, its extraction
-    turn, and each lens verdict draw against the same pool. A call that
-    would get nothing, or less, is refused the way a failed turn already
-    reads to every caller here, with implement.AgentFailed.
+    """Shares one ceiling across a single REBUT's own sessions, at any
+    spend: the rebuttal turn, its extraction turn, and each lens verdict
+    draw against the same pool. A call that would get nothing, or less, is
+    refused the way a failed turn already reads to every caller here, with
+    implement.AgentFailed.
     """
 
     def __init__(self, cap: float) -> None:
@@ -450,6 +454,21 @@ def cut_off_at_turn_ceiling(attempt: AttemptResult) -> bool:
     """
     return (
         attempt.terminal_reason == "max_turns" or attempt.subtype == "error_max_turns"
+    )
+
+
+def cut_off_at_budget_cap(attempt: AttemptResult) -> bool:
+    """The third bound `cut_by_bound` checks, beside the turn ceiling and
+    the wall clock (backlog item 119). True when the in-cell `max_budget_usd`
+    is what ended this turn.
+
+    Both fields, the way `cut_off_at_turn_ceiling` checks both of its own:
+    a result missing one must still read as this bound, not slip past it
+    in silence.
+    """
+    return (
+        attempt.terminal_reason == "budget_exhausted"
+        or attempt.subtype == "error_max_budget_usd"
     )
 
 
@@ -1713,11 +1732,11 @@ def _apply_criterion_probes(
     asks its criterion's witness (items b-2750d5, b-7e69d0). Runs in a
     Gate-only cell entered after `_probe_adequacy`'s own is torn down.
     `pairs` pairs each criterion-probe entry with its criterion, then each
-    wrong version with the criterion that declared it.
-
-    Writes each pair's outcome and summary in place. Appends a survivor's
-    `Finding` to the `adequacy` review in `reviews`, the same in-place
-    contract `_probe_adequacy` keeps.
+    wrong version with the criterion that declared it. Writes each pair's
+    outcome and summary in place, and a refused pair's own
+    `probe.probe_refusal` reason under `refusal` beside them. Appends a
+    survivor's `Finding` to the `adequacy` review in `reviews`, the same
+    in-place contract `_probe_adequacy` keeps.
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
@@ -1743,6 +1762,7 @@ def _apply_criterion_probes(
         refusal = probe_check.probe_refusal(entry["edit"]["file"], test_paths)
         if refusal is not None:
             _unproven([(criterion, entry)], refusal)
+            entry["refusal"] = refusal
             continue
         with_edit.append((criterion, entry))
 
@@ -2309,12 +2329,20 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
+        # Held back from IMPLEMENT's own cap so a cut with nothing committed
+        # still has room for the salvage turn (backlog item 119).
+        remainder_usd = spec.budget_usd - spent
+        held_for_salvage_usd = min(SALVAGE_RESERVE_USD, remainder_usd / 2)
+        implement_options = options | {
+            "max_budget_usd": remainder_usd - held_for_salvage_usd
+        }
+
         implement_failed = False
         try:
             implemented = agent(
                 container,
                 prompt=implement.IMPLEMENT_PROMPT,
-                options=options,
+                options=implement_options,
                 resume=session_id,
                 emit=emit,
                 last_cost_usd=last_cost,
@@ -2348,11 +2376,18 @@ def _drive_cell(
         )
 
         # Decided once, from the implement turn's own attempt: SA-0028's turn
-        # ceiling, or, since SA-0126, the wall clock.
+        # ceiling, SA-0126's wall clock, or item 119's own budget cap.
         turn_ceiling_cut = cut_off_at_turn_ceiling(implemented)
         wall_cut = implemented.bound == "wall"
-        cut_by_bound = turn_ceiling_cut or wall_cut
-        bound_word = "the turn ceiling" if turn_ceiling_cut else "the wall clock"
+        budget_cap_cut = cut_off_at_budget_cap(implemented)
+        cut_by_bound = turn_ceiling_cut or wall_cut or budget_cap_cut
+        bound_word = (
+            "the turn ceiling"
+            if turn_ceiling_cut
+            else "the wall clock"
+            if wall_cut
+            else "the budget cap"
+        )
 
         if commits == 0 and cut_by_bound:
             # The agent did not decide it was finished — a bound cut it off
@@ -2362,18 +2397,44 @@ def _drive_cell(
             # session, asking only for a commit. The budget ceiling is
             # checked *before* it is spent, never after (§4.3).
             if _over_budget():
-                emit(
-                    Terminal(
-                        timestamp=time.time(),
-                        spec_id=spec.spec_id,
-                        reason="cut_off_no_salvage_room",
-                        spent_usd_est=spent,
-                        detail=(
-                            f"${spent:.2f} of ${spec.budget_usd:.2f} — "
-                            f"cut off at {bound_word}"
-                        ),
+                # Still worth the free checkpoint the salvage branch takes
+                # below: losing dirty work to a spent budget is the gap closed.
+                no_room_note = "no room left for a salvage turn"
+                try:
+                    if worktree.dirty_paths(container):
+                        worktree.commit_dirty(
+                            container,
+                            f"checkpoint: host-committed — {no_room_note}",
+                        )
+                        _phase_start(
+                            "IMPLEMENT",
+                            "SALVAGE",
+                            "uncommitted work checkpointed by the host",
+                        )
+                except runtime.CellRuntimeError as broke:
+                    _phase_start(
+                        "IMPLEMENT", "SALVAGE", f"the host checkpoint failed — {broke}"
                     )
-                )
+                commits = worktree.commits_ahead(container, planned_sha)
+                if commits:
+                    _phase_start(
+                        "IMPLEMENT",
+                        "SALVAGE",
+                        f"recovered {commits} commit(s), ${spent:.2f} spent",
+                    )
+                else:
+                    emit(
+                        Terminal(
+                            timestamp=time.time(),
+                            spec_id=spec.spec_id,
+                            reason="cut_off_no_salvage_room",
+                            spent_usd_est=spent,
+                            detail=(
+                                f"${spent:.2f} of ${spec.budget_usd:.2f} — "
+                                f"cut off at {bound_word}"
+                            ),
+                        )
+                    )
             else:
                 _phase_start(
                     "IMPLEMENT",
@@ -2389,7 +2450,7 @@ def _drive_cell(
                     system_prompt=system_prompt,
                     cwd=worktree.WORKTREE_MOUNT,
                     max_turns=salvage_turns,
-                    budget_usd=spec.budget_usd,
+                    budget_usd=held_for_salvage_usd,
                 )
                 salvage_note = "the salvage turn committed nothing"
                 try:
@@ -3043,10 +3104,10 @@ def _drive_cell(
                     return "GATE_ERROR"
                 return "EXHAUSTED" if comparison.new_failures else None
 
-            # At or past budget_usd, REBUT's sessions share one cap instead of
-            # being refused outright. `cap` also says whether one was refused.
-            cap = _RebutCap(REBUT_OVERRUN_CAP_USD) if overrun else None
-            rebut_agent = cap.wrap(agent) if cap is not None else agent
+            # REBUT's sessions always share one cap, at any spend. `cap`
+            # also says whether one call was refused.
+            cap = _RebutCap(REBUT_CAP_USD)
+            rebut_agent = cap.wrap(agent)
 
             with contextlib.ExitStack() as critic_stack:
 
@@ -3084,7 +3145,9 @@ def _drive_cell(
                     claude_md=claude_md,
                     prompts_dir=context.PROMPTS_DIR,
                     max_turns=spec.max_turns,
-                    budget_usd=critic_budget(spec.budget_usd, spent),
+                    # `rebut_agent` replaces this on every call, so no
+                    # REBUT session runs on it.
+                    budget_usd=REBUT_CAP_USD,
                     # Measured, never reported (§4.3): from the head the
                     # rebuttal started at, so the implement turn's own
                     # commits cannot satisfy it.
@@ -3100,6 +3163,16 @@ def _drive_cell(
                     reviewed_diff=reviewed_diff,
                     emit=emit,
                     last_cost_usd=last_cost,
+                )
+            # The cap, not the agent, ended this REBUT: its blockers stand,
+            # and the record must not read as the silence `rebut_state` names.
+            cut = cap.refused and result.state == "REBUTTING"
+            if cut:
+                detail = result.rebuttal.error or next(
+                    (v.error for v in result.verdicts if v.error), None
+                )
+                result.why = f"REBUT ran out of its ${REBUT_CAP_USD:.2f} budget" + (
+                    f" — {detail}" if detail else ""
                 )
             rebut_result = result
             spent += result.cost_usd
@@ -3133,7 +3206,9 @@ def _drive_cell(
                 )
             outcome, why = result.state, result.why
 
-            if cap is not None:
+            # Only a REBUT that started at or past budget_usd gets this
+            # line, whether or not the cap cut it.
+            if overrun:
                 emit(
                     Budget(
                         timestamp=time.time(),
@@ -3144,15 +3219,9 @@ def _drive_cell(
                         rebut_spent_usd_est=result.cost_usd,
                     )
                 )
-                if outcome == "REBUTTING" and cap.refused:
-                    # The cap stopped a session, not the agent: the blockers
-                    # stand unanswered, and the task ends decided, not hanging.
-                    outcome = "EXHAUSTED"
-                    rebut_result = None
-                    why = (
-                        f"the REBUT cap (${REBUT_OVERRUN_CAP_USD:.2f}) cut a "
-                        f"session short — {why}"
-                    )
+            if cut:
+                outcome = "EXHAUSTED"
+                rebut_result = None
 
             _phase_start("REBUT", "REBUT", why)
 
