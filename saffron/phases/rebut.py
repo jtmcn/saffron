@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from saffron.agents import context
 from saffron.agents.findings import Finding
+from saffron.cell.worktree import CriticPatchRejected, CriticPatchUnrepresentable
 from saffron.events import Agent, Event, PhaseStart, describe
 from saffron.intake import Criterion
 from saffron.phases import implement, review
@@ -722,11 +723,6 @@ def run_rebut(
             else f"the gate re-run ended {stopped}"
         )
         return result
-
-    # Local, not module-scope: `session.py` is REBUT's only caller and the
-    # one place a critic cell is built, and it already imports this module,
-    # so a module-scope import here would cycle.
-    from saffron.cell.session import CriticPatchRejected, CriticPatchUnrepresentable
 
     try:
         critic = critic_container()

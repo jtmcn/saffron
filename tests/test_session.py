@@ -4341,17 +4341,32 @@ def _through_rebut(*rebut_turns):
     ]
 
 
+def _rebuttal_fixed_prefix() -> str:
+    """REBUT's own rebuttal turn prompt, up to `{blockers}`: the text that
+    identifies it among `cell.turns`, however many turns IMPLEMENT or
+    REVIEW ran first."""
+    return rebut.REBUT_PROMPT.split("{blockers}")[0]
+
+
 def _rebut_turn_options(cell) -> list[dict]:
     """`cell.turn_options`, filtered to REBUT's own sessions: the rebuttal
     turn, its extraction turn, and each lens verdict, in the order they
     ran (SA-0203). Identified by prompt, the way `cell.turns` records it."""
-    fixed = rebut.REBUT_PROMPT.split("{blockers}")[0]
+    fixed = _rebuttal_fixed_prefix()
     return [
         options
         for prompt, options in zip(cell.turns, cell.turn_options, strict=True)
         if prompt in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT)
         or prompt.startswith(fixed)
     ]
+
+
+def _rebuttal_turn_has_run(cell) -> bool:
+    """Whether REBUT's own rebuttal turn has already run. Read from the
+    prompts in `cell.turns`, not from a turn count that moves whenever
+    IMPLEMENT or REVIEW gains a turn of its own."""
+    fixed = _rebuttal_fixed_prefix()
+    return any(prompt.startswith(fixed) for prompt in cell.turns)
 
 
 def _rebut_capped(
@@ -8324,11 +8339,71 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     monkeypatch, tmp_path
 ):
     """Item 118's REBUT half: verdicts run in a critic cell, never the
-    container the rebuttal just ran in, and that cell's tree is rebuilt from
-    the *post-rebuttal* patch — not REVIEW's already-applied one.
-    `export_patch` grows only once the implementer has taken its rebuttal and
-    extraction turns, so the two critic cells' applied patches are told
-    apart."""
+    container the rebuttal ran in. That cell's tree is rebuilt from the
+    *post-rebuttal* patch, not REVIEW's already-applied one.
+    `export_patch` grows only after the implementer's rebuttal turn, so the
+    two critic cells' applied patches are told apart."""
+    import ast
+    import inspect
+
+    # `_rebuttal_turn_has_run` itself: false while nothing seen is the
+    # rebuttal turn, however many turns already ran, true the moment one is.
+    no_rebuttal_yet = SimpleNamespace(
+        turns=[
+            implement.PLAN_PROMPT,
+            implement.IMPLEMENT_PROMPT,
+            review.REVIEW_PROMPT,
+            review.REVIEW_PROMPT,
+            review.REVIEW_PROMPT,
+            review.REVIEW_PROMPT,
+            rebut.VERDICT_TURN_PROMPT,
+            rebut.EXTRACT_PROMPT,
+            "a plain reply carrying no prompt of its own",
+        ]
+    )
+    assert len(no_rebuttal_yet.turns) == 9
+    assert _rebuttal_turn_has_run(no_rebuttal_yet) is False
+    rebuttal_alone = SimpleNamespace(turns=[_rebuttal_fixed_prefix() + "1. a blocker"])
+    assert _rebuttal_turn_has_run(rebuttal_alone) is True
+    # Not the last turn either. The extraction turn and each verdict follow
+    # it in real use, and a helper that reads only `turns[-1]` would miss it.
+    rebuttal_then_more = SimpleNamespace(
+        turns=[
+            _rebuttal_fixed_prefix() + "1. a blocker",
+            rebut.EXTRACT_PROMPT,
+            rebut.VERDICT_TURN_PROMPT,
+        ]
+    )
+    assert _rebuttal_turn_has_run(rebuttal_then_more) is True
+
+    def _export_patch_stub_reads_the_prompt_not_a_count(test_func) -> bool:
+        """Whether `test_func`'s own `_export_patch` stub branches on exactly
+        `_rebuttal_turn_has_run(cell)` and never reads `.turns`, read from
+        its parsed source rather than from running it."""
+        tree = ast.parse(inspect.getsource(test_func))
+        stub = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_export_patch"
+        )
+        decides_by_helper = any(
+            isinstance(node, (ast.If, ast.IfExp))
+            and ast.unparse(node.test) == "_rebuttal_turn_has_run(cell)"
+            for node in ast.walk(stub)
+        )
+        reads_turns = any(
+            isinstance(node, ast.Attribute) and node.attr == "turns"
+            for node in ast.walk(stub)
+        )
+        return decides_by_helper and not reads_turns
+
+    assert _export_patch_stub_reads_the_prompt_not_a_count(
+        test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch
+    )
+    assert _export_patch_stub_reads_the_prompt_not_a_count(
+        test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown
+    )
+
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=1)
 
@@ -8339,9 +8414,9 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # plan, implement, 4 lenses, rebuttal, extraction = 8 turns by the
-        # time REBUT asks for a critic cell; every earlier export is REVIEW's.
-        return grown if len(cell.turns) > 5 else _ANCHORING_DIFF
+        # True only once REBUT's own rebuttal turn has run. Every export
+        # before that point is REVIEW's.
+        return grown if _rebuttal_turn_has_run(cell) else _ANCHORING_DIFF
 
     monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
 
@@ -8509,9 +8584,9 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
 
     def _export_patch(container, sha):
         cell.export_calls.append((container, sha))
-        # 8 turns precede REBUT's critic cell: plan, implement, 4 lenses, rebuttal
-        # and extraction. Every earlier export is REVIEW's, as in the test above.
-        if len(cell.turns) > 5:
+        # True only once REBUT's own rebuttal turn has run, as in the test
+        # above. Every export before that point is REVIEW's.
+        if _rebuttal_turn_has_run(cell):
             return after_rebuttal
         # Keyed on the container too, not the turn alone: a second export taken
         # from the implementer's own `.git` is item 118's defect, and a stub

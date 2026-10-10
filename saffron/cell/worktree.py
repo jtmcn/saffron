@@ -323,6 +323,34 @@ def export_patch(container: str, base_sha: str) -> str:
     return done.stdout
 
 
+class CriticPatchRejected(RuntimeError):
+    """The exported patch does not apply against its own base in a fresh
+    critic cell tree (CONTEXT.md §5, backlog item 118). The agent's problem,
+    not the toolchain's: the export ran clean, and `git apply` is what
+    refused it. So `EXHAUSTED` is the state that fits, the same one four red
+    gate attempts would reach."""
+
+    def reason(self, where: str, what: str = "the exported patch") -> str:
+        return f"{what} did not apply in {where} — {self}"
+
+
+class CriticPatchEmpty(CriticPatchRejected):
+    """The attempt's commits net to no change, so there was no patch to apply.
+    Still the agent's `EXHAUSTED`, but its reason must not say "did not apply"
+    (backlog item 132)."""
+
+    def reason(self, where: str, what: str = "the exported patch") -> str:
+        return str(self)
+
+
+class CriticPatchUnrepresentable(RuntimeError):
+    """The patch could never apply: `DIFF_FLAGS` carries no
+    `--binary`/`--full-index`, so a binary change comes back as a
+    `_NO_FULL_INDEX` stub no base can apply. PACKAGE's own `apply_patch`
+    already reads that same marker as infrastructure. Saffron's ceiling, not
+    the agent's: `GATE_ERROR`, charged to nobody."""
+
+
 def read_at_head(container: str, path: str) -> str | None:
     """A file's content at HEAD, or None if there is no such file — what
     anchoring a finding outside a hunk needs (§5.5). Read from git rather than
