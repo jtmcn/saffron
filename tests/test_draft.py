@@ -27,10 +27,8 @@ from saffron.spec_review import (
 
 
 def _declares_other(text: str, spec_id: str) -> bool:
-    """The oracle's own check, read through `intake.parse_spec` alone,
-    never through `saffron.draft._declares_other_id`. Sharing that
-    function with the code it checks would let the two agree on a
-    wrong answer."""
+    """The oracle's own check, through `intake.parse_spec` alone, so it
+    cannot share a wrong answer with `saffron.draft`."""
     try:
         parsed = intake.parse_spec(text)
     except intake.SpecError:
