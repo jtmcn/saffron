@@ -1,11 +1,12 @@
 ---
 id: b-3e0dbe
 title: A crash between `reconcile`'s two writes strands the row in `unasked` for good
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-10-09
 specs: [SA-0246]
-prs: []
+prs: [788]
 commits: []
 cites: [§4.2.1, §6.1]
 related: [97, b-1c7019]
@@ -43,3 +44,6 @@ second `reconcile` against a `gh` that errors on the deleted branch.
 - 2026-09-19: filed from the spec loop's run 10 (#381). The correctness lens
   called the non-atomicity benign and was right about the order. The stranding
   is what the order does not fix.
+- 2026-10-09: done by `SA-0246` (#788) in the spec loop's run 32. A pending
+  row with a merged head completes as `MERGED` without asking `gh`. Rows
+  resumed before the change keep a stale head, which b-180f9f tracks.

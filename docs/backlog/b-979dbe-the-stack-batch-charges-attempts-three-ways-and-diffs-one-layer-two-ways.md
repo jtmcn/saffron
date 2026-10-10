@@ -34,3 +34,5 @@ One helper charges a spec session's attempt, and every caller imports it.
 ## Record
 
 - 2026-09-30: filed from the spec loop's run 23.
+- 2026-10-09: #781's Standards seat found a fourth copy. `_charge` in
+  `saffron/draft.py:129` repeats the body of `saffron/follow_up.py:254`.

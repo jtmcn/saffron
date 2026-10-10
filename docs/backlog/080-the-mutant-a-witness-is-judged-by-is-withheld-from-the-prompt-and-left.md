@@ -1,11 +1,11 @@
 ---
 id: 80
 title: The mutant a witness is judged by is withheld from the prompt and left in the worktree
-status: open
+status: partial
 tier: 1
 filed: 2026-09-06
 specs: [SA-0056, SA-0063, SA-0064, SA-0237]
-prs: []
+prs: [784]
 commits: []
 cites: [§5.4.1]
 related: [85, 109, 117]
@@ -97,3 +97,6 @@ seeds a cell: the mirror held the mutant's blob and the cell did not. Not yet
 measured with the cell image's git. **Rejected:** a host-held key encrypting the
 mutant inside the spec. It keeps the spec one file, but it is one more secret
 that must never reach a cell and must be handed to every cloud host.
+- 2026-10-09: `SA-0237` (#784) landed in the spec loop's run 32. The seed
+  fetch names `refs/heads/*`, and a cell-marked test proves a ref outside the
+  branches never reaches a cell. Moving mutants onto the ref is still open.

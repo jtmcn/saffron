@@ -1,11 +1,12 @@
 ---
 id: b-60a399
 title: "An infrastructure error while seeding a layer's cell marks the layer missed, so the batch refuses its descendants"
-status: open
+status: done
 tier: 1
 filed: 2026-10-05
+closed: 2026-10-09
 specs: [SA-0234]
-prs: []
+prs: [783]
 commits: []
 cites: [§4.4, §7]
 related: [b-6ac0cd]
@@ -40,3 +41,6 @@ from `review` and reads the descendant back as a candidate.
 ## Record
 
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
+- 2026-10-09: done by `SA-0234` (#783) in the spec loop's run 32. A
+  `CellRuntimeError` from `review` or `runner` offers the spec again. A raise
+  from `mint` or a revision still misses, which b-a33889 tracks.

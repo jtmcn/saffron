@@ -34,3 +34,10 @@ request. A command then runs PACKAGE alone on it, re-verify included.
 ## Record
 
 - 2026-10-08: filed from the spec loop's run 31.
+- 2026-10-09: recurred in the spec loop's run 32. `SA-0233` went
+  `READY_FOR_REVIEW`, PACKAGE's seed raised, and the delegate packaged it by
+  hand as #780.
+- 2026-10-09: the operator's call on #783 (`SA-0234`). A `CellRuntimeError`
+  raised in PACKAGE after `READY_FOR_REVIEW` is now offered again, so the
+  whole cell re-runs and is paid again. The fix belongs here, as re-running
+  PACKAGE alone.

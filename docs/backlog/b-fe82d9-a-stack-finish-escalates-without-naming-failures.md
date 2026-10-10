@@ -34,3 +34,5 @@ judged into its batch folder, and the log line names the failures.
   moved SA-0225 and SA-0228 to `done/`. `test_the_backlog_records_hold`
   failed on two items still `open` (b-5aa016, b-98a3be). b-a63235 removes the
   move. The finish still names no failure, so this item stays open.
+- 2026-10-09: recurred in the spec loop's run 32. Batch 20's finish committed
+  f69031be, then escalated with 7 new failures at re-verify and named none.

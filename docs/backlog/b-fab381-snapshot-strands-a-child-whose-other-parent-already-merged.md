@@ -34,3 +34,5 @@ read as a contradiction of SKILL.md step 1.
 ## Record
 
 - 2026-09-26: filed from the spec loop's run 18.
+- 2026-10-09: recurred in the spec loop's run 32. The snapshot again
+  stranded six children whose other parent merged.
