@@ -4348,23 +4348,16 @@ def _rebuttal_fixed_prefix() -> str:
     return rebut.REBUT_PROMPT.split("{blockers}")[0]
 
 
-def _is_rebut_turn_prompt(prompt: str) -> bool:
-    """Whether `prompt` is one of REBUT's own sessions: the rebuttal turn,
-    its extraction turn, or a lens verdict."""
-    return prompt in (
-        rebut.EXTRACT_PROMPT,
-        rebut.VERDICT_TURN_PROMPT,
-    ) or prompt.startswith(_rebuttal_fixed_prefix())
-
-
 def _rebut_turn_options(cell) -> list[dict]:
     """`cell.turn_options`, filtered to REBUT's own sessions: the rebuttal
     turn, its extraction turn, and each lens verdict, in the order they
     ran (SA-0203). Identified by prompt, the way `cell.turns` records it."""
+    fixed = _rebuttal_fixed_prefix()
     return [
         options
         for prompt, options in zip(cell.turns, cell.turn_options, strict=True)
-        if _is_rebut_turn_prompt(prompt)
+        if prompt in (rebut.EXTRACT_PROMPT, rebut.VERDICT_TURN_PROMPT)
+        or prompt.startswith(fixed)
     ]
 
 
@@ -8346,11 +8339,10 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     monkeypatch, tmp_path
 ):
     """Item 118's REBUT half: verdicts run in a critic cell, never the
-    container the rebuttal just ran in, and that cell's tree is rebuilt from
-    the *post-rebuttal* patch — not REVIEW's already-applied one.
-    `export_patch` grows only once the implementer has taken its rebuttal and
-    extraction turns, so the two critic cells' applied patches are told
-    apart."""
+    container the rebuttal ran in. That cell's tree is rebuilt from the
+    *post-rebuttal* patch, not REVIEW's already-applied one.
+    `export_patch` grows only after the implementer's rebuttal turn, so the
+    two critic cells' applied patches are told apart."""
     import ast
     import inspect
 
@@ -8385,32 +8377,25 @@ def test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch(
     assert _rebuttal_turn_has_run(rebuttal_then_more) is True
 
     def _export_patch_stub_reads_the_prompt_not_a_count(test_func) -> bool:
-        """Whether `test_func`'s own `_export_patch` stub decides from
-        `_rebuttal_turn_has_run` and never by counting `cell.turns`, read
-        from its parsed source rather than from running it."""
+        """Whether `test_func`'s own `_export_patch` stub branches on exactly
+        `_rebuttal_turn_has_run(cell)` and never reads `.turns`, read from
+        its parsed source rather than from running it."""
         tree = ast.parse(inspect.getsource(test_func))
         stub = next(
             node
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef) and node.name == "_export_patch"
         )
-        calls_helper = any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_rebuttal_turn_has_run"
+        decides_by_helper = any(
+            isinstance(node, (ast.If, ast.IfExp))
+            and ast.unparse(node.test) == "_rebuttal_turn_has_run(cell)"
             for node in ast.walk(stub)
         )
-        counts_turns = any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "len"
-            and any(
-                isinstance(arg, ast.Attribute) and arg.attr == "turns"
-                for arg in node.args
-            )
+        reads_turns = any(
+            isinstance(node, ast.Attribute) and node.attr == "turns"
             for node in ast.walk(stub)
         )
-        return calls_helper and not counts_turns
+        return decides_by_helper and not reads_turns
 
     assert _export_patch_stub_reads_the_prompt_not_a_count(
         test_rebut_verdicts_read_a_tree_rebuilt_from_the_post_rebuttal_patch

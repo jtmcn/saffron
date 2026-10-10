@@ -373,7 +373,7 @@ def test_run_rebut_hands_the_verdict_session_the_diff_its_lens_reviewed():
 
 
 def test_the_critic_patch_exceptions_are_imported_from_worktree_alone():
-    """Backlog items 148/149: `CriticPatchRejected`, `CriticPatchEmpty` and
+    """Backlog item 149: `CriticPatchRejected`, `CriticPatchEmpty` and
     `CriticPatchUnrepresentable` live once, in `saffron.cell.worktree`, below
     both the supervisor and this phase. Every importer in `saffron/` and in
     `tests/` names that module. `session` and `rebut` bind its own classes
@@ -421,9 +421,9 @@ def test_the_critic_patch_exceptions_are_imported_from_worktree_alone():
                             bucket = module_scope if at_module_scope else function_scope
                             bucket[alias.name].append(record)
                 elif isinstance(node, ast.Attribute) and node.attr in names:
-                    value = node.value
-                    if isinstance(value, ast.Name) and value.id != "worktree":
-                        bad_attributes.append((path, value.id, node.attr))
+                    owner = ast.unparse(node.value)
+                    if owner.rsplit(".", 1)[-1] != "worktree":
+                        bad_attributes.append((path, owner, node.attr))
 
     for name in names:
         assert class_homes[name] == [worktree_path], (
