@@ -154,6 +154,90 @@ def test_the_probe_checks_the_ports_it_was_given(monkeypatch):
     assert "ThreadPoolExecutor" in seen["script"]
 
 
+def test_each_refusal_cell_up_can_reach_is_a_preflight_failure(monkeypatch):
+    """Each of the seven refusals `cell_up` can reach through preflight is a
+    `PreflightFailed`, the subclass `_drive_cell` closes honestly. A plain
+    `CellRuntimeError` from the runtime itself must still pass through both
+    callers unchanged."""
+    # The subclass relationship itself, not only the name: every
+    # `except runtime.CellRuntimeError` elsewhere must still catch this.
+    assert issubclass(preflight.PreflightFailed, runtime.CellRuntimeError)
+
+    def _no_lsof(*_a, **_k):
+        raise FileNotFoundError("lsof")
+
+    monkeypatch.setattr(subprocess, "run", _no_lsof)
+    with pytest.raises(preflight.PreflightFailed, match="could not be enumerated"):
+        preflight.host_probe_ports()
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "lsof: no listing"),
+    )
+    with pytest.raises(preflight.PreflightFailed, match="produced no listing"):
+        preflight.host_probe_ports()
+    monkeypatch.undo()
+
+    def _no_lan(*_a, **_k):
+        raise OSError("network unreachable")
+
+    monkeypatch.setattr(preflight.socket, "socket", _no_lan)
+    with pytest.raises(preflight.PreflightFailed, match="could not be determined"):
+        preflight._lan_address()
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(1, "", "boom"),
+    )
+    with pytest.raises(preflight.PreflightFailed, match="did not run"):
+        preflight.probe_host_bindings("img", "net", [4242])
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(0, "10.88.0.1:4242", ""),
+    )
+    with pytest.raises(preflight.PreflightFailed, match="N1 is not satisfied"):
+        preflight.assert_host_is_unreachable("img", "net", [4242])
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(0, "", ""),
+    )
+    with pytest.raises(preflight.PreflightFailed, match="did not run"):
+        preflight.assert_proxy_reaches_upstream("img", "net", "10.88.0.2")
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        preflight.runtime,
+        "run_ephemeral",
+        lambda *a, **k: runtime.Completed(
+            1, "", "Traceback (most recent call last):\nX: could not reach"
+        ),
+    )
+    with pytest.raises(preflight.PreflightFailed, match="could not reach"):
+        preflight.assert_proxy_reaches_upstream("img", "net", "10.88.0.2")
+    monkeypatch.undo()
+
+    def _dead_runtime(*_a, **_k):
+        raise runtime.CellRuntimeError("the runtime is dead")
+
+    monkeypatch.setattr(preflight.runtime, "run_ephemeral", _dead_runtime)
+    with pytest.raises(runtime.CellRuntimeError) as upstream_raised:
+        preflight.assert_proxy_reaches_upstream("img", "net", "10.88.0.2")
+    assert not isinstance(upstream_raised.value, preflight.PreflightFailed)
+    with pytest.raises(runtime.CellRuntimeError) as host_raised:
+        preflight.assert_host_is_unreachable("img", "net", [4242])
+    assert not isinstance(host_raised.value, preflight.PreflightFailed)
+
+
 def test_any_http_status_from_the_upstream_is_reachability(monkeypatch):
     """401 is the expected answer and it is a pass: what is established is the
     route, and no credential is being tested (DESIGN.md §5.1.1)."""
