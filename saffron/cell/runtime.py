@@ -620,3 +620,16 @@ def container_ip(name: str, subnet_prefix: str = SUBNET_PREFIX) -> str | None:
     if done.returncode != 0:
         return None
     return _first_address(done.stdout, subnet_prefix)
+
+
+def inspect_container(name: str, timeout_s: float = 30) -> Completed:
+    """A container's own state, for a caller that reads more than its address.
+
+    `container_ip` already runs this verb. This is the same call, returned
+    whole rather than reduced to one field."""
+    return _call([dialect().binary, "inspect", name], timeout_s=timeout_s)
+
+
+def container_logs(name: str, timeout_s: float = 30) -> Completed:
+    """A container's whole log, both streams, without raising."""
+    return _call([dialect().binary, "logs", name], timeout_s=timeout_s)

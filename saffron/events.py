@@ -352,7 +352,11 @@ class TaskOutcome:
 @dataclass(frozen=True, slots=True)
 class Teardown:
     """One fact from the cell's teardown — the patch export, a proxy denial or
-    failure, or a container/network/volume that would not go away."""
+    failure, or a container/network/volume that would not go away.
+
+    When the plan turn's first call was unserved, four more facts land here
+    too, read before the cell or the proxy goes down: proxy state, proxy
+    log, cell resolver, cell route (`SA-0235`)."""
 
     timestamp: float
     spec_id: str
@@ -965,6 +969,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("teardown: proxy DENIED", _S, Teardown),
     _Family("teardown: proxy FAILED", _S, Teardown),
     _Family("teardown: … survived", _S, Teardown),
+    _Family("teardown: proxy state/log, cell resolver/route", _S, Teardown),
     _Family("agent: (raw)", _IA, Agent),
     _Family("agent: (request digest)", _IA, Agent),
     _Family("agent: (event dict rendering)", _IC, Agent),
