@@ -713,10 +713,12 @@ def attempt_event(
 ) -> Attempt:
     """One `Attempt` line for a suite comparison, in GATE and REBUT alike.
 
-    `commits`/`spent_usd_est` are not the suite's to know — the implement turn
-    holds them — so both are `None`, the log's word for "not computed", never a
-    `0` a reader would take for a measurement (item 47).
-    """
+    `commits`/`spent_usd_est` are not the suite's to know, so both are
+    `None`, the log's word for "not computed" (item 47).
+
+    `gates` is non-empty only on the call `decision=None` makes, REBUT's
+    own, never a GATE suite's. Derived from `comparison.new_failures`,
+    never from a gate's status (b-66e82d)."""
     if comparison.aborted:
         return Attempt(
             timestamp=time.time(),
@@ -737,6 +739,11 @@ def attempt_event(
             spent_usd_est=None,
             drift=comparison.drift,
         )
+    names = (
+        ()
+        if decision is not None
+        else tuple(dict.fromkeys(nf.gate for nf in comparison.new_failures))
+    )
     return Attempt(
         timestamp=time.time(),
         spec_id=spec_id,
@@ -746,6 +753,7 @@ def attempt_event(
         spent_usd_est=None,
         new_failures=len(comparison.new_failures),
         decision=decision,
+        gates=names,
     )
 
 
@@ -2592,7 +2600,9 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
-        def _judge(attempt: int | None = None) -> SuiteComparison:
+        def _judge(
+            attempt: int, *, against: Literal["attempt", "rebuttal"]
+        ) -> SuiteComparison:
             nonlocal latest
             comparison = suite.against(tree, baseline)
             # Kept for the `CellOutcome`'s own gates, effective_risk and
@@ -2618,35 +2628,32 @@ def _drive_cell(
                     baseline=judged_baseline,
                     earned_risk=latest.effective_risk,
                 )
-            # `None` unless `repair_loop` is calling: `_rebut_gates` calls
-            # `_judge()` bare, since `against: "rebuttal"` has no owner yet (item 160).
-            if attempt is not None:
-                # `None`, not a measured `0`, for an aborted/drifted suite or
-                # a skipped/errored/advisory gate: none of those ran a count.
-                counted = (
-                    None
-                    if comparison.aborted or comparison.drift
-                    else Counter(nf.gate for nf in comparison.new_failures)
-                )
-                for result in latest.results:
-                    count = None
-                    if (
-                        counted is not None
-                        and result.status not in ("skip", "error")
-                        and result.gate not in latest.advisory_gates
-                    ):
-                        count = counted.get(result.gate, 0)
-                    emit(
-                        GateResultEvent(
-                            timestamp=time.time(),
-                            spec_id=spec.spec_id,
-                            gate=result.gate,
-                            status=result.status,
-                            against="attempt",
-                            attempt=attempt,
-                            new_failures=count,
-                        )
+            # `None`, not a measured `0`, for an aborted/drifted suite or
+            # a skipped/errored/advisory gate: none of those ran a count.
+            counted = (
+                None
+                if comparison.aborted or comparison.drift
+                else Counter(nf.gate for nf in comparison.new_failures)
+            )
+            for result in latest.results:
+                count = None
+                if (
+                    counted is not None
+                    and result.status not in ("skip", "error")
+                    and result.gate not in latest.advisory_gates
+                ):
+                    count = counted.get(result.gate, 0)
+                emit(
+                    GateResultEvent(
+                        timestamp=time.time(),
+                        spec_id=spec.spec_id,
+                        gate=result.gate,
+                        status=result.status,
+                        against=against,
+                        attempt=attempt,
+                        new_failures=count,
                     )
+                )
             return comparison
 
         def _repair(new: Sequence[NewFailure]) -> str | None:
@@ -2697,7 +2704,7 @@ def _drive_cell(
             return None
 
         outcome, attempts, new_failures = repair_loop(
-            judge=_judge,
+            judge=partial(_judge, against="attempt"),
             max_attempts=spec.max_attempts,
             repair=_repair,
             spec_id=spec.spec_id,
@@ -3094,9 +3101,9 @@ def _drive_cell(
                 """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
                 not re-enter the repair loop. An errored gate is still
                 infrastructure and still not charged to the task (§5.4)."""
-                comparison = _judge()
-                # The suite after the loop's last, so the gate count
-                # continues rather than restarting at 1 (item 47).
+                # The suite after the loop's last, so the count continues
+                # rather than restarting at 1, under its own "rebuttal" (item 47).
+                comparison = _judge(attempts + 1, against="rebuttal")
                 emit(
                     attempt_event(
                         comparison,

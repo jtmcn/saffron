@@ -212,9 +212,9 @@ class Attempt:
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
     mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
-    `list[str]` at the call site. Named apart from `Baseline.aborted`: that one
-    means the toolchain was already broken before an agent ran; these mean it
-    broke, or moved, between two suites of the same attempt."""
+    `list[str]` at the call site. `Baseline.aborted` instead means the toolchain
+    broke before an agent ran. `gates` holds each new-failing gate on REBUT's
+    red line only (b-66e82d), where `Baseline.gates` holds every gate."""
 
     timestamp: float
     spec_id: str
@@ -232,6 +232,7 @@ class Attempt:
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
     aborted: tuple[str, ...] = ()
     drift: tuple[str, ...] = ()
+    gates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,14 +794,20 @@ def describe(event: Event) -> str:
                 f"failures -> {event.decision}"
             )
         if event.new_failures is not None:
+            if event.gates:
+                names = ", ".join(event.gates)
+                return (
+                    f"gates: {event.new_failures} new failures after the "
+                    f"rebuttal — {names}"
+                )
             return f"gates: {event.new_failures} new failures after the rebuttal"
         if event.commits is None or event.spent_usd_est is None:
             return f"{event.phase}: attempt {event.attempt}"
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):
-        # One per gate at the baseline and each attempt's suite; the line omits
-        # `against`, `attempt` and `new_failures`, so only position tells them apart.
+        # One per gate at the baseline, each attempt and the re-run after REBUT. The line
+        # omits `against`, `attempt` and `new_failures`, so only position tells them apart.
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):
@@ -947,7 +954,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("gates: attempt N, K new failures -> decision", _RL, Attempt),
     _Family("gates: … errored — infrastructure", _RL, Attempt),
     _Family("gates: … distrusting the subtraction", _RL, Attempt),
-    _Family("gates: N new failures after the rebuttal", _S, Attempt),
+    _Family("gates: N new failures after the rebuttal (— gate, …)", _S, Attempt),
     _Family("gates: {gate}={status}", _S, GateResult),
     _Family("REPAIR: the session failed", _S, PhaseStart),
     _Family("REPAIR: uncommitted work checkpointed", _S, PhaseStart),

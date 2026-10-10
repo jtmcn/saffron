@@ -5540,6 +5540,273 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
     assert rebut.attempt == 3
 
 
+def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1):
+    """Drives one cell through REBUT with `use_default_emit=True`. Returns
+    its outcome plus every event `read_log` reads back from the real
+    `events.jsonl` under `tmp_path / "out" / "SY-1"`, which b-66e82d's
+    three witnesses share. `_ANCHORING_DIFF` throughout, since REBUT needs
+    REVIEW's own blocker to anchor to the diff. Build `turns` with
+    `_through_rebut` when the loop settles in one attempt, or by hand
+    otherwise, as the gate count test above already does.
+    """
+    from saffron.events import read_log
+
+    cell = _stub_the_runtime(monkeypatch, suites=suites, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=turns,
+        use_default_emit=True,
+    )
+    return outcome, list(read_log(tmp_path / "out" / "SY-1"))
+
+
+def test_a_green_rebuttal_re_run_logs_each_gate_result_against_the_rebuttal(
+    monkeypatch, tmp_path
+):
+    """b-66e82d, criterion 1: a green re-run after REBUT writes one
+    `GateResult` event per gate, each `against="rebuttal"`. Each carries
+    the REBUT `Attempt` line's own number, not the loop's.
+
+    Counts follow the repair loop's own rule. A passing blocking gate
+    (`committed`) carries a measured zero, as does one failing identically
+    at base (`types`). An advisory gate (`size`) and the skipped ones
+    (`integrity`, `census`, `criteria`) carry none. The green line itself
+    stays byte-identical, naming no gate."""
+    from saffron.events import GateResult as GateResultEvent
+
+    f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
+    base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
+    suites = (base, base + _results(f_lint), base, base)
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path,
+        suites=suites,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(),  # the repair turn after attempt 1
+            _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn("Fixed it."),
+            _turn(structured_output=_CLAIMED_FIX),
+            # A green re-run reaches the critic's own verdict session.
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed it"}
+                    ]
+                }
+            ),
+        ],
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    gate_attempt_positions = [
+        i for i, e in enumerate(events) if isinstance(e, Attempt) and e.phase == "GATE"
+    ]
+    (rebut_position,) = [
+        i for i, e in enumerate(events) if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    rebut_attempt = events[rebut_position]
+    assert [events[i].attempt for i in gate_attempt_positions] == [1, 2]
+    assert all(events[i].gates == () for i in gate_attempt_positions)
+    assert rebut_attempt.attempt == 3
+    assert rebut_attempt.new_failures == 0
+    assert rebut_attempt.gates == ()
+    assert describe(rebut_attempt) == "gates: 0 new failures after the rebuttal"
+
+    rebuttal_positions = [
+        i
+        for i, e in enumerate(events)
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    ]
+    assert rebuttal_positions
+    assert max(gate_attempt_positions) < min(rebuttal_positions)
+    assert max(rebuttal_positions) < rebut_position
+
+    rebuttal_results = [events[i] for i in rebuttal_positions]
+    attempt_results = [
+        e for e in events if isinstance(e, GateResultEvent) and e.against == "attempt"
+    ]
+    assert all(e.attempt == 3 for e in rebuttal_results)
+    assert all(e.attempt != 3 for e in attempt_results)
+
+    by_gate = {e.gate: e for e in rebuttal_results}
+    assert (by_gate["types"].status, by_gate["types"].new_failures) == ("fail", 0)
+    assert (by_gate["committed"].status, by_gate["committed"].new_failures) == (
+        "pass",
+        0,
+    )
+    for skipped in ("integrity", "census", "criteria"):
+        assert by_gate[skipped].new_failures is None
+    assert by_gate["size"].status == "pass" and by_gate["size"].new_failures is None
+
+
+def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_path):
+    """b-66e82d, criterion 2: a red re-run after REBUT names, on its own
+    REBUT `Attempt` line, each gate that contributed a new failure, once.
+    That is `lint` (two failures) and `dead` (one). Never `types` (one
+    failure, identical to base) nor `committed` (passing). The count still
+    leads the names, and each failing gate's own event carries its own
+    count, not the suite's total of three. A second drive fails `lint` alone,
+    SA-0118's own one-gate case.
+    """
+    from saffron.events import GateResult as GateResultEvent
+
+    f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
+    base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
+    rebuttal_suite = base + [
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="l 1",
+            failures=[
+                f_lint,
+                Failure(file="c.py", code="E502", message="also too long"),
+            ],
+        ),
+        GateResult(
+            gate="dead",
+            status="fail",
+            tool="d 1",
+            failures=[Failure(file="d.py", code="V1", message="unused")],
+        ),
+    ]
+    suites = (base, base, rebuttal_suite)
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path,
+        suites=suites,
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert outcome.state == "EXHAUSTED"
+
+    (rebut_attempt,) = [
+        e for e in events if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    assert rebut_attempt.new_failures == 3
+    assert list(rebut_attempt.gates) == ["lint", "dead"]
+    assert describe(rebut_attempt) == (
+        "gates: 3 new failures after the rebuttal — lint, dead"
+    )
+
+    rebuttal_results = {
+        e.gate: e
+        for e in events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    }
+    assert (rebuttal_results["lint"].status, rebuttal_results["lint"].new_failures) == (
+        "fail",
+        2,
+    )
+    assert (rebuttal_results["dead"].status, rebuttal_results["dead"].new_failures) == (
+        "fail",
+        1,
+    )
+    assert (
+        rebuttal_results["types"].status,
+        rebuttal_results["types"].new_failures,
+    ) == ("fail", 0)
+    assert (
+        rebuttal_results["committed"].status,
+        rebuttal_results["committed"].new_failures,
+    ) == ("pass", 0)
+
+    one_outcome, one_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "one",
+        suites=(base, base, base + _results(f_lint)),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert one_outcome.state == "EXHAUSTED"
+    (one_rebut,) = [
+        e for e in one_events if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    assert one_rebut.gates == ("lint",)
+    assert describe(one_rebut) == "gates: 1 new failures after the rebuttal — lint"
+    one_results = {
+        e.gate: (e.status, e.new_failures)
+        for e in one_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    }
+    assert one_results["lint"] == ("fail", 1)
+    assert one_results["types"] == ("fail", 0)
+    assert one_results["committed"] == ("pass", 0)
+
+
+def test_an_errored_or_drifted_rebuttal_re_run_logs_each_gate_with_no_count(
+    monkeypatch, tmp_path
+):
+    """b-66e82d, criterion 3: a re-run after REBUT whose suite aborted, or
+    drifted, still logs one `GateResult` event per gate, `against=
+    "rebuttal"`, with no count anywhere. The task ends `GATE_ERROR` either
+    way. An errored gate keeps its own status, never `fail`.
+
+    A drifted suite's events name exactly the gates in the head's own
+    results. `extra`, which the baseline never ran, is one of them.
+    """
+    from saffron.events import GateResult as GateResultEvent
+
+    core = {"scope", "integrity", "size", "committed", "census", "criteria"}
+
+    errored_suite = [
+        GateResult(gate="tests", status="error", summary="toolchain missing"),
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="l 1",
+            failures=[Failure(file="a.py", code="E501", message="too long")],
+        ),
+    ]
+    aborted_outcome, aborted_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "aborted",
+        suites=([], [], errored_suite),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert aborted_outcome.state == "GATE_ERROR"
+    aborted_results = [
+        e
+        for e in aborted_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    ]
+    aborted_by_gate = {e.gate: e for e in aborted_results}
+    assert aborted_by_gate["tests"].status == "error"
+    assert aborted_by_gate["lint"].status == "fail"
+    assert all(e.new_failures is None for e in aborted_results)
+    assert {e.gate for e in aborted_results} == core | {"tests", "lint"}
+
+    base_suite = [GateResult(gate="tests", status="pass", tool="pytest 1")]
+    drift_suite = [
+        GateResult(gate="tests", status="skip"),
+        GateResult(gate="extra", status="pass", tool="x 1"),
+    ]
+    drift_outcome, drift_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "drift",
+        suites=(base_suite, base_suite, drift_suite),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert drift_outcome.state == "GATE_ERROR"
+    drift_results = [
+        e
+        for e in drift_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    ]
+    assert all(e.new_failures is None for e in drift_results)
+    drift_by_gate = {e.gate: e for e in drift_results}
+    assert drift_by_gate["tests"].status == "skip"
+    assert drift_by_gate["extra"].status == "pass"
+    assert {e.gate for e in drift_results} == core | {"tests", "extra"}
+
+
 def _gate_result_events(monkeypatch, tmp_path, *, cell, turns, **kwargs):
     """Drives one cell; returns its outcome plus every `events.GateResult` it
     emitted, in order — what SA-0102's three witnesses share. Imported here,
@@ -5579,11 +5846,13 @@ def test_each_baseline_gate_result_reaches_the_log_as_its_own_event(
 def test_each_attempts_gate_results_carry_their_own_attempt_number(
     monkeypatch, tmp_path
 ):
-    """AC2, folded into one drive through REBUT: `types` fails identically at
-    baseline and both attempts, cancelling to a measured zero; `lint`, new
-    only at attempt 1, carries a 1; attempt 1's set survives attempt 2's
-    being written; and the post-rebuttal re-run emits nothing — no borrowed
-    attempt 3."""
+    """AC2, folded into one drive that ends at `REVIEWING`, before REBUT.
+
+    `types` fails identically at baseline and both attempts, cancelling to
+    a measured zero. `lint`, new only at attempt 1, carries a 1. Attempt
+    1's set survives attempt 2's being written. The drive never reaches the
+    re-run after REBUT, so criterion 1's witness holds the rebuttal set.
+    """
     f_types = Failure(file="a.py", code="T1", message="bad type")
     f_lint = Failure(file="b.py", code="E501", message="too long")
     base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
