@@ -310,7 +310,7 @@ class Agent:
     event as `agent: (bounded, N chars) <line, cut again to 160 for the terminal>` — the
     same truncation the raw shape gets, on top of the one already applied for storage. A
     bounded event's own counts and `model` survive separately in `usage`, kept verbatim.
-    `usage` is `None` when none were carried, or keeping them would stay too large."""
+    `usage` is `None` when none were carried, or their `json.dumps` exceeds `_USAGE_BOUND_CHARS`."""
 
     timestamp: float
     spec_id: str
@@ -460,10 +460,8 @@ class EventLog:
                         original_chars=len(serialized),
                         usage=_bounded_usage(event.event),
                     )
-            # Both reads of the cell's dict sit in this try. `json.dumps` above
-            # handles nesting 5000 deep; `asdict` raises RecursionError at 1000,
-            # so an event too deep to copy is dropped — unless it was bounded,
-            # in which case `asdict` copies a string and the cut event is kept.
+            # Every read of the cell's dict sits in this try. `asdict` drops an event 1000 deep,
+            # but a bounded one copies a string and a `usage` held to `_USAGE_BOUND_CHARS`.
             payload = {"kind": type(event).__name__, **asdict(event)}
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:

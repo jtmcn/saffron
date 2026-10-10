@@ -1002,7 +1002,7 @@ def test_carried_counts_are_held_to_their_own_bound(tmp_path):
     """The kept keys are held to their own bound: 512, separate from
     `BOUND_CHARS`. An oversized `usage` is dropped rather than reaching
     `asdict`'s own deepcopy, which raises past 1000 levels of nesting. A
-    list nested 256 deep already serializes to 512 characters, measured."""
+    list nested 256 deep already serializes to 512 characters, computed."""
     from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
 
     def model_of(total: int) -> str:
