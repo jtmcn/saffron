@@ -2003,6 +2003,10 @@ def _drive_cell(
     # even when it fires before that assignment runs.
     spent = 0.0
 
+    # Bound beside `spent`, for the same reason: the latest suite number
+    # `repair_loop` judged, read by `except RateLimited` below (b-60732c).
+    suite_attempt = 0
+
     # Set only when the plan turn's first call was served nothing (SA-0235).
     # Read in the finally, while the cell and the proxy are still up.
     plan_first_call_unserved = False
@@ -2583,12 +2587,16 @@ def _drive_cell(
         def _judge(
             attempt: int, *, against: Literal["attempt", "rebuttal"]
         ) -> SuiteComparison:
-            nonlocal latest
+            nonlocal latest, suite_attempt
             comparison = suite.against(tree, baseline)
             # Kept for the `CellOutcome`'s own gates, effective_risk and
             # advisory_gates. Not for the critic: its table comes from the
             # gate-only cell now, never the implementer's own run.
             latest = comparison.run
+            if against == "attempt":
+                # Counts the loop's suites only, unlike CONTEXT.md's Attempt
+                # entry, so REBUT's "rebuttal" re-run never moves this.
+                suite_attempt = attempt
             # The turn that just closed, which is the repair turn under §5.4's
             # loop — the join the no-progress rule and §8 need, and the whole
             # point of not collapsing every attempt onto the task. Under §5.6
@@ -3274,6 +3282,7 @@ def _drive_cell(
             run_id=run_id,
             task_dir=task_dir,
             spent_usd=spent_read_back,
+            attempts=suite_attempt,
             effective_risk=latest.effective_risk,
             advisory_gates=sorted(latest.advisory_gates),
             resets_at=resets_at,
