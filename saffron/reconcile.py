@@ -37,9 +37,8 @@ def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 
-# Worth asking about only while undecided. `MERGED`/`REJECTED` are excluded
-# so "never moves backwards" holds even once a merged branch is deleted and
-# `gh pr view` starts erroring on it.
+# Undecided states. An `EXHAUSTED` row is asked too, below, and moves only on a merge.
+# `MERGED`/`REJECTED` stay out, so a row never moves backwards once gh errors on it.
 PR_PENDING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "CHANGES_REQUESTED"})
 
 # §4.2.1: a corpse only at a batch scan's own premise (one batch runs at a
@@ -173,7 +172,8 @@ def reconcile(
         if pr is None:
             result.unasked.append(row["task_id"])
             continue
-        # Before the state check: a merge is the last time this row is asked.
+        # Before the state check, so a merge still reports a moved head.
+        # A non-merged `EXHAUSTED` row is asked every scan, so it can report each time.
         head, pushed = pr.get("headRefOid"), row["pushed_sha"]
         if isinstance(head, str) and head and pushed and head != pushed:
             result.head_moved.append(HeadMoved(row["task_id"], pushed, head))

@@ -626,9 +626,9 @@ def test_a_merged_draft_moves_its_exhausted_task_to_merged(ledger):
 
 def test_an_exhausted_task_moves_on_no_answer_but_a_merge(ledger):
     """Every other answer about an `EXHAUSTED` row's pull request leaves it
-    `EXHAUSTED`. The nine rows here drive every answer `_pr_status` can
-    give: the six it reads into a state, and the three it turns into
-    `None`."""
+    `EXHAUSTED`. The nine rows with a pull request drive every answer
+    `_pr_status` can give: the six it returns as an object, and the three
+    it turns into `None`."""
     repo_id = _repo(ledger)
 
     def _exhausted(spec_id, url):
