@@ -212,9 +212,9 @@ class Attempt:
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
     mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
-    `list[str]` at the call site. Named apart from `Baseline.aborted`: that one
-    means the toolchain was already broken before an agent ran; these mean it
-    broke, or moved, between two suites of the same attempt."""
+    `list[str]` at the call site. `gates` names each gate that contributed
+    a new failure, once, on REBUT's own red line only (b-66e82d): a GATE
+    line's own per-gate events already say which gate failed there."""
 
     timestamp: float
     spec_id: str
@@ -232,6 +232,7 @@ class Attempt:
     decision: Literal["green", "no-progress", "exhausted", "repair"] | None = None
     aborted: tuple[str, ...] = ()
     drift: tuple[str, ...] = ()
+    gates: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,6 +794,12 @@ def describe(event: Event) -> str:
                 f"failures -> {event.decision}"
             )
         if event.new_failures is not None:
+            if event.gates:
+                names = ", ".join(event.gates)
+                return (
+                    f"gates: {event.new_failures} new failures after the "
+                    f"rebuttal — {names}"
+                )
             return f"gates: {event.new_failures} new failures after the rebuttal"
         if event.commits is None or event.spent_usd_est is None:
             return f"{event.phase}: attempt {event.attempt}"
