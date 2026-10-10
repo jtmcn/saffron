@@ -47,8 +47,8 @@ acceptance:
       named in the route section, and no other entry is. The nineteen file
       names the record shows refused are each named as the whole entry, one
       directory down and two down. Its five directory names are each named
-      as the whole entry, as a first component, as a second and as a middle
-      one. Each is driven beside "src/**", which the section must not name.
+      as the whole entry, as the last of two components, as a first
+      component, as a second and as a middle one. Each is driven beside "src/**", which the section must not name.
       The witness spells all twenty-four names itself, from the record's
       tables, and drives each one in every one of those positions.
     witness: tests/test_context.py::test_every_measured_unwritable_name_is_named_at_any_depth
@@ -56,6 +56,7 @@ acceptance:
       - A set missing one of the names measured at the root only, such as "lefthook.yaml".
       - A match on the whole entry alone, so "sub/.gitmodules" is not named.
       - A match on the first component alone, so "sub/.vscode/x.md" is not named.
+      - A directory name matched as a last component only when it is the whole entry, so "sub/.claude" is not named.
       - A section that names every `touches` entry, so "src/**" is named too.
   - claim: >-
       An entry the record shows written gets no route section at all, each
@@ -74,9 +75,11 @@ acceptance:
       - An entry skipped whole when any component holds a glob character, so ".claude/**" is not named.
   - claim: >-
       IMPLEMENT's system prompt, as the cell builds it, names each `touches`
-      entry in the measured set, in one section. The section
-      says the Write and Edit tools and shell redirects are refused on
-      them, and says to write each with a python3 script run through Bash.
+      entry in the measured set, in one section. The section says the
+      Write tool is refused on them, and that Edit and shell redirects
+      were refused on one of them. It says to write each with a python3
+      script run through Bash. `constraints_block`, which the end review
+      also reads, carries no route for those same `touches`.
       A spec with no such entry gets a prompt byte for byte equal to the
       one `build_system_prompt` assembles from today's four values. The
       witness drives two cells. One touches "src/**", "tests/**", two near
@@ -89,6 +92,7 @@ acceptance:
       - A separator added even when no entry matches, so a spec with none gets a changed prompt.
       - A section that never names shell redirects.
       - A section that never names python3 or Bash.
+      - The section appended inside `constraints_block`, so the end review's prompt carries the route too.
   - claim: >-
       Core records the SDK version the set was measured at, and it equals
       the one `ARG SDK_VERSION` line in `images/cell-base.python.Dockerfile`.
@@ -140,8 +144,10 @@ and the protected list into the `{constraints}` value
 ## Problem
 
 Name, in IMPLEMENT's prompt, each `touches` entry the file tools refuse.
-Say the Write and Edit tools and shell redirects are refused on it. Say
-to write it with a python3 script run through Bash. A spec with no such
+Say the Write tool is refused on it, as the record measured over the
+set. Say Edit and shell redirects were refused on one of them, as
+`SA-0255` saw in a cell. Say to write it with a python3 script run
+through Bash. A spec with no such
 entry keeps today's prompt exactly.
 
 Build the section in `saffron/agents/context.py` from the spec's
@@ -172,7 +178,9 @@ component holding a glob character is skipped.
   no path under `.git/`, so no diff carries the first. The second names
   no single component the refusal keys on, since `.config/` alone was never
   tried. Leave both out of the set.
-- **Edit.** The record measured Write alone over the whole list.
+- **Edit over the whole set.** The record measured Write alone over the
+  whole list. `SA-0255`'s cell saw Edit and shell redirects refused on
+  one path, `.pre-commit-config.yaml`.
 - **`DESIGN.md` and `CONTEXT.md`.** §5.3 is edited by hand with this spec.
 
 ## Notes for the agent
@@ -211,6 +219,6 @@ skipped as undecidable.
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
-**Size.** A prototype with every witness measured 556 tokens with
+**Size.** A prototype with every witness measured 583 tokens with
 `size_gate`'s counter, against the `feature` ceiling of 3000.
 `estimated_lines` is that count over four, plus a margin for comments.
