@@ -655,9 +655,18 @@ def run_task(
             # Only in the exhausted mode: a READY_FOR_REVIEW cell's error
             # still reaches cli.main (exit 2), as it always has.
             if not exhausted_package:
+                # The cell's own write stopped short of this state
+                # (b-dce9a4), so the raise path writes it here instead.
+                ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
                 raise
             result = None
             package_error_note = str(exc)
+        except BaseException:
+            # Any other raise, `KeyboardInterrupt` included, leaves the
+            # same row in flight unless this writes it (b-dce9a4).
+            if not exhausted_package:
+                ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+            raise
         else:
             print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
             outcome.state = result.state

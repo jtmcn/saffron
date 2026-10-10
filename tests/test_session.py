@@ -2848,7 +2848,10 @@ def test_a_cell_given_a_task_runs_on_it_and_its_run_and_mints_neither(
         r["task_id"]: r["state"]
         for r in ledger4._db.execute("SELECT task_id, state FROM tasks").fetchall()
     }
-    assert states == {older_task: outcome4.state, minted_task: outcome3.state}
+    # Both cells end READY_FOR_REVIEW, so PACKAGE's own write is the row's
+    # last word and the cell's own leaves REVIEWING standing (b-dce9a4).
+    assert (outcome3.state, outcome4.state) == ("READY_FOR_REVIEW", "READY_FOR_REVIEW")
+    assert states == {older_task: "REVIEWING", minted_task: "REVIEWING"}
     assert states[older_task] != "GATE_ERROR"
     run_count = ledger4._db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()[0]
     assert run_count == 2
@@ -4509,6 +4512,105 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     )
     assert outcome6.state == "EXHAUSTED"
     assert outcome6.rebut_result is not None
+
+
+def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
+    monkeypatch, tmp_path
+):
+    """b-dce9a4: a resumed task carries a stale `CHANGES_REQUESTED` pull
+    request into its next cell. A cell that ends `READY_FOR_REVIEW` leaves
+    the row at `REVIEWING` or `REBUTTING` instead, whether REVIEW found no
+    blocker or REBUT's verdict withdrew or confirmed it. `saffron reconcile`
+    run before PACKAGE writes then finds nothing in `PR_PENDING_STATES` to
+    requeue."""
+    from saffron import cli, scheduler
+    from saffron.reconcile import PR_PENDING_STATES
+
+    url = "https://example.invalid/r.git"
+
+    def _seed(case):
+        ledger = Ledger(case / "ledger.db")
+        repo_id = ledger.upsert_repo("r", url, "/m.git", None)
+        run_id = ledger.create_run(repo_id, "a" * 40)
+        task_id = ledger.create_task(run_id, "SY-1", "a" * 64, branch="saffron/SY-1")
+        ledger.set_task_package(
+            task_id, "READY_FOR_REVIEW", "saffron/SY-1", "c" * 40, f"{url}/pull/1"
+        )
+        ledger.set_task_state(task_id, "CHANGES_REQUESTED")
+        ledger.close()
+        return task_id
+
+    def _state(case, task_id):
+        ledger = Ledger(case / "ledger.db")
+        row = ledger._db.execute(
+            "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        ledger.close()
+        return row["state"]
+
+    def _reconcile(case):
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            lambda argv: subprocess.CompletedProcess(
+                argv, 0, '{"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"}', ""
+            ),
+        )
+        monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: url)
+        assert cli.main(["--home", str(case), "reconcile", "--repo", str(case)]) == 0
+
+    review_case = tmp_path / "review"
+    task_id = _seed(review_case)
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        review_case,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=task_id),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    ledger.close()
+    _reconcile(review_case)
+    assert _state(review_case, task_id) == "REVIEWING"
+
+    # The two REBUT paths: a withdrawn verdict and a confirmed one each end
+    # READY_FOR_REVIEW too, through REBUT's own row instead.
+    for name, verdict in (("withdraw", "withdrawn"), ("confirm", "confirmed")):
+        case = tmp_path / name
+        rebut_task_id = _seed(case)
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        _rebuttable(monkeypatch, cell, rebut_commits=1)
+        outcome, ledger = _drive(
+            monkeypatch,
+            case,
+            cell=cell,
+            turns=_through_rebut(
+                _turn("It is intentional."),
+                _turn(
+                    structured_output={
+                        "rebuttals": [
+                            {"finding": 1, "action": "argued", "argument": "by design"}
+                        ]
+                    }
+                ),
+                _turn(
+                    structured_output={
+                        "verdicts": [
+                            {"finding": 1, "verdict": verdict, "reason": "fair"}
+                        ]
+                    }
+                ),
+            ),
+            spec=_spec(task_id=rebut_task_id),
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        ledger.close()
+        _reconcile(case)
+        assert _state(case, rebut_task_id) == "REBUTTING"
+
+    assert not ({"REVIEWING", "REBUTTING"} & PR_PENDING_STATES)
+    assert not ({"REVIEWING", "REBUTTING"} & scheduler.REQUEUE_STATES)
 
 
 def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_path):

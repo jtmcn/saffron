@@ -816,9 +816,13 @@ class Ledger:
             )
             return None
         if fact.kind == "task_package":
+            # Rolls the spend up the same way `task_state` does: PACKAGE's
+            # own write is now the only one a returning task gets (b-dce9a4).
             self._db.execute(
                 "UPDATE tasks SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?, "
-                "added = ?, removed = ?, updated_at = ? WHERE task_id = ?",
+                "added = ?, removed = ?, updated_at = ?, "
+                "spent_usd_est = (SELECT COALESCE(SUM(cost_usd_est), 0.0) "
+                "FROM attempts WHERE task_id = ?) WHERE task_id = ?",
                 (
                     payload["state"],
                     payload["branch"],
@@ -827,6 +831,7 @@ class Ledger:
                     payload.get("added"),
                     payload.get("removed"),
                     at,
+                    task_id,
                     task_id,
                 ),
             )
@@ -1426,8 +1431,9 @@ class Ledger:
 
     def set_task_state(self, task_id: int, state: str) -> None:
         """Also rolls the task's spend up from its attempts. Derived rather than
-        passed, so the figure can never disagree with the rows it is made of —
-        and every terminal path already calls this, so none can forget it."""
+        passed, so the figure can never disagree with the rows it is made of.
+        A `READY_FOR_REVIEW` outcome's own write lands through
+        `set_task_package` instead (b-dce9a4)."""
         self._commit_and_append(
             self._build_fact(task_id, "task_state", {"state": state})
         )
@@ -1557,14 +1563,11 @@ class Ledger:
         removed: int | None = None,
     ) -> None:
         """PACKAGE's own write-back, after `finish_run` (§5.7). The state it
-        sets — `READY_FOR_REVIEW`, or `MERGE_FAILED` on the four paths where
-        the push or the pull request could not be made — is not the last word
-        on the task: `reconcile` (`saffron/reconcile.py`) revises a
-        `READY_FOR_REVIEW` row once GitHub records what the operator decided.
-        `MERGE_FAILED` is not revised — it is not in `PR_PENDING_STATES`,
-        because it reaches the operator with no pull request to ask about.
-        `added`/`removed` are `None` on the four paths that return before
-        `diff_stat` ran."""
+        sets, `READY_FOR_REVIEW` or `MERGE_FAILED`, is not the task's last
+        word: `reconcile` revises a `READY_FOR_REVIEW` row once GitHub
+        decides. `added`/`removed` are `None` on the paths that return
+        before `diff_stat` ran. Also rolls the spend up from the task's
+        attempts, as `set_task_state` does (b-dce9a4)."""
         fact = self._build_fact(
             task_id,
             "task_package",
