@@ -2628,9 +2628,6 @@ def _drive_cell(
                     baseline=judged_baseline,
                     earned_risk=latest.effective_risk,
                 )
-            # `repair_loop` passes "attempt" via `partial`, `_rebut_gates`
-            # "rebuttal" directly: every caller owns a number now (item 160).
-
             # `None`, not a measured `0`, for an aborted/drifted suite or
             # a skipped/errored/advisory gate: none of those ran a count.
             counted = (

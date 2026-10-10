@@ -212,9 +212,9 @@ class Attempt:
 
     `aborted`/`drift` are the loop's own two ways of distrusting a suite
     mid-attempt — `suite.aborted_gates`/`suite_drift`, both already
-    `list[str]` at the call site. `gates` names each gate that contributed
-    a new failure, once, on REBUT's own red line only (b-66e82d): a GATE
-    line's own per-gate events already say which gate failed there."""
+    `list[str]` at the call site. `Baseline.aborted` instead means the toolchain
+    broke before an agent ran. `gates` holds each new-failing gate on REBUT's
+    red line only (b-66e82d), where `Baseline.gates` holds every gate."""
 
     timestamp: float
     spec_id: str
@@ -806,8 +806,8 @@ def describe(event: Event) -> str:
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"
 
     if isinstance(event, GateResult):
-        # One per gate at the baseline and each attempt's suite; the line omits
-        # `against`, `attempt` and `new_failures`, so only position tells them apart.
+        # One per gate at the baseline, each attempt and the re-run after REBUT. The line
+        # omits `against`, `attempt` and `new_failures`, so only position tells them apart.
         return f"gates: {event.gate}={event.status}"
 
     if isinstance(event, Budget):
@@ -954,7 +954,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("gates: attempt N, K new failures -> decision", _RL, Attempt),
     _Family("gates: … errored — infrastructure", _RL, Attempt),
     _Family("gates: … distrusting the subtraction", _RL, Attempt),
-    _Family("gates: N new failures after the rebuttal", _S, Attempt),
+    _Family("gates: N new failures after the rebuttal (— gate, …)", _S, Attempt),
     _Family("gates: {gate}={status}", _S, GateResult),
     _Family("REPAIR: the session failed", _S, PhaseStart),
     _Family("REPAIR: uncommitted work checkpointed", _S, PhaseStart),

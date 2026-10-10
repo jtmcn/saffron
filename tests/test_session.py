@@ -5615,6 +5615,7 @@ def test_a_green_rebuttal_re_run_logs_each_gate_result_against_the_rebuttal(
     ]
     rebut_attempt = events[rebut_position]
     assert [events[i].attempt for i in gate_attempt_positions] == [1, 2]
+    assert all(events[i].gates == () for i in gate_attempt_positions)
     assert rebut_attempt.attempt == 3
     assert rebut_attempt.new_failures == 0
     assert rebut_attempt.gates == ()
@@ -5653,11 +5654,13 @@ def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_p
     That is `lint` (two failures) and `dead` (one). Never `types` (one
     failure, identical to base) nor `committed` (passing). The count still
     leads the names, and each failing gate's own event carries its own
-    count, not the suite's total of three.
+    count, not the suite's total of three. A second drive fails `lint` alone,
+    SA-0118's own one-gate case.
     """
     from saffron.events import GateResult as GateResultEvent
 
     f_types = Failure(file="a.py", code="T1", message="bad type")
+    f_lint = Failure(file="b.py", code="E501", message="too long")
     base = [GateResult(gate="types", status="fail", tool="t 1", failures=[f_types])]
     rebuttal_suite = base + [
         GateResult(
@@ -5665,7 +5668,7 @@ def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_p
             status="fail",
             tool="l 1",
             failures=[
-                Failure(file="b.py", code="E501", message="too long"),
+                f_lint,
                 Failure(file="c.py", code="E502", message="also too long"),
             ],
         ),
@@ -5715,6 +5718,27 @@ def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_p
         rebuttal_results["committed"].status,
         rebuttal_results["committed"].new_failures,
     ) == ("pass", 0)
+
+    one_outcome, one_events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "one",
+        suites=(base, base, base + _results(f_lint)),
+        turns=_through_rebut(_turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)),
+    )
+    assert one_outcome.state == "EXHAUSTED"
+    (one_rebut,) = [
+        e for e in one_events if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    assert one_rebut.gates == ("lint",)
+    assert describe(one_rebut) == "gates: 1 new failures after the rebuttal — lint"
+    one_results = {
+        e.gate: (e.status, e.new_failures)
+        for e in one_events
+        if isinstance(e, GateResultEvent) and e.against == "rebuttal"
+    }
+    assert one_results["lint"] == ("fail", 1)
+    assert one_results["types"] == ("fail", 0)
+    assert one_results["committed"] == ("pass", 0)
 
 
 def test_an_errored_or_drifted_rebuttal_re_run_logs_each_gate_with_no_count(
@@ -5822,13 +5846,12 @@ def test_each_baseline_gate_result_reaches_the_log_as_its_own_event(
 def test_each_attempts_gate_results_carry_their_own_attempt_number(
     monkeypatch, tmp_path
 ):
-    """AC2, folded into one drive through REBUT.
+    """AC2, folded into one drive that ends at `REVIEWING`, before REBUT.
 
     `types` fails identically at baseline and both attempts, cancelling to
     a measured zero. `lint`, new only at attempt 1, carries a 1. Attempt
-    1's set survives attempt 2's being written. The post-rebuttal re-run
-    writes its own `against="rebuttal"` events instead, each carrying its
-    own number rather than the loop's 1 or 2 (b-66e82d).
+    1's set survives attempt 2's being written. The drive never reaches the
+    re-run after REBUT, so criterion 1's witness holds the rebuttal set.
     """
     f_types = Failure(file="a.py", code="T1", message="bad type")
     f_lint = Failure(file="b.py", code="E501", message="too long")
