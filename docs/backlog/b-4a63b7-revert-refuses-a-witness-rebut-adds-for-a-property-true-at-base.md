@@ -36,3 +36,8 @@ it writes one. A witness drives both halves.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
+- 2026-10-10: deferred by the operator. The operator chose the arm where `revert`
+  exempts a test REBUT added to kill a probe. A spec writer stopped at step 1.
+  REBUT records no kill, because no probe runs after REBUT (ADR 3). `revert` also
+  judges before any verdict session reads the rebuttal (`rebut.py:717`). So that
+  arm needs a probe run after REBUT and before `rerun_gates`, which amends ADR 3.
