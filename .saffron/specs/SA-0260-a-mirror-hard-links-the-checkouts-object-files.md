@@ -3,7 +3,7 @@ id: SA-0260
 title: A mirror cloned from the local checkout hard-links its object files, so it shares their inodes
 type: bug
 priority: 1
-estimated_lines: 46
+estimated_lines: 51
 estimate_measured: true
 touches:
   - saffron/repos/mirror.py
@@ -49,7 +49,8 @@ acceptance:
       `ensure_mirror` creates a mirror that shares no object file with the
       local checkout it clones. No regular file in the mirror's object store
       has the device and inode of a regular file in the checkout's object
-      store. The witness drives the checkout's loose objects and its
+      store, and the mirror borrows none of the checkout's objects through
+      an alternates file. The witness drives the checkout's loose objects and its
       pack files, and the origin passed as a `Path` and as a `str`. Each
       mirror holds every ref and every commit the checkout holds, a ref that
       names no branch included. It still does, and still shares no
@@ -66,6 +67,7 @@ acceptance:
       - The clone adds `--depth 1`, so the mirror lacks the checkout's older commits.
       - The mirror is a `--bare` clone, so it lacks the ref that names no branch.
       - The function repacks the operator's checkout before a local clone, which then links the new pack.
+      - The clone passes `--shared` in place of the flag above, so the mirror copies no object file and reads the checkout's through `objects/info/alternates`, a path the seed's read-only mount cannot reach.
       - The mirror is built by `git init --bare` and a fetch from the checkout's path, so it has no `origin` remote and the second call's fetch raises.
 ---
 
@@ -153,12 +155,14 @@ import, which exists at base.
    a `Path` and once as `str` of it.
 4. For each mirror, collect `(st_dev, st_ino)` of every regular file under
    its `objects/`, recursively. Assert that set is disjoint from the same
-   set over the checkout's `.git/objects`. Assert the mirror's
+   set over the checkout's `.git/objects`. Collect both sets after each
+   `ensure_mirror` call returns, never once before the calls. Assert the
+   mirror has no `objects/info/alternates` file. Assert the mirror's
    `git for-each-ref --format='%(refname) %(objectname)'` output equals the
    checkout's, and so does the sorted output of `git rev-list --all`.
 5. Commit one more new file in the checkout. Call `ensure_mirror` again on
    each mirror path with the checkout's `Path`, which takes the fetch branch.
-   Repeat both assertions of step 4.
+   Repeat every assertion of step 4, with both sets collected afresh.
 
 At base the first assertion of step 4 fails on the `Path` mirror. Measured on
 host git 2.54.0, where both mirrors shared inodes with the checkout.
