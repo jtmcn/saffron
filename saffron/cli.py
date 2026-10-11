@@ -1720,14 +1720,14 @@ def _ceil_cents(amount: float) -> float:
 
 def _print_stack_admission(candidates: list[Candidate]) -> None:
     """What `--budget` a stack queue's own order would need, one line per
-    layer, printed after `_print_queue`'s own output (backlog item b-0a08bf,
-    `DESIGN.md` §7.1). Every earlier layer has already spent its own
-    `budget_usd` plus one spec review by the time the next layer's
-    admission is checked (`saffron/batch.py`'s `wrapped`). Layer `k`'s
+    candidate, printed after `_print_queue`'s own output (backlog item
+    b-0a08bf, `DESIGN.md` §7.1). Every earlier candidate has already spent
+    its own `budget_usd` plus one spec review by the time the next one's
+    admission is checked (`saffron/batch.py`'s `wrapped`). Candidate `k`'s
     threshold adds those to its own `budget_usd`, divided by what admission
     compares against: `1 - reserve share - writer share` of `--budget`
-    (`_drive`'s own comparison). The total adds every layer's own spec
-    review too, since draining the whole order spends every one of them.
+    (`_drive`'s own comparison). The total adds the last spec review too,
+    so draining the whole order leaves both shares whole.
     """
     if not candidates:
         return
@@ -1736,21 +1736,21 @@ def _print_stack_admission(candidates: list[Candidate]) -> None:
     review_usd = spec_review.SPEC_REVIEW_SESSION_USD
     print(
         f"admission: reserve {reserve_share:.0%} and writer {writer_share:.0%} "
-        f"of --budget held back, spec review ${review_usd:.2f} per layer, "
+        f"of --budget held back, spec review ${review_usd:.2f} per candidate, "
         "no revision round"
     )
-    spent_by_earlier_layers = 0.0
+    spent_by_earlier = 0.0
     for candidate in candidates:
         threshold = _ceil_cents(
-            (candidate.spec.budget_usd + spent_by_earlier_layers) / denominator
+            (candidate.spec.budget_usd + spent_by_earlier) / denominator
         )
         print(
             f"  --budget ${threshold:.2f} admits {candidate.spec.id} "
             f"(budget ${candidate.spec.budget_usd:.2f})"
         )
-        spent_by_earlier_layers += candidate.spec.budget_usd + review_usd
-    total = _ceil_cents(spent_by_earlier_layers / denominator)
-    print(f"  --budget ${total:.2f} runs every layer and its spec review")
+        spent_by_earlier += candidate.spec.budget_usd + review_usd
+    total = _ceil_cents(spent_by_earlier / denominator)
+    print(f"  --budget ${total:.2f} runs every candidate and keeps both shares whole")
 
 
 def _print_batch_plan(
@@ -1835,11 +1835,8 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     until = (
         _resolve_until(args.until, datetime.now()) if args.until is not None else None
     )
-    # Bound to `--budget` and `--stack` alone, so the night stays sized
-    # against the one number the operator gives it (stack-batch design §4).
-
-    # Both read through `_stack_admission_shares`, so `saffron queue
-    # --stack`'s own printed thresholds hold back the same two shares.
+    # Bound to `--budget` alone (stack-batch design §3, §4), through the helper
+    # `saffron queue --stack` prints its thresholds from.
     reserve_usd, writer_usd = (
         _stack_admission_shares(args.budget) if args.stack else (None, None)
     )

@@ -3020,11 +3020,11 @@ def test_queue_stack_prints_each_layers_admission_threshold_and_the_total(
     block = stacked[stacked.index("admission:") :]
     assert block.splitlines() == [
         "admission: reserve 25% and writer 25% of --budget held back, "
-        "spec review $8.00 per layer, no revision round",
+        "spec review $8.00 per candidate, no revision round",
         "  --budget $20.00 admits SY-1 (budget $10.00)",
         "  --budget $64.00 admits SY-2 (budget $14.00)",
         "  --budget $92.00 admits SY-3 (budget $6.00)",
-        "  --budget $108.00 runs every layer and its spec review",
+        "  --budget $108.00 runs every candidate and keeps both shares whole",
     ]
 
     assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
@@ -3171,7 +3171,7 @@ def _drive_fake_stack_batch(order, budget, home, monkeypatch):
 
 
 _ADMISSION_LINE = re.compile(r"--budget \$(?P<amount>[0-9.]+) admits (?P<id>\S+)")
-_TOTAL_LINE = re.compile(r"--budget \$(?P<amount>[0-9.]+) runs every layer")
+_TOTAL_LINE = re.compile(r"--budget \$(?P<amount>[0-9.]+) runs every candidate")
 
 
 def _parse_admission_block(tmp_path, capsys, dirname):
@@ -3191,7 +3191,7 @@ def _parse_admission_block(tmp_path, capsys, dirname):
     expected_header = (
         f"admission: reserve {reserve_usd:.0%} and writer {writer_usd:.0%} "
         f"of --budget held back, spec review "
-        f"${spec_review.SPEC_REVIEW_SESSION_USD:.2f} per layer, "
+        f"${spec_review.SPEC_REVIEW_SESSION_USD:.2f} per candidate, "
         "no revision round"
     )
     assert lines[0] == expected_header
@@ -3261,6 +3261,12 @@ def test_each_stack_layers_threshold_agrees_with_what_run_stack_batch_admits(
     def _run_case(case_label, thresholds, total):
         spec_ids = ["SY-1", "SY-2", "SY-3"]
         for k, threshold in enumerate(thresholds, start=1):
+            home_at = tmp_path / f"home-{case_label}-at-{k}"
+            _, started_at, _, _ = _drive_fake_stack_batch(
+                _order(), threshold, home_at, monkeypatch
+            )
+            assert started_at[:k] == spec_ids[:k]
+
             home_above = tmp_path / f"home-{case_label}-above-{k}"
             _, started_above, status_above, _ = _drive_fake_stack_batch(
                 _order(), round(threshold + 0.01, 2), home_above, monkeypatch
@@ -3297,6 +3303,21 @@ def test_each_stack_layers_threshold_agrees_with_what_run_stack_batch_admits(
         assert patched_total == 156.0
 
         _run_case("patched", patched_thresholds, patched_total)
+
+    # Shares that leave a remainder, so the round-up to the cent decides.
+    with monkeypatch.context() as m:
+        m.setattr(end_review, "RESERVE_SHARE", 0.2)
+        m.setattr(follow_up, "WRITER_SHARE", 0.2)
+
+        uneven_thresholds, uneven_total = _parse_admission_block(
+            tmp_path, capsys, dirname="repo-admission-uneven"
+        )
+        assert uneven_thresholds == [16.67, 53.34, 76.67]
+        assert uneven_total == 90.0
+
+        _run_case("uneven", uneven_thresholds, uneven_total)
+
+    assert cli._ceil_cents(0.07 / 0.5) == 0.14
 
 
 def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
