@@ -4,7 +4,7 @@ title: Every task cell and end-review cell joins a network and a proxy of one fi
 type: feature
 priority: 3
 depends_on: []
-estimated_lines: 370
+estimated_lines: 375
 touches:
   - saffron/cell/proxy.py
   - saffron/cell/egress_report.py
@@ -79,7 +79,9 @@ acceptance:
       "saffron-cells" or "saffron-critic-net", and neither removes or stops
       the other's proxy. The Gate-only cell's sweep of the gate subnet is
       `SA-0262`'s and outside this claim. The witness drives one whole task
-      for "SY-1" and one for "SY-2", each through REVIEW.
+      for "SY-1" and one for "SY-2", each through REVIEW. Each run's runtime
+      lists the other task's cells and critic networks as holders of the
+      cells and critic subnets.
     witness: tests/test_session.py::test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy
     wrong_versions:
       - The cells network keyed by spec id and the critic network left as the fixed "saffron-critic-net".
@@ -87,6 +89,7 @@ acceptance:
       - A `cell_down` that also removes the bare "saffron-cells" as a leftover.
       - A `stop_proxy` or a report read handed a proxy name other than the one `start_proxy` was given.
       - A `proxy_address` that reads a fixed proxy name, so the critic cells' address comes from no task's own proxy.
+      - A `cell_up` that pre-cleans every `saffron-` holder on its subnets.
   - claim: >-
       `end_review.layer_cell` brings a layer's cell up on
       `saffron-cells-endreview-` followed by the spec id lowercased. Its
@@ -225,7 +228,10 @@ no proxy (`saffron/cell/proxy.py:33-42`). Then assert every name recorded under 
 key is that key's proxy name, every recorded `runtime.call` argv included.
 
 **Criterion 2** drives `_drive` twice in one plain test, each run with its
-own `_stub_the_runtime` and its own `tmp_path` subdirectory. Use
+own `_stub_the_runtime` and its own `tmp_path` subdirectory. Run "SY-2"
+with `networks_on_subnet={runtime.DEFAULT_SUBNET: ["saffron-cells-sy-1"],
+runtime.SUBNETS["critic"]: ["saffron-critic-net-sy-1"]}`. Run "SY-1" with
+the same map naming SY-2's networks. Leave the gate subnet unlisted. Use
 `_spec(spec_id=..., branch=...)` and the turns
 `test_the_critic_cell_is_not_on_the_implementers_network` uses, so REVIEW
 runs. After `_stub_the_runtime`, replace `start_proxy`, `stop_proxy`,
@@ -235,8 +241,11 @@ runs. After `_stub_the_runtime`, replace `start_proxy`, `stop_proxy`,
 The Gate-only cell each task's REVIEW opens still sweeps every `saffron-`
 holder on the gate subnet (`saffron/cell/session.py:1405-1410`). With two
 tasks live, that sweep removes the other's `saffron-gate-net-<id>`.
-Criterion 2 runs the tasks one after the other, and `_stub_the_runtime`
-lists no holder. So its claim excludes that sweep, which `SA-0262` removes.
+Criterion 2 lists no holder on the gate subnet, so that sweep finds
+nothing and the claim excludes it. `SA-0262` removes the sweep. The holders
+it does list feed no other read at base. The only other caller of
+`runtime.networks_on_subnet` is `runtime.create_network`
+(`saffron/cell/runtime.py:330`), and the stub replaces it.
 
 **Criterion 3** follows
 `test_only_a_spec_sessions_layer_cell_is_granted_capabilities_and_checked`
@@ -260,7 +269,7 @@ and its `_rigged_cell`, once per spec id.
 
 **Existing tests that name the old values change with them.**
 
-- `tests/test_session.py`: 1098-1118, 1780, 1915-1916, 6480 and 7021-7022.
+- `tests/test_session.py`: 1780, 1915-1916, 6480 and 7021-7022.
 - `tests/test_session.py` again: 7550-7551, 7566-7601, 8200, 10653-10655
   and 11054-11069.
 - `tests/test_cli.py`: the `_fake_cell_up` and `_fake_cell_down`

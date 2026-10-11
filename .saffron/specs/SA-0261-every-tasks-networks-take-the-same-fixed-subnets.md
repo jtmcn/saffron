@@ -78,7 +78,6 @@ acceptance:
       - It lists the networks first and creates once on the first /24 the listing leaves free, so no refused create is ever seen.
       - It moves to the next /24 on any non-zero exit, so a broken runtime walks all 256 before it raises.
       - It moves on only when the refusal's text contains `overlap`.
-      - It moves on only when the refusal's text contains `subnet`.
       - It starts the walk at the pool's second /24.
       - It returns the /24 it tried before the one whose create succeeded.
   - claim: >-
@@ -112,6 +111,7 @@ acceptance:
     wrong_versions:
       - It keeps reading the address with `container_ip`'s default prefix, `10.88.0.`.
       - It reads the address on the pool's first /24 whatever `subnet` it is given.
+      - '`subnet` defaults to `runtime.DEFAULT_SUBNET`, pinned by `SA-0262`''s criterion 3.'
   - claim: >-
       A task's `cell_up` hands `start_proxy` the subnet it claimed for the
       task's cells network. Each leg's upstream probe is given the proxy's
@@ -256,8 +256,10 @@ fails. Names alone, from `SA-0260`, do not let two tasks run at once.
 - A cell-marked test that starts two tasks and probes between them. The
   item asks for one. The witnesses here are unit tests over a fake
   runtime, so the isolation between two live tasks stays unmeasured.
-- Podman's refusal of a held subnet. Nothing here reads its wording, so
-  an unmeasured message cannot break the walk.
+- The walk on podman. `networks_on_subnet` reads a subnet from the
+  listing's second column, and `podman network ls` prints none (backlog
+  item 108). So on podman it names no holder, and the walk raises at the
+  first held /24 and never moves on. Podman nights are refused today.
 - `DESIGN.md` §5.1's sketch at `DESIGN.md:626` creates `saffron-cells`
   on `10.88.0.0/24`. After this spec a task's cells network takes a /24
   of `10.200.0.0/16` instead. `DESIGN.md` is protected, so the operator
@@ -280,11 +282,6 @@ no mutant, and `witness` reports `skip` for them. Criterion 3 is an edit
 to `runtime.SUBNETS`, which `SA-0260` leaves alone. Its mutant puts the
 critic entry back beside the gate entry.
 
-**How `cell_up` spells the claim.** Call
-`runtime.allocate_network(leg.network)` inside the loop over the legs.
-`SA-0262`'s mutant matches one call in `session.py` by its text, and
-this spelling keeps that match to one.
-
 **Each witness fails at your base.** `allocate_network`, `start_proxy`'s
 `subnet` and the `"pool"` entry do not exist there, and `cell_up` returns
 `None`. Reach each through its module inside the test, never by a
@@ -300,8 +297,11 @@ does.
 
 - Criterion 1 lists holders on the pool's first two /24s. The first /24
   is refused with apple/container's measured text, quoted in the
-  context. The second is refused with text holding none of `overlap`,
-  `subnet` and `exists`, such as "Error: netavark: refused". It asserts
+  context. The second is refused with stderr holding no `overlap`, such
+  as "Error: netavark: refused". The stderr is the only wording a test
+  can vary. `create_network`'s error always carries the argv's
+  `--subnet`, and never `overlap`, so a build keyed on `overlap` still
+  fails here. It asserts
   the creates ran on the first three /24s in order and the third came
   back. Its second half refuses the first create with no holder listed.
   It asserts `CellRuntimeError` and exactly one create.
@@ -317,6 +317,10 @@ whose subnet overlaps a live network of another name raises
 too. `remove_network` releases the name's claim. `networks_on_subnet`
 reports live claims that overlap the subnet asked about, beside the
 holders a test passes in. Keep `networks_created` as it is.
+
+**Criterion 4's `subnet` is required, but its witness always passes
+it.** `SA-0262`'s criterion 3 checks that it has no default. Until
+`SA-0262` lands, a defaulted `subnet` would pass here.
 
 **Criterion 4's witness** replaces `runtime.call`, `run_detached`,
 `remove_container` and `container_ip`. Its `container_ip` answers only for
