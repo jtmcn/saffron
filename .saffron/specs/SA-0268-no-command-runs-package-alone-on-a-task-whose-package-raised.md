@@ -4,7 +4,7 @@ title: "No command runs PACKAGE alone on a `READY_FOR_REVIEW` task whose PACKAGE
 type: feature
 priority: 2
 depends_on: [SA-0266]
-estimated_lines: 273
+estimated_lines: 304
 estimate_measured: true
 touches:
   - saffron/task.py
@@ -41,26 +41,30 @@ forbidden:
   - tests/test_task.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 42
+budget_usd: 45
 max_attempts: 3
 max_turns: 180
 risk: standard
 acceptance:
   - claim: >-
       `saffron package <spec id> --repo <path>` hands `ready_task` the spec id,
-      the resolved checkout, the repo's ledger id, the ledger and the
-      `out_dir` `saffron cell` uses. On a `ReadyTask` it takes these steps in
-      order. It prepares the mirror at the path `_run_cell` uses and builds
-      the repo's cell image. It creates a scratch network with
-      `runtime.create_network` and no subnet argument, so on
+      the checkout resolved from a relative `--repo`, the repo's ledger id,
+      the ledger and the `out_dir` `saffron cell` uses. On a `ReadyTask` it
+      takes these steps in order. It prepares the mirror at the path
+      `_run_cell` uses and builds the repo's cell image. It removes any
+      leftover network named `saffron-hostprobe-<spec id>`, then creates it
+      with `runtime.create_network` and no subnet argument, so on
       re-verification's subnet. It lists the host's ports with
-      `preflight.host_probe_ports`. It runs
+      `preflight.host_probe_ports`. It prints the line `run_one_cell` prints:
+      the port count, the gateway and LAN addresses, and `tolerating` with
+      the tolerated listeners, or `tolerating nothing`. It runs
       `preflight.assert_host_is_unreachable` with the base image, that
       network, those ports, `runtime.GATEWAY` and those sockets, and removes
       the network. It then calls `package()` once, with the `ReadyTask`'s
       outcome, spec and parent branch beside the mirror, the built image, the
       ledger, the `out_dir` and the token. It never reaches `run_one_cell`.
-      It prints the pull request's URL and exits 0.
+      It prints the pull request's URL and exits 0. The witness tolerates one
+      listener and passes `--repo` relative to the working directory.
     witness: tests/test_cli.py::test_package_probes_the_host_then_runs_package_on_the_rebuilt_task
     wrong_versions:
       - A version that passes `cell_tag(repo)` without building the image.
@@ -69,6 +73,11 @@ acceptance:
       - A version that probes at another subnet's gateway.
       - A version that runs no probe.
       - A version that removes the probe's network after `package()` returns.
+      - A version that prints no `tolerating` part.
+      - A version that prints no ports line at all.
+      - A version that never removes a leftover network before creating it.
+      - A version that names the network with re-verification's `saffron-pkg-` prefix.
+      - A version that never resolves `--repo`.
   - claim: >-
       A `Refused` from `ready_task` prints `package:` and its reason and exits
       1. The command fetches no mirror, builds no image, creates no network
@@ -92,9 +101,10 @@ acceptance:
       - A version that records `MERGE_FAILED` on the task when `package()` raises.
   - claim: >-
       A `PreflightFailed` from `host_probe_ports` or from
-      `assert_host_is_unreachable` exits 2. The scratch network was created
-      with no subnet argument and is removed, and `package()` is never
-      called. The witness drives both.
+      `assert_host_is_unreachable` exits 2. A leftover network of the name
+      was removed first, the scratch network was created with no subnet
+      argument, and it is removed again. `package()` is never called. The
+      witness drives both.
     witness: tests/test_cli.py::test_package_probes_the_host_before_package_and_exits_two_on_a_refusal
     wrong_versions:
       - A version that runs no probe.
@@ -102,6 +112,7 @@ acceptance:
       - A version that leaves the network behind when the probe refuses.
       - A version that reads the probe's refusal as a refused task and exits 1.
       - A version that probes after `package()` returns.
+      - A version that never removes a leftover network before creating it.
 ---
 
 ## Context
@@ -130,12 +141,14 @@ and `serve` (`saffron/cli.py:110-236`). `SA-0264` adds `adopt`.
 task-driving code into `saffron/task.py` (`.saffron/rules/one-task-driver.yml`).
 
 **Re-verification starts cells, and N1's probe is what admits a cell.**
-`reverify` creates a network per Gate-only cell with `runtime.create_network`
+`reverify` creates a network per cell it starts with `runtime.create_network`
 (`saffron/phases/package.py:534-539`). That call makes an `--internal`
 network on the default subnet (`saffron/cell/runtime.py:311-320`), whose
 gateway is `GATEWAY` (`saffron/cell/runtime.py:196`). An
 `--internal` network still routes to the host gateway
-(`saffron/preflight.py:8-10`, `DESIGN.md:1435`). `DESIGN.md:649` says N1's
+(`saffron/preflight.py:8-10`, `DESIGN.md:1435`). Every run reports what it
+tolerated, and the line ends `; tolerating nothing` when nothing is
+(`docs/appendices/H-what-v0-found.md:181-185`). `DESIGN.md:649` says N1's
 host-binding probe gates whether a cell is started at all. `run_one_cell`
 runs it before any cell: it lists ports with `host_probe_ports` and asserts
 with `assert_host_is_unreachable` per network (`saffron/cell/session.py:1095-1111`).
@@ -161,7 +174,7 @@ The dispatch's `except Exception` turns any raise into exit 2
 Add `saffron package <spec id> --repo <path>`, with `--repo` defaulting to
 the working directory. It runs PACKAGE alone, re-verification included, on
 the task `ready_task` rebuilds. It runs no agent and never reaches
-`run_one_cell`. Re-verification's Gate-only cells are the only cells it
+`run_one_cell`. Re-verification's cells are the only cells it
 starts, and N1's probe runs before them.
 
 **`package_ready_task` in `saffron/task.py` takes every step.** It calls
@@ -171,20 +184,31 @@ with `repo_image.build_cell_image(repo)`. It then runs N1's probe and calls
 `package_phase.package`, returning its result. `run_task` and it are then
 `package()`'s only production callers, both in `saffron/task.py`.
 
-**The probe** creates a scratch network with `runtime.create_network(name)`,
-with no subnet argument, so on the subnet re-verification's networks take.
-It calls `preflight.host_probe_ports()`. It calls
+**The probe** names its network `saffron-hostprobe-<spec id>`, a prefix no
+other network uses. Re-verification's networks take `saffron-pkg-`
+(`saffron/phases/package.py:530-532`). It first removes a leftover network
+of that name. Cell setup calls `remove_network` the same way before it
+creates its own networks (`saffron/cell/session.py:1057-1060`). A killed run leaves one, and
+`create_network` then raises. Inside a `try`, it creates the network with
+`runtime.create_network(name)` and no subnet argument, so on the subnet
+re-verification's networks take. Its `finally` removes the network before
+`package()` runs. A failed create is then safe to clean up, since
+`remove_network` returns its result and raises nothing
+(`saffron/cell/runtime.py:365-366`). Inside the `try`, it calls
+`preflight.host_probe_ports()`. It prints `describe` of a `Preflight` with
+step `ports`, whose detail is the one `run_one_cell` builds: the port count,
+the gateway and `preflight.probe_addresses(runtime.GATEWAY)`, and
+`tolerating` with the tolerated names or `nothing`
+(`saffron/cell/session.py:1096-1106`). It then calls
 `preflight.assert_host_is_unreachable(repo_image.BASE_TAG, name, ports,
-runtime.GATEWAY, sockets)`. It removes the network with
-`runtime.remove_network(name)` in a `finally`, before `package()` runs. Name
-the network for the spec id with a prefix no other network uses. A
-`PreflightFailed` propagates, and `main` exits 2.
+runtime.GATEWAY, sockets)`. A `PreflightFailed` propagates, and `main` exits
+2.
 
 **`saffron/cli.py` only adapts.** It adds the parser and a handler. The
 handler checks the token first, exactly as `_run_cell` does, and passes the
-stripped value. It resolves the checkout, reads the repo's ledger id from
-`package_phase.real_remote`, and computes the mirror path as `_run_cell`
-does. It calls `package_ready_task` and prints `package:` and the reason on
+stripped value. It resolves `--repo`, reads the repo's ledger id from
+`package_phase.real_remote`, and computes the mirror path with
+`_mirror_path` (`saffron/cli.py:1611-1617`). It calls `package_ready_task` and prints `package:` and the reason on
 a `Refused`, exiting 1, as `adopt`'s refusals do. Otherwise it prints the
 spec id, the state and the URL or note, as the `print` after PACKAGE does
 (`saffron/task.py:671`), and returns `CELL_EXIT`'s code.
@@ -228,9 +252,12 @@ module, so a monkeypatch reaches it: `ready_task` as a global of
 `saffron.task`, `preflight.prepare_mirror`, `preflight.host_probe_ports`,
 `preflight.assert_host_is_unreachable`, `repo_image.build_cell_image`,
 `runtime.create_network`, `runtime.remove_network` and
-`package_phase.package`. The witnesses replace each of these and
+`package_phase.package`, and `preflight.probe_addresses`, which reads the
+host's LAN address. The witnesses replace each of these and
 `saffron.task.run_one_cell`, which raises. They replace `ready_task` with a
-stub, so this spec's tests seed no task directory. That is `SA-0266`'s.
+stub returning a real `ReadyTask`, so this spec's tests seed no task
+directory. That is `SA-0266`'s. They `monkeypatch.chdir` to the checkout's
+parent and pass `--repo` as a relative path.
 
 **The checkout** is a `git init` directory whose `origin` is a GitHub URL
 added with `git remote add`. `real_remote` reads it and nothing fetches it.
@@ -239,7 +266,7 @@ Seed the repo row with that URL through `_seed_repo` and one task through
 stub outcome's `task_id`, so criterion 3's raise is checked against a real
 row.
 
-**Three residuals, one line each.**
+**Four residuals, one line each.**
 
 - The literal-token scan uses this invocation's token. After a rotation it
   is not the cell's, and the `sk-ant-oat` shape still catches a leaked one
@@ -249,13 +276,16 @@ row.
   can lack a stacked `tree_base`. It raises, and the command exits 2.
 - The probe adds one ephemeral container on the base image per invocation,
   as `run_one_cell`'s does.
+- The scratch network shares `10.88.0.0/24` with `saffron-cells`
+  (`saffron/cell/session.py:1897`). While a cell is up, its create raises and
+  the command exits 2, as re-verification already does.
 
 **Imports.** Import nothing at a witness module's top that the change adds.
 The reverted run would then be a collection error, which `revert` reads as
 `skip`.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill. A
-prototype's witnesses killed all 18 on 2026-10-10 and passed with the
+prototype's witnesses killed all 24 on 2026-10-10 and passed with the
 change. Do not run them yourself.
 
 **The `prose` gate** counts every new comment and docstring. Write none with
@@ -263,7 +293,7 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** No path in `touches` is in `elevate_on`, so the diff is
-`standard` and `size` is advisory. The prototype measured 1091 tokens with
+`standard` and `size` is advisory. The prototype measured 1215 tokens with
 `size_gate`'s counter against the `feature` ceiling of 3000. The tests were
-790 of them, and the documentation 63. `estimated_lines` is that count over
+869 of them, and the documentation 63. `estimated_lines` is that count over
 four.

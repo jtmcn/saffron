@@ -4,7 +4,7 @@ title: "Nothing rebuilds the outcome PACKAGE needs for a `READY_FOR_REVIEW` task
 type: feature
 priority: 2
 depends_on: [SA-0264]
-estimated_lines: 434
+estimated_lines: 455
 estimate_measured: true
 pending_symbols:
   - saffron/task.py::ready_task
@@ -58,20 +58,29 @@ acceptance:
       `patch.json`, no new failures, REVIEW's lens reviews from
       `findings.json`, REBUT's result from `rebuttal.json`, the wrong versions
       and the notes. Only the task's attempts whose `started_at` is at or
-      after `baseline.json`'s mtime, truncated to the second, count as this
-      cell's. The spend is their sum. The attempt count is the number of them
-      in `IMPLEMENTING` or `REPAIRING` that the ledger holds gate results
-      for. The risk is the `earned_risk` of the newest of them that carries
-      one. Its `spec` is the spec the task ran, and its `parent_branch` is
-      `None` for an unstacked patch. The witness seeds the current cell's
-      plan turn with no suite, an implement turn and a repair turn with
-      suites, a review turn and a rebuttal suite. It also seeds a spec review
-      turn, a spec writer turn and an earlier dead cell's implement, repair
-      and review turns, all started before `baseline.json`, and a lens review
-      that errored.
+      after `baseline.json`'s mtime, truncated to the second in UTC, count as
+      this cell's. The spend is their sum, leaving out `SPEC_REVIEW` and
+      `SPEC_WRITING` turns. The attempt count is the number of them in
+      `IMPLEMENTING` or `REPAIRING` that the ledger holds gate results for.
+      The risk is the `earned_risk` of the newest of them that carries one.
+      Its `spec` is the spec the task ran, and its `parent_branch` is `None`
+      for an unstacked patch. The witness seeds the current cell's plan turn
+      with no suite, in `baseline.json`'s own second, half a second before
+      its mtime. It seeds an implement turn and a repair turn with suites, a
+      review turn, a rebuttal suite and a spec writer turn, all after
+      `baseline.json`. It seeds a spec review turn and an earlier dead
+      cell's implement, repair and review turns ten minutes before it, and a
+      lens review that errored. It runs `ready_task` with the zone pinned to
+      `JST-9`.
     witness: tests/test_task.py::test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record
     wrong_versions:
       - A version whose spend is `Ledger.task_spend`, which counts every turn of the task.
+      - A version whose spend counts a spec writer turn started after `baseline.json`.
+      - A version that compares each `started_at`, parsed as UTC, with the untruncated mtime.
+      - A version that keeps only turns started after the truncated cutoff, not at it.
+      - A version whose cutoff carries the mtime's microseconds.
+      - A version that renders the mtime in the local zone.
+      - A version that parses `started_at` as a naive local time and compares its `timestamp()`.
       - A version that leaves out the spec sessions' phases and counts every other turn of the task, the dead cell's included.
       - A version whose spend leaves out `REVIEWING` turns.
       - A version that counts `IMPLEMENTING` suites only.
@@ -202,9 +211,11 @@ them. The squash commit's body lists them only `if agent_subjects:`
 with none when teardown could not read them.
 
 **A task can carry turns that are not this cell's.** A stack batch's spec sessions
-open attempts on the task (`saffron/batch.py:595`, `:703`). A stack batch
-reruns a cell after a `CellRuntimeError` (`saffron/batch.py:741`). The
-rerun keeps the task in `task_ids` (`saffron/batch.py:468-470`).
+open attempts on the task (`saffron/batch.py:595`, `:703`). A follow-up's
+spec writer charges its session to the origin task after that task's cell
+(`saffron/follow_up.py:337-360`). A batch offers a cell again after a
+`CellRuntimeError` (`saffron/batch.py:286-289`). A stack batch's rerun
+keeps the task in `task_ids` (`saffron/batch.py:468-470`).
 That cell reads the task's run with `task_run`
 (`saffron/cell/session.py:1962-1966`). The live outcome counts this cell's
 turns alone (`saffron/cell/session.py:3242-3249`). Every cell writes
@@ -261,11 +272,15 @@ result reads either (`saffron/phases/rebut.py:590-626`,
 `saffron/report/pr_body.py:249-342`). Leave `agent_subjects` empty.
 
 **This cell's turns** are the task's attempts whose `started_at` is at or
-after `baseline.json`'s mtime truncated to the second. `started_at` is
-SQLite's UTC `datetime('now')` text (`saffron/ledger.py:165`). With the
-turns scoped by time, no phase list is needed for the spend: the spec
-sessions run before the cell. The attempt count still needs one, since
-REBUT's re-run records a suite on a `REBUTTING` attempt.
+after `baseline.json`'s mtime truncated to the second, rendered in UTC. A
+fact's `at` is `datetime.now(UTC)` (`saffron/ledger.py:584`). `_apply`
+writes it into `started_at` (`saffron/ledger.py:751-754`) through
+`_ledger_time`, as UTC `%Y-%m-%d %H:%M:%S` text
+(`saffron/ledger.py:343-346`). So compare text against the mtime rendered
+the same way. The spend also leaves out `SPEC_REVIEW` and `SPEC_WRITING`
+turns, since a follow-up's writer can charge one after the cell. The
+attempt count keeps its own phase list, since REBUT's re-run records a
+suite on a `REBUTTING` attempt.
 
 **When no attempt carries an `earned_risk`**, the risk is the spec's own
 `risk`. Re-verification's tier replaces `effective_risk`
@@ -324,6 +339,8 @@ reads as `skip`.
 **Every ledger read exists:** `tasks_by_repo`, `tasks_by_spec_id`,
 `spec_text`, `attempts`, `attempt_results` and `task_run`.
 `saffron/ledger.py` is `forbidden`, and so is `saffron/phases/**`.
+These reads are as at base. `SA-0264`'s prototype adds one ledger method and
+changes none of their columns.
 
 **The `dead` gate.** Nothing in `saffron/` calls `ready_task` until
 `SA-0268`, so it is this spec's `pending_symbols` entry. `ReadyTask` and the
@@ -339,20 +356,26 @@ earlier cell's turns with an `UPDATE` of `attempts.started_at`, as tests
 here already update rows directly. Choose costs that sum exactly in binary,
 such as 1, 2, 0.5, 0.25 and 0.125.
 
+**Criterion 1's clock.** Seed the dead cell's turns, then the plan turn.
+Read the plan turn's `started_at`, and date the dead turns ten minutes
+before that second. Date `baseline.json` to that second plus 0.5 with
+`os.utime`, and every later record a second after it. Pin `TZ=JST-9` and
+call `time.tzset()` around the call, restoring both in a `finally`, as
+`tests/test_view_graph.py:255-262` does.
+
 **Writing the task directory.** Write `findings.json` from
 `LensReview.as_dict` and `rebuttal.json` from `RebutResult.as_dict` over
 `review.anchored_blockers(reviews)`, the way the cell does. Construct the
 `RebuttalTurn` with no cost and no session id, so the rebuilt result equals
-the one written. Date each file with `os.utime`, after every seeded earlier
-turn and before every turn seeded now. Put `baseline.json` first, every
-other record after it, and a stale record before it.
+the one written. Date each file with `os.utime`. Put `baseline.json`
+first, every other record after it, and a stale record before it.
 
 **Criterion 5's states.** Take them from `typing.get_args(TaskState)` inside
 the test, minus `READY_FOR_REVIEW`. Read the whole `tasks` table before and
 after, and assert it unchanged.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill. A
-prototype's witnesses killed all 24 on 2026-10-10 and passed with the
+prototype's witnesses killed all 30 on 2026-10-10 and passed with the
 change. Do not run them yourself.
 
 **The `prose` gate** counts every new comment and docstring. Write none with
@@ -360,6 +383,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
 **Size.** No path in `touches` is in `elevate_on`, so the diff is
-`standard` and `size` is advisory. The prototype measured 1733 tokens with
+`standard` and `size` is advisory. The prototype measured 1819 tokens with
 `size_gate`'s counter against the `feature` ceiling of 3000. The tests were
-1179 of them. `estimated_lines` is that count over four.
+1242 of them. `estimated_lines` is that count over four.
