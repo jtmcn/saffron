@@ -34,6 +34,7 @@ from saffron.cell.session import (
     CellOutcome,
     stop_on_rejected,
 )
+from saffron.events import Event, EventLog, describe
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -934,6 +935,25 @@ def _spec_review_policy(exported: Path) -> Policy:
     return policy
 
 
+def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
+    """A spec review's or spec writer's own `emit`: print `describe(event)`,
+    `run_agent`'s own default, then append it to `EventLog(log_dir)`. A
+    round that calls this again for the same directory appends to the same
+    log, so a later round deletes no earlier line (`b-4e1b6d`). No warning
+    on a failed write: unlike `run_task`'s own default, nothing here owns a
+    task state for a dropped line to flip.
+    """
+    log = EventLog(log_dir)
+
+    def emit(event: Event) -> None:
+        line = describe(event)
+        if line:
+            print(line)
+        log.append(event)
+
+    return emit
+
+
 def _stack_review(
     *, pinned: PinnedBase, repo: Path, out_dir: Path
 ) -> Callable[..., spec_review.SpecReviewSession]:
@@ -993,6 +1013,7 @@ def _stack_review(
             implement.run_agent,
             spec_id=candidate.spec.id,
             timeout_s=spec_review.SPEC_REVIEW_TIMEOUT_S,
+            emit=_spec_session_emit(out_dir / f"{candidate.spec.id}.spec-review"),
         )
         with end_review.layer_cell(
             fields,
@@ -1077,6 +1098,7 @@ def _stack_revise(
             implement.run_agent,
             spec_id=candidate.spec.id,
             timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+            emit=_spec_session_emit(out_dir / f"{candidate.spec.id}.spec-write"),
         )
         with end_review.layer_cell(
             fields,

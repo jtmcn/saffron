@@ -6182,6 +6182,124 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     assert len(rig.cell_up_calls) == before
 
 
+def _default_spec_session_emit(event):
+    """`run_agent`'s own default `emit`, reproduced for the fake below. It
+    prints `describe(event)` and writes no log, so a call this test leaves
+    unpatched still only prints, the shape `b-4e1b6d` names as wrong."""
+    print(describe(event))
+
+
+def test_a_stack_batchs_spec_sessions_reach_the_follower_by_phase_across_rounds(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_review` and `cli._stack_revise` each pass their
+    `partial(implement.run_agent, ...)` an `emit` built from
+    `cli._spec_session_emit`. Every event of a spec review or spec writer
+    session lands directly under `out_dir`, in `<spec id>.spec-review` or
+    `<spec id>.spec-write`, as well as on stdout. A later round appends to
+    the same log rather than replacing it, and `watch.follow_every_task`
+    follows both across rounds, prefixed by directory name (`b-4e1b6d`)."""
+    from saffron import watch
+    from saffron.events import Agent
+
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    rig.out_dir.mkdir()
+
+    spec_ids: list[str] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=_default_spec_session_emit,
+        last_cost_usd=0.0,
+    ):
+        n = len(spec_ids) + 1
+        spec_ids.append(spec_id)
+        for letter in ("a", "b"):
+            emit(
+                Agent(
+                    timestamp=0.0,
+                    spec_id=spec_id,
+                    raw=False,
+                    event={"type": "text", "text": f"call {n}{letter}"},
+                )
+            )
+        return implement.AttemptResult(
+            session_id=f"s-{n}",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.1,
+            rate_limit_status="rejected",
+            rate_limit_resets_at=None,
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    pinned = task.PinnedBase(
+        mirror=rig.mirror, url="https://github.com/o/r.git", base_sha=rig.base_sha
+    )
+    review = cli._stack_review(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
+    revise = cli._stack_revise(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
+
+    sy1 = rig.candidate("SY-1")
+    sy2 = rig.candidate("SY-2")
+    layer7 = rig.candidate("SY-7")
+
+    sleeps: list[int] = []
+
+    def _sleep(_interval):
+        sleeps.append(1)
+        round_ = len(sleeps)
+        if round_ == 1:
+            review(sy1, None)
+            revise(sy1, None, None, "rt")
+            review(sy1, None, spec_text="revised\n")
+            return True
+        if round_ == 2:
+            revise(sy1, layer7, "given\n", "rt")
+            review(sy2, layer7)
+            return True
+        return False
+
+    lines = list(watch.follow_every_task(rig.out_dir, sleep=_sleep))
+
+    assert spec_ids == ["SY-1", "SY-1", "SY-1", "SY-1", "SY-2"]
+
+    assert lines == [
+        "SY-1.spec-review agent: call 1a",
+        "SY-1.spec-review agent: call 1b",
+        "SY-1.spec-review agent: call 3a",
+        "SY-1.spec-review agent: call 3b",
+        "SY-1.spec-write agent: call 2a",
+        "SY-1.spec-write agent: call 2b",
+        "SY-1.spec-write agent: call 4a",
+        "SY-1.spec-write agent: call 4b",
+        "SY-2.spec-review agent: call 5a",
+        "SY-2.spec-review agent: call 5b",
+    ]
+
+    printed = capsys.readouterr().out
+    agent_lines = [line for line in printed.splitlines() if line.startswith("agent: ")]
+    assert agent_lines == [
+        "agent: call 1a",
+        "agent: call 1b",
+        "agent: call 2a",
+        "agent: call 2b",
+        "agent: call 3a",
+        "agent: call 3b",
+        "agent: call 4a",
+        "agent: call 4b",
+        "agent: call 5a",
+        "agent: call 5b",
+    ]
+
+
 def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     tmp_path, monkeypatch, capsys
 ):
