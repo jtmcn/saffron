@@ -1,5 +1,5 @@
 """SIGTERM must unwind `saffron cell` the way Ctrl-C does (DESIGN.md §4.5,
-backlog item b-5df2a7). `batch` is untouched here. `SA-0258` wraps it."""
+backlog item b-5df2a7). `main` installs no handler around `batch`."""
 
 from __future__ import annotations
 
@@ -14,7 +14,18 @@ import pytest
 from saffron import cli, task
 from saffron.cell import runtime
 from saffron.ledger import Ledger
-from tests.test_session import _DIFF, _PLAN, _block, _drive, _stub_the_runtime, _turn
+from tests.test_session import (
+    _CRITIC_CONTAINER,
+    _CRITIC_STATE,
+    _CRITIC_VOLUME,
+    _DIFF,
+    _IMPLEMENTER_CONTAINER,
+    _PLAN,
+    _block,
+    _drive,
+    _stub_the_runtime,
+    _turn,
+)
 
 _SPEC_TEXT = (
     "---\nid: SY-1\ntitle: One\ntype: feature\ntouches: ['src/**']\n---\n\n"
@@ -22,7 +33,7 @@ _SPEC_TEXT = (
 )
 
 _CELL_DOWN_ORDER = [
-    "removed:container:saffron-cell-SY-1",
+    f"removed:container:{_IMPLEMENTER_CONTAINER}",
     "removed:network:saffron-cells",
     "removed:network:saffron-critic-net",
     "removed:volume:saffron-wt-SY-1",
@@ -30,14 +41,14 @@ _CELL_DOWN_ORDER = [
 ]
 
 _CRITIC_CELL_ORDER = [
-    "removed:container:saffron-critic-SY-1",
-    "removed:volume:saffron-critic-wt-SY-1",
-    "removed:volume:saffron-critic-st-SY-1",
+    f"removed:container:{_CRITIC_CONTAINER}",
+    f"removed:volume:{_CRITIC_VOLUME}",
+    f"removed:volume:{_CRITIC_STATE}",
 ]
 
 
 @dataclass
-class _SigtermRun:
+class _SigtermCall:
     """What one `cli.main(["cell", ...])` call, driven under a record-only
     SIGTERM handler, came back as."""
 
@@ -90,13 +101,13 @@ def _run_cell_under_sigterm(monkeypatch, tmp_path, run_name, *, cell, turns):
             result: Any = cli.main(
                 ["--home", str(run_dir / "home"), "cell", str(spec_path)]
             )
-        except BaseException as exc:  # a leak fails this one run, not the session
+        except BaseException as exc:  # a leak fails this one call, not the session
             result = exc
         restored = signal.getsignal(signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, outer_previous)
 
-    return _SigtermRun(
+    return _SigtermCall(
         result=result, restored=restored, handler=_record, heard=heard, run_dir=run_dir
     )
 
@@ -123,17 +134,17 @@ def test_a_cell_sent_sigterm_tears_down_and_closes_its_task(monkeypatch, tmp_pat
                     raise
             yield turn
 
-    run = _run_cell_under_sigterm(
+    call = _run_cell_under_sigterm(
         monkeypatch, tmp_path, "mid-implement", cell=cell, turns=_mid_implement()
     )
-    assert run.result == 143
+    assert call.result == 143
     assert sent == [KeyboardInterrupt]
-    assert run.restored == run.handler
-    assert run.heard == []
+    assert call.restored == call.handler
+    assert call.heard == []
     assert _tail_after_last_turn(cell.order) == _CELL_DOWN_ORDER
     assert "stop" in cell.preflight
-    assert (run.run_dir / "out" / "SY-1" / "patch.diff").read_text() == _DIFF
-    ledger = Ledger(run.run_dir / "ledger.db")
+    assert (call.run_dir / "out" / "SY-1" / "patch.diff").read_text() == _DIFF
+    ledger = Ledger(call.run_dir / "ledger.db")
     try:
         (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
         assert run_row["status"] == "ABORTED"
@@ -158,17 +169,17 @@ def test_a_cell_sent_sigterm_tears_down_and_closes_its_task(monkeypatch, tmp_pat
                     raise
             yield turn
 
-    run = _run_cell_under_sigterm(
+    call = _run_cell_under_sigterm(
         monkeypatch, tmp_path, "mid-review", cell=cell, turns=_mid_review()
     )
-    assert run.result == 143
+    assert call.result == 143
     assert sent == [KeyboardInterrupt]
-    assert run.restored == run.handler
-    assert run.heard == []
+    assert call.restored == call.handler
+    assert call.heard == []
     assert _tail_after_last_turn(cell.order) == _CRITIC_CELL_ORDER + _CELL_DOWN_ORDER
     assert "stop" in cell.preflight
-    assert (run.run_dir / "out" / "SY-1" / "patch.diff").read_text() == _DIFF
-    ledger = Ledger(run.run_dir / "ledger.db")
+    assert (call.run_dir / "out" / "SY-1" / "patch.diff").read_text() == _DIFF
+    ledger = Ledger(call.run_dir / "ledger.db")
     try:
         (run_row,) = ledger._db.execute("SELECT status FROM runs").fetchall()
         assert run_row["status"] == "ABORTED"
@@ -180,26 +191,32 @@ def test_a_cell_sent_sigterm_tears_down_and_closes_its_task(monkeypatch, tmp_pat
     # No signal at all: a bare KeyboardInterrupt still propagates out of
     # `main`, unread as a SIGTERM.
     cell = _stub_the_runtime(monkeypatch)
-    run = _run_cell_under_sigterm(
+    call = _run_cell_under_sigterm(
         monkeypatch, tmp_path, "bare-interrupt", cell=cell, turns=[KeyboardInterrupt()]
     )
-    assert type(run.result) is KeyboardInterrupt
-    assert run.restored == run.handler
-    assert run.heard == []
+    assert type(call.result) is KeyboardInterrupt
+    assert call.restored == call.handler
+    assert call.heard == []
 
-    # `batch` is untouched by this spec: the handler in place while it runs
-    # is whatever `main` was called with, never one this change installs.
+    # `main` installs no handler around `batch`. A sentinel, not pytest's own
+    # SIG_DFL, so a reset to the default reads as a change.
     batch_recorded: list[object] = []
 
     def _batch_stub(_args, _ledger, _out_dir):
         batch_recorded.append(signal.getsignal(signal.SIGTERM))
         return 0
 
+    def batch_previous(_signum: int, _frame: object) -> None:
+        pass
+
     monkeypatch.setattr(cli, "_batch", _batch_stub)
-    batch_previous = signal.getsignal(signal.SIGTERM)
-    batch_result = cli.main(
-        ["--home", str(tmp_path / "batch-home"), "batch", "--repo", str(tmp_path)]
-    )
+    outer = signal.signal(signal.SIGTERM, batch_previous)
+    try:
+        batch_result = cli.main(
+            ["--home", str(tmp_path / "batch-home"), "batch", "--repo", str(tmp_path)]
+        )
+    finally:
+        signal.signal(signal.SIGTERM, outer)
     assert batch_result == 0
     assert batch_recorded == [batch_previous]
 
@@ -213,7 +230,7 @@ def test_a_second_sigterm_does_not_cut_the_teardown_short(monkeypatch, tmp_path)
 
     def _guarded_remove_container(name: str) -> object:
         nonlocal armed
-        if armed and name == "saffron-cell-SY-1" and name not in guarded_names:
+        if armed and name == _IMPLEMENTER_CONTAINER and name not in guarded_names:
             guarded_names.append(name)
             if signal.getsignal(signal.SIGTERM) is signal.SIG_DFL:
                 pytest.fail(
@@ -238,12 +255,13 @@ def test_a_second_sigterm_does_not_cut_the_teardown_short(monkeypatch, tmp_path)
                     raise
             yield turn
 
-    run = _run_cell_under_sigterm(
+    call = _run_cell_under_sigterm(
         monkeypatch, tmp_path, "second-signal", cell=cell, turns=_turns()
     )
 
-    assert run.result == 143
+    assert call.result == 143
     assert sent == [KeyboardInterrupt]
-    assert run.restored == run.handler
-    assert run.heard == []
+    assert call.restored == call.handler
+    assert call.heard == []
+    assert guarded_names == [_IMPLEMENTER_CONTAINER]
     assert _tail_after_last_turn(cell.order) == _CELL_DOWN_ORDER

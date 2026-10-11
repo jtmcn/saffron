@@ -452,10 +452,7 @@ def _cell_guarding_sigterm(
 
     `exec_stream`'s `with proc:` only waits briefly for a `KeyboardInterrupt`
     and otherwise blocks on the child, so the handler raises that exact
-    class. `sigtermed` marks only this one call: a bare `KeyboardInterrupt`
-    with no signal behind it still propagates out of `main`. The first
-    delivery also ignores SIGTERM, so a second one during teardown does
-    nothing, and the handler found on entry comes back once this returns.
+    class. It then ignores SIGTERM, so a second one cannot cut teardown short.
     """
     sigtermed = False
 
