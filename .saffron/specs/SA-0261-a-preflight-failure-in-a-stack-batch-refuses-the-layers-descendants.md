@@ -49,29 +49,32 @@ risk: standard
 acceptance:
   - claim: >-
       In a stack batch, a spec of the order whose task returns
-      `PREFLIGHT_FAILED` is not a miss. It runs again at once, on the same
-      predecessor, with no second spec review, and a spec that depends on it
+      `PREFLIGHT_FAILED` is not a miss. Unless the breaker stops the batch,
+      it runs again at once, on the same predecessor, with no second spec
+      review, and a spec that depends on it
       is not refused. A task that returns `GATE_ERROR` is still a miss, and
       its dependent is refused. The witness drives both states in one
       batch, and the batch drains.
     witness: tests/test_batch.py::test_a_preflight_failure_in_a_stack_batch_is_offered_again_not_missed
     wrong_versions:
       - The wrapper keeps the spec queued but the loop still counts it as started, so its dependent runs next on the wrong predecessor.
-      - The loop offers the spec again but the wrapper still records a miss, so its dependent is refused.
+      - The loop offers the spec again but the wrapper takes it out of `remaining` and records a miss, so its dependent is refused.
+      - The wrapper keeps the spec in `remaining` and also records it missed, so its dependent is refused.
       - Every state in `ABORT_STATES` is kept queued and offered again, so a `GATE_ERROR` task runs twice and its dependent is not refused.
       - The re-offer takes the spec out of `reviewed`, so it is reviewed a second time.
   - claim: >-
       A follow-up whose task returns `PREFLIGHT_FAILED` runs again at once,
-      on the same predecessor. A follow-up whose task returns `GATE_ERROR`
-      runs once, and the next follow-up runs on the last layer. No
-      follow-up is listed unrun. The witness drives both states.
+      on the same predecessor, unless the breaker stops the batch. A
+      follow-up whose task returns `GATE_ERROR` runs once, and the next
+      follow-up runs on the last layer. The witness drives both states.
     witness: tests/test_batch.py::test_a_follow_ups_preflight_failure_is_offered_again
     wrong_versions:
       - The wrapper keeps the spec queued but the loop still counts it as started, so the follow-up runs once.
       - The wrapper calls `runner` again in place for a spec of the order only, so a follow-up runs once.
       - The loop also offers a `GATE_ERROR` spec again, so a follow-up that returned it runs twice.
   - claim: >-
-      Each re-offer counts toward the breaker. A spec of the order whose
+      Each re-offer of a spec of the order counts toward the breaker. A
+      spec of the order whose
       task returns `PREFLIGHT_FAILED` twice in a row ends the stack batch
       `INFRASTRUCTURE` after two `runner` calls and one review. Its
       dependent is neither refused nor reviewed. A plain batch passes no
@@ -80,10 +83,10 @@ acceptance:
       plain batch.
     witness: tests/test_batch.py::test_a_preflight_failure_is_offered_again_only_until_the_breaker
     wrong_versions:
-      - The wrapper calls `runner` again in place on `PREFLIGHT_FAILED`, so the breaker never sees the first outcome.
+      - The wrapper calls `runner` again in place on `PREFLIGHT_FAILED` for a spec of the order, so the breaker never sees the first outcome.
       - A stack batch's `PREFLIGHT_FAILED` is not counted as an abort, so the re-offers never reach the breaker.
       - The re-offer ignores `sleep`, so a plain batch starts the spec twice.
-      - The loop offers the spec again but the wrapper still records a miss, so the dependent is refused.
+      - The loop offers the spec again but the wrapper takes it out of `remaining` and records a miss, so the dependent is refused.
 ---
 
 ## Context
@@ -209,8 +212,7 @@ order. `TE-8` returns `PREFLIGHT_FAILED` once, and `TE-9` returns
 (`saffron/batch.py:752-753`), and its pass rescans `follow_up_candidates`, a fixed list (`:816`).
 So only the loop decides whether `TE-9` runs
 again. Assert `DRAINED`. Assert these runner calls: `TE-7` and none, `TE-8`
-on `TE-7` twice, `TE-9` on `TE-8` once, `TE-10` on `TE-8`. Assert no line
-names a follow-up unrun.
+on `TE-7` twice, `TE-9` on `TE-8` once, `TE-10` on `TE-8`.
 
 **Criterion 3.** One stack batch, then one plain batch. The stack batch is
 `TE-21`, then `TE-22` on `TE-21`. `TE-21` returns `PREFLIGHT_FAILED`
@@ -225,7 +227,9 @@ returning the same two candidates. Assert `DRAINED` and runner calls
 **What the witnesses leave undriven.** The two causes reach `wrapped` as
 one state, so the witnesses drive the state, not a cause. A
 `PREFLIGHT_FAILED` that `mint` or `revise` could produce does not exist:
-neither returns a `CellOutcome`. A re-offer runs the same minted task
+neither returns a `CellOutcome`. Criterion 3 counts re-offers in the
+order's pass only. A wrapper that retries a follow-up in place, so the
+breaker sees one outcome, passes criterion 2 (measured). A re-offer runs the same minted task
 again, as the `PROVIDER_UNREACHABLE` and `CellRuntimeError` re-offers do.
 
 **Measured on a prototype, 2026-10-10.** The change and all three
