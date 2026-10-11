@@ -2895,6 +2895,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0261",
         "SA-0262",
         "SA-0264",
+        "SA-0265",
         "SA-0266",
         "SA-0268",
     }
@@ -2965,6 +2966,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0258",
         "SA-0262",
         "SA-0264",
+        "SA-0265",
         "SA-0266",
         "SA-0268",
     ]
