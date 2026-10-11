@@ -1,7 +1,7 @@
 ---
 id: b-8170eb
 title: An agent that never reached the API is recorded `NOT_IMPLEMENTED`
-status: open
+status: superseded
 tier: 1
 filed: 2026-09-29
 specs: [SA-0193, SA-0195]
@@ -9,6 +9,8 @@ prs: []
 commits: []
 cites: []
 related: [173]
+closed: 2026-10-10
+superseded_by: b-031ac2
 ---
 
 ## Problem
@@ -40,3 +42,5 @@ infrastructure failure. `saffron cell` exits 2, and the ledger records no
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-10-10: superseded by b-031ac2. Its `SA-0201` (#673) ends a plan turn the provider served
+  nothing `PROVIDER_UNREACHABLE`, which is the failure this item recorded.
