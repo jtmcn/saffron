@@ -3366,15 +3366,35 @@ def test_bookkeeping_drafts_no_change_for_a_retirement_once_the_set_is_bound(
     assert "assert [" not in after_block1
 
 
+def _no_order(tmp_path, monkeypatch):
+    state = tmp_path / ".saffron-loop"
+    monkeypatch.setattr(driver, "REPO", tmp_path)
+    monkeypatch.setattr(driver, "ORDER", state / "order.json")
+    monkeypatch.setattr(driver, "LEGACY_PLAN", state / "plan.json")
+    return state
+
+
 def test_status_in_a_checkout_with_no_loop_is_not_an_error(
     tmp_path, monkeypatch, capsys
 ):
-    # `.saffron-loop/` is gitignored, so every new worktree opens a delegate here.
-    monkeypatch.setattr(driver, "ORDER", tmp_path / ".saffron-loop" / "order.json")
-    monkeypatch.setattr(driver, "REPO", tmp_path)
+    # A delegate opened in a new worktree finds no order, since git ignores the state.
+    _no_order(tmp_path, monkeypatch)
 
     assert driver.cmd_status(argparse.Namespace()) == 0
     captured = capsys.readouterr()
     assert captured.err == ""
     assert "no loop in this checkout" in captured.out
     assert "driver.py snapshot" in captured.out
+
+
+def test_status_with_only_the_legacy_plan_still_says_to_delete_it(
+    tmp_path, monkeypatch, capsys
+):
+    state = _no_order(tmp_path, monkeypatch)
+    state.mkdir()
+    (state / "plan.json").write_text("[]")
+
+    with pytest.raises(SystemExit) as exit_:
+        driver.cmd_status(argparse.Namespace())
+    assert exit_.value.code == 1
+    assert "plan.json is the previous driver's file" in capsys.readouterr().err
