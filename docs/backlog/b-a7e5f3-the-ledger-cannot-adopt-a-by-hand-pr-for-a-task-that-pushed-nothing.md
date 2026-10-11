@@ -4,7 +4,7 @@ title: The ledger cannot adopt a by-hand pull request for a task whose cell push
 status: open
 tier: 1
 filed: 2026-09-25
-specs: []
+specs: [SA-0264]
 prs: []
 commits: []
 cites: [§4.2, §5.7]
