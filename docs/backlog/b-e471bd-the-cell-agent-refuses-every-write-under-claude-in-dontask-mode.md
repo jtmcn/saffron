@@ -1,11 +1,11 @@
 ---
 id: b-e471bd
 title: The cell's agent refuses every write under `.claude/` in dontAsk mode, so a spec that touches `.claude/**` depends on the agent routing around a denial
-status: open
+status: partial
 tier: 1
 filed: 2026-09-25
 specs: [SA-0259]
-prs: []
+prs: [809]
 commits: []
 cites: [§5.3, §4.2]
 related: []
@@ -43,3 +43,8 @@ One of two, decided before a spec lands:
 
 - 2026-09-25: filed from the spec loop's run 16. `SA-0129` was taken by hand
   as #502.
+- 2026-10-11: `SA-0259` (#809), from the spec loop's run 34, names the
+  python3 route in IMPLEMENT's prompt for each `.claude/` touch. Neither
+  exit is met. The host grants no write, and intake refuses no spec. So the
+  outcome still turns on the agent taking the route, and no cell test
+  edits a file under `.claude/`.

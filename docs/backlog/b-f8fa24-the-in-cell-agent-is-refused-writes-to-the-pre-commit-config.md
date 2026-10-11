@@ -1,11 +1,12 @@
 ---
 id: b-f8fa24
 title: "The in-cell agent is refused every write to `.pre-commit-config.yaml`, though a spec's `touches` names it"
-status: open
+status: done
 tier: 1
 filed: 2026-10-09
+closed: 2026-10-11
 specs: [SA-0259]
-prs: [790]
+prs: [790, 809]
 commits: []
 cites: [§5.3]
 related: [b-1e106d, b-7f105f]
@@ -38,3 +39,7 @@ sanctioned way to write it. A test drives intake with such a spec.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-10-11: done by `SA-0259` (#809), from the spec loop's run 34. The
+  set is measured in `docs/evidence/2026-10-10-agent-unwritable-paths.md`.
+  IMPLEMENT's prompt names each `touches` entry in it and the python3 route.
+  The operator chose that route over a refusal at intake.
