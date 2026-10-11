@@ -265,7 +265,14 @@ def test_a_near_miss_or_a_glob_component_is_not_named():
 
     assert context.unwritable_touches_section(["docs/.envrc/notes.md"]) == ""
 
-    for entry in [".claud?/x.md", "[.]claude/x.md", ".vscode*/x.txt", "**"]:
+    for entry in [
+        ".claud?/x.md",
+        "[.]claude/x.md",
+        ".vscode*/x.txt",
+        "**",
+        "docs/.envr?",
+        "lefthook.y?ml",
+    ]:
         assert context.unwritable_touches_section([entry]) == ""
 
     for entry in [

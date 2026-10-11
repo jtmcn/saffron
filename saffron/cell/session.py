@@ -2099,8 +2099,8 @@ def _drive_cell(
             constraints=context.constraints_block(
                 spec.touches, spec.forbidden, policy.protected
             )
-            # IMPLEMENT alone also carries this route around the file tools'
-            # own refusal. `constraints_block` stays as `end_review.py` reads it.
+            # IMPLEMENT alone also carries the paths the Write tool refuses.
+            # `constraints_block` stays as `end_review.py` reads it.
             + context.unwritable_touches_section(spec.touches),
             witnesses=context.witnesses_block(spec.acceptance),
             standing_instructions=context.standing_instructions(claude_md),

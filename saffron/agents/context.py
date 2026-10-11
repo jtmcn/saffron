@@ -71,7 +71,7 @@ def sections_for(
     return "\n\n".join(chunks)
 
 
-# Measured for b-f8fa24 against claude-agent-sdk 0.2.142, IMPLEMENT's own
+# Measured for b-f8fa24 at `UNWRITABLE_SET_SDK_VERSION`, IMPLEMENT's own
 # options (docs/evidence/2026-10-10-agent-unwritable-paths.md).
 UNWRITABLE_FILE_NAMES = frozenset(
     {
@@ -85,7 +85,7 @@ UNWRITABLE_FILE_NAMES = frozenset(
         ".bashrc",
         "lefthook.yml",
         # ponytail: refused at the root only in the record. The set matches
-        # these at any depth, since the refusal keys on the component alone.
+        # these at any depth, since Write keys on the component alone.
         ".zshrc",
         ".profile",
         ".bash_profile",
@@ -129,23 +129,20 @@ def _unwritable_touch(entry: str) -> bool:
 
 
 def unwritable_touches_section(touches: list[str]) -> str:
-    """The route around the file tools' own refusal, built from the
-    `touches` it bites.
+    """The `touches` entries the Write tool refuses, and the route around it.
 
-    Measured, not guessed (`docs/evidence/2026-10-10-agent-unwritable-paths.md`).
-    Appended to IMPLEMENT's own `constraints` value, never to
-    `constraints_block`, so the end review needs no route. Empty when nothing
-    matches, so a spec with no such entry keeps today's prompt byte for byte.
+    Empty when nothing matches, so a spec with no such entry keeps today's
+    prompt byte for byte.
     """
     named = [t for t in touches if _unwritable_touch(t)]
     if not named:
         return ""
     lines = [
         "",
-        "## A route around the file tools' own refusal",
+        "## Paths the Write tool refuses",
         "",
         f"Measured against `claude-agent-sdk {UNWRITABLE_SET_SDK_VERSION}`: the "
-        "Write tool refuses every path below, at any depth, no matter what "
+        "Write tool refuses every path below, no matter what "
         "`allowed_tools` grants.",
         "",
     ]

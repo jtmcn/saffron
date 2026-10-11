@@ -2130,7 +2130,7 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
 def test_the_implement_prompt_routes_each_unwritable_touch_and_no_other(
     monkeypatch, tmp_path
 ):
-    """The route around the file tools' own refusal rides IMPLEMENT's
+    """The paths the Write tool refuses ride IMPLEMENT's
     `constraints` value. It reaches the salvage turn too, since both resume
     on the same `system_prompt`. A spec naming no such path keeps today's
     prompt exactly."""
@@ -2159,8 +2159,14 @@ def test_the_implement_prompt_routes_each_unwritable_touch_and_no_other(
     assert outcome.state == "READY_FOR_REVIEW"
     assert cell.turns[2] == implement.SALVAGE_PROMPT
     assert cell.system_prompts[2] == cell.system_prompts[0]
-    assert "- `.pre-commit-config.yaml`" in cell.system_prompts[0]
-    assert "- `sub/.claude/skills/x.md`" in cell.system_prompts[0]
+    # `constraints_block` lists every entry once, so a routed one appears twice.
+    prompt = cell.system_prompts[0]
+    assert prompt.count("- `.pre-commit-config.yaml`") == 2
+    assert prompt.count("- `sub/.claude/skills/x.md`") == 2
+    assert prompt.count("- `src/**`") == 1
+    assert prompt.count("- `.claudeignore`") == 1
+    assert "Write tool refuses every path below" in prompt
+    assert "python3" not in context.constraints_block(touches_with_route, [], [])
     assert "python3" in cell.system_prompts[0]
     assert "Bash" in cell.system_prompts[0]
     assert "shell redirect" in cell.system_prompts[0]
