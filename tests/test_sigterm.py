@@ -13,6 +13,7 @@ import pytest
 
 from saffron import cli, task
 from saffron.cell import runtime
+from saffron.cell.session import CRITIC_NETWORK
 from saffron.ledger import Ledger
 from tests.test_session import (
     _CRITIC_CONTAINER,
@@ -35,7 +36,7 @@ _SPEC_TEXT = (
 _CELL_DOWN_ORDER = [
     f"removed:container:{_IMPLEMENTER_CONTAINER}",
     "removed:network:saffron-cells",
-    "removed:network:saffron-critic-net",
+    f"removed:network:{CRITIC_NETWORK}",
     "removed:volume:saffron-wt-SY-1",
     "removed:volume:saffron-st-SY-1",
 ]
