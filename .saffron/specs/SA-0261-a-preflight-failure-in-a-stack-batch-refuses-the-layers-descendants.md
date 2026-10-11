@@ -4,7 +4,7 @@ title: A start that fails preflight in a stack batch marks the layer missed, so 
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 123
+estimated_lines: 126
 estimate_measured: true
 touches:
   - saffron/batch.py
@@ -62,12 +62,14 @@ acceptance:
       - The re-offer takes the spec out of `reviewed`, so it is reviewed a second time.
   - claim: >-
       A follow-up whose task returns `PREFLIGHT_FAILED` runs again at once,
-      on the same predecessor, and the next follow-up runs on top of it. No
-      follow-up is listed unrun.
+      on the same predecessor. A follow-up whose task returns `GATE_ERROR`
+      runs once, and the next follow-up runs on the last layer. No
+      follow-up is listed unrun. The witness drives both states.
     witness: tests/test_batch.py::test_a_follow_ups_preflight_failure_is_offered_again
     wrong_versions:
       - The wrapper keeps the spec queued but the loop still counts it as started, so the follow-up runs once.
       - The wrapper calls `runner` again in place for a spec of the order only, so a follow-up runs once.
+      - The loop also offers a `GATE_ERROR` spec again, so a follow-up that returned it runs twice.
   - claim: >-
       Each re-offer counts toward the breaker. A spec of the order whose
       task returns `PREFLIGHT_FAILED` twice in a row ends the stack batch
@@ -201,10 +203,14 @@ none, `TE-1` on `TE-0` twice, `TE-2` on `TE-1`, `TE-3` on `TE-2`, `TE-5`
 on `TE-2`. Assert the refused lines are exactly `TE-4` reaching `TE-3`.
 
 **Criterion 2.** Order `TE-7` alone, with `end_review` and `follow_ups`
-from the doubles. The follow-ups are `TE-8` and `TE-9`, in that order.
-`TE-8` returns `PREFLIGHT_FAILED` once. Assert `DRAINED`. Assert these
-runner calls: `TE-7` and none, `TE-8` on `TE-7` twice, `TE-9` on `TE-8`.
-Assert no line names a follow-up unrun.
+from the doubles. The follow-ups are `TE-8`, `TE-9` and `TE-10`, in that
+order. `TE-8` returns `PREFLIGHT_FAILED` once, and `TE-9` returns
+`GATE_ERROR` once. A follow-up is never taken out of `remaining`
+(`saffron/batch.py:752-753`), and its pass rescans `follow_up_candidates`, a fixed list (`:816`).
+So only the loop decides whether `TE-9` runs
+again. Assert `DRAINED`. Assert these runner calls: `TE-7` and none, `TE-8`
+on `TE-7` twice, `TE-9` on `TE-8` once, `TE-10` on `TE-8`. Assert no line
+names a follow-up unrun.
 
 **Criterion 3.** One stack batch, then one plain batch. The stack batch is
 `TE-21`, then `TE-22` on `TE-21`. `TE-21` returns `PREFLIGHT_FAILED`
@@ -219,13 +225,14 @@ returning the same two candidates. Assert `DRAINED` and runner calls
 **What the witnesses leave undriven.** The two causes reach `wrapped` as
 one state, so the witnesses drive the state, not a cause. A
 `PREFLIGHT_FAILED` that `mint` or `revise` could produce does not exist:
-neither returns a `CellOutcome`.
+neither returns a `CellOutcome`. A re-offer runs the same minted task
+again, as the `PROVIDER_UNREACHABLE` and `CellRuntimeError` re-offers do.
 
 **Measured on a prototype, 2026-10-10.** The change and all three
 witnesses were written against `0a5e3e5c` and passed. Each failed with
 `saffron/batch.py` reverted to base. Each wrong version listed above was
 applied as an edit, and each failed its own criterion's witness. The whole
-of `tests/test_batch.py` passed, and `ruff` passed. The diff measured 489
+of `tests/test_batch.py` passed, and `ruff` passed. The diff measured 502
 changed tokens by `size_gate`, against the `bug` ceiling of 1300.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
