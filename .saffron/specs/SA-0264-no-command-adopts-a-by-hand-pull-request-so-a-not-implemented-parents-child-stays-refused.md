@@ -4,7 +4,7 @@ title: "No command names a by-hand pull request as a task's, so a `NOT_IMPLEMENT
 type: feature
 priority: 2
 depends_on: [SA-0254]
-estimated_lines: 410
+estimated_lines: 415
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -39,9 +39,9 @@ forbidden:
   - saffron/gates/**
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 40
+budget_usd: 48
 max_attempts: 3
-max_turns: 190
+max_turns: 230
 risk: standard
 acceptance:
   - claim: >-
@@ -93,7 +93,8 @@ acceptance:
       when it refuses. It refuses a repo with no ledger row and a spec with
       no task in the repo, and its line names the spec id. It refuses a
       newest task that already carries a `pr_url`, and the line names that
-      URL. It refuses a newest task in any state but the three it takes,
+      URL. The witness drives one such task in each of the three states the
+      command takes. It refuses a newest task in any state but the three it takes,
       and the line names the state. The witness drives every other member
       of `saffron.ledger.TaskState`, and a refused newest task above an
       older task `adopt` would take. None of these asks `gh` anything. It
@@ -103,6 +104,7 @@ acceptance:
     witness: tests/test_cli.py::test_adopt_refuses_with_exit_one_and_writes_nothing
     wrong_versions:
       - A version that falls back to an older task the command would take when the newest is refused.
+      - A version that refuses a carried `pr_url` on a `READY_FOR_REVIEW` task alone, and overwrites one on a `NOT_IMPLEMENTED` or `EXHAUSTED` task.
       - A version that asks `gh` before it reads the ledger.
       - A version that accepts a zero exit from `gh` that printed no URL.
       - A version that refuses `MERGED` and `REJECTED` alone among the other states.
@@ -297,9 +299,29 @@ with an empty `pr_url` and a diff stat, as a refused PACKAGE does. Give
 the `READY_FOR_REVIEW` row a `record_push` first.
 
 **Criterion 3's states.** Take them from `typing.get_args(TaskState)`
-inside the test, minus the three. That is 23 at base. One task per state, each its own spec
+inside the test, minus the three. That is 23 at base. Seed the carried
+`pr_url` case three times, once in each state the command takes. One task per state, each its own spec
 id. Record every `gh` call. Assert none was made before the two `gh`
 cases, and that the whole `tasks` table reads the same afterwards.
+
+**Two conventions meet in the adoption fact.** PACKAGE writes a
+`task_package` fact only in a state it ends a task in.
+`migrate._outcome_facts` keeps that true: a stored state outside
+`_PACKAGED` becomes `READY_FOR_REVIEW` or `MERGE_FAILED` in the fact
+(`saffron/record/migrate.py:439-454`). So migrate is no precedent here.
+The adoption fact breaks that convention on purpose. It carries the row's
+own state, such as `NOT_IMPLEMENTED`. The fold writes the state from the
+payload, and it must rebuild the row as it stood. The only reader that
+keys on the kind is the fold's `task_package` branch
+(`saffron/ledger.py:818`). So no fold, view or report reads the fact as
+PACKAGE's.
+
+**PACKAGE's write method cannot carry the adoption.** `set_task_package`
+types `branch` and `pushed_sha` as `str` (`saffron/ledger.py:1554-1560`).
+An adopted row with a NULL `pushed_sha` then fails the `types` gate.
+`tasks_by_repo` selects neither the branch nor the diff stat
+(`saffron/ledger.py:1060-1077`). A ledger method that reads the row
+itself and builds the fact through `_build_fact` avoids both.
 
 **Criterion 4's ledger.** `main` opens `Ledger(args.home / "ledger.db")`
 (`saffron/cli.py:270`). Replace `saffron.cli.Ledger` with a callable
@@ -326,6 +348,6 @@ sentence over 25 words.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so a diff that edits it
 is `elevated` and `size` blocks. A prototype with all five new witnesses
-measured 1612 tokens with `size_gate`'s counter, against the `feature`
-ceiling of 3000. The tests were 1249 of them. `estimated_lines` is that
+measured 1630 tokens with `size_gate`'s counter, against the `feature`
+ceiling of 3000. The tests were 1267 of them. `estimated_lines` is that
 count over four, plus the two documentation lines.
