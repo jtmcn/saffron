@@ -173,8 +173,8 @@ has a base. The task is cut from the predecessor's head and targets its
 branch. A task with no predecessor is cut from `base_sha`.
 _Avoid_: "parent" (that is `depends_on[0]`, and a predecessor need not be one).
 
-**Stack base**: A parent outside a stack order whose newest task waits on review
-with a pushed branch, from an earlier batch. A stack batch stacks its first layer
+**Stack base**: A parent outside a stack order whose newest waiting task has a
+pushed branch and a pull request, from an earlier batch. A stack batch stacks its first layer
 on that branch, and links nothing. An order has at most one (`SA-0265`).
 _Avoid_: "base" alone (that is `base_sha`), "root".
 

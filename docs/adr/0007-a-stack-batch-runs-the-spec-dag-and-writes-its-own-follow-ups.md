@@ -41,8 +41,8 @@ request stack.
 comes before it in the order, so its tree holds that code. A spec is refused
 when any `depends_on` entry is outside the plan and not on the default branch.
 Amended 2026-10-10, `SA-0265`: one such entry is allowed if it is the **stack base**, a
-parent whose newest task waits on review with a pushed branch. The first
-layer is cut from the base's branch, and the base's task is its predecessor.
+parent whose newest waiting task has a pushed branch and a pull request. The
+first layer is cut from the base's branch, and the base's task is its predecessor.
 With two such parents the lower id is the base, and a spec naming the other
 is refused. A refusal names its remedy.
 A composite's members stay contiguous in the order. The last member's tree
