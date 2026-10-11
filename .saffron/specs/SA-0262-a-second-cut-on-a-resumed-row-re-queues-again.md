@@ -137,9 +137,10 @@ the attempt either. So the attempts alone cannot say the last cell was a
 zero-commit cut. The row's state and its run's status, read before the
 next cell moves them, can.
 
-**Which attempt is latest.** `attempt_id` is the only order. `started_at`
-defaults to `datetime('now')`, one-second resolution
-(`saffron/ledger.py:165`). `n` numbers attempts within one phase only
+**Which attempt is latest.** `attempt_id` is the only order. The fold
+writes `started_at` from the fact's time (`saffron/ledger.py:751-755`).
+`_ledger_time` truncates that time to whole seconds
+(`saffron/ledger.py:343-346`). `n` numbers attempts within one phase only
 (`saffron/ledger.py:1447-1453`).
 
 **Only `IMPLEMENTING` ends a cut row.** `SPEC_REVIEW` and `SPEC_WRITING`
@@ -240,7 +241,10 @@ Give each cut a salvage turn after it, as
 `test_a_second_cut_at_one_spec_sha_settles_the_spec` does. Seed the three
 rows that are no earlier cut through the `Ledger` API, each on its own
 ledger. The `GATE_ERROR` row holds three `IMPLEMENTING` attempts, the
-second closed with a turn ceiling's subtype and terminal reason. The
+second closed with a turn ceiling's subtype and terminal reason. Its run
+finishes `COMPLETE`, as a real `GATE_ERROR` does
+(`saffron/cell/session.py:3238-3241`). Left `RUNNING`, it no longer
+kills the fifth wrong version. The
 raised row and the scanned row each hold one `IMPLEMENTING` attempt, so
 it is their latest. Without it the state and run checks go untested. The
 scanned row's run is never finished.
@@ -249,9 +253,14 @@ scanned row's run is never finished.
 trailing `IMPLEMENTING` attempt, on another row and on the resumed row.
 That is sixteen cells, each on its own ledger. Seed each row `ORPHANED`
 with its run `COMPLETE`. Then write each attempt's `started_at` through
-`ledger._db`, latest first for the lowest `attempt_id`. Opening the
+`ledger._db`, latest first for the lowest `attempt_id`. Commit that
+write with `ledger._db.commit()` before `ledger.close()`. An uncommitted
+write is lost on close, and every attempt then shares one second. Before
+driving each cell, open the ledger again and assert one seeded row's
+`started_at` values fall as its `attempt_id` rises. Opening the
 non-`SPEC_*` shapes with three `IMPLEMENTING` attempts gives a trailing
-`REVIEWING` a lower `n` than an earlier `IMPLEMENTING` attempt. On another row, the cell mints its own row. On
+`REVIEWING` a lower `n` than an earlier `IMPLEMENTING` attempt. On
+another row, the cell mints its own row. On
 the resumed row, pass the seeded row's id as `task_id`. Copy the seeding
 shape from `test_a_revised_specs_second_cut_settles_on_its_task_rows_spec_sha`.
 
@@ -264,5 +273,5 @@ sentence over 25 words. Update `previous_cut_orphan`'s docstring where it
 describes the phase rule and says it excludes `task_id` itself.
 
 **Size.** A prototype with both witnesses and both test edits measured
-745 tokens with `size_gate`'s counter, against the `bug` ceiling of 1300.
+769 tokens with `size_gate`'s counter, against the `bug` ceiling of 1300.
 `estimated_lines` is that count over four, plus a margin for docstrings.
