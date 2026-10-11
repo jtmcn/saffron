@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -50,6 +51,7 @@ from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
 from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
 from tests.conftest import HostToolExecInTest
+from tests.test_batch import MintDouble
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
 
@@ -2345,6 +2347,36 @@ def _dep_spec(spec_id, depends_on=None):
     )
 
 
+def _budget_spec(spec_id, budget_usd, depends_on=None):
+    """`_dep_spec`'s own twin for the admission witnesses: a `budget_usd`
+    line beside the optional `depends_on` one, since the admission block's
+    arithmetic is read straight off each candidate's own budget."""
+    dep = f"depends_on:\n  - {depends_on}\n" if depends_on else ""
+    return (
+        f"---\nid: {spec_id}\ntitle: t\ntype: chore\nbudget_usd: {budget_usd}\n"
+        f"{dep}---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+
+
+def _stack_admission_repo(tmp_path, dirname="repo-queue-admission"):
+    """The one fixture both admission witnesses drive. SY-1 has budget 10
+    and no parent. SY-2 has budget 14 and depends on SY-1. SY-3 has budget
+    6 and depends on SY-2. SY-4 has budget 40 and depends on SY-9, which no
+    spec here declares, so it is refused. The stack order is SY-1, SY-2,
+    SY-3."""
+    sy1 = _budget_spec("SY-1", 10)
+    sy2 = _budget_spec("SY-2", 14, depends_on="SY-1")
+    sy3 = _budget_spec("SY-3", 6, depends_on="SY-2")
+    sy4 = _budget_spec("SY-4", 40, depends_on="SY-9")
+    return _repo_with_spec(
+        tmp_path,
+        spec_text=sy1,
+        dirname=dirname,
+        extra_specs={"SY-2.md": sy2, "SY-3.md": sy3, "SY-4.md": sy4},
+    )
+
+
 _ID = ("-c", "user.email=t@t", "-c", "user.name=T")
 
 
@@ -2966,6 +2998,305 @@ def test_queue_stack_prints_the_stack_order(tmp_path, capsys):
         for line in plain.splitlines()
         if line.startswith("  ")
     )
+
+
+def test_queue_stack_prints_each_layers_admission_threshold_and_the_total(
+    tmp_path, capsys
+):
+    """`saffron queue --stack` ends with an admission block over its own
+    stack order (backlog item b-0a08bf, `DESIGN.md` §7.1). A header names
+    both shares a stack batch holds back and the spec review cap. One line
+    per candidate gives the least `--budget` that admits it. A last line
+    gives the `--budget` that also pays the last layer's own spec review.
+    SY-4 depends on SY-9, which no spec here declares, and stays refused.
+    It adds no admission line. Without `--stack`, and under
+    `--stack` with no candidate at all, no admission line is printed."""
+    repo = _stack_admission_repo(tmp_path)
+    home = tmp_path / "home"
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo), "--stack"]) == 0
+
+    stacked = capsys.readouterr().out
+    block = stacked[stacked.index("admission:") :]
+    assert block.splitlines() == [
+        "admission: reserve 25% and writer 25% of --budget held back, "
+        "spec review $8.00 per layer, no revision round",
+        "  --budget $20.00 admits SY-1 (budget $10.00)",
+        "  --budget $64.00 admits SY-2 (budget $14.00)",
+        "  --budget $92.00 admits SY-3 (budget $6.00)",
+        "  --budget $108.00 runs every layer and its spec review",
+    ]
+
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo)]) == 0
+
+    plain = capsys.readouterr().out
+    assert "admission" not in plain
+
+    refused_only = _budget_spec("SY-1", 10, depends_on="SY-9")
+    lone_repo = _repo_with_spec(
+        tmp_path, spec_text=refused_only, dirname="repo-queue-admission-refused"
+    )
+    lone_home = tmp_path / "home-refused"
+
+    assert (
+        cli.main(
+            ["--home", str(lone_home), "queue", "--repo", str(lone_repo), "--stack"]
+        )
+        == 0
+    )
+
+    refused_out = capsys.readouterr().out
+    assert "queue: 0 candidate(s)" in refused_out
+    assert "admission" not in refused_out
+
+
+def _review_double(candidate, predecessor=None, **_kwargs):
+    """A `review` that always routes `run`. It costs
+    `spec_review.SPEC_REVIEW_SESSION_USD`, read fresh from the module at
+    call time, so a test that patches the constant mid-run sees the
+    patched cost."""
+    return spec_review.SpecReviewSession(
+        text='```json\n{"findings": []}\n```',
+        cost_usd=spec_review.SPEC_REVIEW_SESSION_USD,
+        error=None,
+    )
+
+
+class _AdmissionRunner:
+    """The `runner` double `run_stack_batch` calls once a layer is admitted.
+    Records the spec id, then closes one `IMPLEMENT` attempt on the task
+    `mint` already opened for it, costing the layer's own `budget_usd`, and
+    returns `READY_FOR_REVIEW`."""
+
+    def __init__(self, ledger):
+        self._ledger = ledger
+        self.started: list[str] = []
+
+    def __call__(self, candidate, predecessor=None):
+        self.started.append(candidate.spec.id)
+        assert candidate.task_id is not None
+        run_id = self._ledger.task_run(candidate.task_id)
+        attempt_id = self._ledger.open_attempt(candidate.task_id, phase="IMPLEMENT")
+        self._ledger.close_attempt(
+            attempt_id,
+            session_id="sess",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=candidate.spec.budget_usd,
+        )
+        return CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=candidate.task_id,
+            run_id=run_id,
+            task_dir=Path("/tmp/nonexistent-task-dir"),
+        )
+
+
+def _drive_fake_stack_batch(order, budget, home, monkeypatch):
+    """`saffron batch --stack --budget {budget}` over `order`, three
+    `Candidate`s and no real repo scan. `_resolve_queue` is faked to hand
+    back exactly `order`. `cli.run_stack_batch` is replaced by a wrapper.
+    The wrapper forwards the order, ledger, budget and readiness check it
+    was given, plus the `reserve_usd`/`writer_usd` `_batch` computed, to
+    the real `saffron.batch.run_stack_batch`. It substitutes its own
+    runner, review and mint, and passes no end review, follow-ups or
+    finish. Returns the started spec ids and the closed batch row."""
+    real_run_stack_batch = cli.run_stack_batch
+    runners: list[_AdmissionRunner] = []
+
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
+        return _fake_batch_resolution(home, repo_id=None, candidates=list(order))
+
+    def _fake_run_stack_batch(
+        candidates,
+        ledger,
+        budget_usd,
+        until,
+        _runner,
+        *,
+        readiness_check,
+        reserve_usd=0.0,
+        writer_usd=0.0,
+        **_ignored,
+    ):
+        repo_id = ledger.upsert_repo(
+            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+        )
+        mint = MintDouble(ledger, repo_id)
+        runner = _AdmissionRunner(ledger)
+        runners.append(runner)
+        return real_run_stack_batch(
+            candidates,
+            ledger,
+            budget_usd,
+            until,
+            runner,
+            readiness_check=readiness_check,
+            reserve_usd=reserve_usd,
+            writer_usd=writer_usd,
+            review=_review_double,
+            mint=mint,
+        )
+
+    with monkeypatch.context() as m:
+        _readiness_passes(m)
+        m.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+        m.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+        repo_dir = home.parent / f"{home.name}-repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        exit_code = cli.main(
+            [
+                "--home",
+                str(home),
+                "batch",
+                "--repo",
+                str(repo_dir),
+                "--stack",
+                "--budget",
+                str(budget),
+            ]
+        )
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    spend = ledger.batch_spend(ledger.latest_batch_id())
+    ledger.close()
+    started = runners[0].started if runners else []
+    return exit_code, started, row["status"], spend
+
+
+_ADMISSION_LINE = re.compile(r"--budget \$(?P<amount>[0-9.]+) admits (?P<id>\S+)")
+_TOTAL_LINE = re.compile(r"--budget \$(?P<amount>[0-9.]+) runs every layer")
+
+
+def _parse_admission_block(tmp_path, capsys, dirname):
+    """Runs `saffron queue --stack` over `_stack_admission_repo` and parses
+    the printed block's own header line, its four amounts (SY-1's, SY-2's
+    and SY-3's thresholds, in order, and the total). None of this is
+    hand-computed. A patched share or cap changes what the amounts read
+    back. The header is asserted against the same two share constants and
+    the review cap, so a header that stops reading them is caught here."""
+    repo = _stack_admission_repo(tmp_path, dirname=dirname)
+    home = tmp_path / f"{dirname}-home"
+    assert cli.main(["--home", str(home), "queue", "--repo", str(repo), "--stack"]) == 0
+    out = capsys.readouterr().out
+    block = out[out.index("admission:") :]
+    lines = block.splitlines()
+    reserve_usd, writer_usd = cli._stack_admission_shares(1.0)
+    expected_header = (
+        f"admission: reserve {reserve_usd:.0%} and writer {writer_usd:.0%} "
+        f"of --budget held back, spec review "
+        f"${spec_review.SPEC_REVIEW_SESSION_USD:.2f} per layer, "
+        "no revision round"
+    )
+    assert lines[0] == expected_header
+    thresholds = [_matched_amount(_ADMISSION_LINE, line) for line in lines[1:4]]
+    total = _matched_amount(_TOTAL_LINE, lines[4])
+    return thresholds, total
+
+
+def _matched_amount(pattern: re.Pattern[str], line: str) -> float:
+    """`pattern`'s own `amount` group in `line`, as a `float`. A `None`
+    match here is this test's own fixture wrong, not a case to tolerate."""
+    match = pattern.search(line)
+    assert match is not None, f"{pattern.pattern!r} did not match {line!r}"
+    return float(match["amount"])
+
+
+def test_each_stack_layers_threshold_agrees_with_what_run_stack_batch_admits(
+    tmp_path, monkeypatch, capsys
+):
+    """Each printed threshold is the least `--budget` at which `saffron
+    batch --stack` starts that layer. A cent above it starts every layer up
+    to and including it. A cent below it stops `BUDGET` before it. At the
+    printed total the batch drains every layer, and `ledger.batch_spend`
+    equals `--budget` less both shares `_batch` passed. Driven under the
+    real shares and spec review cap, then again with all three patched, so
+    a copied constant fails either run."""
+    thresholds, total = _parse_admission_block(
+        tmp_path, capsys, dirname="repo-admission-real"
+    )
+    assert thresholds == [20.0, 64.0, 92.0]
+    assert total == 108.0
+
+    def _order():
+        return [
+            Candidate(
+                path=Path("SY-1.md"),
+                spec=intake.Spec(id="SY-1", title="t", type="chore", budget_usd=10.0),
+                spec_sha="a" * 64,
+                task_id=None,
+            ),
+            Candidate(
+                path=Path("SY-2.md"),
+                spec=intake.Spec(
+                    id="SY-2",
+                    title="t",
+                    type="chore",
+                    budget_usd=14.0,
+                    depends_on=["SY-1"],
+                ),
+                spec_sha="b" * 64,
+                task_id=None,
+            ),
+            Candidate(
+                path=Path("SY-3.md"),
+                spec=intake.Spec(
+                    id="SY-3",
+                    title="t",
+                    type="chore",
+                    budget_usd=6.0,
+                    depends_on=["SY-2"],
+                ),
+                spec_sha="c" * 64,
+                task_id=None,
+            ),
+        ]
+
+    def _run_case(case_label, thresholds, total):
+        spec_ids = ["SY-1", "SY-2", "SY-3"]
+        for k, threshold in enumerate(thresholds, start=1):
+            home_above = tmp_path / f"home-{case_label}-above-{k}"
+            _, started_above, status_above, _ = _drive_fake_stack_batch(
+                _order(), round(threshold + 0.01, 2), home_above, monkeypatch
+            )
+            assert started_above == spec_ids[:k]
+
+            home_below = tmp_path / f"home-{case_label}-below-{k}"
+            _, started_below, status_below, _ = _drive_fake_stack_batch(
+                _order(), round(threshold - 0.01, 2), home_below, monkeypatch
+            )
+            assert started_below == spec_ids[: k - 1]
+            assert status_below == "BUDGET"
+
+        home_total = tmp_path / f"home-{case_label}-total"
+        _, started_total, status_total, spend_total = _drive_fake_stack_batch(
+            _order(), total, home_total, monkeypatch
+        )
+        assert started_total == spec_ids
+        assert status_total == "DRAINED"
+        reserve_usd, writer_usd = cli._stack_admission_shares(total)
+        assert abs(spend_total - (total - reserve_usd - writer_usd)) < 0.005
+
+    _run_case("real", thresholds, total)
+
+    with monkeypatch.context() as m:
+        m.setattr(end_review, "RESERVE_SHARE", 0.375)
+        m.setattr(follow_up, "WRITER_SHARE", 0.375)
+        m.setattr(spec_review, "SPEC_REVIEW_SESSION_USD", 3.0)
+
+        patched_thresholds, patched_total = _parse_admission_block(
+            tmp_path, capsys, dirname="repo-admission-patched"
+        )
+        assert patched_thresholds == [40.0, 108.0, 144.0]
+        assert patched_total == 156.0
+
+        _run_case("patched", patched_thresholds, patched_total)
 
 
 def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):

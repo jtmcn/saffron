@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import os
 import signal
 import subprocess
@@ -1693,6 +1694,65 @@ def _no_candidates_to_rescan() -> list[Candidate]:
     return []
 
 
+def _stack_admission_shares(budget_usd: float) -> tuple[float, float]:
+    """The reserve and the writer share of `budget_usd`, read from
+    `end_review.RESERVE_SHARE` and `follow_up.WRITER_SHARE` at call time.
+    Both `_batch` and `saffron queue --stack`'s own admission arithmetic
+    call this, so a patched share moves both or neither.
+
+    Called with `args.budget` for the dollar amounts `_batch` holds back,
+    and with `1.0` for the bare fractions `_print_stack_admission` divides
+    by. A share is a fraction of the budget, so the two calls are the same
+    computation at different scales.
+    """
+    return (
+        budget_usd * end_review.RESERVE_SHARE,
+        budget_usd * follow_up.WRITER_SHARE,
+    )
+
+
+def _ceil_cents(amount: float) -> float:
+    """`amount` rounded up to the cent, with a tolerance of `1e-9` so a
+    float error in the division above adds no cent of its own. A printed
+    threshold must never sit below the amount it was computed from."""
+    return math.ceil(amount * 100 - 1e-9) / 100
+
+
+def _print_stack_admission(candidates: list[Candidate]) -> None:
+    """What `--budget` a stack queue's own order would need, one line per
+    layer, printed after `_print_queue`'s own output (backlog item b-0a08bf,
+    `DESIGN.md` §7.1). Every earlier layer has already spent its own
+    `budget_usd` plus one spec review by the time the next layer's
+    admission is checked (`saffron/batch.py`'s `wrapped`). Layer `k`'s
+    threshold adds those to its own `budget_usd`, divided by what admission
+    compares against: `1 - reserve share - writer share` of `--budget`
+    (`_drive`'s own comparison). The total adds every layer's own spec
+    review too, since draining the whole order spends every one of them.
+    """
+    if not candidates:
+        return
+    reserve_share, writer_share = _stack_admission_shares(1.0)
+    denominator = 1.0 - reserve_share - writer_share
+    review_usd = spec_review.SPEC_REVIEW_SESSION_USD
+    print(
+        f"admission: reserve {reserve_share:.0%} and writer {writer_share:.0%} "
+        f"of --budget held back, spec review ${review_usd:.2f} per layer, "
+        "no revision round"
+    )
+    spent_by_earlier_layers = 0.0
+    for candidate in candidates:
+        threshold = _ceil_cents(
+            (candidate.spec.budget_usd + spent_by_earlier_layers) / denominator
+        )
+        print(
+            f"  --budget ${threshold:.2f} admits {candidate.spec.id} "
+            f"(budget ${candidate.spec.budget_usd:.2f})"
+        )
+        spent_by_earlier_layers += candidate.spec.budget_usd + review_usd
+    total = _ceil_cents(spent_by_earlier_layers / denominator)
+    print(f"  --budget ${total:.2f} runs every layer and its spec review")
+
+
 def _print_batch_plan(
     resolved: QueueResolution,
     *,
@@ -1777,10 +1837,12 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     )
     # Bound to `--budget` and `--stack` alone, so the night stays sized
     # against the one number the operator gives it (stack-batch design §4).
-    reserve_usd = args.budget * end_review.RESERVE_SHARE if args.stack else None
-    # The spec writer's own sub-cap, held back beside the reserve rather
-    # than inside it (stack-batch design §3, Money).
-    writer_usd = args.budget * follow_up.WRITER_SHARE if args.stack else None
+
+    # Both read through `_stack_admission_shares`, so `saffron queue
+    # --stack`'s own printed thresholds hold back the same two shares.
+    reserve_usd, writer_usd = (
+        _stack_admission_shares(args.budget) if args.stack else (None, None)
+    )
 
     # Readiness first, and before the scan — §4.4's own order, step 1 ahead of
     # step 4. Run after it, `Readiness`'s `mirror`, `origin` and
@@ -2114,6 +2176,8 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
         resolved.gh_failures,
         resolved.policy_unread,
     )
+    if args.stack:
+        _print_stack_admission(resolved.candidates)
     return 0
 
 
