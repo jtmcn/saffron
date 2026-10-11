@@ -270,6 +270,14 @@ Add the command to the command list in `CLAUDE.md` and to the usage in
   refuses it with every other state.
 - **A closed adopted pull request is asked again on every scan**, one
   `gh pr view` per row, as for an `EXHAUSTED` row.
+- **Changes requested on an adopted `READY_FOR_REVIEW` row.** The row
+  becomes `CHANGES_REQUESTED`. The scheduler resumes its task, and that
+  cell's PACKAGE overwrites the adopted `pr_url`
+  (`saffron/ledger.py:818-838`). The operator adopts it again. Leave it.
+- **The window's order.** An adoption's fact stamps `updated_at`, so an
+  old row moves to the newest end of the trailing window
+  (`saffron/ledger.py:1127`). A `SA-0251` merge reorders it the same way.
+  Leave it.
 
 ## Notes for the agent
 

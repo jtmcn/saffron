@@ -692,12 +692,12 @@ _Avoid_: "accept", "merge" (merging is what the train does, later, if green), an
 > Always "trailing". A batch's own accept rate is unknowable when the batch ends,
 > because nothing in it is merged by then. Merging is the next morning's work.
 
-**Settled task**: A task whose outcome can no longer change. Its state is
+**Settled task**: A task the trailing window counts. Its state is
 `MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`,
 `PLAN_REJECTED` or `SPEC_WITHHELD`. A task the scheduler re-queues has not settled,
 and neither has one whose outcome still waits on the operator. An `EXHAUSTED` or
-`NOT_IMPLEMENTED` task with an open pull request still moves to `MERGED` if it
-merges. The window counts it by its state until then, as settled and not merged.
+`NOT_IMPLEMENTED` task with a pull request is the exception. It counts as settled
+and not merged, and only `reconcile` can still move it, to `MERGED`.
 
 **Adopt**: What the operator does with `saffron adopt` to attach a by-hand pull
 request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW` or `EXHAUSTED`
