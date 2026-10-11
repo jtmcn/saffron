@@ -6,7 +6,7 @@ priority: 3
 depends_on: [SA-0260]
 consumes:
   - saffron/cell/proxy.py:proxy_name
-estimated_lines: 378
+estimated_lines: 396
 touches:
   - saffron/cell/runtime.py
   - saffron/cell/proxy.py
@@ -58,7 +58,7 @@ forbidden:
   - tests/test_cli.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 35
+budget_usd: 37
 max_attempts: 3
 max_turns: 200
 risk: standard
@@ -100,6 +100,10 @@ acceptance:
       - The pool is added and the `"cells"` and `"critic"` entries are kept beside it.
       - The pool is declared as the /16 at 10.88.0.0, which holds `DEFAULT_SUBNET`.
       - The pool is declared as one /24.
+    mutant:
+      file: saffron/cell/runtime.py
+      find: '"gate": "10.90.0.0/24",'
+      replace: '"gate": "10.90.0.0/24", "critic": "10.91.0.0/24",'
   - claim: >-
       `proxy.start_proxy` takes the subnet of the network its address is
       read on as a required keyword argument, `subnet`. Given a /24 of the
@@ -110,12 +114,17 @@ acceptance:
       - It reads the address on the pool's first /24 whatever `subnet` it is given.
   - claim: >-
       A task's `cell_up` hands `start_proxy` the subnet it claimed for the
-      task's cells network. REVIEW's critic cells then carry the proxy's
-      address on the subnet claimed for the task's critic network. Those
-      two subnets differ.
+      task's cells network. Each leg's upstream probe is given the proxy's
+      address on the subnet claimed for that leg's network. Each leg's host
+      probe runs at that subnet's gateway. REVIEW's critic cells then carry
+      the proxy's address on the subnet claimed for the task's critic
+      network. Those two subnets differ, and hold whichever /24s of the
+      pool were free.
     witness: tests/test_session.py::test_a_tasks_proxy_is_addressed_on_the_subnets_cell_up_claimed
     wrong_versions:
       - REVIEW reads the critic cells' proxy address on the pool's first /24.
+      - REVIEW reads the critic cells' proxy address on the pool's second /24.
+      - The probes keep each leg's subnet from before the claim.
       - REVIEW reads the critic cells' proxy address on the cells network's subnet.
       - '`cell_up` hands `start_proxy` the critic network''s subnet.'
   - claim: >-
@@ -168,7 +177,10 @@ declaration of every subnet Saffron allocates (backlog item 143,
 (`saffron/cell/runtime.py:329-332`). `networks_on_subnet` lists every
 network whose subnet overlaps the one asked about
 (`saffron/cell/runtime.py:336-363`). It returns an empty list when the
-listing fails.
+listing exits non-zero (`:346-347`). When the binary cannot be run at
+all, `_call` raises `CellRuntimeError` (`:288-291`). `create_network`
+reaches `_admit` first, which raises `CellRuntimeError` on a host the
+runtime refuses, before any create (`saffron/cell/runtime.py:105-116`).
 
 **Where a task's subnets are read.** One `_Leg` per internal network is
 built at `saffron/cell/session.py:1046-1055`. The cells leg takes
@@ -218,7 +230,8 @@ fails. Names alone, from `SA-0260`, do not let two tasks run at once.
    On a refused create, ask `networks_on_subnet(<that /24>,
    exclude=name)`. A holder moves the walk on. No holder raises the
    create's own error. Exhaustion raises `CellRuntimeError` naming every
-   holder it met. `SA-0262` calls this exact name and signature.
+   holder it met. `SA-0262` calls this exact name and signature. It also
+   moves `_admit()` ahead of the walk. Leave that to it.
 3. **`start_proxy`** takes a required keyword argument `subnet` and reads
    its address with that subnet's prefix (`runtime.subnet_prefix`).
 4. **`cell_up`** claims each leg's subnet with `allocate_network`, after
@@ -262,9 +275,15 @@ cut-off attempt's work.
 
 **Edit or new.** `allocate_network` is new code. The edits to
 `start_proxy`, `cell_up` and REVIEW land on lines `SA-0260` rewrote after
-this spec was written. So no criterion can pin their text, and every
-criterion declares a witness and no mutant. `witness` then reports
-`skip`.
+this spec was written. So criteria 1, 2, 4, 5 and 6 declare a witness and
+no mutant, and `witness` reports `skip` for them. Criterion 3 is an edit
+to `runtime.SUBNETS`, which `SA-0260` leaves alone. Its mutant puts the
+critic entry back beside the gate entry.
+
+**How `cell_up` spells the claim.** Call
+`runtime.allocate_network(leg.network)` inside the loop over the legs.
+`SA-0262`'s mutant matches one call in `session.py` by its text, and
+this spelling keeps that match to one.
 
 **Each witness fails at your base.** `allocate_network`, `start_proxy`'s
 `subnet` and the `"pool"` entry do not exist there, and `cell_up` returns
@@ -305,8 +324,15 @@ the prefix of the /24 it hands `start_proxy`. Pass a short `timeout_s`, so
 a wrong version fails in under a second.
 
 **Criterion 5's witness** runs `_drive` to `READY_FOR_REVIEW` over that
-fake. It replaces `proxy.start_proxy` with a recorder of its keyword
-arguments. It replaces `container_ip` with one returning
+fake. Before `_drive`, it creates a network named `held` on the pool's
+first /24 through the fake. The task then claims the second and third,
+so neither its cells nor its critic network is on a /24 a fixed reading
+would guess. It replaces `proxy.start_proxy` with a recorder of its
+keyword arguments. It replaces `preflight.assert_proxy_reaches_upstream`
+and `preflight.assert_host_is_unreachable` with recorders of the network
+and the address each was given, as
+`test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it` does.
+Assert both legs' probes against the subnets the fake recorded. It replaces `container_ip` with one returning
 `f"{subnet_prefix}9"`, as
 `test_the_critic_cell_is_not_on_the_implementers_network` does at
 `tests/test_session.py:7541-7544`. Take each network from the worktree it
@@ -322,6 +348,19 @@ what `networks_created` recorded for its two names.
 
 **Tests at base that the change makes false.** Update each and keep its
 name. A test's name is in the census, so none is removed.
+
+- Every test `SA-0260` added that calls `start_proxy`, or replaces
+  `start_proxy` or `container_ip` with a fake. Pass `subnet=` to the one,
+  and let each fake take `subnet=` and a prefix. Read them at your base.
+- `test_the_preflight_line_reports_what_was_tolerated`
+  (`tests/test_session.py:1640-1647`) expects the probe line to start at
+  `10.88.0.1`. Over the claim model it starts at the gateway of the
+  pool's first /24.
+- `test_normalise_replaces_exactly_the_three_volatile_substrings`
+  (`tests/test_events.py:1893-1901`) expects `runtime.GATEWAY` to survive
+  `_normalise`. `_GATEWAYS` is built from `SUBNETS.values()`, which loses
+  `DEFAULT_SUBNET`. Keep `DEFAULT_SUBNET`'s gateway in `_GATEWAYS`.
+  `SA-0262` deletes it.
 
 - `test_every_subnet_saffron_allocates_is_declared_in_one_place`
   (`tests/test_runtime.py:685-728`) asserts the `"cells"` and `"critic"`
@@ -348,7 +387,7 @@ name. A test's name is in the census, so none is removed.
   `docs/` (`pyproject.toml:55-58`).
   `docs/evidence/scripts/2026-08-28-egress-nat-order.py:61` calls
   `start_proxy` on a network created on `DEFAULT_SUBNET`, so it passes
-  that subnet. `docs/evidence/scripts/2026-10-01-critic-cell-peer-reach.py:125`
+  that subnet. `docs/evidence/scripts/2026-10-01-critic-cell-peer-reach.py:127`
   reads the proxy's address with the default prefix.
   `docs/evidence/scripts/2026-10-01-critic-cell-peer-reach.py:131` reads
   `SUBNETS["critic"]`. Read both from the mapping `cell_up` returns there

@@ -6,7 +6,7 @@ priority: 3
 depends_on: [SA-0261]
 consumes:
   - saffron/cell/runtime.py:allocate_network
-estimated_lines: 440
+estimated_lines: 480
 estimate_measured: true
 touches:
   - saffron/cell/runtime.py
@@ -176,6 +176,9 @@ rewritten.
 Claim the gate-only cell's network with `allocate_network`, and delete the
 sweep, `_GATE_CELL_SUBNET` and `SUBNETS["gate"]`. Keep the by-name pre-clean
 of the cell's own network. Another spec's network is never removed.
+Fix the docstring of `networks_on_subnet` (`saffron/cell/runtime.py:336`).
+Its last lines say the Gate-only cell's pre-clean removes nothing (`:342-344`).
+Once the sweep goes, that cell never reads it.
 
 Claim each of reverify's two networks with `allocate_network`. Remove the
 cell's own network by name before the claim, since a leftover under that
@@ -186,7 +189,15 @@ drop each default above, so each caller names its subnet. A parameter with
 no default cannot follow one with a default. So in the two probe functions
 the gateway moves ahead of `ports`, and every caller follows. Any reader
 of a removed name that the parent leaves names its subnet instead. Rewrite the podman comment to name the subnet the
-host refused, `10.88.0.0/24`.
+host refused, `10.88.0.0/24`. One evidence script,
+`docs/evidence/scripts/2026-08-28-egress-nat-order.py`, keeps the setup it
+measured. It calls `runtime.create_network(NETWORK)` with no subnet (`:57`).
+Pass the literal `"10.88.0.0/24"` there.
+
+In `allocate_network`, call `_admit()` once before the walk. A host refusal
+then raises as itself, never as an exhausted pool. The exhaustion error also
+carries the last refused create's own error text. The parent left this here
+on size. Pin it in an existing `test_runtime.py` test of the walk.
 
 ## Out of scope
 
@@ -194,14 +205,23 @@ host refused, `10.88.0.0/24`.
   the spec id (b-d9ed45).
 - **Batch concurrency.** b-a714d2, item 108, K above one and the spec loop
   driver.
-- **`DESIGN.md` §5.1's worked example.** It names `saffron-cells`,
-  `saffron-proxy` and `10.88.0.0/24`, and is edited by hand with this spec.
+- **Two `DESIGN.md` lines.** §5.1's worked example names `saffron-cells`,
+  `saffron-proxy` and `10.88.0.0/24`. `DESIGN.md:680` says the one measured
+  host refused `DEFAULT_SUBNET`, a name this spec deletes. Both are edited
+  by hand with this spec.
 
 ## Notes for the agent
 
 **Commit as each witness passes.** A cut-off attempt keeps the work.
 
 **Each criterion edits code that exists**, so each declares a mutant.
+
+**One claim per file.** Each of `critic_cell` and `_gate_cell` calls
+`allocate_network` through `runtime` once. It passes the local `network` as
+the only argument. A mutant's find
+must match exactly once (`saffron/cell/worktree.py:731`). In `session.py`
+that relies on `SA-0261` spelling `cell_up`'s claim as
+`runtime.allocate_network(leg.network)`, with `leg.network` as the argument.
 
 **A model of the runtime's networks.** Criteria 1 and 2 fake
 `saffron.cell.runtime._call`, so the real `allocate_network` runs however
@@ -235,25 +255,43 @@ subnet. The defaults exist.
 that another spec's networks survive and its own leftover does not. The
 lens gate cell test asserts `10.90.0.0/24` (`tests/test_session.py:8146`).
 Assert the pool there instead. `_stub_package_cells` stubs `create_network`
-and not `allocate_network` (`tests/test_package.py:227-234`). Stub it too,
-or the other reverify tests reach the runtime. Every test or evidence
+(`tests/test_package.py:227-234`). The real `allocate_network` creates
+through that stub, so the first /24 succeeds with no runtime call. Stubbing
+`allocate_network` as well is optional.
+`test_every_subnet_saffron_allocates_is_declared_in_one_place`
+(`tests/test_runtime.py:685`) keeps its name. It reads `SUBNETS["gate"]`
+and `_GATE_CELL_SUBNET` at `:709`, and `DEFAULT_SUBNET` at `:707` unless the
+parent changed that line. Its AST loop also looks up `"_GATE_CELL_SUBNET"`
+by string at `:717`. `ty` cannot see that string or the dict key, and the
+loop fails only at run time, on `(value,) = []`. Drop the gate entry from
+both. `test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one`
+(`tests/test_session.py:7797`) asserts no overlap with `DEFAULT_SUBNET` at
+`:7847`. Assert the subnet lies inside the pool instead. Every test or evidence
 script that relied on a removed default now names a subnet. A `cell`-marked
 test claims its network with `allocate_network`, so a by-hand run beside a
 live task never collides with it. `test_the_subnet_is_the_only_place_the_network_is_written`
 (`tests/test_runtime.py:502`) keeps its name and asserts `subnet_prefix` and
 `gateway` over one pool /24. The parent's pool test keeps its name and
 drops its `DEFAULT_SUBNET` half. The `types` gate checks `tests/` and
-`docs/`, so it names any caller you miss.
+`docs/`, so it names any attribute read you miss, but not a string.
 
-**One `cell`-marked test, which you cannot run.** Write
+**`cell`-marked tests, which you cannot run.**
+Several change with the probe functions. In `tests/test_proxy.py`, the
+`network` fixture's `runtime.create_network(NETWORK)` (`:30-34`) now
+claims a subnet and yields it with the name. Each
+`preflight.probe_host_bindings` call (`:101`, `:124`) passes the gateway
+ahead of `ports`. The same holds for `tests/test_worktree.py` (`:26-29`, `:282`),
+`tests/test_agent_runner.py` (`:422`, `:455`) and
+`tests/test_review_cells.py`. Only `ty` checks these. Then write
 `tests/test_two_tasks_beside_each_other.py`. Bring two tasks up at once
 with `cell_up`, named as `_drive_cell` names them at the tree base, and tear
 both down in a `finally`. From each implementer, connect to its own proxy
 first, as the positive control. Then try the other task's proxy on each of
 its networks, and the other implementer. Each must fail.
-`tests/test_review_cells.py` has the probe program to copy. It is not a
-witness. The cell runs no `cell`-marked test, so the operator runs it by
-hand before the pull request merges.
+`tests/test_review_cells.py` has the probe program to copy. None of these is
+a witness. The cell runs no `cell`-marked test, so the operator runs
+`uv run pytest -m cell tests/test_proxy.py tests/test_worktree.py tests/test_agent_runner.py tests/test_review_cells.py tests/test_two_tasks_beside_each_other.py`
+by hand before the pull request merges.
 
 **`saffron/cell/**` is in `elevate_on`,** so this task runs `elevated` and
 `size` blocks.
@@ -262,7 +300,10 @@ hand before the pull request merges.
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
-**Size.** A prototype with every witness, over a stand-in for the parent's
-`allocate_network`, measured 1535 tokens with `size_gate`'s counter,
-against the `feature` ceiling of 3000. `estimated_lines` is that count over
-four, plus a margin for comments.
+**Size.** A prototype over a stand-in for the parent's `allocate_network`,
+at an emulated base, measured 1535 tokens with `size_gate`'s counter. It
+measured the source edits, the three witnesses and the conftest model. The
+rest was counted by hand: the new `cell`-marked file at about 90 lines, and
+the existing test and evidence-script edits that rest on the parent's real
+text at about 95. `estimated_lines` is 470, the measured part over four plus
+those counts and a margin for comments. The `feature` ceiling is 3000.

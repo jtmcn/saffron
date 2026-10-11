@@ -73,10 +73,13 @@ acceptance:
       network `saffron-critic-net-`, each followed by the spec id
       lowercased. It starts the proxy `proxy.proxy_name` gives the spec id,
       on exactly those two networks. It reads that proxy's two reports, stops
-      it, and reads every proxy address from it, the critic cells' included. No network either task removes, in its pre-clean or its
-      teardown, is one the other created, and neither removes a bare
-      "saffron-cells" or "saffron-critic-net". The witness drives one whole
-      task for "SY-1" and one for "SY-2", each through REVIEW.
+      it, and reads every proxy address from it, the critic cells' included.
+      No cells or critic network either task removes, in its pre-clean or
+      its teardown, is one the other created. Neither removes a bare
+      "saffron-cells" or "saffron-critic-net", and neither removes or stops
+      the other's proxy. The Gate-only cell's sweep of the gate subnet is
+      `SA-0262`'s and outside this claim. The witness drives one whole task
+      for "SY-1" and one for "SY-2", each through REVIEW.
     witness: tests/test_session.py::test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy
     wrong_versions:
       - The cells network keyed by spec id and the critic network left as the fixed "saffron-critic-net".
@@ -163,7 +166,10 @@ Name the proxy and every task network from the task.
   proxy `proxy_name("endreview-" + spec id)`.
 
 Network names are lowercased because apple/container refuses an uppercase
-one (`saffron/cell/session.py:1391-1393`).
+one (`saffron/cell/session.py:1391-1393`). The longest new name is
+`saffron-cells-endreview-sa-NNNN`, 31 characters. On 2026-10-11,
+apple/container 1.3.0 created `saffron-cells-endreview-sa-0262` and a
+61-character name, each with exit 0 (measured). Podman is unmeasured.
 
 **Subnets stay fixed, and that is the deliberate intermediate state.**
 Every cells network still takes `runtime.DEFAULT_SUBNET` and every critic
@@ -172,9 +178,11 @@ So a second task brought up beside a first now fails at its own
 `create_network`. The runtime refuses an overlapping subnet, and
 `create_network` raises naming the holder (`saffron/cell/runtime.py:329-333`,
 measured as `:337-341` records). That failure is loud and leaves the first
-task running, where today the second silently tears the first down. A
-SIGKILLed task's leftover network now blocks the next task the same way,
-since no later pre-clean names it. `SA-0261` removes both.
+task running, where today the second silently tears the first down. Any
+network a teardown leaves behind now blocks the next task the same way.
+That covers a SIGKILLed task and a removal `cell_down` reports as
+`survived` without raising (`saffron/cell/session.py:1185-1190`). No later
+pre-clean names it. `SA-0261` removes both.
 
 ## Out of scope
 
@@ -211,8 +219,10 @@ Record every name `runtime.remove_container`, `runtime.run_detached` and
 `runtime.container_ip` get, and every `runtime.call` argv. For each key,
 start its proxy with an address, read both reports, then stop it. Then
 start each again with `container_ip` answering `None` and `timeout_s=0`,
-so it gives up and removes. Assert every name recorded under a key is
-that key's proxy name, the `logs` argv included.
+so it gives up and removes. Replace `proxy._ensure_egress_network` with a
+no-op first. Its `runtime.call` argv creates `EGRESS_NETWORK` and names
+no proxy (`saffron/cell/proxy.py:33-42`). Then assert every name recorded under a
+key is that key's proxy name, every recorded `runtime.call` argv included.
 
 **Criterion 2** drives `_drive` twice in one plain test, each run with its
 own `_stub_the_runtime` and its own `tmp_path` subdirectory. Use
@@ -222,11 +232,24 @@ runs. After `_stub_the_runtime`, replace `start_proxy`, `stop_proxy`,
 `denied_egress`, `failed_egress` and `runtime.container_ip` with recorders.
 `cell.networks_created` and `cell.removed` hold the rest.
 
+The Gate-only cell each task's REVIEW opens still sweeps every `saffron-`
+holder on the gate subnet (`saffron/cell/session.py:1405-1410`). With two
+tasks live, that sweep removes the other's `saffron-gate-net-<id>`.
+Criterion 2 runs the tasks one after the other, and `_stub_the_runtime`
+lists no holder. So its claim excludes that sweep, which `SA-0262` removes.
+
 **Criterion 3** follows
 `test_only_a_spec_sessions_layer_cell_is_granted_capabilities_and_checked`
 in `tests/test_end_review.py`. Record each `cell_up` and `cell_down`
 keyword set, and every `runtime.remove_network` and
-`runtime.remove_container` call.
+`runtime.remove_container` call. Its witness fakes `cell_up` and
+`cell_down`, so it sees only `layer_cell`'s own removals. Criterion 2
+covers what the real pre-clean and teardown remove.
+
+**Two comments in `saffron/cell/session.py` name the old network.** Lines
+1328 and 1364 name `saffron-cells`. Rewrite each to name the task's own
+cells network. `saffron/cell/runtime.py:166,169` name it too, but that
+file is forbidden here and `SA-0261` rewrites them.
 
 **Criterion 4** follows
 `test_a_first_call_the_provider_never_served_reports_the_proxy_and_the_cell_before_teardown`
@@ -247,6 +270,10 @@ and its `_rigged_cell`, once per spec id.
   `tests/test_proxy.py`.
 - The four evidence scripts in `touches` call what changes, and `ty`
   checks `docs/`.
+
+**The operator runs `SA-0260` to `SA-0262` as one stack batch**, with no
+other task between them. The intermediate state above lasts only inside
+that batch.
 
 **`saffron/cell/**` is in `elevate_on`**, so this task runs `elevated` and
 `size` blocks. The estimate is about 90 lines of source, 90 of edited
