@@ -280,7 +280,9 @@ Design notes:
                        Also a preflight check that refused the start before
                        any cell existed, such as N1's host probe (§5.1)
   NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
-                       a dead seam here would have returned an earned state
+                       a dead seam here would have returned an earned state.
+                       Leaves only for `MERGED`, when `reconcile` reads that a
+                       pull request `saffron adopt` attached merged (`SA-0264`)
   GATE_ERROR       ◀── a gate errored, the two suites drifted, the critic cell
                        met a binary stub the export cannot carry, a verdict
                        session never started, or a stack batch's spec session
@@ -300,7 +302,8 @@ Design notes:
                        and the rebuttal was left unjudged.
                        Its blockers stand (§5.6). Leaves only for `MERGED`,
                        when `reconcile` reads that the draft PACKAGE opened
-                       for it merged (§5.7)
+                       for it, or a pull request `saffron adopt` attached,
+                       merged (§5.7)
   RATE_LIMITED     ◀── any turn, on a `rejected` window: the provider's ceiling,
                        not the task's. Deliberately not EXHAUSTED — nothing was
                        learned about the spec, and the retry is free (N2, §5.1)
@@ -1351,7 +1354,7 @@ The batch header shows counts by terminal state, total spend, wall clock, and pe
 
 *Trailing*, and the qualifier is not pedantry. This batch's accept rate is unknowable when the batch ends. Nothing is merged yet, because merging is what you do next. The header can only show the rate over prior batches. Its window is the last twenty settled tasks, roughly the smallest n at which the number means anything (§8). A header field that claimed to score the night it was printed would be reporting on work not yet done.
 
-**The window holds settled tasks.** The rate is the share of them that merged. A settled task is in a `DONE_STATES` state whose outcome waits on nobody: `MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`, `PLAN_REJECTED` or `SPEC_WITHHELD`. An `EXHAUSTED` task with a draft still waits on that draft, and moves to `MERGED` if it merges (`SA-0251`). A task the scheduler re-queues on its own `task_id` has not settled. Neither has a task whose outcome still waits on the operator. Item 52 made `reconcile` the writer of `MERGED`, so the field has a source (backlog item b-49a2f7).
+**The window holds settled tasks.** The rate is the share of them that merged. A settled task is in a `DONE_STATES` state whose outcome waits on nobody: `MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`, `PLAN_REJECTED` or `SPEC_WITHHELD`. An `EXHAUSTED` task with a draft still waits on that draft, and moves to `MERGED` if it merges (`SA-0251`). A `NOT_IMPLEMENTED` task with a pull request `saffron adopt` attached waits on it the same way (`SA-0264`). A task the scheduler re-queues on its own `task_id` has not settled. Neither has a task whose outcome still waits on the operator. Item 52 made `reconcile` the writer of `MERGED`, so the field has a source (backlog item b-49a2f7).
 
 Inside the PR body, the ordering that matters is: **disagreements first.** Anywhere the critic and implementer diverged goes above the gate table, because that is where your judgment is worth the most.
 
