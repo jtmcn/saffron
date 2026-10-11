@@ -44,9 +44,10 @@ Amended 2026-10-10, `SA-0265` and `SA-0267`: one such entry is allowed if it is 
 parent whose newest waiting task has a pushed branch and a pull request. The
 first layer is cut from the base's branch, and the base's task is its predecessor.
 With two such parents the lower id is the base, and a spec naming the other
-is refused. A refusal names its remedy. When the base's branch is gone before
-the first layer, every remaining spec on it is refused by name. That is no
-abort, and the night drains.
+is refused. A refusal names its cause and its remedy. A spec offered with no
+predecessor first asks whether the stack base's branch is still there. If the
+ref is gone, every remaining spec on it is refused by name. That is no abort,
+and the night drains. A fetch that fails for another reason is still an abort.
 A composite's members stay contiguous in the order. The last member's tree
 still carries every layer below the composite, not only its members. So the
 composite review's range starts at the first member's predecessor head. The
