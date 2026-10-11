@@ -448,9 +448,9 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
 def _guarding_sigterm(run: Callable[[], int]) -> int:
     """`run`, with SIGTERM made to unwind it the way Ctrl-C does.
 
-    `exec_stream`'s `with proc:` only waits briefly for a `KeyboardInterrupt`
-    and otherwise blocks on the child, so the handler raises that exact
-    class. It then ignores SIGTERM, so a second one cannot cut teardown short.
+    `Popen.__exit__` skips its wait on the child only for that exact class,
+    so the handler raises it. It then ignores SIGTERM, so a second one cannot
+    cut teardown short.
     """
     sigtermed = False
 

@@ -1,6 +1,6 @@
 """SIGTERM must unwind `saffron cell` and `saffron batch` the way Ctrl-C does
-(DESIGN.md §4.5, backlog item b-5df2a7). Both share one handler, installed
-around `_run_cell` and around `_batch` in turn."""
+(DESIGN.md §4.2.1, §4.3, backlog item b-5df2a7). Both share one handler,
+installed around `_run_cell` and around `_batch` in turn."""
 
 from __future__ import annotations
 
@@ -223,7 +223,8 @@ def test_a_cell_sent_sigterm_tears_down_and_closes_its_task(monkeypatch, tmp_pat
     finally:
         signal.signal(signal.SIGTERM, outer)
     assert batch_result == 0
-    assert batch_recorded != [batch_previous]
+    assert len(batch_recorded) == 1
+    assert batch_recorded[0] != batch_previous
 
 
 def test_a_second_sigterm_does_not_cut_the_teardown_short(monkeypatch, tmp_path):
@@ -392,7 +393,7 @@ def test_a_batch_sent_sigterm_exits_143_with_its_log_flushed(tmp_path):
 
     assert proc.returncode == 143
     lines = [line for line in stdout.splitlines() if line]
-    assert lines[-1] == "run_task: SY-1"
+    assert lines[-1:] == ["run_task: SY-1"]
     assert "SY-2       starting" not in stdout
     assert "run_task: SY-2" not in stdout
 

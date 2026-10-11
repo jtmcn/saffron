@@ -206,9 +206,9 @@ whatever the file assigns, so the file's own style stops mattering.
 block-buffers stdout into a file redirect, and `launchctl unload`, logout and
 shutdown all send SIGTERM. Measured before b-5df2a7, a process killed that way
 left a **0-byte** log. One that reaches Python now unwinds and flushes,
-exiting 143. Its log then ends with no `batch:` stop line, and its row closes
-`INFRASTRUCTURE`. Forwarding by `uv run` and launchd's exit timeout are
-unmeasured. On macOS, a stop during a silent agent turn waited until the
+exiting 143. Its log then ends with no `batch:` stop line, and its row, once
+it has one, closes `INFRASTRUCTURE`. Forwarding by `uv run` and launchd's exit
+timeout are unmeasured. On macOS, a stop during a silent agent turn waited until the
 agent's process exited. A SIGKILL still loses what is buffered.
 
 **The two log files are the night's human-readable account.** Every line
