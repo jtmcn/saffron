@@ -6196,9 +6196,9 @@ def test_a_stack_batchs_spec_sessions_reach_the_follower_by_phase_across_rounds(
     `partial(implement.run_agent, ...)` an `emit` built from
     `cli._spec_session_emit`. Every event of a spec review or spec writer
     session lands directly under `out_dir`, in `<spec id>.spec-review` or
-    `<spec id>.spec-write`, as well as on stdout. A later round appends to
+    `<spec id>.spec-write`, as well as on stdout. A later session appends to
     the same log rather than replacing it, and `watch.follow_every_task`
-    follows both across rounds, prefixed by directory name (`b-4e1b6d`)."""
+    follows both across sessions, prefixed by directory name (`b-4e1b6d`)."""
     from saffron import watch
     from saffron.events import Agent
 
@@ -6255,13 +6255,13 @@ def test_a_stack_batchs_spec_sessions_reach_the_follower_by_phase_across_rounds(
 
     def _sleep(_interval):
         sleeps.append(1)
-        round_ = len(sleeps)
-        if round_ == 1:
+        poll = len(sleeps)
+        if poll == 1:
             review(sy1, None)
             revise(sy1, None, None, "rt")
             review(sy1, None, spec_text="revised\n")
             return True
-        if round_ == 2:
+        if poll == 2:
             revise(sy1, layer7, "given\n", "rt")
             review(sy2, layer7)
             return True

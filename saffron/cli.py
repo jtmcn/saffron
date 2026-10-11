@@ -32,9 +32,10 @@ from saffron.cell.session import (
     _SAFFRON_ROOT,
     TURN_TIMEOUT_S,
     CellOutcome,
+    _default_emit,
     stop_on_rejected,
 )
-from saffron.events import Event, EventLog, describe
+from saffron.events import Event, EventLog
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -936,22 +937,10 @@ def _spec_review_policy(exported: Path) -> Policy:
 
 
 def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
-    """A spec review's or spec writer's own `emit`: print `describe(event)`,
-    `run_agent`'s own default, then append it to `EventLog(log_dir)`. A
-    round that calls this again for the same directory appends to the same
-    log, so a later round deletes no earlier line (`b-4e1b6d`). No warning
-    on a failed write: unlike `run_task`'s own default, nothing here owns a
-    task state for a dropped line to flip.
+    """A spec review's or spec writer's `emit`: the terminal plus an
+    `EventLog(log_dir)`. A later session for the same spec appends to it.
     """
-    log = EventLog(log_dir)
-
-    def emit(event: Event) -> None:
-        line = describe(event)
-        if line:
-            print(line)
-        log.append(event)
-
-    return emit
+    return partial(_default_emit, log=EventLog(log_dir))
 
 
 def _stack_review(
