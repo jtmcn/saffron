@@ -1238,7 +1238,7 @@ anywhere. The agent's own commit subjects are captured before teardown and
 carried in the commit body. Without that, a transcript would be their only
 record.
 A commit `saffron package` makes after PACKAGE raised carries none, because nothing
-persists them past teardown (`SA-0266`).
+persists them past teardown (`SA-0266`, `SA-0268`).
 
 The PR opens as a **draft**. Real enough to exercise the path nightly, without
 pinging reviewers while v1 settles.
