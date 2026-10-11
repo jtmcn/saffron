@@ -1613,6 +1613,13 @@ def cmd_hold(args) -> int:
 
 
 def cmd_status(_args) -> int:
+    # The state dir is ignored by git, so every new worktree opens with no order.
+    if not ORDER.is_file() and not LEGACY_PLAN.is_file():
+        print(
+            f"no loop in this checkout ({ORDER.relative_to(REPO)} is absent) — "
+            "`uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot` starts one"
+        )
+        return 0
     rows = _load()
     if not rows:
         return _fail("the order is empty — `snapshot --force`")
