@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -69,14 +70,8 @@ from saffron.watch import UnknownTask, follow, follow_every_task, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
-# The exit code is the only thing a script reads: 0 the task is reviewable,
-# 2 the infrastructure failed, 1 the task did not make it (§3.3). The map covers
-# states; a driver or runtime crash is the same class of failure and takes 2 by
-# the handler in `main`, or an abort would read as an ordinary task outcome.
-# Everything the setup path raises before a cell exists — an unreadable spec or
-# policy, a mirror that will not clone, a repo with no HEAD — is that same
-# infrastructure failure, and is caught there too rather than reaching the
-# operator as a traceback.
+# Exit codes (§3.3): 0 reviewable, 1 the task did not make it, 2 infrastructure,
+# 143 SIGTERM. A crash or setup failure takes 2 from `main`'s handler, never 1.
 CELL_EXIT = {
     "READY_FOR_REVIEW": 0,
     # Already the default for an unnamed state; named because PACKAGE returns it
@@ -270,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     ledger = Ledger(args.home / "ledger.db")
     try:
         if args.command == "cell":
-            return _run_cell(args, ledger, out_dir)
+            return _cell_guarding_sigterm(args, ledger, out_dir)
 
         if args.command == "batch":
             return _batch(args, ledger, out_dir)
@@ -448,6 +443,37 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
     raise git_mirror.GitError(
         f"git merge-base {pushed_sha}..{base_sha}: {ancestor.stderr.strip()}"
     )
+
+
+def _cell_guarding_sigterm(
+    args: argparse.Namespace, ledger: Ledger, out_dir: Path
+) -> int:
+    """`_run_cell`, with SIGTERM made to unwind the cell the way Ctrl-C does.
+
+    `exec_stream`'s `with proc:` only waits briefly for a `KeyboardInterrupt`
+    and otherwise blocks on the child, so the handler raises that exact
+    class. `sigtermed` marks only this one call: a bare `KeyboardInterrupt`
+    with no signal behind it still propagates out of `main`. The first
+    delivery also ignores SIGTERM, so a second one during teardown does
+    nothing, and the handler found on entry comes back once this returns.
+    """
+    sigtermed = False
+
+    def _on_sigterm(_signum: int, _frame: object) -> None:
+        nonlocal sigtermed
+        sigtermed = True
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, _on_sigterm)
+    try:
+        return _run_cell(args, ledger, out_dir)
+    except KeyboardInterrupt:
+        if sigtermed:
+            return 143
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
