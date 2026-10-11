@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
             return _cell_guarding_sigterm(args, ledger, out_dir)
 
         if args.command == "batch":
-            return _batch(args, ledger, out_dir)
+            return _guarding_sigterm(lambda: _batch(args, ledger, out_dir))
 
         if args.command == "draft":
             return _draft(args, ledger, out_dir)
@@ -445,10 +445,8 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
     )
 
 
-def _cell_guarding_sigterm(
-    args: argparse.Namespace, ledger: Ledger, out_dir: Path
-) -> int:
-    """`_run_cell`, with SIGTERM made to unwind the cell the way Ctrl-C does.
+def _guarding_sigterm(run: Callable[[], int]) -> int:
+    """`run`, with SIGTERM made to unwind it the way Ctrl-C does.
 
     `exec_stream`'s `with proc:` only waits briefly for a `KeyboardInterrupt`
     and otherwise blocks on the child, so the handler raises that exact
@@ -464,13 +462,20 @@ def _cell_guarding_sigterm(
 
     previous = signal.signal(signal.SIGTERM, _on_sigterm)
     try:
-        return _run_cell(args, ledger, out_dir)
+        return run()
     except KeyboardInterrupt:
         if sigtermed:
             return 143
         raise
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+def _cell_guarding_sigterm(
+    args: argparse.Namespace, ledger: Ledger, out_dir: Path
+) -> int:
+    """`_run_cell`, wrapped by `_guarding_sigterm`."""
+    return _guarding_sigterm(lambda: _run_cell(args, ledger, out_dir))
 
 
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
