@@ -696,13 +696,13 @@ _Avoid_: "accept", "merge" (merging is what the train does, later, if green), an
 `MERGED`, `REJECTED`, `MERGE_FAILED`, `EXHAUSTED`, `NOT_IMPLEMENTED`,
 `PLAN_REJECTED` or `SPEC_WITHHELD`. A task the scheduler re-queues has not settled,
 and neither has one whose outcome still waits on the operator. An `EXHAUSTED` or
-`NOT_IMPLEMENTED` task with an open pull request waits on it, and moves to `MERGED`
-if it merges.
+`NOT_IMPLEMENTED` task with an open pull request still moves to `MERGED` if it
+merges. The window counts it by its state until then, as settled and not merged.
 
 **Adopt**: What the operator does with `saffron adopt` to attach a by-hand pull
-request to a spec's newest task, when its cell pushed nothing it could package.
-`reconcile` then reads that pull request like one PACKAGE opened, and a merge
-admits the task's dependents (`SA-0264`).
+request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW` or `EXHAUSTED`
+task that carries none. `reconcile` then asks GitHub about it, and a merge makes
+the task `MERGED` and admits its dependents (`SA-0264`).
 _Avoid_: "import", "link" (linking is what `gh stack link` does to a stack).
 
 **Merge train**: The serial post-approval process: rebase onto current `main`,
