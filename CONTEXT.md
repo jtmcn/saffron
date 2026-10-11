@@ -162,14 +162,21 @@ predecessor. One end review reads the stack once the batch stops taking tasks.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
-once every `depends_on` entry is already in the order or on the default branch. Among
+once every `depends_on` entry is already in the order, on the default branch, or the
+stack base. Among
 ready specs the lowest `priority` goes first, then the lowest id. A spec the order
 never takes is refused before any cell starts.
 
 **Predecessor**: The last task below a task in its stack order to reach
-`READY_FOR_REVIEW`. The task is cut from the predecessor's head and targets its
+`READY_FOR_REVIEW`. For the first layer it is the stack base's task, if the order
+has a base. The task is cut from the predecessor's head and targets its
 branch. A task with no predecessor is cut from `base_sha`.
 _Avoid_: "parent" (that is `depends_on[0]`, and a predecessor need not be one).
+
+**Stack base**: A parent outside a stack order whose newest task waits on review
+with a pushed branch, from an earlier batch. A stack batch stacks its first layer
+on that branch, and links nothing. An order has at most one (`SA-0265`).
+_Avoid_: "base" alone (that is `base_sha`), "root".
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
 `stack_layers` row, with its position and its predecessor. A task that misses adds no
@@ -712,8 +719,8 @@ _Avoid_: "merge queue" (GitHub's feature, which this is not).
 **Stacked branch**: A dependent task's branch, cut from its parent's branch rather
 than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. In a stack
 batch a task is cut from its predecessor's head instead, which need not be its parent.
-A dependency there is met by a layer below it in the same stack, or by the default
-branch.
+A dependency there is met by a layer below it in the same stack, by the stack base,
+or by the default branch.
 
 **Retired spec**: A spec the operator moved to `.saffron/specs/done/`, asserting
 that its work is in the default branch. Not offered to the scan. It admits a
