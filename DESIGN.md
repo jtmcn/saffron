@@ -1237,6 +1237,8 @@ the cell's head sha**, and the cell's head names an object no longer reachable
 anywhere. The agent's own commit subjects are captured before teardown and
 carried in the commit body. Without that, a transcript would be their only
 record.
+A commit `saffron package` makes after PACKAGE raised carries none, because nothing
+persists them past teardown (`SA-0266`).
 
 The PR opens as a **draft**. Real enough to exercise the path nightly, without
 pinging reviewers while v1 settles.
