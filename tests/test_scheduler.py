@@ -2897,6 +2897,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0264",
         "SA-0265",
         "SA-0266",
+        "SA-0267",
         "SA-0268",
     }
     directory = tmp_path / "specs"
@@ -2968,6 +2969,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0264",
         "SA-0265",
         "SA-0266",
+        "SA-0267",
         "SA-0268",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
