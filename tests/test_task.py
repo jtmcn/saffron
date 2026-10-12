@@ -35,7 +35,7 @@ from saffron.phases.rebut import (
 from saffron.phases.review import LensReview
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import PolicyError
-from saffron.task import PinnedBase, ReadyTask, Refused, ResolvedCeilings
+from saffron.task import PinnedBase, Refused, ResolvedCeilings
 
 _NO_COMMITS = "no commits, nothing to push"
 
@@ -2475,11 +2475,19 @@ def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
         task_id,
         phase="REPAIRING",
         cost=0.5,
-        earned_risk="elevated",
+        earned_risk="standard",
         with_gate=True,
     )
     _rt_attempt(ledger, task_id, phase="REVIEWING", cost=0.25)
-    _rt_attempt(ledger, task_id, phase="REBUTTING", cost=0.125, with_gate=True)
+    # The rebuttal's re-run stamps `earned_risk` too, and as the newest it wins.
+    _rt_attempt(
+        ledger,
+        task_id,
+        phase="REBUTTING",
+        cost=0.125,
+        earned_risk="elevated",
+        with_gate=True,
+    )
     _rt_attempt(ledger, task_id, phase="SPEC_WRITING", cost=4.0)
 
     ledger.set_task_state(task_id, "READY_FOR_REVIEW")
@@ -2555,7 +2563,7 @@ def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
         monkeypatch.delenv("TZ", raising=False)
         time.tzset()
 
-    assert isinstance(result, ReadyTask)
+    assert isinstance(result, task_module.ReadyTask)
     outcome = result.outcome
     assert outcome.task_id == task_id
     assert outcome.task_dir == task_dir
@@ -2607,14 +2615,16 @@ def test_ready_task_stacks_on_the_branch_of_the_task_that_pushed_its_tree_base(
     decoy_id = _rt_task(ledger, repo_id, spec_id="RT-3", spec_sha="q" * 64)
     ledger.set_task_package(decoy_id, "READY_FOR_REVIEW", "saffron/RT-3", "d" * 40, "")
 
-    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    # A declared tier the default is not, so the fallback cannot be a literal.
+    text = _RT_TEXT.replace("type: feature\n", "type: feature\nrisk: elevated\n")
+    spec_sha = hashlib.sha256(text.encode()).hexdigest()
     task_id = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=spec_sha)
     ledger.record_spec_text(
         task_id,
         origin="revision",
         spec_id="RT-1",
         path=".saffron/specs/RT-1.md",
-        text=_RT_TEXT,
+        text=text,
     )
     ledger.set_task_state(task_id, "READY_FOR_REVIEW")
 
@@ -2631,9 +2641,9 @@ def test_ready_task_stacks_on_the_branch_of_the_task_that_pushed_its_tree_base(
         out_dir=out_dir,
     )
 
-    assert isinstance(result, ReadyTask)
+    assert isinstance(result, task_module.ReadyTask)
     assert result.parent_branch == "saffron/RT-2"
-    assert result.outcome.effective_risk == "standard"
+    assert result.outcome.effective_risk == "elevated"
     ledger.close()
 
 
@@ -2666,7 +2676,7 @@ def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
     result1 = task_module.ready_task(
         "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
     )
-    assert isinstance(result1, ReadyTask)
+    assert isinstance(result1, task_module.ReadyTask)
     assert result1.spec.title == "Done version"
 
     live_sha = hashlib.sha256(_RT_LIVE_TEXT.encode()).hexdigest()
@@ -2675,7 +2685,7 @@ def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
     result2 = task_module.ready_task(
         "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
     )
-    assert isinstance(result2, ReadyTask)
+    assert isinstance(result2, task_module.ReadyTask)
     assert result2.spec.title == "Live version"
 
     task3 = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha="z" * 64)
@@ -2690,7 +2700,7 @@ def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
     result3 = task_module.ready_task(
         "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
     )
-    assert isinstance(result3, ReadyTask)
+    assert isinstance(result3, task_module.ReadyTask)
     assert result3.spec.title == "Recorded version"
     ledger.close()
 
@@ -2742,7 +2752,7 @@ def test_ready_task_reads_a_record_older_than_the_cells_baseline_as_absent(tmp_p
         ledger=ledger,
         out_dir=out_dir,
     )
-    assert isinstance(result, ReadyTask)
+    assert isinstance(result, task_module.ReadyTask)
     assert result.outcome.rebut_result is None
     assert result.outcome.wrong_versions == []
     assert result.outcome.notes == ""
@@ -2756,7 +2766,7 @@ def test_ready_task_reads_a_record_older_than_the_cells_baseline_as_absent(tmp_p
         ledger=ledger,
         out_dir=out_dir,
     )
-    assert isinstance(result_absent, ReadyTask)
+    assert isinstance(result_absent, task_module.ReadyTask)
     assert result_absent.outcome.rebut_result is None
     assert result_absent.outcome.wrong_versions == []
     assert result_absent.outcome.notes == ""

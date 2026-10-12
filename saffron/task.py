@@ -63,7 +63,7 @@ from saffron.events import (
     describe,
 )
 from saffron.intake import Spec, SpecError, parse_spec
-from saffron.ledger import Ledger
+from saffron.ledger import Ledger, _ledger_time
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import (
     LensVerdicts,
@@ -767,10 +767,10 @@ def run_task(
 
 
 # A spec session charged to this task outside its own cell is not this
-# cell's own spend (`CONTEXT.md`'s note on `ready_task`).
+# cell's own spend.
 _NOT_THIS_CELLS_PHASE = frozenset({"SPEC_REVIEW", spec_review.WRITING_PHASE})
-# The repair loop's own phases. REBUTTING records the rebuttal's re-run,
-# not one more suite of the loop (`CONTEXT.md`'s Attempt).
+# The repair loop's own phases. The live cell's outcome leaves the rebuttal's
+# re-run out of its count, measured on tasks 240 and 249.
 _SUITE_PHASES = frozenset({"IMPLEMENTING", "REPAIRING"})
 
 
@@ -795,10 +795,10 @@ def _newest_for_spec(rows: list[sqlite3.Row], spec_id: str) -> sqlite3.Row | Non
 
 def _cell_cutoff(baseline_path: Path) -> str:
     """`baseline.json`'s own mtime, floored to the second and rendered in
-    UTC the way `Ledger._ledger_time` renders `started_at`. A plain text
-    comparison, never a parsed one, decides which turns are this cell's."""
+    UTC by `ledger._ledger_time`, the way it renders `started_at`. A plain
+    text comparison, never a parsed one, decides which turns are this cell's."""
     floored = int(baseline_path.stat().st_mtime)
-    return datetime.fromtimestamp(floored, tz=UTC).strftime("%Y-%m-%d %H:%M:%S")
+    return _ledger_time(datetime.fromtimestamp(floored, tz=UTC).isoformat())
 
 
 def _spec_for_task(
@@ -835,7 +835,7 @@ def _spec_for_task(
 def _rebuild_rebut_result(task_dir: Path) -> RebutResult:
     """`rebuttal.json` rebuilt into a `RebutResult`, with a bare
     `RebuttalTurn`. Its `cost_usd` and `session_id` are not in the file,
-    and no reader of the result reads either (`CONTEXT.md`'s own note)."""
+    and no reader of the result reads either."""
     data = json.loads((task_dir / "rebuttal.json").read_text())
     rebuttal = data["rebuttal"]
     return RebutResult(
@@ -876,7 +876,7 @@ def ready_task(
 
     Refuses by name rather than by raising. It names the spec id, the
     state, the pull request url, and the missing, stale or unmatched
-    file or sha (`CONTEXT.md`'s own **Refusal**).
+    file or sha.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -972,16 +972,16 @@ def ready_task(
             return Refused(
                 reason=f"{tree_base[:12]} was pushed by no task in this repo"
             )
-        parent = pushers[-1]
-        parent_task = next(
+        pusher = pushers[-1]
+        pusher_task = next(
             (
                 row
-                for row in ledger.tasks_by_spec_id(repo_id, parent["spec_id"])
-                if row["task_id"] == parent["task_id"]
+                for row in ledger.tasks_by_spec_id(repo_id, pusher["spec_id"])
+                if row["task_id"] == pusher["task_id"]
             ),
             None,
         )
-        parent_branch = parent_task["branch"] if parent_task is not None else None
+        parent_branch = pusher_task["branch"] if pusher_task is not None else None
 
     outcome = CellOutcome(
         state="READY_FOR_REVIEW",
