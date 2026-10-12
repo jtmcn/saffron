@@ -396,7 +396,7 @@ third outcome, and it is not even attempted when either of the first two holds.
 PACKAGE, in gate-only cells and against a fresh baseline. `saffron regate` runs
 one (`SA-0284`). It is kept as a `task_regate` fact: the head, the baseline's
 commit and the count of new failures. A red re-gate moves no task state.
-_Avoid_: "re-verification", which is PACKAGE's own run over the packaged commit.
+_Avoid_: "re-verification", which judges a packaged commit for PACKAGE or the finishing layer.
 
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
 - `skip`: the repo declares no such gate. Not a failure. Nothing is wrong.

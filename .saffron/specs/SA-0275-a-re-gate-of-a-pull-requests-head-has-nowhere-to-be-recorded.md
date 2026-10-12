@@ -249,6 +249,13 @@ sentence counts as a new one. `_drop_task_rows`' docstring names seven
 tables and says "all seven deletes run first" (`saffron/ledger.py:614-616`).
 Name `regates` too, and make it eight.
 
+`HeadMoved`'s docstring says a moved head is "judged by no gate, critic or
+record" (`saffron/reconcile.py:71-73`). A re-gate now records one. Rewrite
+it with no dash: "A pull request whose head is not the commit PACKAGE
+pushed. Review fixes or a restack moved it, and only a re-gate judges it
+(backlog item 97)." Leave the `head_moved` comment at
+`saffron/reconcile.py:96-97` as it is.
+
 ## Out of scope
 
 - **Running the gates.** `SA-0284` adds `saffron regate`, which calls
