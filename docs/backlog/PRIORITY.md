@@ -256,6 +256,7 @@ moves it to `MERGED`.
 **b-4eaaa4** and **b-6677b6**. A mirror that lacks a task's ref starts one
 with no `task_created` fact, and the fold refuses it. Facts written outside
 `run_task` never leave the host. No record append emits an event.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The

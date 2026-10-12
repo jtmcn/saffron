@@ -3,7 +3,7 @@ id: SA-0278
 title: "No command constructs its `Ledger` with a record, so no fact a night writes reaches `refs/saffron/*`"
 type: feature
 priority: 1
-depends_on: [SA-0268, SA-0265, SA-0260, SA-0271]
+depends_on: [SA-0277, SA-0268, SA-0265, SA-0260, SA-0271]
 estimated_lines: 538
 estimate_measured: true
 touches:
