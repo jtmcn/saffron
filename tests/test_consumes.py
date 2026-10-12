@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import locale
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -685,6 +686,19 @@ def test_an_unreadable_consumed_entry_refuses_the_task_and_names_it(
     monkeypatch.setattr(
         task_module, "run_one_cell", lambda spec, **k: calls.append(spec)
     )
+
+    # `--no-local` (b-6cd3c2) means the clone above packed real.py rather than
+    # linking it loose, so unpack every pack back to loose objects first.
+    pack_dir = mirror / "objects" / "pack"
+    for pack in list(pack_dir.glob("*.pack")):
+        data = pack.read_bytes()
+        for sibling in pack_dir.glob(f"{pack.stem}.*"):
+            sibling.unlink()
+        subprocess.run(
+            ["git", "-C", str(mirror), "unpack-objects", "-q"],
+            input=data,
+            check=True,
+        )
 
     blob = git(repo, "rev-parse", f"{sha}:real.py")
     loose = mirror / "objects" / blob[:2] / blob[2:]

@@ -73,7 +73,11 @@ def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
         return mirror_path
 
     mirror_path.parent.mkdir(parents=True, exist_ok=True)
-    completed = _run(["git", "clone", "--mirror", str(origin), str(mirror_path)])
+    # --no-local: a local-path origin otherwise hard-links the checkout's
+    # object files into the mirror, so the mirror is never a copy (b-6cd3c2).
+    completed = _run(
+        ["git", "clone", "--mirror", "--no-local", str(origin), str(mirror_path)]
+    )
     if completed.returncode != 0:
         raise GitError(f"git clone --mirror: {completed.stderr.strip()}")
     return mirror_path
