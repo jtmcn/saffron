@@ -62,12 +62,12 @@ acceptance:
       reads the policy and the spec file from that export. It builds the
       repo's cell image. It then runs N1's host probe on a network it
       claims from the pool, after removing a leftover of that name, and
-      removes the network before re-verification. It prints the ports line
+      removes the network before `reverify` starts. It prints the ports line
       `run_one_cell` prints, `tolerating` part included. It calls
       `package_phase.reverify` once, with the mirror, that head, that merge
       base, the policy, the export, the built image and the spec. It then
       calls `record_regate` with the task id, `head_sha` the head,
-      `base_sha` the merge base and `new_failures` 0, prints `green`, and
+      `baseline_sha` the merge base and `new_failures` 0, prints `green`, and
       exits 0. It reads no token and reaches no agent. The witness drives a
       base of the default branch and a base of a parent's branch, each
       moved after the task's branch forked from it, with `--repo` relative
@@ -86,7 +86,7 @@ acceptance:
       - The probe at a fixed subnet's gateway rather than the claimed one's.
       - No removal of a leftover network before the claim.
       - A ports line with no `tolerating` part.
-      - No `record_regate` call, or one whose `base_sha` is the base branch's head.
+      - No `record_regate` call, or one whose `baseline_sha` is the base branch's head.
       - "`--repo` used unresolved."
       - A refusal to run when `CLAUDE_CODE_OAUTH_TOKEN` is unset.
   - claim: >-
@@ -229,8 +229,9 @@ steps run in this order.
 7. Call `package_phase.reverify` with the mirror, `packaged_sha` the head,
    `new_base_sha` the merge base, the policy, the export, the image and
    the spec.
-8. Call `ledger.record_regate(task_id, head_sha=..., base_sha=...,
-   new_failures=...)`, with the merge base and the count of new failures.
+8. Call `ledger.record_regate(task_id, head_sha=..., baseline_sha=...,
+   new_failures=...)`. `baseline_sha` is the commit the baseline suite ran
+   at, the merge base, and `new_failures` is the count.
    Print each new failure's gate, code and file, then one line with the
    head, the merge base and `green` or the count. Exit 0 green and 1 red.
 
@@ -260,7 +261,7 @@ no other network uses. Remove a leftover of that name first. Inside a
 the gateway first and then `preflight.probe_addresses(gateway)`, each once.
 Call `preflight.assert_host_is_unreachable(repo_image.BASE_TAG, name,
 gateway=..., ports=..., sockets=...)`. The `finally` removes the network,
-so it is gone before re-verification starts.
+so it is gone before `reverify` starts.
 
 **The documentation, as cell work.**
 
@@ -307,7 +308,7 @@ keyword. Then the call is right under either order. Read `runtime` and
 `preflight` at the tree base before you write the probe.
 
 **Writing against `SA-0275`.** Call `ledger.record_regate` with exactly
-the keywords `head_sha`, `base_sha` and `new_failures`, the last an `int`.
+the keywords `head_sha`, `baseline_sha` and `new_failures`, the last an `int`.
 The `types` gate checks the call against the parent's signature.
 
 **The seams.** Call each host step through its module, so a monkeypatch
@@ -338,7 +339,7 @@ Annotate the runner parameter with the `GhRunner` alias at
 - `reverify` returns a green comparison with no results. It records its
   keyword arguments, and criterion 1 asserts each.
 - The `record_regate` fake accepts any keywords. So the witnesses assert
-  the exact keyword set, and a `baseline_sha` spelling fails.
+  the exact keyword set, and a `base_sha` spelling fails.
 - `probe_addresses` returns the gateway and one LAN address.
 
 **The origin is real git.** Build a checkout with a bare origin added as
