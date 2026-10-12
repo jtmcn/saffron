@@ -4,7 +4,7 @@ title: The cell's agent refuses every write under `.claude/` in dontAsk mode, so
 status: partial
 tier: 1
 filed: 2026-09-25
-specs: [SA-0259]
+specs: [SA-0259, SA-0279]
 prs: [809]
 commits: []
 cites: [§5.3, §4.2]
@@ -48,3 +48,6 @@ One of two, decided before a spec lands:
   exit is met. The host grants no write, and intake refuses no spec. So the
   outcome still turns on the agent taking the route, and no cell test
   edits a file under `.claude/`.
+- 2026-10-11: `SA-0279` is queued for the second exit. It makes the
+  protected-touch refusal refuse a `touches` entry with a `.claude`
+  component.
