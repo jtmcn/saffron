@@ -4,7 +4,7 @@ title: No task records which engine judged it, so two engines' results read alik
 type: feature
 priority: 2
 depends_on: [SA-0262, SA-0264, SA-0271]
-estimated_lines: 325
+estimated_lines: 337
 estimate_measured: true
 touches:
   - saffron/engine.py
@@ -56,27 +56,32 @@ acceptance:
       surrounding whitespace, when that text is not empty. It does so whether
       or not a checkout holds `source`, and before it asks git anything. A
       blank file reads as no file. The witness drives a baked file inside a
-      committed checkout, one in a directory no checkout holds, and a blank
-      one inside the checkout, which then reads the checkout's `HEAD`.
+      committed checkout and one in a directory no checkout holds. It drives
+      two blank files inside the checkout, an empty one and one holding only
+      a newline, a space and a newline. Each blank one reads the checkout's
+      `HEAD`.
     witness: tests/test_engine.py::test_a_baked_engine_commit_is_read_before_any_checkout
     wrong_versions:
       - A version that asks git first and reads the file only when no checkout answers.
       - A version that returns the file's text without stripping it.
       - A version that returns an empty string for a blank file.
+      - A version that reads the file raw and returns its stripped text whenever the raw text is not empty.
   - claim: >-
       With no baked value, `engine_commit(source)` returns the full
       40-character `HEAD` of the checkout whose top level is the parent of
       `source`. It appends `-dirty` when a tracked file differs from `HEAD`,
-      staged or not. An untracked file marks nothing. The witness drives a
-      clean checkout, the same checkout with only an untracked file added,
-      then with an unstaged edit to a tracked file, then with that edit
-      staged.
+      staged or not. An untracked file marks nothing. It never writes the
+      checkout's index. The witness drives a clean checkout whose tracked
+      file's mtime moved forward, and asserts the index bytes are unchanged. It
+      then drives the same checkout with only an untracked file added, then
+      with an unstaged edit to a tracked file, then with that edit staged.
     witness: tests/test_engine.py::test_a_checkout_reports_its_head_and_marks_a_tracked_change_dirty
     wrong_versions:
       - A version that counts an untracked file as a change.
       - A version that reads only unstaged changes, so a staged edit reads clean.
       - A version that returns an abbreviated commit.
       - A version built on `git describe --always`.
+      - A version that runs a plain `git status`, which rewrites the index after an mtime moves.
   - claim: >-
       `engine_commit(source)` returns `None` when there is no baked value and
       the parent of `source` is not the top level of a checkout with a
@@ -226,7 +231,11 @@ task's reviewer reads.
 - **`saffron migrate`.** Its docstring lists the kinds it writes, ending
   at `stack_finish` (`saffron/record/migrate.py:9-15`). `task_engine` is
   not among them, so a migrated task folds with a NULL engine.
-  `saffron/record/**` is `forbidden`.
+  `saffron/record/**` is `forbidden`. Live writes reach the record
+  once SA-0278 lands, since it builds the production `Ledger` with a
+  record. `record_engine` appends through `_append` like every other
+  write. Only `saffron migrate` of a ledger written before that wiring
+  drops the engine, and that stays out of scope.
 - **Tasks no cell starts on.** A stack batch mints its task through
   `create_task` with no engine (`saffron/cli.py:1123`). Its cell records
   one when it starts, as a given task. The draft command's own
@@ -275,10 +284,15 @@ The test over it asserts `value is not None` for every folded column
 working directory. Compare `git rev-parse --show-toplevel` with that
 directory with both resolved, since macOS reaches a temporary directory
 through `/private`. `git rev-parse --verify HEAD` fails on a checkout with no
-commit. `git status --porcelain --untracked-files=no` prints nothing on a
-clean tree. A non-zero exit, or git missing, reads as no answer and never
+commit. `git --no-optional-locks status --porcelain --untracked-files=no`
+prints nothing on a clean tree. Without `--no-optional-locks`, `status`
+rewrites `.git/index` after a tracked file's mtime moves. That holds the
+index lock in the operator's checkout. Measured 2026-10-11: plain `status`
+rewrote the index and the flagged one did not. The flag also covers
+criterion 4, whose call reads the real checkout. A non-zero exit, or git missing, reads as no answer and never
 raises. Measured with git 2.54 on the host. That each flag also runs on
-git 2.39.5, the cell image's git, is reasoned and not measured.
+git 2.47.3, the git of the cell image's `python:3.12-slim-trixie` base,
+is reasoned and not measured.
 
 **The engine tests isolate git**, as `_isolate_git` does
 (`tests/test_finish.py:31-39`). Set `HOME`, `XDG_CONFIG_HOME`,
@@ -308,7 +322,7 @@ such as `"d" * 40 + "-dirty"`. Use the `packageable` fixture
 about the checkout. It took about 10 ms here.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill. A
-prototype's witnesses killed all 24 on 2026-10-11, and every witness failed
+prototype's witnesses killed all 26 on 2026-10-11, and every witness failed
 with the source reverted.
 
 **The `prose` gate** counts every new comment and docstring. Write none
@@ -317,7 +331,7 @@ sentence over 25 words.
 
 **Size.** `saffron/ledger.py` and `saffron/cell/**` are in `elevate_on`, so
 the task is `elevated` and `size` blocks. A prototype of the whole change
-measured 1298 changed tokens with `size_gate`'s counter, against the
+measured 1348 changed tokens with `size_gate`'s counter, against the
 `feature` ceiling of 3000. It held the module, the ledger, cell, PACKAGE
 and body edits, all nine witnesses, the mapping entry and the
 `_drive_eleven_kinds` call. `estimated_lines` is that count over four.
