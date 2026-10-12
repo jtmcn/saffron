@@ -135,8 +135,8 @@ class StackBase:
 
     `task_id` is that pull request's own task. It names no task of this
     order, and is read for its branch and its pushed head. `_resolve_stack_base`
-    (`SA-0267`) is what chooses one, from the newest waiting task of the
-    lowest-id parent that qualifies (`SA-0267`).
+    chooses one, from the newest waiting task of the lowest-id parent that
+    qualifies (`SA-0267`).
     """
 
     spec_id: str
@@ -800,8 +800,8 @@ def _refuse(
     return None
 
 
-# The two remedy texts a non-qualifying parent's cause ends on.
-# `_stack_base_candidate` picks between them below.
+# Two of the three remedies a non-qualifying parent's cause ends on.
+# The adopt remedy names its id, so `_stack_base_candidate` builds it inline.
 _RUN_TO_PR_FIRST = "run it to a pull request first"
 _MERGE_OR_RERUN = "merge it, or rerun it"
 
@@ -819,8 +819,8 @@ def _stack_base_candidate(
     Reads `dep`'s tasks the way `task._resolve_stacked_on` does without a
     `gh`: the newest row in `DEPENDENCY_WAITING_STATES`. It qualifies only
     with a `branch`, a resolved `pushed_sha`, and a `pr_url` on that row.
-    `pr_url_by_task` comes from `ledger.tasks_by_repo`, the one method that
-    carries it.
+    `pr_url_by_task` comes from `ledger.tasks_by_repo`, the one per-repo
+    method that carries it.
     """
     rows = ledger.tasks_by_spec_id(repo_id, dep)
     waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
@@ -899,8 +899,7 @@ def _resolve_stack_base(
 def _second_stack_base_reason(stack_base_id: str, other_id: str) -> str:
     """Why a spec naming `other_id` is refused although `other_id` itself
     qualifies as a stack base: `stack_base_id` already won the lowest-id
-    tie-break, and a stack order has at most one (`SA-0267`, `SA-0265`,
-    `SA-0267`)."""
+    tie-break, and a stack order has at most one (`SA-0265`, `SA-0267`)."""
     return (
         f"depends_on {other_id} is outside the stack order and not on the "
         f"default branch, and {stack_base_id} is already this batch's "
