@@ -1114,6 +1114,18 @@ is not the schema is re-prompted once in its own session, as a lens's is. A
 criterion still without a usable answer is an `error`. It blocks nothing, and
 the REVIEW line and the pull request name it (`SA-0202`).
 
+**An edit the gate derives.** A witness can compare the code's output with
+the constant it tests. Any value then passes it (backlog item b-5b1f8a). So
+`witness` also derives a **constant mutant** from the diff (`SA-0280`). It
+changes the value the diff gives a constant. It then runs each witness whose
+own text in the diff names that constant. A witness that stays green is a
+survivor, filed as one under a declared mutant is. What a constant looks
+like, and where a witness's text lies, is language knowledge. So the repo
+declares both as patterns under `policy.yaml`'s `witness:`, as it declares
+`integrity`'s tokens (§2.1). Core applies them to the diff as text and runs
+nothing new. A repo that declares none derives none. A constant in a declared
+test path is never mutated.
+
 **Reversion is at hunk granularity and cannot reach this.** `revert` (§5.4)
 stashes whole files and asks whether the new tests test *anything*. Scaling it
 down to hunks does not help: a diff that adds a function has one hunk, and
@@ -1141,8 +1153,8 @@ not have run yet. `SA-0062` specified the opposite order and passed review
 **Blocking level.** Advisory at `standard`, blocking at `elevated`: the level
 `size` already carries, and for the same reason: an elevated diff is one where a
 plausible-looking wrong change hurts most, and a claim guarded by nothing is
-exactly that. A spec declaring no mutants reports `skip`, so this cannot fail a
-task retroactively. A survivor at base is not subtracted (§5.4), so at `elevated`
+exactly that. A spec declaring no mutants, whose diff yields no constant mutant,
+reports `skip`. So this cannot fail a task retroactively. A survivor at base is not subtracted (§5.4), so at `elevated`
 it blocks until the task kills its mutant.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)

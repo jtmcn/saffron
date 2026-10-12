@@ -457,6 +457,14 @@ against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
 the edit is applied to. That is the worktree, mutated. _Avoid_ "mutant" for the
 edit a lens names in a review finding. That is a vacuity probe.
 
+**Constant mutant**: A find-and-replace edit the `witness` gate derives from the diff
+and applies as it applies a mutant (`DESIGN.md` §5.4.1). It changes the value the diff
+gives a constant, then runs each witness whose own text names that constant. A witness
+that stays green reads the constant back, so any value passes it. The repo declares what
+a constant and a witness's text look like, under `policy.yaml`'s `witness:`.
+_Avoid_ "criterion probe" for one. No session names it, and the implementer can see
+what it will change.
+
 **Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
 notice the behaviour it describes breaking. After REVIEW the host applies each anchored adequacy
 finding's probe in a gate-only cell. It refuses a probe that edits a declared test path, and
