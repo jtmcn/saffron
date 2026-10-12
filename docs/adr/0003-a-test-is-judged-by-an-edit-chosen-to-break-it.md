@@ -16,8 +16,9 @@ the gates were necessary and nowhere near sufficient. Thirty-one passing tests
 and five surviving mutants described one artifact. Tests written by the code's
 author certify agreement, not correctness.
 
-The decision is spread across §5.4, §5.4.1, §5.5, §5.5.1, §11 and the backlog,
-and it changed seven times.
+The decision is spread across §5.4, §5.4.1, §5.5, §5.5.1, §11 and the backlog.
+The list below dates seven entries. The first sets the decision, and each of
+the six after it changes it.
 
 - 2026-08-25. §5.4 rejected mutation testing on cost, because `mutmut` reruns
   the suite per mutant. §11 corrected that reason. `mutmut` does not rerun per
@@ -145,7 +146,11 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
 - **49** departs. Principle 49 needs the answer hidden from the agent. A spec's
   mutant is hidden from the prompt and not from the cell, until item 80 lands.
   A surviving probe is shown at REBUT, and item 117 accepts that only if a
-  fresh probe is asked for each round.
+  fresh probe is asked for each round. The `revert` exemption rests on that
+  same shown probe. A test REBUT adds is exempt because it kills the edit the
+  implementer was told about, and no fresh probe is asked. The operator
+  accepted that on 2026-10-11. Without it a sound fix ended `EXHAUSTED`, and
+  the kill is still a run of the declared `tests` gate, not a claim.
 - **52** departs. Vacuity is a property of how a test and its code respond to
   perturbation, so the first verdict comes from running an edit. After REBUT
   a run decides the tests REBUT added, and the blocker returns to reading.

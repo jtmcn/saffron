@@ -241,6 +241,10 @@ and no resume.
 in-cell agent is refused every write to `.pre-commit-config.yaml`, so a spec
 that names it ends `EXHAUSTED`.
 
+**Placed 2026-10-11**, from `SA-0273`'s first spec review: **b-6b06e1**. A
+rebuilt outcome for PACKAGE run alone drops the `revert` exemption, so a sound
+diff ends `MERGE_FAILED`.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The

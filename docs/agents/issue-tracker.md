@@ -157,8 +157,9 @@ GitHub issues remain in use only for research/evidence records under
   easy to pass. `revert` is the strict one. It re-runs a subset with the diff's
   source files reverted and blocks any that still pass: **every test the diff
   adds, united with every declared witness the suite collected at head, minus
-  every `preserves` witness** (`saffron/gates/core/revert.py`). Two things
-  follow. A test the spec asks the cell to write is judged whether or not a
+  every `preserves` witness** (`saffron/gates/core/revert.py`). After REBUT
+  it also spares a test the rebuttal added that killed a surviving probe
+  (ADR 3). Two things follow. A test the spec asks the cell to write is judged whether or not a
   criterion declares it, so never ask in prose for a guard that passes at base.
   And a criterion describing behaviour already true at base — "nothing is
   pushed", "the breaker does not fire" — cannot be witnessed honestly as
