@@ -3,7 +3,7 @@ id: SA-0274
 title: The `size` gate counts the tests a spec's criteria demand against the same ceiling as its source
 type: feature
 priority: 2
-estimated_lines: 140
+estimated_lines: 160
 estimate_measured: true
 touches:
   - saffron/gates/core/size.py
@@ -51,10 +51,14 @@ acceptance:
       path matches any one of them adds nothing to the count. The verdict,
       the pass summary, the fail summary and the failure message all use the
       count without them. When files under a test path carried tokens, the
-      summary names how many. When none did, the pass and fail summaries are
-      exactly what they are today, with a rewrapped test file that carries
-      none. An estimated file under a test path is not named as estimated. The witness declares two globs, tests/** and
-      *_test.go, and changes six files. It counts src/a.py, pkg/a_test.go
+      summary names how many tokens they carried. When none did, the pass and
+      fail summaries are exactly what they are today, with a rewrapped test
+      file that carries none. An estimated file under a test path is not
+      named as estimated. A file hidden as binary under a test path and
+      inside `touches` is refused or named exactly as today: `error` where
+      the gate blocks, and named in the pass summary where it does not. The
+      witness declares two globs, tests/** and *_test.go, and changes six
+      files. It counts src/a.py, pkg/a_test.go
       and src/tests/util.py. It leaves out tests/unit/test_a.py, a_test.go
       and a tests/shared.py past the token-diff bound. A diff over the `bug`
       ceiling only with its test file passes with the paths declared and
@@ -73,6 +77,7 @@ acceptance:
       - The estimated-file note built from every file, so tests/shared.py is named.
       - The test-path note printed when any test-path file changed, so a rewrapped test file that carries no tokens adds it.
       - The fail summary carrying a zero test-path note when no test path carried tokens.
+      - The unreadable paths filtered by the test paths, so a binary under tests/ is neither refused where the gate blocks nor named where it does not.
       - The test paths accepted and never read.
   - claim: >-
       The gate suite hands `size_gate` the test paths `policy.integrity`
@@ -154,8 +159,8 @@ Leave the repo's declared test paths out of what `size` counts.
   (`saffron/agents/prompts/implement.md:26-32`). At `elevated` a plan
   whose tests take it over the ceiling is still refused. Backlog item
   **b-15db6e** owns it, and `saffron/agents/**` is forbidden here.
-- **An unreadable file under a test path.** It is refused or named exactly
-  as today. Its content is uncounted either way.
+- **Refusing or naming an unreadable file differently.** Criterion 1
+  holds both as today under a test path. Its content stays uncounted.
 - **`driver.py`.** Its `_size` and its `check` pricing keep counting every
   line. `.claude/**` changes by hand.
 - **`DESIGN.md`.** §5.4's `size` row is edited by hand with this spec.
@@ -195,7 +200,12 @@ source file at the ceiling plus 1 beside it fails declared. Assert its
 failure message and its summary both start with the ceiling plus 1, and
 that its summary carries the 100. Last, a source file at the ceiling plus 1
 beside the rewrapped test file fails declared. Assert its summary equals
-the fail summary today's tests pin, with no note.
+the fail summary today's tests pin, with no note. Then add a
+`Binary files /dev/null and b/tests/logo.png differ` block, written by hand
+under its `diff --git` header, beside `src/a.py`. Pass `touches` holding
+`src/**` and `tests/**`. Assert `error` naming the path with
+`blocking=True`. With `blocking=False`, assert `pass` and a summary
+carrying `tests/logo.png unreadable, not counted`.
 
 **Criterion 2's witness.** `_Tree` (`tests/test_suite.py:21`) returns
 `""` from `patch` by default. Every `size` result passes on that, so a
@@ -217,7 +227,7 @@ so every line it grows is a new hit. Put any reason in a one-line comment.
 and `size` blocks.
 
 **Size.** A prototype held both witnesses, the `size_gate` change and the
-suite's one argument. It measured 539 changed tokens with `size_gate`,
+suite's one argument. It measured 616 changed tokens with `size_gate`,
 counting its tests, against the `feature` ceiling of 3000. With
-`tests/**` left out it measured 72. `estimated_lines` is 539 over four,
+`tests/**` left out it measured 72. `estimated_lines` is 616 over four,
 plus a margin for one docstring sentence.
