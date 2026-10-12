@@ -3,7 +3,7 @@ id: SA-0280
 title: A witness that reads back the constant it tests passes every gate, because `witness` runs only the mutants a spec declares
 type: feature
 priority: 2
-depends_on: []
+depends_on: [SA-0278]
 estimated_lines: 560
 estimate_measured: true
 touches:
