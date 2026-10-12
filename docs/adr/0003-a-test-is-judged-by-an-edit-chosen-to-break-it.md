@@ -17,8 +17,8 @@ and five surviving mutants described one artifact. Tests written by the code's
 author certify agreement, not correctness.
 
 The decision is spread across §5.4, §5.4.1, §5.5, §5.5.1, §11 and the backlog.
-The list below dates seven entries. The first sets the decision, and each of
-the six after it changes it.
+The list below dates eight entries. The first sets the decision, and each of
+the seven after it changes it.
 
 - 2026-08-25. §5.4 rejected mutation testing on cost, because `mutmut` reruns
   the suite per mutant. §11 corrected that reason. `mutmut` does not rerun per
@@ -41,18 +41,25 @@ the six after it changes it.
 - 2026-10-11. `revert` failed a test REBUT added to kill a probe, and a sound
   fix ended `EXHAUSTED`. A probe now runs again after REBUT, and its kill
   exempts that test from `revert` (`SA-0273`, backlog item b-4a63b7).
+- 2026-10-11. A witness that compared output with the constant it tested
+  passed every gate (backlog item b-5b1f8a). `SA-0280` lets a repo declare
+  `witness:` patterns, from which `witness` derives a constant mutant.
 
 ## Decision
 
 Whether a test guards a behaviour is answered by running an edit chosen to
-break that behaviour. No mutation-testing tool sweeps the diff. Two gates and
-two host-run probes share the question, and each asks it differently.
+break that behaviour. No mutation-testing tool sweeps the diff. The one edit
+derived from it changes a constant a witness names. Two gates and two host-run
+probes share the question, and each asks it differently.
 
 - `revert` reverts the diff's source files, keeps its test files, and requires
   the new tests to fail. It asks whether the tests test anything. A test REBUT
   added is exempt when the probe run after REBUT shows it killing a probe.
 - `witness` applies a mutant the spec declares to the head tree, and requires
   the claim's witness to fail. It asks whether that one claim is guarded.
+  Where a repo declares `witness:` patterns, it also changes each constant the
+  diff writes. It runs each witness whose own text names that constant, and
+  asks whether the witness reads the constant back.
 - A criterion probe is an edit a fresh session names to make one claim false.
   The session is never told which test is the claim's witness. The host applies
   the edit in its own gate-only cell and runs the claim's witness over it, as
@@ -72,7 +79,8 @@ the run collected. An `unproven` vacuity
 probe leaves its finding at the severity the lens filed. An `unproven`
 criterion probe files no finding.
 
-ADR 2 names only the spec's mutant among the edits core applies. The two probe
+ADR 2 names the spec's mutant and the constant mutant among the edits core
+applies. The two probe
 runs are host steps inside the same rule. The host invokes a gate the repo
 declared, and no tool.
 

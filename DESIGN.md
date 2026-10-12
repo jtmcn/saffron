@@ -151,6 +151,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | `census` gate | **Core** | Subtracts two lists of names the repo's `tests` gate already reported. It reads a gate result and invokes nothing |
 | `criteria` gate | **Core** | Judges each declared witness against the same two reported lists. It reads a gate result and invokes nothing |
 | `revert` gate | **Core** logic, the repo's `tests` gate as runner | The sanctioned exception below: core re-invokes a declared gate, it does not run a tool |
+| `witness` gate | **Core** logic, patterns from repo, the repo's `tests` gate as runner | Runs `revert`'s exception. What a constant or a test's text looks like is not universal, so a constant mutant reads the repo's `witness:` patterns (§5.4.1) |
 | `format`, `lint`, `types`, `tests`, `no-network` | **Repo** | Executables satisfying the gate contract |
 | Cell image, services (DB, cache, …), fixtures | **Repo** | `.saffron/Dockerfile` and a declared service list |
 | Risk-elevation paths, protected paths, envelope defaults | **Repo** | `policy.yaml` |
@@ -887,7 +888,7 @@ Everything downstream is built on this and nothing else:
 - **`error` is distinct from `fail`**: the gate itself broke (toolchain missing, DB down). It never counts as a task failure. It aborts the attempt and surfaces as an infrastructure problem. Conflating these is how you get an agent spending four attempts "fixing" a crashed linter.
 - **`tool` is what distinguishes "ran and passed" from "didn't run",** and v0 shipped without it at the cost of a silently green replay (Appendix H). `{"status":"pass","failures":[]}` is bit-for-bit identical whether the linter found nothing or the linter was not on `PATH` and a shell script swallowed the error. So the contract requires an opaque tool identifier **obtained by executing the tool**: `ruff --version`, not a string literal. A gate that cannot run its tool cannot produce the field. The host stores it per gate result. It treats a `tool` that differs between a run's baseline and its head as grounds to distrust the subtraction rather than report it.
 
-**`collected` is optional.** `census`, `criteria`, `revert` and `witness` read it. A gate that enumerates reports the identifiers, and for a test runner those are its node ids. Core treats them as opaque strings: it never splits one, never assumes a separator, never infers a path from one. Absence is not a failure. It means the runner does not enumerate. `census` and `criteria` then report `skip`. Unlike `tool`, this field is not a trust signal. It is data core gates compare, and it is transient: `gate_results` has no column for it, so the comparison happens in memory within a run.
+**`collected` is optional.** `census`, `criteria`, `revert` and `witness` read it. A gate that enumerates reports the identifiers, and for a test runner those are its node ids. Core treats them as opaque strings: it never splits one, never assumes a separator, never infers a path from one. The one reading is a repo's own. `witness` applies the `witness_name` pattern a repo declares to find a test's name (§5.4.1). Absence is not a failure. It means the runner does not enumerate. `census` and `criteria` then report `skip`. Unlike `tool`, this field is not a trust signal. It is data core gates compare, and it is transient: `gate_results` has no column for it, so the comparison happens in memory within a run.
 
 The same replay forced two rules about `error`. Both are stated because a gate author has to know them, and neither is derivable from the schema:
 
@@ -1009,7 +1010,7 @@ A criterion can therefore declare a **witness**: a test node id, in an optional 
 
 **`revert`: the anti-theater gate, and the best cost/value ratio in the system**. Revert the source files of the diff, keep the test files, run only the new tests, and require them to **fail**. `SA-0044` shipped it file-level rather than hunk-level, which its own `ponytail:` names: a file that is half test and half source is reverted whole or not at all. One extra test run. It reaches the repo's toolchain only through the declared `tests` gate, as `witness` does (§2.1, §5.4.1). That is why the contract requires the `tests` gate to accept a **test-subset argument**. It is the single most constraining line in the whole contract, and worth the constraint: every serious test runner supports it, and without it this gate degrades to a full-suite run per attempt. It asks whether the new tests test anything, which is not lens #3's question (§5.5.1). It catches deleted assertions, `assert result is not None`, and tests that pass identically on `main`. One kind of new test is exempt. A test REBUT adds to kill a surviving probe can pass without the source, because the property it guards held at base. The probe run after REBUT decides that test instead (§5.6, ADR 3).
 
-No mutation tool sweeps the diff. Edits chosen to break one behaviour are run instead (ADR 3). `mutmut` does not rerun the suite per mutant, measured on 2026-08-25 (§11). It cannot scope below a function, and cannot run over a suite that gates its own tree. `cosmic-ray` scopes to a diff, but lacks the string-literal operator the one real defect needed.
+No mutation tool sweeps the diff. Edits chosen to break one behaviour are run instead (ADR 3). Where a repo declares `witness:` patterns, `witness` derives one edit per constant a witness names (§5.4.1). `mutmut` does not rerun the suite per mutant, measured on 2026-08-25 (§11). It cannot scope below a function, and cannot run over a suite that gates its own tree. `cosmic-ray` scopes to a diff, but lacks the string-literal operator the one real defect needed.
 
 **`coverage` is advisory, deliberately, and at every risk tier.** Blocking on changed-line coverage generates exactly the behavior `integrity` exists to prevent: the cheapest way to satisfy it is a test that *executes* new lines without asserting on them. It also misfires structurally here: `except` branches for provider timeouts, `if TYPE_CHECKING`, defensive gap handling, and pure refactors where every changed line is a moved line. Report it in the PR body. Block on `tests`, `revert` and a surviving probe (ADR 3).
 
@@ -1121,10 +1122,12 @@ changes the value the diff gives a constant. It then runs each witness whose
 own text in the diff names that constant. A witness that stays green is a
 survivor, filed as one under a declared mutant is. What a constant looks
 like, and where a witness's text lies, is language knowledge. So the repo
-declares both as patterns under `policy.yaml`'s `witness:`, as it declares
-`integrity`'s tokens (§2.1). Core applies them to the diff as text and runs
+declares both as Python `re` patterns under `policy.yaml`'s `witness:`
+(§2.1). `integrity`'s tokens are the nearest precedent, though they are
+plain substrings. Core applies the patterns to the diff as text and runs
 nothing new. A repo that declares none derives none. A constant in a declared
-test path is never mutated.
+test path is never mutated. Some survivors are false. A witness that feeds the
+constant in, or names it only in a comment, also stays green.
 
 **Reversion is at hunk granularity and cannot reach this.** `revert` (§5.4)
 stashes whole files and asks whether the new tests test *anything*. Scaling it
@@ -1154,7 +1157,9 @@ not have run yet. `SA-0062` specified the opposite order and passed review
 `size` already carries, and for the same reason: an elevated diff is one where a
 plausible-looking wrong change hurts most, and a claim guarded by nothing is
 exactly that. A spec declaring no mutants, whose diff yields no constant mutant,
-reports `skip`. So this cannot fail a task retroactively. A survivor at base is not subtracted (§5.4), so at `elevated`
+reports `skip`. So this cannot fail a task retroactively. Declaring
+`witness:` patterns is an operator step. Once a repo declares them, a queued
+elevated spec written before them can draw a constant-mutant survivor. A survivor at base is not subtracted (§5.4), so at `elevated`
 it blocks until the task kills its mutant.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
@@ -1690,7 +1695,7 @@ And the other half of the layout (the part that lives in every target repo, and 
 | Review UI | GitHub PRs + a thin index | Custom dossier viewer | Index is dumb. You are in a browser tab, not a local page |
 | Scope control | Agent proposes, human ratifies (bugs) | Human declares upfront | One extra round trip per bug spec. It avoids inverting who does the diagnosis |
 | Dependencies | Satisfied at `READY_FOR_REVIEW`, stacked | At `MERGED` | A rejected parent wastes its children. It avoids one-task-per-night |
-| Test quality | `revert`, `witness` and host-run probes (ADR 3) | A mutation tool over the diff | Nothing sweeps the diff, and a probe covers only the edit someone names |
+| Test quality | `revert`, `witness` and host-run probes (ADR 3) | A mutation tool over the diff | Nothing sweeps the diff, and a probe covers only the edit someone names. A constant mutant covers only a constant a witness names |
 | Coverage | Advisory | Blocking | Weaker guarantee. It avoids rewarding assertion-free tests |
 | Egress | Allowlisting proxy | iptables in cell | Extra container. It works with `--cap-drop ALL` and CDN endpoints |
 | Isolation | Container + volume + repo fixture services | Worktree only | Real build/teardown complexity. It is the only thing that makes "unattended" defensible |
