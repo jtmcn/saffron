@@ -3,6 +3,7 @@ id: SA-0274
 title: The `size` gate counts the tests a spec's criteria demand against the same ceiling as its source
 type: feature
 priority: 2
+depends_on: [SA-0273]
 estimated_lines: 160
 estimate_measured: true
 touches:
