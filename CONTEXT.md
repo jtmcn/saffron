@@ -453,15 +453,17 @@ to ask whether the tests would notice the claim being broken. Withheld from the
 implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
 killed.
 _Avoid_: "mutation testing" for the gate as a whole. The gate runs one declared edit
-against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
+against one named witness, not a generated suite. It also runs the constant mutants
+it derives from a repo's patterns. _Avoid_ "mutant" for the tree
 the edit is applied to. That is the worktree, mutated. _Avoid_ "mutant" for the
 edit a lens names in a review finding. That is a vacuity probe.
 
 **Constant mutant**: A find-and-replace edit the `witness` gate derives from the diff
 and applies as it applies a mutant (`DESIGN.md` §5.4.1). It changes the value the diff
 gives a constant, then runs each witness whose own text names that constant. A witness
-that stays green reads the constant back, so any value passes it. The repo declares what
-a constant and a witness's text look like, under `policy.yaml`'s `witness:`.
+that stays green passes with any value of it. Most such witnesses read the constant
+back. Some feed it in, or name it only in a comment, and are false survivors. The repo
+declares what a constant and a witness's text look like, under `policy.yaml`'s `witness:`.
 _Avoid_ "criterion probe" for one. No session names it, and the implementer can see
 what it will change.
 

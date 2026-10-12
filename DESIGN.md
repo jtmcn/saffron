@@ -1076,7 +1076,8 @@ result to be `fail`. A mutant the witness survives is the finding: the claim is
 asserted by nothing.
 
 **It is `revert`'s exception, not a new one** (§2.1). The gate executes no tool:
-it applies a text edit the *spec* supplied. It then invokes a gate the repo
+it applies a text edit the *spec* supplied, or one core derives from the
+repo's patterns. It then invokes a gate the repo
 already declared, through the same JSON contract, with the subset argument
 `revert` established. Core still knows nothing about the toolchain, only that a
 `tests` gate exists and that the contract obliges it to accept a subset. Any
@@ -1157,9 +1158,9 @@ not have run yet. `SA-0062` specified the opposite order and passed review
 `size` already carries, and for the same reason: an elevated diff is one where a
 plausible-looking wrong change hurts most, and a claim guarded by nothing is
 exactly that. A spec declaring no mutants, whose diff yields no constant mutant,
-reports `skip`. So this cannot fail a task retroactively. Declaring
-`witness:` patterns is an operator step. Once a repo declares them, a queued
-elevated spec written before them can draw a constant-mutant survivor. A survivor at base is not subtracted (§5.4), so at `elevated`
+reports `skip`. So this cannot fail a task retroactively until a repo
+declares `witness:` patterns, which is an operator step. Once it does, a
+queued elevated spec written before them can draw a constant-mutant survivor. A survivor at base is not subtracted (§5.4), so at `elevated`
 it blocks until the task kills its mutant.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)

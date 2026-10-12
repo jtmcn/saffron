@@ -4,10 +4,11 @@ title: A witness that reads back the constant it tests passes every gate, becaus
 type: feature
 priority: 2
 depends_on: []
-estimated_lines: 540
+estimated_lines: 560
 estimate_measured: true
 touches:
   - saffron/gates/core/constant_mutants.py
+  - saffron/gates/core/witness.py
   - saffron/gates/suite.py
   - saffron/repos/policy.py
   - tests/test_constant_mutants.py
@@ -33,7 +34,6 @@ forbidden:
   - records/**
   - hooks/**
   - saffron/agents/**
-  - saffron/gates/core/witness.py
   - saffron/gates/core/integrity.py
   - saffron/gates/runner.py
   - saffron/intake.py
@@ -53,11 +53,14 @@ acceptance:
       and it is never mutated. The spec declares no mutant. The witness
       that compares the code's output with the constant survives. So
       `witness` reports `fail` with exactly one `survived-mutant` failure,
-      filed under that witness. Its message ends with "the witness
-      compares with `GREETING` itself, so pin its value as a literal".
-      The witness that pins the literal value dies under the same edit.
-      The tree is unchanged afterwards. The witness drives a real git tree
-      and a real `tests` gate through `GateSuite`.
+      filed under that witness. Its message ends with "the witness names
+      `GREETING` and passes with any value of it, so pin the value as a
+      literal". The witness that pins the literal value dies under the same
+      edit. `revert` and `criteria` judge the spec's own two criteria alone,
+      so `criteria` reports "2 criteria witnessed at head". The tree is
+      unchanged afterwards. The witness drives a real git tree and a real
+      `tests` gate through `GateSuite._run`, with a base whose `tests`
+      result enumerated no test.
     witness: tests/test_constant_mutants.py::test_a_witness_reading_its_constant_back_survives_a_constant_mutant
     wrong_versions:
       - "`GateSuite` computes the constant mutants and passes only the spec's own criteria to `run_suite`, so `witness` reports `skip`."
@@ -69,6 +72,7 @@ acceptance:
       - The `replace` template is inserted as written and never expanded against the match.
       - The derived claim omits the constant's name, or names no remedy.
       - Only the first criterion whose witness names the constant gets a mutant, so the literal witness is never run.
+      - One combined acceptance list reaches all three sites, `run_suite`, `revert` and `criteria`, so `criteria` counts four criteria.
   - claim: >-
       With the notes' patterns verbatim, `constant_mutants` derives one
       criterion for each pair of a constant and a witness. It applies
@@ -79,7 +83,9 @@ acceptance:
       The witness's own text in the diff names the constant as a whole
       word. Each of these derives nothing. A constant only on a context
       line. A constant in a test path. A name that is only the prefix of a
-      longer one. A test in the same file whose own text never names it. A
+      longer one, as `NEW` of `NEWER`. A name that is only the suffix of a
+      longer one, as `NEW` of `OLD_NEW`. A test in the same file whose own
+      text never names it. A
       witness id the `witness_name` pattern does not match. A second
       criterion naming a witness already paired with that constant.
     witness: tests/test_constant_mutants.py::test_only_a_constant_the_diff_writes_and_a_witness_names_is_mutated
@@ -91,6 +97,7 @@ acceptance:
       - A witness id the `witness_name` pattern misses is searched under its whole id, or raises.
       - Two criteria naming one witness yield the pair twice.
       - A per-line matcher runs each pattern over one line at a time.
+      - The whole-word search has no leading word boundary, so `NEW` matches a test naming `OLD_NEW`.
       - "`witness_name` is applied with `re.match`, anchored at the id's start."
   - claim: >-
       `constant_mutants` derives nothing, and raises nothing, in each of
@@ -216,16 +223,27 @@ text, and its `replace` the same text with the `value` span replaced.
 Skip a file the test paths match, and a deleted or unreadable one. Pair
 the constant with each criterion whose witness's own text names it as a
 whole word. That text is every `witness_body` match over the hunks' new
-sides. The derived criterion keeps the witness. Its claim is exactly
-"the witness compares with `NAME` itself, so pin its value as a literal",
-with the constant's name in place of `NAME`.
+sides. The derived criterion keeps the witness. Its claim is the text
+below, with the constant's name in place of `NAME`.
+
+```text
+the witness names `NAME` and passes with any value of it, so pin the value as a literal
+```
+
+Rewrite two docstrings in `saffron/gates/core/witness.py` and change no
+code there. The module docstring says the gate applies "a text edit the
+*spec* supplied" (`:15-16`). The `witness_gate` docstring says `skip` is
+the answer "for a spec that declares no mutants" (`:112-114`). Each must
+also cover a constant mutant.
 
 In `GateSuite._run`, pass `run_suite` the spec's criteria followed by the
 derived ones, with `policy.integrity.test_paths` as the test paths. Leave
 `revert` and `criteria` on the spec's own criteria.
 
 Name the `witness:` block in the setup template, with `FILL` comments
-like its neighbours. One comment names the dialect, Python `re`. One says
+like its neighbours. `witness_name` and `witness_body` are `null` there,
+and `constants` is an empty list. One comment names the dialect, Python
+`re`. One says
 a `replace` must leave every matched file importable. Extend
 `test_the_policy_template_names_every_policy_field` to compare the
 block's keys with `WitnessPatterns.model_fields`, as it compares the
@@ -239,9 +257,13 @@ and add one bullet for it.
   protected (`.saffron/policy.yaml:67`). `Policy` refuses the key until
   this spec lands, so the block goes in by hand after the merge. The
   notes give the patterns measured for it.
-- **The design record.** `DESIGN.md` §2.1, §5.4, §5.4.1 and §7, ADR 2,
+- **The design record.** `DESIGN.md` §2.1, §5.4, §5.4.1 and §11, ADR 2,
   ADR 3 and the `CONTEXT.md` entry are written by hand on this spec's
   branch.
+- **A stale docstring sentence.** It says "the gate never parses" the
+  `witness` node id (`saffron/intake.py:113-114`). A
+  constant mutant reads one through the repo's `witness_name` pattern.
+  The file stays forbidden, so the sentence is left for a follow-up.
 - **The implement prompt.** Telling the implementer to pin a constant's
   value as a literal is a follow-up in `saffron/agents/`.
 - **Comment and docstring lines inside a witness.** A regular expression
@@ -332,7 +354,9 @@ adapter returns `git diff` with `worktree.DIFF_FLAGS` as its patch. It
 mutates through `tests.mutation.host_mutator`. Its `reverted` yields
 without reverting, and `dirty_paths` returns an empty list. Those two
 defaults hide only `revert` and `committed`, which this criterion does
-not read. Read the `witness` result. Assert its failures as a list of
+not read. Call `suite._run` with a `prior` holding one readable `tests`
+result whose `collected` is empty, so `criteria` judges each witness red at
+base. Assert the `criteria` summary exactly. Read the `witness` result. Assert its failures as a list of
 `(file, code)` pairs, and the summary saying one of two witnesses
 survived. Assert `git diff HEAD` is empty afterwards.
 
@@ -360,7 +384,8 @@ only an elevated diff, and its message names the remedy.
 
 **The estimate is measured.** A prototype held the policy model, the new
 module, the suite wiring, the template block and every witness above.
-Its diff came to 1,686 changed tokens, 422 lines at four tokens a line.
-The margin covers fuller docstrings and the skill's edit. Every wrong
+Its diff came to 1,743 changed tokens, 436 lines at four tokens a line.
+The margin covers fuller docstrings, the two in `witness.py` among them,
+and the skill's edit. Every wrong
 version listed above failed its witness on that prototype. Each new
 witness failed with the source at the tree base.
