@@ -6398,3 +6398,183 @@ def test_a_cell_runtime_failure_is_offered_again_only_until_the_breaker(
     )
     assert reason3 == "DRAINED"
     assert runner3.calls == candidates3
+
+
+class QueuedStackDoubles(StackDoubles):
+    """`StackDoubles`, with a queue of runner states per spec id. Each
+    `runner` call pops that spec's next queued state, records it as this
+    call's row, then delegates to `StackDoubles.runner`. An empty queue
+    falls back to `READY_FOR_REVIEW`, the base class's own default."""
+
+    def __init__(
+        self, ledger: Ledger, repo_id: int, rows: dict, queues: dict, *, order=None
+    ):
+        super().__init__(ledger, repo_id, rows, order=order)
+        self.queues = {spec_id: list(states) for spec_id, states in queues.items()}
+
+    def runner(self, candidate: Candidate, predecessor: Candidate | None = None):
+        spec_id = candidate.spec.id
+        queue = self.queues.get(spec_id, [])
+        state = queue.pop(0) if queue else "READY_FOR_REVIEW"
+        self.rows[spec_id] = {"runner": state}
+        return super().runner(candidate, predecessor)
+
+
+def test_a_preflight_failure_in_a_stack_batch_is_offered_again_not_missed(
+    ledger, repo_id
+):
+    """A spec of the order whose task returns `PREFLIGHT_FAILED` stays
+    queued, not missed. It runs again at once, against the same
+    predecessor, with no second spec review, and nothing that depends on
+    it is refused. A task that returns `GATE_ERROR` is still a miss, and
+    its dependent is refused."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-0"),
+        _candidate("TE-1"),
+        _candidate("TE-2", depends_on=["TE-1"]),
+        _candidate("TE-3"),
+        _candidate("TE-4", depends_on=["TE-3"]),
+        _candidate("TE-5"),
+    ]
+    doubles = QueuedStackDoubles(
+        ledger,
+        repo_id,
+        {},
+        {"TE-1": ["PREFLIGHT_FAILED"], "TE-3": ["GATE_ERROR"]},
+    )
+    lines: list[str] = []
+    reason = run_stack_batch(
+        order,
+        ledger,
+        100.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        review=doubles.review,
+        mint=doubles.mint,
+        sleep=_fail_sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert doubles.review_calls == [
+        ("TE-0", None),
+        ("TE-1", "TE-0"),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-2"),
+        ("TE-5", "TE-2"),
+    ]
+    assert doubles.runner_calls == [
+        ("TE-0", None),
+        ("TE-1", "TE-0"),
+        ("TE-1", "TE-0"),
+        ("TE-2", "TE-1"),
+        ("TE-3", "TE-2"),
+        ("TE-5", "TE-2"),
+    ]
+    assert [line for line in lines if " refused " in line] == [
+        f"{'TE-4':<10} refused  reaches TE-3",
+    ]
+
+
+def test_a_follow_ups_preflight_failure_is_offered_again(ledger, repo_id):
+    """A follow-up whose task returns `PREFLIGHT_FAILED` runs again at once,
+    on the same predecessor, unless the breaker stops the batch. A
+    follow-up whose task returns `GATE_ERROR` runs once, and the next
+    follow-up runs on the last layer."""
+    from saffron.batch import run_stack_batch
+
+    rows = {
+        "__follow_ups__": [
+            {"id": "TE-8"},
+            {"id": "TE-9"},
+            {"id": "TE-10"},
+        ],
+    }
+    doubles = QueuedStackDoubles(
+        ledger,
+        repo_id,
+        rows,
+        {"TE-8": ["PREFLIGHT_FAILED"], "TE-9": ["GATE_ERROR"]},
+    )
+    reason = run_stack_batch(
+        [_candidate("TE-7")],
+        ledger,
+        100.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        sleep=_fail_sleep,
+    )
+
+    assert reason == "DRAINED"
+    assert doubles.runner_calls == [
+        ("TE-7", None),
+        ("TE-8", "TE-7"),
+        ("TE-8", "TE-7"),
+        ("TE-9", "TE-8"),
+        ("TE-10", "TE-8"),
+    ]
+
+
+def test_a_preflight_failure_is_offered_again_only_until_the_breaker(ledger, repo_id):
+    """Each re-offer of a spec of the order counts toward the breaker. Two
+    `PREFLIGHT_FAILED` results in a row end a stack batch `INFRASTRUCTURE`
+    after two `runner` calls and one review, with its dependent neither
+    refused nor reviewed. A plain batch passes no `sleep`, and never
+    offers a `PREFLIGHT_FAILED` spec again."""
+    from saffron.batch import run_stack_batch
+
+    order = [_candidate("TE-21"), _candidate("TE-22", depends_on=["TE-21"])]
+    doubles = QueuedStackDoubles(
+        ledger,
+        repo_id,
+        {},
+        # The third entry, never reached by a correctly bounded re-offer,
+        # is what tells it apart from one the breaker fails to count.
+        {"TE-21": ["PREFLIGHT_FAILED", "PREFLIGHT_FAILED", "READY_FOR_REVIEW"]},
+    )
+    lines: list[str] = []
+    reason = run_stack_batch(
+        order,
+        ledger,
+        100.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        review=doubles.review,
+        mint=doubles.mint,
+        sleep=_fail_sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert doubles.review_calls == [("TE-21", None)]
+    assert doubles.runner_calls == [("TE-21", None), ("TE-21", None)]
+    assert not any(" refused " in line for line in lines)
+
+    run_one = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner(
+        [
+            _outcome(state="PREFLIGHT_FAILED", run_id=run_one),
+            _outcome(state="READY_FOR_REVIEW", run_id=run_one),
+        ]
+    )
+    candidates = [_candidate("TE-41"), _candidate("TE-42")]
+    reason2 = run_batch(
+        candidates,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        rescan=lambda: candidates,
+        readiness_check=_ready,
+    )
+    assert reason2 == "DRAINED"
+    assert runner.calls == candidates

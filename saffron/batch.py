@@ -215,7 +215,7 @@ def _drive(
             return "INFRASTRUCTURE", consecutive_aborts
 
     # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, a spec that ended
-    # `RATE_LIMITED` or `PROVIDER_UNREACHABLE`, or raised `CellRuntimeError`, is taken back out (b-031ac2, b-60a399).
+    # `RATE_LIMITED`, `PROVIDER_UNREACHABLE` or `PREFLIGHT_FAILED`, or raised `CellRuntimeError`, is taken back out (b-031ac2, b-60a399, b-032c61).
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -324,7 +324,10 @@ def _drive(
                         # would have recovered on its third task (backlog item 70).
                         consecutive_aborts = 0
 
-                    if outcome.state == "PROVIDER_UNREACHABLE" and sleep is not None:
+                    if (
+                        outcome.state in ("PROVIDER_UNREACHABLE", "PREFLIGHT_FAILED")
+                        and sleep is not None
+                    ):
                         # Not a miss: offered again at once, with no wait.
                         # The breaker above is the only bound on it (b-031ac2).
                         started.discard(candidate.spec.id)
@@ -373,8 +376,8 @@ def _is_layer(result: CellOutcome | Refused) -> bool:
     """`run_stack_batch`'s one predicate. A result adds a layer only when it
     is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
     `EXHAUSTED`, any other state, or a `Refused`. `wrapped()` keeps
-    `RATE_LIMITED`, `PROVIDER_UNREACHABLE` and a `CellRuntimeError` queued
-    rather than record a miss."""
+    `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `PREFLIGHT_FAILED` and a
+    `CellRuntimeError` queued rather than record a miss."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 
@@ -745,6 +748,7 @@ def run_stack_batch(
         if isinstance(result, CellOutcome) and result.state in (
             "RATE_LIMITED",
             "PROVIDER_UNREACHABLE",
+            "PREFLIGHT_FAILED",
         ):
             # Neither a layer nor a miss: `original` stays in `remaining` so
             # the same spec is offered again, against this same `pred`.
