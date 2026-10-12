@@ -4,7 +4,7 @@ title: "A re-gate of a pull request's head has nowhere to be recorded, so `recon
 type: feature
 priority: 2
 depends_on: [SA-0268, SA-0265, SA-0269]
-estimated_lines: 262
+estimated_lines: 283
 estimate_measured: true
 touches:
   - saffron/ledger.py
@@ -62,8 +62,9 @@ acceptance:
       ledger that wrote them. `fold_task` with no facts removes the row
       its key filed. A ledger file whose table was dropped gains it again
       on open. The witness drives two tasks. It writes the second one
-      twice and then the first. Each read uses a fresh `Ledger` on the
-      same path.
+      twice and then the first. Every write uses three values that differ
+      from each other and from every other write's. Each read uses a fresh
+      `Ledger` on the same path.
     witness: tests/test_ledger.py::test_a_regate_is_one_fact_that_folds_back_as_the_tasks_newest_row
     wrong_versions:
       - A write that commits the row and appends no fact, so a fold into a fresh ledger rebuilds nothing.
@@ -72,20 +73,27 @@ acceptance:
       - A `_drop_task_rows` that leaves `regates` alone, so `fold_task(key, [])` keeps the row.
       - A read not scoped to the task, which returns the other task's row.
       - A table the write creates, not `SCHEMA`, so a read before any write raises.
+      - A write or an `_apply` that swaps `head_sha` and `baseline_sha`.
   - claim: >-
       For every row `reconcile` asks GitHub about, it reads the task's
-      re-gate. When that re-gate's `head_sha` equals the `headRefOid`
-      GitHub answered, the task id, that head and the re-gate's
-      `new_failures` land in a new `regated` list on the result. A green
-      re-gate and a red one both land there. A re-gate at any other head
-      lands nowhere, and so does a task with none. The re-gate moves no
-      state. The witness drives six rows, all `READY_FOR_REVIEW`. A
-      moved head re-gated red keeps its draft state. An unmoved head
-      re-gated green keeps it too. A re-gate at the commit PACKAGE pushed
-      reports nothing once the head has moved past it. A moved head with
-      no re-gate reports nothing. A merged answer over a red re-gate
-      still moves the row to `MERGED`. A ready, non-draft answer over a
-      red re-gate still moves it to `APPROVED`.
+      re-gate. Those are the rows in `READY_FOR_REVIEW`, `APPROVED`,
+      `CHANGES_REQUESTED` or `EXHAUSTED` that carry a `pr_url`. When the
+      re-gate's `head_sha` equals the `headRefOid` GitHub answered, the
+      task id, that head and the re-gate's `new_failures` land in a new
+      `regated` list on the result. A green re-gate and a red one both
+      land there. A re-gate at any other head lands nowhere, and so does a
+      task with none. The re-gate moves no state. The witness drives nine
+      rows. Six are `READY_FOR_REVIEW`. A moved head re-gated red keeps
+      its draft state. An unmoved head re-gated green keeps it too. A
+      re-gate at the commit PACKAGE pushed reports nothing once the head
+      has moved past it. A moved head with no re-gate reports nothing. A
+      merged answer over a red re-gate still moves the row to `MERGED`. A
+      ready, non-draft answer over a red re-gate still moves it to
+      `APPROVED`. The other three are an `APPROVED` row answered ready, an
+      `EXHAUSTED` row answered as an open draft, and a
+      `CHANGES_REQUESTED` row answered with changes requested. Each is
+      re-gated red at the answered head, is reported, and keeps its
+      state.
     witness: tests/test_reconcile.py::test_a_regate_at_the_current_head_is_reported_and_moves_no_state
     wrong_versions:
       - A version that reports the task's re-gate whatever its head.
@@ -94,24 +102,27 @@ acceptance:
       - A version that reports only a red re-gate.
       - A version that moves a red re-gate's task to `CHANGES_REQUESTED`.
       - A version that withholds `APPROVED` from a task whose re-gate is red.
+      - A version that reads the re-gate only for `READY_FOR_REVIEW` rows.
   - claim: >-
-      `_print_reconcile_summary` gives the verdict on the head-moved line
-      of a task re-gated at that same head. The line keeps its text up to
-      the two shortened shas, and then ends `; re-gated, new failures: N`
-      for a red re-gate or `; re-gated, no new failures` for a green one,
-      in place of `; no gate judged that tree`. A moved head with no
-      re-gate at it keeps the old ending. A re-gate with no head-moved line
-      for its task and head prints `reconcile: task <id>'s pull request
-      head <head, 12 characters> re-gated, ` and then the same verdict. A
-      result that holds a re-gate alone does not print `reconcile: nothing
-      moved`. The witness drives a red and a green re-gate on moved heads,
-      a moved head with none, and a re-gate at a head other than its
-      task's moved head. It also drives a re-gate with no moved line
-      at all, once beside the others and once alone.
-    witness: tests/test_cli.py::test_a_regated_head_prints_its_verdict_in_place_of_no_gate_judged
+      `_print_reconcile_summary` gives the re-gate's new failures on the
+      head-moved line of a task re-gated at that same head. The line keeps
+      its text up to the two shortened shas, and then ends `; re-gated,
+      new failures: N` for a red re-gate or `; re-gated, no new failures`
+      for a green one, in place of `; no gate judged that tree`. A moved
+      head with no re-gate at it keeps the old ending. A re-gate with no
+      head-moved line for its task and head prints `reconcile: task <id>'s
+      pull request head <head, 12 characters> re-gated, ` and then the same
+      count. A result that holds a re-gate alone does not print
+      `reconcile: nothing moved`. The witness drives a red and a green
+      re-gate on moved heads, a moved head with none, and a re-gate at a
+      head other than its task's moved head. It also drives a re-gate with
+      no moved line at all, once beside the others and once alone. That
+      one shares its head with another task's moved line.
+    witness: tests/test_cli.py::test_a_regated_head_prints_its_new_failures_in_place_of_no_gate_judged
     wrong_versions:
       - A version that keeps `no gate judged that tree` on every head-moved line.
       - A version that matches a re-gate to its line by task id alone, so task 9's re-gate at another head lands on task 9's line.
+      - A version that matches a re-gate to its line by head alone, so task 10's re-gate lands on task 7's line.
       - A version that prints no line for a re-gate with no head-moved line.
       - 'A version that still prints `reconcile: nothing moved` when the result holds only a re-gate.'
       - 'A version that prints `new failures: 0` for a green re-gate.'
@@ -167,7 +178,9 @@ its own. A red one leaves the task's state alone.
 `ontology/factory.ttl` and, by render, to `CONTEXT.md`'s **Fact kind**
 entry. That is how `729133f6` added `stack_finish` and `30636ea7`
 added `spec_text`. So `Fact(kind="task_regate", ...)` constructs at the
-tree base, and this spec edits no file of the record.
+tree base, and this spec edits no file of the record. The same commit
+adds a **Re-gate** entry to `CONTEXT.md`, beside **Suite comparison**. Use
+its words. A re-gate yields new failures, as a suite comparison does.
 
 **What the base offers, and the shape to copy.** `SA-0177` gave the
 finishing layer a fact and a table, and this spec copies that shape.
@@ -222,7 +235,7 @@ Build four things.
 
 4. **The summary prints it.** Change `_print_reconcile_summary`. A
    head-moved line whose task and head match a `Regated` ends with that
-   re-gate's verdict, as the third criterion words it. Print a line of its
+   re-gate's new failures, as the third criterion words it. Print a line of its
    own for each `Regated` that no head-moved line took. Count `regated`
    among the lists that suppress `reconcile: nothing moved`.
 
@@ -276,6 +289,8 @@ builds one. Compare `result.regated` with plain tuples, since a
   Each read opens a fresh `Ledger` on that path and closes it.
 - Create two tasks, `TE-1` and then `TE-2`, each on its own run, and keep
   each record key right after `create_task`.
+- Give every write its own `head_sha` and `baseline_sha`, different from
+  each other and from every other write's.
 - Read `TE-1` first, before any write, and get `None`.
 - Write `TE-2` with 2 new failures. Read `TE-2`'s values, and `None` for
   `TE-1`.
@@ -294,7 +309,7 @@ builds one. Compare `result.regated` with plain tuples, since a
 
 **The reconcile witness** uses `tests/test_reconcile.py`'s `_repo`,
 `_task`, `_state` and `_FakeGh`, and its `_PUSHED` and `_FIXED`. Every row
-is `READY_FOR_REVIEW` with a `pr_url` and a pushed sha. `_FakeGh` prints
+has a `pr_url` and a pushed sha. `_task` takes the row's state. `_FakeGh` prints
 only the fields `--json` asked for (`tests/test_reconcile.py:55-81`).
 Each answer carries `state`, `reviewDecision`, `isDraft` and
 `headRefOid`. Give each row a distinct pull request URL.
@@ -310,7 +325,16 @@ Each answer carries `state`, `reviewDecision`, `isDraft` and
 - An open answer with `isDraft` false at a moved head, re-gated there
   with 4. It is reported, and the row is `APPROVED`.
 
-Assert `result.regated` equals the four reported rows in task order, as
+The other three rows start in the state named, each at a moved head and
+re-gated there red.
+- `APPROVED`, answered open with `isDraft` false. It is reported, and
+  stays `APPROVED`.
+- `EXHAUSTED`, answered as an open draft. It is reported, and stays
+  `EXHAUSTED`.
+- `CHANGES_REQUESTED`, answered open with `reviewDecision`
+  `CHANGES_REQUESTED`. It is reported, and stays `CHANGES_REQUESTED`.
+
+Assert `result.regated` equals the seven reported rows in task order, as
 tuples.
 
 **The summary witness** calls `cli._print_reconcile_summary` directly,
@@ -319,7 +343,8 @@ as `test_a_moved_head_is_named_with_both_shas` does
 - Moved heads: task 7 to `b`×40, task 8 to `c`×40 and task 9 to `d`×40,
   each from `a`×40.
 - Re-gates: task 7 at `b`×40 with 2, task 8 at `c`×40 with 0, task 9 at
-  `f`×40 with 1, and task 10 at `e`×40 with 3.
+  `f`×40 with 1, and task 10 at `b`×40 with 3. Task 10 shares task 7's
+  head, so a match by head alone puts the wrong count on task 7's line.
 
 Compare the printed lines, sorted, with exactly five expected lines.
 Task 9 gets two lines: its moved line keeps `no gate judged that tree`,
@@ -328,7 +353,7 @@ with one green re-gate alone. The output is exactly that re-gate's one
 line.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill.
-A prototype's witnesses killed all 17 on `bc879e2c` and passed with the
+A prototype's witnesses killed all 20 on `bc879e2c` and passed with the
 change. Do not run them yourself.
 
 **The `prose` gate** reads every new comment and docstring, and the SQL
@@ -338,8 +363,8 @@ the table's SQL comment to two lines, as for every table beside it.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
 `feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
-prototype of all three criteria measured 1047 tokens with `size_gate`'s
+prototype of all three criteria measured 1131 tokens with `size_gate`'s
 counter on 2026-10-11. The source was 307 of them and the three witnesses
-740. It held the table, both methods, the `_apply` branch, the drop, the
+824. It held the table, both methods, the `_apply` branch, the drop, the
 docstring edits, `Regated`, the reconcile read and the summary lines.
 `estimated_lines` is that count over four.

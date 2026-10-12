@@ -392,6 +392,12 @@ _Avoid_: "verdict", which is the critic's confirm-or-withdraw of a finding.
 _Avoid_ also "the subtraction" for the whole: the subtraction produces only the
 third outcome, and it is not even attempted when either of the first two holds.
 
+**Re-gate**: The gate suite run again over a task's pull request head after
+PACKAGE, in gate-only cells and against a fresh baseline. `saffron regate` runs
+one (`SA-0284`). It is kept as a `task_regate` fact: the head, the baseline's
+commit and the count of new failures. A red re-gate moves no task state.
+_Avoid_: "re-verification", which is PACKAGE's own run over the packaged commit.
+
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
 - `skip`: the repo declares no such gate. Not a failure. Nothing is wrong.
 - `fail`: the repo's code is wrong.
