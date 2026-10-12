@@ -4,7 +4,7 @@ title: Every cell network and the proxy have one fixed name, so two tasks at onc
 status: open
 tier: 3
 filed: 2026-10-01
-specs: []
+specs: [SA-0269, SA-0270, SA-0271]
 prs: []
 commits: []
 cites: [§4.2.1, §5.1, §5.5]
