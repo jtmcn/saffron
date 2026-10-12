@@ -3,7 +3,7 @@ id: SA-0277
 title: A credential a cell prints reaches events.jsonl unredacted, and PACKAGE's credential shapes live where only PACKAGE reads them
 type: feature
 priority: 2
-depends_on: [SA-0271, SA-0268]
+depends_on: [SA-0276, SA-0271, SA-0268]
 estimated_lines: 431
 estimate_measured: true
 touches:
