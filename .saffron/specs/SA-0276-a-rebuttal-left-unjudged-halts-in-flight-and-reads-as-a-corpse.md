@@ -224,7 +224,11 @@ Leave every `REBUTTING` that names the live state or an attempt's phase.
 - **A parent whose push was refused.** `push_unpackaged_work` can refuse,
   and the row then records no push. The scheduler still admits the child,
   which is cut from `base_sha` without the parent's code. Backlog item
-  b-f603c9 owns that. This spec adds no witness and no code for it.
+  b-f603c9 owns that, and a resumed row's stale `pushed_sha` with it. This
+  spec adds no witness and no code for it.
+- **A resumed row with an open pull request.** Ending `REBUTTAL_UNJUDGED`, it
+  is pushed onto that pull request's branch, and `reconcile` never moves it
+  to `MERGED`. Backlog item b-af24d1 owns that.
 
 ## Notes for the agent
 
@@ -257,8 +261,7 @@ On each of the two ledgers, assert the outcome and the row are
 `REBUTTAL_UNJUDGED`. Then add a second task row in the same repo, set it
 `REBUTTING` through `ledger.set_task_state`, and call
 `saffron.reconcile.reconcile` with `stamp_orphaned=True`. Pass a `gh` that
-raises when called. A `gh` that returned an empty answer would hide a build
-that asks GitHub about the row. Read the repo id from the ledger's `repos`
+raises when called. Read the repo id from the ledger's `repos`
 table. Assert `result.orphaned` is exactly the second row's id. Then assert
 the cell's row is still `REBUTTAL_UNJUDGED` and the second row is
 `ORPHANED`. Without the second row, a reconcile that reads no rows passes.
