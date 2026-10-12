@@ -523,8 +523,8 @@ re-verification uses one too.
 _Avoid_: "the gate cell", "the suite cell", "the third cell".
 
 **History run**: One run of a spec's declared `history` command in a Gate-only
-cell. A snapshot of the host's ledger is mounted read-only, and so is the batch
-tree when the spec asks for it. The command reads a writable copy of the mount's
+cell. A snapshot of the host's ledger is mounted read-only, and so are the
+host's mirrors, and the batch tree when the spec asks for it. The command reads a writable copy of the mount's
 `ledger.db`, with the batch tree linked read-only. Every lens reads its exit and
 both streams. It is the one place a change whose subject is history meets the
 real record (`DESIGN.md` §3.2).

@@ -99,9 +99,11 @@ spec's declared history command in a Gate-only cell over a read-only
 snapshot of the ledger. This spec builds the four pieces it stands on. It
 was split from `SA-0272` on size.
 
-Every line number below was read at `bc879e2c`. The three specs this one
-depends on edit `saffron/cell/session.py`, `saffron/task.py` and
-`saffron/ledger.py` first, so read each at the tree base before you start.
+Every line number below was read at `bc879e2c`. `SA-0262` and `SA-0271`
+edit `saffron/cell/session.py`. `SA-0268` and its parent `SA-0266` edit
+`saffron/task.py`. `SA-0264`, an ancestor of `SA-0268`, edits
+`saffron/ledger.py`. All of them land first, so read each file at the tree
+base before you start.
 
 **The spec model refuses unknown keys.** `Spec` sets `extra="forbid"`
 (`saffron/intake.py:157`, `:160`). Its fields end with `risk`
@@ -149,7 +151,8 @@ The seed container mounts the mirror and the worktree volume alone
 
 - Running anything over the snapshot, adding `extra_mounts` to
   `critic_cell`, and every lens prompt. `SA-0272` does all three.
-- `DESIGN.md` §3.2, `CONTEXT.md` and `docs/agents/issue-tracker.md`. They
+- `DESIGN.md` §3.2 and §5.5, `CONTEXT.md` and
+  `docs/agents/issue-tracker.md`. They
   are written by hand on this spec's own branch.
 - Any spec declaring `history`. None can until this lands
   (`DESIGN.md` §3.2, "A spec cannot introduce the frontmatter it is written

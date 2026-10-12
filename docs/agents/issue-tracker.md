@@ -24,7 +24,7 @@ GitHub issues remain in use only for research/evidence records under
   when `estimated_lines` came from a prototype's measured diff. `check` then
   prices the estimate at 1.0 and leaves it out of the overrun it measures.
 - **`history`** is optional and absent by default. Declare it when the
-  change's subject is history, such as a projection, a report or `reconcile`.
+  change's subject is history, such as a projection or a report.
   It takes a `command` and a strict boolean `batches`, false by default.
   REVIEW runs the command in a Gate-only cell over a snapshot of the host
   ledger, and every lens reads what it printed (`DESIGN.md` §3.2). Point the
