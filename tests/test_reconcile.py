@@ -702,6 +702,93 @@ def test_an_exhausted_task_moves_on_no_answer_but_a_merge(ledger):
     assert _state(ledger, no_pr_empty) == "EXHAUSTED"
 
 
+# --- `saffron adopt`'s row: a `NOT_IMPLEMENTED` task with a by-hand pull
+# request named onto it (b-a7e5f3) ---
+
+
+def test_a_not_implemented_task_with_an_adopted_pull_request_moves_only_on_a_merge(
+    ledger,
+):
+    """A `NOT_IMPLEMENTED` row that `saffron adopt` named a pull request
+    onto follows the same merge-only rule an `EXHAUSTED` draft does. Every
+    answer but a merge leaves it exactly as it was, and a merge writes
+    `MERGED` and records the reported head. Driven over the nine answers
+    `_pr_status` can give, plus a null and an empty `pr_url` that must never
+    be asked."""
+    repo_id = _repo(ledger)
+
+    def _adopted(spec_id, url):
+        return _task(
+            ledger, repo_id, spec_id=spec_id, state="NOT_IMPLEMENTED", pr_url=url
+        )
+
+    merged_url = "https://github.com/jtmcn/saffron/pull/502"
+    merged_task = _adopted("SA-9601", merged_url)
+
+    claimed = {
+        "closed": ({"state": "CLOSED", "reviewDecision": None}, "SA-9611"),
+        "changes-requested": (
+            {"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"},
+            "SA-9612",
+        ),
+        "marked-ready": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": False},
+            "SA-9613",
+        ),
+        "open-draft": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": True},
+            "SA-9614",
+        ),
+        "open-no-isdraft-field": ({"state": "OPEN", "reviewDecision": None}, "SA-9615"),
+        "unrecognised-state": (
+            {"state": "SOMETHING_NEW", "reviewDecision": None},
+            "SA-9616",
+        ),
+    }
+    answers: dict[str, dict | str | list | None] = {
+        merged_url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}
+    }
+    task_ids: dict[str, int] = {}
+    for i, (label, (pr, spec_id)) in enumerate(claimed.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{620 + i}"
+        task_ids[label] = _adopted(spec_id, url)
+        answers[url] = pr
+
+    unanswerable = {
+        "nonzero-exit": (None, "SA-9630"),
+        "unparseable": ("not json", "SA-9631"),
+        "wrong-shape": ([], "SA-9632"),
+    }
+    for i, (label, (answer, spec_id)) in enumerate(unanswerable.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{630 + i}"
+        task_ids[label] = _adopted(spec_id, url)
+        answers[url] = answer
+
+    no_pr_null = _task(ledger, repo_id, spec_id="SA-9640", state="NOT_IMPLEMENTED")
+    no_pr_empty = _task(
+        ledger, repo_id, spec_id="SA-9641", state="NOT_IMPLEMENTED", pr_url=""
+    )
+
+    gh = _FakeGh(answers)
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert result.merged == [merged_task]
+    assert _state(ledger, merged_task) == "MERGED"
+    assert _merged_head(ledger, merged_task) == _FIXED
+    for label in claimed:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "NOT_IMPLEMENTED"
+        assert task_id not in result.unasked
+    for label in unanswerable:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "NOT_IMPLEMENTED"
+        assert task_id in result.unasked
+    assert result.rejected == result.changes_requested == result.approved == []
+    assert sorted(gh.calls) == sorted(answers)
+    assert _state(ledger, no_pr_null) == "NOT_IMPLEMENTED"
+    assert _state(ledger, no_pr_empty) == "NOT_IMPLEMENTED"
+
+
 def test_a_merged_exhausted_parent_admits_its_child_to_the_queue(tmp_path, ledger):
     """`build_queue` refuses a child whose only parent row is a dead
     `EXHAUSTED` state. Once `reconcile` reads a merged answer for that

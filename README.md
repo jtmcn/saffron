@@ -133,6 +133,7 @@ agent-free:
 
 ```sh
 uv run saffron reconcile --repo .
+uv run saffron adopt <spec id> <pr> --repo .
 uv run saffron replay <repo> <pr>
 ```
 

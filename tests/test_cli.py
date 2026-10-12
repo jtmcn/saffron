@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import typing
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -42,7 +43,7 @@ from saffron.events import (
     describe,
     read_log,
 )
-from saffron.ledger import Ledger
+from saffron.ledger import Ledger, TaskState
 from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.record.fold import fold
@@ -2000,6 +2001,32 @@ def _task_state(home, task_id):
     return row["state"]
 
 
+def _checkout_with_origin(tmp_path, url, *, dirname="checkout"):
+    """A `git init` directory with no commit and no fetch, whose `origin`
+    is a GitHub URL added by hand. `real_remote` reads it and `adopt`
+    fetches nothing, so this is enough to resolve a slug without reaching
+    any forge."""
+    repo = tmp_path / dirname
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "remote", "add", "origin", url)
+    return repo
+
+
+def _task_row(ledger, task_id):
+    return dict(
+        ledger._db.execute(
+            "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+    )
+
+
+def _dump_tasks(ledger):
+    return [
+        dict(row) for row in ledger._db.execute("SELECT * FROM tasks ORDER BY task_id")
+    ]
+
+
 def _fake_gh_says_merged(argv):
     return subprocess.CompletedProcess(
         argv, 0, '{"state": "MERGED", "reviewDecision": null}', ""
@@ -2050,6 +2077,393 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
 
     assert expect_substring in capsys.readouterr().out
     assert _task_state(home, task_id) == expect_state
+
+
+_ADOPT_PR_NUMBER = "123"
+
+
+def _fake_gh_names_a_pull_request(url, number=_ADOPT_PR_NUMBER):
+    """A `gh pr view <number> ... --jq .url` fake. Its answer can differ in
+    case from the origin's slug, so a version that builds the URL itself
+    rather than asking fails against it."""
+
+    def fake(argv):
+        assert argv[:3] == ["gh", "pr", "view"]
+        assert argv[3] == number
+        assert "--jq" in argv
+        return subprocess.CompletedProcess(argv, 0, url + "\n", "")
+
+    return fake
+
+
+def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
+    tmp_path, monkeypatch, capsys
+):
+    """One task per state `adopt` takes: `NOT_IMPLEMENTED` and
+    `READY_FOR_REVIEW` carry a NULL `pr_url`, `EXHAUSTED` carries an empty
+    one beside a recorded push and diff stat. Every other column reads
+    back unchanged, and an older task of the same spec is untouched.
+    `gh`'s answer differs in case from the slug, so a URL built from the
+    slug and the number fails this."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    adopted_url = "https://github.com/OWNER/REPO/pull/123"
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url))
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+
+    older = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-OLD",
+        state="MERGED",
+        pr_url="https://github.com/o/r/pull/1",
+    )
+    older_before = _task_row(ledger, older)
+
+    # A rejected, unadoptable older sibling of each spec, so `adopt` must
+    # pick the newest row rather than the first one for that spec id.
+    older_ni = _seed_task(ledger, repo_id, spec_id="SY-NI", state="REJECTED")
+    not_implemented = _seed_task(
+        ledger, repo_id, spec_id="SY-NI", state="NOT_IMPLEMENTED"
+    )
+
+    older_rfr = _seed_task(ledger, repo_id, spec_id="SY-RFR", state="REJECTED")
+    ready = _seed_task(ledger, repo_id, spec_id="SY-RFR", state="DIAGNOSING")
+    ledger.record_push(ready, "p" * 40)
+    ledger.set_task_state(ready, "READY_FOR_REVIEW")
+
+    older_ex = _seed_task(ledger, repo_id, spec_id="SY-EX", state="REJECTED")
+    exhausted = _seed_task(ledger, repo_id, spec_id="SY-EX", state="DIAGNOSING")
+    ledger.set_task_package(
+        exhausted,
+        "EXHAUSTED",
+        branch="saffron/SY-EX",
+        pushed_sha="",
+        pr_url="",
+        added=5,
+        removed=2,
+    )
+
+    siblings = (older_ni, older_rfr, older_ex)
+    befores = {
+        task_id: _task_row(ledger, task_id)
+        for task_id in (not_implemented, ready, exhausted, *siblings)
+    }
+    ledger.close()
+
+    for spec_id, task_id in (
+        ("SY-NI", not_implemented),
+        ("SY-RFR", ready),
+        ("SY-EX", exhausted),
+    ):
+        assert (
+            cli.main(
+                [
+                    "--home",
+                    str(home),
+                    "adopt",
+                    spec_id,
+                    _ADOPT_PR_NUMBER,
+                    "--repo",
+                    str(repo),
+                ]
+            )
+            == 0
+        )
+        assert adopted_url in capsys.readouterr().out
+
+        check = Ledger(home / "ledger.db")
+        after = _task_row(check, task_id)
+        check.close()
+        before = befores[task_id]
+        assert after["pr_url"] == adopted_url
+        for column in ("state", "branch", "pushed_sha", "added", "removed"):
+            assert after[column] == before[column], column
+
+    check = Ledger(home / "ledger.db")
+    assert _task_row(check, older) == older_before
+    for sibling in siblings:
+        assert _task_row(check, sibling) == befores[sibling]
+    check.close()
+
+
+def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    """Every refusal path, read from the ledger alone. A missing ledger row
+    or spec refuses. So does a newest task that already carries a
+    `pr_url`, or sits in any state `adopt` does not take. A dead newest
+    task shadowing an older live one still refuses on the newest. None of
+    those asks `gh`. The last two cases ask `gh` once each, about a number
+    it names nothing for. The whole table reads the same once every case
+    above finishes."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    no_history = _checkout_with_origin(
+        tmp_path, "https://github.com/owner/none.git", dirname="checkout-none"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+
+    takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"}
+    others = sorted(state for state in typing.get_args(TaskState) if state not in takes)
+    assert len(others) == 23
+
+    carried = {}
+    for i, state in enumerate(sorted(takes)):
+        url = f"https://github.com/owner/repo/pull/{900 + i}"
+        spec_id = f"SY-CARRIED-{i}"
+        carried[spec_id] = url
+        _seed_task(ledger, repo_id, spec_id=spec_id, state=state, pr_url=url)
+
+    other_states = {}
+    for i, state in enumerate(others):
+        spec_id = f"SY-OTHER-{i}"
+        other_states[spec_id] = state
+        _seed_task(ledger, repo_id, spec_id=spec_id, state=state)
+
+    _seed_task(ledger, repo_id, spec_id="SY-STACK", state="NOT_IMPLEMENTED")
+    _seed_task(ledger, repo_id, spec_id="SY-STACK", state="MERGED")
+
+    before = _dump_tasks(ledger)
+    ledger.close()
+
+    calls = []
+
+    def unexpected_gh(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "unexpected")
+
+    monkeypatch.setattr(cli, "run_gh", unexpected_gh)
+
+    assert (
+        cli.main(
+            ["--home", str(home), "adopt", "SY-NOROW", "1", "--repo", str(no_history)]
+        )
+        == 1
+    )
+    assert "SY-NOROW" in capsys.readouterr().out
+
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-NOTASK", "1", "--repo", str(repo)])
+        == 1
+    )
+    assert "SY-NOTASK" in capsys.readouterr().out
+
+    for spec_id, url in carried.items():
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
+            == 1
+        )
+        assert url in capsys.readouterr().out
+
+    for spec_id, state in other_states.items():
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
+            == 1
+        )
+        assert state in capsys.readouterr().out
+
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-STACK", "1", "--repo", str(repo)])
+        == 1
+    )
+    assert "MERGED" in capsys.readouterr().out
+
+    assert calls == []
+
+    def gh_returns_nonzero(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "no such pr")
+
+    monkeypatch.setattr(cli, "run_gh", gh_returns_nonzero)
+    seed_more = Ledger(home / "ledger.db")
+    _seed_task(seed_more, repo_id, spec_id="SY-NOPR1", state="NOT_IMPLEMENTED")
+    seed_more.close()
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-NOPR1", "404", "--repo", str(repo)])
+        == 1
+    )
+    assert "404" in capsys.readouterr().out
+
+    def gh_returns_blank(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(cli, "run_gh", gh_returns_blank)
+    seed_more = Ledger(home / "ledger.db")
+    _seed_task(seed_more, repo_id, spec_id="SY-NOPR2", state="NOT_IMPLEMENTED")
+    seed_more.close()
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-NOPR2", "405", "--repo", str(repo)])
+        == 1
+    )
+    assert "405" in capsys.readouterr().out
+
+    assert len(calls) == 2
+
+    final_ledger = Ledger(home / "ledger.db")
+    after = _dump_tasks(final_ledger)
+    final_ledger.close()
+    assert after[: len(before)] == before
+
+
+def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch):
+    """An adoption is a fact, not a bare `UPDATE`. Folding the record it is
+    appended to rebuilds the row with the adopted URL. Every other column
+    stands exactly as it did before the adoption. This runs for a
+    `NOT_IMPLEMENTED` row and for an `EXHAUSTED` row with a recorded push
+    and diff stat."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    record = MemoryRecord()
+    monkeypatch.setattr(cli, "Ledger", lambda path: Ledger(path, record=record))
+
+    seed = Ledger(home / "ledger.db", record=record)
+    repo_id = seed.upsert_repo(
+        "repo", "https://github.com/owner/repo.git", "/m.git", policy_sha="p" * 64
+    )
+
+    run_id = seed.create_run(repo_id, base_sha="a" * 40)
+    not_implemented = seed.create_task(
+        run_id, spec_id="SY-FOLD-NI", spec_sha="s" * 40, branch="saffron/SY-FOLD-NI"
+    )
+    seed.set_task_state(not_implemented, "NOT_IMPLEMENTED")
+
+    run_id = seed.create_run(repo_id, base_sha="a" * 40)
+    exhausted = seed.create_task(
+        run_id, spec_id="SY-FOLD-EX", spec_sha="s" * 40, branch="saffron/SY-FOLD-EX"
+    )
+    seed.set_task_package(
+        exhausted,
+        "EXHAUSTED",
+        branch="saffron/SY-FOLD-EX",
+        pushed_sha="p" * 40,
+        pr_url="",
+        added=9,
+        removed=4,
+    )
+
+    befores = {
+        "SY-FOLD-NI": _task_row(seed, not_implemented),
+        "SY-FOLD-EX": _task_row(seed, exhausted),
+    }
+    seed.close()
+
+    adopted_url = "https://github.com/owner/repo/pull/77"
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url, "77"))
+    for spec_id in ("SY-FOLD-NI", "SY-FOLD-EX"):
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "77", "--repo", str(repo)])
+            == 0
+        )
+
+    folded = Ledger(tmp_path / "folded.db")
+    outcome = fold(record, folded)
+    assert outcome.skipped == []
+
+    for spec_id, before in befores.items():
+        row = dict(
+            folded._db.execute(
+                "SELECT * FROM tasks WHERE spec_id = ?", (spec_id,)
+            ).fetchone()
+        )
+        assert row["pr_url"] == adopted_url
+        for column in ("state", "branch", "pushed_sha", "added", "removed"):
+            assert row[column] == before[column], column
+    folded.close()
+
+
+def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_parent(
+    tmp_path, monkeypatch, capsys
+):
+    """A parent whose only task ended `NOT_IMPLEMENTED`, with no push and
+    no pull request, refuses its child, naming `NOT_IMPLEMENTED`. `adopt`
+    alone changes nothing about that. Only `reconcile` reading a merge
+    does, and the same `build_queue` scan then admits the child."""
+    from saffron.scheduler import build_queue
+
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    parent_id, child_id = "SA-9901", "SA-9902"
+    (specs_dir / "parent.md").write_text(
+        f"---\nid: {parent_id}\ntitle: Parent\ntype: chore\n---\n\nParent body.\n"
+    )
+    (specs_dir / "child.md").write_text(
+        f"---\nid: {child_id}\ntitle: Child\ntype: chore\n"
+        f"depends_on: [{parent_id}]\n---\n\nChild body.\n"
+    )
+    parent_spec, parent_sha = intake.load_spec(specs_dir / "parent.md")
+
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    def open_ledger():
+        return Ledger(home / "ledger.db")
+
+    seed = open_ledger()
+    repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
+    run_id = seed.create_run(repo_id, base_sha="a" * 40)
+    parent_task = seed.create_task(
+        run_id,
+        spec_id=parent_spec.id,
+        spec_sha=parent_sha,
+        branch=f"saffron/{parent_id}",
+    )
+    seed.set_task_state(parent_task, "NOT_IMPLEMENTED")
+    seed.close()
+
+    check = open_ledger()
+    before_candidates, before_refusals = build_queue(specs_dir, repo_id, check)
+    check.close()
+    assert [c.spec.id for c in before_candidates] == []
+    assert len(before_refusals) == 1
+    assert before_refusals[0].path == specs_dir / "child.md"
+    assert "NOT_IMPLEMENTED" in before_refusals[0].reason
+
+    adopted_url = "https://github.com/owner/repo/pull/55"
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url, "55"))
+    assert (
+        cli.main(["--home", str(home), "adopt", parent_id, "55", "--repo", str(repo)])
+        == 0
+    )
+    capsys.readouterr()
+
+    check = open_ledger()
+    mid_candidates, mid_refusals = build_queue(specs_dir, repo_id, check)
+    check.close()
+    assert [c.spec.id for c in mid_candidates] == []
+    assert len(mid_refusals) == 1
+    assert "NOT_IMPLEMENTED" in mid_refusals[0].reason
+
+    def fake_gh_merged(argv):
+        assert argv[:3] == ["gh", "pr", "view"]
+        assert argv[3] == adopted_url
+        return subprocess.CompletedProcess(
+            argv, 0, json.dumps({"state": "MERGED", "reviewDecision": None}), ""
+        )
+
+    monkeypatch.setattr(cli, "run_gh", fake_gh_merged)
+    assert cli.main(["--home", str(home), "reconcile", "--repo", str(repo)]) == 0
+    capsys.readouterr()
+
+    check = open_ledger()
+    after_row = dict(
+        check._db.execute(
+            "SELECT state, pushed_sha FROM tasks WHERE task_id = ?", (parent_task,)
+        ).fetchone()
+    )
+    assert after_row["state"] == "MERGED"
+    assert not after_row["pushed_sha"]
+
+    candidates, refusals = build_queue(specs_dir, repo_id, check)
+    check.close()
+    assert [c.spec.id for c in candidates] == [child_id]
+    assert refusals == []
 
 
 def test_watch_reads_the_batch_tree_the_cli_already_computes(tmp_path, monkeypatch):

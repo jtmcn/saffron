@@ -1,5 +1,6 @@
-"""`saffron`: cell, batch, draft, queue, reconcile, watch, fold, migrate,
-chains, serve, replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, queue, reconcile, adopt, watch, fold,
+migrate, chains, serve, replay. `ratify` and `gc` are still unbuilt
+(§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -162,6 +163,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     reconcile_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    adopt_parser = subcommands.add_parser(
+        "adopt",
+        help="name a by-hand pull request as one spec's newest task's own",
+    )
+    adopt_parser.add_argument(
+        "spec_id", help="the spec id whose newest task adopts the pull request"
+    )
+    adopt_parser.add_argument("pr", type=int)
+    adopt_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     watch_parser = subcommands.add_parser(
         "watch", help="follow one task's event log, or every task's, agent-free"
     )
@@ -281,6 +292,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "reconcile":
             return _reconcile(args, ledger)
+
+        if args.command == "adopt":
+            return _adopt(args, ledger)
 
         if args.command == "watch":
             return _watch(args, out_dir)
@@ -2194,6 +2208,63 @@ def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
     _print_reconcile_summary(result)
     if gh_failures:
         print(f"reconcile: gh could not be run ({gh_failures[0]})")
+    return 0
+
+
+# A newest task in one of these carries no pull request yet and is the one
+# `reconcile` will later ask about (b-a7e5f3). Every other state refuses.
+_ADOPTABLE_STATES = frozenset({"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"})
+
+
+def _adopt(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron adopt <spec id> <pr> --repo .`: name a pull request opened
+    by hand as the spec's newest task's own. `reconcile` can then ask
+    GitHub what happened to it (b-a7e5f3). Reads the ledger and refuses
+    before asking `gh` anything."""
+    repo = args.repo.resolve()
+    url = package_phase.real_remote(repo)
+    repo_id = ledger.resolve_repo_id(url)
+    rows = (
+        [row for row in ledger.tasks_by_repo(repo_id) if row["spec_id"] == args.spec_id]
+        if repo_id is not None
+        else []
+    )
+    if not rows:
+        print(f"adopt: {args.spec_id} has no task in this repo")
+        return 1
+    newest = rows[-1]
+    if newest["state"] not in _ADOPTABLE_STATES:
+        print(
+            f"adopt: {args.spec_id}'s newest task is {newest['state']}, "
+            "which adopt does not take"
+        )
+        return 1
+    if newest["pr_url"]:
+        print(f"adopt: {args.spec_id}'s newest task already carries {newest['pr_url']}")
+        return 1
+
+    slug = package_phase.github_slug(url)
+    found = run_gh(
+        [
+            "gh",
+            "pr",
+            "view",
+            str(args.pr),
+            "--repo",
+            slug,
+            "--json",
+            "url",
+            "--jq",
+            ".url",
+        ]
+    )
+    adopted_url = found.stdout.strip() if found.returncode == 0 else ""
+    if not adopted_url:
+        print(f"adopt: gh named no pull request numbered {args.pr}")
+        return 1
+
+    ledger.adopt_pull_request(newest["task_id"], adopted_url)
+    print(f"adopt: task {newest['task_id']} ({args.spec_id}) → {adopted_url}")
     return 0
 
 
