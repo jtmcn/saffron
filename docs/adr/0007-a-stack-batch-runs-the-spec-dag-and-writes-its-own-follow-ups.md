@@ -40,6 +40,14 @@ request stack.
 **Every task in a stack batch stacks.** Every `depends_on` entry of a spec
 comes before it in the order, so its tree holds that code. A spec is refused
 when any `depends_on` entry is outside the plan and not on the default branch.
+Amended 2026-10-10, `SA-0265` and `SA-0267`: one such entry is allowed if it is the **stack base**, a
+parent whose newest waiting task has a pushed branch and a pull request. The
+first layer is cut from the base's branch, and the base's task is its predecessor.
+With two such parents the lower id is the base, and a spec naming the other
+is refused. A refusal names its cause and its remedy. A spec offered with no
+predecessor first asks whether the stack base's branch is still there. If the
+ref is gone, every remaining spec on it is refused by name. That is no abort,
+and the night drains. A fetch that fails for another reason is still an abort.
 A composite's members stay contiguous in the order. The last member's tree
 still carries every layer below the composite, not only its members. So the
 composite review's range starts at the first member's predecessor head. The
@@ -52,7 +60,8 @@ batch. A name a member takes from a layer below is not a join. This narrows ADR
 descendants are refused with a reason. The batch goes on. A `CellRuntimeError`
 raised by a spec's review or by its task's cell is not a miss. The spec is
 offered again at once on the same predecessor, and the breaker bounds the
-re-offers (`SA-0234`). A `GATE_ERROR` outcome is still a miss.
+re-offers (`SA-0234`). A `PREFLIGHT_FAILED` outcome is offered again the same
+way (`SA-0261`). A `GATE_ERROR` outcome is still a miss.
 
 **Spec review runs inside the batch.**
 
@@ -131,6 +140,7 @@ because the batch compares each layer's remote head with its record before
 the push, and escalates a moved branch (`SA-0167`).
 
 **Nothing merges.** The batch links the stack, and leaves every layer a draft.
+A stack on a stack base is not linked (`SA-0265`).
 Amended 2026-10-03, `SA-0170`: `--ready` is withdrawn. A ready, open pull
 request reconciles as `APPROVED`, so marking ready stays the operator's
 approval.
@@ -162,8 +172,10 @@ this decision rests on.
 ## Principles
 
 - **2** departs. A spec whose dependency sits in an unmerged stack outside the
-  plan is refused. Cutting it from its predecessor would drop that code. The
-  residual is a spec that waits for a merge, as §4.2 avoided.
+  plan is refused, unless that dependency is the stack base. Cutting it from
+  its predecessor would drop that code. The residual is a spec whose
+  dependency has no pushed branch or pull request, or is a second base. It
+  waits for a merge, as §4.2 avoided.
 - **4** upholds. Every end-review lens and every spec session runs in a critic
   cell. The host decides what qualifies.
 - **6** departs. A follow-up that carries a probe exists to kill it, and
@@ -178,8 +190,8 @@ this decision rests on.
 - **17** departs. Spec review runs before a spec's first cell. A descendant
   refused after its parent's review has paid for its own review and revisions.
   The round bound caps that spend, and no cell starts.
-- **21** departs. A hand push to a lower layer mid-batch leaves the layers
-  above on a stale head. The residual holds until the spec records each
+- **21** departs. A hand push to a lower layer or to the stack base mid-batch
+  leaves the layers above on a stale head. The residual holds until the spec records each
   handoff's head and checks it at the finish.
 - **23** upholds. §1.4's entry is narrowed in the same pull request, with the
   operator's request, its reason and the seam that covers the rest. ADR 5

@@ -4,7 +4,7 @@ title: "The cut re-queue cap looks for an earlier row, and a batch resumes the s
 status: open
 tier: 1
 filed: 2026-10-07
-specs: []
+specs: [SA-0262]
 prs: []
 commits: []
 cites: [§4.5, §4.2.1]

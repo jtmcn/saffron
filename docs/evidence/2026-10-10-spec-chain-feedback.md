@@ -135,3 +135,97 @@ operator moved the arm to IMPLEMENT's prompt, which names the route.
   the operator to settle" costs a blocker. The brief should ask first.
 - **Read a hand edit's own paragraph for antecedents.** Pre-flight 12 caught
   overclaims in earlier runs, and it still does not read placement.
+
+## Seven tier 1 items, nine specs, `SA-0260` to `SA-0268`
+
+The operator asked for specs for the next loop while run 32's batch ran
+elsewhere. Two read-only agents triaged sixteen tier 1 items first.
+
+| Verdict | Items |
+|---|---|
+| Ready to spec | b-6cd3c2, b-032c61 |
+| A decision, then a spec | b-3bba0f, b-a7e5f3, b-883f74, b-e0e1cf, b-4a63b7 |
+| By hand or a measurement | b-cab612, 40, 49, 79, b-a8270f |
+| Fixed already | b-a04cc8, b-3c7ce9, b-8170eb, b-a4df62 |
+
+Each stale verdict was checked at base before closing it. Four of sixteen
+tier 1 items described code a merged fix had already changed.
+
+The operator chose four arms. b-4a63b7's arm failed at the writer's step 1.
+REBUT records no probe kill, and ADR 3 runs no probe after REBUT. The
+operator deferred it, and the item's record says why.
+
+### Cost
+
+| Spec | Draft | Review 1 | Revise 1 | Review 2 | Settle |
+|---|---|---|---|---|---|
+| `SA-0260` | 21.9 min | 2.1 min | 7.4 min | 1.8 min | none |
+| `SA-0261` | 14.2 min | 3.9 min | 7.6 min | 3.5 min | 6.2 min |
+| `SA-0262` | 19.1 min | 5.8 min | 9.5 min | 3.6 min | 7.6 min |
+| `SA-0264` | 29.0 min | 7.0 min | 7.3 min | 2.8 min | by hand |
+| `SA-0265`, `SA-0267` | 31.5 min | 7.8 min | 32.0 min, split | 7.4 and 5.6 min | 23.6 min |
+| `SA-0266`, `SA-0268` | 31.2 min | 8.7 min | 21.9 min, split | 5.3 and 6.3 min | 10.8 min |
+
+Triage took 2.6 and 3.2 min. b-4a63b7's writer stopped after 1.2 min.
+
+### Rounds
+
+| Spec | Round 1 | Round 2 |
+|---|---|---|
+| `SA-0260` | 0 blockers, 2 concerns | 0 blockers, 0 concerns |
+| `SA-0261` | 1 blocker, 1 concern | 0 blockers, 2 concerns |
+| `SA-0262` | 0 blockers, 5 concerns | 0 blockers, 3 concerns |
+| `SA-0264` | 0 blockers, 4 concerns | 0 blockers, 3 concerns |
+| `SA-0265` | 1 blocker, 6 concerns | 0 blockers, 4 concerns |
+| `SA-0267` | 0 blockers, 6 concerns | none |
+| `SA-0266` | 1 blocker, 4 concerns | 2 blockers, 2 concerns |
+| `SA-0268` | 1 blocker, 3 concerns | none |
+
+No first review came back empty. Every round 2 finding was settled by the
+writer measuring on its prototype, with no third review.
+
+### Each finding by class
+
+- **An arrangement that hides a wrong version.** The largest class, nine
+  findings. A `GATE_ERROR` spec left `remaining`, so a loop that re-offered
+  it looked the same as one that did not. Two seeds a witness rested on
+  could be written so they killed nothing. A test's margins of years hid
+  a missing one-second truncation and a local-time conversion. Pre-flight
+  1 drives each member of a set. It does not ask what else the
+  arrangement makes equal.
+- **A claim over a set whose witness drives one member.** Five findings.
+  The dead-state refusal drove one of `REJECTED` and `EXHAUSTED`. A carried
+  pull request was driven on one of three states.
+- **A rule a sibling path already enforces, missed by a new path.** Two
+  blockers on `SA-0266` and `SA-0268`. A new command started gate cells
+  with no N1 host probe, then probed without reporting what it tolerated.
+  `run_one_cell` does both. No pre-flight check asks what invariants the
+  path being copied carries.
+- **My own hand edits.** Seven findings across five specs. A count left at
+  four, a residual credited to the wrong item, a glossary word the specs
+  then broke, and three sentences that contradicted the code or each
+  other. Pre-flight 12 caught none of them, because they were written
+  after it ran.
+- **A residual the spec did not state.** Six findings, most on `SA-0262`
+  and `SA-0264`. A design argument resting on what the change exposes,
+  not on what it fixes.
+- **Size.** Two specs split after review, not before. Each review added a
+  criterion that pushed the prototype past 80% of its ceiling.
+- **A precedent cited for the opposite.** The writer called `migrate.py`
+  a precedent for a non-PACKAGE state in a `task_package` fact. It maps
+  every such state away.
+
+### What the next run changes
+
+- **Ask what the arrangement makes equal.** For each wrong version, name
+  the state that tells it apart, and check the arrangement reaches it.
+  This is the class that survived every writer's kill list.
+- **Copy a path's invariants with its calls.** A spec that starts cells
+  outside `run_one_cell` lists what `run_one_cell` does before a cell
+  starts, and says which it keeps.
+- **Pre-flight 12 runs after every hand edit, not once.** Each review
+  round moved a hand edit, and the next reviewer found it.
+- **Price a review's likely additions before the first review.** Both
+  splits came from reviews adding a witness to a spec already near 80%.
+- **A triage pass is worth its cost.** Six minutes found four stale tier 1
+  items and one infeasible arm before any writer started.

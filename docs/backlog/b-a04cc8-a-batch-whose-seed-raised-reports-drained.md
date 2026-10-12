@@ -1,14 +1,15 @@
 ---
 id: b-a04cc8
 title: A stack batch whose every layer's seed raised reports `DRAINED` and exits 0
-status: open
+status: done
 tier: 1
 filed: 2026-10-08
-specs: []
-prs: []
+specs: [SA-0234]
+prs: [783]
 commits: []
 cites: [§4.4, §7]
 related: [b-60a399, b-6cd3c2]
+closed: 2026-10-10
 ---
 
 ## Problem
@@ -35,3 +36,5 @@ is not `DRAINED`.
 ## Record
 
 - 2026-10-08: filed from the spec loop's run 31.
+- 2026-10-10: closed as fixed by `SA-0234` (#783), merged the day after this was filed.
+  A seed raise in a stack batch is offered again, and two in a row end it `INFRASTRUCTURE`.

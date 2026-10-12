@@ -4,7 +4,7 @@ title: "A start preflight refuses in a stack batch is a miss, so the batch refus
 status: open
 tier: 1
 filed: 2026-10-07
-specs: []
+specs: [SA-0261]
 prs: []
 commits: []
 cites: [§4.2.1, §5.1.1]

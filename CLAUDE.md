@@ -145,7 +145,8 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 - `saffron/phases/` — `implement.py` (plan checkpoint + repair turns), `review.py` (lenses),
   `rebut.py`, `package.py`.
 - `saffron/task.py` — `run_task` drives one task end to end, a cell *and* PACKAGE.
-  `saffron cell` and `saffron batch` adapt over it.
+  `saffron cell` and `saffron batch` adapt over it. `saffron package` reruns PACKAGE
+  alone for a task whose PACKAGE raised. It runs no agent and never reaches `run_one_cell`.
 - `saffron/agents/` — `context.py` injects `CONTEXT.md` sections per phase and loads turn prompts.
   `artifacts.py` holds the extraction turn and plan validation; `findings.py` anchors findings to the diff.
 - `images/agent_runner.py` — the **only** file permitted to import the Agent SDK (gated). It runs

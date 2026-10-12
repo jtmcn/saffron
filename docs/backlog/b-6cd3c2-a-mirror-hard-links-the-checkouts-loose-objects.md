@@ -4,7 +4,7 @@ title: A mirror hard-links the checkout's loose objects, so one unreadable inode
 status: open
 tier: 1
 filed: 2026-10-08
-specs: []
+specs: [SA-0260]
 prs: []
 commits: []
 cites: [§5.1]

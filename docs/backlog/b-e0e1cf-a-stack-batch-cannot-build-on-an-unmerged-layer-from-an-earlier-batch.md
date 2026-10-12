@@ -4,7 +4,7 @@ title: "A stack batch cannot build on an unmerged layer from an earlier batch, s
 status: open
 tier: 2
 filed: 2026-10-05
-specs: []
+specs: [SA-0265, SA-0267]
 prs: []
 commits: []
 cites: [§4.2]
