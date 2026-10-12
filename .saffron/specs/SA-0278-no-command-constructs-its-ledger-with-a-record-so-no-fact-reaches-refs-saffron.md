@@ -3,8 +3,8 @@ id: SA-0278
 title: "No command constructs its `Ledger` with a record, so no fact a night writes reaches `refs/saffron/*`"
 type: feature
 priority: 1
-depends_on: [SA-0268, SA-0265, SA-0260]
-estimated_lines: 490
+depends_on: [SA-0268, SA-0265, SA-0260, SA-0271]
+estimated_lines: 526
 estimate_measured: true
 touches:
   - saffron/record/routed.py
@@ -17,6 +17,7 @@ touches:
   - tests/test_task_record.py
   - tests/test_cli.py
   - tests/test_mirror.py
+  - tests/test_events.py
   - CLAUDE.md
   - docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md
 forbidden:
@@ -84,17 +85,20 @@ acceptance:
   - claim: >-
       `push_record` on a ledger built with no record, or with a
       `MemoryRecord`, returns without pushing or raising, even when the task's
-      repo row names a mirror and an origin that do not exist.
+      repo row names a mirror and an origin that do not exist. On a ledger
+      with a `RoutedRecord`, `push_record` for a task id with no row returns
+      without raising and writes nothing to any mirror or origin.
     witness: tests/test_record_routed.py::test_a_ledger_without_a_routed_record_pushes_nothing
     wrong_versions:
       - A version that builds a `RefsRecord` from `record_home` and pushes whatever record the ledger holds.
+      - A version that raises `ValueError` on a missing key.
   - claim: >-
       `run_task` pushes the task's record exactly once, after PACKAGE's last
       fact, on every way out of it that follows a returned cell. The witness
       drives five: a packaged `READY_FOR_REVIEW`, an `EXHAUSTED` cell packaged
       in the exhausted mode, an `EXHAUSTED` cell PACKAGE never ran on, a
-      `PackageError` from a `READY_FOR_REVIEW` cell's PACKAGE, and a
-      `RuntimeError` from it. In each case a fake PACKAGE, or a fake push of
+      `PackageError` from a `READY_FOR_REVIEW` cell's PACKAGE, a
+      `RuntimeError` from it, and a `KeyboardInterrupt` from it. In each case a fake PACKAGE, or a fake push of
       unpackaged work, writes a `task_push` fact. After each, the origin reads
       the mirror's facts and ends with the fact written last.
     witness: tests/test_task_record.py::test_every_way_out_of_a_task_after_its_cell_pushes_its_record_once
@@ -104,6 +108,7 @@ acceptance:
       - A version that pushes only when the cell ended `READY_FOR_REVIEW`.
       - A version that pushes from `set_task_state` on each state outside `IN_FLIGHT_STATES`.
       - A version that pushes on the return path and again in a `finally`.
+      - A version that pushes before the return and in an `except Exception` that re-raises, so a `KeyboardInterrupt` pushes nothing.
   - claim: >-
       A push `run_task` cannot make leaves the task's outcome as it was. Its
       state is unchanged, `run_task` returns it, and a raise out of PACKAGE
@@ -128,15 +133,16 @@ acceptance:
       - A version whose `main` constructs the shared ledger with no record.
   - claim: >-
       `ensure_mirror`'s fetch of an existing mirror neither prunes nor
-      overwrites a ref under `refs/saffron/`. A ref the checkout lacks
-      survives, and one the checkout holds at another commit keeps the
-      mirror's commit. A branch the checkout deleted is still pruned, and a
+      overwrites a ref under `refs/saffron/`. A task ref and a
+      `refs/saffron/values/` ref the checkout lacks both survive, and a task
+      ref the checkout holds at another commit keeps the mirror's commit. A branch the checkout deleted is still pruned, and a
       branch it gained is still fetched.
     witness: tests/test_mirror.py::test_a_mirror_fetch_neither_prunes_nor_overwrites_the_records_refs
     wrong_versions:
       - A version that keeps the plain `+refs/*:refs/*` fetch with `--prune`.
       - A version that drops `--prune` and keeps the forced `+refs/*:refs/*` refspec.
       - A version that adds the negative refspec and drops `--prune`.
+      - A version whose negative refspec is built from `refs.TASKS`, `^refs/saffron/tasks/*`.
 ---
 
 ## Context
@@ -184,7 +190,13 @@ so each fetch deletes every task ref in the mirror. Measured on
 kept it. `prepare_mirror` runs that fetch before `saffron cell` creates its
 task (`saffron/preflight.py:422-439`, `saffron/cli.py:504-506`). The
 queue's resolver calls `git_mirror.ensure_mirror` unless a batch pinned the
-mirror (`saffron/cli.py:1534-1541`).
+mirror (`saffron/cli.py:1534-1541`). On 2026-10-12 no mirror under
+`~/.saffron/mirrors/` held a `refs/saffron/*` ref.
+
+**The fold refuses a ref with no `task_created` fact.** `_facts_of` raises
+for one (`saffron/record/fold.py:76-79`). A strict fold then raises
+`UnreadableTask`, and a skipping one folds the task to no rows
+(`saffron/record/fold.py:88-92`).
 
 **A cell still cannot reach the record.** The seed fetches
 `+refs/heads/*:refs/remotes/origin/*` alone and removes the remote
@@ -252,6 +264,28 @@ message. It never changes `outcome.state` and never replaces an exception
 already propagating. A raise out of `run_one_cell` pushes nothing: the task
 never ended, and it stays in flight until a scan stamps it.
 
+**`push_record` on a task with no row** returns plainly and writes nothing.
+Five tests in `tests/test_cli.py` stay green because of it. Each stubs
+`run_one_cell` with an outcome whose `task_id` the ledger never held:
+`test_the_exit_code_distinguishes_the_terminal_states` (`:116`),
+`test_a_provider_that_served_nothing_exits_2_and_a_task_that_failed_exits_1`
+(`:167`), `test_an_unpackaged_task_names_the_branch_its_work_was_pushed_to`
+(`:200`), `test_package_events_land_in_the_runs_own_log` (`:296`) and
+`test_a_package_that_fails_and_one_that_breaks_exit_differently` (`:416`).
+
+**`package_ready_task`**, which `SA-0268` adds to `saffron/task.py`, also
+pushes the task's record once, after its call to `package()` returns or
+raises. A refused push is handled as `run_task` handles one: a `Teardown`
+with `ok` false lands in the task's `events.jsonl`, and the result or the
+exception is left as it was. No criterion witnesses this push. The notes say
+why.
+
+**The new `Teardown` call site gets its `FAMILIES` row**, citing
+`task.py:run_task` (`saffron/events.py:937-1020`). That moves the table's
+count, so `tests/test_events.py:1385-1386` read 72 for 71, and its
+docstring names this spec beside the others that moved it. Those are the
+only edits in that file.
+
 **`ensure_mirror`** adds the negative refspec `^refs/saffron/*` to its
 fetch of an existing mirror, so the fetch neither prunes nor overwrites the
 record's refs. A comment of one or two lines says why.
@@ -302,11 +336,33 @@ they are.
   from the fold rather than `ledger.batch_spend`. A later spec.
 - **Design step 5**, `queue.json` as a render of the record and its
   equality check. A later spec.
-- **§8's event-per-append rule.** `_append` emits nothing, and this spec
-  leaves it so.
-- **Facts a task gains after `run_task`.** `reconcile` writes `MERGED` and
-  the other review states into the mirror and pushes nothing. They reach the
-  origin with the task's next push, if it has one.
+- **§8's event-per-append rule**
+  (`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md:363-367`).
+  The design binds it at this wiring. `_append` emits nothing, and this spec
+  leaves it so. The operator signs that deferral off on this spec's pull
+  request, and backlog item b-6677b6 holds it.
+- **Facts written after or outside `run_task`.** These land in the mirror.
+  They reach the origin only on the task's next push. A merged task has
+  no next push. They are
+  `reconcile`'s review states, `MERGED` among them. They are `stack_layer`
+  (`saffron/batch.py:497`), `end_review` (`saffron/end_review.py:358`),
+  `stack_finish` (`saffron/finish.py:415`) and `qualification`
+  (`saffron/qualify.py:169`). They include every fact of a draft task. The
+  draft handler never reaches the task driver (`saffron/cli.py:1226`). ADR 10 says
+  the record lets a host VM be discarded
+  (`docs/adr/0010-saffron-ships-as-an-engine-each-operator-deploys.md:126-127`).
+  That promise is not met while these facts live on one host. Backlog item
+  b-4eaaa4 pushes them.
+- **The cutover.** Every mirror's fetch so far pruned its task refs
+  (`saffron/repos/mirror.py:72`). So the operator runs `saffron migrate`
+  after this spec merges and before the first wired night. It writes each
+  repo's task refs into the mirror its repo row names
+  (`saffron/record/migrate.py:613`). Suppose it is skipped. The night's first
+  fact for an older task starts a ref holding that one `task_state` fact.
+  `reconcile`'s `MERGED` and a scan's `ORPHANED` are such facts. The fold refuses that ref
+  as unreadable (`saffron/record/fold.py:76-79`), and its push is refused as
+  stale. A night run from another checkout's mirror meets the same.
+  Backlog item b-d4b847 makes the fold, or the writer, tolerate it.
 - **A retry, or a re-read of the remote.** A mirror can lack a task's ref.
   The task then appends a fresh history, and its push is refused as stale.
   A mirror made fresh, or one for another checkout path, does this. The
@@ -348,26 +404,44 @@ routed ledger whose origin is the stale repository. Copy that task's ref in
 its mirror to `refs/saffron/tasks/<first key>`, and push it to the stale
 origin. The first task's push is then not a fast-forward.
 
+**Criterion 2.** Create the pushed task, and so upsert its repo, before the
+other repo's task. A version that pushes to the most recently upserted
+origin then reaches the other origin, and the witness kills it. Measured on
+the prototype.
+
 **Criterion 6.** Seed the repo row and task through a plain `Ledger` before
 `cli.main` runs, so the mirror holds only what the command wrote. Use
 `_fake_gh_says_merged` (`tests/test_cli.py:2003-2006`). Every other command
 but `migrate`, `serve` and `fold` shares the same ledger, so the witness
 drives one command for all of them.
 
-**Criterion 7.** In the checkout, delete the `feature` branch and add one
-before the second `ensure_mirror`, beside the two task refs.
+**Criterion 7.** Before the second `ensure_mirror`, put two task refs and a
+`refs/saffron/values/` ref in the mirror. Give the checkout its own ref for
+one of the task keys, at another commit. In the checkout, delete the `feature`
+branch and add one.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill. A
-prototype's witnesses killed all 19 on 2026-10-11, failed with the source
+prototype's witnesses killed all 22 on 2026-10-12, failed with the source
 reverted, and passed with the change. Do not run them yourself.
+
+**Written against `SA-0268`'s end state.** This spec depends on `SA-0264`
+to `SA-0268`, which add `adopt`, `ready_task` and `package_ready_task`. None
+is built, so the prototype was cut from `bc879e2c` without them. The eight
+repaired tests, the size and the wrong versions were measured there. Re-read
+each line this spec cites before editing it, since those specs move them.
+`package_ready_task`'s push is written against the function `SA-0268`
+describes. No criterion witnesses it, because the prototype had no
+`package_ready_task` to call or stub. A test you write for it is judged by
+`revert` like any other, so write one only if it fails without the push.
 
 **The `prose` gate** counts every new comment, docstring and Markdown line.
 Write none with an em dash, a semicolon, a contraction, the perfect tense or
 a sentence over 25 words.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so the task is `elevated`
-and `size` blocks. The prototype held every source change, all seven
-witnesses, the eight repaired tests and the documentation. It measured 1963
-tokens with `size`'s own counter against the `feature` ceiling of 3000.
-Source was 612 of them, tests 1205, and documentation 146.
-`estimated_lines` is that count over four.
+and `size` blocks. The prototype held every source change but
+`package_ready_task`'s push, all seven witnesses, the eight repaired tests,
+the `FAMILIES` row and count, and the documentation. It measured 2045 tokens
+with `size`'s own counter against the `feature` ceiling of 3000. Source was
+625 of them, tests 1274, and documentation 146. `estimated_lines` is that
+count over four, plus 15 lines for `package_ready_task`'s push.

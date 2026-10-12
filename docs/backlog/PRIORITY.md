@@ -252,6 +252,10 @@ the child is cut from `base_sha` without the parent's code. Then
 `REBUTTAL_UNJUDGED` is pushed onto that pull request's branch, and no merge
 moves it to `MERGED`.
 
+**Placed 2026-10-12**, from `SA-0278`'s spec review: **b-d4b847**, then
+**b-4eaaa4** and **b-6677b6**. A mirror that lacks a task's ref starts one
+with no `task_created` fact, and the fold refuses it. Facts written outside
+`run_task` never leave the host. No record append emits an event.
 ### Tier 2 — the morning after
 
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
