@@ -373,8 +373,8 @@ repos        (repo_id, name, origin, mirror_path, policy_sha, image_tag,
 runs         (run_id, batch_id, repo_id, base_sha, preflight, started_at,
               ended_at, status)
 tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sha,
-              prompt_sha, parent_task_id, worktree, volume, budget_usd,
-              spent_usd_est, updated_at)
+              prompt_sha, engine_commit, parent_task_id, worktree, volume,
+              budget_usd, spent_usd_est, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
               ended_at, subtype, terminal_reason, num_turns, cost_usd_est,
               cost_floor_usd_est, earned_risk)
@@ -418,6 +418,12 @@ An attempt's `failures` rows are its new failures only, and `gate_results.failur
 **Both invalidations need a moment to fire at, and it is a mirror refetch at task scheduling**. Preflight fetches once and pins `base_sha` (§4.4), so nothing else in the batch ever re-reads the repo. Left so, these two columns would record a check that structurally cannot happen. The scheduler therefore refetches the mirror before each task starts and compares both shas then. It is a local `git fetch` against a bare repo, and it costs milliseconds. It is the only point in a batch where a mid-flight edit can be noticed at all. See what this deliberately does *not* do: `base_sha` stays pinned for the whole batch. So a refetch invalidates tasks and never moves the baseline out from under them.
 
 `prompt_sha` is a digest of `saffron/agents/prompts/**` as authored, the third input beside `spec_sha` and `policy_sha`. `attempts.model` names the models an attempt's assistant messages named, comma-joined in first-seen order. The CLI's own `<synthetic>` marker is no model and is skipped (SA-0205).
+
+`engine_commit` names the engine that judged the task (ADR 10). It is the commit a build
+wrote into `saffron/ENGINE_COMMIT`. With no such file, it is the `HEAD` of the checkout
+the engine runs from, marked `-dirty` when a tracked file differs from it. A cell writes it
+at start as a `task_engine` fact, and only when it differs from the one on record. NULL
+means no engine was observed (SA-0281). The pull request body names it under Provenance.
 
 Artifacts (transcripts, diffs, gate logs, coverage XML) go in a **plain directory tree**, not a content-addressed store:
 

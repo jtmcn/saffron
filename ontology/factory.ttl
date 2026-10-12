@@ -221,6 +221,7 @@ factory:spec_finding a factory:FactKind .
 factory:spec_text a factory:FactKind .
 factory:stack_finish a factory:FactKind .
 factory:task_regate a factory:FactKind .
+factory:task_engine a factory:FactKind .
 
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .

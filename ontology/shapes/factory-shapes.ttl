@@ -148,7 +148,7 @@ factory:FactKindShape a sh:NodeShape ;
             factory:batch_created factory:batch_closed factory:repo_upserted
             factory:stack_layer factory:end_review factory:qualification
             factory:spec_review factory:spec_finding factory:spec_text
-            factory:stack_finish factory:task_regate ) .
+            factory:stack_finish factory:task_regate factory:task_engine ) .
 
 # A contract gate is a repo's executable for one core-supplied role. This states
 # the contract half only; nothing here forbids a role on a core gate, because

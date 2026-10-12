@@ -23,6 +23,7 @@ KINDS = (
     "task_push",
     "task_merged_head",
     "task_policy",
+    "task_engine",
     "attempt_opened",
     "attempt_closed",
     "gate_result",
