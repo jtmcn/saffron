@@ -3,7 +3,7 @@ id: SA-0275
 title: "A re-gate of a pull request's head has nowhere to be recorded, so `reconcile` can only say that no gate judged the tree"
 type: feature
 priority: 2
-depends_on: [SA-0268, SA-0265, SA-0269]
+depends_on: [SA-0274, SA-0268, SA-0265, SA-0269]
 estimated_lines: 283
 estimate_measured: true
 touches:
