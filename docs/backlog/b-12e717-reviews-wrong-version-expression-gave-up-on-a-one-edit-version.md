@@ -30,3 +30,8 @@ can tell "no single edit exists" from "the session stopped".
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-10-11: recurred on `SA-0258` in the spec loop's run 34. The batch
+  log said "5 declared, 4 expressed" and named no version. The fifth,
+  `os._exit(143)`, was `unproven` in `wrong-versions.json`. The Spec seat
+  expressed it as one edit, and only an `IndexError` killed it. #812's
+  review made the witness fail by assertion.

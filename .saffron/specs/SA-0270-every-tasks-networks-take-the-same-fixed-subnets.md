@@ -1,9 +1,9 @@
 ---
-id: SA-0261
+id: SA-0270
 title: Every task's networks take the same fixed subnets, so two tasks up at once collide on them
 type: feature
 priority: 3
-depends_on: [SA-0260]
+depends_on: [SA-0269]
 consumes:
   - saffron/cell/proxy.py:proxy_name
 estimated_lines: 396
@@ -111,7 +111,7 @@ acceptance:
     wrong_versions:
       - It keeps reading the address with `container_ip`'s default prefix, `10.88.0.`.
       - It reads the address on the pool's first /24 whatever `subnet` it is given.
-      - '`subnet` defaults to `runtime.DEFAULT_SUBNET`, pinned by `SA-0262`''s criterion 3.'
+      - '`subnet` defaults to `runtime.DEFAULT_SUBNET`, pinned by `SA-0271`''s criterion 3.'
   - claim: >-
       A task's `cell_up` hands `start_proxy` the subnet it claimed for the
       task's cells network. Each leg's upstream probe is given the proxy's
@@ -146,15 +146,15 @@ acceptance:
 
 Backlog items **b-ca3bc6** and **b-6a692d**, tier 3. They cite
 `DESIGN.md` §4.2, §4.2.1, §5.1 and §5.5. Lines below were read at
-`60f8b3f5`, which is before `SA-0260`.
+`60f8b3f5`, which is before `SA-0269`.
 
-**This spec is the second of three.** `SA-0260` names the proxy and every
+**This spec is the second of three.** `SA-0269` names the proxy and every
 task network from the task. It leaves every subnet fixed. This spec moves
-the task networks onto subnets allocated per task. `SA-0262` then retires
+the task networks onto subnets allocated per task. `SA-0271` then retires
 the Gate-only cell's fixed subnet and PACKAGE's re-verification on
 `DEFAULT_SUBNET`.
 
-**What `SA-0260` gives this spec.** `proxy.proxy_name(key)` returns
+**What `SA-0269` gives this spec.** `proxy.proxy_name(key)` returns
 `saffron-proxy-<key lower>`. `start_proxy`, `denied_egress`,
 `failed_egress` and `stop_proxy` take that proxy name. So does
 `session.proxy_address(proxy_name, subnet)`. `cell_up` and `cell_down`
@@ -214,13 +214,13 @@ and apple/container's default network is `192.168.64.0/24`. So
 
 Every task network takes a fixed subnet. A second task brought up beside
 a first asks the runtime for a /24 the first one holds, and its create
-fails. Names alone, from `SA-0260`, do not let two tasks run at once.
+fails. Names alone, from `SA-0269`, do not let two tasks run at once.
 
 1. **The pool.** In `runtime.SUBNETS`, replace the `"cells"` and
    `"critic"` entries with one `"pool"` entry, `10.200.0.0/16`. Keep
    `"egress"` and `"gate"`. Keep `DEFAULT_SUBNET`, `SUBNET_PREFIX` and
    `GATEWAY` as they are. PACKAGE's re-verification still creates on
-   `DEFAULT_SUBNET` until `SA-0262`. Rewrite the comment above
+   `DEFAULT_SUBNET` until `SA-0271`. Rewrite the comment above
    `SUBNETS` to say so.
 2. **`allocate_network(name: str) -> str`**, new in
    `saffron/cell/runtime.py`. It walks the pool's /24s in address order.
@@ -230,7 +230,7 @@ fails. Names alone, from `SA-0260`, do not let two tasks run at once.
    On a refused create, ask `networks_on_subnet(<that /24>,
    exclude=name)`. A holder moves the walk on. No holder raises the
    create's own error. Exhaustion raises `CellRuntimeError` naming every
-   holder it met. `SA-0262` calls this exact name and signature. It also
+   holder it met. `SA-0271` calls this exact name and signature. It also
    moves `_admit()` ahead of the walk. Leave that to it.
 3. **`start_proxy`** takes a required keyword argument `subnet` and reads
    its address with that subnet's prefix (`runtime.subnet_prefix`).
@@ -248,7 +248,7 @@ fails. Names alone, from `SA-0260`, do not let two tasks run at once.
 ## Out of scope
 
 - The Gate-only cell's fixed `"gate"` subnet and PACKAGE's
-  re-verification on `DEFAULT_SUBNET`. `SA-0262` owns both.
+  re-verification on `DEFAULT_SUBNET`. `SA-0271` owns both.
 - More than one task at a time in a batch (K > 1, `DESIGN.md` §4.2.1).
   This spec makes the networks able to hold two tasks, and starts no
   second one.
@@ -267,7 +267,7 @@ fails. Names alone, from `SA-0260`, do not let two tasks run at once.
 
 ## Notes for the agent
 
-**Your base.** `SA-0260` lands first. Its proxy name, network names and
+**Your base.** `SA-0269` lands first. Its proxy name, network names and
 the `proxy_address(proxy_name, subnet)` signature are in your base. Read
 `saffron/cell/proxy.py`, `cell_up`, `_drive_cell` and REVIEW's
 `critic_env` line at your base before you edit them.
@@ -276,10 +276,10 @@ the `proxy_address(proxy_name, subnet)` signature are in your base. Read
 cut-off attempt's work.
 
 **Edit or new.** `allocate_network` is new code. The edits to
-`start_proxy`, `cell_up` and REVIEW land on lines `SA-0260` rewrote after
+`start_proxy`, `cell_up` and REVIEW land on lines `SA-0269` rewrote after
 this spec was written. So criteria 1, 2, 4, 5 and 6 declare a witness and
 no mutant, and `witness` reports `skip` for them. Criterion 3 is an edit
-to `runtime.SUBNETS`, which `SA-0260` leaves alone. Its mutant puts the
+to `runtime.SUBNETS`, which `SA-0269` leaves alone. Its mutant puts the
 critic entry back beside the gate entry.
 
 **Each witness fails at your base.** `allocate_network`, `start_proxy`'s
@@ -319,8 +319,8 @@ reports live claims that overlap the subnet asked about, beside the
 holders a test passes in. Keep `networks_created` as it is.
 
 **Criterion 4's `subnet` is required, but its witness always passes
-it.** `SA-0262`'s criterion 3 checks that it has no default. Until
-`SA-0262` lands, a defaulted `subnet` would pass here.
+it.** `SA-0271`'s criterion 3 checks that it has no default. Until
+`SA-0271` lands, a defaulted `subnet` would pass here.
 
 **Criterion 4's witness** replaces `runtime.call`, `run_detached`,
 `remove_container` and `container_ip`. Its `container_ip` answers only for
@@ -353,7 +353,7 @@ what `networks_created` recorded for its two names.
 **Tests at base that the change makes false.** Update each and keep its
 name. A test's name is in the census, so none is removed.
 
-- Every test `SA-0260` added that calls `start_proxy`, or replaces
+- Every test `SA-0269` added that calls `start_proxy`, or replaces
   `start_proxy` or `container_ip` with a fake. Pass `subnet=` to the one,
   and let each fake take `subnet=` and a prefix. Read them at your base.
 - `test_the_preflight_line_reports_what_was_tolerated`
@@ -364,7 +364,7 @@ name. A test's name is in the census, so none is removed.
   (`tests/test_events.py:1893-1901`) expects `runtime.GATEWAY` to survive
   `_normalise`. `_GATEWAYS` is built from `SUBNETS.values()`, which loses
   `DEFAULT_SUBNET`. Keep `DEFAULT_SUBNET`'s gateway in `_GATEWAYS`.
-  `SA-0262` deletes it.
+  `SA-0271` deletes it.
 
 - `test_every_subnet_saffron_allocates_is_declared_in_one_place`
   (`tests/test_runtime.py:685-728`) asserts the `"cells"` and `"critic"`

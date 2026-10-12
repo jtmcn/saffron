@@ -237,7 +237,7 @@ bad inode failed four seeds in a night. A batch whose only runnable layer
 failed its seed reports `DRAINED`. A PACKAGE raise after green leaves no branch
 and no resume.
 
-**Placed 2026-10-09**, from the spec loop's run 32: **b-f8fa24**. The
+**Placed 2026-10-09**, from the spec loop's run 32: ~~**b-f8fa24**~~. The
 in-cell agent is refused every write to `.pre-commit-config.yaml`, so a spec
 that names it ends `EXHAUSTED`.
 
@@ -248,7 +248,7 @@ sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
 **b-0569f7**, **b-da550a** and last **b-a9ec4b**.
 
-**Placed 2026-10-06**, from stopping a cell by hand: **b-5df2a7**. SIGTERM skips
+**Placed 2026-10-06**, from stopping a cell by hand: ~~**b-5df2a7**~~. SIGTERM skips
 the cell's teardown, so its containers and its task stay in flight.
 
 **Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: **b-52e670**. A
@@ -425,12 +425,12 @@ layer's peak turns counts attempts its `max_turns` does not bound.
 and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
 REVIEW's re-prompt is written twice.
 
-**Placed 2026-10-05**, from the first live stack batch: **b-4e1b6d**.
+**Placed 2026-10-05**, from the first live stack batch: ~~**b-4e1b6d**~~.
 `saffron watch` shows nothing while a spec is reviewed or written, since
 those sessions log no events.
 
 **Placed 2026-10-05**, from stage 2's stack batches: **b-e0e1cf**,
-**b-0a08bf**, then **b-593d50**. A stack batch cannot build on an unmerged
+~~**b-0a08bf**~~, then **b-593d50**. A stack batch cannot build on an unmerged
 layer from an earlier batch. `queue --stack` never says what `--budget`
 admits every layer. A cut resumed turn undercounts its own spend.
 
@@ -462,6 +462,12 @@ before the review commits. A `run` route prints nothing. The driver's
 **b-27bacc**. A criterion probe is judged against its declared witness
 alone, so a blocker another test kills stands after REBUT. A stack batch's
 follow-ups are pooled for their own `depends_on`.
+
+**Placed 2026-10-11**, from the spec loop's run 34: **b-f7a591**,
+**b-d0fed8**, **b-2f4746**, then **b-e7b6a2**. A lens that errors drops the
+host's own probe blockers filed under it. A batch stopped before its row
+exists leaves no row. A stack batch at a threshold spends into its shares.
+`watch` cannot follow the follow-up writer or the end review.
 
 ### Tier 3 — real, not urgent
 
@@ -565,6 +571,11 @@ regular-file git modes are spelled in three modules.
 leave a side untested. The fold writes its spend rollup twice. A closed
 `EXHAUSTED` draft reports `head_moved` on every scan. A preflight hit with
 no socket list names no process.
+
+**Placed 2026-10-11**, from the spec loop's run 34: **b-5a69db**,
+**b-c86c4b**, then **b-54fee5**. A stopped night closes `INFRASTRUCTURE`,
+which the glossary keeps for the breaker. A probe's reason is called a
+refusal. The glob characters are spelled in two modules.
 
 **Placed 2026-10-05**, from stage 2's stack batches: **b-937778**,
 **b-050733**, then **b-0efc31**. The loop driver's `history` counts every

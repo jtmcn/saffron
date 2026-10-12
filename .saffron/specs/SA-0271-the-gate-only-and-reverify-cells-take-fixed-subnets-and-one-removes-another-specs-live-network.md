@@ -1,9 +1,9 @@
 ---
-id: SA-0262
+id: SA-0271
 title: The gate-only cell and reverify's cells take fixed subnets, and the gate-only cell's pre-clean removes another spec's live network
 type: feature
 priority: 3
-depends_on: [SA-0261]
+depends_on: [SA-0270]
 consumes:
   - saffron/cell/runtime.py:allocate_network
 estimated_lines: 480
@@ -125,8 +125,8 @@ acceptance:
 ## Context
 
 Backlog item **b-ca3bc6**, with **b-6a692d**. It cites `DESIGN.md` §5.1
-and §5.7. This is the last of three specs. `SA-0260` names the proxy and
-every task network from the task. `SA-0261`, the parent, adds a pool to
+and §5.7. This is the last of three specs. `SA-0269` names the proxy and
+every task network from the task. `SA-0270`, the parent, adds a pool to
 `runtime.SUBNETS` and the function `allocate_network`. That function walks
 the pool's /24s, claims one by creating the network on it, and returns the
 subnet it claimed. It raises `CellRuntimeError` when the pool is spent. Read
@@ -164,7 +164,7 @@ default their gateway to `GATEWAY` (`saffron/preflight.py:158`, `:187`,
 `saffron/cell/runtimes/podman.py:84`. A test reads `GATEWAY` at
 `tests/test_events.py:1895` and `:1899`.
 
-**What the parent leaves for you.** By its own text, `SA-0261` keeps
+**What the parent leaves for you.** By its own text, `SA-0270` keeps
 `DEFAULT_SUBNET`, `SUBNET_PREFIX`, `GATEWAY` and the "gate" entry. It makes
 `start_proxy` take its subnet as a keyword. Its cell-marked callers of
 `start_proxy` pass `DEFAULT_SUBNET`, since their networks are still
@@ -334,7 +334,7 @@ a removed one.
 - `tests/test_events.py:1895` and `:1899` read `GATEWAY`. Use the gateway
   of a pool /24. The parent keeps `DEFAULT_SUBNET`'s gateway in
   `_GATEWAYS`. Drop it.
-- Every `SA-0260` or `SA-0261` test that reads a removed name. The `types`
+- Every `SA-0269` or `SA-0270` test that reads a removed name. The `types`
   gate checks `tests/` and `docs/`, so it names any attribute read you
   miss, but not a string.
 

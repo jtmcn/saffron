@@ -561,13 +561,15 @@ def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
 
 
 def test_status_says_which_reviewable_branches_carry_pushed_review_commits(
-    monkeypatch, capsys
+    tmp_path, monkeypatch, capsys
 ):
     # Item 14: `status` showed `READY_FOR_REVIEW #243` either way, so it could
     # not answer "what is left to review?".
     reviewed, unreviewed, unrecorded = _row("A", pr=10), _row("B", pr=11), _row("C")
     reviewed.pushed_sha = unreviewed.pushed_sha = "p" * 40
     heads = {"saffron/A": "r" * 40, "saffron/B": "p" * 40}
+    (order := tmp_path / "order.json").write_text("[]")
+    monkeypatch.setattr(driver, "ORDER", order)
     monkeypatch.setattr(driver, "_load", lambda: [reviewed, unreviewed, unrecorded])
     monkeypatch.setattr(driver, "_stale", lambda rows: [])
     monkeypatch.setattr(driver, "_origin_head", heads.get)
@@ -3362,3 +3364,37 @@ def test_bookkeeping_drafts_no_change_for_a_retirement_once_the_set_is_bound(
     assert after_block1.count(driver.RETIREMENT_OWES_NOTHING) == 2
     assert "Re-measured" not in after_block1
     assert "assert [" not in after_block1
+
+
+def _no_order(tmp_path, monkeypatch):
+    state = tmp_path / ".saffron-loop"
+    monkeypatch.setattr(driver, "REPO", tmp_path)
+    monkeypatch.setattr(driver, "ORDER", state / "order.json")
+    monkeypatch.setattr(driver, "LEGACY_PLAN", state / "plan.json")
+    return state
+
+
+def test_status_in_a_checkout_with_no_loop_is_not_an_error(
+    tmp_path, monkeypatch, capsys
+):
+    # A delegate opened in a new worktree finds no order, since git ignores the state.
+    _no_order(tmp_path, monkeypatch)
+
+    assert driver.cmd_status(argparse.Namespace()) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "no loop in this checkout" in captured.out
+    assert "driver.py snapshot" in captured.out
+
+
+def test_status_with_only_the_legacy_plan_still_says_to_delete_it(
+    tmp_path, monkeypatch, capsys
+):
+    state = _no_order(tmp_path, monkeypatch)
+    state.mkdir()
+    (state / "plan.json").write_text("[]")
+
+    with pytest.raises(SystemExit) as exit_:
+        driver.cmd_status(argparse.Namespace())
+    assert exit_.value.code == 1
+    assert "plan.json is the previous driver's file" in capsys.readouterr().err

@@ -1,5 +1,5 @@
 ---
-id: SA-0260
+id: SA-0269
 title: Every task cell and end-review cell joins a network and a proxy of one fixed name, so a second one started tears down the first
 type: feature
 priority: 3
@@ -78,7 +78,7 @@ acceptance:
       its teardown, is one the other created. Neither removes a bare
       "saffron-cells" or "saffron-critic-net", and neither removes or stops
       the other's proxy. The Gate-only cell's sweep of the gate subnet is
-      `SA-0262`'s and outside this claim. The witness drives one whole task
+      `SA-0271`'s and outside this claim. The witness drives one whole task
       for "SY-1" and one for "SY-2", each through REVIEW. Each run's runtime
       lists the other task's cells and critic networks as holders of the
       cells and critic subnets.
@@ -121,8 +121,8 @@ acceptance:
 
 Backlog item **b-ca3bc6**, filed reviewing #633. It also answers the naming
 half of **b-6a692d**. Both cite `DESIGN.md` §5.1. This is the first of three
-specs. `SA-0261` gives each task network its own subnet from one pool, and
-`SA-0262` moves the Gate-only cell and PACKAGE's reverify onto that pool.
+specs. `SA-0270` gives each task network its own subnet from one pool, and
+`SA-0271` moves the Gate-only cell and PACKAGE's reverify onto that pool.
 Every line number below was read at `60f8b3f5`.
 
 **The proxy has one fixed name.** `PROXY_NAME` is `saffron-proxy`
@@ -185,17 +185,17 @@ task running, where today the second silently tears the first down. Any
 network a teardown leaves behind now blocks the next task the same way.
 That covers a SIGKILLed task and a removal `cell_down` reports as
 `survived` without raising (`saffron/cell/session.py:1185-1190`). No later
-pre-clean names it. `SA-0261` removes both.
+pre-clean names it. `SA-0270` removes both.
 
 ## Out of scope
 
 - **Subnets.** `runtime.SUBNETS` and every subnet a network takes stay as
-  they are. `SA-0261` and `SA-0262` own them.
+  they are. `SA-0270` and `SA-0271` own them.
 - **The Gate-only cell and PACKAGE's reverify.** Each already names its
   network from its own spec or commit (`saffron/cell/session.py:1393`,
   `saffron/phases/package.py:530-532`). The sweep of every `saffron-`
   holder on the gate subnet (`saffron/cell/session.py:1408-1410`) stays.
-  `SA-0262` removes it.
+  `SA-0271` removes it.
 - **The egress network.** `saffron-egress` stays one network every proxy
   joins, created once and never removed (`saffron/cell/proxy.py:27-48`).
 - **More than one cell at a time.** K stays 1 (`DESIGN.md` §4.2.1). No
@@ -242,7 +242,7 @@ The Gate-only cell each task's REVIEW opens still sweeps every `saffron-`
 holder on the gate subnet (`saffron/cell/session.py:1405-1410`). With two
 tasks live, that sweep removes the other's `saffron-gate-net-<id>`.
 Criterion 2 lists no holder on the gate subnet, so that sweep finds
-nothing and the claim excludes it. `SA-0262` removes the sweep. The holders
+nothing and the claim excludes it. `SA-0271` removes the sweep. The holders
 it does list feed no other read at base. The only other caller of
 `runtime.networks_on_subnet` is `runtime.create_network`
 (`saffron/cell/runtime.py:330`), and the stub replaces it.
@@ -258,14 +258,14 @@ covers what the real pre-clean and teardown remove.
 **Two comments in `saffron/cell/session.py` name the old network.** Lines
 1328 and 1364 name `saffron-cells`. Rewrite each to name the task's own
 cells network. `saffron/cell/runtime.py:166,169` name it too, but that
-file is forbidden here and `SA-0261` rewrites them.
+file is forbidden here and `SA-0270` rewrites them.
 
 **Criterion 4** follows
 `test_a_first_call_the_provider_never_served_reports_the_proxy_and_the_cell_before_teardown`
 and its `_rigged_cell`, once per spec id.
 
 **`_CRITIC_SUBNET` stays** in `saffron/cell/session.py`, since
-`tests/test_runtime.py:710` reads it and `SA-0261` replaces it.
+`tests/test_runtime.py:710` reads it and `SA-0270` replaces it.
 
 **Existing tests that name the old values change with them.**
 
@@ -280,7 +280,7 @@ and its `_rigged_cell`, once per spec id.
 - The four evidence scripts in `touches` call what changes, and `ty`
   checks `docs/`.
 
-**The operator runs `SA-0260` to `SA-0262` as one stack batch**, with no
+**The operator runs `SA-0269` to `SA-0271` as one stack batch**, with no
 other task between them. The intermediate state above lasts only inside
 that batch.
 

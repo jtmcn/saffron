@@ -2127,6 +2127,75 @@ def test_a_salvage_turn_that_still_commits_nothing_is_not_implemented(
     assert outcome.spent_usd == pytest.approx(0.1 + 0.4 + 0.05)
 
 
+def test_the_implement_prompt_routes_each_unwritable_touch_and_no_other(
+    monkeypatch, tmp_path
+):
+    """The paths the Write tool refuses ride IMPLEMENT's
+    `constraints` value. It reaches the salvage turn too, since both resume
+    on the same `system_prompt`. A spec naming no such path keeps today's
+    prompt exactly."""
+    from pathlib import Path
+
+    touches_with_route = [
+        "src/**",
+        "tests/**",
+        ".claudeignore",
+        ".vscode-test/x.txt",
+        ".pre-commit-config.yaml",
+        "sub/.claude/skills/x.md",
+    ]
+    cell = _stub_the_runtime(monkeypatch, commits=[0, 1])
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            implement.AgentFailed("max turns", _cut_off_turn(cost=0.4)),
+            _turn(cost=0.1),
+        ],
+        spec=_spec(touches=touches_with_route),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.turns[2] == implement.SALVAGE_PROMPT
+    assert cell.system_prompts[2] == cell.system_prompts[0]
+    # `constraints_block` lists every entry once, so a routed one appears twice.
+    prompt = cell.system_prompts[0]
+    assert prompt.count("- `.pre-commit-config.yaml`") == 2
+    assert prompt.count("- `sub/.claude/skills/x.md`") == 2
+    assert prompt.count("- `src/**`") == 1
+    assert prompt.count("- `.claudeignore`") == 1
+    assert "Write tool refuses every path below" in prompt
+    assert "python3" not in context.constraints_block(touches_with_route, [], [])
+    assert "python3" in cell.system_prompts[0]
+    assert "Bash" in cell.system_prompts[0]
+    assert "shell redirect" in cell.system_prompts[0]
+
+    touches_without_route = touches_with_route[:-2]
+    cell2 = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(touches=touches_without_route),
+    )
+    repo_root = Path(__file__).resolve().parent.parent
+    context_md = (repo_root / "CONTEXT.md").read_text()
+    template = (context.PROMPTS_DIR / "implement.md").read_text()
+    spec2 = _spec(touches=touches_without_route)
+    expected = context.build_system_prompt(
+        "IMPLEMENT",
+        context_md,
+        template=template,
+        spec=spec2.body,
+        constraints=context.constraints_block(spec2.touches, spec2.forbidden, []),
+        witnesses=context.witnesses_block(spec2.acceptance),
+        standing_instructions=context.standing_instructions(None),
+    )
+    assert cell2.system_prompts[0] == expected
+
+
 def test_a_turn_that_crashed_is_not_reported_as_having_finished(monkeypatch, tmp_path):
     """A third fact, and the one the two branches above would swallow. An idle
     bound, a provider wall or a crash ends a turn without the agent deciding

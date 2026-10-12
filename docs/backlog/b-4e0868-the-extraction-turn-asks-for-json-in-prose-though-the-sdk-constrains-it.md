@@ -81,3 +81,6 @@ that choice waits on the observer's record, and this item does not make it.
   first confirmed `output_format` holds beside the file system prompt
   `SA-0140` introduced. The item stays open for REVIEW, the plan checkpoint
   and the notes turn.
+- 2026-10-11: REVIEW's half recurred on `SA-0259` in the spec loop's run
+  34. The adequacy lens failed its schema twice, at columns 999 and 929,
+  and the task halted at `REVIEWING` (b-032c3e, b-f7a591).

@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import os
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -31,8 +33,10 @@ from saffron.cell.session import (
     _SAFFRON_ROOT,
     TURN_TIMEOUT_S,
     CellOutcome,
+    _default_emit,
     stop_on_rejected,
 )
+from saffron.events import Event, EventLog
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -69,14 +73,8 @@ from saffron.watch import UnknownTask, follow, follow_every_task, once
 
 DEFAULT_HOME = Path.home() / ".saffron"
 
-# The exit code is the only thing a script reads: 0 the task is reviewable,
-# 2 the infrastructure failed, 1 the task did not make it (§3.3). The map covers
-# states; a driver or runtime crash is the same class of failure and takes 2 by
-# the handler in `main`, or an abort would read as an ordinary task outcome.
-# Everything the setup path raises before a cell exists — an unreadable spec or
-# policy, a mirror that will not clone, a repo with no HEAD — is that same
-# infrastructure failure, and is caught there too rather than reaching the
-# operator as a traceback.
+# Exit codes (§3.3): 0 reviewable, 1 the task did not make it, 2 infrastructure,
+# 143 SIGTERM. A crash or setup failure takes 2 from `main`'s handler, never 1.
 CELL_EXIT = {
     "READY_FOR_REVIEW": 0,
     # Already the default for an unnamed state; named because PACKAGE returns it
@@ -270,10 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     ledger = Ledger(args.home / "ledger.db")
     try:
         if args.command == "cell":
-            return _run_cell(args, ledger, out_dir)
+            return _cell_guarding_sigterm(args, ledger, out_dir)
 
         if args.command == "batch":
-            return _batch(args, ledger, out_dir)
+            return _guarding_sigterm(lambda: _batch(args, ledger, out_dir))
 
         if args.command == "draft":
             return _draft(args, ledger, out_dir)
@@ -448,6 +446,39 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
     raise git_mirror.GitError(
         f"git merge-base {pushed_sha}..{base_sha}: {ancestor.stderr.strip()}"
     )
+
+
+def _guarding_sigterm(run: Callable[[], int]) -> int:
+    """`run`, with SIGTERM made to unwind it the way Ctrl-C does.
+
+    `Popen.__exit__` skips its wait on the child only for that exact class,
+    so the handler raises it. It then ignores SIGTERM, so a second one cannot
+    cut teardown short.
+    """
+    sigtermed = False
+
+    def _on_sigterm(_signum: int, _frame: object) -> None:
+        nonlocal sigtermed
+        sigtermed = True
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, _on_sigterm)
+    try:
+        return run()
+    except KeyboardInterrupt:
+        if sigtermed:
+            return 143
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _cell_guarding_sigterm(
+    args: argparse.Namespace, ledger: Ledger, out_dir: Path
+) -> int:
+    """`_run_cell`, wrapped by `_guarding_sigterm`."""
+    return _guarding_sigterm(lambda: _run_cell(args, ledger, out_dir))
 
 
 def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
@@ -906,6 +937,13 @@ def _spec_review_policy(exported: Path) -> Policy:
     return policy
 
 
+def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
+    """A spec review's or spec writer's `emit`: the terminal plus an
+    `EventLog(log_dir)`. A later session for the same spec appends to it.
+    """
+    return partial(_default_emit, log=EventLog(log_dir))
+
+
 def _stack_review(
     *, pinned: PinnedBase, repo: Path, out_dir: Path
 ) -> Callable[..., spec_review.SpecReviewSession]:
@@ -965,6 +1003,7 @@ def _stack_review(
             implement.run_agent,
             spec_id=candidate.spec.id,
             timeout_s=spec_review.SPEC_REVIEW_TIMEOUT_S,
+            emit=_spec_session_emit(out_dir / f"{candidate.spec.id}.spec-review"),
         )
         with end_review.layer_cell(
             fields,
@@ -1049,6 +1088,7 @@ def _stack_revise(
             implement.run_agent,
             spec_id=candidate.spec.id,
             timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+            emit=_spec_session_emit(out_dir / f"{candidate.spec.id}.spec-write"),
         )
         with end_review.layer_cell(
             fields,
@@ -1654,6 +1694,65 @@ def _no_candidates_to_rescan() -> list[Candidate]:
     return []
 
 
+def _stack_admission_shares(budget_usd: float) -> tuple[float, float]:
+    """The reserve and the writer share of `budget_usd`, read from
+    `end_review.RESERVE_SHARE` and `follow_up.WRITER_SHARE` at call time.
+    Both `_batch` and `saffron queue --stack`'s own admission arithmetic
+    call this, so a patched share moves both or neither.
+
+    Called with `args.budget` for the dollar amounts `_batch` holds back,
+    and with `1.0` for the bare fractions `_print_stack_admission` divides
+    by. A share is a fraction of the budget, so the two calls are the same
+    computation at different scales.
+    """
+    return (
+        budget_usd * end_review.RESERVE_SHARE,
+        budget_usd * follow_up.WRITER_SHARE,
+    )
+
+
+def _ceil_cents(amount: float) -> float:
+    """`amount` rounded up to the cent, with a tolerance of `1e-9` so a
+    float error in the division above adds no cent of its own. A printed
+    threshold must never sit below the amount it was computed from."""
+    return math.ceil(amount * 100 - 1e-9) / 100
+
+
+def _print_stack_admission(candidates: list[Candidate]) -> None:
+    """What `--budget` a stack queue's own order would need, one line per
+    candidate, printed after `_print_queue`'s own output (backlog item
+    b-0a08bf, `DESIGN.md` §7.1). Every earlier candidate has already spent
+    its own `budget_usd` plus one spec review by the time the next one's
+    admission is checked (`saffron/batch.py`'s `wrapped`). Candidate `k`'s
+    threshold adds those to its own `budget_usd`, divided by what admission
+    compares against: `1 - reserve share - writer share` of `--budget`
+    (`_drive`'s own comparison). The total adds the last spec review too,
+    so draining the whole order leaves both shares whole.
+    """
+    if not candidates:
+        return
+    reserve_share, writer_share = _stack_admission_shares(1.0)
+    denominator = 1.0 - reserve_share - writer_share
+    review_usd = spec_review.SPEC_REVIEW_SESSION_USD
+    print(
+        f"admission: reserve {reserve_share:.0%} and writer {writer_share:.0%} "
+        f"of --budget held back, spec review ${review_usd:.2f} per candidate, "
+        "no revision round"
+    )
+    spent_by_earlier = 0.0
+    for candidate in candidates:
+        threshold = _ceil_cents(
+            (candidate.spec.budget_usd + spent_by_earlier) / denominator
+        )
+        print(
+            f"  --budget ${threshold:.2f} admits {candidate.spec.id} "
+            f"(budget ${candidate.spec.budget_usd:.2f})"
+        )
+        spent_by_earlier += candidate.spec.budget_usd + review_usd
+    total = _ceil_cents(spent_by_earlier / denominator)
+    print(f"  --budget ${total:.2f} runs every candidate and keeps both shares whole")
+
+
 def _print_batch_plan(
     resolved: QueueResolution,
     *,
@@ -1736,12 +1835,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     until = (
         _resolve_until(args.until, datetime.now()) if args.until is not None else None
     )
-    # Bound to `--budget` and `--stack` alone, so the night stays sized
-    # against the one number the operator gives it (stack-batch design §4).
-    reserve_usd = args.budget * end_review.RESERVE_SHARE if args.stack else None
-    # The spec writer's own sub-cap, held back beside the reserve rather
-    # than inside it (stack-batch design §3, Money).
-    writer_usd = args.budget * follow_up.WRITER_SHARE if args.stack else None
+    # Bound to `--budget` alone (stack-batch design §3, §4), through the helper
+    # `saffron queue --stack` prints its thresholds from.
+    reserve_usd, writer_usd = (
+        _stack_admission_shares(args.budget) if args.stack else (None, None)
+    )
 
     # Readiness first, and before the scan — §4.4's own order, step 1 ahead of
     # step 4. Run after it, `Readiness`'s `mirror`, `origin` and
@@ -2075,6 +2173,8 @@ def _queue(args: argparse.Namespace, ledger: Ledger) -> int:
         resolved.gh_failures,
         resolved.policy_unread,
     )
+    if args.stack:
+        _print_stack_admission(resolved.candidates)
     return 0
 
 

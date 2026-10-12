@@ -1,11 +1,12 @@
 ---
 id: b-4e1b6d
 title: "`saffron watch` shows nothing while a stack batch reviews or writes a spec, because those sessions log no events"
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-10-11
 specs: [SA-0253]
-prs: []
+prs: [821]
 commits: []
 cites: [§4.3]
 related: [b-2d09de]
@@ -43,3 +44,6 @@ events back through the follower.
   `batches/v0/spec-review/SA-NNNN/` with no task folder. So cell-watch kept
   following the last loop's task, and its first hand-over named SA-0224.
   The review's route was read from `spec_reviews` in the ledger by hand.
+- 2026-10-11: done by `SA-0253` (#821), from the spec loop's run 34. The
+  follow-up writer and the end review's lenses still log nothing
+  (b-e7b6a2).

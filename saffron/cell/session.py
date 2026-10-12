@@ -2098,7 +2098,10 @@ def _drive_cell(
             # against live in frontmatter and policy.yaml, so they are injected.
             constraints=context.constraints_block(
                 spec.touches, spec.forbidden, policy.protected
-            ),
+            )
+            # IMPLEMENT alone also carries the paths the Write tool refuses.
+            # `constraints_block` stays as `end_review.py` reads it.
+            + context.unwritable_touches_section(spec.touches),
             witnesses=context.witnesses_block(spec.acceptance),
             standing_instructions=context.standing_instructions(claude_md),
         )

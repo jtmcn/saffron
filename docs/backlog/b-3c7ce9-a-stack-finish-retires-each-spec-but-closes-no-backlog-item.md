@@ -1,14 +1,15 @@
 ---
 id: b-3c7ce9
 title: "A stack finish retires each layer's spec but closes no backlog item, so this repo's suite goes red on every finish"
-status: open
+status: done
 tier: 1
 filed: 2026-10-05
 specs: []
-prs: []
+prs: [776]
 commits: []
 cites: [§4.4]
 related: [b-b0cd68]
+closed: 2026-10-10
 ---
 
 ## Problem
@@ -40,3 +41,5 @@ and reads the records check back clean.
 ## Record
 
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
+- 2026-10-10: closed as fixed by #776 (b-a63235). The finishing commit moves no spec into `done/`,
+  so a finish no longer leaves a retired spec beside an open item.

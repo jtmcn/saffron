@@ -4,7 +4,7 @@ title: PACKAGE raising after a cell went `READY_FOR_REVIEW` leaves no branch and
 status: open
 tier: 1
 filed: 2026-10-08
-specs: [SA-0226]
+specs: [SA-0226, SA-0266, SA-0268]
 prs: [745]
 commits: []
 cites: [§5.7]

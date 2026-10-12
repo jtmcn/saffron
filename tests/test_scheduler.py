@@ -2251,7 +2251,7 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-11 for SA-0260, SA-0261 and SA-0262. The candidates and the refusals
+    """Re-measured 2026-10-11 for SA-0269, SA-0270 and SA-0271. The candidates and the refusals
     are the two lists below, in the order the scan returns them.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
@@ -2894,6 +2894,14 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0260",
         "SA-0261",
         "SA-0262",
+        "SA-0264",
+        "SA-0265",
+        "SA-0266",
+        "SA-0267",
+        "SA-0268",
+        "SA-0269",
+        "SA-0270",
+        "SA-0271",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -2910,6 +2918,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0230",
         "SA-0232",
         "SA-0259",
+        "SA-0260",
         "SA-0200",
         "SA-0201",
         "SA-0208",
@@ -2918,8 +2927,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0239",
         "SA-0245",
         "SA-0255",
+        "SA-0261",
         "SA-0225",
-        "SA-0260",
+        "SA-0269",
     ]
     assert [r.path.name[:7] for r in refusals] == [
         "SA-0202",
@@ -2959,8 +2969,14 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0253",
         "SA-0254",
         "SA-0258",
-        "SA-0261",
         "SA-0262",
+        "SA-0264",
+        "SA-0265",
+        "SA-0266",
+        "SA-0267",
+        "SA-0268",
+        "SA-0270",
+        "SA-0271",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.

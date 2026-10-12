@@ -1,14 +1,16 @@
 ---
 id: b-a4df62
 title: Nothing in Saffron reviews a spec before its cell, so the loop's delegate does it by hand for every spec of every run
-status: open
+status: superseded
 tier: 1
 filed: 2026-09-20
-specs: []
+specs: [SA-0149, SA-0155, SA-0156]
 prs: []
 commits: []
 cites: ["§4.2", "§5.5"]
 related: [130, 124, 125, 56, 159, b-281f0a, b-865399]
+closed: 2026-10-10
+superseded_by: 130
 ---
 
 ## Problem
@@ -62,3 +64,5 @@ running it.
   Runs 9 and 10 repeated the pattern, with the same two causes: the delegate's
   own edits, and a stop rule that never converges. No spec exists. A second
   promotion attempt waits on 124, 125 and 130.
+- 2026-10-10: superseded by item 130. A stack batch reviews each spec before its cell, built
+  under b-792ab2. What is left is the promotion bar, and 130 owns that measurement.

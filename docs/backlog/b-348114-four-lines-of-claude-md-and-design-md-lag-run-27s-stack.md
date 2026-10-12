@@ -35,3 +35,5 @@ night's own settled tasks, or the operator decides otherwise.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 27.
+- 2026-10-11: the `DESIGN.md` §4.7 bullet now holds. #774 rewrote the
+  sentence for `SA-0253`, which the spec loop's run 34 delivered as #821.
