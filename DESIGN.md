@@ -243,6 +243,7 @@ Design notes:
 - **Acceptance criteria are checkboxes** because the packager renders them into the PR body as a checklist, and the critic is handed them as its rubric.
 - **"Out of scope" measurably reduces sprawl.** Agents are eager. Naming the adjacent broken things stops them from opportunistically fixing three of them in one unreviewable diff.
 - **No `estimated_diff_lines`.** A self-reported number from the model being gated is not a gate. Size is enforced post-implementation where it is measurable, and at plan time via `len(files_to_change)`, which is checkable against `touches`. One exception is by design. A spec's author can declare `estimated_lines` in its frontmatter. Intake checks its type. The host-side `driver.py check` reads its value to ask for a split before a cell is paid for. `run_task` appends it to the spec body that IMPLEMENT, REVIEW and REBUT read, so the plan turn sees the author's figure in lines (`SA-0185`). No cell gate reads it, so it is not a number from the model being gated (`SA-0129`, #502). The plan's own `estimated_lines` is advisory except at `elevated`, where the plan checkpoint refuses a plan it prices over the ceiling.
+- **`history` declares that a change's subject is history.** It is optional and takes a `command` and a boolean `batches`, false by default. A cell's own ledger holds only its own task. Code that reads history can pass every witness there and fail over the real ledger. `SA-0107` kept 1 of 76 merged tasks over a ledger copy, and every witness passed (b-a8270f). For such a spec, REVIEW runs the command in a Gate-only cell, never on the host (§5.7). It runs from the worktree over a read-only mount of the host ledger's copy. With `batches`, a copy of the batch tree joins it. `SAFFRON_HISTORY_HOME` names a writable copy of that home, since `Ledger` writes on open. A command such as `python -m saffron.cli --home "$SAFFRON_HISTORY_HOME" chains` reads it. Every lens is shown the command's exit and both streams (§5.5), and `history.json` in the task directory records them.
 
 ### 3.3 Task state machine
 
@@ -1137,7 +1138,7 @@ it blocks until the task kills its mutant.
 ### 5.5 Phase 4 — REVIEW (adversarial)
 
 Fresh session, read-only tools, different system prompt, ideally a different model or effort level. It never sees the implementer's transcript. It sees the spec, the diff, the gate results, the acceptance criteria, and the repo's
-`CLAUDE.md` at `base_sha` (§5.3).
+`CLAUDE.md` at `base_sha` (§5.3). For a spec that declares `history`, it also sees the history run (§3.2).
 
 Its instruction is not "review this code":
 

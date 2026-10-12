@@ -522,6 +522,12 @@ hand it root over the critic (`SA-0089`, `DESIGN.md` §5.5). PACKAGE's
 re-verification uses one too.
 _Avoid_: "the gate cell", "the suite cell", "the third cell".
 
+**History run**: One run of a spec's declared `history` command in a Gate-only
+cell. It reads a read-only copy of the host's ledger, and of the batch tree when
+the spec asks for it. Every lens reads its exit and both streams. It is the one place a change
+whose subject is history meets the real record (`DESIGN.md` §3.2).
+_Avoid_: "the history gate" (it is no gate and has no status), "the history check".
+
 **Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
 acts on the operator's behalf, directly or through the delegate that started the
 task. Every diff it writes is written to the plan validated at the plan
