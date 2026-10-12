@@ -640,8 +640,8 @@ it to the vocabulary.
 the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
 `GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
-`SPEC_DRAFTED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`,
-`MERGE_TRAIN`.
+`SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`,
+`MERGED`, `ORPHANED`, `MERGE_TRAIN`.
 A re-queue resumes the same row from six end states, so an end state need not be
 final. Every terminal state is an end state.
 
@@ -653,7 +653,7 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
-`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`.
+`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -669,7 +669,7 @@ checkpoint, ends `ORPHANED` the first time at a `spec_sha`. The second such cut 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase. Five more ways in share the state.
 The spend ceiling stops the task before its next turn. Its gates go red after the
-rebuttal. A REBUT that would halt at `REBUTTING` is cut short by its $10.00 cap. Its exported patch
+rebuttal. A REBUT that would end `REBUTTAL_UNJUDGED` is cut short by its $10.00 cap. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
 **`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
@@ -691,6 +691,12 @@ after three revisions. The review is a fact on the task. The spec is not queued 
 until it is edited. Under `saffron draft`, a writer reply that declares an id other
 than the task's is withheld too, with no further review (§3.4).
 _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
+
+**`REBUTTAL_UNJUDGED`**: A task whose REBUT ended with its anchored blockers
+standing and no critic judging the rebuttal. Either the rebuttal moved no commit
+and made no argument, or a lens that started gave no verdict. No pull request
+opens. The cell's branch is pushed, so a dependent stacks on it. A REBUT that
+its cap cut short ends `EXHAUSTED` instead.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.

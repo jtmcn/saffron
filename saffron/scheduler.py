@@ -80,6 +80,7 @@ DONE_STATES = frozenset(
         "SCOPE_REVIEW",
         "SPEC_WITHHELD",
         "SPEC_DRAFTED",
+        "REBUTTAL_UNJUDGED",
     }
 )
 
@@ -91,12 +92,11 @@ DONE_STATES = frozenset(
 # admissions are live now.
 DEPENDENCY_MERGED = "MERGED"
 
-# Reached review and not landed, and §4.2 admits it outright: a dependent
-# stacks on this parent's branch instead of cutting from `base_sha`
-# (`CellSpec.stacked_on`, resolved by `task._resolve_stacked_on`, `SA-0026`),
-# so these three no longer refuse — only `DEPENDENCY_DEAD_STATES` and the
-# fallthrough below still do.
-DEPENDENCY_WAITING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"})
+# Not landed, and §4.2 admits each. A dependent stacks on the parent's pushed
+# branch rather than `base_sha` (`task._resolve_stacked_on`, `SA-0026`).
+DEPENDENCY_WAITING_STATES = frozenset(
+    {"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REBUTTAL_UNJUDGED"}
+)
 
 # Will not merge as it stands. Read only at the parent's *current* `spec_sha`:
 # a dead row under a superseded sha is a fact about text that has since been
@@ -120,7 +120,7 @@ REQUEUE_STATES = frozenset(
 )
 
 # Done, and not waiting on the operator (§6): `DONE_STATES` minus the
-# three dependent-stacking states, minus `SCOPE_REVIEW`, which still waits.
+# four dependent-stacking states, minus `SCOPE_REVIEW`, which still waits.
 SETTLED_STATES = (DONE_STATES - DEPENDENCY_WAITING_STATES) - {
     "SCOPE_REVIEW",
     "SPEC_DRAFTED",
