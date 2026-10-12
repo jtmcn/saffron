@@ -178,7 +178,7 @@ After the policy loads in `_drive_cell`, decide whether the pool is
 uncapped. That is the selected dialect's `shares_kernel`, and a
 `thread_env` that holds no entries. An absent key and an empty map read
 alike, since neither caps a pool. This repo's policy and the setup
-skill's template both declare an empty map (`.saffron/policy.yaml:134`,
+skill's template both declare an empty map (`.saffron/policy.yaml:133`,
 `.claude/skills/setup-saffron/templates/policy.yaml:33`). When the pool is
 uncapped, emit one `Preflight` with step `thread_env`, naming the
 runtime's binary and `thread_env`. Then run the task as before.
@@ -207,6 +207,10 @@ Update what the change makes false or breaks:
   without `when`, and `:53` says `envelope_default` stays empty. Say
   instead that Saffron executes every declared gate on every task, and
   drop the second.
+- `.claude/skills/setup-saffron/SKILL.md:55`, section E, tells an operator
+  with no pool to skip `thread_env`. Add one sentence: on a runtime that
+  shares the host kernel, an empty `thread_env` draws a warning on every
+  task, and that is expected.
 
 ## Out of scope
 
