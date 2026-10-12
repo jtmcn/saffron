@@ -128,8 +128,8 @@ review, paid from the reserve it held back:
 CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron batch --repo . --budget 50 --until 06:30
 ```
 
-Ask GitHub what happened to open pull requests, and replay an already-merged PR
-agent-free:
+Ask GitHub what happened to open pull requests, name one opened by hand as a
+task's own, and replay an already-merged PR agent-free:
 
 ```sh
 uv run saffron reconcile --repo .

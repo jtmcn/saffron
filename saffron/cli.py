@@ -42,7 +42,7 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_phase
-from saffron.reconcile import ReconcileResult, reconcile
+from saffron.reconcile import MERGE_ONLY_STATES, ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
@@ -2213,7 +2213,7 @@ def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
 
 # A newest task in one of these carries no pull request yet and is the one
 # `reconcile` will later ask about (b-a7e5f3). Every other state refuses.
-_ADOPTABLE_STATES = frozenset({"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"})
+_ADOPTABLE_STATES = MERGE_ONLY_STATES | {"READY_FOR_REVIEW"}
 
 
 def _adopt(args: argparse.Namespace, ledger: Ledger) -> int:

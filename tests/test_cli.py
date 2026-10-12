@@ -2082,14 +2082,15 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
 _ADOPT_PR_NUMBER = "123"
 
 
-def _fake_gh_names_a_pull_request(url, number=_ADOPT_PR_NUMBER):
-    """A `gh pr view <number> ... --jq .url` fake. Its answer can differ in
-    case from the origin's slug, so a version that builds the URL itself
-    rather than asking fails against it."""
+def _fake_gh_names_a_pull_request(url, number=_ADOPT_PR_NUMBER, slug="owner/repo"):
+    """A `gh pr view <number> --repo <slug> ... --jq .url` fake. Its answer can
+    differ in case from the origin's slug, so a version that builds the URL
+    itself rather than asking fails against it."""
 
     def fake(argv):
         assert argv[:3] == ["gh", "pr", "view"]
         assert argv[3] == number
+        assert argv[argv.index("--repo") + 1] == slug
         assert "--jq" in argv
         return subprocess.CompletedProcess(argv, 0, url + "\n", "")
 
@@ -2323,15 +2324,10 @@ def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "Ledger", lambda path: Ledger(path, record=record))
 
     seed = Ledger(home / "ledger.db", record=record)
-    repo_id = seed.upsert_repo(
-        "repo", "https://github.com/owner/repo.git", "/m.git", policy_sha="p" * 64
+    repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
+    not_implemented = _seed_task(
+        seed, repo_id, spec_id="SY-FOLD-NI", state="NOT_IMPLEMENTED"
     )
-
-    run_id = seed.create_run(repo_id, base_sha="a" * 40)
-    not_implemented = seed.create_task(
-        run_id, spec_id="SY-FOLD-NI", spec_sha="s" * 40, branch="saffron/SY-FOLD-NI"
-    )
-    seed.set_task_state(not_implemented, "NOT_IMPLEMENTED")
 
     run_id = seed.create_run(repo_id, base_sha="a" * 40)
     exhausted = seed.create_task(
@@ -2407,14 +2403,13 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
 
     seed = open_ledger()
     repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
-    run_id = seed.create_run(repo_id, base_sha="a" * 40)
-    parent_task = seed.create_task(
-        run_id,
+    parent_task = _seed_task(
+        seed,
+        repo_id,
         spec_id=parent_spec.id,
+        state="NOT_IMPLEMENTED",
         spec_sha=parent_sha,
-        branch=f"saffron/{parent_id}",
     )
-    seed.set_task_state(parent_task, "NOT_IMPLEMENTED")
     seed.close()
 
     check = open_ledger()
