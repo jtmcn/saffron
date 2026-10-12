@@ -4,7 +4,7 @@ title: "`.saffron/` declares no schema version, and two policy fields are parsed
 status: open
 tier: 2
 filed: 2026-10-06
-specs: [SA-0282]
+specs: [SA-0282, SA-0283]
 prs: []
 commits: []
 cites: [§3.2, §5.4]
