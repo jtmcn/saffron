@@ -88,9 +88,9 @@ cd saffron
 make install
 ```
 
-`saffron cell`, `saffron batch` and `saffron package` run inside two images you build
-once, and again after editing either Dockerfile. The repo's own image is built from
-these automatically.
+`saffron cell` and `saffron batch` run inside two images you build once, and again
+after editing either Dockerfile. `saffron package` starts no proxy and needs only the
+base image. The repo's own image is built from these automatically.
 
 ```sh
 container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .

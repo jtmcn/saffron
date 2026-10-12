@@ -2555,7 +2555,9 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     pr_url = "https://github.com/owner/repo/pull/42"
 
     def fake_package(outcome_arg, **kwargs):
-        calls.append(("package", outcome_arg, kwargs))
+        # Read while open: `main` closes the ledger once the command returns.
+        db_file = kwargs["ledger"]._db.execute("PRAGMA database_list").fetchone()[2]
+        calls.append(("package", outcome_arg, {**kwargs, "db_file": db_file}))
         return package.PackageResult(
             state="READY_FOR_REVIEW", pr_url=pr_url, branch="saffron/SY-PKG"
         )
@@ -2618,6 +2620,7 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     assert package_kwargs["out_dir"] == home / "batches" / "v0"
     assert package_kwargs["token"] == "a-token"
     assert package_kwargs["parent_branch"] == "saffron/SY-PARENT"
+    assert package_kwargs["db_file"] == str(home / "ledger.db")
 
 
 def test_package_refused_by_ready_task_exits_one_and_takes_no_host_step(
@@ -2860,6 +2863,8 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
         )
 
         assert code == 2
+        if break_step == "assert_host_is_unreachable":
+            assert "tolerating nothing" in capsys.readouterr().out
         names = [c[0] for c in calls]
         # Exact, not a subset: a skipped probe still removes and recreates
         # the network, so only the sequence catches package() running instead.

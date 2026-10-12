@@ -1029,7 +1029,7 @@ def package_ready_task(
     mirror, _, _ = preflight.prepare_mirror(repo, mirror_path)
     image = repo_image.build_cell_image(repo)
 
-    # A prefix no other network uses, so a killed run's leftover cannot
+    # A prefix no other network uses, so a killed invocation's leftover cannot
     # collide with re-verification's own `saffron-pkg-` names.
     network = f"saffron-hostprobe-{spec_id}"
     runtime.remove_network(network)

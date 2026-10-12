@@ -2346,7 +2346,7 @@ def _package(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
     if not token.strip():
         raise RuntimeError(
-            "CLAUDE_CODE_OAUTH_TOKEN is unset; the agent cannot authenticate "
+            "CLAUDE_CODE_OAUTH_TOKEN is unset; PACKAGE's credential scan needs it "
             "(`claude setup-token`)"
         )
     repo = args.repo.resolve()
