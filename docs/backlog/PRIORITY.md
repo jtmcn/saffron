@@ -263,6 +263,10 @@ spec's own mutant survived and its task packaged. A lens that errors halts its
 task in flight (moved up from tier 3 by the operator). A batch on an empty
 image store asks a registry for the proxy.
 
+**Placed 2026-10-12**, from writing `SA-0284`: **b-e773d9**. Two queued specs
+in separate chains clashed on a name one deletes and the other reads. No
+check compares names, so the second to land would end `EXHAUSTED`.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
