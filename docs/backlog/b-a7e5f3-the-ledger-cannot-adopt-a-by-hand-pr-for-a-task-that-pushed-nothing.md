@@ -1,11 +1,12 @@
 ---
 id: b-a7e5f3
 title: The ledger cannot adopt a by-hand pull request for a task whose cell pushed nothing, so its children stay refused after it merges
-status: open
+status: done
 tier: 1
 filed: 2026-09-25
+closed: 2026-10-12
 specs: [SA-0264]
-prs: []
+prs: [830]
 commits: []
 cites: [§4.2, §5.7]
 related: [b-111c56, b-e471bd]
@@ -37,3 +38,6 @@ whose by-hand pull request then merged, and its child is a candidate.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-10-12: `SA-0264` ran in the spec loop's run 35 as #830. `saffron
+  adopt` records a by-hand pull request for a task. The migrate fact it
+  leaves wrong is b-82cf2e.

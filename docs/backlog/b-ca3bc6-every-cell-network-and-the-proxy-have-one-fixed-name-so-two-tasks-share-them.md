@@ -35,3 +35,7 @@ allocation in `runtime.SUBNETS` has to become per task too.
 Each task's networks, subnets and proxy are named from the task. Two tasks
 brought up at once share none of them, and a cell-marked test starts two and
 probes that neither reaches the other.
+- 2026-10-12: `SA-0269` ran in the spec loop's run 35 and ended
+  `EXHAUSTED` at $41.03 of $36 after three gate attempts. Its branch is
+  pushed with no pull request. `SA-0270` and `SA-0271` were refused for
+  depending on it. The operator decides whether to rerun, split or drop it.

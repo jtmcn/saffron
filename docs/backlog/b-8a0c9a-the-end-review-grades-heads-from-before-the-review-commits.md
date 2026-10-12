@@ -42,3 +42,7 @@ test drives an end review over a layer whose branch moved after PACKAGE.
 - 2026-10-10: recurred in the spec loop's run 33. Batch 21's end review graded
   the packaged heads again. Seven of its eight findings were already fixed
   on the branches. The eighth became b-55186d.
+- 2026-10-12: recurred in the spec loop's run 35, batch 24. The end
+  review graded the packaged heads and raised a `SA-0262` docstring concern
+  a held review commit had fixed. Three of its four blockers were new and
+  real, on `SA-0262` and `SA-0267`. The delegate fixed them before the push.

@@ -37,3 +37,9 @@ batch whose `depends_on` names none of its predecessors.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-10-12: recurred in the spec loop's run 35. Batch 24 stacked
+  `SA-0261` below `SA-0264`, against the snapshot's order. `size` then
+  measured three layers against a child and read 0. It counted three
+  others' parents into them. Its dry run linked the eight PRs out of order
+  and was not executed. The operator marked them ready with `gh pr ready` on the
+  batch's own bases.

@@ -40,3 +40,7 @@ The batch's `follow_ups` list came back empty.
   frontmatter was not valid YAML, from an unquoted list item holding
   quotes. One writer session ended `api_error` with no output. Two failed
   preflight on a proxy 503 tunnelling to `api.anthropic.com`.
+- 2026-10-12: recurred in the spec loop's run 35, batch 24. Fifteen
+  findings gave no follow-up. Seven were pooled for a `depends_on` entry.
+  Six were pooled because the text did not parse. One draft had a backtick
+  opening a YAML list item. One mutant named text the spec body also held.

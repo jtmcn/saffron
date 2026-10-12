@@ -1,11 +1,12 @@
 ---
 id: b-3bba0f
 title: "The cut re-queue cap looks for an earlier row, and a batch resumes the same row, so a second cut re-queues again"
-status: open
+status: done
 tier: 1
 filed: 2026-10-07
+closed: 2026-10-12
 specs: [SA-0262]
-prs: []
+prs: [828]
 commits: []
 cites: [§4.5, §4.2.1]
 related: [119]
@@ -43,3 +44,6 @@ witness drives a second cut on a resumed row to `NOT_IMPLEMENTED`.
 ## Record
 
 - 2026-10-07: filed from `SA-0230`'s first review.
+- 2026-10-12: `SA-0262` ran in the spec loop's run 35 as #828. A second
+  cut on a resumed row reads that row's own earlier cut and settles
+  `NOT_IMPLEMENTED`.

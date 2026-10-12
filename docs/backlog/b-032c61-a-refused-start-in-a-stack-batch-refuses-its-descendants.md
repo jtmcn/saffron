@@ -1,11 +1,12 @@
 ---
 id: b-032c61
 title: "A start preflight refuses in a stack batch is a miss, so the batch refuses its descendants"
-status: open
+status: done
 tier: 1
 filed: 2026-10-07
+closed: 2026-10-12
 specs: [SA-0261]
-prs: []
+prs: [829]
 commits: []
 cites: [§4.2.1, §5.1.1]
 related: [b-60a399, b-e0cd57]
@@ -36,3 +37,6 @@ no descendant.
 ## Record
 
 - 2026-10-07: filed from `SA-0244`'s first review.
+- 2026-10-12: `SA-0261` ran in the spec loop's run 35 as #829. A start
+  that preflight refuses in a stack batch is offered again, and its
+  descendants are not refused.
