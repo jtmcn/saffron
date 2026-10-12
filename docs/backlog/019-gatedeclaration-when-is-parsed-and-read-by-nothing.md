@@ -3,7 +3,7 @@ id: 19
 title: '`GateDeclaration.when` is parsed and read by nothing'
 status: open
 tier: 3
-specs: []
+specs: [SA-0282]
 prs: [46]
 commits: []
 cites: [§5.4, §10]

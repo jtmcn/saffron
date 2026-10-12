@@ -363,7 +363,7 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
 - **Contract gates**: the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates**: anything a repo adds against its own hard-to-fake
-  surfaces, conditional on touched paths. Names vary by repo and are not vocabulary.
+  surfaces. Each one executes on every task. Names vary by repo and are not vocabulary.
 
 _Avoid_: "check", "validation", "CI" (there is no CI), "the linter" for the `lint`
 gate. _Avoid_ naming any repo-defined gate here as though it were universal.

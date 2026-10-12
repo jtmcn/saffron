@@ -154,7 +154,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | `witness` gate | **Core** logic, patterns from repo, the repo's `tests` gate as runner | Runs `revert`'s exception. What a constant or a test's text looks like is not universal, so a constant mutant reads the repo's `witness:` patterns (§5.4.1) |
 | `format`, `lint`, `types`, `tests`, `no-network` | **Repo** | Executables satisfying the gate contract |
 | Cell image, services (DB, cache, …), fixtures | **Repo** | `.saffron/Dockerfile` and a declared service list |
-| Risk-elevation paths, protected paths, envelope defaults | **Repo** | `policy.yaml` |
+| Risk-elevation paths, protected paths | **Repo** | `policy.yaml` |
 | Standing agent instructions | **Repo** | `CLAUDE.md` |
 
 Saffron ships thin base images (`saffron/cell-base:python`, `:node`, …) carrying the agent runtime, git, and nothing else. **There is no gate-runner shim**. That phrase survived four revisions describing a component that was never built and turned out not to be needed. The host `exec`s the repo's gate executables directly through the runtime, so there is nothing for a shim to do (Appendix I). A repo's `.saffron/Dockerfile` starts `FROM` one of those and installs whatever it needs. Saffron never installs a toolchain on a repo's behalf.
@@ -939,19 +939,19 @@ Not *the cell cannot lie*. It can, and a design that assumes otherwise is how v0
 | `tests` | repo | yes | must accept a test-subset argument, for `revert` |
 | `no-network` | repo | yes | the repo knows how to intercept its own sockets |
 | `coverage` | repo | **advisory, at every tier** | see below |
-| *(repo-defined)* | repo | declared | conditional on touched paths |
+| *(repo-defined)* | repo | declared | runs on every task |
 
-The last row is where a repo's real leverage lives, and it is why the contract is worth having. A repo declares its own gates against its own hard-to-fake surfaces, conditioned on paths:
+The last row is where a repo's real leverage lives, and it is why the contract is worth having. A repo declares its own gates against its own hard-to-fake surfaces:
 
 ```yaml
 # .saffron/policy.yaml — excerpt from one repo
 gates:
-  shacl:      { blocking: true, when: "**/*.ttl" }
-  migration:  { blocking: true, when: "migrations/**" }
+  shacl:      { blocking: true }
+  migration:  { blocking: true }
   perf-smoke: { blocking: false }
 ```
 
-`when` is **declared and not yet read**: `repos/policy.py` parses it and `run_suite` runs every declared gate regardless, so a conditional gate today runs unconditionally. Saffron's own `shacl` gate is declared without it for that reason (backlog item 19).
+A declaration carries `blocking` and nothing else. `load_policy` refuses a `when` key, because nothing reads one and a conditional gate would execute on every task (backlog item 19, ADR 10).
 
 Core sees three more entries in a list. **The best gates are always the domain-specific ones**: a migration round-trip, a schema conformance check, an invariant only this codebase can state. They are the best because an agent cannot satisfy them by writing plausible-looking code. Onboarding a repo well means asking: *what is expensive to fake here?*
 
@@ -1672,10 +1672,10 @@ And the other half of the layout (the part that lives in every target repo, and 
 <any-repo>/
   .saffron/
     policy.yaml            # gate roles + blocking levels, elevate_on, protected,
-                           #   envelope defaults, integrity patterns, thread_env
+                           #   integrity patterns, thread_env
     gates/
       lint  types  tests  no-network  coverage   # executables → gate JSON (§5.4)
-      shacl  migration                            # repo-defined, conditional
+      shacl  migration                            # repo-defined
     Dockerfile             # FROM saffron/cell-base:<runtime>; toolchain, services,
                            #   migrations and seed data baked at build time
     specs/                 # the queue
