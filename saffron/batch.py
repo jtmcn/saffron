@@ -63,6 +63,10 @@ ABORT_STATES = frozenset(
     {"GATE_ERROR", "PREFLIGHT_FAILED", "RATE_LIMITED", "PROVIDER_UNREACHABLE"}
 )
 
+# Offered again at once with `sleep` set, neither a layer nor a miss. One set,
+# so `_drive` and the stack wrapper cannot disagree (b-031ac2, b-032c61).
+_OFFERED_AGAIN = frozenset({"PROVIDER_UNREACHABLE", "PREFLIGHT_FAILED"})
+
 # Two consecutive aborts is what fires the breaker (§4.2.1) — enough to tell
 # "the toolchain is broken" from "three flaky tasks", never fewer.
 _BREAKER_THRESHOLD = 2
@@ -214,8 +218,8 @@ def _drive(
             # token at 22:00 produces a night with no record it was attempted.
             return "INFRASTRUCTURE", consecutive_aborts
 
-    # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, a spec that ended
-    # `RATE_LIMITED`, `PROVIDER_UNREACHABLE` or `PREFLIGHT_FAILED`, or raised `CellRuntimeError`, is taken back out (b-031ac2, b-60a399, b-032c61).
+    # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, one that ended
+    # `RATE_LIMITED`, in `_OFFERED_AGAIN` or raised `CellRuntimeError` is taken back out.
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -324,12 +328,9 @@ def _drive(
                         # would have recovered on its third task (backlog item 70).
                         consecutive_aborts = 0
 
-                    if (
-                        outcome.state in ("PROVIDER_UNREACHABLE", "PREFLIGHT_FAILED")
-                        and sleep is not None
-                    ):
+                    if outcome.state in _OFFERED_AGAIN and sleep is not None:
                         # Not a miss: offered again at once, with no wait.
-                        # The breaker above is the only bound on it (b-031ac2).
+                        # The breaker above is the only bound on it (b-031ac2, b-032c61).
                         started.discard(candidate.spec.id)
 
                     if outcome.state in IN_FLIGHT_STATES:
@@ -745,10 +746,8 @@ def run_stack_batch(
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
                 remaining.remove(original)
             raise
-        if isinstance(result, CellOutcome) and result.state in (
-            "RATE_LIMITED",
-            "PROVIDER_UNREACHABLE",
-            "PREFLIGHT_FAILED",
+        if isinstance(result, CellOutcome) and (
+            result.state == "RATE_LIMITED" or result.state in _OFFERED_AGAIN
         ):
             # Neither a layer nor a miss: `original` stays in `remaining` so
             # the same spec is offered again, against this same `pred`.

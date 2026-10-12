@@ -6407,7 +6407,13 @@ class QueuedStackDoubles(StackDoubles):
     falls back to `READY_FOR_REVIEW`, the base class's own default."""
 
     def __init__(
-        self, ledger: Ledger, repo_id: int, rows: dict, queues: dict, *, order=None
+        self,
+        ledger: Ledger,
+        repo_id: int,
+        rows: dict,
+        queues: Mapping[str, Sequence[str]],
+        *,
+        order=None,
     ):
         super().__init__(ledger, repo_id, rows, order=order)
         self.queues = {spec_id: list(states) for spec_id, states in queues.items()}
@@ -6416,7 +6422,7 @@ class QueuedStackDoubles(StackDoubles):
         spec_id = candidate.spec.id
         queue = self.queues.get(spec_id, [])
         state = queue.pop(0) if queue else "READY_FOR_REVIEW"
-        self.rows[spec_id] = {"runner": state}
+        self.rows.setdefault(spec_id, {})["runner"] = state
         return super().runner(candidate, predecessor)
 
 
@@ -6520,6 +6526,35 @@ def test_a_follow_ups_preflight_failure_is_offered_again(ledger, repo_id):
         ("TE-8", "TE-7"),
         ("TE-9", "TE-8"),
         ("TE-10", "TE-8"),
+    ]
+
+    # A follow-up's re-offer counts toward the breaker too, so a retry in
+    # place that hides its first outcome runs a third time and drains.
+    breaker = QueuedStackDoubles(
+        ledger,
+        repo_id,
+        {"__follow_ups__": [{"id": "TE-12"}]},
+        {"TE-12": ["PREFLIGHT_FAILED", "PREFLIGHT_FAILED", "READY_FOR_REVIEW"]},
+    )
+    reason = run_stack_batch(
+        [_candidate("TE-11")],
+        ledger,
+        100.0,
+        None,
+        breaker.runner,
+        readiness_check=_ready,
+        review=breaker.review,
+        mint=breaker.mint,
+        end_review=breaker.end_review,
+        follow_ups=breaker.follow_ups,
+        sleep=_fail_sleep,
+    )
+
+    assert reason == "INFRASTRUCTURE"
+    assert breaker.runner_calls == [
+        ("TE-11", None),
+        ("TE-12", "TE-11"),
+        ("TE-12", "TE-11"),
     ]
 
 
