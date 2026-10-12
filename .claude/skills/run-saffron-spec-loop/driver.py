@@ -40,6 +40,8 @@ STATE_DIR = REPO / ".saffron-loop"
 SPECS_DIR = REPO / ".saffron" / "specs"
 ORDER = STATE_DIR / "order.json"
 LEGACY_PLAN = STATE_DIR / "plan.json"
+# The full command: run 31's operator read `snapshot` as `saffron snapshot`.
+SNAPSHOT_COMMAND = "uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot"
 ONTOLOGY = REPO / "ontology" / "factory.ttl"
 ONTOLOGY_NS = "urn:software-factory:ns#"
 # Where `jev` writes. A cell's own batch directory sits under `v0/`, as `saffron/cli.py` puts it.
@@ -367,11 +369,7 @@ def _load() -> list[OrderRow]:
             else ""
         )
         raise SystemExit(
-            # The full command: run 31's operator read `snapshot` as `saffron snapshot`.
-            _fail(
-                f"no order at {ORDER.relative_to(REPO)} — run "
-                f"`uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot`{legacy}"
-            )
+            _fail(f"no order at {_relative(ORDER)} — run `{SNAPSHOT_COMMAND}`{legacy}")
         )
     try:
         return _parse_order()
@@ -1613,6 +1611,13 @@ def cmd_hold(args) -> int:
 
 
 def cmd_status(_args) -> int:
+    # The state dir is ignored by git, so every new worktree opens with no order.
+    if not ORDER.is_file() and not LEGACY_PLAN.is_file():
+        print(
+            f"no loop in this checkout ({_relative(ORDER)} is absent) — "
+            f"`{SNAPSHOT_COMMAND}` starts one"
+        )
+        return 0
     rows = _load()
     if not rows:
         return _fail("the order is empty — `snapshot --force`")

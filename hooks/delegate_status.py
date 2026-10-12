@@ -17,7 +17,7 @@ def main() -> int:
     if event.get("agent_type") != "delegate" or event.get("source") not in STARTS:
         return 0
     run = subprocess.run(
-        ["uv", "run", DRIVER, "status"],
+        ["uv", "run", "-q", DRIVER, "status"],
         cwd=event.get("cwd") or ".",
         capture_output=True,
         text=True,
