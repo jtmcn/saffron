@@ -131,8 +131,9 @@ before any cell (`saffron/task.py:465`). `RefusalKind` lists eight kinds
 (`saffron/scheduler.py:152-161`). `tests/test_refusal_count.py` holds
 that count to §4.2.1.
 
-**No queued spec touches `.claude/`.** At `cad84298` no spec in
-`.saffron/specs/` names a `.claude` component, this one included. Seven retired ones do:
+**Only the three parents touch `.claude/` in the queue.** At `04d54884`
+the specs in `.saffron/specs/` that name a `.claude` component are
+`SA-0280`, `SA-0282` and `SA-0283`. Seven retired ones do:
 `SA-0092`, `SA-0112`, `SA-0114`, `SA-0115`, `SA-0116`, `SA-0129` and
 `SA-0196`. The scan never refuses a spec in `done/`.
 
