@@ -257,6 +257,10 @@ moves it to `MERGED`.
 with no `task_created` fact, and the fold refuses it. Facts written outside
 `run_task` never leave the host. No record append emits an event.
 
+**Placed 2026-10-12**, from writing `SA-0284`: **b-e773d9**. Two queued specs
+in separate chains clashed on a name one deletes and the other reads. No
+check compares names, so the second to land would end `EXHAUSTED`.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
