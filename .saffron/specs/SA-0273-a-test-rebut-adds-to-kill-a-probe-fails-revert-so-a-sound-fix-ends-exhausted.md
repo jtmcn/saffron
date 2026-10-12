@@ -4,7 +4,7 @@ title: A test REBUT adds to kill a surviving probe fails `revert`, so a sound fi
 type: feature
 priority: 1
 depends_on: [SA-0262, SA-0271]
-estimated_lines: 435
+estimated_lines: 478
 estimate_measured: true
 touches:
   - saffron/gates/core/revert.py
@@ -79,7 +79,8 @@ acceptance:
       gate was that test reaches `READY_FOR_REVIEW`. Two tests are still
       handed to `revert` there. One is a test the rebuttal added that
       killed no probe. The other is a test from before REBUT that killed
-      the probe. REBUT's blockers keep the probe verdict REVIEW gave them.
+      the probe. REBUT's blockers keep the probe verdict REVIEW gave them,
+      and `rebut-probes.json` records the severity the lens filed.
     witness: tests/test_session.py::test_a_test_rebut_added_that_kills_the_surviving_probe_reaches_ready_for_review
     wrong_versions:
       - The re-run judged with no exemption, so the task still ends `EXHAUSTED`.
@@ -92,6 +93,7 @@ acceptance:
       - The probe asked over the patch REVIEW was shown rather than the post-rebuttal one.
       - The probe asked after the re-run, so the exemption arrives too late.
       - Blockers filtered on a probe being set alone, so a probe REVIEW left `unproven` is asked again.
+      - Copies that keep the `blocker` severity REVIEW's probe gave them, so `rebut-probes.json` records it as filed.
   - claim: >-
       A rebuttal that moved no commit since the head it started at asks no
       probe again. It builds no gate-only cell after REBUT, writes neither
@@ -112,24 +114,29 @@ acceptance:
       When the probe cell after REBUT cannot apply the post-rebuttal patch,
       the task ends as REBUT's verdict cell would end it. A refused patch
       and an empty one end it `EXHAUSTED`, and a binary one `GATE_ERROR`.
-      A REBUT line gives the reason, and the gates do not re-run.
+      A REBUT line gives the reason, and so does the `why` that
+      `rebuttal.json` records. The gates do not re-run.
     witness: tests/test_session.py::test_a_post_rebuttal_patch_the_probe_cell_cannot_apply_ends_the_task_as_rebut_does
     wrong_versions:
       - The probe cell's patch exceptions escape `_rebut_gates`, so the task ends `ORPHANED`.
       - A refused patch read as `GATE_ERROR`.
       - A binary patch read as `EXHAUSTED`.
       - A patch fault read as a probe that answered nothing, so the gates re-run and `revert` decides.
+      - The recorded `why` left as the text that says the gates are red after the rebuttal.
   - claim: >-
-      When the probe cell after REBUT cannot be entered, or its baseline
-      `tests` gate cannot run, and `revert` at the re-run then fails a test
-      the rebuttal added, the task ends `GATE_ERROR`. A probe that ran and
-      survived exempts nothing, and the same `revert` failure ends the task
-      `EXHAUSTED`.
+      Entering the probe cell after REBUT can raise, and so can running
+      its baseline `tests` gate. After either, the task ends `GATE_ERROR`
+      when every new failure at the re-run is `revert` failing a test the
+      rebuttal added. When another gate also fails, it ends `EXHAUSTED`. A
+      probe that ran and survived exempts nothing, and the same `revert`
+      failure ends the task `EXHAUSTED`.
     witness: tests/test_session.py::test_a_probe_that_never_answered_after_rebut_ends_gate_error_not_exhausted
     wrong_versions:
       - A probe left `unproven` by infrastructure treated like any other, so the task ends `EXHAUSTED`.
       - Only a cell that never came up counted as infrastructure, so a lost baseline ends `EXHAUSTED`.
       - Every probe run after REBUT counted as infrastructure, so a survivor ends `GATE_ERROR`.
+      - "`GATE_ERROR` beside another red gate, because one `revert` failure on a REBUT test is enough."
+      - "The `revert` failure matched on `failure.code`, which is always `passed-without-source`, rather than `failure.file`."
 ---
 
 ## Context
@@ -225,12 +232,17 @@ empty by default. Inside `_rebut_gates`, before `_judge` runs:
 3. Hand copies of those blockers to `probe_findings`. Export the patch
    from the implementer's container against `spec.tree_base`, as
    `_rebut_critic_container` does. Pass the task's pre-turn
-   `baseline.results`, as REVIEW's call does.
+   `baseline.results`, as REVIEW's call does. Give each copy
+   `severity=f.filed_severity or f.severity`, so the entry records the
+   severity the lens filed rather than the one REVIEW's probe set.
 4. Map the probe cell's patch faults as `run_rebut` maps the verdict
    cell's. On `CriticPatchRejected`, emit a REBUT line carrying its
    `reason("the probe cell", "the post-rebuttal patch")` and return
    `EXHAUSTED`. On `CriticPatchUnrepresentable`, emit a REBUT line naming
    the binary change and return `GATE_ERROR`. Neither runs `_judge`.
+   Keep that reason. After `run_rebut` returns, set `result.why` to it,
+   as the cap path rewrites `result.why` (`saffron/cell/session.py:3171-3179`).
+   `run_rebut`'s own text would say the gates are red.
 5. Write the returned entries to `rebut-probes.json` in the task
    directory.
 6. The exemption is every name under `failures` of a `killed` entry,
@@ -238,17 +250,22 @@ empty by default. Inside `_rebut_gates`, before `_judge` runs:
    With no such result, or none that collected, the exemption is empty.
    `latest` still holds that suite at this point. Write it, sorted, to
    `revert-exempt.json` in the task directory.
-7. Note whether any entry is `unproven` for infrastructure. Its reason
-   starts with one of the two prefixes its `unproven` calls write at
-   `saffron/cell/session.py:1618-1627`. Make each prefix a module constant and use it at both
-   places.
+7. Note whether any entry is `unproven` because something raised: the
+   probe cell could not be entered, or its baseline `tests` gate raised.
+   Its reason starts with one of the two prefixes the `unproven` calls
+   write at `saffron/cell/session.py:1618-1627`. Make each prefix a
+   module constant. Use it there, and use the first at `:1787` too.
 8. Pass the exemption to `_judge`, and from there to `suite.against`.
    Store it so the returned `CellOutcome` carries it, sorted.
 9. After an aborted or drifted re-run, keep returning `GATE_ERROR`.
-   Then check the entry step 7 looked for. If there was one, and a new
-   `revert` failure names a test the loop's last `tests` result did not
-   collect, return `GATE_ERROR`. Otherwise keep today's `EXHAUSTED` and
-   `None`.
+   Then check the entry step 7 looked for. Return `GATE_ERROR` if there
+   was one and every new failure is a `revert` failure on a test the
+   rebuttal added. `revert` puts that test's name in `Failure.file`, and
+   its `code` is always `passed-without-source` (`saffron/gates/core/revert.py:384-391`). A
+   test the rebuttal added is one the loop's last `tests` result did not
+   collect. Capture that result before `_judge` runs, since `_judge`
+   replaces `latest` (`saffron/cell/session.py:2598`). Otherwise keep
+   today's `EXHAUSTED` and `None`.
 
 **PACKAGE.** `reverify` takes the exemption as a keyword argument that
 defaults to empty, and passes it to its head suite's `suite.against`.
@@ -262,9 +279,14 @@ Two test stand-ins for `CellOutcome` gain `revert_exempt=[]`:
 
 ## Out of scope
 
-- **A probe that ends `unproven` after REBUT for a reason other than
-  infrastructure**, such as a refused edit. It exempts nothing, so a test
-  REBUT added for it is still judged by `revert`.
+- **A probe that ends `unproven` after REBUT with nothing raised.** A
+  refused edit is one. Infrastructure the gate reports rather than raises
+  is another. That covers a baseline gate that reported `error` or `skip`
+  (`saffron/probe.py:198-203`) and a probed run that did
+  (`saffron/probe.py:216-222`). It also covers a probe whose apply raised
+  after the baseline ran (`saffron/cell/session.py:1645-1650`). Each
+  exempts nothing, so a test REBUT added for it is still judged by
+  `revert`, and the task still ends `EXHAUSTED`.
 - **Criterion-probe and wrong-version survivors.** Their blockers also
   carry a probe read `survived`, and step 1 takes them. No witness drives
   one. The witness drives a vacuity probe from the adequacy lens.
@@ -334,7 +356,8 @@ Assert `READY_FOR_REVIEW`, and `revert_exempt` and `revert-exempt.json`
 equal to `t.py::test_rebut` alone. Assert the last reverted subset is
 `t.py::test_a` and `t.py::test_rebut_other`. Assert `rebut-probes.json`
 holds one `killed` entry, for `src/a.py`, whose `failures` are
-`t.py::test_a` and `t.py::test_rebut`. Assert `rebuttal.json`'s blockers
+`t.py::test_a` and `t.py::test_rebut`, and whose one finding's
+`filed_severity` is `concern`. Assert `rebuttal.json`'s blockers
 still read `survived` and `unproven`. Assert `cell.mutated` names
 `src/a.py` twice, once for REVIEW and once after REBUT. Assert the last
 patch applied into the gate-only container is the grown one.
@@ -350,13 +373,16 @@ grown patch's apply into the gate-only container with a non-zero exit.
 The binary leg's stderr carries `_NO_FULL_INDEX` from
 `saffron/phases/package.py:59`. The empty leg exports an empty patch after
 the rebuttal turn. Assert the state, one reverted run in all, the loop's,
-and a watched line carrying the reason.
+a watched line carrying the reason, and `rebuttal.json`'s `why` carrying
+it.
 
-**Criterion 6** drives three legs the same way. In one, `critic_cell`
+**Criterion 6** drives four legs the same way. In one, `critic_cell`
 raises `CellRuntimeError` for the cell after the rebuttal turn whose
 `network` is `None`, the probe cell. In one, the probe cell's baseline
 raises `CellRuntimeError`. In one, its probe run is green, so the probe
-survives. Assert the state, an empty `revert_exempt`, and
+survives. The fourth is the first with a `lint` gate red at the re-run.
+Every suite carries a `lint` result, green before REBUT, so the gate set
+never drifts. Assert the state, an empty `revert_exempt`, and
 `t.py::test_rebut` in the last reverted subset.
 
 **Criterion 4.** Use the `packageable` fixture and `_stub_package_cells`.
@@ -373,7 +399,7 @@ task runs `elevated` and `size` blocks.
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words. Keep each one to two lines naming the reason.
 
-**Size.** A prototype measured 1740 tokens with `size_gate`'s counter,
+**Size.** A prototype measured 1913 tokens with `size_gate`'s counter,
 against the `feature` ceiling of 3000. It held all nine steps above, the
 24 `exempt` arguments in `tests/test_revert.py`, both stand-in edits and
 the six witnesses. Its comments were one or two lines each.
