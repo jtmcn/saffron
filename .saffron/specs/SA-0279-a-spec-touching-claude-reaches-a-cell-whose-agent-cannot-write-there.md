@@ -180,6 +180,11 @@ seven above, then `SA-0280`, `SA-0282` and `SA-0283`. Write the list as
 literal ids, never computed by the rule under test. Keep its other
 assertions, and keep every remaining refusal on `depends_on`.
 
+The queue smoke test promotes `SA-0280`, `SA-0282` and `SA-0283` from its
+measured set at your base. Move each one it lists as a candidate to its
+refusals, at scan position. Rewrite its top docstring paragraph in place to
+say why.
+
 ## Out of scope
 
 - **The other four directory names** in `UNWRITABLE_DIR_NAMES`, and the
