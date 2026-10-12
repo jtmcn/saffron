@@ -247,7 +247,6 @@ diff ends `MERGE_FAILED`.
 
 **Placed 2026-10-11**, from `SA-0276`'s spec review: **b-f603c9**. A
 `REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, and
-the child is cut from `base_sha` without the parent's code.
 the child is cut from `base_sha` without the parent's code. Then
 **b-af24d1**: a resumed row with an open pull request that ends
 `REBUTTAL_UNJUDGED` is pushed onto that pull request's branch, and no merge

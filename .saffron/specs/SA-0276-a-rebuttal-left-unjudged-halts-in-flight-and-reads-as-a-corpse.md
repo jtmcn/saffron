@@ -3,7 +3,7 @@ id: SA-0276
 title: A rebuttal left unjudged halts its task at `REBUTTING`, so a stamping scan reads the halt as a crash
 type: bug
 priority: 2
-depends_on: [SA-0271, SA-0262]
+depends_on: [SA-0284, SA-0271, SA-0262]
 estimated_lines: 140
 estimate_measured: true
 touches:
