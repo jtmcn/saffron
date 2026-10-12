@@ -159,6 +159,144 @@ def test_a_declared_path_containing_a_brace_is_not_expanded():
     assert "- `src/{vocabulary}/**`" in out
 
 
+# Copied from the record's own tables and "Written" section, never read
+# off core's own constant (docs/evidence/2026-10-10-agent-unwritable-paths.md).
+_RECORD_FILE_NAMES = [
+    ".pre-commit-config.yaml",
+    ".gitmodules",
+    ".gitconfig",
+    ".mcp.json",
+    ".claude.json",
+    ".envrc",
+    ".npmrc",
+    ".bashrc",
+    "lefthook.yml",
+    ".zshrc",
+    ".profile",
+    ".bash_profile",
+    ".bash_login",
+    ".zprofile",
+    ".zshenv",
+    ".ripgreprc",
+    ".yarnrc.yml",
+    ".lefthook.yml",
+    "lefthook.yaml",
+]
+_RECORD_DIR_NAMES = [".claude", ".vscode", ".idea", ".husky", ".devcontainer"]
+_RECORD_WRITTEN = [
+    "control.txt",
+    "src/control.py",
+    ".gitignore",
+    ".gitattributes",
+    ".github/workflows/ci.yml",
+    ".env",
+    "Makefile",
+    "pyproject.toml",
+    "package.json",
+    ".editorconfig",
+    "tox.ini",
+    "setup.cfg",
+    "CLAUDE.md",
+    ".saffron/policy.yaml",
+    ".pre-commit-hooks.yaml",
+    ".tool-versions",
+    ".git-blame-ignore-revs",
+    ".gitignore_global",
+    ".pypirc",
+    ".netrc",
+    ".ssh/config",
+]
+_RECORD_NEAR_MISSES = [
+    ".pre-commit-config.yml",
+    ".pre-commit-config.yaml.bak",
+    "docs/.pre-commit-config.yaml.bak",
+    ".claudeignore",
+    "claude/x.md",
+    ".vscode-test/x.txt",
+    ".cursor/rules.md",
+]
+
+
+def test_every_measured_unwritable_name_is_named_at_any_depth():
+    """Every file name is driven as the whole entry, one directory down and
+    two down. Every directory name is driven at several component
+    positions, first, middle and last, beside "src/**", which must stay
+    unnamed."""
+    assert len(_RECORD_FILE_NAMES) == 19
+    assert len(_RECORD_DIR_NAMES) == 5
+
+    touches = ["src/**"]
+    for name in _RECORD_FILE_NAMES:
+        touches += [name, f"sub/{name}", f"sub/deep/{name}"]
+    for name in _RECORD_DIR_NAMES:
+        touches += [
+            name,
+            f"sub/{name}",
+            f"{name}/x",
+            f"a/b/{name}/c",
+            f"a/{name}/b",
+        ]
+
+    section = context.unwritable_touches_section(touches)
+
+    for name in _RECORD_FILE_NAMES:
+        assert f"`{name}`" in section
+        assert f"`sub/{name}`" in section
+        assert f"`sub/deep/{name}`" in section
+    for name in _RECORD_DIR_NAMES:
+        assert f"`{name}`" in section
+        assert f"`sub/{name}`" in section
+        assert f"`{name}/x`" in section
+        assert f"`a/b/{name}/c`" in section
+        assert f"`a/{name}/b`" in section
+    assert "`src/**`" not in section
+
+
+def test_a_near_miss_or_a_glob_component_is_not_named():
+    """A written path or a near miss gets no section at all. A refused name
+    buried in a non-final component gets none. A glob component is skipped
+    rather than matched as a pattern, though a literal component beside a
+    glob one still decides the entry."""
+    assert len(_RECORD_WRITTEN) == 21
+    assert len(_RECORD_NEAR_MISSES) == 7
+
+    for entry in _RECORD_WRITTEN + _RECORD_NEAR_MISSES:
+        assert context.unwritable_touches_section([entry]) == ""
+
+    assert context.unwritable_touches_section(["docs/.envrc/notes.md"]) == ""
+
+    for entry in [
+        ".claud?/x.md",
+        "[.]claude/x.md",
+        ".vscode*/x.txt",
+        "**",
+        "docs/.envr?",
+        "lefthook.y?ml",
+    ]:
+        assert context.unwritable_touches_section([entry]) == ""
+
+    for entry in [
+        ".claude/**",
+        "**/.pre-commit-config.yaml",
+        "docs/*/.husky/pre-commit",
+    ]:
+        section = context.unwritable_touches_section([entry])
+        assert f"`{entry}`" in section
+
+    assert context.unwritable_touches_section([]) == ""
+
+
+def test_the_unwritable_set_was_measured_at_the_cell_images_sdk():
+    """A version bump moves the pin the set was measured at, and this fails
+    until the set is measured again."""
+    dockerfile = (
+        Path(__file__).parent.parent / "images" / "cell-base.python.Dockerfile"
+    ).read_text()
+    match = re.search(r"^ARG SDK_VERSION=(\S+)", dockerfile, re.MULTILINE)
+    assert match is not None
+    assert match.group(1) == context.UNWRITABLE_SET_SDK_VERSION
+
+
 def test_a_trailing_non_numbered_heading_is_a_boundary_not_a_payload():
     """The last numbered section must not swallow a trailing '## ...' heading."""
     out = context.sections_for("IMPLEMENT", SAMPLE, sections=(9,))
