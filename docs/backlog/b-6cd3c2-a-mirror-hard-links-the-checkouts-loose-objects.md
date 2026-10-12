@@ -1,11 +1,12 @@
 ---
 id: b-6cd3c2
 title: A mirror hard-links the checkout's loose objects, so one unreadable inode fails every seed and a fresh mirror inherits it
-status: open
+status: done
 tier: 1
 filed: 2026-10-08
+closed: 2026-10-12
 specs: [SA-0260]
-prs: []
+prs: [827]
 commits: []
 cites: [§5.1]
 related: [b-6ac0cd, b-60a399, b-f582ee]
@@ -51,3 +52,5 @@ repository and asserts that no object file's inode appears in both.
 - 2026-10-09: recurred in the spec loop's run 32. The mirror's loose object
   6c8cc03b failed `SA-0233`'s PACKAGE seed and `SA-0251`'s first seed. `git
   repack -d` and moving the mirror aside cleared it again.
+- 2026-10-12: `SA-0260` ran in the spec loop's run 35 as #827. A mirror
+  is cloned with `--no-hardlinks`, so it holds no inode of the checkout's.

@@ -2000,3 +2000,79 @@ seat finding the in-cell critic and the end review both passed.
   **Bucket 1**, `witness`. **Landed:** a review commit on #822.
 - `SA-0254` (#822): `_batch`'s comment was left stranded above a blank line.
   **Bucket 3**, conventions. **Landed:** a review commit on #822.
+
+## 2026-10-12, `SA-0260` to `SA-0268` (spec loop run 35, stack #827 to #847)
+
+- `SA-0262` (#828): the cut predicate was written out in two queries.
+  **Bucket 3**, conventions. **Landed:** a review commit on #828.
+- `SA-0262` (#828): a docstring called an `ORPHANED` row settled, a word
+  `CONTEXT.md` keeps for a decided task.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #828.
+- `SA-0262` (#828): the `started_at` guard was asserted before the reopen,
+  so a tie passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #828.
+- `SA-0262` (#828): the witness cut each row twice by the same bound, and
+  the claim names three crossed pairs. The end review found it.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #828.
+- `SA-0261` (#829): no witness drove a follow-up retried in place, so its
+  preflight failure stayed hidden from the breaker.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #829.
+- `SA-0261` (#829): two literal tuples had to agree, and nothing tied them.
+  **Bucket 3**, conventions. **Landed:** a review commit on #829.
+- `SA-0261` (#829): `CONTEXT.md`'s Mint entry says a re-offer waits, and
+  two re-offers happen at once.
+  **Bucket 3**, conventions. **Open:** b-d7959f.
+- `SA-0264` (#830): the fake `gh` never checked `--repo`, so a wrong slug
+  passed four adopt tests.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #830.
+- `SA-0264` (#830): the adoptable states restated the merge-only set.
+  **Bucket 3**, conventions. **Landed:** a review commit on #830.
+- `SA-0265` (#844): no witness read the stack base `_batch` passes to the
+  runner, review and revise.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #844.
+- `SA-0265` (#844): criterion 4's witness drove no review or mint, so a mint
+  before the refusal passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #844.
+- `SA-0265` (#844): five comments cited "ADR 7, criterion N", and ADR 7
+  numbers no criteria.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #844. **Open:** b-54ad4f.
+- `SA-0265` (#844): three comments misnamed what they described.
+  **Bucket 3**, conventions. **Landed:** a review commit on #844.
+- `SA-0265` (#844): the `not is_follow_up` guard has no witness, and a
+  missing stack-base row falls back to the default branch.
+  **Bucket 1**, `witness`. **Open:** b-7ee599.
+- `SA-0266` (#845): three comments cited `CONTEXT.md` notes it does not hold.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #845. **Open:** b-54ad4f.
+- `SA-0266` (#845): `_cell_cutoff` restated `_ledger_time`.
+  **Bucket 3**, conventions. **Landed:** a review commit on #845.
+- `SA-0266` (#845): the test module imported `ReadyTask` at its top, so the
+  whole module failed to collect at base.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #845.
+- `SA-0266` (#845): no witness pinned which phase's `earned_risk` sets the
+  risk.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #845.
+- `SA-0267` (#846): the witness looped over the set the declared mutant
+  shrinks, and `witness` reported the survivor without blocking.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #846. **Open:** b-02d328.
+- `SA-0267` (#846): the refused parents recorded no push, so a version
+  taking any pushed parent passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #846.
+- `SA-0267` (#846): every remedy was asserted with `in`, and the reason
+  must end with it.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #846.
+- `SA-0267` (#846): no parent recorded an unresolved sha, so plain
+  truthiness passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #846.
+- `SA-0267` (#846): the tie-break by id and the refusal's two roles each
+  passed a swapped version. The end review found both.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #846.
+- `SA-0267` (#846): four docstrings miscounted or cited an id twice.
+  **Bucket 3**, conventions. **Landed:** a review commit on #846.
+- `SA-0268` (#847): no witness read the ledger `package()` received, or the
+  "tolerating nothing" line.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #847.
+- `SA-0268` (#847): a comment called one invocation a run.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #847.
+- `SA-0268` (#847): the host-probe line is built twice, and `saffron
+  package` never emits it.
+  **Bucket 3**, conventions. **Open:** b-d3b755.

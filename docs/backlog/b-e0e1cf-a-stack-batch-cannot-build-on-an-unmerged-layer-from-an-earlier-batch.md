@@ -1,11 +1,12 @@
 ---
 id: b-e0e1cf
 title: "A stack batch cannot build on an unmerged layer from an earlier batch, so the operator merges a stack before the next batch runs"
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-10-12
 specs: [SA-0265, SA-0267]
-prs: []
+prs: [844, 846]
 commits: []
 cites: [§4.2]
 related: []
@@ -34,3 +35,7 @@ remedy: merge the parent's pull request first.
 ## Record
 
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
+- 2026-10-12: `SA-0265` and `SA-0267` ran in the spec loop's run 35 as
+  #844 and #846. A stack order takes an earlier batch's open pull request
+  as its stack base, and a stack batch seeds, exempts and finishes on it.
+  What review left is b-7ee599.
