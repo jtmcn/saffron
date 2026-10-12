@@ -3,7 +3,7 @@ id: 40
 title: A host-side fix round can undo a gate the cell passed
 status: open
 tier: 1
-specs: [SA-0029, SA-0080, SA-0086, SA-0274]
+specs: [SA-0029, SA-0080, SA-0086, SA-0274, SA-0284]
 prs: [91, 247, 255]
 commits: [4ba8bdf]
 cites: [§5.4]

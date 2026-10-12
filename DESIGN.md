@@ -1367,6 +1367,8 @@ Inside the PR body, the ordering that matters is: **disagreements first.** Anywh
 
 You approve in GitHub by marking PACKAGE's draft ready, and `saffron reconcile` records that as `APPROVED` (item 52). GitHub refuses an author's own review approval, so this is the only approval you can give. Nothing merges on your click. No train is built yet, so today your merge is still `gh pr merge`. Approved tasks enter a serial train that rebases onto current `main`, re-runs the **full** gate suite on the merged result, and merges only if green.
 
+**`saffron regate <task id>` judges a pull request's head until the train exists**. Review commits pushed after PACKAGE reach no gate the cell passed (backlog item 97). The command runs the task's gate suite over the head GitHub holds, in gate-only cells. Its baseline is the merge base with the branch the pull request targets. Its gates and policy come from the task's own `base_sha`, so no later change to them judges an older task. It records the result beside the task and leaves the state alone. No agent runs. It judges the branch as GitHub shows it, which is not the merged result the train would judge.
+
 Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents *file* collisions but not *semantic* ones. Two tasks can each pass while jointly breaking an invariant, and stacked branches (§4.2) make this more likely, not less. The train catches it at machine cost rather than at yours.
 
 ### 6.2 The run record view
