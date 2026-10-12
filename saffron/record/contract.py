@@ -42,6 +42,7 @@ KINDS = (
     "spec_finding",
     "spec_text",
     "stack_finish",
+    "task_regate",
 )
 
 

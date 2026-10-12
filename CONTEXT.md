@@ -802,7 +802,7 @@ Each name is the `kind` written to `events.jsonl` with `Event` appended, because
 `attempt_closed`, `gate_result`, `finding`, `rebuttal`, `decision`, `run_created`,
 `run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`,
 `stack_layer`, `end_review`, `qualification`, `spec_review`, `spec_finding`,
-`spec_text`, `stack_finish`.
+`spec_text`, `stack_finish`, `task_regate`.
 The set is the record's whole alphabet, so it holds kinds nothing appends yet.
 > A fact is an entry in the record on `refs/saffron/*`. An event is a line of
 > `events.jsonl`. The two words do not merge.
