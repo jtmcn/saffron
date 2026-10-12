@@ -3,19 +3,16 @@ id: SA-0272
 title: A change whose subject is history never runs against a real ledger, so a projection that drops 75 of 76 merged tasks passes every witness
 type: feature
 priority: 2
-depends_on: [SA-0262, SA-0268, SA-0271]
-estimated_lines: 472
+depends_on: [SA-0285, SA-0262, SA-0271]
+consumes:
+  - saffron/ledger.py:snapshot
+  - saffron/cell/worktree.py:extra_mounts
+  - saffron/intake.py:History
+estimated_lines: 394
 estimate_measured: true
 touches:
-  - saffron/intake.py
-  - saffron/ledger.py
-  - saffron/task.py
   - saffron/cell/session.py
   - saffron/cell/worktree.py
-  - tests/test_intake.py
-  - tests/test_ledger.py
-  - tests/test_task.py
-  - tests/test_worktree.py
   - tests/test_history_run.py
 forbidden:
   - DESIGN.md
@@ -37,79 +34,51 @@ forbidden:
   - saffron/agents/**
   - saffron/phases/**
   - saffron/cell/runtime.py
+  - saffron/intake.py
+  - saffron/ledger.py
+  - saffron/task.py
   - saffron/cli.py
   - saffron/scheduler.py
   - tests/test_session.py
   - tests/test_scheduler.py
   - tests/test_cli.py
-budget_usd: 39
+budget_usd: 36
 max_attempts: 3
 max_turns: 190
 acceptance:
   - claim: >-
-      A spec's frontmatter can declare `history`, with a `command` and a
-      `batches` flag. `batches` is false unless declared, and a spec with no
-      `history` parses with `None` there. Intake refuses each of these: a
-      blank `command`, a missing one, `batches` given as the string `'yes'`,
-      `batches` given as the integer `1`, and an unknown key under `history`.
-    witness: tests/test_intake.py::test_a_history_declaration_parses_and_a_malformed_one_is_refused
-    wrong_versions:
-      - A lax boolean for `batches`, so `'yes'` and `1` both parse as true.
-      - A `command` check that refuses only the empty string and lets one of spaces through.
-      - A `history` model that ignores an unknown key instead of refusing it.
-  - claim: >-
-      `run_task` hands `run_one_cell` a `CellSpec` whose `history` is the
-      spec's, its command and `batches` alike. The witness drives a spec with
-      `batches: true`, one with `batches` left out, and one with no
-      `history`, which gets `None`.
-    witness: tests/test_task.py::test_the_cell_spec_carries_the_specs_history_declaration
-    wrong_versions:
-      - "`run_task` builds the `CellSpec` without `history`, so every cell sees `None`."
-  - claim: >-
-      `Ledger.snapshot` writes a copy of the ledger at the path it is given.
-      The copy holds every committed row, rows still in the write-ahead log
-      included. It is in rollback-journal mode, and no other file lands
-      beside it. A write to the ledger after the snapshot never reaches it.
-    witness: tests/test_ledger.py::test_a_snapshot_is_a_rollback_journal_copy_carrying_every_committed_row
-    wrong_versions:
-      - A file copy of `ledger.db` alone, which misses rows still in the write-ahead log and keeps WAL mode.
-      - The backup API with no switch out of WAL mode, so the copy still reads as WAL.
-      - A symlink or hard link to the live file, so a later write reaches the copy.
-  - claim: >-
-      `prepare_worktree` takes `extra_mounts`. The container it starts
-      carries the three mounts `mounts()` returns, then each extra mount in
-      the order given. The seed container carries none of the extra mounts.
-      The witness passes a read-only bind mount and a volume mount.
-    witness: tests/test_worktree.py::test_prepare_worktree_keeps_every_extra_mount_beside_its_own_three
-    wrong_versions:
-      - The extra mounts replace the three `mounts()` returns.
-      - Only the first extra mount is kept.
-      - The extra mounts also reach the seed container.
-  - claim: >-
       `session.run_history` enters a Gate-only cell through `critic_cell`,
-      with `network=None`, the repo's `thread_env` alone as its env, and a
-      read-only bind mount at `worktree.HISTORY_MOUNT` among its
-      `extra_mounts`. The mount's source holds a copy of the ledger and is
-      never the live ledger's directory. With `batches: true` it also holds
-      a copy of the batch tree, `v0` under `batches`, and with `batches` false it
-      holds none. The command runs through `runtime.exec_` in that cell,
-      from `worktree.WORKTREE_MOUNT`. It sees `SAFFRON_HISTORY_HOME` naming
-      a writable copy of the mount under `worktree.STATE_MOUNT`. So a
-      command that writes to its ledger leaves every file of the mount's
-      source unchanged. The result carries the command's exit code, its
-      stdout and its stderr. The mount's source no longer exists once
-      `run_history` returns. The witness drives `batches` true and false.
+      with `network=None`, the repo's `thread_env` alone as its env, and
+      read-only bind mounts as its `extra_mounts`. One sits at
+      `worktree.HISTORY_MOUNT`. Its source is
+      `session.HISTORY_SOURCE_ROOT` joined with the spec id, a directory
+      that holds the ledger's snapshot and is never the live ledger's
+      directory. With `batches: true` a second sits at
+      `worktree.BATCHES_MOUNT`, and its source is `out_dir` itself, never a
+      copy. With `batches` false there is no second mount. Both execs in the
+      cell go through `runtime.exec_`, from `worktree.WORKTREE_MOUNT`, with a
+      timeout of 600 seconds. The command sees `SAFFRON_HISTORY_HOME`
+      naming a home under `worktree.STATE_MOUNT`. That home holds a
+      writable copy of the mount's `ledger.db`, with the batch tree linked
+      read-only as `v0` under `batches` when it is mounted. A command that
+      writes to its ledger leaves every file of both mount sources
+      unchanged. The result carries the exit code, stdout and stderr. The
+      snapshot's directory is gone once `run_history` returns, and also
+      after `critic_cell` raises. The witness drives `batches` true and
+      false, and a `critic_cell` that raises.
     witness: tests/test_history_run.py::test_the_history_command_reads_a_writable_copy_and_never_writes_the_mount
     wrong_versions:
-      - The live ledger's own directory bind-mounted read-only, with no copy.
+      - The live ledger's own directory bind-mounted read-only, with no snapshot.
+      - The snapshot kept under `out_dir`, beside the task's gates.
       - "`SAFFRON_HISTORY_HOME` names the mount itself, so the command's first write lands in the mount's source."
       - The history mount declared without `readonly`.
-      - "`batches` ignored, so the batch tree is never copied."
-      - The batch tree copied whatever `batches` says.
-      - The copy left on the host after the run.
+      - "`batches` ignored, so the batch tree is never mounted."
+      - The batch tree mounted whatever `batches` says.
+      - The batch tree copied on the host and the copy mounted.
+      - The snapshot removed after the cell closes but outside a `finally`, so a raise leaks it.
+      - The command's exec left at `exec_`'s default timeout of 900 seconds.
       - The cell's env built with `cell_env`, so it carries a proxy address.
       - The result's stderr dropped.
-      - The command run on the host with `subprocess`, so no cell runs it.
   - claim: >-
       Each of the result's two streams keeps its first
       `session.HISTORY_OUTPUT_CHARS` characters. Past that, it ends with a
@@ -123,22 +92,33 @@ acceptance:
       - Only stdout bounded.
       - The note names the stream's whole length rather than the count cut.
   - claim: >-
-      For a spec declaring `history`, REVIEW runs the command once, in the
-      Gate-only cell that carries the history mount, before any lens. Every
-      lens's system prompt carries the command, both streams, and either
-      `exited` with the exit code or `timed out`. `history.json` in the task
-      directory records the command, the exit code, `timed_out` and both
-      streams. A spec declaring no `history` gets no history mount, no
-      `history.json` and no history text in any lens prompt. The witness
-      drives a run that exits 3, a run that times out, and a spec with no
-      `history`.
+      For a spec declaring `history`, REVIEW runs the in-cell copy and then
+      the command, each once, in the Gate-only cell that carries the history
+      mount, before any lens. Every lens's system prompt carries the
+      command, both streams, and either `exited` with the exit code or
+      `timed out`. `history.json` in the task directory records the
+      command, the exit code, `timed_out` and both streams. A spec declaring
+      no `history` gets no history mount, no `history.json` and no
+      `History run` text in any lens prompt. The witness drives a run that
+      exits 3, a run that times out, and a spec with no `history`.
     witness: tests/test_history_run.py::test_every_lens_reads_the_history_run_and_the_task_dir_records_it
     wrong_versions:
       - The history run reaches only the first lens's prompt.
-      - The history command run in the critic cell, on the critic network.
       - The lens prompt names the exit code of a timed-out run and never says it timed out.
       - No `history.json` written.
       - "`critic_cell` takes `extra_mounts` and never passes it to `prepare_worktree`."
+  - claim: >-
+      The in-cell copy runs as its own exec, before the command's. When it
+      exits non-zero or times out, the command never runs. `history.json`
+      then records `started` as false and the copy's stderr. Every lens's
+      prompt says the history run did not start and carries that stderr,
+      and none says `exited`. The witness drives a copy that exits 1 with
+      `no space left on device` on stderr.
+    witness: tests/test_history_run.py::test_a_history_run_whose_copy_fails_never_runs_the_command_and_says_so
+    wrong_versions:
+      - The command runs after a failed copy.
+      - The lens section reads `exited 1` for a run whose copy failed.
+      - The copy's stderr dropped from the result.
 ---
 
 ## Context
@@ -154,20 +134,12 @@ backup of `~/.saffron/ledger.db`. That lookup is fixed now
 ledger but the one its own task writes, so projection, reporting,
 `reconcile` and `watch` meet no real history in any gate.
 
-Every line number below was read at `bc879e2c`. The three specs this one
-depends on edit `saffron/cell/session.py`, `saffron/task.py` and
-`saffron/ledger.py` first, so read each at the tree base before you start.
+**What the parent leaves for you.** `SA-0285` adds the `History` model and
+`Spec.history`, `CellSpec.history`, `Ledger.snapshot`, and `extra_mounts`
+on `prepare_worktree`. Read each at the tree base before you start.
 
-**The spec model refuses unknown keys.** `Spec` sets `extra="forbid"`
-(`saffron/intake.py:157`, `:160`). Its fields end with `risk`
-(`:199`), and `body` follows (`:201`). The nested models `Mutant` (`:72`) and
-`Criterion` (`:110`) refuse unknown keys the same way.
-
-**`CellSpec` is built in one place.** `run_task` builds it at
-`saffron/task.py:533`, passing `declared_risk` at `:544`. `class CellSpec`
-is at `saffron/cell/session.py:315`, and its last field is `task_id`
-(`:350`). `saffron/qualify.py:131` builds one too, by keyword, so a new
-field with a default needs nothing there.
+Every line number below was read at `bc879e2c`. `SA-0262` and `SA-0271`
+edit `saffron/cell/session.py` first, so read it at the tree base too.
 
 **The Gate-only cell is `critic_cell` with `network=None`.** It is defined at
 `saffron/cell/session.py:1335`. With no network it makes its own, named
@@ -177,13 +149,8 @@ field with a default needs nothing there.
 `_gate_cell_suite` (`:1452`) and `probe_findings` (`:1506`) enter it with
 `env=dict(thread_env)`, the repo's gate env and nothing else.
 
-**A cell's mounts come from one function.** `worktree.mounts`
-(`saffron/cell/worktree.py:35`) returns the worktree volume, the state
-volume and the read-only gates bind. `prepare_worktree` (`:94`) starts the
-cell with `mounts(volume, state, gates_dir)` (`:169`) and nothing else.
-The seed container mounts the mirror and the worktree volume alone
-(`:80-91`). `runtime.Mount` has a `readonly` flag
-(`saffron/cell/runtime.py:212-220`).
+**`runtime.exec_` defaults its timeout.** Its `timeout_s` defaults to 900
+seconds (`saffron/cell/runtime.py:470`).
 
 **REVIEW builds every lens prompt from one body.** In `_drive_cell`, REVIEW
 first computes the gate table in a Gate-only cell, through
@@ -196,6 +163,11 @@ rejected patch. `review.run_review` gets
 `lens_prompt` (`saffron/phases/review.py:191`) puts that body in every
 lens's system prompt. The gate table is
 written beside it as `lens-gates.json` (`saffron/cell/session.py:2844`).
+
+**The task's bind sources sit under `out_dir`.** `task_dir.mkdir` makes the
+task directory (`saffron/cell/session.py:1915`).
+`export_saffron_dir` writes the gates under it (`:1916`). So `out_dir` holds the task's own directory. A copy of
+`out_dir` placed under it would copy into itself.
 
 **`Ledger` writes when it opens.** `Ledger.__init__` makes the parent
 directory, runs `PRAGMA journal_mode=WAL` (`saffron/ledger.py:393`) and
@@ -220,43 +192,43 @@ does. A history command is the patch's own code.
 ## Problem
 
 A spec can say its subject is history, and nothing runs it against any.
-Build that path, from frontmatter to every lens.
+Build that path, from the parent's field to every lens.
 
-1. **The field.** Add `history` to `Spec`, `None` by default. Its model takes
-   a `command` string and a `batches` boolean, strict and false by default,
-   and refuses unknown keys. A `command` that is blank once stripped is
-   refused. Give `CellSpec` a `history` field, `None` by default, and have
-   `run_task` pass the spec's.
-2. **The snapshot.** Add `Ledger.snapshot(dest)`. It writes a consistent
-   copy with sqlite's backup API and leaves it in rollback-journal mode, so
-   a reader needs nothing beside the file. The live ledger is being written
-   by the task that calls it, so a file copy is not enough.
-3. **The mount.** Add `extra_mounts`, a sequence of `runtime.Mount` empty by
-   default, to `prepare_worktree` and to `critic_cell`. `critic_cell` passes
-   it through. `prepare_worktree` appends it after `mounts()`' three, on the
-   cell alone. Add `worktree.HISTORY_MOUNT`, `"/history"`.
-4. **The run.** Add `session.run_history`, keyword-only: `spec`, `repo`,
+1. **The mounts.** Add `extra_mounts`, empty by default, to `critic_cell`,
+   and pass it to `prepare_worktree`. Add `worktree.HISTORY_MOUNT`,
+   `"/history"`, and `worktree.BATCHES_MOUNT`, `"/history-batches"`.
+2. **The run.** Add `session.run_history`, keyword-only: `spec`, `repo`,
    `mirror`, `gates_dir`, `thread_env`, `patch`, `ledger`, `out_dir`,
-   `created` and `note`. On the host it builds a source directory holding
-   `ledger.db` from `Ledger.snapshot`. With `batches`, it also holds a copy
-   of `out_dir` as `v0` under `batches`, so the source reads as a
-   `--home`. It enters `critic_cell` with `network=None`, `env=dict(thread_env)` and the
-   source bind-mounted read-only at `HISTORY_MOUNT`. In the cell it runs one
-   `runtime.exec_` from `WORKTREE_MOUNT`. That exec copies the ledger to a
-   writable home under `worktree.STATE_MOUNT` and links the batch tree in
-   when it is there. It then runs the command with `SAFFRON_HISTORY_HOME`
-   naming that home. Bound it with a timeout of 600 seconds. Remove the
-   source in a `finally`. Return a dict with `command`, `batches`,
-   `exit_code`, `timed_out`, `stdout` and `stderr`. Bound each stream at
-   `HISTORY_OUTPUT_CHARS`, 20000. Keep the first characters, and end a cut
-   one with a note naming how many went.
-5. **The lenses.** REVIEW calls `run_history` for a spec whose `history`
+   `created` and `note`. Add `session.HISTORY_SOURCE_ROOT`, set to
+   `Path.home() / ".saffron" / "history"`. The source directory is that
+   root joined with the spec id, outside `out_dir` and outside TMPDIR. A
+   bind from TMPDIR is unmeasured on apple/container.
+   - On the host, write `ledger.db` into the source with `Ledger.snapshot`.
+   - Enter `critic_cell` with `network=None` and `env=dict(thread_env)`.
+     Bind the source read-only at `HISTORY_MOUNT`. With `batches`, also
+     bind `out_dir` itself read-only at `BATCHES_MOUNT`. Never copy the
+     batch tree.
+   - In the cell, run two execs through `runtime.exec_` from
+     `WORKTREE_MOUNT`, each with a timeout of 600 seconds. The first copies
+     the mount's `ledger.db` to a writable home under
+     `worktree.STATE_MOUNT`. When the batch tree is mounted, it also links
+     it into the home as `v0` under `batches`. The second runs only when
+     the first exited 0 and did not time out. It runs the command with
+     `SAFFRON_HISTORY_HOME` naming that home.
+   - Remove the source in a `finally`.
+   - Return a dict with `command`, `batches`, `started`, `exit_code`,
+     `timed_out`, `stdout` and `stderr`. When the copy failed, `started` is
+     false and the other fields are the copy's. Bound each stream at
+     `HISTORY_OUTPUT_CHARS`, 20000. Keep the first characters, and end a
+     cut one with a note naming how many went.
+3. **The lenses.** REVIEW calls `run_history` for a spec whose `history`
    is set. The call comes after a clean gate comparison and before the lens
-   critic cell, inside the same `try` as that critic cell. Write its result to
-   `history.json` in the task directory. Append a `## History run` section
-   to the `spec_body` every lens gets. It names the command and says
-   `exited <code>` or `timed out`, then gives stdout and stderr. A spec with
-   no `history` gets an empty section and no cell.
+   critic cell, inside the same `try` as that critic cell. Write its result
+   to `history.json` in the task directory. Append a `## History run`
+   section to the `spec_body` every lens gets. It names the command and
+   says `exited <code>`, `timed out`, or that the history run did not
+   start. It then gives stdout and stderr. A spec with no `history` gets
+   no history text in the body at all, and no history cell.
 
 ## Out of scope
 
@@ -267,7 +239,7 @@ Build that path, from frontmatter to every lens.
   own branch.
 - REBUT's prompt (`saffron/cell/session.py:3146`), the PR body and the
   events log. They do not show the history run.
-- A history run that cannot start. `critic_cell` raising
+- A history cell that cannot start. `critic_cell` raising
   `CellRuntimeError` ends the task as `_gate_cell_suite`'s raise does today.
 - Any spec declaring `history`. None can until this lands
   (`DESIGN.md` §3.2, "A spec cannot introduce the frontmatter it is written
@@ -279,10 +251,14 @@ Every criterion here witnesses new code, so none declares a `mutant`, and
 the `witness` gate will report `skip` for each. That is honest, not
 missing.
 
-Import `History`, `run_history` and `HISTORY_MOUNT` inside each test body,
-never at module scope. `revert` re-runs the witnesses with your source
+Import `History` inside each test body, never at module scope. Reach
+`run_history`, `HISTORY_MOUNT` and the other names you add through their
+modules at call time. `revert` re-runs the witnesses with your source
 files reverted. A module-scope import of a name you add makes that run a
 collection error, which `revert` reads as `skip`.
+
+Mark the 600-second and 20000-character bounds as reasoned, not measured,
+in the comment beside each. No history command has run in a cell yet.
 
 `tests/test_history_run.py` is a new file. It imports `_drive`,
 `_stub_the_runtime`, `_spec`, `_turn`, `_block`, `_PLAN` and
@@ -290,36 +266,48 @@ collection error, which `revert` reads as `skip`.
 `tests/test_probe_findings.py` imports from it. Do not edit
 `tests/test_session.py`.
 
-**The unit witness for `run_history`** stubs `session.critic_cell` with a
-context manager that records its keywords and yields a fixed container. It
-stubs `runtime.exec_` to run the argv on the host. In one pass over each
-argument, it rewrites `worktree.STATE_MOUNT` to a host directory for the
-state volume. The same pass rewrites `worktree.HISTORY_MOUNT` to the
-mount's own source. Use a fresh state directory per exec call. With no
-`extra_mounts` keyword, the stub finds no history mount and the test fails,
-which is the default it must not hide. The command is a Python script file
-run with `sys.executable`. It reads `SAFFRON_HISTORY_HOME`, sets WAL mode on
-its `ledger.db`, writes one table, and prints the task count. It prints one
-batch-tree file's text or `None`, and the real path of its home, and exits
-3 with a marker on stderr. The test hashes every file of the mount's source
-before and after the command, inside the stub. `_gate_cell_suite`'s docstring says the tests in a gate cell execute as `root`
-(`saffron/cell/session.py:1469`), so a `chmod` cannot stand in for a
-read-only mount. The hash is what
-catches a write.
+**The unit witness for `run_history`** sets `session.HISTORY_SOURCE_ROOT`
+to a directory under `tmp_path`. It stubs `session.critic_cell` with a
+context manager that records its keywords and yields a fixed container,
+or raises when the test asks it to. It stubs `runtime.exec_` to record
+`workdir` and `timeout_s` and run the argv on the host. `/work` exists only
+in a cell. So the stub runs every exec in one host directory whatever
+`workdir` says. The test asserts the recorded `workdir` instead.
+- The stub rewrites `worktree.STATE_MOUNT` to a host state directory, one
+  per cell entered. It rewrites each mount's target to that mount's
+  source. A target is rewritten only as a whole path, never inside a
+  longer one, so `/history` inside a state path stays as it is.
+- With no `extra_mounts` keyword, the stub finds no history mount and the
+  test fails. That is the default it must not hide.
+- The command is a Python script file run with `sys.executable`. It reads
+  `SAFFRON_HISTORY_HOME`, sets WAL mode on its `ledger.db`, writes one
+  table, and prints the task count. It prints one batch-tree file's text
+  or `None`, and the real path of its home, and exits 3 with a marker on
+  stderr.
+- The stub hashes every file of every mount source before and after each
+  exec. `_gate_cell_suite`'s docstring says the tests in a Gate-only cell
+  execute as `root` (`saffron/cell/session.py:1469`), so a `chmod` cannot
+  stand in for a read-only mount. The hash is what catches a write.
 
-**The wiring witness** drives `_drive` three times, under its own
-`tmp_path` subdirectory each. It overrides `runtime.exec_` after
-`_stub_the_runtime` to return a scripted `runtime.Completed` for the one exec
-whose argv mentions the history command in any argument. Every other exec
-gets a clean `runtime.Completed(0, "", "")`. The lens prompts are
+**The wiring witnesses** each drive `_drive` under their own `tmp_path`
+subdirectory, with `session.HISTORY_SOURCE_ROOT` set under it. They
+override `runtime.exec_` after `_stub_the_runtime`. The exec whose argv
+mentions the history command in any argument returns a scripted
+`runtime.Completed`. The one that mentions `worktree.HISTORY_MOUNT` and
+not the command is the copy, and returns its own. Every other exec gets a
+clean `runtime.Completed(0, "", "")`. The lens prompts are
 `cell.system_prompts[2 : 2 + len(review.LENSES)]`, after the plan and
 implement turns. The history mount is read from the `extra_mounts` keyword
 of `cell.worktrees`.
 
-`estimated_lines` is a prototype's measured diff: 1887 changed tokens
-over the five source files and five test files in `touches`. It holds
-every criterion's code and witness, with terse comments. It holds none of
-the `DESIGN.md`, `CONTEXT.md` or backlog edits, which are not yours.
+`estimated_lines` is a prototype's measured diff over `SA-0285`'s: 1574
+changed tokens over `saffron/cell/session.py`, `saffron/cell/worktree.py`
+and `tests/test_history_run.py`. It holds every criterion's code and
+witness. It holds none of `SA-0285`'s work and none of the `DESIGN.md`,
+`CONTEXT.md` or backlog edits.
 
-The in-cell copy of an 880 MB ledger onto the state volume is unmeasured in
-a real cell. Mark it with a `ponytail:` comment naming that ceiling.
+Both ledger copies are deliberate. The host snapshot is consistent while
+the task writes the live ledger. The in-cell copy exists because
+`Ledger.__init__` sets WAL mode on open. The in-cell copy of an 880 MB
+ledger onto the state volume is unmeasured in a real cell. Mark it with a
+`ponytail:` comment naming that ceiling.

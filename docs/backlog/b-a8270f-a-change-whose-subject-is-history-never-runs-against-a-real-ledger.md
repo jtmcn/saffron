@@ -4,7 +4,7 @@ title: A change whose subject is history never runs against a real ledger in the
 status: open
 tier: 1
 filed: 2026-09-19
-specs: [SA-0272]
+specs: [SA-0272, SA-0285]
 prs: []
 commits: []
 cites: [§4.1, §5.4]
