@@ -543,8 +543,8 @@ def run_stack_batch(
         original = candidate
         is_follow_up = generation == 1
 
-        # ADR 7, criterion 4: asked only with no predecessor yet, and never
-        # for a follow-up. `stack_base_gone` caches a `False` answer below.
+        # Asked only with no predecessor yet, and never for a follow-up (ADR 7).
+        # `stack_base_gone` keeps the refusal reason once the branch is gone.
         if not is_follow_up and pred is None and stack_base is not None:
             if (
                 stack_base_gone is None

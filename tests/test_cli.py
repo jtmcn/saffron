@@ -7055,22 +7055,46 @@ def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing
         stack_batch_calls.append(kwargs)
         return "DRAINED"
 
+    from saffron import intake
+    from saffron.scheduler import StackBase
+
     pinned = task.PinnedBase(
         mirror=Path("/tmp/pinned-mirror.git"),
         url="https://github.com/o/r.git",
         base_sha="a" * 40,
     )
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+    first = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore", priority=1),
+        spec_sha="r" * 64,
+        task_id=None,
+        stack_base=stack_base,
+    )
+    seeded: dict[str, object] = {}
+
+    def _capturing(name):
+        def _factory(**kwargs):
+            seeded[name] = kwargs["stack_base"]
+            return object()
+
+        return _factory
 
     with monkeypatch.context() as m:
         m.chdir(tmp_path)
         m.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
         m.setattr(cli, "_stack_base_alive", _fake_stack_base_alive)
         m.setattr(
-            cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+            cli,
+            "_resolve_queue",
+            lambda *a, **k: _fake_batch_resolution(tmp_path, candidates=[first]),
         )
         m.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+        for name in ("_stack_runner", "_stack_review", "_stack_revise"):
+            m.setattr(cli, name, _capturing(name))
 
-        # Case 1: readiness passes, `--stack`. Built once, on the pinned base.
+        # Case 1: readiness passes, `--stack`. Built once, on the pinned base,
+        # and the order's stack base reaches the three seeding callables.
         _readiness_passes(m)
         home1 = tmp_path / "home1"
         assert main(["--home", str(home1), "batch", "--stack"]) == 0
@@ -7078,6 +7102,11 @@ def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing
         assert alive_calls == [pinned]
         assert len(stack_batch_calls) == 1
         assert stack_batch_calls[0]["stack_base_alive"] is alive_sentinel
+        assert seeded == {
+            "_stack_runner": stack_base,
+            "_stack_review": stack_base,
+            "_stack_revise": stack_base,
+        }
 
         # Case 2: readiness fails. Never built, and `None` reaches the batch.
         alive_calls.clear()

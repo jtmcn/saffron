@@ -635,9 +635,9 @@ def _batch_runner(
 def _seed_branch(
     predecessor: Candidate | None, stack_base: scheduler.StackBase | None
 ) -> str | None:
-    """The branch a spec session with no layer of its own yet seeds its cell
-    on (ADR 7, criterion 1): the predecessor's own branch, else the stack
-    base's, else `None` for the pinned `base_sha`. A predecessor always
+    """The branch a cell with no predecessor yet seeds on (ADR 7): the
+    predecessor's own branch, else the stack base's, else `None` for the
+    pinned `base_sha`. A predecessor always
     outranks the stack base. A later layer is cut from the batch's own
     chain, never from the pull request the whole order stacks on."""
     if predecessor is not None:
@@ -648,7 +648,7 @@ def _seed_branch(
 
 
 def _stack_base_alive(pinned: PinnedBase) -> Callable[[str], bool]:
-    """`run_stack_batch`'s `stack_base_alive` (ADR 7, criterion 4/5).
+    """`run_stack_batch`'s `stack_base_alive` (ADR 7).
 
     Whether `branch` is still on the remote, read fresh with `remote_sha`,
     against the pinned base's own mirror and url. An unreachable remote's

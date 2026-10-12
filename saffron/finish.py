@@ -62,7 +62,7 @@ def link_stack(
     if finishing is None or finishing["pr_url"] is None:
         raise ValueError(f"batch {batch_id} has no finishing pull request")
     layers = ledger.stack_layers(batch_id)
-    # ADR 7, criterion 6: stacked on an earlier pull request, so a list
+    # ADR 7: stacked on an earlier pull request, so a list
     # missing it would retarget the bottom layer onto the default branch.
     if layers and layers[0]["predecessor_key"] is not None:
         return [
@@ -394,7 +394,7 @@ def publish_finish(
         if predecessor is not None:
             wanted = predecessor["branch"]
         elif layer["predecessor_key"] is not None:
-            # The stack base's own task (ADR 7, criterion 6), read by its
+            # The stack base's own task (ADR 7), read by its
             # record key the way `end_review.layer_fields` reads one.
             row = ledger._db.execute(
                 "SELECT branch FROM tasks WHERE record_key = ?",

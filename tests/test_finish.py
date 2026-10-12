@@ -1703,7 +1703,7 @@ def test_a_stack_on_an_earlier_pull_request_is_finished_against_its_branch_and_n
         return s
 
     # Escalated: the new layer's pull request targets the default branch,
-    # not the stack base's own branch (`bottom`'s), so the finish refuses.
+    # not the stack base's own branch (`bottom`'s), so the finish escalates.
     s_escalate = _new_layer("TE-3-escalate")
     sha_escalate = _finishing_commit(s_escalate.mirror, top["head"])
     gh_escalate = _FakeGh({"https://github.com/o/r/pull/300": "trunk"})

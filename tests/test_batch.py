@@ -1644,9 +1644,10 @@ def test_a_stack_whose_base_branch_is_gone_refuses_its_order_without_an_abort(
     stack_base = StackBase(spec_id="TE-9000", task_id=1, branch="saffron/TE-0")
 
     def _order(*, with_base: bool) -> list[Candidate]:
-        base = stack_base if with_base else None
         return [
-            dataclasses.replace(_candidate("TE-1"), stack_base=base),
+            dataclasses.replace(
+                _candidate("TE-1"), stack_base=stack_base if with_base else None
+            ),
             _candidate("TE-2"),
             _candidate("TE-3"),
         ]
@@ -1655,17 +1656,21 @@ def test_a_stack_whose_base_branch_is_gone_refuses_its_order_without_an_abort(
     # and every one of the three specs is refused by name.
     script1 = _StackBaseAliveScript([False])
     lines1: list[str] = []
+    doubles1 = StackDoubles(ledger, repo_id, {})
     reason1 = run_stack_batch(
         _order(with_base=True),
         ledger,
         budget_usd=100.0,
         until=None,
-        runner=FakeStackRunner({}),
+        runner=doubles1.runner,
+        review=doubles1.review,
+        mint=doubles1.mint,
         readiness_check=_ready,
         emit=lines1.append,
         stack_base_alive=script1,
     )
     assert reason1 == "DRAINED"
+    assert doubles1.order == []
     assert script1.calls == ["saffron/TE-0"]
     refused1 = [line for line in lines1 if "refused" in line]
     assert len(refused1) == 3
@@ -1679,23 +1684,22 @@ def test_a_stack_whose_base_branch_is_gone_refuses_its_order_without_an_abort(
     # and the two specs offered after it are both refused.
     script2 = _StackBaseAliveScript([True, False])
     lines2: list[str] = []
-    run_te1, task_te1 = _spend_task(ledger, repo_id, 1.0)
-    runner2 = FakeStackRunner(
-        {"TE-1": _outcome(state="EXHAUSTED", run_id=run_te1, task_id=task_te1)}
-    )
+    doubles2 = StackDoubles(ledger, repo_id, {"TE-1": {"runner": "EXHAUSTED"}})
     reason2 = run_stack_batch(
         _order(with_base=True),
         ledger,
         budget_usd=100.0,
         until=None,
-        runner=runner2,
+        runner=doubles2.runner,
+        review=doubles2.review,
+        mint=doubles2.mint,
         readiness_check=_ready,
         emit=lines2.append,
         stack_base_alive=script2,
     )
     assert reason2 == "DRAINED"
     assert script2.calls == ["saffron/TE-0", "saffron/TE-0"]
-    assert runner2.calls == [("TE-1", None)]
+    assert doubles2.order == ["mint:TE-1", "review:TE-1", "runner:TE-1"]
     refused2 = [line for line in lines2 if "refused" in line]
     assert {line.split()[0] for line in refused2} == {"TE-2", "TE-3"}
     assert not any(" raised " in line for line in lines2)
