@@ -35,3 +35,8 @@ The batch's `follow_ups` list came back empty.
 ## Record
 
 - 2026-10-10: filed from the spec loop's run 33.
+- 2026-10-11: recurred in the spec loop's run 34, batch 22. The writer
+  drafted for four groups, and none became a spec. One draft's
+  frontmatter was not valid YAML, from an unquoted list item holding
+  quotes. One writer session ended `api_error` with no output. Two failed
+  preflight on a proxy 503 tunnelling to `api.anthropic.com`.

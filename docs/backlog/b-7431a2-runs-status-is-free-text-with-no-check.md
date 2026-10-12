@@ -35,3 +35,7 @@ and `finish_run`, in the shape `runs.preflight` uses. A witness shows
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #338.
+- 2026-10-11: the Standards seat on #811 (`SA-0245`) found `ABORTED` in
+  neither `CONTEXT.md` nor `ontology/factory.ttl`. No vocabulary owns
+  the run statuses either. The set declared here also wants a glossary
+  entry and an ontology class.

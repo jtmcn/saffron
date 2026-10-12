@@ -1,11 +1,12 @@
 ---
 id: b-0a08bf
 title: "`saffron queue --stack` prints no admission arithmetic, so nothing shows what `--budget` admits every layer"
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-10-11
 specs: [SA-0254]
-prs: []
+prs: [822]
 commits: []
 cites: [§7.1]
 related: []
@@ -43,3 +44,4 @@ layer's spec review.
   before choosing $320 for $157 of spec budgets.
 - 2026-10-10: the spec loop's run 33 read the split from the batch's first
   line, `reserve $125.00, writer $125.00` of $500.
+- 2026-10-11: done by `SA-0254` (#822), from the spec loop's run 34.

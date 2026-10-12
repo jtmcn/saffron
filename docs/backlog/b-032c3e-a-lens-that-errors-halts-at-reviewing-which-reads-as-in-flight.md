@@ -32,3 +32,8 @@ process died, and a witness covers the scan's choice.
 ## Record
 
 - 2026-09-22: filed from ADR 4's review. ADR 4's principle 55 records it.
+- 2026-10-11: measured on `SA-0259` in the spec loop's run 34. The
+  adequacy lens returned malformed JSON twice, and the task halted at
+  `REVIEWING` with green gates. The branch was pushed and no PR opened.
+  The batch then closed `INCOMPLETE` and exited 2. The PR was opened by
+  hand as #809. The probes the lens carried are b-f7a591.

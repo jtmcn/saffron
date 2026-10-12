@@ -1,11 +1,12 @@
 ---
 id: b-5df2a7
 title: "A cell stopped with SIGTERM leaves its containers and its task in flight"
-status: open
+status: done
 tier: 2
 filed: 2026-10-06
+closed: 2026-10-11
 specs: [SA-0245, SA-0258]
-prs: []
+prs: [811, 812]
 commits: []
 cites: [§4.5]
 related: [b-a1d649]
@@ -41,3 +42,9 @@ SIGTERM to `saffron cell` or `saffron batch` raises inside the process. The
 run then closes `ABORTED` and the task is stamped `ORPHANED`. The patch is
 exported, and every container the cell created is removed. A test sends the
 signal to a running cell and asserts all four.
+
+## Record
+
+- 2026-10-11: done by `SA-0245` (#811) for `saffron cell` and `SA-0258`
+  (#812) for `saffron batch`, from the spec loop's run 34. A signal
+  before the batch row exists still leaves no row (b-d0fed8).

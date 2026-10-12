@@ -1950,3 +1950,53 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0249` (#802): a comment cited `CONTEXT.md`'s Attempt entry for the count
   it departs from.
   **Bucket 3**, conventions. **Landed:** a review commit on #802.
+
+## 2026-10-11, `SA-0259` to `SA-0254` (spec loop run 34, #809 and stack #811 to #822)
+
+- `SA-0259` (#809): the host filed two criterion-probe blockers under the
+  adequacy lens, which errored, so neither reached REBUT.
+  **No bucket**. **Landed:** a review commit on #809. **Open:** b-f7a591.
+- `SA-0259` (#809): the route witness never asserted the section says the
+  Write tool refuses, and drove no glob final component.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #809.
+- `SA-0259` (#809): the prompt heading called the Write tool's denial a
+  refusal, a word `CONTEXT.md` keeps for a task.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #809.
+- `SA-0259` (#809): the prompt called "at any depth" measured, and a comment
+  spelled the SDK version its constant holds.
+  **Bucket 3**, conventions. **Landed:** a review commit on #809.
+- `SA-0259` (#809): `_GLOB_CHARS` restated `saffron/scheduler.py`'s, which
+  the spec forbade.
+  **Bucket 3**, conventions. **Open:** b-54fee5.
+- `SA-0245` (#811): the batch step compared against pytest's own `SIG_DFL`,
+  so a reset to the default around `batch` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #811.
+- `SA-0245` (#811): the second-signal test never asserted its wrapper fired.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #811.
+- `SA-0245` (#811): the test restated the container names
+  `tests/test_session.py` defines, and spelled the critic network's name.
+  The batch's end review found the second.
+  **Bucket 3**, conventions. **Landed:** a review commit on #811.
+- `SA-0245` (#811): a test type called one `main` call a run, and a
+  docstring carried the spec's rationale.
+  **Bucket 3**, conventions. **Landed:** a review commit on #811.
+- `SA-0258` (#812): `os._exit(143)` was killed only by an `IndexError`, not
+  an assertion.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #812.
+- `SA-0258` (#812): the handler's docstring said `with proc:` only waits
+  briefly, against the doc's own measurement.
+  **Bucket 3**, conventions. **Landed:** a review commit on #812.
+- `SA-0253` (#821): `_spec_session_emit` restated `session._default_emit`
+  line for line.
+  **Bucket 3**, conventions. **Landed:** a review commit on #821.
+- `SA-0253` (#821): two docstrings and a test local used bare "round",
+  which `CONTEXT.md` avoids.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #821.
+- `SA-0253` (#821): a docstring said `run_task`'s default flips a task
+  state, and it only prints a warning.
+  **Bucket 3**, conventions. **Landed:** a review commit on #821.
+- `SA-0254` (#822): every fixture amount divided exactly, so a floored or
+  rounded threshold passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #822.
+- `SA-0254` (#822): `_batch`'s comment was left stranded above a blank line.
+  **Bucket 3**, conventions. **Landed:** a review commit on #822.
