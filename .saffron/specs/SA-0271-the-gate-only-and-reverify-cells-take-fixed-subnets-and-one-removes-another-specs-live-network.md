@@ -52,9 +52,9 @@ forbidden:
   - saffron/cli.py
   - saffron/scheduler.py
   - tests/test_scheduler.py
-budget_usd: 36
+budget_usd: 52
 max_attempts: 3
-max_turns: 180
+max_turns: 230
 acceptance:
   - claim: >-
       Two gate-only cells of two specs can be up at once. Each claims its
@@ -248,9 +248,12 @@ position after `ports`, to `assert_host_is_unreachable`. Claim that network
 with `allocate_network` and pass `runtime.gateway` of the claimed subnet to
 both, by keyword. Keep its by-name pre-clean and its `finally` removal.
 Read `package_ready_task` and its witnesses in `tests/test_cli.py` at the
-tree base. Each witness that fakes `create_network` or records
-`assert_host_is_unreachable`'s arguments keeps its name and takes the new
-order. A wrong version in `SA-0268` names "the gate subnet", which this spec
+tree base. Each witness keeps its name, and these assertions turn
+over. "No subnet argument" becomes a subnet inside the pool. Every
+`runtime.GATEWAY`, the ports line's included, becomes the claimed subnet's
+gateway. Every `create_network` fake accepts `subnet`, since a fake that
+raises `TypeError` exits 2 and passes a refusal witness for the wrong
+reason. A wrong version in `SA-0268` names "the gate subnet", which this spec
 deletes. Leave that spec's text alone.
 
 ## Out of scope
@@ -268,9 +271,10 @@ deletes. Leave that spec's text alone.
 
 **Commit as each witness passes.** A cut-off attempt keeps the work.
 
-**Witness and mutant.** Criteria 1, 2 and 4 declare a witness and no
+**Witness and mutant.** Criteria 1, 2, 4 and 5 declare a witness and no
 mutant, so `witness` reports `skip` for them. Their code rests on
-`allocate_network`, which the parent writes after this spec. Criterion 3
+`allocate_network`, which the parent writes after this spec. Criterion 5
+also edits `SA-0268`'s probe, whose text this spec cannot quote. Criterion 3
 declares a mutant over a signature the change determines.
 
 **A model of the runtime's networks.** Criteria 1 and 2 fake
@@ -304,14 +308,6 @@ only the pool check reaches its subnet.
 its default is `inspect.Parameter.empty`. Import `proxy`, `preflight` and
 `session` inside the test body.
 
-**Criterion 5** drives `saffron package` as `SA-0268`'s witnesses do,
-over the model of the runtime's networks. Seed another spec's network on a
-pool /24 and a leftover under the probe's own name. Record the gateway each
-probe call receives. Assert the probe's subnet lies inside the pool and
-differs from the held one. Assert both probe calls received its gateway.
-After the command, assert the held network survives and the probe's does
-not.
-
 **Criterion 4** is one test with two halves.
 
 - Select podman as `_as_podman` does (`tests/test_runtime.py:95-107`). It
@@ -331,10 +327,22 @@ not.
   Assert the error holds the last create's ordinal and not the first's.
   That pins the last refusal's text.
 
+**Criterion 5** drives `saffron package` as `SA-0268`'s witnesses do,
+over the model of the runtime's networks. Seed another spec's network on
+the pool's first /24, so the claim must walk to a later one. The first
+/24's gateway equals `runtime.gateway` of the whole pool, so a held network
+elsewhere lets a hard-coded gateway pass. Seed a leftover under the probe's
+own name. Record each call to `probe_addresses` and
+`assert_host_is_unreachable`. Assert exit 0, exactly one call of each, and
+`package()` called once. Assert the probe's subnet lies inside the pool and
+differs from the held one, and both calls received its gateway. After the
+command, assert the held network survives and the probe's does not.
+
 **At the tree base each witness fails.** The sweep removes the first
 cell's network. Reverify's second create overlaps the first on the default
 subnet. The defaults exist. `create_network` admits the host inside the
-walk, and the exhaustion error carries no refusal's text.
+walk, and the exhaustion error carries no refusal's text. The package probe
+creates on `10.88.0.0/24`, outside the pool.
 
 **Existing tests that change.** Each keeps its name, since `census` fails
 a removed one.
