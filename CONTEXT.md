@@ -363,7 +363,7 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
 - **Contract gates**: the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates**: anything a repo adds against its own hard-to-fake
-  surfaces, conditional on touched paths. Names vary by repo and are not vocabulary.
+  surfaces. Each one executes on every task. Names vary by repo and are not vocabulary.
 
 _Avoid_: "check", "validation", "CI" (there is no CI), "the linter" for the `lint`
 gate. _Avoid_ naming any repo-defined gate here as though it were universal.
@@ -391,6 +391,12 @@ the blocking new failures that remain.
 _Avoid_: "verdict", which is the critic's confirm-or-withdraw of a finding.
 _Avoid_ also "the subtraction" for the whole: the subtraction produces only the
 third outcome, and it is not even attempted when either of the first two holds.
+
+**Re-gate**: The gate suite run again over a task's pull request head after
+PACKAGE, in gate-only cells and against a fresh baseline. `saffron regate` runs
+one (`SA-0284`). It is kept as a `task_regate` fact: the head, the baseline's
+commit and the count of new failures. A red re-gate moves no task state.
+_Avoid_: "re-verification", which judges a packaged commit for PACKAGE or the finishing layer.
 
 **Status**: A gate result is `pass`, `fail`, `skip`, or `error`.
 - `skip`: the repo declares no such gate. Not a failure. Nothing is wrong.
@@ -447,9 +453,19 @@ to ask whether the tests would notice the claim being broken. Withheld from the
 implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
 killed.
 _Avoid_: "mutation testing" for the gate as a whole. The gate runs one declared edit
-against one named witness, not a generated suite. _Avoid_ "mutant" for the tree
+against one named witness, not a generated suite. It also runs the constant mutants
+it derives from a repo's patterns. _Avoid_ "mutant" for the tree
 the edit is applied to. That is the worktree, mutated. _Avoid_ "mutant" for the
 edit a lens names in a review finding. That is a vacuity probe.
+
+**Constant mutant**: A find-and-replace edit the `witness` gate derives from the diff
+and applies as it applies a mutant (`DESIGN.md` §5.4.1). It changes the value the diff
+gives a constant, then runs each witness whose own text names that constant. A witness
+that stays green passes with any value of it. Most such witnesses read the constant
+back. Some feed it in, or name it only in a comment, and are false survivors. The repo
+declares what a constant and a witness's text look like, under `policy.yaml`'s `witness:`.
+_Avoid_ "criterion probe" for one. No session names it, and the implementer can see
+what it will change.
 
 **Vacuity probe**: A find-and-replace edit a *lens* names to show that the tests would not
 notice the behaviour it describes breaking. After REVIEW the host applies each anchored adequacy
@@ -521,6 +537,14 @@ Running that code in the container the lenses then re-exec their runner from wou
 hand it root over the critic (`SA-0089`, `DESIGN.md` §5.5). PACKAGE's
 re-verification uses one too.
 _Avoid_: "the gate cell", "the suite cell", "the third cell".
+
+**History run**: One run of a spec's declared `history` command in a Gate-only
+cell. A snapshot of the host's ledger is mounted read-only, and so are the
+host's mirrors, and the batch tree when the spec asks for it. The command reads a writable copy of the mount's
+`ledger.db`, with the batch tree linked read-only. Every lens reads its exit and
+both streams. It is the one place a change whose subject is history meets the
+real record (`DESIGN.md` §3.2).
+_Avoid_: "the history gate" (it is no gate and has no status), "the history check".
 
 **Implementer**: The session that holds write tools during IMPLEMENT and REBUT. It
 acts on the operator's behalf, directly or through the delegate that started the
@@ -626,8 +650,8 @@ it to the vocabulary.
 the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
 `GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
-`SPEC_DRAFTED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`,
-`MERGE_TRAIN`.
+`SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`,
+`MERGED`, `ORPHANED`, `MERGE_TRAIN`.
 A re-queue resumes the same row from six end states, so an end state need not be
 final. Every terminal state is an end state.
 
@@ -639,7 +663,7 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
-`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`.
+`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -655,7 +679,7 @@ checkpoint, ends `ORPHANED` the first time at a `spec_sha`. The second such cut 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase. Five more ways in share the state.
 The spend ceiling stops the task before its next turn. Its gates go red after the
-rebuttal. A REBUT that would halt at `REBUTTING` is cut short by its $10.00 cap. Its exported patch
+rebuttal. A REBUT that would end `REBUTTAL_UNJUDGED` is cut short by its $10.00 cap. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
 **`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
@@ -677,6 +701,16 @@ after three revisions. The review is a fact on the task. The spec is not queued 
 until it is edited. Under `saffron draft`, a writer reply that declares an id other
 than the task's is withheld too, with no further review (§3.4).
 _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
+
+**`REBUTTAL_UNJUDGED`**: A task whose REBUT ended before the critics judged the
+whole rebuttal. Either the rebuttal moved no commit and made no argument, or a
+lens that started gave no verdict, so the rebuttal is not fully judged. Its
+unjudged blockers stand. No pull request opens. The cell's branch is pushed
+only when `push_unpackaged_work` succeeds, and a dependent then stacks on it.
+A row whose latest run's push was refused can carry an earlier run's
+`pushed_sha`, and a dependent then stacks on that older branch. A stack batch
+counts the task a miss and refuses its children. A REBUT that its cap cut
+short ends `EXHAUSTED` instead.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.
@@ -739,8 +773,8 @@ of task, and that is the kind every consumer of either has to be right about.
 ## 7. Repos
 
 **Policy**: `.saffron/policy.yaml` in a target repo: gate roles and blocking
-levels, `elevate_on`, protected paths, envelope defaults, `integrity` patterns,
-thread env. Everything repo-shaped that is not an executable.
+levels, `elevate_on`, protected paths, `integrity` patterns, thread env.
+Everything repo-shaped that is not an executable.
 _Avoid_: "config", "settings", "the manifest".
 
 **Cell image**: Built from the repo's `.saffron/Dockerfile`, `FROM` a Saffron base
@@ -775,7 +809,8 @@ such as the port probe. That is fatal to the task, where the per-repo sense skip
 
 **Ledger**: The SQLite database at `~/.saffron/ledger.db`. Authoritative for state.
 Item 170 makes it an index that `saffron fold` rebuilds from the record on
-`refs/saffron/*`. It stays authoritative until a caller constructs it with a record.
+`refs/saffron/*`. It stays authoritative for every state read until the batch and run
+folds read the record instead.
 _Avoid_: "the DB" (ambiguous with fixture services inside a cell), "the store".
 
 **Batch tree**: The plain directory tree of artifacts under
@@ -794,7 +829,7 @@ Each name is the `kind` written to `events.jsonl` with `Event` appended, because
 `attempt_closed`, `gate_result`, `finding`, `rebuttal`, `decision`, `run_created`,
 `run_finished`, `run_preflight`, `batch_created`, `batch_closed`, `repo_upserted`,
 `stack_layer`, `end_review`, `qualification`, `spec_review`, `spec_finding`,
-`spec_text`, `stack_finish`.
+`spec_text`, `stack_finish`, `task_regate`, `task_engine`.
 The set is the record's whole alphabet, so it holds kinds nothing appends yet.
 > A fact is an entry in the record on `refs/saffron/*`. An event is a line of
 > `events.jsonl`. The two words do not merge.

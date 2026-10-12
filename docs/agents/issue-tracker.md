@@ -23,6 +23,13 @@ GitHub issues remain in use only for research/evidence records under
 - **`estimate_measured`** is a strict boolean, false by default. Set it true
   when `estimated_lines` came from a prototype's measured diff. `check` then
   prices the estimate at 1.0 and leaves it out of the overrun it measures.
+- **`history`** is optional and absent by default. Declare it when the
+  change's subject is history, such as a projection or a report.
+  It takes a `command` and a strict boolean `batches`, false by default.
+  REVIEW runs the command in a Gate-only cell over a snapshot of the host
+  ledger, and every lens reads what it printed (`DESIGN.md` §3.2). Point the
+  command at `--home "$SAFFRON_HISTORY_HOME"`. `SA-0285` adds the field and
+  `SA-0272` runs it. No spec can use it until both land.
 - **`consumes`** is optional and empty by default. Each entry is a
   repo-relative `path` or `path:name` that `depends_on[0]` produces. A spec
   that declares it needs a `depends_on`. `run_task` resolves each entry at
@@ -150,8 +157,9 @@ GitHub issues remain in use only for research/evidence records under
   easy to pass. `revert` is the strict one. It re-runs a subset with the diff's
   source files reverted and blocks any that still pass: **every test the diff
   adds, united with every declared witness the suite collected at head, minus
-  every `preserves` witness** (`saffron/gates/core/revert.py`). Two things
-  follow. A test the spec asks the cell to write is judged whether or not a
+  every `preserves` witness** (`saffron/gates/core/revert.py`). After REBUT
+  it also spares a test the rebuttal added that killed a surviving probe
+  (ADR 3). Two things follow. A test the spec asks the cell to write is judged whether or not a
   criterion declares it, so never ask in prose for a guard that passes at base.
   And a criterion describing behaviour already true at base — "nothing is
   pushed", "the breaker does not fire" — cannot be witnessed honestly as

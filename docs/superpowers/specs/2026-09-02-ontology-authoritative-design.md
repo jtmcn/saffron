@@ -128,7 +128,7 @@ spike is *for*, not whether it runs.
 > **Amended 2026-09-29.** Item 170 reverses the second bullet. The record on
 > `refs/saffron/*` becomes authoritative for facts, and the ledger an index folded
 > from it (`2026-09-20-the-record-on-git-refs-design.md`). The ledger stays
-> authoritative until that design's wiring lands.
+> authoritative for reads until that design's batch and run folds land.
 
 - **The ontology is authoritative for vocabulary** — what the words mean.
 - **The ledger is authoritative for facts** — what happened in a run.

@@ -4,7 +4,7 @@ title: The engine ships only as a checkout, so no other operator can install it 
 status: open
 tier: 2
 filed: 2026-10-06
-specs: []
+specs: [SA-0281]
 prs: []
 commits: []
 cites: [§1.4, §2, §5.1.2]

@@ -241,6 +241,22 @@ and no resume.
 in-cell agent is refused every write to `.pre-commit-config.yaml`, so a spec
 that names it ends `EXHAUSTED`.
 
+**Placed 2026-10-11**, from `SA-0273`'s first spec review: **b-6b06e1**. A
+rebuilt outcome for PACKAGE run alone drops the `revert` exemption, so a sound
+diff ends `MERGE_FAILED`.
+
+**Placed 2026-10-11**, from `SA-0276`'s spec review: **b-f603c9**. A
+`REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, and
+the child is cut from `base_sha` without the parent's code. Then
+**b-af24d1**: a resumed row with an open pull request that ends
+`REBUTTAL_UNJUDGED` is pushed onto that pull request's branch, and no merge
+moves it to `MERGED`.
+
+**Placed 2026-10-12**, from `SA-0278`'s spec review: **b-d4b847**, then
+**b-4eaaa4** and **b-6677b6**. A mirror that lacks a task's ref starts one
+with no `task_created` fact, and the fold refuses it. Facts written outside
+`run_task` never leave the host. No record append emits an event.
+
 **Placed 2026-10-12**, from the spec loop's run 35: **b-02d328**, **b-032c3e**,
 then **b-1c20da**. The `witness` gate blocks only at `elevated` risk, so a
 spec's own mutant survived and its task packaged. A lens that errors halts its
@@ -249,10 +265,17 @@ image store asks a registry for the proxy.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
+plan checkpoint still prices the tests that `size` leaves out, so an
+elevated plan can be refused when the gate would pass.
+
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
 sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
 **b-0569f7**, **b-da550a** and last **b-a9ec4b**.
+
+**Placed 2026-10-11**, from reviewing `SA-0282`: **b-e9153f**, after b-0569f7.
+A task a `--stack` batch mints never records whether its thread pool was uncapped.
 
 **Placed 2026-10-06**, from stopping a cell by hand: ~~**b-5df2a7**~~. SIGTERM skips
 the cell's teardown, so its containers and its task stay in flight.

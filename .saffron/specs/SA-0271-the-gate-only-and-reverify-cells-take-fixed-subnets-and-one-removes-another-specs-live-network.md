@@ -3,10 +3,10 @@ id: SA-0271
 title: The gate-only cell and reverify's cells take fixed subnets, and the gate-only cell's pre-clean removes another spec's live network
 type: feature
 priority: 3
-depends_on: [SA-0270]
+depends_on: [SA-0270, SA-0268]
 consumes:
   - saffron/cell/runtime.py:allocate_network
-estimated_lines: 480
+estimated_lines: 520
 estimate_measured: true
 touches:
   - saffron/cell/runtime.py
@@ -15,6 +15,7 @@ touches:
   - saffron/cell/runtimes/podman.py
   - saffron/phases/package.py
   - saffron/preflight.py
+  - saffron/task.py
   - tests/conftest.py
   - tests/test_session.py
   - tests/test_package.py
@@ -25,6 +26,7 @@ touches:
   - tests/test_worktree.py
   - tests/test_agent_runner.py
   - tests/test_review_cells.py
+  - tests/test_cli.py
   - docs/evidence/scripts/2026-08-28-egress-nat-order.py
   - docs/evidence/scripts/2026-10-01-critic-cell-peer-reach.py
 forbidden:
@@ -47,13 +49,12 @@ forbidden:
   - hooks/**
   - saffron/gates/**
   - saffron/agents/**
-  - saffron/task.py
   - saffron/cli.py
   - saffron/scheduler.py
   - tests/test_scheduler.py
-budget_usd: 36
+budget_usd: 52
 max_attempts: 3
-max_turns: 180
+max_turns: 230
 acceptance:
   - claim: >-
       Two gate-only cells of two specs can be up at once. Each claims its
@@ -120,6 +121,23 @@ acceptance:
       - The walk catches the host's refusal like any refused create and moves to the next /24.
       - The exhaustion error names the holders and drops every refusal's text.
       - The exhaustion error carries the first refused create's text.
+  - claim: >-
+      `saffron package`'s host probe claims its network from the pool. The
+      probe in `package_ready_task` claims `saffron-hostprobe-<spec id>` with
+      `allocate_network`, and the subnet it gets lies inside
+      `SUBNETS["pool"]`. It passes that subnet's gateway to
+      `probe_addresses` and to `assert_host_is_unreachable`, both by
+      keyword. A leftover under its own name is still removed before the
+      claim, and its `finally` removes its network before `package()` runs.
+      Another spec's live network on the pool survives the probe. The
+      witness runs the command with another spec's network held in the
+      model of the runtime's networks.
+    witness: tests/test_cli.py::test_package_probe_claims_its_network_from_the_pool_and_probes_its_gateway
+    wrong_versions:
+      - The probe network created on a fixed subnet, so it collides with the held network.
+      - The probe passing a gateway other than its claimed subnet's.
+      - The by-name pre-clean dropped, so a leftover under the probe's name makes its claim raise.
+      - The probe network left behind after `package()` runs.
 ---
 
 ## Context
@@ -130,7 +148,9 @@ every task network from the task. `SA-0270`, the parent, adds a pool to
 `runtime.SUBNETS` and the function `allocate_network`. That function walks
 the pool's /24s, claims one by creating the network on it, and returns the
 subnet it claimed. It raises `CellRuntimeError` when the pool is spent. Read
-both at the tree base before you start. Every line number below was read at
+both at the tree base before you start. `SA-0268`, the second entry in
+`depends_on`, adds `saffron package`. Its cell lands first, so its code is
+at your base too. Every line number below was read at
 `60f8b3f5`, the parent's own base, in code the parent leaves alone.
 
 **The gate-only cell takes one fixed subnet for every spec.** `critic_cell`
@@ -220,6 +240,22 @@ then raises as itself, never as an exhausted pool. The exhaustion error also
 carries the last refused create's own error text. The parent left both here
 on size.
 
+**`saffron package`'s host probe reads the names this spec deletes.**
+`SA-0268` adds `package_ready_task` to `saffron/task.py`. Its probe creates
+`saffron-hostprobe-<spec id>` with `runtime.create_network(name)` and no
+subnet. It passes `runtime.GATEWAY` to `preflight.probe_addresses` and, by
+position after `ports`, to `assert_host_is_unreachable`. Claim that network
+with `allocate_network` and pass `runtime.gateway` of the claimed subnet to
+both, by keyword. Keep its by-name pre-clean and its `finally` removal.
+Read `package_ready_task` and its witnesses in `tests/test_cli.py` at the
+tree base. Each witness keeps its name, and these assertions turn
+over. "No subnet argument" becomes a subnet inside the pool. Every
+`runtime.GATEWAY`, the ports line's included, becomes the claimed subnet's
+gateway. Every `create_network` fake accepts `subnet`, since a fake that
+raises `TypeError` exits 2 and passes a refusal witness for the wrong
+reason. A wrong version in `SA-0268` names "the gate subnet", which this spec
+deletes. Leave that spec's text alone.
+
 ## Out of scope
 
 - **One spec in two cells at once.** The gate-only cell stays named from
@@ -235,9 +271,10 @@ on size.
 
 **Commit as each witness passes.** A cut-off attempt keeps the work.
 
-**Witness and mutant.** Criteria 1, 2 and 4 declare a witness and no
+**Witness and mutant.** Criteria 1, 2, 4 and 5 declare a witness and no
 mutant, so `witness` reports `skip` for them. Their code rests on
-`allocate_network`, which the parent writes after this spec. Criterion 3
+`allocate_network`, which the parent writes after this spec. Criterion 5
+also edits `SA-0268`'s probe, whose text this spec cannot quote. Criterion 3
 declares a mutant over a signature the change determines.
 
 **A model of the runtime's networks.** Criteria 1 and 2 fake
@@ -290,10 +327,22 @@ its default is `inspect.Parameter.empty`. Import `proxy`, `preflight` and
   Assert the error holds the last create's ordinal and not the first's.
   That pins the last refusal's text.
 
+**Criterion 5** drives `saffron package` as `SA-0268`'s witnesses do,
+over the model of the runtime's networks. Seed another spec's network on
+the pool's first /24, so the claim must walk to a later one. The first
+/24's gateway equals `runtime.gateway` of the whole pool, so a held network
+elsewhere lets a hard-coded gateway pass. Seed a leftover under the probe's
+own name. Record each call to `probe_addresses` and
+`assert_host_is_unreachable`. Assert exit 0, exactly one call of each, and
+`package()` called once. Assert the probe's subnet lies inside the pool and
+differs from the held one, and both calls received its gateway. After the
+command, assert the held network survives and the probe's does not.
+
 **At the tree base each witness fails.** The sweep removes the first
 cell's network. Reverify's second create overlaps the first on the default
 subnet. The defaults exist. `create_network` admits the host inside the
-walk, and the exhaustion error carries no refusal's text.
+walk, and the exhaustion error carries no refusal's text. The package probe
+creates on `10.88.0.0/24`, outside the pool.
 
 **Existing tests that change.** Each keeps its name, since `census` fails
 a removed one.
@@ -370,8 +419,10 @@ two-task file (408) and its `start_proxy` edit (12) are not this spec's.
 That leaves 1115 tokens, or 279 lines. They cover the source edits,
 criteria 1 to 3 and the conftest model. The rest is counted by hand. The
 edits on the parent's real text come to about 95 lines. Criterion 4 and
-its `_admit` and error edits add about 45. The `start_proxy` default, the
+its `_admit` and error edits add about 45. The `saffron package` probe and
+criterion 5 add about 40, from `SA-0268`'s prototype, where the probe is
+about 25 lines. The `start_proxy` default, the
 keyword call, the three comments and the pool check add about 16. That
-sums to 435 lines. A margin of 45 for comments makes `estimated_lines`
-480, and the measured part is 58% of it. The `feature` ceiling is 3000
+sums to 475 lines. A margin of 45 for comments makes `estimated_lines`
+520, and the measured part is 54% of it. The `feature` ceiling is 3000
 tokens.
