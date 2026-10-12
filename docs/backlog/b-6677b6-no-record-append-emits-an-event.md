@@ -20,8 +20,8 @@ and no event implies an append. It binds once a production caller constructs a
 `Ledger` with a record
 (`docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md:363-367`).
 `SA-0278` is that caller and leaves the rule unbuilt. `Ledger._append` takes no
-event sink and emits nothing (`saffron/ledger.py:590-594`). The deferral was the
-operator's call on `SA-0278`'s pull request.
+event sink and emits nothing (`saffron/ledger.py:590-594`). The operator signs
+this deferral off on `SA-0278`'s pull request.
 
 Until it is built, `events.jsonl` can omit a fact the record holds, and nothing
 reports the gap.

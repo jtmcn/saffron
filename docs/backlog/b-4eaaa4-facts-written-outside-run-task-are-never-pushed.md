@@ -26,6 +26,16 @@ facts after that, or with no `run_task` at all.
 - Every fact of a `saffron draft` task, which never reaches `run_task`
   (`saffron/cli.py:1226`).
 - `reconcile`'s review states, `MERGED` among them.
+- The batch's spec review terminals, `GATE_ERROR`, `RATE_LIMITED` and
+  `SPEC_WITHHELD`, which end a task with no cell (`saffron/batch.py:578-721`).
+- A follow-up's spec writer, which charges attempts and records its text
+  (`saffron/follow_up.py:255`, `saffron/follow_up.py:375`).
+- `ORPHANED`, which `_drive_cell` stamps when the cell raises
+  (`saffron/cell/session.py:3304-3311`).
+- `SA-0264`'s `adopt` fact, written with no `run_task`.
+- The replay path's task facts (`saffron/replay.py:55-108`).
+- `SA-0268`'s `package_ready_task`, which runs PACKAGE with no `run_task` and
+  has no event stream to report a refused push on.
 
 Each lands in the mirror and stays there. ADR 10 says the record on
 `refs/saffron/*` lets a host VM be discarded

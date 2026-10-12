@@ -25,11 +25,14 @@ another checkout path, does it for any task.
 That ref holds no `task_created` fact. `_facts_of` refuses it
 (`saffron/record/fold.py:76-79`). A strict `saffron fold` then raises
 `UnreadableTask`, and `--skip-unreadable` folds the task to no rows. Its push is
-refused as stale, since the origin holds another history for the key.
+refused as stale only where the origin already holds the key's ref. An origin
+without it takes the push and publishes the lone ref.
 
 `SA-0278` names a cutover step: run `saffron migrate` before the first wired
 night. That covers the tasks the ledger holds then, in the mirror each repo row
-names. It covers no later mirror.
+names. It covers no later mirror. It also raises on a repo row whose mirror is
+gone, since it fetches into every row's mirror first
+(`saffron/record/migrate.py:608-615`).
 
 ## Done looks like
 

@@ -4,7 +4,7 @@ title: "No command constructs its `Ledger` with a record, so no fact a night wri
 type: feature
 priority: 1
 depends_on: [SA-0268, SA-0265, SA-0260, SA-0271]
-estimated_lines: 526
+estimated_lines: 538
 estimate_measured: true
 touches:
   - saffron/record/routed.py
@@ -95,11 +95,12 @@ acceptance:
   - claim: >-
       `run_task` pushes the task's record exactly once, after PACKAGE's last
       fact, on every way out of it that follows a returned cell. The witness
-      drives five: a packaged `READY_FOR_REVIEW`, an `EXHAUSTED` cell packaged
+      drives six: a packaged `READY_FOR_REVIEW`, an `EXHAUSTED` cell packaged
       in the exhausted mode, an `EXHAUSTED` cell PACKAGE never ran on, a
       `PackageError` from a `READY_FOR_REVIEW` cell's PACKAGE, a
-      `RuntimeError` from it, and a `KeyboardInterrupt` from it. In each case a fake PACKAGE, or a fake push of
-      unpackaged work, writes a `task_push` fact. After each, the origin reads
+      `RuntimeError` from it, and a `KeyboardInterrupt` from it. In each case
+      a fake PACKAGE, or a fake push of unpackaged work, writes a `task_push`
+      fact. After each, the origin reads
       the mirror's facts and ends with the fact written last.
     witness: tests/test_task_record.py::test_every_way_out_of_a_task_after_its_cell_pushes_its_record_once
     wrong_versions:
@@ -114,15 +115,18 @@ acceptance:
       state is unchanged, `run_task` returns it, and a raise out of PACKAGE
       still propagates as itself. The task's `events.jsonl` gains one
       `Teardown` event with `ok` false whose detail carries the push error's
-      message, which names the origin. The witness drives an origin path that
-      is no repository, an origin whose ref for the key holds another history,
-      and the first under a `PackageError`.
+      message. A `RecordError` and an `OSError` are both caught. The witness
+      drives an origin path that is no repository, an origin whose ref for the
+      key holds another history, the first under a `PackageError`, and a push
+      that raises `FileNotFoundError`, as git missing from `PATH` does. In the
+      first two the detail names the origin.
     witness: tests/test_task_record.py::test_a_refused_push_is_an_event_and_the_task_keeps_its_outcome
     wrong_versions:
       - A version that catches `StaleWriter` alone, so a missing remote raises.
       - A version that prints the refusal and emits no event.
       - A version that lets the push error propagate.
       - A version whose event detail is a fixed string without the error's message.
+      - A version that catches `RecordError` alone, so an `OSError` from the push propagates.
   - claim: >-
       The `Ledger` that `saffron`'s commands share is built with a
       `RoutedRecord`. The witness drives `saffron reconcile`: the `task_state`
@@ -258,11 +262,13 @@ reads `ledger` only when a write appends, after the name is bound.
 **`run_task`** calls `ledger.push_record(outcome.task_id)` once, after
 `run_one_cell` returns, on every way out that follows: both returns and
 every raise. A `try` around everything after the cell returns, with the
-push in its `finally`, does that. It catches `RecordError` from the push
-and emits a `Teardown` with `ok` false whose detail carries the error's
-message. It never changes `outcome.state` and never replaces an exception
-already propagating. A raise out of `run_one_cell` pushes nothing: the task
-never ended, and it stays in flight until a scan stamps it.
+push in its `finally`, does that. It catches `RecordError` and `OSError`
+from the push and emits a `Teardown` with `ok` false whose detail carries
+the error's message. It never changes `outcome.state` and never replaces an
+exception already propagating. A raise out of `run_one_cell` pushes
+nothing. `_drive_cell` stamps that task `ORPHANED` and re-raises
+(`saffron/cell/session.py:3304-3311`). Its facts stay in the mirror until a
+resumed run of the task pushes them.
 
 **`push_record` on a task with no row** returns plainly and writes nothing.
 Five tests in `tests/test_cli.py` stay green because of it. Each stubs
@@ -272,13 +278,6 @@ Five tests in `tests/test_cli.py` stay green because of it. Each stubs
 (`:167`), `test_an_unpackaged_task_names_the_branch_its_work_was_pushed_to`
 (`:200`), `test_package_events_land_in_the_runs_own_log` (`:296`) and
 `test_a_package_that_fails_and_one_that_breaks_exit_differently` (`:416`).
-
-**`package_ready_task`**, which `SA-0268` adds to `saffron/task.py`, also
-pushes the task's record once, after its call to `package()` returns or
-raises. A refused push is handled as `run_task` handles one: a `Teardown`
-with `ok` false lands in the task's `events.jsonl`, and the result or the
-exception is left as it was. No criterion witnesses this push. The notes say
-why.
 
 **The new `Teardown` call site gets its `FAMILIES` row**, citing
 `task.py:run_task` (`saffron/events.py:937-1020`). That moves the table's
@@ -291,9 +290,11 @@ fetch of an existing mirror, so the fetch neither prunes nor overwrites the
 record's refs. A comment of one or two lines says why.
 
 **The tests this breaks.** A local append raises when a task's mirror is no
-repository, as `_append` lets any record error do today. Eight tests in
-`tests/test_cli.py` seed a mirror path that does not exist and drive a
-command that writes a fact. They are
+repository, as `_append` lets any record error do today. So every test in
+`tests/test_cli.py` that drives a fact-writing command over a seeded mirror
+that is not a repository gets a bare repository under `tmp_path`. That rule
+covers the tests a dependency adds, `SA-0264`'s `adopt` witnesses included.
+On the prototype, cut from `bc879e2c`, eight tests met it. They are
 `test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer`,
 `test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state`,
 `test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state`,
@@ -306,9 +307,10 @@ and
 Their mirrors come from `_seed_repo`'s `"/m.git"` (`tests/test_cli.py:1971-1972`),
 `"/m.git"` in the stack helpers' own `upsert_repo` calls, and
 `_readiness_passes`'s `/tmp/pinned-mirror.git` (`tests/test_cli.py:3427-3445`).
-Give each a bare repository under `tmp_path` instead, through optional
-parameters on those helpers, and leave every other caller's arguments as
-they are.
+Where repairing `_seed_repo` itself is cheaper than repairing each caller,
+repair `_seed_repo`. `SA-0264`'s criterion 4 replaces `saffron.cli.Ledger`
+with a callable that passes its own `MemoryRecord`. Adapt that callable to
+accept a `record` keyword and ignore it, since `main` now passes one.
 
 **The documentation, as cell work.**
 
@@ -343,13 +345,22 @@ they are.
   request, and backlog item b-6677b6 holds it.
 - **Facts written after or outside `run_task`.** These land in the mirror.
   They reach the origin only on the task's next push. A merged task has
-  no next push. They are
-  `reconcile`'s review states, `MERGED` among them. They are `stack_layer`
-  (`saffron/batch.py:497`), `end_review` (`saffron/end_review.py:358`),
-  `stack_finish` (`saffron/finish.py:415`) and `qualification`
-  (`saffron/qualify.py:169`). They include every fact of a draft task. The
-  draft handler never reaches the task driver (`saffron/cli.py:1226`). ADR 10 says
-  the record lets a host VM be discarded
+  no next push. They are `reconcile`'s review states, `MERGED` among them.
+  They are `stack_layer` (`saffron/batch.py:497`), `end_review`
+  (`saffron/end_review.py:358`), `stack_finish` (`saffron/finish.py:415`)
+  and `qualification` (`saffron/qualify.py:169`). They include every fact of
+  a draft task. The draft handler never reaches the task driver
+  (`saffron/cli.py:1226`).
+  The batch's spec review ends a task in `GATE_ERROR`, `RATE_LIMITED` or
+  `SPEC_WITHHELD` with no cell (`saffron/batch.py:578-721`). A follow-up's
+  spec writer charges attempts and records its text
+  (`saffron/follow_up.py:255`, `saffron/follow_up.py:375`). A raise out of
+  the cell stamps `ORPHANED` (`saffron/cell/session.py:3304-3311`).
+  `SA-0264`'s `adopt` writes its fact with no `run_task`. The replay path
+  writes a task's facts with none either (`saffron/replay.py:55-108`).
+  `SA-0268`'s `package_ready_task` runs PACKAGE with no `run_task`, and this
+  spec adds no push to it: it has no event stream and no witness here.
+  ADR 10 says the record lets a host VM be discarded
   (`docs/adr/0010-saffron-ships-as-an-engine-each-operator-deploys.md:126-127`).
   That promise is not met while these facts live on one host. Backlog item
   b-4eaaa4 pushes them.
@@ -357,12 +368,17 @@ they are.
   (`saffron/repos/mirror.py:72`). So the operator runs `saffron migrate`
   after this spec merges and before the first wired night. It writes each
   repo's task refs into the mirror its repo row names
-  (`saffron/record/migrate.py:613`). Suppose it is skipped. The night's first
-  fact for an older task starts a ref holding that one `task_state` fact.
-  `reconcile`'s `MERGED` and a scan's `ORPHANED` are such facts. The fold refuses that ref
-  as unreadable (`saffron/record/fold.py:76-79`), and its push is refused as
-  stale. A night run from another checkout's mirror meets the same.
-  Backlog item b-d4b847 makes the fold, or the writer, tolerate it.
+  (`saffron/record/migrate.py:613`). It raises on a repo row whose mirror is
+  gone, since it fetches into every row's mirror first
+  (`saffron/record/migrate.py:608-615`). Suppose the step is skipped. The
+  night's first fact for an older task starts a ref holding that one
+  `task_state` fact. `reconcile`'s `MERGED` and a scan's `ORPHANED` are such
+  facts. The fold refuses that ref as unreadable
+  (`saffron/record/fold.py:76-79`). Its push is refused as stale only where
+  the origin already holds the key's ref. An origin without it takes the push
+  and publishes the lone ref. A night run from another checkout's mirror
+  meets the same. Backlog item b-d4b847 makes the fold, or the writer,
+  tolerate it.
 - **A retry, or a re-read of the remote.** A mirror can lack a task's ref.
   The task then appends a fresh history, and its push is refused as stale.
   A mirror made fresh, or one for another checkout path, does this. The
@@ -421,27 +437,29 @@ one of the task keys, at another commit. In the checkout, delete the `feature`
 branch and add one.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill. A
-prototype's witnesses killed all 22 on 2026-10-12, failed with the source
+prototype's witnesses killed all 23 on 2026-10-12, failed with the source
 reverted, and passed with the change. Do not run them yourself.
 
-**Written against `SA-0268`'s end state.** This spec depends on `SA-0264`
-to `SA-0268`, which add `adopt`, `ready_task` and `package_ready_task`. None
-is built, so the prototype was cut from `bc879e2c` without them. The eight
-repaired tests, the size and the wrong versions were measured there. Re-read
-each line this spec cites before editing it, since those specs move them.
-`package_ready_task`'s push is written against the function `SA-0268`
-describes. No criterion witnesses it, because the prototype had no
-`package_ready_task` to call or stub. A test you write for it is judged by
-`revert` like any other, so write one only if it fails without the push.
+**Criterion 5's `OSError` case.** Replace `RoutedRecord.push` with one that
+raises `FileNotFoundError` naming `git`. No local repository arrangement makes
+git itself fail to start.
+
+**Your base carries `SA-0264` to `SA-0268`.** They add `adopt`,
+`ready_task` and `package_ready_task`, and their tests. None was built when
+this spec was written, so the prototype was cut from `bc879e2c` without
+them. The eight repaired tests, the size and the wrong versions were
+measured there. Re-read each line this spec cites before editing it, since
+those specs move them. Apply the mirror rule above to their tests too.
 
 **The `prose` gate** counts every new comment, docstring and Markdown line.
 Write none with an em dash, a semicolon, a contraction, the perfect tense or
 a sentence over 25 words.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so the task is `elevated`
-and `size` blocks. The prototype held every source change but
-`package_ready_task`'s push, all seven witnesses, the eight repaired tests,
-the `FAMILIES` row and count, and the documentation. It measured 2045 tokens
-with `size`'s own counter against the `feature` ceiling of 3000. Source was
-625 of them, tests 1274, and documentation 146. `estimated_lines` is that
-count over four, plus 15 lines for `package_ready_task`'s push.
+and `size` blocks. The prototype held every source change, all seven
+witnesses, the eight repaired tests, the `FAMILIES` row and count, and the
+documentation. It measured 2131 tokens with `size`'s own counter against the
+`feature` ceiling of 3000. Source was 626 of them, tests 1359, and
+documentation 146. `estimated_lines` is that count over four, plus 5 lines
+for adapting `SA-0264`'s `Ledger` replacement, which the prototype lacked.
+The tests `SA-0264` to `SA-0268` add were not in it either.
