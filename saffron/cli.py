@@ -632,6 +632,35 @@ def _batch_runner(
     return run
 
 
+def _seed_branch(
+    predecessor: Candidate | None, stack_base: scheduler.StackBase | None
+) -> str | None:
+    """The branch a spec session with no layer of its own yet seeds its cell
+    on (ADR 7, criterion 1): the predecessor's own branch, else the stack
+    base's, else `None` for the pinned `base_sha`. A predecessor always
+    outranks the stack base. A later layer is cut from the batch's own
+    chain, never from the pull request the whole order stacks on."""
+    if predecessor is not None:
+        return _branch(predecessor.spec.id)
+    if stack_base is not None:
+        return stack_base.branch
+    return None
+
+
+def _stack_base_alive(pinned: PinnedBase) -> Callable[[str], bool]:
+    """`run_stack_batch`'s `stack_base_alive` (ADR 7, criterion 4/5).
+
+    Whether `branch` is still on the remote, read fresh with `remote_sha`,
+    against the pinned base's own mirror and url. An unreachable remote's
+    `PackageError` is let through uncaught, the same raise `_drive` already
+    counts as an abort."""
+
+    def alive(branch: str) -> bool:
+        return package_phase.remote_sha(pinned.url, branch, cwd=pinned.mirror) != ""
+
+    return alive
+
+
 def _stack_runner(
     *,
     pinned: PinnedBase,
@@ -639,23 +668,26 @@ def _stack_runner(
     repo: Path,
     ledger: Ledger,
     out_dir: Path,
+    stack_base: scheduler.StackBase | None = None,
 ) -> Callable[[Candidate, Candidate | None], CellOutcome | Refused]:
     """`run_stack_batch`'s adapter. Given a predecessor, it fetches that
     task's branch fresh into the mirror and hands `run_task` a `Handoff`
-    built from the fetch, never from `_resolve_stacked_on`. A predecessor
-    branch the origin no longer has raises `package_phase.ParentGone`, and
-    this never catches it: an unstacked cell is not this function's call to
-    make. It hands `run_task` the candidate's own `task_id`, never the
-    predecessor's, so a review's task is the one this cell runs on."""
+    built from the fetch, never from `_resolve_stacked_on`. With no
+    predecessor, it fetches the stack base's own branch instead, when this
+    batch has one (`_seed_branch`). A branch the origin no longer has raises
+    `package_phase.ParentGone`, and this never catches it: an unstacked cell
+    is not this function's call to make. It hands `run_task` the candidate's
+    own `task_id`, never the predecessor's, so a review's task is the one
+    this cell runs on."""
 
     def run(
         candidate: Candidate, predecessor: Candidate | None
     ) -> CellOutcome | Refused:
         spec = candidate.spec
-        if predecessor is None:
+        branch = _seed_branch(predecessor, stack_base)
+        if branch is None:
             handoff = Handoff(stacked_on=None, target_branch=None)
         else:
-            branch = _branch(predecessor.spec.id)
             head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
             handoff = Handoff(stacked_on=head, target_branch=branch)
         ceilings = spec_ceilings(spec)
@@ -959,12 +991,18 @@ def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
 
 
 def _stack_review(
-    *, pinned: PinnedBase, repo: Path, out_dir: Path
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    out_dir: Path,
+    stack_base: scheduler.StackBase | None = None,
 ) -> Callable[..., spec_review.SpecReviewSession]:
     """`run_stack_batch`'s `review` adapter (ADR 7). Given a layer, it
     fetches that spec's branch fresh and seeds the cell there. Given
-    `None`, it seeds the cell at the pinned `base_sha`. The system prompt and
-    gates always come from `base_sha`'s own export, never a layer's head.
+    `None`, it fetches the stack base's own branch instead, when this batch
+    has one, else it seeds the cell at the pinned `base_sha` (`_seed_branch`).
+    The system prompt and gates always come from `base_sha`'s own export,
+    never a layer's head.
     """
 
     def run(
@@ -974,10 +1012,10 @@ def _stack_review(
         spec_text: str | None = None,
         sentence: str | None = None,
     ) -> spec_review.SpecReviewSession:
-        if layer is None:
+        branch = _seed_branch(layer, stack_base)
+        if branch is None:
             head = pinned.base_sha
         else:
-            branch = _branch(layer.spec.id)
             head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
@@ -1035,16 +1073,22 @@ def _stack_review(
 
 
 def _stack_revise(
-    *, pinned: PinnedBase, repo: Path, out_dir: Path
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    out_dir: Path,
+    stack_base: scheduler.StackBase | None = None,
 ) -> Callable[
     [Candidate, Candidate | None, str | None, str], spec_review.SpecWriterSession
 ]:
     """`SA-0164`'s revision adapter (ADR 7), built the way
     `_stack_review` is. Given a layer, it fetches that spec's branch fresh
-    and seeds the cell there. Given `None`, it seeds the cell at the
-    pinned `base_sha`. The prompt and gates always come from `base_sha`'s
-    own export, never a layer's head. A `None` spec text reads the queued
-    file at `base_sha`, and a missing one raises `ValueError` before any cell.
+    and seeds the cell there. Given `None`, it fetches the stack base's own
+    branch instead, when this batch has one, else it seeds the cell at the
+    pinned `base_sha` (`_seed_branch`). The prompt and gates always come
+    from `base_sha`'s own export, never a layer's head. A `None` spec text
+    reads the queued file at `base_sha`, and a missing one raises
+    `ValueError` before any cell.
     """
 
     def run(
@@ -1061,10 +1105,10 @@ def _stack_revise(
             if queued is None:
                 raise ValueError(f"{path} not found at {pinned.base_sha}")
             spec_text = queued
-        if layer is None:
+        branch = _seed_branch(layer, stack_base)
+        if branch is None:
             head = pinned.base_sha
         else:
-            branch = _branch(layer.spec.id)
             head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
@@ -1898,6 +1942,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     open_prs: Callable[[], list[dict]] | None = None
     # Same: no finishing commit runs until then.
     stack_finish: Callable[[int, list[int]], object] | None = None
+    # Same: no spec is ever asked about a stack base, since none is chosen
+    # here (`SA-0267` does). The real callable is still built below.
+    stack_base_alive: Callable[[str], bool] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1965,19 +2012,28 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             if args.stack:
                 # A stack batch never rescans: the order is fixed right here.
                 # `repo_id` is still looked up fresh per task, not pinned now.
+                stack_base = (
+                    resolved.candidates[0].stack_base if resolved.candidates else None
+                )
                 stack_runner = _stack_runner(
                     pinned=pinned,
                     repo_id=lambda: ledger.resolve_repo_id(pinned.url),
                     repo=repo,
                     ledger=ledger,
                     out_dir=out_dir,
+                    stack_base=stack_base,
                 )
                 stack_end_review = _stack_end_review(
                     pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
                 )
-                stack_review = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
-                stack_revise = _stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+                stack_review = _stack_review(
+                    pinned=pinned, repo=repo, out_dir=out_dir, stack_base=stack_base
+                )
+                stack_revise = _stack_revise(
+                    pinned=pinned, repo=repo, out_dir=out_dir, stack_base=stack_base
+                )
                 stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
+                stack_base_alive = _stack_base_alive(pinned)
                 pooled: list[follow_up.Pooled] = []
                 assert writer_usd is not None  # set whenever `args.stack` is
                 follow_ups = _stack_follow_ups(
@@ -2046,6 +2102,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 follow_ups=follow_ups,
                 open_prs=open_prs,
                 finish=stack_finish,
+                stack_base_alive=stack_base_alive,
             )
             # The fixed order this batch ran, not every ledger task. A
             # follow-up's spec never joined it, so its layer shows no title.

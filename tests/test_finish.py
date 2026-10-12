@@ -136,6 +136,8 @@ def _stack(root: Path, count: int) -> SimpleNamespace:
         mirror=mirror,
         ledger=ledger,
         ledger_path=ledger_path,
+        repo_id=repo_id,
+        base_sha=base_sha,
         batch_id=batch_id,
         layers=layers,
         url=str(remote),
@@ -1652,6 +1654,151 @@ def test_a_pushed_stack_is_linked_bottom_to_top_with_its_finishing_layer_last(
     with pytest.raises(ValueError, match=str(s.batch_id)):
         link_stack(s.ledger, s.batch_id, mirror=s.mirror, url=s.url, gh=gh)
     assert gh.calls == []
+
+
+def test_a_stack_on_an_earlier_pull_request_is_finished_against_its_branch_and_never_linked(
+    tmp_path, monkeypatch
+):
+    """When a stack's first layer stacks on a stack base, `publish_finish`
+    expects that layer's pull request to target the stack base's branch.
+    It pushes when the pull request does, and escalates naming that branch
+    when it targets the default branch. `link_stack` then runs no `gh` and
+    returns one line saying nothing is linked."""
+    from saffron.finish import ESCALATE, PUSHED, link_stack, publish_finish
+
+    _isolate_git(tmp_path, monkeypatch)
+
+    # An earlier, two-layer stack: TE-1 (bottom) and TE-2 (top), both
+    # already pushed and pull-requested.
+    earlier = _stack(tmp_path / "earlier", 2)
+    bottom, top = earlier.layers
+
+    def _new_layer(name: str):
+        """A second batch whose one layer reuses the earlier stack's top
+        branch and head. No new git commit is needed. Its predecessor is
+        the earlier stack's bottom task, outside this new batch."""
+        s = SimpleNamespace(**vars(earlier))
+        s.batch_id = earlier.ledger.create_batch(100.0)
+        run_id = earlier.ledger.create_run(
+            s.repo_id, base_sha=earlier.base_sha, batch_id=s.batch_id
+        )
+        task_id = earlier.ledger.create_task(
+            run_id, spec_id=name, spec_sha="n" * 64, branch=top["branch"]
+        )
+        earlier.ledger.record_push(task_id, top["head"])
+        earlier.ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            top["branch"],
+            top["head"],
+            "https://github.com/o/r/pull/300",
+        )
+        earlier.ledger.record_stack_layer(
+            task_id,
+            position=1,
+            predecessor_task_id=bottom["task_id"],
+            generation=0,
+        )
+        s.layers = earlier.ledger.stack_layers(s.batch_id)
+        return s
+
+    # Escalated: the new layer's pull request targets the default branch,
+    # not the stack base's own branch (`bottom`'s), so the finish refuses.
+    s_escalate = _new_layer("TE-3-escalate")
+    sha_escalate = _finishing_commit(s_escalate.mirror, top["head"])
+    gh_escalate = _FakeGh({"https://github.com/o/r/pull/300": "trunk"})
+    lines_escalate = publish_finish(
+        s_escalate.ledger,
+        s_escalate.batch_id,
+        sha_escalate,
+        mirror=s_escalate.mirror,
+        url=s_escalate.url,
+        slug=s_escalate.slug,
+        verify=lambda sha_arg, base_arg: 0,
+        gh=gh_escalate,
+        workdir=tmp_path / "push-escalate",
+    )
+    assert lines_escalate == [
+        f"{ESCALATE}TE-3-escalate's pull request targets trunk, not {bottom['branch']}"
+    ]
+    assert gh_escalate.calls == [
+        [
+            "gh",
+            "pr",
+            "view",
+            "https://github.com/o/r/pull/300",
+            "--json",
+            "baseRefName",
+            "--jq",
+            ".baseRefName",
+        ]
+    ]
+
+    # Pushed: the new layer's pull request targets the stack base's own
+    # branch, so the finish pushes.
+    s_pushed = _new_layer("TE-3-pushed")
+    sha_pushed = _finishing_commit(s_pushed.mirror, top["head"])
+    gh_pushed = _FakeGh({"https://github.com/o/r/pull/300": bottom["branch"]})
+    branch = f"saffron/batch-{s_pushed.batch_id}-finish"
+    workdir = tmp_path / "push-pushed"
+    lines_pushed = publish_finish(
+        s_pushed.ledger,
+        s_pushed.batch_id,
+        sha_pushed,
+        mirror=s_pushed.mirror,
+        url=s_pushed.url,
+        slug=s_pushed.slug,
+        verify=lambda sha_arg, base_arg: 0,
+        gh=gh_pushed,
+        workdir=workdir,
+    )
+    assert lines_pushed == [
+        f"{PUSHED}{sha_pushed[:12]} to {branch}, draft pull request "
+        "https://github.com/o/r/pull/200"
+    ]
+
+    # `link_stack` runs no `gh` call at all here, and says so in one line.
+    gh_link = _FakeGh({})
+    lines_linked = link_stack(
+        s_pushed.ledger,
+        s_pushed.batch_id,
+        mirror=s_pushed.mirror,
+        url=s_pushed.url,
+        gh=gh_link,
+    )
+    assert gh_link.calls == []
+    assert len(lines_linked) == 1
+    assert "nothing is linked" in lines_linked[0]
+
+    # The earlier stack's own `link_stack` is unaffected: no predecessor
+    # outside it, so it links as every plain stack does.
+    earlier.ledger.record_stack_finish(
+        earlier.batch_id,
+        branch=f"saffron/batch-{earlier.batch_id}-finish",
+        head_sha=top["head"],
+        pr_url="https://github.com/o/r/pull/201",
+    )
+    gh_earlier = _FakeGh({})
+    lines_earlier = link_stack(
+        earlier.ledger,
+        earlier.batch_id,
+        mirror=earlier.mirror,
+        url=earlier.url,
+        gh=gh_earlier,
+    )
+    assert lines_earlier == ["linked 3 pull requests"]
+    assert gh_earlier.calls == [
+        [
+            "gh",
+            "stack",
+            "link",
+            "--base",
+            "trunk",
+            bottom["pr_url"],
+            top["pr_url"],
+            "https://github.com/o/r/pull/201",
+        ]
+    ]
 
 
 def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):

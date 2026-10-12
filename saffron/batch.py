@@ -445,6 +445,9 @@ def run_stack_batch(
     open_prs: Callable[[], list[dict]] | None = None,
     # Runs once, after the follow-ups, while the batch row is still open (ADR 7).
     finish: Callable[[int, list[int]], object] | None = None,
+    # `order[0].stack_base`'s own liveness check (ADR 7). `None` means every
+    # spec with no predecessor runs. `_batch` passes the real one under `--stack`.
+    stack_base_alive: Callable[[str], bool] | None = None,
 ) -> StopReason:
     """Run one stack's planned `order`, then its follow-ups, without rescanning (`SA-0142`,
     `SA-0162`). `runner` takes each candidate and its predecessor, the last one that reached
@@ -461,10 +464,16 @@ def run_stack_batch(
     if follow_ups is not None and review is None:
         raise ValueError("run_stack_batch needs review whenever follow_ups is given")
     order = list(order)
+    stack_base = order[0].stack_base if order else None
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
     predecessor: Candidate | None = None
-    predecessor_task_id: int | None = None
+    predecessor_task_id: int | None = (
+        stack_base.task_id if stack_base is not None else None
+    )
+    # `None` until a gone stack base is confirmed, then cached: the reason
+    # every further no-predecessor spec is refused with, asking nothing more.
+    stack_base_gone: str | None = None
     position = 0
     # Spec ids cleared `run`. A `wait` route is never added here, so the
     # next call for that spec reviews it again (ADR 7).
@@ -481,9 +490,9 @@ def run_stack_batch(
     # 0 for the order, 1 for its follow-ups, read by `wrapped` and
     # `record_layer` below, set once the order's own pass drains.
     generation = 0
-    # `_branch` of every layer this batch recorded, either generation. The
-    # exempt set a follow-up's and a revision's own open-pull-request check share.
-    layer_branches: set[str] = set()
+    # `_branch` of every layer this batch recorded, either generation, plus
+    # the stack base's own branch: the exempt set gate 0's checks share.
+    layer_branches: set[str] = {stack_base.branch} if stack_base is not None else set()
     # Spec ids whose review routed `run`, `escalate` or `revise`, decided by the
     # route alone, never by a raise, a wait or a `Refused` return.
     follow_up_reviewed: set[str] = set()
@@ -527,12 +536,32 @@ def run_stack_batch(
         return remaining
 
     def wrapped(candidate: Candidate) -> CellOutcome | Refused:
-        nonlocal predecessor
+        nonlocal predecessor, stack_base_gone
         pred = predecessor
         # `remaining` holds the object `_drive` offered, not the one
         # `dataclasses.replace` builds below. `list.remove` matches by value.
         original = candidate
         is_follow_up = generation == 1
+
+        # ADR 7, criterion 4: asked only with no predecessor yet, and never
+        # for a follow-up. `stack_base_gone` caches a `False` answer below.
+        if not is_follow_up and pred is None and stack_base is not None:
+            if (
+                stack_base_gone is None
+                and stack_base_alive is not None
+                and not stack_base_alive(stack_base.branch)
+            ):
+                stack_base_gone = (
+                    f"its stack base {stack_base.spec_id}'s pull request "
+                    f"branch {stack_base.branch} is gone — run the next "
+                    "batch, which reconciles it first"
+                )
+            if stack_base_gone is not None:
+                emit(f"{candidate.spec.id:<10} refused  {stack_base_gone}")
+                missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                remaining.remove(original)
+                return Refused(reason=stack_base_gone)
+
         if review is not None:
             if candidate.spec.id not in task_ids:
                 # Minted once per spec, never for a follow-up, already seeded.

@@ -1515,6 +1515,240 @@ def test_a_stack_batch_counts_a_raise_as_an_abort(ledger, repo_id):
     assert runner.calls == [("TE-1", None), ("TE-2", None)]
 
 
+def test_a_stacks_first_layer_records_the_earlier_pull_request_it_stacks_on(
+    ledger, repo_id
+):
+    """`run_stack_batch` records the stack base's task as the first layer's
+    predecessor, at that task's pushed sha. Every later layer's predecessor
+    stays the layer below it. `end_review.layer_fields` then starts the
+    first layer's range at the stack base's pushed sha, not at the run's
+    `base_sha`."""
+    from saffron.batch import run_stack_batch
+    from saffron.end_review import layer_fields
+    from saffron.scheduler import StackBase
+
+    # The stack base: an earlier batch's own task, already pushed and reviewable.
+    base_run_id = ledger.create_run(repo_id, base_sha="z" * 40)
+    base_task_id = ledger.create_task(
+        base_run_id, spec_id="TE-0", spec_sha="s" * 64, branch="saffron/TE-0"
+    )
+    ledger.record_push(base_task_id, "base-pushed-sha")
+    ledger.set_task_package(
+        base_task_id,
+        "READY_FOR_REVIEW",
+        "saffron/TE-0",
+        "base-pushed-sha",
+        "https://example.invalid/0",
+    )
+    stack_base = StackBase(spec_id="TE-0", task_id=base_task_id, branch="saffron/TE-0")
+
+    order = [
+        dataclasses.replace(_candidate("TE-1"), stack_base=stack_base),
+        _candidate("TE-2"),
+    ]
+    run1, task1 = _spend_task(ledger, repo_id, 1.0)
+    run2, task2 = _spend_task(ledger, repo_id, 1.0)
+    ledger.record_push(task1, "te1-pushed-sha")
+    results = {
+        "TE-1": _outcome(state="READY_FOR_REVIEW", run_id=run1, task_id=task1),
+        "TE-2": _outcome(state="READY_FOR_REVIEW", run_id=run2, task_id=task2),
+    }
+    runner = FakeStackRunner(results)
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+    )
+
+    assert reason == "DRAINED"
+
+    rows = _stack_layers(ledger)
+    assert [row["position"] for row in rows] == [1, 2]
+    assert rows[0]["task_key"] == ledger.record_key(task1)
+    assert rows[0]["predecessor_key"] == ledger.record_key(base_task_id)
+    assert rows[0]["predecessor_head"] == "base-pushed-sha"
+    assert rows[1]["task_key"] == ledger.record_key(task2)
+    assert rows[1]["predecessor_key"] == ledger.record_key(task1)
+
+    fields = layer_fields(ledger, ledger.record_key(task1))
+    assert fields.base == "base-pushed-sha"
+
+    # With no stack base, the first layer's predecessor is `None` as before.
+    plain_order = [_candidate("TE-3"), _candidate("TE-4")]
+    run3, task3 = _spend_task(ledger, repo_id, 1.0)
+    run4, task4 = _spend_task(ledger, repo_id, 1.0)
+    ledger.record_push(task3, "te3-pushed-sha")
+    plain_runner = FakeStackRunner(
+        {
+            "TE-3": _outcome(state="READY_FOR_REVIEW", run_id=run3, task_id=task3),
+            "TE-4": _outcome(state="READY_FOR_REVIEW", run_id=run4, task_id=task4),
+        }
+    )
+    reason_2 = run_stack_batch(
+        plain_order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=plain_runner,
+        readiness_check=_ready,
+    )
+    assert reason_2 == "DRAINED"
+    plain_rows = [
+        row
+        for row in _stack_layers(ledger)
+        if row["task_key"] in (ledger.record_key(task3), ledger.record_key(task4))
+    ]
+    plain_rows.sort(key=lambda row: row["position"])
+    assert plain_rows[0]["predecessor_key"] is None
+    fields_2 = layer_fields(ledger, ledger.record_key(task3))
+    assert fields_2.base == "a" * 40
+
+
+class _StackBaseAliveScript:
+    """Plays back one scripted answer per call, in order, and records
+    the branch it was asked about."""
+
+    def __init__(self, answers: list[bool]):
+        self._answers = list(answers)
+        self.calls: list[str] = []
+
+    def __call__(self, branch: str) -> bool:
+        self.calls.append(branch)
+        return self._answers.pop(0)
+
+
+def _stack_base_alive_fails_if_called(branch: str) -> bool:
+    raise AssertionError(f"stack_base_alive should not be asked about {branch}")
+
+
+def test_a_stack_whose_base_branch_is_gone_refuses_its_order_without_an_abort(
+    ledger, repo_id
+):
+    """Each time a spec of the order is offered with no predecessor,
+    `run_stack_batch` asks `stack_base_alive` about its stack base before
+    the mint. When the branch is gone, every remaining spec on that stack
+    base is refused. Each reason names the stack base and its branch, and
+    the remedy, to run the next batch, which reconciles it first. Nothing
+    more is minted, reviewed or run, no abort is counted, and the night
+    drains. Once a layer exists, nothing asks. An order with no stack base
+    never asks."""
+    from saffron.batch import run_stack_batch
+    from saffron.scheduler import StackBase
+
+    # `spec_id` and `branch` deliberately differ, so a reason naming only one
+    # of the two cannot be mistaken for naming both.
+    stack_base = StackBase(spec_id="TE-9000", task_id=1, branch="saffron/TE-0")
+
+    def _order(*, with_base: bool) -> list[Candidate]:
+        base = stack_base if with_base else None
+        return [
+            dataclasses.replace(_candidate("TE-1"), stack_base=base),
+            _candidate("TE-2"),
+            _candidate("TE-3"),
+        ]
+
+    # 1: gone before the first spec. Nothing is minted, reviewed or run,
+    # and every one of the three specs is refused by name.
+    script1 = _StackBaseAliveScript([False])
+    lines1: list[str] = []
+    reason1 = run_stack_batch(
+        _order(with_base=True),
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=FakeStackRunner({}),
+        readiness_check=_ready,
+        emit=lines1.append,
+        stack_base_alive=script1,
+    )
+    assert reason1 == "DRAINED"
+    assert script1.calls == ["saffron/TE-0"]
+    refused1 = [line for line in lines1 if "refused" in line]
+    assert len(refused1) == 3
+    assert {line.split()[0] for line in refused1} == {"TE-1", "TE-2", "TE-3"}
+    assert all("TE-9000" in line for line in refused1)
+    assert all("saffron/TE-0" in line for line in refused1)
+    assert all("run the next batch" in line for line in refused1)
+    assert not any(" raised " in line for line in lines1)
+
+    # 2: alive for the first spec, which misses, then gone. Asked twice,
+    # and the two specs offered after it are both refused.
+    script2 = _StackBaseAliveScript([True, False])
+    lines2: list[str] = []
+    run_te1, task_te1 = _spend_task(ledger, repo_id, 1.0)
+    runner2 = FakeStackRunner(
+        {"TE-1": _outcome(state="EXHAUSTED", run_id=run_te1, task_id=task_te1)}
+    )
+    reason2 = run_stack_batch(
+        _order(with_base=True),
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner2,
+        readiness_check=_ready,
+        emit=lines2.append,
+        stack_base_alive=script2,
+    )
+    assert reason2 == "DRAINED"
+    assert script2.calls == ["saffron/TE-0", "saffron/TE-0"]
+    assert runner2.calls == [("TE-1", None)]
+    refused2 = [line for line in lines2 if "refused" in line]
+    assert {line.split()[0] for line in refused2} == {"TE-2", "TE-3"}
+    assert not any(" raised " in line for line in lines2)
+
+    # 3: alive throughout. Asked once, for the first spec alone. Once it
+    # becomes a layer, every later spec has a predecessor and is never asked.
+    script3 = _StackBaseAliveScript([True])
+    runs3 = [_spend_task(ledger, repo_id, 1.0) for _ in range(3)]
+    runner3 = FakeStackRunner(
+        {
+            spec_id: _outcome(state="READY_FOR_REVIEW", run_id=run_id, task_id=task_id)
+            for spec_id, (run_id, task_id) in zip(
+                ("TE-1", "TE-2", "TE-3"), runs3, strict=True
+            )
+        }
+    )
+    reason3 = run_stack_batch(
+        _order(with_base=True),
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner3,
+        readiness_check=_ready,
+        stack_base_alive=script3,
+    )
+    assert reason3 == "DRAINED"
+    assert script3.calls == ["saffron/TE-0"]
+    assert runner3.calls == [("TE-1", None), ("TE-2", "TE-1"), ("TE-3", "TE-2")]
+
+    # 4: an order with no stack base never asks at all. A callable that
+    # raises if called proves it.
+    runs4 = [_spend_task(ledger, repo_id, 1.0) for _ in range(3)]
+    runner4 = FakeStackRunner(
+        {
+            spec_id: _outcome(state="READY_FOR_REVIEW", run_id=run_id, task_id=task_id)
+            for spec_id, (run_id, task_id) in zip(
+                ("TE-1", "TE-2", "TE-3"), runs4, strict=True
+            )
+        }
+    )
+    reason4 = run_stack_batch(
+        _order(with_base=False),
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner4,
+        readiness_check=_ready,
+        stack_base_alive=_stack_base_alive_fails_if_called,
+    )
+    assert reason4 == "DRAINED"
+    assert runner4.calls == [("TE-1", None), ("TE-2", "TE-1"), ("TE-3", "TE-2")]
+
+
 def test_a_stack_batch_records_one_layer_for_each_task_that_reached_review(tmp_path):
     """One `stack_layers` row per layer that reached `READY_FOR_REVIEW`. The
     same three rows come back with no record behind the ledger. A second
@@ -5548,6 +5782,103 @@ def test_a_revised_spec_meets_gate_0s_open_pull_request_refusals_before_its_cell
         open_pr_log, ["TE-143", "TE-144", "TE-145", "TE-147"], strict=True
     ):
         assert doubles.order[at - 1] == f"review:{spec_id}"
+
+
+def test_a_follow_up_and_a_revised_spec_on_an_earlier_pull_request_are_not_refused_on_it(
+    ledger, repo_id, monkeypatch
+):
+    """Gate 0's open pull request check, as `run_stack_batch` runs it,
+    exempts the stack base's branch. A revised spec of the order and a
+    follow-up both read it. Another open pull request still refuses each."""
+    from saffron import spec_review as spec_review_module
+    from saffron.batch import run_stack_batch
+    from saffron.scheduler import StackBase
+
+    monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 1.0)
+    monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 1.0)
+
+    base_run_id = ledger.create_run(repo_id, base_sha="z" * 40)
+    base_task_id = ledger.create_task(
+        base_run_id, spec_id="TE-200", spec_sha="s" * 64, branch="saffron/TE-200"
+    )
+    ledger.record_push(base_task_id, "base-pushed-sha")
+    ledger.set_task_package(
+        base_task_id,
+        "READY_FOR_REVIEW",
+        "saffron/TE-200",
+        "base-pushed-sha",
+        "https://example.invalid/200",
+    )
+    stack_base = StackBase(
+        spec_id="TE-200", task_id=base_task_id, branch="saffron/TE-200"
+    )
+
+    pull_requests = [
+        _pr(1, "saffron/TE-200", "a.py"),  # the stack base's own pull request
+        _pr(2, "saffron/SA-9000", "b.py"),  # unrelated, still refuses
+    ]
+    open_pr_log: list[int] = []
+
+    def open_prs() -> list[dict]:
+        open_pr_log.append(len(doubles.order))
+        return pull_requests
+
+    rows = {
+        "TE-201": {"route": ["revise", "run"], "revised_touches": ["m.py", "a.py"]},
+        "TE-202": {"route": ["revise", "run"], "revised_touches": ["m.py", "b.py"]},
+        "__follow_ups__": [
+            {"id": "TE-291", "touches": ["a.py"]},
+            {"id": "TE-292", "touches": ["b.py"]},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    order = [
+        dataclasses.replace(
+            _candidate("TE-201", budget_usd=1),
+            spec=_candidate("TE-201").spec.model_copy(update={"touches": ["m.py"]}),
+            stack_base=stack_base,
+        ),
+        dataclasses.replace(
+            _candidate("TE-202", budget_usd=1),
+            spec=_candidate("TE-202").spec.model_copy(update={"touches": ["m.py"]}),
+        ),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        revise=doubles.revise,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        open_prs=open_prs,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+
+    refused = {
+        line.split()[0]: line
+        for line in lines
+        if "refused" in line and "/pull/" in line
+    }
+    assert set(refused) == {"TE-202", "TE-292"}
+    assert "/pull/2" in refused["TE-202"]
+    assert "/pull/2" in refused["TE-292"]
+    assert not any("TE-201" in line for line in refused.values())
+    assert not any("TE-291" in line for line in refused.values())
+
+    assert doubles.revise_calls == ["TE-201", "TE-202"]
+    layers = _stack_layers(ledger, batch_id=_latest_batch_id(ledger))
+    assert [row["spec_id"] for row in layers] == ["TE-201", "TE-291"]
 
 
 def _fail_sleep(seconds: float) -> None:

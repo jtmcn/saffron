@@ -5435,6 +5435,184 @@ def test_only_the_stack_runner_hands_run_task_the_candidates_task(
     assert recorded == [7, 8, None]
 
 
+def test_a_stack_batchs_spec_with_no_predecessor_is_seeded_on_the_pull_request_its_order_stacks_on(
+    tmp_path, monkeypatch
+):
+    """Given no predecessor, `_stack_runner`, `_stack_review` and
+    `_stack_revise` each fetch the branch of the candidate's stack base and
+    seed there. The runner's `Handoff` names that branch and its fetched
+    head. Each spec session's cell starts at that head. A predecessor still
+    outranks the stack base, and a spec with neither seeds at `base_sha` as
+    before."""
+    from saffron.scheduler import StackBase
+    from saffron.task import Handoff
+
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+
+    # --- the runner's own `Handoff` ---
+    runner_fetches: list[tuple] = []
+
+    def _fake_fetch_for_runner(mirror, url, branch):
+        runner_fetches.append((mirror, url, branch))
+        return f"{branch}-head"
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch_for_runner)
+
+    def _plain_candidate(spec_id):
+        return Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.Spec(id=spec_id, title="t", type="chore"),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    handoffs: list[Handoff] = []
+
+    def _fake_run_task(
+        spec,
+        spec_sha,
+        *,
+        ceilings,
+        base,
+        repo_id,
+        repo,
+        ledger,
+        out_dir,
+        token,
+        handoff: Handoff | None = None,
+        task_id=None,
+        emit=None,
+    ):
+        assert handoff is not None
+        handoffs.append(handoff)
+        return CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    monkeypatch.setattr(cli, "run_task", _fake_run_task)
+
+    with_base = cli._stack_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+        stack_base=stack_base,
+    )
+    with_base(_plain_candidate("SY-1"), None)
+    assert handoffs[-1] == Handoff(
+        stacked_on="saffron/SY-9-head", target_branch="saffron/SY-9"
+    )
+
+    with_base(_plain_candidate("SY-1"), _plain_candidate("SY-7"))
+    assert handoffs[-1] == Handoff(
+        stacked_on="saffron/SY-7-head", target_branch="saffron/SY-7"
+    )
+
+    without_base = cli._stack_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+    without_base(_plain_candidate("SY-1"), None)
+    assert handoffs[-1] == Handoff(stacked_on=None, target_branch=None)
+
+    assert runner_fetches == [
+        (pinned.mirror, pinned.url, "saffron/SY-9"),
+        (pinned.mirror, pinned.url, "saffron/SY-7"),
+    ]
+    ledger.close()
+
+    # --- the spec review's and the spec writer's own seed ---
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    mirror, base_sha = rig.mirror, rig.base_sha
+    repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        return implement.AttemptResult(
+            session_id="sid",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.0,
+            rate_limit_status="rejected",
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    def _fake_run_spec_review(container, *, system_prompt, prompt, agent):
+        agent(container, prompt="x", options={})
+        return object()
+
+    monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+        return spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.0,
+            error=None,
+            resets_at=None,
+            session_id="s",
+            num_turns=0,
+            spec_sha="x" * 64,
+        )
+
+    monkeypatch.setattr(spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    pinned2 = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+
+    review_with_base = cli._stack_review(
+        pinned=pinned2, repo=repo, out_dir=out_dir, stack_base=stack_base
+    )
+    review_with_base(_candidate("SY-1"), None)
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-9")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    review_with_base(_candidate("SY-2"), _candidate("SY-7"))
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-7")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    review_without_base = cli._stack_review(pinned=pinned2, repo=repo, out_dir=out_dir)
+    review_without_base(_candidate("SY-3"), None)
+    assert cell_up_calls[-1]["tree_base"] == base_sha
+    assert len(fetch_calls) == 2
+
+    revise_with_base = cli._stack_revise(
+        pinned=pinned2, repo=repo, out_dir=out_dir, stack_base=stack_base
+    )
+    revise_with_base(_candidate("SY-4"), None, "spec text", "review text")
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-9")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    revise_with_base(_candidate("SY-5"), _candidate("SY-7"), "spec text", "review text")
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-7")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    revise_without_base = cli._stack_revise(pinned=pinned2, repo=repo, out_dir=out_dir)
+    revise_without_base(_candidate("SY-6"), None, "spec text", "review text")
+    assert cell_up_calls[-1]["tree_base"] == base_sha
+    assert len(fetch_calls) == 4
+
+
 def test_the_night_cannot_start_without_a_readiness_gate():
     """The loop used to bind a permissive stub, so a caller who simply forgot
     the argument got a vacuous §4.4 step 1 and a night that could start on an
@@ -6854,6 +7032,98 @@ def test_a_stack_batch_passes_run_stack_batch_its_spec_revision(tmp_path, monkey
     assert revise_calls == []
     assert len(stack_batch_calls) == 1
     assert stack_batch_calls[0]["revise"] is None
+
+
+def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing(
+    tmp_path, monkeypatch
+):
+    """`saffron batch --stack` hands `run_stack_batch` the `stack_base_alive`
+    that `cli._stack_base_alive` builds on the pinned base. That callable
+    reads the stack base's branch on the remote with `remote_sha`. A
+    present branch is true and a missing ref is false. An unreachable
+    remote raises `PackageError`, which `_drive` counts as an abort."""
+    alive_calls: list[task.PinnedBase] = []
+    alive_sentinel = object()
+
+    def _fake_stack_base_alive(pinned_arg):
+        alive_calls.append(pinned_arg)
+        return alive_sentinel
+
+    stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        stack_batch_calls.append(kwargs)
+        return "DRAINED"
+
+    pinned = task.PinnedBase(
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+
+    with monkeypatch.context() as m:
+        m.chdir(tmp_path)
+        m.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+        m.setattr(cli, "_stack_base_alive", _fake_stack_base_alive)
+        m.setattr(
+            cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+        )
+        m.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+        # Case 1: readiness passes, `--stack`. Built once, on the pinned base.
+        _readiness_passes(m)
+        home1 = tmp_path / "home1"
+        assert main(["--home", str(home1), "batch", "--stack"]) == 0
+
+        assert alive_calls == [pinned]
+        assert len(stack_batch_calls) == 1
+        assert stack_batch_calls[0]["stack_base_alive"] is alive_sentinel
+
+        # Case 2: readiness fails. Never built, and `None` reaches the batch.
+        alive_calls.clear()
+        stack_batch_calls.clear()
+        m.setattr(
+            cli.preflight,
+            "check_readiness",
+            lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+        )
+        home2 = tmp_path / "home2"
+        main(["--home", str(home2), "batch", "--stack"])
+
+        assert alive_calls == []
+        assert len(stack_batch_calls) == 1
+        assert stack_batch_calls[0]["stack_base_alive"] is None
+
+        # Case 3: `batch` without `--stack`. Never built either.
+        alive_calls.clear()
+        stack_batch_calls.clear()
+        _readiness_passes(m)
+        home3 = tmp_path / "home3"
+        m.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+        assert main(["--home", str(home3), "batch"]) == 0
+
+        assert alive_calls == []
+
+    # The real one, driven against real git. Unaffected by the faked
+    # `real_remote` above, which this block never enters.
+    repo = _local_origin(tmp_path)
+    present_head = _push_parent_branch(repo, "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+    real_pinned = task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40)
+    real_alive = cli._stack_base_alive(real_pinned)
+
+    assert real_alive("saffron/SY-9000") is True
+    assert real_alive("saffron/SY-missing") is False
+    assert _rev_parse(repo, "saffron/SY-9000") == present_head
+
+    unreachable = task.PinnedBase(
+        mirror=mirror,
+        url=str(tmp_path / "no-such-remote.git"),
+        base_sha="a" * 40,
+    )
+    unreachable_alive = cli._stack_base_alive(unreachable)
+    with pytest.raises(package.PackageError):
+        unreachable_alive("saffron/SY-9000")
 
 
 def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_file(

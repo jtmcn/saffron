@@ -128,6 +128,21 @@ SETTLED_STATES = (DONE_STATES - DEPENDENCY_WAITING_STATES) - {
 
 
 @dataclass(frozen=True)
+class StackBase:
+    """A stack order's parent outside it: an earlier batch's or cell's own
+    open pull request (ADR 7, `DESIGN.md` §4.2.1, backlog item b-e0e1cf).
+
+    `task_id` is that pull request's own task. It names no task of this
+    order, and is read for its branch and its pushed head. Nothing in this
+    module sets this yet. `SA-0267` is what chooses one.
+    """
+
+    spec_id: str
+    task_id: int
+    branch: str
+
+
+@dataclass(frozen=True)
 class Candidate:
     """One spec worth running tonight.
 
@@ -146,6 +161,8 @@ class Candidate:
     spec: Spec
     spec_sha: str
     task_id: int | None
+    # `None` for every candidate this module builds. `SA-0267` is what sets it.
+    stack_base: StackBase | None = None
 
 
 # `preflight` has no site here: a repo that failed preflight is refused by the batch.
