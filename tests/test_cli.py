@@ -2461,6 +2461,418 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
     assert refusals == []
 
 
+def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron package <spec id> --repo <path>` rebuilds the task with
+    `ready_task`, probes the host itself in its own network, and calls
+    `package()` once with every value that rebuild carried. The probe
+    tolerates one listener, and `--repo` is resolved from a relative
+    path."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-PKG", state="READY_FOR_REVIEW")
+    ledger.close()
+
+    resolved_repo = checkout.resolve()
+    spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": "SY-PKG"})
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=7,
+        task_dir=tmp_path / "taskdir",
+    )
+    ready = task.ReadyTask(
+        outcome=outcome, spec=spec, parent_branch="saffron/SY-PARENT"
+    )
+
+    calls = []
+
+    def fake_ready_task(spec_id, *, repo, repo_id, ledger, out_dir):
+        calls.append(("ready_task", spec_id, repo, repo_id))
+        return ready
+
+    monkeypatch.setattr(task, "ready_task", fake_ready_task)
+
+    mirror = tmp_path / "mirror.git"
+
+    def fake_prepare_mirror(repo_arg, mirror_path):
+        calls.append(("prepare_mirror", repo_arg, mirror_path))
+        return mirror, "https://github.com/owner/repo.git", "b" * 40
+
+    monkeypatch.setattr(preflight, "prepare_mirror", fake_prepare_mirror)
+
+    def fake_build_cell_image(repo_arg):
+        calls.append(("build_cell_image", repo_arg))
+        return "saffron/cell:repo"
+
+    monkeypatch.setattr(repo_image, "build_cell_image", fake_build_cell_image)
+
+    def fake_remove_network(name):
+        calls.append(("remove_network", name))
+        return subprocess.CompletedProcess([name], 0, "", "")
+
+    def fake_create_network(name, *args, **kwargs):
+        calls.append(("create_network", name, args, kwargs))
+
+    monkeypatch.setattr(runtime, "remove_network", fake_remove_network)
+    monkeypatch.setattr(runtime, "create_network", fake_create_network)
+
+    sockets = [("Tailscale", 8000), ("Postgres", 5432)]
+
+    def fake_host_probe_ports():
+        calls.append(("host_probe_ports",))
+        return [5432], ["Tailscale"], sockets
+
+    monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw, "192.168.1.9"])
+
+    def fake_assert_unreachable(image_tag, network, ports, gateway, sockets_arg):
+        calls.append(
+            (
+                "assert_host_is_unreachable",
+                image_tag,
+                network,
+                ports,
+                gateway,
+                sockets_arg,
+            )
+        )
+
+    monkeypatch.setattr(
+        preflight, "assert_host_is_unreachable", fake_assert_unreachable
+    )
+
+    pr_url = "https://github.com/owner/repo/pull/42"
+
+    def fake_package(outcome_arg, **kwargs):
+        calls.append(("package", outcome_arg, kwargs))
+        return package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url=pr_url, branch="saffron/SY-PKG"
+        )
+
+    monkeypatch.setattr(package, "package", fake_package)
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("run_one_cell must not run")
+
+    monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+    code = cli.main(["--home", str(home), "package", "SY-PKG", "--repo", checkout.name])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert pr_url in out
+    assert "tolerating Tailscale" in out
+    assert "probing 1 host ports" in out
+    # Not a substring alone: the two addresses the probe covered must
+    # both appear, so a dropped address cannot hide behind this check.
+    assert runtime.GATEWAY in out
+    assert "192.168.1.9" in out
+
+    names = [c[0] for c in calls]
+    assert names == [
+        "ready_task",
+        "prepare_mirror",
+        "build_cell_image",
+        "remove_network",
+        "create_network",
+        "host_probe_ports",
+        "assert_host_is_unreachable",
+        "remove_network",
+        "package",
+    ]
+
+    network_name = "saffron-hostprobe-SY-PKG"
+    assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id)
+    assert calls[1][1:] == (resolved_repo, cli._mirror_path(resolved_repo, home))
+    assert calls[2][1] == resolved_repo
+    assert calls[3][1] == network_name
+    assert calls[4][1:] == (network_name, (), {})
+    assert calls[7][1] == network_name
+
+    _, image_tag, assert_network, assert_ports, assert_gateway, assert_sockets = calls[
+        6
+    ]
+    assert image_tag == repo_image.BASE_TAG
+    assert assert_network == network_name
+    assert assert_ports == [5432]
+    assert assert_gateway == runtime.GATEWAY
+    assert assert_sockets == sockets
+
+    package_outcome, package_kwargs = calls[8][1], calls[8][2]
+    assert package_outcome is outcome
+    assert package_kwargs["spec"] is spec
+    assert package_kwargs["repo"] == resolved_repo
+    assert package_kwargs["mirror"] == mirror
+    assert package_kwargs["image"] == "saffron/cell:repo"
+    assert package_kwargs["out_dir"] == home / "batches" / "v0"
+    assert package_kwargs["token"] == "a-token"
+    assert package_kwargs["parent_branch"] == "saffron/SY-PARENT"
+
+
+def test_package_refused_by_ready_task_exits_one_and_takes_no_host_step(
+    tmp_path, monkeypatch, capsys
+):
+    """A `Refused` from `ready_task` prints `package:` and the reason and
+    exits 1, before the mirror, the image, the network or `package()`."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    monkeypatch.setattr(
+        task, "ready_task", lambda *a, **k: task.Refused(reason="no such task")
+    )
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("no host step runs after a refusal")
+
+    monkeypatch.setattr(preflight, "prepare_mirror", must_not_run)
+    monkeypatch.setattr(repo_image, "build_cell_image", must_not_run)
+    monkeypatch.setattr(runtime, "create_network", must_not_run)
+    monkeypatch.setattr(runtime, "remove_network", must_not_run)
+    monkeypatch.setattr(package, "package", must_not_run)
+    monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+    code = cli.main(
+        ["--home", str(home), "package", "SY-REFUSED", "--repo", str(checkout)]
+    )
+
+    assert code == 1
+    assert "package: no such task" in capsys.readouterr().out
+
+
+def test_package_exits_by_the_token_and_by_what_package_returned_or_raised(
+    tmp_path, monkeypatch, capsys
+):
+    """An unset, empty or blank token exits 2 before `ready_task` runs. A
+    `package()` returning `MERGE_FAILED` exits 1 and prints its note. A
+    `package()` that raises exits 2 and leaves the task untouched, so the
+    command can take it again."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-TOKEN", state="READY_FOR_REVIEW")
+    ledger.close()
+
+    reached = []
+    monkeypatch.setattr(task, "ready_task", lambda *a, **k: reached.append(True))
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("run_one_cell must not run")
+        ),
+    )
+
+    for blank in ("", "   "):
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", blank)
+        assert (
+            cli.main(
+                ["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)]
+            )
+            == 2
+        )
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert (
+        cli.main(["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)])
+        == 2
+    )
+    assert reached == []
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": "SY-TOKEN"})
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW", task_id=task_id, run_id=1, task_dir=tmp_path / "td"
+    )
+    ready = task.ReadyTask(outcome=outcome, spec=spec, parent_branch=None)
+    monkeypatch.setattr(task, "ready_task", lambda *a, **k: ready)
+    monkeypatch.setattr(
+        preflight,
+        "prepare_mirror",
+        lambda repo, mp: (tmp_path / "m.git", "u", "b" * 40),
+    )
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "img")
+    monkeypatch.setattr(runtime, "create_network", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime,
+        "remove_network",
+        lambda name: subprocess.CompletedProcess([name], 0, "", ""),
+    )
+    monkeypatch.setattr(preflight, "host_probe_ports", lambda: ([], [], []))
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+    monkeypatch.setattr(preflight, "assert_host_is_unreachable", lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        package,
+        "package",
+        lambda *a, **k: package.PackageResult(
+            state="MERGE_FAILED", note="lease rejected"
+        ),
+    )
+    assert (
+        cli.main(["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)])
+        == 1
+    )
+    assert "lease rejected" in capsys.readouterr().out
+
+    def raises_package(*a, **k):
+        raise package.PackageError("gate broke")
+
+    monkeypatch.setattr(package, "package", raises_package)
+    check = Ledger(home / "ledger.db")
+    before = _task_row(check, task_id)
+    check.close()
+
+    assert (
+        cli.main(["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)])
+        == 2
+    )
+
+    check = Ledger(home / "ledger.db")
+    after = _task_row(check, task_id)
+    check.close()
+    assert after == before
+    assert after["state"] == "READY_FOR_REVIEW"
+    assert after["pr_url"] is None
+
+
+def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
+    tmp_path, monkeypatch, capsys
+):
+    """A `PreflightFailed` from `host_probe_ports` or from
+    `assert_host_is_unreachable` exits 2. A leftover network is removed
+    first, the scratch network is created with no subnet, and it is
+    removed again. `package()` is never called. The witness drives both."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    def one_trial(break_step, spec_id, dirname):
+        checkout = _checkout_with_origin(
+            tmp_path, "https://github.com/owner/repo.git", dirname=dirname
+        )
+        home = tmp_path / f"home-{dirname}"
+        home.mkdir()
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+        ledger = Ledger(home / "ledger.db")
+        repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+        task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state="READY_FOR_REVIEW")
+        ledger.close()
+
+        spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": spec_id})
+        outcome = CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "td",
+        )
+        ready = task.ReadyTask(outcome=outcome, spec=spec, parent_branch=None)
+        monkeypatch.setattr(task, "ready_task", lambda *a, **k: ready)
+        monkeypatch.setattr(
+            preflight,
+            "prepare_mirror",
+            lambda repo, mp: (tmp_path / "m.git", "u", "b" * 40),
+        )
+        monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "img")
+
+        calls = []
+
+        def fake_remove_network(name):
+            calls.append(("remove_network", name))
+            return subprocess.CompletedProcess([name], 0, "", "")
+
+        def fake_create_network(name, *args, **kwargs):
+            calls.append(("create_network", name, args, kwargs))
+
+        monkeypatch.setattr(runtime, "remove_network", fake_remove_network)
+        monkeypatch.setattr(runtime, "create_network", fake_create_network)
+
+        if break_step == "host_probe_ports":
+
+            def fake_host_probe_ports():
+                calls.append(("host_probe_ports",))
+                raise preflight.PreflightFailed("lsof missing")
+
+            monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
+            expected_names = [
+                "remove_network",
+                "create_network",
+                "host_probe_ports",
+                "remove_network",
+            ]
+        else:
+
+            def fake_host_probe_ports():
+                calls.append(("host_probe_ports",))
+                return [5432], [], []
+
+            def fake_assert_unreachable(*a, **k):
+                calls.append(("assert_host_is_unreachable",))
+                raise preflight.PreflightFailed("host answered")
+
+            monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
+            monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+            monkeypatch.setattr(
+                preflight, "assert_host_is_unreachable", fake_assert_unreachable
+            )
+            expected_names = [
+                "remove_network",
+                "create_network",
+                "host_probe_ports",
+                "assert_host_is_unreachable",
+                "remove_network",
+            ]
+
+        def fake_package(*a, **k):
+            calls.append(("package",))
+            raise AssertionError("package() must not run after a probe refusal")
+
+        monkeypatch.setattr(package, "package", fake_package)
+
+        def must_not_run(*a, **k):
+            raise AssertionError("run_one_cell must not run")
+
+        monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+        code = cli.main(
+            ["--home", str(home), "package", spec_id, "--repo", str(checkout)]
+        )
+
+        assert code == 2
+        names = [c[0] for c in calls]
+        # Exact, not a subset: a skipped probe still removes and recreates
+        # the network, so only the sequence catches package() running instead.
+        assert names == expected_names
+        network_name = f"saffron-hostprobe-{spec_id}"
+        assert calls[0][1] == network_name
+        assert calls[1][1:] == (network_name, (), {})
+        assert calls[-1][1] == network_name
+
+    one_trial("host_probe_ports", "SY-PROBE-A", "checkout-probe-a")
+    one_trial("assert_host_is_unreachable", "SY-PROBE-B", "checkout-probe-b")
+
+
 def test_watch_reads_the_batch_tree_the_cli_already_computes(tmp_path, monkeypatch):
     """The task directory `watch` reads is `out_dir / task` — the same
     batch-tree root `main` already computes from `--home` for every other

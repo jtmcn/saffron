@@ -68,8 +68,8 @@ Measured on macOS 26.6 with `container` 1.3.0. Older versions are untested.
   `brew install prek`
 - **`git`** and **[`gh`](https://cli.github.com/)** — `queue`, `reconcile`, and PR
   packaging shell out to `gh`
-- **`CLAUDE_CODE_OAUTH_TOKEN`** — from `claude setup-token`; needed only by `cell` and
-  `batch`
+- **`CLAUDE_CODE_OAUTH_TOKEN`** — from `claude setup-token`; needed only by `cell`,
+  `batch` and `package`
 
 On a Linux host that cannot run `apple/container`, set `SAFFRON_CELL_RUNTIME=podman`.
 Cells then share the host kernel instead of getting a VM each. The trade is measured in
@@ -88,9 +88,9 @@ cd saffron
 make install
 ```
 
-`saffron cell` and `saffron batch` run inside two images you build once, and
-again after editing either Dockerfile. The repo's own image is built from these
-automatically.
+`saffron cell`, `saffron batch` and `saffron package` run inside two images you build
+once, and again after editing either Dockerfile. The repo's own image is built from
+these automatically.
 
 ```sh
 container build -t saffron/cell-base:python -f images/cell-base.python.Dockerfile .
@@ -135,6 +135,13 @@ task's own, and replay an already-merged PR agent-free:
 uv run saffron reconcile --repo .
 uv run saffron adopt <spec id> <pr> --repo .
 uv run saffron replay <repo> <pr>
+```
+
+Run PACKAGE alone on a `READY_FOR_REVIEW` task whose own PACKAGE raised. No agent
+runs, and the token is scoped the same way:
+
+```sh
+CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron package <spec id> --repo .
 ```
 
 Under launchd, `batch` needs `PYTHONUNBUFFERED=1`. Without it, a SIGKILL loses whatever output

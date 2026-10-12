@@ -48,9 +48,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from saffron import spec_review
+from saffron import preflight, spec_review
 from saffron.agents import context
 from saffron.agents.findings import Finding
+from saffron.cell import runtime
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, LiveState, run_one_cell
 from saffron.events import (
@@ -998,3 +999,74 @@ def ready_task(
         notes=notes,
     )
     return ReadyTask(outcome=outcome, spec=spec, parent_branch=parent_branch)
+
+
+def package_ready_task(
+    spec_id: str,
+    *,
+    repo: Path,
+    repo_id: int | None,
+    ledger: Ledger,
+    out_dir: Path,
+    mirror_path: Path,
+    token: str | None,
+) -> package_phase.PackageResult | Refused:
+    """`saffron package`'s whole body: `ready_task`'s rebuild, then every
+    step PACKAGE needs on its own, with no agent and no `run_one_cell`.
+
+    Returns `ready_task`'s `Refused` untouched, before the mirror, the
+    image or the network exist. On a `ReadyTask` it prepares the mirror
+    and builds the repo's image. It then runs N1's host-binding probe in
+    a network named for this spec id, and calls `package_phase.package`
+    once.
+    """
+    ready = ready_task(
+        spec_id, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    if isinstance(ready, Refused):
+        return ready
+
+    mirror, _, _ = preflight.prepare_mirror(repo, mirror_path)
+    image = repo_image.build_cell_image(repo)
+
+    # A prefix no other network uses, so a killed run's leftover cannot
+    # collide with re-verification's own `saffron-pkg-` names.
+    network = f"saffron-hostprobe-{spec_id}"
+    runtime.remove_network(network)
+    try:
+        runtime.create_network(network)
+        ports, tolerated, sockets = preflight.host_probe_ports()
+        addresses = preflight.probe_addresses(runtime.GATEWAY)
+        detail = (
+            f"probing {len(ports)} host ports at "
+            + ", ".join(addresses)
+            + "; tolerating "
+            + (", ".join(tolerated) or "nothing")
+        )
+        print(
+            describe(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="ports",
+                    detail=detail,
+                )
+            )
+        )
+        preflight.assert_host_is_unreachable(
+            repo_image.BASE_TAG, network, ports, runtime.GATEWAY, sockets
+        )
+    finally:
+        runtime.remove_network(network)
+
+    return package_phase.package(
+        ready.outcome,
+        spec=ready.spec,
+        repo=repo,
+        mirror=mirror,
+        image=image,
+        ledger=ledger,
+        out_dir=out_dir,
+        token=token,
+        parent_branch=ready.parent_branch,
+    )

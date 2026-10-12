@@ -1,5 +1,5 @@
-"""`saffron`: cell, batch, draft, queue, reconcile, adopt, watch, fold,
-migrate, chains, serve, replay. `ratify` and `gc` are still unbuilt
+"""`saffron`: cell, batch, draft, queue, reconcile, adopt, package, watch,
+fold, migrate, chains, serve, replay. `ratify` and `gc` are still unbuilt
 (§4.2.1, §4.5)."""
 
 from __future__ import annotations
@@ -67,6 +67,7 @@ from saffron.task import (
     PinnedBase,
     Refused,
     ResolvedCeilings,
+    package_ready_task,
     run_task,
     spec_ceilings,
 )
@@ -172,6 +173,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     adopt_parser.add_argument("pr", type=int)
     adopt_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
+    package_parser = subcommands.add_parser(
+        "package",
+        help="run PACKAGE alone on a READY_FOR_REVIEW task whose own "
+        "PACKAGE raised, no agent and no cell but re-verification's own",
+    )
+    package_parser.add_argument(
+        "spec_id", help="the spec id whose newest task PACKAGE runs against"
+    )
+    package_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
     watch_parser = subcommands.add_parser(
         "watch", help="follow one task's event log, or every task's, agent-free"
@@ -295,6 +306,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "adopt":
             return _adopt(args, ledger)
+
+        if args.command == "package":
+            return _package(args, ledger, out_dir)
 
         if args.command == "watch":
             return _watch(args, out_dir)
@@ -2323,6 +2337,37 @@ def _adopt(args: argparse.Namespace, ledger: Ledger) -> int:
     ledger.adopt_pull_request(newest["task_id"], adopted_url)
     print(f"adopt: task {newest['task_id']} ({args.spec_id}) → {adopted_url}")
     return 0
+
+
+def _package(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron package <spec id> --repo .`: run PACKAGE alone, re-
+    verification included, on the task `package_ready_task` rebuilds. No
+    agent runs here, and `run_one_cell` is never reached (§5.7)."""
+    token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+    if not token.strip():
+        raise RuntimeError(
+            "CLAUDE_CODE_OAUTH_TOKEN is unset; the agent cannot authenticate "
+            "(`claude setup-token`)"
+        )
+    repo = args.repo.resolve()
+    url = package_phase.real_remote(repo)
+    repo_id = ledger.resolve_repo_id(url)
+    mirror_path = _mirror_path(repo, args.home)
+
+    result = package_ready_task(
+        args.spec_id,
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
+        token=token.strip(),
+    )
+    if isinstance(result, Refused):
+        print(f"package: {result.reason}")
+        return 1
+    print(f"{args.spec_id:<10} {result.state}  {result.pr_url or result.note}")
+    return CELL_EXIT.get(result.state, 1)
 
 
 def _poll_interval(value: str) -> float:
