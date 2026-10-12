@@ -52,42 +52,46 @@ acceptance:
   - claim: >-
       `load_policy` reads a `policy.yaml` that declares no `schema_version`
       as version 1, the integer, and reads one declaring 1 the same way. One
-      declaring 2, and one declaring `true`, each raise `PolicyError`, and
-      the message lists the versions the engine reads. The witness loads all
-      four files.
+      declaring 2, one declaring `true` and one declaring 1.0 each raise
+      `PolicyError`, and the message lists the versions the engine reads.
+      The witness loads all five files.
     witness: tests/test_policy.py::test_a_policy_reads_as_version_1_and_refuses_any_other
     wrong_versions:
       - A field defaulting to None, so a policy declaring none reads as no version.
       - A field typed float, so a policy declaring none reads as 1.0.
       - A refusal that names the declared value and lists no supported version.
       - A lax integer check, so `true` loads as version 1.
+      - A check that refuses a `bool` and then tests membership in the supported set, so 1.0 passes it and loads as 1.
       - A check that refuses every declared value, 1 included.
       - A check that never runs on a declared value, so 2 loads.
   - claim: >-
       `parse_spec` reads frontmatter that declares no `schema_version` as
       version 1, the integer, and reads frontmatter declaring 1 the same way.
-      Frontmatter declaring 2, and frontmatter declaring `true`, each raise
-      `SpecError`, and the message lists the versions the engine reads. The
-      witness parses all four.
+      Frontmatter declaring 2, `true` or 1.0 raises `SpecError` each time,
+      and the message lists the versions the engine reads. The witness
+      parses all five.
     witness: tests/test_intake.py::test_a_spec_reads_as_version_1_and_refuses_any_other
     wrong_versions:
       - A field defaulting to None, so a spec declaring none reads as no version.
       - A field typed float, so a spec declaring none reads as 1.0.
       - A refusal that names the declared value and lists no supported version.
       - A lax integer check, so `true` parses as version 1.
+      - A check that refuses a `bool` and then tests membership in the supported set, so 1.0 passes it and parses as 1.
       - A check that refuses every declared value, 1 included.
       - A check that never runs on a declared value, so 2 parses.
   - claim: >-
       `parse_gate_json` reads a result that declares no `schema_version` as
       version 1, the integer, and reads one declaring 1 the same way. One
-      declaring 2, and one declaring `true`, each raise, and the message
-      lists the versions the engine reads. The witness parses all four.
+      declaring 2, one declaring `true` and one declaring 1.0 each raise,
+      and the message lists the versions the engine reads. The witness
+      parses all five.
     witness: tests/test_contract.py::test_a_gate_result_reads_as_version_1_and_refuses_any_other
     wrong_versions:
       - A field defaulting to None, so a result declaring none reads as no version.
       - A field typed float, so a result declaring none reads as 1.0.
       - A refusal that names the declared value and lists no supported version.
       - A lax integer check, so `true` parses as version 1.
+      - A check that refuses a `bool` and then tests membership in the supported set, so 1.0 passes it and parses as 1.
       - A check that refuses every declared value, 1 included.
       - A contract that keeps ignoring the key, so a result declaring 2 parses.
   - claim: >-
@@ -117,30 +121,29 @@ acceptance:
 Backlog item **b-0569f7**, the child half of its split. It cites
 `DESIGN.md` §3.2 and §5.4, and ADR 10. The parent, `SA-0282`, takes the
 item's other two parts: the two inert policy fields and the shared-kernel
-warning. Every line number below was read at `bc879e2c`.
+warning. Every line number below was read at `bc879e2c`. Those in
+`saffron/repos/policy.py` are cited by name, since `SA-0282` moves them.
 
 **ADR 10 makes `.saffron/` an interface other operators write against.**
 One operator changes a format and fixes every repo in an afternoon. Another
 operator's repo meets the change at their next engine upgrade.
 
-**None of the three formats carries a version.** `Policy` holds six fields
-and none names a format (`saffron/repos/policy.py:66-74`). `Spec` holds its
-frontmatter fields and none names one (`saffron/intake.py:157-199`).
-`GateResult` holds eight fields and none names one
-(`saffron/gates/contract.py:60-86`).
+**None of the three formats carries a version.** No field of `Policy`
+in `saffron/repos/policy.py` names a format. No field of `Spec` in
+`saffron/intake.py` names one, and no field of `GateResult` in
+`saffron/gates/contract.py` does.
 
 **The three refuse an unknown key differently.** `Policy` and `Spec` each
-set `extra="forbid"` (`saffron/repos/policy.py:67`,
-`saffron/intake.py:160`). So today a declared `schema_version` refuses the
+set `extra="forbid"` in their `model_config`. So today a declared `schema_version` refuses the
 whole file, whatever its value. `GateResult` sets no `model_config`
-(`saffron/gates/contract.py:60-61`), so pydantic drops an unknown key. A
+in `GateResult`, so pydantic drops an unknown key. A
 gate printing `"schema_version": 2` today parses as whatever status it
 reports.
 
 **Each refusal already has a path to the operator.** `load_policy` turns a
-`ValidationError` into a `PolicyError` carrying its text
-(`saffron/repos/policy.py:129-132`). `parse_spec` turns one into a
-`SpecError` the same way (`saffron/intake.py:289-292`). `run_gate` turns
+`ValidationError` into a `PolicyError` carrying its text, in
+`load_policy`'s `Policy.model_validate` call. `parse_spec` turns one into a
+`SpecError` the same way, around its `Spec.model_validate` call. `run_gate` turns
 any exception from `parse_gate_json` into an `error` result. Its summary
 carries the exception's text (`saffron/gates/runner.py:140-146`,
 `:353-356`).
@@ -156,11 +159,10 @@ reads.
 The three formats version apart, so each module keeps its own set of
 supported versions. Each set holds 1 alone today.
 
-Refuse a boolean. A lax integer check reads `true` as 1, and so does a
-plain `version in (1,)`. Pydantic's strict integer mode refuses `true`
-with its own message, which lists no supported version. Measured on a
-prototype: the refusal has to run before pydantic coerces the value, and
-refuse a `bool` with the same message as a 2.
+Refuse a boolean and a float with the same message as a 2. Pydantic's
+lax integer mode reads `true` as 1 and 1.0 as 1. Its strict mode refuses
+both, with its own message, which lists no supported version. Measured on
+a prototype. So the refusal sees the value before pydantic coerces it.
 
 Then write the three documents that name these fields.
 
@@ -215,9 +217,10 @@ the reverted run fails in the test and not at collection.
 **Assert the integer, not equality alone.** `1.0 == 1` and `True == 1` in
 Python. Assert the type is `int` beside the value.
 
-**The witnesses drive four values each: none, 1, 2 and `true`.** The
-same check refuses 0, 1.0 and the string "1", and no witness drives
-those. The claims name the four they reach.
+**Criteria 1 to 3 drive five values each: none, 1, 2, `true` and
+1.0.** None and 1 read as the integer 1. A 2, `true` and 1.0 are refused
+with the supported list. No witness drives 0 or the
+string "1". The claims name the five values they reach.
 
 **Assert the list of supported versions, not a bare digit.** Pydantic's
 error text holds `1 validation error for ...` and a URL with its own
@@ -240,7 +243,8 @@ each of the two with a `python3` script run through Bash, as `SA-0259`
 documented. The script reads the file, replaces the text and writes it back. Read each back with `cat` afterwards. The template's comment
 cites no `DESIGN.md` section and no `§`, since
 `test_a_template_cites_no_saffron_design_section` refuses one in any
-template.
+template. It names neither `when` nor `envelope_default`, since `SA-0282`
+holds the template free of both names.
 
 **Criteria 5 and 6** name tests in `tests/test_setup_saffron.py`, which
 this spec forbids and `SA-0282` edits. Both pass at base. Each fails once
@@ -254,7 +258,7 @@ and `size` blocks.
 Write none with an em dash, a semicolon, a contraction, the perfect tense
 or a sentence over 25 words.
 
-**Size.** A prototype measured 429 changed tokens with `size_gate`'s
+**Size.** A prototype measured 444 changed tokens with `size_gate`'s
 counter, against the `feature` ceiling of 3000. Each of the three
 modules held a field, a before-mode validator and a supported-version
 constant. It also held the four new witnesses, the template line, one
