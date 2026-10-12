@@ -799,7 +799,8 @@ such as the port probe. That is fatal to the task, where the per-repo sense skip
 
 **Ledger**: The SQLite database at `~/.saffron/ledger.db`. Authoritative for state.
 Item 170 makes it an index that `saffron fold` rebuilds from the record on
-`refs/saffron/*`. It stays authoritative until a caller constructs it with a record.
+`refs/saffron/*`. It stays authoritative for every state read until the batch and run
+folds read the record instead.
 _Avoid_: "the DB" (ambiguous with fixture services inside a cell), "the store".
 
 **Batch tree**: The plain directory tree of artifacts under
