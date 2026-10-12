@@ -909,7 +909,7 @@ Not *the cell cannot lie*. It can, and a design that assumes otherwise is how v0
 | Role | Owner | Blocking | Notes |
 |---|---|---|---|
 | `scope` | **core** | yes | changed files ⊆ `touches`, and matching neither `forbidden` nor `protected` |
-| `size` | **core** | at `elevated` | changed tokens ≤ type ceiling (bug 1300 / feature 3000 / refactor 4200). `error` where it blocks and a file inside `touches` is binary. The patch is diffed in a fresh git dir, so no `-diff` attribute hides a text file (`SA-0118`) |
+| `size` | **core** | at `elevated` | changed tokens ≤ type ceiling (bug 1300 / feature 3000 / refactor 4200). A file under the repo's declared `test_paths` is not counted, and the summary names its tokens (`SA-0274`). `error` where it blocks and a file inside `touches` is binary. The patch is diffed in a fresh git dir, so no `-diff` attribute hides a text file (`SA-0118`) |
 | `secrets` | **core** | yes | credential scan over the diff |
 | `integrity` | **core**, repo patterns | yes | test-tampering check (below) |
 | `census` | **core** | yes | collected test names at `base_sha` vs head (below) |
