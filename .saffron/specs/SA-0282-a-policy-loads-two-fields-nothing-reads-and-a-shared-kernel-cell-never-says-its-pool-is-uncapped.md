@@ -3,7 +3,7 @@ id: SA-0282
 title: A policy loads two fields nothing reads, and a shared-kernel cell never says its thread pool is uncapped
 type: feature
 priority: 2
-depends_on: [SA-0271, SA-0262, SA-0264]
+depends_on: [SA-0281, SA-0271, SA-0262, SA-0264]
 estimated_lines: 200
 estimate_measured: true
 touches:
