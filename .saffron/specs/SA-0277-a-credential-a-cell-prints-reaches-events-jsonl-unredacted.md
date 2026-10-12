@@ -4,7 +4,7 @@ title: A credential a cell prints reaches events.jsonl unredacted, and PACKAGE's
 type: feature
 priority: 2
 depends_on: [SA-0271, SA-0268]
-estimated_lines: 422
+estimated_lines: 431
 estimate_measured: true
 touches:
   - saffron/credentials.py
@@ -49,16 +49,17 @@ acceptance:
       shape inside an event's text. They are an Anthropic API key, an
       Anthropic OAuth token, a GitHub token under each of its five
       prefixes `ghp_`, `gho_`, `ghu_`, `ghs_` and `ghr_`, an AWS access
-      key id, and a private key block with a body line. For each one,
+      key id, and a private key block with one body line. For each one,
       PACKAGE's prose scan still returns exactly that shape's description,
-      and the written file holds neither the credential nor the key
-      block's body. The event read back keeps its other keys, the text on
+      and the written file holds neither the credential nor that body
+      line. The event read back keeps its other keys, the text on
       both sides of the credential, and a `redacted` field naming that
       shape's description alone. The witness then drives two key blocks
-      with no END line. One is a header and a body clipped inside a
-      `tool_use` input, and the other is a raw `line` holding the header
-      alone. Each is written with neither its header nor its body, and
-      `redacted` names the private key block.
+      with no END line. One is a header and four body lines inside a
+      `tool_use` input, cut at 200 characters and ending in the marker
+      `agent_runner.py`'s clip appends. The other is a raw `line` holding
+      the header alone. Each is written with neither the header nor a whole
+      body line, and `redacted` names the private key block.
     witness: tests/test_credentials.py::test_every_shape_package_refuses_is_redacted_from_the_log
     wrong_versions:
       - A private key block redacted at its header line alone, so the key's body is written.
@@ -67,6 +68,7 @@ acceptance:
       - A description reworded when the shapes move, so PACKAGE's refusal note changes.
       - An event that carried a credential written with `event` set to `None`, so the evidence is lost.
       - A block pattern that requires an END line, so a clipped block or a lone header is written whole.
+      - A block body limited to key characters and anchored at the end of the string, so the clip's marker stops the match.
   - claim: >-
       Redaction reaches every cell-authored place in an `Agent` event. The
       witness puts one AWS access key id in each of seven places. They are
@@ -103,8 +105,9 @@ acceptance:
       - The guard written as at least eight characters, so the eight-character token is redacted.
       - The token redacted in `event` alone, so `line` and `detail` keep it.
   - claim: >-
-      Redaction runs before the size bound, so a credential the bound's cut
-      would split is never written in part. The witness places a GitHub
+      For a parsed event, redaction runs before the size bound, so a
+      credential the bound's cut would split is never written in part. The
+      witness places a GitHub
       token so the cut at `BOUND_CHARS` falls ten characters past its
       prefix, and an Anthropic API key in the event's `model`. The event
       reads back bounded. The file holds neither the token's first
@@ -230,8 +233,8 @@ nothing. Make these changes.
 2. **PACKAGE reads it.** `_scan` keeps its behaviour exactly, token first
    and then the first matching shape, and reads both from the new module.
    No shape stays in `package.py`.
-3. **`EventLog` redacts.** `EventLog.__init__` takes a keyword `token`,
-   default `None`. Add a field `redacted: tuple[str, ...]`, default empty,
+3. **`EventLog` redacts.** `EventLog.__init__` takes a keyword-only
+   `token`, default `None`. Add a field `redacted: tuple[str, ...]`, default empty,
    to `Agent`. In `append`, before the size bound and inside its `try`,
    redact an `Agent` event's `event`, `line` and `detail`. Walk `event` at
    every depth, dict keys included. When anything was replaced, the event
@@ -241,11 +244,14 @@ nothing. Make these changes.
    each of the four lines ends by naming what was redacted.
 5. **`run_task` hands over its token.** Its default `EventLog` takes the
    `token` argument `run_task` already holds.
-6. **`Agent`'s docstring stops claiming verbatim.** Its opening sentence
+6. **`Agent`'s docstring stops claiming verbatim.** Its second sentence
    calls `event` verbatim and says `original_chars` names the event's full
    size (`saffron/events.py:294`, `:303-304`). Say instead that
    `event` is verbatim except where a credential was redacted, and that
-   `original_chars` counts the serialization after redaction.
+   `original_chars` counts the serialization after redaction. Two other
+   texts say the copied `usage` is `kept verbatim` (`saffron/events.py:312`,
+   `:413-414`). It is copied from the redacted dict, so say it is kept as
+   redacted.
 
 ## Out of scope
 
@@ -260,6 +266,10 @@ nothing. Make these changes.
   becomes its own `Agent` with `raw=True` (`saffron/events.py:295-297`). The
   header's line is redacted, but each body line is its own event and
   matches no shape, so it is written.
+- **A raw line cut before `append`.** `_quarantined` slices a raw line at
+  `BOUND_CHARS` before it ever reaches `append`
+  (`saffron/phases/implement.py:224`, `:239`). A credential straddling that cut is
+  written in part when what is left matches no shape.
 - **A credential the cell clipped.** `agent_runner.py` cuts every string in
   a tool input at 200 characters (`images/agent_runner.py:25`, `:78-79`). A
   credential cut there short of its shape's length is written in part.
@@ -326,12 +336,13 @@ it passes instead. `_FailFirst` and `_FailAfterTwo` subclass `EventLog` with
 accept and pass on the new keyword. The `_drive` double returns the outcome
 it was built with. It emits only the events it was handed. So the witness
 patches `push_unpackaged_work` with `_push` and drives an `EXHAUSTED` state.
-It unsets `CLAUDE_CODE_OAUTH_TOKEN` with `monkeypatch.delenv`.
+It unsets `CLAUDE_CODE_OAUTH_TOKEN` with `monkeypatch.delenv(...,
+raising=False)`.
 
 **The `prose` gate.** `saffron/credentials.py` and `tests/test_credentials.py`
 start at zero. PACKAGE's three-line `ponytail:` comment moves with the
 shapes, so rewrite it in two lines and keep the `ponytail:` mark. `Agent`'s
-docstring is already past ten lines. Keep its line count exactly, or the
+docstring is already past ten lines. Keep it no longer than today, or its
 length hit counts as new. Name the new field in a one-line comment above
 it. The gate keys a hit on its sentence's text, so step 6 makes the edited
 sentence a new hit unless you rewrite it clean. Split it into sentences of
@@ -340,10 +351,10 @@ sentence a new hit unless you rewrite it clean. Split it into sentences of
 **The `dead` gate.** `redacted` counts as used only because `describe`
 reads it, which is step 4.
 
-**Size.** A prototype at `27ca2838` measured 1687 changed tokens with
+**Size.** A prototype at `e30fa26f` measured 1725 changed tokens with
 `size_gate`, and `estimated_lines` is that over four. It held all six
 steps above, the seven new witnesses and the `test_task.py` edits. Its
-step 6 rewrote the docstring's first thirteen lines clean, with no new
-`prose` hit. Every
+step 6 rewrote the docstring's first thirteen lines clean and changed the
+two `usage` texts, with no new `prose` hit. Every
 wrong version listed above failed its witness there, and each new witness
 failed with the source reverted.
