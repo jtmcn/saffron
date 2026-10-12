@@ -477,21 +477,31 @@ def cut_off_at_budget_cap(attempt: AttemptResult) -> bool:
     )
 
 
+# One cut-row rule for another row and the resumed row, so the two cannot drift.
+_CUT_ROW = """t.state = 'ORPHANED'
+           AND rn.status = 'COMPLETE'
+           AND (
+               SELECT a.phase FROM attempts a
+                WHERE a.task_id = t.task_id
+                ORDER BY a.attempt_id DESC LIMIT 1
+           ) = 'IMPLEMENTING'"""
+
+
 def previous_cut_orphan(
     ledger: Ledger, repo_id: int, spec: CellSpec, task_id: int
 ) -> int | None:
-    """The re-queue cap (SA-0126, backlog item b-36b551). Only the first zero-commit cut at
-    one `spec_sha` earns `ORPHANED`, and the next settles as `NOT_IMPLEMENTED`. No fact
-    says "orphaned by a cut" apart from the other three paths that write it, so this
-    reads `ledger._db` directly, as `chain_walk._task_rows` does. A cut task's run
-    finished `COMPLETE` while every attempt it holds stayed phase `IMPLEMENTING`,
-    `SPEC_REVIEW` or `SPEC_WRITING`. Scoped to this repo and spec id, its `spec_sha`
-    checked against `task_id`'s own row, never `CellSpec.spec_sha` (SA-0150). Excludes
-    `task_id` itself. Call only when a bound cut this task and nothing survived the
-    salvage.
+    """The re-queue cap (SA-0126, b-36b551, b-3bba0f). Only the first zero-commit cut at
+    one `spec_sha` earns `ORPHANED`, and the next settles `NOT_IMPLEMENTED`. No fact says
+    a row was orphaned by a cut, apart from the other three paths that write `ORPHANED`.
+    This reads `ledger._db` directly, as `chain_walk._task_rows` does. A cut row's run
+    finishes `COMPLETE` while its latest attempt, by `attempt_id`, stays phase
+    `IMPLEMENTING`. Scoped to this repo and spec id, its `spec_sha` checked against
+    `task_id`'s own row, never `CellSpec.spec_sha` (SA-0150). Excludes `task_id` itself:
+    its own cut is read by `row_is_orphaned_cut`. Call only when a bound cut this task
+    and nothing survived the salvage.
     """
     row = ledger._db.execute(
-        """
+        f"""
         SELECT t.task_id
           FROM tasks t
           JOIN runs rn ON rn.run_id = t.run_id
@@ -499,19 +509,32 @@ def previous_cut_orphan(
            AND t.spec_id = ?
            AND t.spec_sha = (SELECT spec_sha FROM tasks WHERE task_id = ?)
            AND t.task_id != ?
-           AND t.state = 'ORPHANED'
-           AND rn.status = 'COMPLETE'
-           AND NOT EXISTS (
-               SELECT 1 FROM attempts a
-                WHERE a.task_id = t.task_id
-                  AND a.phase NOT IN ('IMPLEMENTING', 'SPEC_REVIEW', 'SPEC_WRITING')
-           )
+           AND {_CUT_ROW}
          ORDER BY t.task_id
          LIMIT 1
         """,
         (repo_id, spec.spec_id, task_id, task_id),
     ).fetchone()
     return int(row["task_id"]) if row is not None else None
+
+
+def row_is_orphaned_cut(ledger: Ledger, task_id: int) -> bool:
+    """Whether `task_id`'s own row, read before this cell moves it, already
+    ended `ORPHANED` by a cut (b-3bba0f). True only when its state is `ORPHANED`, its
+    run finished `COMPLETE`, and its latest attempt, by `attempt_id`, is phase
+    `IMPLEMENTING`.
+    """
+    row = ledger._db.execute(
+        f"""
+        SELECT 1
+          FROM tasks t
+          JOIN runs rn ON rn.run_id = t.run_id
+         WHERE t.task_id = ?
+           AND {_CUT_ROW}
+        """,
+        (task_id,),
+    ).fetchone()
+    return row is not None
 
 
 def require_session(session_id: str | None) -> str:
@@ -1962,10 +1985,15 @@ def _drive_cell(
         # A stack batch's own task: read its run rather than minting one, and
         # a task_id naming nothing raises before any cell comes up.
         task_id = spec.task_id
+        # Read before this cell moves the row, so a resumed row already cut
+        # by an earlier bound reads as its own earlier cut (b-3bba0f).
+        resumed_cut = row_is_orphaned_cut(ledger, task_id)
         run_id = ledger.task_run(task_id)
         start_spend = ledger.task_spend(task_id)
     else:
         run_id = ledger.create_run(repo_id, spec.base_sha)
+        # A freshly minted task carries no earlier history, so it is never a cut.
+        resumed_cut = False
         task_id = ledger.create_task(
             run_id,
             spec.spec_id,
@@ -2563,10 +2591,12 @@ def _drive_cell(
 
         if commits == 0:
             # SA-0126: a bound's first cut at a `spec_sha` re-queues as
-            # `ORPHANED`. An earlier such task settles this one instead.
+            # `ORPHANED`. An earlier task, or this row's own cut, settles this one.
             state = "NOT_IMPLEMENTED"
             if cut_by_bound:
                 earlier = previous_cut_orphan(ledger, repo_id, spec, task_id)
+                if earlier is None and resumed_cut:
+                    earlier = task_id
                 if earlier is not None:
                     _phase_start(
                         "IMPLEMENT",

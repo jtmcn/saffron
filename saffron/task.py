@@ -38,14 +38,20 @@ What stays outside, deliberately, except the refusals named below:
 from __future__ import annotations
 
 import hashlib
+import json
+import sqlite3
 import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
+from saffron import preflight, spec_review
 from saffron.agents import context
+from saffron.agents.findings import Finding
+from saffron.cell import runtime
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.cell.session import CellOutcome, CellSpec, LiveState, run_one_cell
 from saffron.events import (
@@ -58,10 +64,18 @@ from saffron.events import (
     describe,
 )
 from saffron.intake import Spec, SpecError, parse_spec
-from saffron.ledger import Ledger
+from saffron.ledger import Ledger, _ledger_time
 from saffron.phases import package as package_phase
-from saffron.phases.rebut import sustained_blockers, unkept_fixes
-from saffron.phases.review import anchored_blockers, anchored_concerns
+from saffron.phases.rebut import (
+    LensVerdicts,
+    RebutResult,
+    Rebuttal,
+    RebuttalTurn,
+    Verdict,
+    sustained_blockers,
+    unkept_fixes,
+)
+from saffron.phases.review import LensReview, anchored_blockers, anchored_concerns
 from saffron.reconcile import GhRunner, reconcile
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
@@ -751,3 +765,308 @@ def run_task(
         )
         print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     return outcome
+
+
+# A spec session charged to this task outside its own cell is not this
+# cell's own spend.
+_NOT_THIS_CELLS_PHASE = frozenset({"SPEC_REVIEW", spec_review.WRITING_PHASE})
+# The repair loop's own phases. The live cell's outcome leaves the rebuttal's
+# re-run out of its count, measured on tasks 240 and 249.
+_SUITE_PHASES = frozenset({"IMPLEMENTING", "REPAIRING"})
+
+
+@dataclass(frozen=True, kw_only=True)
+class ReadyTask:
+    """What `ready_task` rebuilds for a `READY_FOR_REVIEW` task whose
+    `package()` raised. Carries a live-shaped `outcome`, the `spec` the
+    task ran, and the `parent_branch` it stacked on, or `None` unstacked."""
+
+    outcome: CellOutcome
+    spec: Spec
+    parent_branch: str | None
+
+
+def _newest_for_spec(rows: list[sqlite3.Row], spec_id: str) -> sqlite3.Row | None:
+    """The last row naming `spec_id`, or `None`. `tasks_by_repo` and
+    `tasks_by_spec_id` both order oldest first, so the last match is the
+    newest task."""
+    matches = [row for row in rows if row["spec_id"] == spec_id]
+    return matches[-1] if matches else None
+
+
+def _cell_cutoff(baseline_path: Path) -> str:
+    """`baseline.json`'s own mtime, floored to the second and rendered in
+    UTC by `ledger._ledger_time`, the way it renders `started_at`. A plain
+    text comparison, never a parsed one, decides which turns are this cell's."""
+    floored = int(baseline_path.stat().st_mtime)
+    return _ledger_time(datetime.fromtimestamp(floored, tz=UTC).isoformat())
+
+
+def _spec_for_task(
+    ledger: Ledger, repo: Path, repo_id: int, spec_id: str, task_id: int
+) -> Spec | Refused:
+    """The spec text the task ran. Its newest recorded text, or the file
+    under `.saffron/specs/` (`done/` included) whose bytes hash to the
+    task's own `spec_sha`."""
+    recorded = ledger.spec_text(task_id)
+    if recorded is not None:
+        try:
+            return parse_spec(recorded["text"])
+        except SpecError as exc:
+            return Refused(
+                reason=f"task {task_id}'s recorded text does not parse: {exc}"
+            )
+
+    own = _newest_for_spec(ledger.tasks_by_spec_id(repo_id, spec_id), spec_id)
+    spec_sha = own["spec_sha"] if own is not None else None
+    if spec_sha is None:
+        return Refused(reason=f"task {task_id} carries no recorded spec_sha")
+
+    specs_dir = repo / ".saffron" / "specs"
+    candidates = sorted(specs_dir.rglob(f"{spec_id}*.md")) if specs_dir.is_dir() else []
+    for candidate in candidates:
+        if hashlib.sha256(candidate.read_bytes()).hexdigest() == spec_sha:
+            try:
+                return parse_spec(candidate.read_text())
+            except SpecError:
+                continue
+    return Refused(reason=f"no spec file under {specs_dir} hashes to {spec_sha[:12]}")
+
+
+def _rebuild_rebut_result(task_dir: Path) -> RebutResult:
+    """`rebuttal.json` rebuilt into a `RebutResult`, with a bare
+    `RebuttalTurn`. Its `cost_usd` and `session_id` are not in the file,
+    and no reader of the result reads either."""
+    data = json.loads((task_dir / "rebuttal.json").read_text())
+    rebuttal = data["rebuttal"]
+    return RebutResult(
+        state=data["state"],
+        why=data["why"],
+        rebuttal=RebuttalTurn(
+            rebuttals=[Rebuttal(**r) for r in rebuttal["rebuttals"]],
+            error=rebuttal["error"],
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens=v["lens"],
+                verdicts=[Verdict(**d) for d in v["verdicts"]],
+                cost_usd=v["cost_usd"],
+                error=v["error"],
+                never_started=v["never_started"],
+                quote_failures=v["quote_failures"],
+                withdrawal_refusals=v["withdrawal_refusals"],
+            )
+            for v in data["verdicts"]
+        ],
+        moved=data["head_moved"],
+        cost_usd=data["cost_usd"],
+    )
+
+
+def ready_task(
+    spec_id: str,
+    *,
+    repo: Path,
+    repo_id: int | None,
+    ledger: Ledger,
+    out_dir: Path,
+) -> ReadyTask | Refused:
+    """Rebuilds what `package()` needs for `spec_id`'s newest task in this
+    repo, from the ledger and the task directory alone. No live
+    `CellOutcome` is required, and nothing here writes, ledger or disk.
+
+    Refuses by name rather than by raising. It names the spec id, the
+    state, the pull request url, and the missing, stale or unmatched
+    file or sha.
+    """
+    if repo_id is None:
+        return Refused(reason=f"{spec_id} has no task in this repo")
+    newest = _newest_for_spec(ledger.tasks_by_repo(repo_id), spec_id)
+    if newest is None:
+        return Refused(reason=f"{spec_id} has no task in this repo")
+    task_id = newest["task_id"]
+    if newest["state"] != "READY_FOR_REVIEW":
+        return Refused(
+            reason=f"task {task_id} is {newest['state']}, not READY_FOR_REVIEW"
+        )
+    if newest["pr_url"]:
+        return Refused(
+            reason=f"task {task_id} already carries a pull request: {newest['pr_url']}"
+        )
+
+    task_dir = out_dir / spec_id
+    baseline_path = task_dir / "baseline.json"
+    if not baseline_path.is_file():
+        return Refused(reason=f"{baseline_path} does not exist")
+    baseline_mtime = baseline_path.stat().st_mtime
+
+    for name in ("patch.diff", "patch.json", "findings.json"):
+        path = task_dir / name
+        if not path.is_file():
+            return Refused(reason=f"{path} does not exist")
+        if path.stat().st_mtime < baseline_mtime:
+            return Refused(
+                reason=f"{path} is older than {baseline_path}, so it is another cell's"
+            )
+
+    patch_meta = json.loads((task_dir / "patch.json").read_text())
+    base_sha = patch_meta["base_sha"]
+    tree_base = patch_meta.get("tree_base", base_sha)
+
+    spec = _spec_for_task(ledger, repo, repo_id, spec_id, task_id)
+    if isinstance(spec, Refused):
+        return spec
+
+    cutoff = _cell_cutoff(baseline_path)
+    this_cells = [a for a in ledger.attempts(task_id) if a["started_at"] >= cutoff]
+
+    spent_usd = sum(
+        (a["cost_usd_est"] or 0.0)
+        for a in this_cells
+        if a["phase"] not in _NOT_THIS_CELLS_PHASE
+    )
+    attempts = sum(
+        1
+        for a in this_cells
+        if a["phase"] in _SUITE_PHASES and ledger.attempt_results(a["attempt_id"])
+    )
+    effective_risk = spec.risk
+    for attempt in reversed(this_cells):
+        if attempt["earned_risk"]:
+            effective_risk = attempt["earned_risk"]
+            break
+
+    reviews = [
+        LensReview(
+            lens=review["lens"],
+            findings=[Finding.model_validate(f) for f in review["findings"]],
+            cost_usd=review["cost_usd"],
+            error=review["error"],
+        )
+        for review in json.loads((task_dir / "findings.json").read_text())
+    ]
+
+    def _fresh(name: str) -> bool:
+        path = task_dir / name
+        return path.is_file() and path.stat().st_mtime >= baseline_mtime
+
+    rebut_result = _rebuild_rebut_result(task_dir) if _fresh("rebuttal.json") else None
+    wrong_versions = (
+        json.loads((task_dir / "wrong-versions.json").read_text())
+        if _fresh("wrong-versions.json")
+        else []
+    )
+    notes = (
+        json.loads((task_dir / "notes.json").read_text())["raw"]
+        if _fresh("notes.json")
+        else ""
+    )
+
+    parent_branch: str | None = None
+    if tree_base != base_sha:
+        pushers = [
+            row
+            for row in ledger.tasks_by_repo(repo_id)
+            if row["pushed_sha"] == tree_base
+        ]
+        if not pushers:
+            return Refused(
+                reason=f"{tree_base[:12]} was pushed by no task in this repo"
+            )
+        pusher = pushers[-1]
+        pusher_task = next(
+            (
+                row
+                for row in ledger.tasks_by_spec_id(repo_id, pusher["spec_id"])
+                if row["task_id"] == pusher["task_id"]
+            ),
+            None,
+        )
+        parent_branch = pusher_task["branch"] if pusher_task is not None else None
+
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=ledger.task_run(task_id),
+        task_dir=task_dir,
+        spent_usd=spent_usd,
+        attempts=attempts,
+        cell_head_sha=patch_meta.get("head_sha"),
+        reviews=reviews,
+        wrong_versions=wrong_versions,
+        rebut_result=rebut_result,
+        effective_risk=effective_risk,
+        notes=notes,
+    )
+    return ReadyTask(outcome=outcome, spec=spec, parent_branch=parent_branch)
+
+
+def package_ready_task(
+    spec_id: str,
+    *,
+    repo: Path,
+    repo_id: int | None,
+    ledger: Ledger,
+    out_dir: Path,
+    mirror_path: Path,
+    token: str | None,
+) -> package_phase.PackageResult | Refused:
+    """`saffron package`'s whole body: `ready_task`'s rebuild, then every
+    step PACKAGE needs on its own, with no agent and no `run_one_cell`.
+
+    Returns `ready_task`'s `Refused` untouched, before the mirror, the
+    image or the network exist. On a `ReadyTask` it prepares the mirror
+    and builds the repo's image. It then runs N1's host-binding probe in
+    a network named for this spec id, and calls `package_phase.package`
+    once.
+    """
+    ready = ready_task(
+        spec_id, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    if isinstance(ready, Refused):
+        return ready
+
+    mirror, _, _ = preflight.prepare_mirror(repo, mirror_path)
+    image = repo_image.build_cell_image(repo)
+
+    # A prefix no other network uses, so a killed invocation's leftover cannot
+    # collide with re-verification's own `saffron-pkg-` names.
+    network = f"saffron-hostprobe-{spec_id}"
+    runtime.remove_network(network)
+    try:
+        runtime.create_network(network)
+        ports, tolerated, sockets = preflight.host_probe_ports()
+        addresses = preflight.probe_addresses(runtime.GATEWAY)
+        detail = (
+            f"probing {len(ports)} host ports at "
+            + ", ".join(addresses)
+            + "; tolerating "
+            + (", ".join(tolerated) or "nothing")
+        )
+        print(
+            describe(
+                Preflight(
+                    timestamp=time.time(),
+                    spec_id=spec_id,
+                    step="ports",
+                    detail=detail,
+                )
+            )
+        )
+        preflight.assert_host_is_unreachable(
+            repo_image.BASE_TAG, network, ports, runtime.GATEWAY, sockets
+        )
+    finally:
+        runtime.remove_network(network)
+
+    return package_phase.package(
+        ready.outcome,
+        spec=ready.spec,
+        repo=repo,
+        mirror=mirror,
+        image=image,
+        ledger=ledger,
+        out_dir=out_dir,
+        token=token,
+        parent_branch=ready.parent_branch,
+    )

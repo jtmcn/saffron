@@ -38,11 +38,12 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
+from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.gates.core.scope import matches
 from saffron.intake import DiscoveryFailure, Spec, discover_specs
 from saffron.ledger import Ledger
@@ -128,6 +129,22 @@ SETTLED_STATES = (DONE_STATES - DEPENDENCY_WAITING_STATES) - {
 
 
 @dataclass(frozen=True)
+class StackBase:
+    """A stack order's parent outside it: an earlier batch's or cell's own
+    open pull request (ADR 7, `DESIGN.md` §4.2.1, backlog item b-e0e1cf).
+
+    `task_id` is that pull request's own task. It names no task of this
+    order, and is read for its branch and its pushed head. `_resolve_stack_base`
+    chooses one, from the newest waiting task of the lowest-id parent that
+    qualifies (`SA-0267`).
+    """
+
+    spec_id: str
+    task_id: int
+    branch: str
+
+
+@dataclass(frozen=True)
 class Candidate:
     """One spec worth running tonight.
 
@@ -146,6 +163,9 @@ class Candidate:
     spec: Spec
     spec_sha: str
     task_id: int | None
+    # Set by `build_queue` on every taken spec once one of them names the
+    # order's one `StackBase` (`_resolve_stack_base`, `SA-0267`).
+    stack_base: StackBase | None = None
 
 
 # `preflight` has no site here: a repo that failed preflight is refused by the batch.
@@ -780,27 +800,155 @@ def _refuse(
     return None
 
 
+# Two of the three remedies a non-qualifying parent's cause ends on.
+# The adopt remedy names its id, so `_stack_base_candidate` builds it inline.
+_RUN_TO_PR_FIRST = "run it to a pull request first"
+_MERGE_OR_RERUN = "merge it, or rerun it"
+
+
+def _stack_base_candidate(
+    ledger: Ledger,
+    repo_id: int,
+    dep: str,
+    pr_url_by_task: Mapping[int, str],
+) -> StackBase | tuple[str, str]:
+    """`dep`'s eligibility as this order's one `StackBase`: the `StackBase`
+    itself, or the `(cause, remedy)` pair for `_stack_dependency_reason` to
+    append (`SA-0267`).
+
+    Reads `dep`'s tasks the way `task._resolve_stacked_on` does without a
+    `gh`: the newest row in `DEPENDENCY_WAITING_STATES`. It qualifies only
+    with a `branch`, a resolved `pushed_sha`, and a `pr_url` on that row.
+    `pr_url_by_task` comes from `ledger.tasks_by_repo`, the one per-repo
+    method that carries it.
+    """
+    rows = ledger.tasks_by_spec_id(repo_id, dep)
+    waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]
+    if not waiting:
+        if not rows:
+            return f"{dep} has no task recorded", _RUN_TO_PR_FIRST
+        return f"{dep} has no waiting task", _MERGE_OR_RERUN
+    newest = waiting[-1]
+    if not newest["branch"]:
+        return f"{dep}'s newest waiting task records no branch", _RUN_TO_PR_FIRST
+    if not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
+        return (
+            f"{dep}'s newest waiting task records no pushed sha",
+            _RUN_TO_PR_FIRST,
+        )
+    pr_url = pr_url_by_task.get(int(newest["task_id"]), "")
+    if not pr_url:
+        return (
+            f"{dep}'s newest waiting task has no pull request URL",
+            f"run `saffron adopt {dep} <pr>` first",
+        )
+    return StackBase(
+        spec_id=dep, task_id=int(newest["task_id"]), branch=newest["branch"]
+    )
+
+
+def _resolve_stack_base(
+    ledger: Ledger,
+    repo_id: int | None,
+    kept: list[Candidate],
+    kept_ids: frozenset[str],
+    on_default_branch: frozenset[str],
+) -> tuple[StackBase | None, dict[str, tuple[str, str]], frozenset[str]]:
+    """The order's one `StackBase`, every non-qualifying external parent's
+    cause, and every *other* qualifying id the lowest-id tie-break passed
+    over (`SA-0267`).
+
+    "External" means named by a kept spec's own `depends_on`, outside the
+    kept ids and off the default branch. Read only from `kept`, so a spec
+    gate 0 already refused names no parent here. The lowest qualifying id,
+    as a string, wins. The rest come back too, for `build_queue` to refuse.
+    """
+    external = {
+        dep
+        for c in kept
+        for dep in c.spec.depends_on
+        if dep not in kept_ids and dep not in on_default_branch
+    }
+    if not external:
+        return None, {}, frozenset()
+    if repo_id is None:
+        causes = {
+            dep: (f"{dep} has no task recorded", _RUN_TO_PR_FIRST) for dep in external
+        }
+        return None, causes, frozenset()
+
+    pr_url_by_task = {
+        int(row["task_id"]): row["pr_url"] or ""
+        for row in ledger.tasks_by_repo(repo_id)
+    }
+    qualifying: dict[str, StackBase] = {}
+    causes: dict[str, tuple[str, str]] = {}
+    for dep in external:
+        result = _stack_base_candidate(ledger, repo_id, dep, pr_url_by_task)
+        if isinstance(result, StackBase):
+            qualifying[dep] = result
+        else:
+            causes[dep] = result
+
+    if not qualifying:
+        return None, causes, frozenset()
+    chosen_id = min(qualifying)
+    return qualifying[chosen_id], causes, frozenset(qualifying) - {chosen_id}
+
+
+def _second_stack_base_reason(stack_base_id: str, other_id: str) -> str:
+    """Why a spec naming `other_id` is refused although `other_id` itself
+    qualifies as a stack base: `stack_base_id` already won the lowest-id
+    tie-break, and a stack order has at most one (`SA-0265`, `SA-0267`)."""
+    return (
+        f"depends_on {other_id} is outside the stack order and not on the "
+        f"default branch, and {stack_base_id} is already this batch's "
+        "stack base by the lower id — merge it first, or run the spec in "
+        "a later stack batch"
+    )
+
+
 def _stack_dependency_reason(
-    candidate: Candidate, taken_ids: frozenset[str], on_default_branch: frozenset[str]
+    candidate: Candidate,
+    taken_ids: frozenset[str],
+    on_default_branch: frozenset[str],
+    causes: Mapping[str, tuple[str, str]] | None = None,
+    other_qualifying: frozenset[str] = frozenset(),
+    stack_base_id: str | None = None,
 ) -> str:
     """Why `candidate` never became ready in `_stack_order`.
 
     Names each `depends_on` entry that is neither taken into the order nor
-    on the default branch, and no other entry."""
+    on the default branch, and no other entry (`SA-0267`). For the first
+    missing entry, in `depends_on` order, naming `other_qualifying`'s
+    second stack base wins over `causes`' plain cause and remedy.
+    """
     missing = [
         dep
         for dep in candidate.spec.depends_on
         if dep not in taken_ids and dep not in on_default_branch
     ]
     verb = "is" if len(missing) == 1 else "are"
-    return (
+    reason = (
         f"depends_on {', '.join(missing)} {verb} outside the stack order "
         "and not on the default branch"
     )
+    causes = causes or {}
+    for dep in missing:
+        if dep in other_qualifying and stack_base_id is not None:
+            return _second_stack_base_reason(stack_base_id, dep)
+        if dep in causes:
+            cause, remedy = causes[dep]
+            return f"{reason} — {cause}, so {remedy}"
+    return reason
 
 
 def _stack_order(
-    candidates: list[Candidate], on_default_branch: frozenset[str]
+    candidates: list[Candidate],
+    on_default_branch: frozenset[str],
+    causes: Mapping[str, tuple[str, str]] | None = None,
+    other_qualifying: frozenset[str] = frozenset(),
+    stack_base_id: str | None = None,
 ) -> tuple[list[Candidate], list[Refusal]]:
     """One stack's fixed order over `candidates` (ADR 7, `SA-0142`).
 
@@ -808,8 +956,9 @@ def _stack_order(
     is already taken or in `on_default_branch`. Each step takes the ready
     spec with the lowest `priority`, then the lowest id as a string. It
     stops once nothing is ready. Every spec never taken is refused, naming
-    what kept it from ever becoming ready. A cycle refuses both members,
-    since neither one ever becomes ready.
+    what kept it from ever becoming ready. A cycle refuses both members.
+    `causes`, `other_qualifying` and `stack_base_id` (`SA-0267`) pass
+    straight through to `_stack_dependency_reason`.
     """
     remaining = list(candidates)
     taken: list[Candidate] = []
@@ -833,7 +982,14 @@ def _stack_order(
     refusals = [
         Refusal(
             path=c.path,
-            reason=_stack_dependency_reason(c, frozenset(taken_ids), on_default_branch),
+            reason=_stack_dependency_reason(
+                c,
+                frozenset(taken_ids),
+                on_default_branch,
+                causes,
+                other_qualifying,
+                stack_base_id,
+            ),
             kind="depends_on",
         )
         for c in remaining
@@ -1011,8 +1167,24 @@ def build_queue(
             kept.append(candidate)
 
     if stack:
-        ordered, stack_refusals = _stack_order(kept, retired | merged_anywhere)
-        return ordered, refusals + stack_refusals
+        on_default_branch = retired | merged_anywhere
+        kept_ids = frozenset(c.spec.id for c in kept)
+        stack_base, causes, other_qualifying = _resolve_stack_base(
+            ledger, repo_id, kept, kept_ids, on_default_branch
+        )
+        satisfied = on_default_branch | (
+            {stack_base.spec_id} if stack_base is not None else frozenset()
+        )
+        stack_base_id = stack_base.spec_id if stack_base is not None else None
+
+        ordered, order_refusals = _stack_order(
+            kept, satisfied, causes, other_qualifying, stack_base_id
+        )
+        if stack_base is not None and any(
+            stack_base.spec_id in c.spec.depends_on for c in ordered
+        ):
+            ordered = [replace(c, stack_base=stack_base) for c in ordered]
+        return ordered, refusals + order_refusals
 
     kept.sort(key=lambda c: c.spec.priority)
     return kept, refusals

@@ -60,6 +60,8 @@ uv run saffron replay <repo> <pr>          # v0: replay a merged PR, agent-free
 uv run saffron cell .saffron/specs/SA-NNNN-<slug>.md --repo .    # v0.5: one attended cell
 uv run saffron queue --repo .              # v0.5: what a batch would run; reconciles PR state first
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
+uv run saffron package SA-NNNN --repo .    # run PACKAGE alone on a task whose own PACKAGE raised
+uv run saffron adopt SA-NNNN 502 --repo .  # name a by-hand pull request as a task's own
 uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
 uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
 uv run saffron fold --repo <mirror> --into <ledger.db>    # rebuild a ledger from the record
@@ -76,8 +78,8 @@ needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses whatever output is still buffered
 log is the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
 `docs/HOST-HARDENING.md` §4a carry the setup.
 
-`saffron cell` and `saffron batch` need `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in
-the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
+`saffron cell`, `saffron batch` and `saffron package` need `CLAUDE_CODE_OAUTH_TOKEN` (from
+`claude setup-token`) in the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
 export it into every shell in this directory, and from there into any Claude Code session
 started in one. `.env` is no home for it either — `.envrc` loads that with
 `dotenv_if_exists`. Scope it to the invocation instead (fish; a cloud host, which has no

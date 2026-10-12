@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import typing
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
@@ -42,7 +43,7 @@ from saffron.events import (
     describe,
     read_log,
 )
-from saffron.ledger import Ledger
+from saffron.ledger import Ledger, TaskState
 from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.record.fold import fold
@@ -2000,6 +2001,32 @@ def _task_state(home, task_id):
     return row["state"]
 
 
+def _checkout_with_origin(tmp_path, url, *, dirname="checkout"):
+    """A `git init` directory with no commit and no fetch, whose `origin`
+    is a GitHub URL added by hand. `real_remote` reads it and `adopt`
+    fetches nothing, so this is enough to resolve a slug without reaching
+    any forge."""
+    repo = tmp_path / dirname
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "remote", "add", "origin", url)
+    return repo
+
+
+def _task_row(ledger, task_id):
+    return dict(
+        ledger._db.execute(
+            "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+    )
+
+
+def _dump_tasks(ledger):
+    return [
+        dict(row) for row in ledger._db.execute("SELECT * FROM tasks ORDER BY task_id")
+    ]
+
+
 def _fake_gh_says_merged(argv):
     return subprocess.CompletedProcess(
         argv, 0, '{"state": "MERGED", "reviewDecision": null}', ""
@@ -2050,6 +2077,805 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
 
     assert expect_substring in capsys.readouterr().out
     assert _task_state(home, task_id) == expect_state
+
+
+_ADOPT_PR_NUMBER = "123"
+
+
+def _fake_gh_names_a_pull_request(url, number=_ADOPT_PR_NUMBER, slug="owner/repo"):
+    """A `gh pr view <number> --repo <slug> ... --jq .url` fake. Its answer can
+    differ in case from the origin's slug, so a version that builds the URL
+    itself rather than asking fails against it."""
+
+    def fake(argv):
+        assert argv[:3] == ["gh", "pr", "view"]
+        assert argv[3] == number
+        assert argv[argv.index("--repo") + 1] == slug
+        assert "--jq" in argv
+        return subprocess.CompletedProcess(argv, 0, url + "\n", "")
+
+    return fake
+
+
+def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
+    tmp_path, monkeypatch, capsys
+):
+    """One task per state `adopt` takes: `NOT_IMPLEMENTED` and
+    `READY_FOR_REVIEW` carry a NULL `pr_url`, `EXHAUSTED` carries an empty
+    one beside a recorded push and diff stat. Every other column reads
+    back unchanged, and an older task of the same spec is untouched.
+    `gh`'s answer differs in case from the slug, so a URL built from the
+    slug and the number fails this."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    adopted_url = "https://github.com/OWNER/REPO/pull/123"
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url))
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+
+    older = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-OLD",
+        state="MERGED",
+        pr_url="https://github.com/o/r/pull/1",
+    )
+    older_before = _task_row(ledger, older)
+
+    # A rejected, unadoptable older sibling of each spec, so `adopt` must
+    # pick the newest row rather than the first one for that spec id.
+    older_ni = _seed_task(ledger, repo_id, spec_id="SY-NI", state="REJECTED")
+    not_implemented = _seed_task(
+        ledger, repo_id, spec_id="SY-NI", state="NOT_IMPLEMENTED"
+    )
+
+    older_rfr = _seed_task(ledger, repo_id, spec_id="SY-RFR", state="REJECTED")
+    ready = _seed_task(ledger, repo_id, spec_id="SY-RFR", state="DIAGNOSING")
+    ledger.record_push(ready, "p" * 40)
+    ledger.set_task_state(ready, "READY_FOR_REVIEW")
+
+    older_ex = _seed_task(ledger, repo_id, spec_id="SY-EX", state="REJECTED")
+    exhausted = _seed_task(ledger, repo_id, spec_id="SY-EX", state="DIAGNOSING")
+    ledger.set_task_package(
+        exhausted,
+        "EXHAUSTED",
+        branch="saffron/SY-EX",
+        pushed_sha="",
+        pr_url="",
+        added=5,
+        removed=2,
+    )
+
+    siblings = (older_ni, older_rfr, older_ex)
+    befores = {
+        task_id: _task_row(ledger, task_id)
+        for task_id in (not_implemented, ready, exhausted, *siblings)
+    }
+    ledger.close()
+
+    for spec_id, task_id in (
+        ("SY-NI", not_implemented),
+        ("SY-RFR", ready),
+        ("SY-EX", exhausted),
+    ):
+        assert (
+            cli.main(
+                [
+                    "--home",
+                    str(home),
+                    "adopt",
+                    spec_id,
+                    _ADOPT_PR_NUMBER,
+                    "--repo",
+                    str(repo),
+                ]
+            )
+            == 0
+        )
+        assert adopted_url in capsys.readouterr().out
+
+        check = Ledger(home / "ledger.db")
+        after = _task_row(check, task_id)
+        check.close()
+        before = befores[task_id]
+        assert after["pr_url"] == adopted_url
+        for column in ("state", "branch", "pushed_sha", "added", "removed"):
+            assert after[column] == before[column], column
+
+    check = Ledger(home / "ledger.db")
+    assert _task_row(check, older) == older_before
+    for sibling in siblings:
+        assert _task_row(check, sibling) == befores[sibling]
+    check.close()
+
+
+def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    """Every refusal path, read from the ledger alone. A missing ledger row
+    or spec refuses. So does a newest task that already carries a
+    `pr_url`, or sits in any state `adopt` does not take. A dead newest
+    task shadowing an older live one still refuses on the newest. None of
+    those asks `gh`. The last two cases ask `gh` once each, about a number
+    it names nothing for. The whole table reads the same once every case
+    above finishes."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    no_history = _checkout_with_origin(
+        tmp_path, "https://github.com/owner/none.git", dirname="checkout-none"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+
+    takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"}
+    others = sorted(state for state in typing.get_args(TaskState) if state not in takes)
+    assert len(others) == 23
+
+    carried = {}
+    for i, state in enumerate(sorted(takes)):
+        url = f"https://github.com/owner/repo/pull/{900 + i}"
+        spec_id = f"SY-CARRIED-{i}"
+        carried[spec_id] = url
+        _seed_task(ledger, repo_id, spec_id=spec_id, state=state, pr_url=url)
+
+    other_states = {}
+    for i, state in enumerate(others):
+        spec_id = f"SY-OTHER-{i}"
+        other_states[spec_id] = state
+        _seed_task(ledger, repo_id, spec_id=spec_id, state=state)
+
+    _seed_task(ledger, repo_id, spec_id="SY-STACK", state="NOT_IMPLEMENTED")
+    _seed_task(ledger, repo_id, spec_id="SY-STACK", state="MERGED")
+
+    before = _dump_tasks(ledger)
+    ledger.close()
+
+    calls = []
+
+    def unexpected_gh(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "unexpected")
+
+    monkeypatch.setattr(cli, "run_gh", unexpected_gh)
+
+    assert (
+        cli.main(
+            ["--home", str(home), "adopt", "SY-NOROW", "1", "--repo", str(no_history)]
+        )
+        == 1
+    )
+    assert "SY-NOROW" in capsys.readouterr().out
+
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-NOTASK", "1", "--repo", str(repo)])
+        == 1
+    )
+    assert "SY-NOTASK" in capsys.readouterr().out
+
+    for spec_id, url in carried.items():
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
+            == 1
+        )
+        assert url in capsys.readouterr().out
+
+    for spec_id, state in other_states.items():
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
+            == 1
+        )
+        assert state in capsys.readouterr().out
+
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-STACK", "1", "--repo", str(repo)])
+        == 1
+    )
+    assert "MERGED" in capsys.readouterr().out
+
+    assert calls == []
+
+    def gh_returns_nonzero(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "no such pr")
+
+    monkeypatch.setattr(cli, "run_gh", gh_returns_nonzero)
+    seed_more = Ledger(home / "ledger.db")
+    _seed_task(seed_more, repo_id, spec_id="SY-NOPR1", state="NOT_IMPLEMENTED")
+    seed_more.close()
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-NOPR1", "404", "--repo", str(repo)])
+        == 1
+    )
+    assert "404" in capsys.readouterr().out
+
+    def gh_returns_blank(argv):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(cli, "run_gh", gh_returns_blank)
+    seed_more = Ledger(home / "ledger.db")
+    _seed_task(seed_more, repo_id, spec_id="SY-NOPR2", state="NOT_IMPLEMENTED")
+    seed_more.close()
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-NOPR2", "405", "--repo", str(repo)])
+        == 1
+    )
+    assert "405" in capsys.readouterr().out
+
+    assert len(calls) == 2
+
+    final_ledger = Ledger(home / "ledger.db")
+    after = _dump_tasks(final_ledger)
+    final_ledger.close()
+    assert after[: len(before)] == before
+
+
+def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch):
+    """An adoption is a fact, not a bare `UPDATE`. Folding the record it is
+    appended to rebuilds the row with the adopted URL. Every other column
+    stands exactly as it did before the adoption. This runs for a
+    `NOT_IMPLEMENTED` row and for an `EXHAUSTED` row with a recorded push
+    and diff stat."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    record = MemoryRecord()
+    monkeypatch.setattr(cli, "Ledger", lambda path: Ledger(path, record=record))
+
+    seed = Ledger(home / "ledger.db", record=record)
+    repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
+    not_implemented = _seed_task(
+        seed, repo_id, spec_id="SY-FOLD-NI", state="NOT_IMPLEMENTED"
+    )
+
+    run_id = seed.create_run(repo_id, base_sha="a" * 40)
+    exhausted = seed.create_task(
+        run_id, spec_id="SY-FOLD-EX", spec_sha="s" * 40, branch="saffron/SY-FOLD-EX"
+    )
+    seed.set_task_package(
+        exhausted,
+        "EXHAUSTED",
+        branch="saffron/SY-FOLD-EX",
+        pushed_sha="p" * 40,
+        pr_url="",
+        added=9,
+        removed=4,
+    )
+
+    befores = {
+        "SY-FOLD-NI": _task_row(seed, not_implemented),
+        "SY-FOLD-EX": _task_row(seed, exhausted),
+    }
+    seed.close()
+
+    adopted_url = "https://github.com/owner/repo/pull/77"
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url, "77"))
+    for spec_id in ("SY-FOLD-NI", "SY-FOLD-EX"):
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "77", "--repo", str(repo)])
+            == 0
+        )
+
+    folded = Ledger(tmp_path / "folded.db")
+    outcome = fold(record, folded)
+    assert outcome.skipped == []
+
+    for spec_id, before in befores.items():
+        row = dict(
+            folded._db.execute(
+                "SELECT * FROM tasks WHERE spec_id = ?", (spec_id,)
+            ).fetchone()
+        )
+        assert row["pr_url"] == adopted_url
+        for column in ("state", "branch", "pushed_sha", "added", "removed"):
+            assert row[column] == before[column], column
+    folded.close()
+
+
+def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_parent(
+    tmp_path, monkeypatch, capsys
+):
+    """A parent whose only task ended `NOT_IMPLEMENTED`, with no push and
+    no pull request, refuses its child, naming `NOT_IMPLEMENTED`. `adopt`
+    alone changes nothing about that. Only `reconcile` reading a merge
+    does, and the same `build_queue` scan then admits the child."""
+    from saffron.scheduler import build_queue
+
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    parent_id, child_id = "SA-9901", "SA-9902"
+    (specs_dir / "parent.md").write_text(
+        f"---\nid: {parent_id}\ntitle: Parent\ntype: chore\n---\n\nParent body.\n"
+    )
+    (specs_dir / "child.md").write_text(
+        f"---\nid: {child_id}\ntitle: Child\ntype: chore\n"
+        f"depends_on: [{parent_id}]\n---\n\nChild body.\n"
+    )
+    parent_spec, parent_sha = intake.load_spec(specs_dir / "parent.md")
+
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    def open_ledger():
+        return Ledger(home / "ledger.db")
+
+    seed = open_ledger()
+    repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
+    parent_task = _seed_task(
+        seed,
+        repo_id,
+        spec_id=parent_spec.id,
+        state="NOT_IMPLEMENTED",
+        spec_sha=parent_sha,
+    )
+    seed.close()
+
+    check = open_ledger()
+    before_candidates, before_refusals = build_queue(specs_dir, repo_id, check)
+    check.close()
+    assert [c.spec.id for c in before_candidates] == []
+    assert len(before_refusals) == 1
+    assert before_refusals[0].path == specs_dir / "child.md"
+    assert "NOT_IMPLEMENTED" in before_refusals[0].reason
+
+    adopted_url = "https://github.com/owner/repo/pull/55"
+    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url, "55"))
+    assert (
+        cli.main(["--home", str(home), "adopt", parent_id, "55", "--repo", str(repo)])
+        == 0
+    )
+    capsys.readouterr()
+
+    check = open_ledger()
+    mid_candidates, mid_refusals = build_queue(specs_dir, repo_id, check)
+    check.close()
+    assert [c.spec.id for c in mid_candidates] == []
+    assert len(mid_refusals) == 1
+    assert "NOT_IMPLEMENTED" in mid_refusals[0].reason
+
+    def fake_gh_merged(argv):
+        assert argv[:3] == ["gh", "pr", "view"]
+        assert argv[3] == adopted_url
+        return subprocess.CompletedProcess(
+            argv, 0, json.dumps({"state": "MERGED", "reviewDecision": None}), ""
+        )
+
+    monkeypatch.setattr(cli, "run_gh", fake_gh_merged)
+    assert cli.main(["--home", str(home), "reconcile", "--repo", str(repo)]) == 0
+    capsys.readouterr()
+
+    check = open_ledger()
+    after_row = dict(
+        check._db.execute(
+            "SELECT state, pushed_sha FROM tasks WHERE task_id = ?", (parent_task,)
+        ).fetchone()
+    )
+    assert after_row["state"] == "MERGED"
+    assert not after_row["pushed_sha"]
+
+    candidates, refusals = build_queue(specs_dir, repo_id, check)
+    check.close()
+    assert [c.spec.id for c in candidates] == [child_id]
+    assert refusals == []
+
+
+def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron package <spec id> --repo <path>` rebuilds the task with
+    `ready_task`, probes the host itself in its own network, and calls
+    `package()` once with every value that rebuild carried. The probe
+    tolerates one listener, and `--repo` is resolved from a relative
+    path."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-PKG", state="READY_FOR_REVIEW")
+    ledger.close()
+
+    resolved_repo = checkout.resolve()
+    spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": "SY-PKG"})
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=7,
+        task_dir=tmp_path / "taskdir",
+    )
+    ready = task.ReadyTask(
+        outcome=outcome, spec=spec, parent_branch="saffron/SY-PARENT"
+    )
+
+    calls = []
+
+    def fake_ready_task(spec_id, *, repo, repo_id, ledger, out_dir):
+        calls.append(("ready_task", spec_id, repo, repo_id))
+        return ready
+
+    monkeypatch.setattr(task, "ready_task", fake_ready_task)
+
+    mirror = tmp_path / "mirror.git"
+
+    def fake_prepare_mirror(repo_arg, mirror_path):
+        calls.append(("prepare_mirror", repo_arg, mirror_path))
+        return mirror, "https://github.com/owner/repo.git", "b" * 40
+
+    monkeypatch.setattr(preflight, "prepare_mirror", fake_prepare_mirror)
+
+    def fake_build_cell_image(repo_arg):
+        calls.append(("build_cell_image", repo_arg))
+        return "saffron/cell:repo"
+
+    monkeypatch.setattr(repo_image, "build_cell_image", fake_build_cell_image)
+
+    def fake_remove_network(name):
+        calls.append(("remove_network", name))
+        return subprocess.CompletedProcess([name], 0, "", "")
+
+    def fake_create_network(name, *args, **kwargs):
+        calls.append(("create_network", name, args, kwargs))
+
+    monkeypatch.setattr(runtime, "remove_network", fake_remove_network)
+    monkeypatch.setattr(runtime, "create_network", fake_create_network)
+
+    sockets = [("Tailscale", 8000), ("Postgres", 5432)]
+
+    def fake_host_probe_ports():
+        calls.append(("host_probe_ports",))
+        return [5432], ["Tailscale"], sockets
+
+    monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw, "192.168.1.9"])
+
+    def fake_assert_unreachable(image_tag, network, ports, gateway, sockets_arg):
+        calls.append(
+            (
+                "assert_host_is_unreachable",
+                image_tag,
+                network,
+                ports,
+                gateway,
+                sockets_arg,
+            )
+        )
+
+    monkeypatch.setattr(
+        preflight, "assert_host_is_unreachable", fake_assert_unreachable
+    )
+
+    pr_url = "https://github.com/owner/repo/pull/42"
+
+    def fake_package(outcome_arg, **kwargs):
+        # Read while open: `main` closes the ledger once the command returns.
+        db_file = kwargs["ledger"]._db.execute("PRAGMA database_list").fetchone()[2]
+        calls.append(("package", outcome_arg, {**kwargs, "db_file": db_file}))
+        return package.PackageResult(
+            state="READY_FOR_REVIEW", pr_url=pr_url, branch="saffron/SY-PKG"
+        )
+
+    monkeypatch.setattr(package, "package", fake_package)
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("run_one_cell must not run")
+
+    monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+    code = cli.main(["--home", str(home), "package", "SY-PKG", "--repo", checkout.name])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert pr_url in out
+    assert "tolerating Tailscale" in out
+    assert "probing 1 host ports" in out
+    # Not a substring alone: the two addresses the probe covered must
+    # both appear, so a dropped address cannot hide behind this check.
+    assert runtime.GATEWAY in out
+    assert "192.168.1.9" in out
+
+    names = [c[0] for c in calls]
+    assert names == [
+        "ready_task",
+        "prepare_mirror",
+        "build_cell_image",
+        "remove_network",
+        "create_network",
+        "host_probe_ports",
+        "assert_host_is_unreachable",
+        "remove_network",
+        "package",
+    ]
+
+    network_name = "saffron-hostprobe-SY-PKG"
+    assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id)
+    assert calls[1][1:] == (resolved_repo, cli._mirror_path(resolved_repo, home))
+    assert calls[2][1] == resolved_repo
+    assert calls[3][1] == network_name
+    assert calls[4][1:] == (network_name, (), {})
+    assert calls[7][1] == network_name
+
+    _, image_tag, assert_network, assert_ports, assert_gateway, assert_sockets = calls[
+        6
+    ]
+    assert image_tag == repo_image.BASE_TAG
+    assert assert_network == network_name
+    assert assert_ports == [5432]
+    assert assert_gateway == runtime.GATEWAY
+    assert assert_sockets == sockets
+
+    package_outcome, package_kwargs = calls[8][1], calls[8][2]
+    assert package_outcome is outcome
+    assert package_kwargs["spec"] is spec
+    assert package_kwargs["repo"] == resolved_repo
+    assert package_kwargs["mirror"] == mirror
+    assert package_kwargs["image"] == "saffron/cell:repo"
+    assert package_kwargs["out_dir"] == home / "batches" / "v0"
+    assert package_kwargs["token"] == "a-token"
+    assert package_kwargs["parent_branch"] == "saffron/SY-PARENT"
+    assert package_kwargs["db_file"] == str(home / "ledger.db")
+
+
+def test_package_refused_by_ready_task_exits_one_and_takes_no_host_step(
+    tmp_path, monkeypatch, capsys
+):
+    """A `Refused` from `ready_task` prints `package:` and the reason and
+    exits 1, before the mirror, the image, the network or `package()`."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    monkeypatch.setattr(
+        task, "ready_task", lambda *a, **k: task.Refused(reason="no such task")
+    )
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("no host step runs after a refusal")
+
+    monkeypatch.setattr(preflight, "prepare_mirror", must_not_run)
+    monkeypatch.setattr(repo_image, "build_cell_image", must_not_run)
+    monkeypatch.setattr(runtime, "create_network", must_not_run)
+    monkeypatch.setattr(runtime, "remove_network", must_not_run)
+    monkeypatch.setattr(package, "package", must_not_run)
+    monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+    code = cli.main(
+        ["--home", str(home), "package", "SY-REFUSED", "--repo", str(checkout)]
+    )
+
+    assert code == 1
+    assert "package: no such task" in capsys.readouterr().out
+
+
+def test_package_exits_by_the_token_and_by_what_package_returned_or_raised(
+    tmp_path, monkeypatch, capsys
+):
+    """An unset, empty or blank token exits 2 before `ready_task` runs. A
+    `package()` returning `MERGE_FAILED` exits 1 and prints its note. A
+    `package()` that raises exits 2 and leaves the task untouched, so the
+    command can take it again."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-TOKEN", state="READY_FOR_REVIEW")
+    ledger.close()
+
+    reached = []
+    monkeypatch.setattr(task, "ready_task", lambda *a, **k: reached.append(True))
+    monkeypatch.setattr(
+        task,
+        "run_one_cell",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("run_one_cell must not run")
+        ),
+    )
+
+    for blank in ("", "   "):
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", blank)
+        assert (
+            cli.main(
+                ["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)]
+            )
+            == 2
+        )
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert (
+        cli.main(["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)])
+        == 2
+    )
+    assert reached == []
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": "SY-TOKEN"})
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW", task_id=task_id, run_id=1, task_dir=tmp_path / "td"
+    )
+    ready = task.ReadyTask(outcome=outcome, spec=spec, parent_branch=None)
+    monkeypatch.setattr(task, "ready_task", lambda *a, **k: ready)
+    monkeypatch.setattr(
+        preflight,
+        "prepare_mirror",
+        lambda repo, mp: (tmp_path / "m.git", "u", "b" * 40),
+    )
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "img")
+    monkeypatch.setattr(runtime, "create_network", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime,
+        "remove_network",
+        lambda name: subprocess.CompletedProcess([name], 0, "", ""),
+    )
+    monkeypatch.setattr(preflight, "host_probe_ports", lambda: ([], [], []))
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+    monkeypatch.setattr(preflight, "assert_host_is_unreachable", lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        package,
+        "package",
+        lambda *a, **k: package.PackageResult(
+            state="MERGE_FAILED", note="lease rejected"
+        ),
+    )
+    assert (
+        cli.main(["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)])
+        == 1
+    )
+    assert "lease rejected" in capsys.readouterr().out
+
+    def raises_package(*a, **k):
+        raise package.PackageError("gate broke")
+
+    monkeypatch.setattr(package, "package", raises_package)
+    check = Ledger(home / "ledger.db")
+    before = _task_row(check, task_id)
+    check.close()
+
+    assert (
+        cli.main(["--home", str(home), "package", "SY-TOKEN", "--repo", str(checkout)])
+        == 2
+    )
+
+    check = Ledger(home / "ledger.db")
+    after = _task_row(check, task_id)
+    check.close()
+    assert after == before
+    assert after["state"] == "READY_FOR_REVIEW"
+    assert after["pr_url"] is None
+
+
+def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
+    tmp_path, monkeypatch, capsys
+):
+    """A `PreflightFailed` from `host_probe_ports` or from
+    `assert_host_is_unreachable` exits 2. A leftover network is removed
+    first, the scratch network is created with no subnet, and it is
+    removed again. `package()` is never called. The witness drives both."""
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    def one_trial(break_step, spec_id, dirname):
+        checkout = _checkout_with_origin(
+            tmp_path, "https://github.com/owner/repo.git", dirname=dirname
+        )
+        home = tmp_path / f"home-{dirname}"
+        home.mkdir()
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+        ledger = Ledger(home / "ledger.db")
+        repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+        task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state="READY_FOR_REVIEW")
+        ledger.close()
+
+        spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": spec_id})
+        outcome = CellOutcome(
+            state="READY_FOR_REVIEW",
+            task_id=task_id,
+            run_id=1,
+            task_dir=tmp_path / "td",
+        )
+        ready = task.ReadyTask(outcome=outcome, spec=spec, parent_branch=None)
+        monkeypatch.setattr(task, "ready_task", lambda *a, **k: ready)
+        monkeypatch.setattr(
+            preflight,
+            "prepare_mirror",
+            lambda repo, mp: (tmp_path / "m.git", "u", "b" * 40),
+        )
+        monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "img")
+
+        calls = []
+
+        def fake_remove_network(name):
+            calls.append(("remove_network", name))
+            return subprocess.CompletedProcess([name], 0, "", "")
+
+        def fake_create_network(name, *args, **kwargs):
+            calls.append(("create_network", name, args, kwargs))
+
+        monkeypatch.setattr(runtime, "remove_network", fake_remove_network)
+        monkeypatch.setattr(runtime, "create_network", fake_create_network)
+
+        if break_step == "host_probe_ports":
+
+            def fake_host_probe_ports():
+                calls.append(("host_probe_ports",))
+                raise preflight.PreflightFailed("lsof missing")
+
+            monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
+            expected_names = [
+                "remove_network",
+                "create_network",
+                "host_probe_ports",
+                "remove_network",
+            ]
+        else:
+
+            def fake_host_probe_ports():
+                calls.append(("host_probe_ports",))
+                return [5432], [], []
+
+            def fake_assert_unreachable(*a, **k):
+                calls.append(("assert_host_is_unreachable",))
+                raise preflight.PreflightFailed("host answered")
+
+            monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
+            monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+            monkeypatch.setattr(
+                preflight, "assert_host_is_unreachable", fake_assert_unreachable
+            )
+            expected_names = [
+                "remove_network",
+                "create_network",
+                "host_probe_ports",
+                "assert_host_is_unreachable",
+                "remove_network",
+            ]
+
+        def fake_package(*a, **k):
+            calls.append(("package",))
+            raise AssertionError("package() must not run after a probe refusal")
+
+        monkeypatch.setattr(package, "package", fake_package)
+
+        def must_not_run(*a, **k):
+            raise AssertionError("run_one_cell must not run")
+
+        monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+        code = cli.main(
+            ["--home", str(home), "package", spec_id, "--repo", str(checkout)]
+        )
+
+        assert code == 2
+        if break_step == "assert_host_is_unreachable":
+            assert "tolerating nothing" in capsys.readouterr().out
+        names = [c[0] for c in calls]
+        # Exact, not a subset: a skipped probe still removes and recreates
+        # the network, so only the sequence catches package() running instead.
+        assert names == expected_names
+        network_name = f"saffron-hostprobe-{spec_id}"
+        assert calls[0][1] == network_name
+        assert calls[1][1:] == (network_name, (), {})
+        assert calls[-1][1] == network_name
+
+    one_trial("host_probe_ports", "SY-PROBE-A", "checkout-probe-a")
+    one_trial("assert_host_is_unreachable", "SY-PROBE-B", "checkout-probe-b")
 
 
 def test_watch_reads_the_batch_tree_the_cli_already_computes(tmp_path, monkeypatch):
@@ -5026,6 +5852,184 @@ def test_only_the_stack_runner_hands_run_task_the_candidates_task(
     assert recorded == [7, 8, None]
 
 
+def test_a_stack_batchs_spec_with_no_predecessor_is_seeded_on_the_pull_request_its_order_stacks_on(
+    tmp_path, monkeypatch
+):
+    """Given no predecessor, `_stack_runner`, `_stack_review` and
+    `_stack_revise` each fetch the branch of the candidate's stack base and
+    seed there. The runner's `Handoff` names that branch and its fetched
+    head. Each spec session's cell starts at that head. A predecessor still
+    outranks the stack base, and a spec with neither seeds at `base_sha` as
+    before."""
+    from saffron.scheduler import StackBase
+    from saffron.task import Handoff
+
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+
+    # --- the runner's own `Handoff` ---
+    runner_fetches: list[tuple] = []
+
+    def _fake_fetch_for_runner(mirror, url, branch):
+        runner_fetches.append((mirror, url, branch))
+        return f"{branch}-head"
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch_for_runner)
+
+    def _plain_candidate(spec_id):
+        return Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.Spec(id=spec_id, title="t", type="chore"),
+            spec_sha="s" * 64,
+            task_id=None,
+        )
+
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    ledger = Ledger(tmp_path / "l.db")
+    handoffs: list[Handoff] = []
+
+    def _fake_run_task(
+        spec,
+        spec_sha,
+        *,
+        ceilings,
+        base,
+        repo_id,
+        repo,
+        ledger,
+        out_dir,
+        token,
+        handoff: Handoff | None = None,
+        task_id=None,
+        emit=None,
+    ):
+        assert handoff is not None
+        handoffs.append(handoff)
+        return CellOutcome(
+            state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
+        )
+
+    monkeypatch.setattr(cli, "run_task", _fake_run_task)
+
+    with_base = cli._stack_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+        stack_base=stack_base,
+    )
+    with_base(_plain_candidate("SY-1"), None)
+    assert handoffs[-1] == Handoff(
+        stacked_on="saffron/SY-9-head", target_branch="saffron/SY-9"
+    )
+
+    with_base(_plain_candidate("SY-1"), _plain_candidate("SY-7"))
+    assert handoffs[-1] == Handoff(
+        stacked_on="saffron/SY-7-head", target_branch="saffron/SY-7"
+    )
+
+    without_base = cli._stack_runner(
+        pinned=pinned,
+        repo_id=lambda: 1,
+        repo=tmp_path / "repo",
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+    )
+    without_base(_plain_candidate("SY-1"), None)
+    assert handoffs[-1] == Handoff(stacked_on=None, target_branch=None)
+
+    assert runner_fetches == [
+        (pinned.mirror, pinned.url, "saffron/SY-9"),
+        (pinned.mirror, pinned.url, "saffron/SY-7"),
+    ]
+    ledger.close()
+
+    # --- the spec review's and the spec writer's own seed ---
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    mirror, base_sha = rig.mirror, rig.base_sha
+    repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        return implement.AttemptResult(
+            session_id="sid",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.0,
+            rate_limit_status="rejected",
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    def _fake_run_spec_review(container, *, system_prompt, prompt, agent):
+        agent(container, prompt="x", options={})
+        return object()
+
+    monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+        return spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.0,
+            error=None,
+            resets_at=None,
+            session_id="s",
+            num_turns=0,
+            spec_sha="x" * 64,
+        )
+
+    monkeypatch.setattr(spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    pinned2 = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+
+    review_with_base = cli._stack_review(
+        pinned=pinned2, repo=repo, out_dir=out_dir, stack_base=stack_base
+    )
+    review_with_base(_candidate("SY-1"), None)
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-9")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    review_with_base(_candidate("SY-2"), _candidate("SY-7"))
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-7")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    review_without_base = cli._stack_review(pinned=pinned2, repo=repo, out_dir=out_dir)
+    review_without_base(_candidate("SY-3"), None)
+    assert cell_up_calls[-1]["tree_base"] == base_sha
+    assert len(fetch_calls) == 2
+
+    revise_with_base = cli._stack_revise(
+        pinned=pinned2, repo=repo, out_dir=out_dir, stack_base=stack_base
+    )
+    revise_with_base(_candidate("SY-4"), None, "spec text", "review text")
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-9")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    revise_with_base(_candidate("SY-5"), _candidate("SY-7"), "spec text", "review text")
+    assert fetch_calls[-1] == (mirror, pinned2.url, "saffron/SY-7")
+    assert cell_up_calls[-1]["tree_base"] == "d" * 40
+
+    revise_without_base = cli._stack_revise(pinned=pinned2, repo=repo, out_dir=out_dir)
+    revise_without_base(_candidate("SY-6"), None, "spec text", "review text")
+    assert cell_up_calls[-1]["tree_base"] == base_sha
+    assert len(fetch_calls) == 4
+
+
 def test_the_night_cannot_start_without_a_readiness_gate():
     """The loop used to bind a permissive stub, so a caller who simply forgot
     the argument got a vacuous §4.4 step 1 and a night that could start on an
@@ -6445,6 +7449,127 @@ def test_a_stack_batch_passes_run_stack_batch_its_spec_revision(tmp_path, monkey
     assert revise_calls == []
     assert len(stack_batch_calls) == 1
     assert stack_batch_calls[0]["revise"] is None
+
+
+def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing(
+    tmp_path, monkeypatch
+):
+    """`saffron batch --stack` hands `run_stack_batch` the `stack_base_alive`
+    that `cli._stack_base_alive` builds on the pinned base. That callable
+    reads the stack base's branch on the remote with `remote_sha`. A
+    present branch is true and a missing ref is false. An unreachable
+    remote raises `PackageError`, which `_drive` counts as an abort."""
+    alive_calls: list[task.PinnedBase] = []
+    alive_sentinel = object()
+
+    def _fake_stack_base_alive(pinned_arg):
+        alive_calls.append(pinned_arg)
+        return alive_sentinel
+
+    stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        stack_batch_calls.append(kwargs)
+        return "DRAINED"
+
+    from saffron import intake
+    from saffron.scheduler import StackBase
+
+    pinned = task.PinnedBase(
+        mirror=Path("/tmp/pinned-mirror.git"),
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+    first = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore", priority=1),
+        spec_sha="r" * 64,
+        task_id=None,
+        stack_base=stack_base,
+    )
+    seeded: dict[str, object] = {}
+
+    def _capturing(name):
+        def _factory(**kwargs):
+            seeded[name] = kwargs["stack_base"]
+            return object()
+
+        return _factory
+
+    with monkeypatch.context() as m:
+        m.chdir(tmp_path)
+        m.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+        m.setattr(cli, "_stack_base_alive", _fake_stack_base_alive)
+        m.setattr(
+            cli,
+            "_resolve_queue",
+            lambda *a, **k: _fake_batch_resolution(tmp_path, candidates=[first]),
+        )
+        m.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+        for name in ("_stack_runner", "_stack_review", "_stack_revise"):
+            m.setattr(cli, name, _capturing(name))
+
+        # Case 1: readiness passes, `--stack`. Built once, on the pinned base,
+        # and the order's stack base reaches the three seeding callables.
+        _readiness_passes(m)
+        home1 = tmp_path / "home1"
+        assert main(["--home", str(home1), "batch", "--stack"]) == 0
+
+        assert alive_calls == [pinned]
+        assert len(stack_batch_calls) == 1
+        assert stack_batch_calls[0]["stack_base_alive"] is alive_sentinel
+        assert seeded == {
+            "_stack_runner": stack_base,
+            "_stack_review": stack_base,
+            "_stack_revise": stack_base,
+        }
+
+        # Case 2: readiness fails. Never built, and `None` reaches the batch.
+        alive_calls.clear()
+        stack_batch_calls.clear()
+        m.setattr(
+            cli.preflight,
+            "check_readiness",
+            lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+        )
+        home2 = tmp_path / "home2"
+        main(["--home", str(home2), "batch", "--stack"])
+
+        assert alive_calls == []
+        assert len(stack_batch_calls) == 1
+        assert stack_batch_calls[0]["stack_base_alive"] is None
+
+        # Case 3: `batch` without `--stack`. Never built either.
+        alive_calls.clear()
+        stack_batch_calls.clear()
+        _readiness_passes(m)
+        home3 = tmp_path / "home3"
+        m.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
+        assert main(["--home", str(home3), "batch"]) == 0
+
+        assert alive_calls == []
+
+    # The real one, driven against real git. Unaffected by the faked
+    # `real_remote` above, which this block never enters.
+    repo = _local_origin(tmp_path)
+    present_head = _push_parent_branch(repo, "saffron/SY-9000")
+    mirror, url = _mirror_of(tmp_path, repo)
+    real_pinned = task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40)
+    real_alive = cli._stack_base_alive(real_pinned)
+
+    assert real_alive("saffron/SY-9000") is True
+    assert real_alive("saffron/SY-missing") is False
+    assert _rev_parse(repo, "saffron/SY-9000") == present_head
+
+    unreachable = task.PinnedBase(
+        mirror=mirror,
+        url=str(tmp_path / "no-such-remote.git"),
+        base_sha="a" * 40,
+    )
+    unreachable_alive = cli._stack_base_alive(unreachable)
+    with pytest.raises(package.PackageError):
+        unreachable_alive("saffron/SY-9000")
 
 
 def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_file(

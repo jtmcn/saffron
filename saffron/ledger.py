@@ -1585,6 +1585,33 @@ class Ledger:
         )
         self._commit_and_append(fact)
 
+    def adopt_pull_request(self, task_id: int, pr_url: str) -> None:
+        """Name a by-hand pull request as this task's own, through the same
+        `task_package` fact `set_task_package` builds, so a fold rebuilds
+        it unchanged (b-a7e5f3). Carries the row's own `state`, `branch`,
+        `pushed_sha`, `added` and `removed` rather than a caller's: an
+        adoption changes nothing about the row but its `pr_url`, and a
+        `NOT_IMPLEMENTED` row has no pushed branch to pass as `str`."""
+        row = self._db.execute(
+            "SELECT state, branch, pushed_sha, added, removed FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no task {task_id} to adopt a pull request onto")
+        fact = self._build_fact(
+            task_id,
+            "task_package",
+            {
+                "state": row["state"],
+                "branch": row["branch"],
+                "pushed_sha": row["pushed_sha"],
+                "pr_url": pr_url,
+                "added": row["added"],
+                "removed": row["removed"],
+            },
+        )
+        self._commit_and_append(fact)
+
     def record_stack_layer(
         self,
         task_id: int,

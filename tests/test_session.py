@@ -2878,13 +2878,12 @@ def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp
     ledger.set_task_state(task3, "ORPHANED")
     ledger.finish_run(run3, "COMPLETE")
 
-    # Task 4: IMPLEMENTING, REBUTTING, IMPLEMENTING, run COMPLETE. The
-    # trailing IMPLEMENTING attempt is what a last-attempt-only cap would miss.
+    # Task 4: IMPLEMENTING then REBUTTING, run COMPLETE. It stopped at
+    # REBUTTING, and a scan stamped it ORPHANED, never a cut.
     run4 = ledger.create_run(repo_id, "b" * 40)
     task4 = ledger.create_task(run4, spec_id, spec_sha, branch=branch)
     _closed(task4, "IMPLEMENTING")
     _closed(task4, "REBUTTING")
-    _closed(task4, "IMPLEMENTING")
     ledger.set_task_state(task4, "ORPHANED")
     ledger.finish_run(run4, "COMPLETE")
 
@@ -2939,6 +2938,251 @@ def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp
     assert states[task4] == "ORPHANED" and statuses[run4] == "COMPLETE"
     assert outcome5.state == "ORPHANED"
     assert not any("cut again at this spec_sha" in line for line in cell5.watched)
+
+
+def test_a_second_cut_on_a_resumed_row_settles_the_spec(monkeypatch, tmp_path):
+    """Criterion 1 (b-3bba0f). Each bound cuts a fresh task at zero commits,
+    which ends ORPHANED. A second cut by the next bound on that row, given back as
+    task_id, reads the row's own earlier cut and settles NOT_IMPLEMENTED.
+    Three further rows look cut-shaped but are not: GATE_ERROR instead of
+    ORPHANED, a raise's run ABORTED, and a scan's run left RUNNING. Each
+    stays its own first cut."""
+    bounds = {
+        "wall": lambda: _wall_cut_turn(cost=0.4),
+        "turn ceiling": lambda: implement.AgentFailed(
+            "max turns", _cut_off_turn(cost=0.4)
+        ),
+        "budget cap": lambda: _budget_cut_turn(cost=0.4),
+    }
+    names = list(bounds)
+    for i, name in enumerate(names):
+        make_cut, make_second = bounds[name], bounds[names[(i + 1) % len(names)]]
+        case_dir = tmp_path / name.replace(" ", "_")
+        case_dir.mkdir()
+        cell1 = _stub_the_runtime(monkeypatch, commits=0)
+        outcome1, _ledger = _drive(
+            monkeypatch,
+            case_dir,
+            cell=cell1,
+            turns=[_turn(_block(_PLAN)), make_cut(), _turn(cost=0.05)],
+        )
+        assert outcome1.state == "ORPHANED", name
+
+        cell2 = _stub_the_runtime(monkeypatch, commits=0)
+        outcome2, _ledger = _drive(
+            monkeypatch,
+            case_dir,
+            cell=cell2,
+            turns=[_turn(_block(_PLAN)), make_second(), _turn(cost=0.05)],
+            spec=_spec(task_id=outcome1.task_id),
+        )
+        assert outcome2.state == "NOT_IMPLEMENTED", name
+        assert outcome2.task_id == outcome1.task_id, name
+        named = [line for line in cell2.watched if "cut again at this spec_sha" in line]
+        assert len(named) == 1, name
+        assert f"task {outcome1.task_id}" in named[0], name
+
+    def _closed(
+        ledger, task_id, phase, *, subtype="success", terminal_reason="completed"
+    ):
+        attempt_id = ledger.open_attempt(task_id, phase=phase)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s",
+            subtype=subtype,
+            terminal_reason=terminal_reason,
+            num_turns=1,
+            cost_usd_est=0.1,
+        )
+
+    # Cut-shaped, but none of the three earns the read: a GATE_ERROR state, a
+    # raise's ABORTED run, and a scan's never-finished run.
+    shapes = []
+
+    gate_error_dir = tmp_path / "gate_error"
+    gate_error_dir.mkdir()
+    ledger = Ledger(gate_error_dir / "ledger.db")
+    repo_id = ledger.upsert_repo(
+        "repo", str(gate_error_dir / "repo"), str(gate_error_dir / "m.git"), None
+    )
+    run = ledger.create_run(repo_id, "b" * 40)
+    gate_error_task = ledger.create_task(run, "SY-1", "a" * 64, branch="saffron/SY-1")
+    _closed(ledger, gate_error_task, "IMPLEMENTING")
+    _closed(
+        ledger,
+        gate_error_task,
+        "IMPLEMENTING",
+        subtype="error_max_turns",
+        terminal_reason="max_turns",
+    )
+    _closed(ledger, gate_error_task, "IMPLEMENTING")
+    ledger.set_task_state(gate_error_task, "GATE_ERROR")
+    ledger.finish_run(run, "COMPLETE")
+    ledger.close()
+    shapes.append(("gate_error", gate_error_dir, gate_error_task))
+
+    raised_dir = tmp_path / "raised"
+    raised_dir.mkdir()
+    ledger = Ledger(raised_dir / "ledger.db")
+    repo_id = ledger.upsert_repo(
+        "repo", str(raised_dir / "repo"), str(raised_dir / "m.git"), None
+    )
+    run = ledger.create_run(repo_id, "b" * 40)
+    raised_task = ledger.create_task(run, "SY-1", "a" * 64, branch="saffron/SY-1")
+    _closed(ledger, raised_task, "IMPLEMENTING")
+    ledger.set_task_state(raised_task, "ORPHANED")
+    ledger.finish_run(run, "ABORTED")
+    ledger.close()
+    shapes.append(("raised", raised_dir, raised_task))
+
+    scanned_dir = tmp_path / "scanned"
+    scanned_dir.mkdir()
+    ledger = Ledger(scanned_dir / "ledger.db")
+    repo_id = ledger.upsert_repo(
+        "repo", str(scanned_dir / "repo"), str(scanned_dir / "m.git"), None
+    )
+    run = ledger.create_run(repo_id, "b" * 40)
+    scanned_task = ledger.create_task(run, "SY-1", "a" * 64, branch="saffron/SY-1")
+    _closed(ledger, scanned_task, "IMPLEMENTING")
+    ledger.set_task_state(scanned_task, "ORPHANED")
+    ledger.close()
+    shapes.append(("scanned", scanned_dir, scanned_task))
+
+    for name, case_dir, task_id in shapes:
+        cell = _stub_the_runtime(monkeypatch, commits=0)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            case_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _wall_cut_turn(cost=0.4), _turn(cost=0.05)],
+            spec=_spec(task_id=task_id),
+        )
+        assert outcome.state == "ORPHANED", name
+        assert not any("cut again at this spec_sha" in line for line in cell.watched), (
+            name
+        )
+
+
+def test_a_cut_after_a_repair_a_review_or_a_rebuttal_still_counts(
+    monkeypatch, tmp_path
+):
+    """Criterion 2 (b-3bba0f). The cap judges a row by its latest attempt, by
+    attempt_id, not by every attempt the row holds. Three shapes open
+    IMPLEMENTING then move past it: REPAIRING, REVIEWING, or REPAIRING then
+    REVIEWING then REBUTTING. The fourth is SPEC_REVIEW then SPEC_WRITING. A trailing
+    IMPLEMENTING attempt makes each count. Without one, the row still does
+    not count. Each shape is driven both on another row and on the row cut
+    itself."""
+    shapes = {
+        "repaired": ("IMPLEMENTING", "IMPLEMENTING", "IMPLEMENTING", "REPAIRING"),
+        "reviewed": ("IMPLEMENTING", "IMPLEMENTING", "IMPLEMENTING", "REVIEWING"),
+        "rebutted": (
+            "IMPLEMENTING",
+            "IMPLEMENTING",
+            "IMPLEMENTING",
+            "REPAIRING",
+            "REVIEWING",
+            "REBUTTING",
+        ),
+        "spec_reviewed": ("SPEC_REVIEW", "SPEC_WRITING"),
+    }
+
+    def _closed(ledger, task_id, phase):
+        attempt_id = ledger.open_attempt(task_id, phase=phase)
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s",
+            subtype="success",
+            terminal_reason="completed",
+            num_turns=1,
+            cost_usd_est=0.1,
+        )
+        return attempt_id
+
+    def _seed(case_dir, phases, *, trailing):
+        case_dir.mkdir()
+        ledger = Ledger(case_dir / "ledger.db")
+        repo_id = ledger.upsert_repo(
+            "repo", str(case_dir / "repo"), str(case_dir / "m.git"), None
+        )
+        run = ledger.create_run(repo_id, "b" * 40)
+        task = ledger.create_task(run, "SY-1", "a" * 64, branch="saffron/SY-1")
+        all_phases = phases + (("IMPLEMENTING",) if trailing else ())
+        attempt_ids = [_closed(ledger, task, phase) for phase in all_phases]
+        # Run backwards against attempt_id, so a cap keyed on started_at
+        # alone would read the row's first attempt as its latest.
+        for offset, attempt_id in enumerate(attempt_ids):
+            ledger._db.execute(
+                "UPDATE attempts SET started_at = ? WHERE attempt_id = ?",
+                (f"2026-01-01 00:00:{59 - offset:02d}", attempt_id),
+            )
+        ledger._db.commit()
+        ledger.set_task_state(task, "ORPHANED")
+        ledger.finish_run(run, "COMPLETE")
+        ledger.close()
+        reopened = Ledger(case_dir / "ledger.db")
+        rows = reopened._db.execute(
+            "SELECT started_at FROM attempts WHERE task_id = ? ORDER BY attempt_id",
+            (task,),
+        ).fetchall()
+        reopened.close()
+        started = [r["started_at"] for r in rows]
+        assert all(a > b for a, b in zip(started, started[1:], strict=False))
+        return task
+
+    for case, phases in shapes.items():
+        for trailing in (False, True):
+            another_dir = tmp_path / f"{case}_another_{trailing}"
+            seeded = _seed(another_dir, phases, trailing=trailing)
+            cell = _stub_the_runtime(monkeypatch, commits=0)
+            outcome, _ledger = _drive(
+                monkeypatch,
+                another_dir,
+                cell=cell,
+                turns=[
+                    _turn(_block(_PLAN)),
+                    _wall_cut_turn(cost=0.4),
+                    _turn(cost=0.05),
+                ],
+                spec=_spec(),
+            )
+            label = f"{case} another trailing={trailing}"
+            named = [
+                line for line in cell.watched if "cut again at this spec_sha" in line
+            ]
+            if trailing:
+                assert outcome.state == "NOT_IMPLEMENTED", label
+                assert len(named) == 1, label
+                assert f"task {seeded}" in named[0], label
+            else:
+                assert outcome.state == "ORPHANED", label
+                assert not named, label
+
+            resumed_dir = tmp_path / f"{case}_resumed_{trailing}"
+            seeded2 = _seed(resumed_dir, phases, trailing=trailing)
+            cell2 = _stub_the_runtime(monkeypatch, commits=0)
+            outcome2, _ledger2 = _drive(
+                monkeypatch,
+                resumed_dir,
+                cell=cell2,
+                turns=[
+                    _turn(_block(_PLAN)),
+                    _wall_cut_turn(cost=0.4),
+                    _turn(cost=0.05),
+                ],
+                spec=_spec(task_id=seeded2),
+            )
+            label2 = f"{case} resumed trailing={trailing}"
+            named2 = [
+                line for line in cell2.watched if "cut again at this spec_sha" in line
+            ]
+            if trailing:
+                assert outcome2.state == "NOT_IMPLEMENTED", label2
+                assert len(named2) == 1, label2
+                assert f"task {seeded2}" in named2[0], label2
+            else:
+                assert outcome2.state == "ORPHANED", label2
+                assert not named2, label2
 
 
 def test_a_cell_given_a_task_runs_on_it_and_its_run_and_mints_neither(
@@ -3089,9 +3333,8 @@ def test_a_revised_specs_second_cut_settles_on_its_task_rows_spec_sha(
     row, not `CellSpec.spec_sha`: a revision in progress can carry a newer
     hash than the row a stack batch's review minted (SA-0150). Only the
     `revised` case, whose earlier row matches tonight's task row, settles
-    `NOT_IMPLEMENTED`. The phase clause allows `SPEC_REVIEW` and
-    `SPEC_WRITING` beside `IMPLEMENTING`, but a `REVIEWING` or `REPAIRING`
-    attempt still disqualifies the earlier row."""
+    `NOT_IMPLEMENTED`. The phase clause counts a row only when its latest
+    attempt, by `attempt_id`, is `IMPLEMENTING`."""
     cases = {
         "revised": (
             ("SPEC_WRITING", "SPEC_REVIEW", "IMPLEMENTING"),

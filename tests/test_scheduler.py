@@ -54,6 +54,15 @@ def _task_at(ledger, repo_id, *, spec_id, spec_sha, state):
     return task_id
 
 
+def set_task_package(ledger, task_id, state, *, branch="", pushed_sha="", pr_url=""):
+    """The branch, the pushed sha and the pull request URL together.
+
+    `_task_at` alone always records a branch at creation. A stack-base case
+    needing one of the three absent passes `""` for the member it lacks.
+    """
+    ledger.set_task_package(task_id, state, branch, pushed_sha, pr_url)
+
+
 def _sha(path):
     """The spec_sha the scan would compute for a spec file on disk."""
     return load_spec(path)[1]
@@ -2245,6 +2254,508 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
     assert {c.spec.id for c in stacked_candidates} == {
         c.spec.id for c in flat_candidates
     }
+
+
+# ------------------------------------------------------------------ stack base
+
+
+def test_a_stack_order_stacks_on_an_earlier_batchs_pushed_pull_request(
+    tmp_path, ledger
+):
+    """Each of the three `DEPENDENCY_WAITING_STATES`, in its own repo.
+
+    Each parent's qualifying task sits beside an older waiting task with no
+    push and a newer `EXHAUSTED` one. The newest *waiting* row must decide.
+    A parent whose push landed on the default branch stacks on nothing.
+    """
+    from saffron.scheduler import StackBase
+
+    # Spelled out, so a state dropped from the set cannot shrink this loop.
+    for i, state in enumerate(("APPROVED", "MERGE_TRAIN", "READY_FOR_REVIEW")):
+        root = tmp_path / f"waiting-{i}"
+        root.mkdir()
+        directory = _spec_dir(root)
+        repo_id = _repo(ledger, origin=f"/waiting-{i}")
+        parent_id = f"TB-P{i}"
+        dep_id = f"TB-{i + 1}"
+        # A second, dependency-free spec: the stack base must land on it too,
+        # not only on the spec whose own `depends_on` names the parent.
+        plain_id = f"TB-{i + 100}"
+        _write_spec(
+            directory,
+            "dep.md",
+            id=dep_id,
+            touches=[f"tbd{i}.py"],
+            depends_on=[parent_id],
+        )
+        _write_spec(directory, "plain.md", id=plain_id, touches=[f"tbp{i}.py"])
+
+        _task_at(ledger, repo_id, spec_id=parent_id, spec_sha="noise-old", state=state)
+        qualified = _task_at(
+            ledger, repo_id, spec_id=parent_id, spec_sha="qualified", state=state
+        )
+        set_task_package(
+            ledger,
+            qualified,
+            state,
+            branch=f"saffron/{parent_id}",
+            pushed_sha=f"{i}" * 40,
+            pr_url=f"https://example.invalid/{parent_id}",
+        )
+        _task_at(
+            ledger, repo_id, spec_id=parent_id, spec_sha="noise-new", state="EXHAUSTED"
+        )
+
+        candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+
+        assert refusals == []
+        base = StackBase(
+            spec_id=parent_id, task_id=qualified, branch=f"saffron/{parent_id}"
+        )
+        by_id = {c.spec.id: c for c in candidates}
+        assert set(by_id) == {dep_id, plain_id}
+        assert by_id[dep_id].stack_base == base
+        assert by_id[plain_id].stack_base == base
+
+    # A landed push is read before the stack base is resolved, so the
+    # dependent runs unstacked. No `StackBase` names it at all.
+    root = tmp_path / "landed"
+    root.mkdir()
+    directory = _spec_dir(root)
+    repo_id = _repo(ledger, origin="/landed")
+    _write_spec(
+        directory, "dep.md", id="TB-4", touches=["tbdl.py"], depends_on=["TB-PL"]
+    )
+    qualified = _task_at(
+        ledger, repo_id, spec_id="TB-PL", spec_sha="qualified", state="READY_FOR_REVIEW"
+    )
+    landed_sha = "9" * 40
+    set_task_package(
+        ledger,
+        qualified,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-PL",
+        pushed_sha=landed_sha,
+        pr_url="https://example.invalid/TB-PL",
+    )
+
+    def pushed_landed(sha):
+        return sha == landed_sha
+
+    candidates, refusals = build_queue(
+        directory, repo_id, ledger, pushed_landed=pushed_landed, stack=True
+    )
+    assert refusals == []
+    assert [c.spec.id for c in candidates] == ["TB-4"]
+    assert candidates[0].stack_base is None
+
+
+def test_a_stack_order_refuses_a_parent_it_cannot_stack_on_and_names_the_remedy(
+    tmp_path, ledger
+):
+    """Eight parents that each fail to qualify as this order's stack base,
+    one dependent apiece, plus one parent that does qualify. A two-spec
+    cycle keeps the old, cause-free reason: both sit inside the order
+    itself, so neither is a stack-base candidate.
+    """
+    from saffron.scheduler import StackBase
+
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    _write_spec(
+        directory,
+        "dep-notask.md",
+        id="TB-11",
+        touches=["tbr1.py"],
+        depends_on=["TB-NOTASK"],
+    )
+    _write_spec(
+        directory,
+        "dep-nopush.md",
+        id="TB-12",
+        touches=["tbr2.py"],
+        depends_on=["TB-NOPUSH"],
+    )
+    _write_spec(
+        directory,
+        "dep-rejected.md",
+        id="TB-13",
+        touches=["tbr3.py"],
+        depends_on=["TB-REJECTED"],
+    )
+    _write_spec(
+        directory,
+        "dep-exhausted.md",
+        id="TB-14",
+        touches=["tbr4.py"],
+        depends_on=["TB-EXHAUSTED"],
+    )
+    _write_spec(
+        directory,
+        "dep-nobranch.md",
+        id="TB-15",
+        touches=["tbr5.py"],
+        depends_on=["TB-NOBRANCH"],
+    )
+    _write_spec(
+        directory,
+        "dep-nourl.md",
+        id="TB-16",
+        touches=["tbr6.py"],
+        depends_on=["TB-NOURL"],
+    )
+    _write_spec(
+        directory,
+        "dep-newestnopush.md",
+        id="TB-17",
+        touches=["tbr7.py"],
+        depends_on=["TB-NEWESTNOPUSH"],
+    )
+    _write_spec(
+        directory,
+        "cycle-a.md",
+        id="TB-18",
+        touches=["tbca.py"],
+        depends_on=["TB-19"],
+    )
+    _write_spec(
+        directory,
+        "cycle-b.md",
+        id="TB-19",
+        touches=["tbcb.py"],
+        depends_on=["TB-18"],
+    )
+    _write_spec(
+        directory,
+        "dep-shortsha.md",
+        id="TB-21",
+        touches=["tbr8.py"],
+        depends_on=["TB-SHORTSHA"],
+    )
+    _write_spec(
+        directory,
+        "dep-qualifies.md",
+        id="TB-20",
+        touches=["tbq.py"],
+        depends_on=["TB-QUALIFIES"],
+    )
+
+    # TB-NOTASK: no task at all.
+
+    # TB-NOPUSH: waiting, with the branch `_task_at` always records, but no push.
+    _task_at(
+        ledger, repo_id, spec_id="TB-NOPUSH", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+
+    # TB-REJECTED / TB-EXHAUSTED: fully pushed, but dead. Never waiting at all.
+    for dead, state, digit in (
+        ("TB-REJECTED", "REJECTED", "6"),
+        ("TB-EXHAUSTED", "EXHAUSTED", "7"),
+    ):
+        dead_task = _task_at(ledger, repo_id, spec_id=dead, spec_sha="s", state=state)
+        set_task_package(
+            ledger,
+            dead_task,
+            state,
+            branch=f"saffron/{dead}",
+            pushed_sha=digit * 40,
+            pr_url=f"https://example.invalid/{dead}",
+        )
+
+    # TB-SHORTSHA: waiting, branched, with a URL, but its sha is unresolved.
+    shortsha = _task_at(
+        ledger, repo_id, spec_id="TB-SHORTSHA", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        shortsha,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-SHORTSHA",
+        pushed_sha="abc123",
+        pr_url="https://example.invalid/TB-SHORTSHA",
+    )
+
+    # TB-NOBRANCH: waiting and pushed, but records no branch.
+    nobranch = _task_at(
+        ledger, repo_id, spec_id="TB-NOBRANCH", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger, nobranch, "READY_FOR_REVIEW", branch="", pushed_sha="2" * 40, pr_url=""
+    )
+
+    # TB-NOURL: waiting, branched and pushed, but no pull request URL.
+    nourl = _task_at(
+        ledger, repo_id, spec_id="TB-NOURL", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        nourl,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-NOURL",
+        pushed_sha="3" * 40,
+        pr_url="",
+    )
+
+    # TB-NEWESTNOPUSH: an older task fully qualifies, but a newer waiting
+    # task with no push hides it. The newest waiting row must decide.
+    older = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-NEWESTNOPUSH",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        older,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-NEWESTNOPUSH",
+        pushed_sha="4" * 40,
+        pr_url="https://example.invalid/n",
+    )
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-NEWESTNOPUSH",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+    )
+
+    # TB-QUALIFIES: branch, resolved pushed sha, and a pull request URL.
+    # It is the one parent of the nine outside the order taken as the stack base.
+    qualifies_task = _task_at(
+        ledger, repo_id, spec_id="TB-QUALIFIES", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        qualifies_task,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-QUALIFIES",
+        pushed_sha="5" * 40,
+        pr_url="https://example.invalid/TB-QUALIFIES",
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+
+    reasons = {r.path.name: r.reason for r in refusals}
+    assert set(reasons) == {
+        "dep-notask.md",
+        "dep-nopush.md",
+        "dep-rejected.md",
+        "dep-exhausted.md",
+        "dep-nobranch.md",
+        "dep-nourl.md",
+        "dep-newestnopush.md",
+        "dep-shortsha.md",
+        "cycle-a.md",
+        "cycle-b.md",
+    }
+
+    # Each cause's own wording, not only the shared remedy, so a cause
+    # swapped for another sharing the same remedy still fails this test.
+    assert "TB-NOTASK" in reasons["dep-notask.md"]
+    assert "outside the stack order" in reasons["dep-notask.md"]
+    assert "TB-NOTASK has no task recorded" in reasons["dep-notask.md"]
+    assert reasons["dep-notask.md"].endswith("run it to a pull request first")
+
+    assert "TB-NOPUSH" in reasons["dep-nopush.md"]
+    assert (
+        "TB-NOPUSH's newest waiting task records no pushed sha"
+        in reasons["dep-nopush.md"]
+    )
+    assert reasons["dep-nopush.md"].endswith("run it to a pull request first")
+
+    assert "TB-REJECTED" in reasons["dep-rejected.md"]
+    assert "TB-REJECTED has no waiting task" in reasons["dep-rejected.md"]
+    assert reasons["dep-rejected.md"].endswith("merge it, or rerun it")
+
+    assert "TB-EXHAUSTED" in reasons["dep-exhausted.md"]
+    assert "TB-EXHAUSTED has no waiting task" in reasons["dep-exhausted.md"]
+    assert reasons["dep-exhausted.md"].endswith("merge it, or rerun it")
+
+    assert "TB-NOBRANCH" in reasons["dep-nobranch.md"]
+    assert (
+        "TB-NOBRANCH's newest waiting task records no branch"
+        in reasons["dep-nobranch.md"]
+    )
+    assert reasons["dep-nobranch.md"].endswith("run it to a pull request first")
+
+    assert "TB-NOURL" in reasons["dep-nourl.md"]
+    assert (
+        "TB-NOURL's newest waiting task has no pull request URL"
+        in reasons["dep-nourl.md"]
+    )
+    assert reasons["dep-nourl.md"].endswith("run `saffron adopt TB-NOURL <pr>` first")
+
+    assert "TB-NEWESTNOPUSH" in reasons["dep-newestnopush.md"]
+    assert (
+        "TB-NEWESTNOPUSH's newest waiting task records no pushed sha"
+        in reasons["dep-newestnopush.md"]
+    )
+    assert reasons["dep-newestnopush.md"].endswith("run it to a pull request first")
+
+    assert (
+        "TB-SHORTSHA's newest waiting task records no pushed sha"
+        in (reasons["dep-shortsha.md"])
+    )
+    assert reasons["dep-shortsha.md"].endswith("run it to a pull request first")
+
+    # TB-QUALIFIES has a branch, a resolved pushed sha, and a pull request
+    # URL, read back by its own task_id. It is taken, not refused.
+    by_id = {c.spec.id: c for c in candidates}
+    assert set(by_id) == {"TB-20"}
+    assert by_id["TB-20"].stack_base == StackBase(
+        spec_id="TB-QUALIFIES",
+        task_id=qualifies_task,
+        branch="saffron/TB-QUALIFIES",
+    )
+
+    # A parent that is itself inside the stack order (here, a two-spec
+    # cycle) keeps the old reason: no cause, no remedy.
+    for name in ("cycle-a.md", "cycle-b.md"):
+        assert "outside the stack order" in reasons[name]
+        for remedy in (
+            "run it to a pull request first",
+            "merge it, or rerun it",
+            "saffron adopt",
+        ):
+            assert remedy not in reasons[name]
+
+
+def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_naming_another(
+    tmp_path, ledger
+):
+    """A stack has at most one stack base: the lowest qualifying id, as a
+    string, over three arrangements in their own repos (`SA-0267`).
+
+    Arrangement 1 has two qualifying parents. Arrangement 2 has the lower
+    id's only namer refused by gate 0. Arrangement 3 has the lower id's
+    only namer stuck on a second, unresolvable dependency. Each arrangement
+    is commented below.
+    """
+    from saffron.scheduler import StackBase
+
+    def _qualifying_task(repo_id, parent_id, digit):
+        task_id = _task_at(
+            ledger, repo_id, spec_id=parent_id, spec_sha="s", state="READY_FOR_REVIEW"
+        )
+        set_task_package(
+            ledger,
+            task_id,
+            "READY_FOR_REVIEW",
+            branch=f"saffron/{parent_id}",
+            pushed_sha=str(digit) * 40,
+            pr_url=f"https://example.invalid/{parent_id}",
+        )
+        return task_id
+
+    # Arrangement 1: two parents qualify. The lower id's dependent, and an
+    # unrelated spec with no deps, both carry the chosen base.
+    root = tmp_path / "arr1"
+    root.mkdir()
+    directory = _spec_dir(root)
+    repo_id = _repo(ledger, origin="/arr1")
+    # The higher id's task is older, so a task_id tie-break picks the wrong one.
+    _qualifying_task(repo_id, "TB-B1", 2)
+    lo_task = _qualifying_task(repo_id, "TB-A1", 1)
+    _write_spec(
+        directory,
+        "dep-a.md",
+        id="TB-101",
+        touches=["depa1.py"],
+        depends_on=["TB-A1"],
+    )
+    _write_spec(
+        directory,
+        "dep-b.md",
+        id="TB-102",
+        touches=["depb1.py"],
+        depends_on=["TB-B1"],
+    )
+    _write_spec(directory, "plain.md", id="TB-103", touches=["plaina.py"])
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+
+    base = StackBase(spec_id="TB-A1", task_id=lo_task, branch="saffron/TB-A1")
+    by_id = {c.spec.id: c for c in candidates}
+    assert set(by_id) == {"TB-101", "TB-103"}
+    assert by_id["TB-101"].stack_base == base
+    assert by_id["TB-103"].stack_base == base
+
+    depb1_reason = next(r.reason for r in refusals if r.path.name == "dep-b.md")
+    assert "depends_on TB-B1 is outside" in depb1_reason
+    assert "TB-A1 is already this batch's stack base" in depb1_reason
+    assert "merge it first" in depb1_reason
+    assert "run the spec in a later stack batch" in depb1_reason
+
+    # Arrangement 2: the lower id's only namer is refused by gate 0, so
+    # the higher id becomes the order's sole stack base.
+    root = tmp_path / "arr2"
+    root.mkdir()
+    directory = _spec_dir(root)
+    repo_id = _repo(ledger, origin="/arr2")
+    _qualifying_task(repo_id, "TB-A2", 3)
+    hi_task = _qualifying_task(repo_id, "TB-B2", 4)
+    _write_spec(
+        directory,
+        "refused.md",
+        id="TB-104",
+        touches=["prot2.py"],
+        depends_on=["TB-A2"],
+    )
+    _write_spec(
+        directory,
+        "dep-b2.md",
+        id="TB-105",
+        touches=["depb2.py"],
+        depends_on=["TB-B2"],
+    )
+
+    candidates, refusals = build_queue(
+        directory, repo_id, ledger, protected=["prot2.py"], stack=True
+    )
+
+    by_id = {c.spec.id: c for c in candidates}
+    assert set(by_id) == {"TB-105"}
+    assert by_id["TB-105"].stack_base == StackBase(
+        spec_id="TB-B2", task_id=hi_task, branch="saffron/TB-B2"
+    )
+    assert any(r.path.name == "refused.md" for r in refusals)
+
+    # Arrangement 3: the lower id's only namer is stuck on a second,
+    # unresolvable dependency, so no taken spec ever names it.
+    root = tmp_path / "arr3"
+    root.mkdir()
+    directory = _spec_dir(root)
+    repo_id = _repo(ledger, origin="/arr3")
+    _qualifying_task(repo_id, "TB-A3", 5)
+    _qualifying_task(repo_id, "TB-B3", 6)
+    _write_spec(
+        directory,
+        "dep-a3.md",
+        id="TB-106",
+        touches=["depa3.py"],
+        depends_on=["TB-A3", "TB-GHOST"],
+    )
+    _write_spec(
+        directory,
+        "dep-b3.md",
+        id="TB-107",
+        touches=["depb3.py"],
+        depends_on=["TB-B3"],
+    )
+    _write_spec(directory, "plain3.md", id="TB-108", touches=["plainc.py"])
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+
+    assert [c.spec.id for c in candidates] == ["TB-108"]
+    assert candidates[0].stack_base is None
+
+    depb3_reason = next(r.reason for r in refusals if r.path.name == "dep-b3.md")
+    assert "TB-A3" in depb3_reason
+    assert "TB-B3" in depb3_reason
+    assert "merge it first" in depb3_reason
 
 
 # ---------------------------------------------------------------------- smoke

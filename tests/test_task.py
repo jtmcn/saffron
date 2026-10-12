@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
+import time
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -17,10 +21,17 @@ from saffron import task as task_module
 from saffron.agents.findings import Finding
 from saffron.cell.session import CellOutcome
 from saffron.events import Ceilings, Event, Teardown, read_log
+from saffron.gates.contract import GateResult
 from saffron.intake import Spec, parse_spec
-from saffron.ledger import Ledger
+from saffron.ledger import Ledger, TaskState
 from saffron.phases import package as package_phase
-from saffron.phases.rebut import RebutResult, RebuttalTurn
+from saffron.phases.rebut import (
+    LensVerdicts,
+    RebutResult,
+    Rebuttal,
+    RebuttalTurn,
+    Verdict,
+)
 from saffron.phases.review import LensReview
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import PolicyError
@@ -2305,3 +2316,605 @@ def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
         if not exhausted:
             assert row["spent_usd_est"] == pytest.approx(3.0)
         ledger.close()
+
+
+# --- SA-0266: `ready_task` rebuilds a raised PACKAGE's outcome ---------
+
+_RT_TEXT = (
+    "---\nid: RT-1\ntitle: Ready\ntype: feature\ntouches: ['src/**']\n---\nbody\n"
+)
+
+
+def _rt_ledger(tmp_path: Path, name: str = "ready.db") -> tuple[Ledger, int]:
+    ledger = Ledger(tmp_path / name)
+    repo_id = ledger.upsert_repo(
+        "r", "https://github.com/o/r.git", str(tmp_path / "m.git"), None
+    )
+    return ledger, repo_id
+
+
+def _rt_task(
+    ledger: Ledger,
+    repo_id: int,
+    *,
+    spec_id: str,
+    spec_sha: str,
+    base_sha: str = "a" * 40,
+) -> int:
+    run_id = ledger.create_run(repo_id, base_sha=base_sha)
+    return ledger.create_task(
+        run_id, spec_id=spec_id, spec_sha=spec_sha, branch=f"saffron/{spec_id}"
+    )
+
+
+def _rt_attempt(
+    ledger: Ledger,
+    task_id: int,
+    *,
+    phase: str,
+    cost: float,
+    earned_risk: str | None = None,
+    with_gate: bool = False,
+) -> int:
+    attempt_id = ledger.open_attempt(task_id, phase=phase)
+    ledger.close_attempt(
+        attempt_id,
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=cost,
+    )
+    if with_gate:
+        ledger.record_gate_result(
+            GateResult(gate="tests", status="pass", tool="pytest 1"),
+            attempt_id=attempt_id,
+            baseline=[],
+            earned_risk=earned_risk,
+        )
+    return attempt_id
+
+
+def _rt_backdate(ledger: Ledger, attempt_ids: Sequence[int], started_at: str) -> None:
+    for attempt_id in attempt_ids:
+        ledger._db.execute(
+            "UPDATE attempts SET started_at = ? WHERE attempt_id = ?",
+            (started_at, attempt_id),
+        )
+    ledger._db.commit()
+
+
+def _rt_write_patch(
+    task_dir: Path, *, base_sha: str, tree_base: str, head_sha: str
+) -> None:
+    task_dir.mkdir(parents=True, exist_ok=True)
+    (task_dir / "patch.diff").write_text("diff --git a/x b/x\n")
+    (task_dir / "patch.json").write_text(
+        json.dumps(
+            {
+                "base_sha": base_sha,
+                "tree_base": tree_base,
+                "head_sha": head_sha,
+                "files": ["x"],
+            }
+        )
+    )
+
+
+def _rt_set_mtime(path: Path, when: float) -> None:
+    os.utime(path, (when, when))
+
+
+def _rt_seed_records(task_dir: Path, *, when: float | None = None) -> None:
+    """`baseline.json` and an empty `findings.json`. Every required file's
+    mtime is pinned to `when`, the current time by default, so none reads
+    as stale against the others."""
+    when = time.time() if when is None else when
+    baseline_path = task_dir / "baseline.json"
+    baseline_path.write_text("{}")
+    findings_path = task_dir / "findings.json"
+    findings_path.write_text("[]")
+    for path in (
+        baseline_path,
+        task_dir / "patch.diff",
+        task_dir / "patch.json",
+        findings_path,
+    ):
+        _rt_set_mtime(path, when)
+
+
+def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
+    tmp_path, monkeypatch
+):
+    """Every field `package()` reads off a live `CellOutcome` comes back the
+    same from the ledger and the task directory alone. A dead cell's own
+    turns and a spec session's spend are both excluded."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    task_id = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=spec_sha)
+    ledger.record_spec_text(
+        task_id,
+        origin="revision",
+        spec_id="RT-1",
+        path=".saffron/specs/RT-1.md",
+        text=_RT_TEXT,
+    )
+
+    # An earlier, dead cell's own turns, backdated below once the plan
+    # turn's own second is known.
+    dead_impl = _rt_attempt(
+        ledger, task_id, phase="IMPLEMENTING", cost=8.0, with_gate=True
+    )
+    dead_repair = _rt_attempt(
+        ledger, task_id, phase="REPAIRING", cost=16.0, with_gate=True
+    )
+    dead_review = _rt_attempt(ledger, task_id, phase="REVIEWING", cost=32.0)
+    dead_spec_review = _rt_attempt(ledger, task_id, phase="SPEC_REVIEW", cost=64.0)
+
+    # The current cell's own plan turn, with no suite.
+    plan = _rt_attempt(ledger, task_id, phase="IMPLEMENTING", cost=1.0)
+    plan_started = next(
+        a["started_at"] for a in ledger.attempts(task_id) if a["attempt_id"] == plan
+    )
+    plan_dt = datetime.strptime(plan_started, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    dead_at = (plan_dt - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    _rt_backdate(
+        ledger, [dead_impl, dead_repair, dead_review, dead_spec_review], dead_at
+    )
+
+    _rt_attempt(
+        ledger,
+        task_id,
+        phase="IMPLEMENTING",
+        cost=2.0,
+        earned_risk="standard",
+        with_gate=True,
+    )
+    _rt_attempt(
+        ledger,
+        task_id,
+        phase="REPAIRING",
+        cost=0.5,
+        earned_risk="standard",
+        with_gate=True,
+    )
+    _rt_attempt(ledger, task_id, phase="REVIEWING", cost=0.25)
+    # The rebuttal's re-run stamps `earned_risk` too, and as the newest it wins.
+    _rt_attempt(
+        ledger,
+        task_id,
+        phase="REBUTTING",
+        cost=0.125,
+        earned_risk="elevated",
+        with_gate=True,
+    )
+    _rt_attempt(ledger, task_id, phase="SPEC_WRITING", cost=4.0)
+
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+
+    out_dir = tmp_path / "out"
+    task_dir = out_dir / "RT-1"
+    _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+
+    plan_epoch = plan_dt.timestamp()
+    baseline_path = task_dir / "baseline.json"
+    baseline_path.write_text("{}")
+    _rt_set_mtime(baseline_path, plan_epoch + 0.5)
+    for name in ("patch.diff", "patch.json"):
+        _rt_set_mtime(task_dir / name, plan_epoch + 1.0)
+
+    finding = Finding(
+        lens="correctness",
+        severity="note",
+        file="src/x.py",
+        line=1,
+        claim="ok",
+        anchored=True,
+    )
+    review_ok = LensReview(
+        lens="correctness", findings=[finding], cost_usd=0.0, error=None
+    )
+    review_err = LensReview(
+        lens="adequacy", findings=[], cost_usd=0.0, error="the turn failed"
+    )
+    findings_path = task_dir / "findings.json"
+    findings_path.write_text(json.dumps([review_ok.as_dict(), review_err.as_dict()]))
+    _rt_set_mtime(findings_path, plan_epoch + 1.0)
+
+    rebuttal_turn = RebuttalTurn(
+        rebuttals=[Rebuttal(finding=1, action="fixed", argument="done")]
+    )
+    verdict = Verdict(finding=1, verdict="confirmed", reason="ok")
+    lens_verdicts = LensVerdicts(lens="correctness", verdicts=[verdict], cost_usd=0.0)
+    rebut_result = RebutResult(
+        state="EXHAUSTED",
+        why="still red",
+        rebuttal=rebuttal_turn,
+        verdicts=[lens_verdicts],
+        moved=True,
+        cost_usd=0.3,
+    )
+    rebuttal_path = task_dir / "rebuttal.json"
+    rebuttal_path.write_text(json.dumps(rebut_result.as_dict(blockers=[])))
+    _rt_set_mtime(rebuttal_path, plan_epoch + 1.0)
+
+    wrong_versions_payload = [{"id": 1, "survived": False}]
+    wrong_versions_path = task_dir / "wrong-versions.json"
+    wrong_versions_path.write_text(json.dumps(wrong_versions_payload))
+    _rt_set_mtime(wrong_versions_path, plan_epoch + 1.0)
+
+    notes_path = task_dir / "notes.json"
+    notes_path.write_text(
+        json.dumps({"raw": "watch the forbidden list", "sha256": "x"})
+    )
+    _rt_set_mtime(notes_path, plan_epoch + 1.0)
+
+    monkeypatch.setenv("TZ", "JST-9")
+    time.tzset()
+    try:
+        result = task_module.ready_task(
+            "RT-1",
+            repo=tmp_path / "target-repo",
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+        )
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
+
+    assert isinstance(result, task_module.ReadyTask)
+    outcome = result.outcome
+    assert outcome.task_id == task_id
+    assert outcome.task_dir == task_dir
+    assert outcome.cell_head_sha == "c" * 40
+    assert outcome.new_failures == []
+    assert outcome.reviews == [review_ok, review_err]
+    assert outcome.rebut_result == rebut_result
+    assert outcome.wrong_versions == wrong_versions_payload
+    assert outcome.notes == "watch the forbidden list"
+    assert outcome.spent_usd == pytest.approx(3.875)
+    assert outcome.attempts == 2
+    assert outcome.effective_risk == "elevated"
+    assert result.parent_branch is None
+    assert result.spec.id == "RT-1"
+    ledger.close()
+
+
+def test_ready_task_stacks_on_the_branch_of_the_task_that_pushed_its_tree_base(
+    tmp_path,
+):
+    """A patch stacks on the branch of whichever task pushed its
+    `tree_base`. Among every task that pushed it, the newest wins, read
+    off that exact task rather than the newest task of its own spec. A
+    newer, unrelated push of another spec is ignored. `effective_risk`
+    falls back to the spec's own `risk` when no attempt carries an
+    `earned_risk`."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+    tree_base = "b" * 40
+
+    # An older task of a different spec that also pushed `tree_base`: the
+    # match must be the *newest* of every task that pushed it, not this one.
+    older_match_id = _rt_task(ledger, repo_id, spec_id="RT-5", spec_sha="o" * 64)
+    ledger.set_task_package(
+        older_match_id, "READY_FOR_REVIEW", "saffron/RT-5-old", tree_base, ""
+    )
+
+    parent_id = _rt_task(ledger, repo_id, spec_id="RT-2", spec_sha="p" * 64)
+    ledger.set_task_package(
+        parent_id, "READY_FOR_REVIEW", "saffron/RT-2", tree_base, ""
+    )
+
+    # A later re-run of the same spec pushed a different sha, so the
+    # branch must come from the task that pushed `tree_base`, not the newest.
+    stale_rerun_id = _rt_task(ledger, repo_id, spec_id="RT-2", spec_sha="p" * 64)
+    ledger.set_task_package(
+        stale_rerun_id, "READY_FOR_REVIEW", "saffron/RT-2-v2", "f" * 40, ""
+    )
+
+    decoy_id = _rt_task(ledger, repo_id, spec_id="RT-3", spec_sha="q" * 64)
+    ledger.set_task_package(decoy_id, "READY_FOR_REVIEW", "saffron/RT-3", "d" * 40, "")
+
+    # A declared tier the default is not, so the fallback cannot be a literal.
+    text = _RT_TEXT.replace("type: feature\n", "type: feature\nrisk: elevated\n")
+    spec_sha = hashlib.sha256(text.encode()).hexdigest()
+    task_id = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=spec_sha)
+    ledger.record_spec_text(
+        task_id,
+        origin="revision",
+        spec_id="RT-1",
+        path=".saffron/specs/RT-1.md",
+        text=text,
+    )
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+
+    out_dir = tmp_path / "out"
+    task_dir = out_dir / "RT-1"
+    _rt_write_patch(task_dir, base_sha="a" * 40, tree_base=tree_base, head_sha="c" * 40)
+    _rt_seed_records(task_dir)
+
+    result = task_module.ready_task(
+        "RT-1",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+    )
+
+    assert isinstance(result, task_module.ReadyTask)
+    assert result.parent_branch == "saffron/RT-2"
+    assert result.outcome.effective_risk == "elevated"
+    ledger.close()
+
+
+_RT_DONE_TEXT = _RT_TEXT.replace("title: Ready", "title: Done version", 1)
+_RT_LIVE_TEXT = _RT_TEXT.replace("title: Ready", "title: Live version", 1)
+_RT_RECORDED_TEXT = _RT_TEXT.replace("title: Ready", "title: Recorded version", 1)
+
+
+def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
+    """A task with no recorded text resolves through the spec file whose
+    bytes hash to its own `spec_sha`, under `.saffron/specs/` or its
+    `done/` subdirectory. A task that holds a recorded text reads that
+    text instead, with no file search at all."""
+    repo = tmp_path / "target-repo"
+    specs_dir = repo / ".saffron" / "specs"
+    done_dir = specs_dir / "done"
+    done_dir.mkdir(parents=True)
+    (done_dir / "RT-1-old.md").write_text(_RT_DONE_TEXT)
+    (specs_dir / "RT-1-new.md").write_text(_RT_LIVE_TEXT)
+
+    ledger, repo_id = _rt_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+    task_dir = out_dir / "RT-1"
+    _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+    _rt_seed_records(task_dir)
+
+    done_sha = hashlib.sha256(_RT_DONE_TEXT.encode()).hexdigest()
+    task1 = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=done_sha)
+    ledger.set_task_state(task1, "READY_FOR_REVIEW")
+    result1 = task_module.ready_task(
+        "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result1, task_module.ReadyTask)
+    assert result1.spec.title == "Done version"
+
+    live_sha = hashlib.sha256(_RT_LIVE_TEXT.encode()).hexdigest()
+    task2 = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=live_sha)
+    ledger.set_task_state(task2, "READY_FOR_REVIEW")
+    result2 = task_module.ready_task(
+        "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result2, task_module.ReadyTask)
+    assert result2.spec.title == "Live version"
+
+    task3 = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha="z" * 64)
+    ledger.record_spec_text(
+        task3,
+        origin="revision",
+        spec_id="RT-1",
+        path=".saffron/specs/RT-1.md",
+        text=_RT_RECORDED_TEXT,
+    )
+    ledger.set_task_state(task3, "READY_FOR_REVIEW")
+    result3 = task_module.ready_task(
+        "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result3, task_module.ReadyTask)
+    assert result3.spec.title == "Recorded version"
+    ledger.close()
+
+
+def test_ready_task_reads_a_record_older_than_the_cells_baseline_as_absent(tmp_path):
+    """`rebuttal.json`, `wrong-versions.json` and `notes.json` read as
+    unset when each is older than `baseline.json`, left behind by an
+    earlier cell, or when each is absent."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    task_id = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=spec_sha)
+    ledger.record_spec_text(
+        task_id,
+        origin="revision",
+        spec_id="RT-1",
+        path=".saffron/specs/RT-1.md",
+        text=_RT_TEXT,
+    )
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+
+    out_dir = tmp_path / "out"
+    task_dir = out_dir / "RT-1"
+    _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+
+    now = time.time()
+    rebuttal_path = task_dir / "rebuttal.json"
+    wrong_versions_path = task_dir / "wrong-versions.json"
+    notes_path = task_dir / "notes.json"
+    stale_rebut = RebutResult(
+        state="EXHAUSTED",
+        why="x",
+        rebuttal=RebuttalTurn(),
+        verdicts=[],
+        moved=False,
+        cost_usd=0.1,
+    )
+    rebuttal_path.write_text(json.dumps(stale_rebut.as_dict(blockers=[])))
+    wrong_versions_path.write_text(json.dumps([{"id": 1}]))
+    notes_path.write_text(json.dumps({"raw": "stale note", "sha256": "x"}))
+    for path in (rebuttal_path, wrong_versions_path, notes_path):
+        _rt_set_mtime(path, now - 10)
+
+    _rt_seed_records(task_dir, when=now)
+
+    result = task_module.ready_task(
+        "RT-1",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+    )
+    assert isinstance(result, task_module.ReadyTask)
+    assert result.outcome.rebut_result is None
+    assert result.outcome.wrong_versions == []
+    assert result.outcome.notes == ""
+
+    for path in (rebuttal_path, wrong_versions_path, notes_path):
+        path.unlink()
+    result_absent = task_module.ready_task(
+        "RT-1",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+    )
+    assert isinstance(result_absent, task_module.ReadyTask)
+    assert result_absent.outcome.rebut_result is None
+    assert result_absent.outcome.wrong_versions == []
+    assert result_absent.outcome.notes == ""
+    ledger.close()
+
+
+def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
+    """Every refusal names why, and leaves the `tasks` table exactly as it
+    found it. The causes: no task for the spec, a wrong state, an open
+    pull request, a missing or stale file, an unmatched `spec_sha`, and
+    an unmatched `tree_base`."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+    repo = tmp_path / "target-repo"
+    out_dir = tmp_path / "out"
+
+    def _snapshot() -> list[tuple]:
+        return sorted(
+            tuple(row) for row in ledger._db.execute("SELECT * FROM tasks").fetchall()
+        )
+
+    before = _snapshot()
+    result = task_module.ready_task(
+        "RT-0", repo=repo, repo_id=None, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result, Refused)
+    assert "RT-0" in result.reason
+    assert _snapshot() == before
+
+    result = task_module.ready_task(
+        "RT-0", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result, Refused)
+    assert "RT-0" in result.reason
+    assert _snapshot() == before
+
+    other_states = [s for s in get_args(TaskState) if s != "READY_FOR_REVIEW"]
+    for n, state in enumerate(other_states):
+        spec_id = f"RS-{n}"
+        older = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha="a" * 64)
+        ledger.set_task_state(older, "READY_FOR_REVIEW")
+        newer = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha="a" * 64)
+        ledger.set_task_state(newer, state)
+
+        before = _snapshot()
+        result = task_module.ready_task(
+            spec_id, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        )
+        assert isinstance(result, Refused)
+        assert state in result.reason
+        assert _snapshot() == before
+
+    pr_task = _rt_task(ledger, repo_id, spec_id="RT-PR", spec_sha="a" * 64)
+    ledger.set_task_package(
+        pr_task, "READY_FOR_REVIEW", "saffron/RT-PR", "c" * 40, "https://example/pr/1"
+    )
+    before = _snapshot()
+    result = task_module.ready_task(
+        "RT-PR", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result, Refused)
+    assert "https://example/pr/1" in result.reason
+    assert _snapshot() == before
+
+    file_spec = "RT-FILE"
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    task_dir = out_dir / file_spec
+
+    def _fresh_task() -> None:
+        tid = _rt_task(ledger, repo_id, spec_id=file_spec, spec_sha=spec_sha)
+        ledger.set_task_state(tid, "READY_FOR_REVIEW")
+
+    def _clear(directory: Path) -> None:
+        if directory.exists():
+            for leftover in directory.iterdir():
+                leftover.unlink()
+        else:
+            directory.mkdir(parents=True)
+
+    _fresh_task()
+    _clear(task_dir)
+    _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+    (task_dir / "findings.json").write_text("[]")
+    before = _snapshot()
+    result = task_module.ready_task(
+        file_spec, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result, Refused)
+    assert "baseline.json" in result.reason
+    assert _snapshot() == before
+
+    for name in ("patch.diff", "patch.json", "findings.json"):
+        for mode in ("missing", "stale"):
+            _fresh_task()
+            _clear(task_dir)
+            _rt_write_patch(
+                task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40
+            )
+            _rt_seed_records(task_dir)
+            target = task_dir / name
+            if mode == "missing":
+                target.unlink()
+            else:
+                baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
+                _rt_set_mtime(target, baseline_mtime - 10)
+
+            before = _snapshot()
+            result = task_module.ready_task(
+                file_spec, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+            )
+            assert isinstance(result, Refused)
+            assert name in result.reason
+            assert _snapshot() == before
+
+    sha_task_id = _rt_task(ledger, repo_id, spec_id="RT-SHA", spec_sha="f" * 64)
+    ledger.set_task_state(sha_task_id, "READY_FOR_REVIEW")
+    sha_dir = out_dir / "RT-SHA"
+    _rt_write_patch(sha_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+    _rt_seed_records(sha_dir)
+    before = _snapshot()
+    result = task_module.ready_task(
+        "RT-SHA", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result, Refused)
+    assert "f" * 12 in result.reason
+    assert _snapshot() == before
+
+    orphan_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    orphan_task_id = _rt_task(ledger, repo_id, spec_id="RT-ORPHAN", spec_sha=orphan_sha)
+    ledger.record_spec_text(
+        orphan_task_id,
+        origin="revision",
+        spec_id="RT-ORPHAN",
+        path=".saffron/specs/RT-ORPHAN.md",
+        text=_RT_TEXT,
+    )
+    ledger.set_task_state(orphan_task_id, "READY_FOR_REVIEW")
+    orphan_dir = out_dir / "RT-ORPHAN"
+    unresolved_tree_base = "e" * 40
+    _rt_write_patch(
+        orphan_dir, base_sha="a" * 40, tree_base=unresolved_tree_base, head_sha="c" * 40
+    )
+    _rt_seed_records(orphan_dir)
+    before = _snapshot()
+    result = task_module.ready_task(
+        "RT-ORPHAN", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    )
+    assert isinstance(result, Refused)
+    assert "e" * 12 in result.reason
+    assert _snapshot() == before
+
+    ledger.close()

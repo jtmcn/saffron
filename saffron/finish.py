@@ -61,7 +61,15 @@ def link_stack(
     finishing = ledger.stack_finish(batch_id)
     if finishing is None or finishing["pr_url"] is None:
         raise ValueError(f"batch {batch_id} has no finishing pull request")
-    urls = [layer["pr_url"] for layer in ledger.stack_layers(batch_id)]
+    layers = ledger.stack_layers(batch_id)
+    # ADR 7: stacked on an earlier pull request, so a list
+    # missing it would retarget the bottom layer onto the default branch.
+    if layers and layers[0]["predecessor_key"] is not None:
+        return [
+            "the bottom layer stacks on an earlier pull request, so nothing "
+            "is linked — link it by hand"
+        ]
+    urls = [layer["pr_url"] for layer in layers]
     urls.append(finishing["pr_url"])
     default = package_phase.default_branch(url, cwd=mirror)
     done = gh(["gh", "stack", "link", "--base", default, *urls])
@@ -383,7 +391,18 @@ def publish_finish(
     by_key = {layer["task_key"]: layer for layer in layers}
     for layer in layers:
         predecessor = by_key.get(layer["predecessor_key"])
-        wanted = predecessor["branch"] if predecessor is not None else default
+        if predecessor is not None:
+            wanted = predecessor["branch"]
+        elif layer["predecessor_key"] is not None:
+            # The stack base's own task (ADR 7), read by its
+            # record key the way `end_review.layer_fields` reads one.
+            row = ledger._db.execute(
+                "SELECT branch FROM tasks WHERE record_key = ?",
+                (layer["predecessor_key"],),
+            ).fetchone()
+            wanted = row["branch"] if row is not None else default
+        else:
+            wanted = default
         view = gh(
             [
                 "gh",

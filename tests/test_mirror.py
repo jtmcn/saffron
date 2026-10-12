@@ -872,3 +872,57 @@ def test_unresolved_consumes_raises_on_a_sha_the_mirror_does_not_hold(tmp_path):
         unresolved_consumes(mirror, bad_sha, ["exact.py"])
     with pytest.raises(GitError):
         unresolved_consumes(mirror, bad_sha, ["exact.py:run_task"])
+
+
+# --------------------------------------------------------- shared inodes (b-6cd3c2)
+
+
+def _object_inodes(objects_dir):
+    """`(st_dev, st_ino)` of every regular file under `objects_dir`."""
+    return {
+        (stat.st_dev, stat.st_ino)
+        for path in objects_dir.rglob("*")
+        if path.is_file()
+        for stat in [path.stat()]
+    }
+
+
+def test_a_mirror_shares_no_object_file_with_the_checkout_it_is_cloned_from(
+    tmp_path, origin
+):
+    git(origin, "repack", "-q")
+    (origin / "fresh.py").write_text("print('fresh')\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "a loose object written after the repack")
+    git(origin, "update-ref", "refs/saffron/probe", "main^")
+
+    checkout_objects = origin / ".git" / "objects"
+    assert list(checkout_objects.glob("pack/*.pack"))
+    assert list(checkout_objects.glob("??/*"))
+
+    mirror_from_path = ensure_mirror(origin, tmp_path / "path-mirror.git")
+    mirror_from_str = ensure_mirror(str(origin), tmp_path / "str-mirror.git")
+    mirrors = (mirror_from_path, mirror_from_str)
+
+    def _assert_shares_nothing():
+        checkout_inodes = _object_inodes(checkout_objects)
+        refs = git(origin, "for-each-ref", "--format=%(refname) %(objectname)")
+        commits = sorted(git(origin, "rev-list", "--all").splitlines())
+        for mirror in mirrors:
+            mirror_inodes = _object_inodes(mirror / "objects")
+            assert mirror_inodes.isdisjoint(checkout_inodes)
+            assert not (mirror / "objects" / "info" / "alternates").exists()
+            assert (
+                git(mirror, "for-each-ref", "--format=%(refname) %(objectname)") == refs
+            )
+            assert sorted(git(mirror, "rev-list", "--all").splitlines()) == commits
+
+    _assert_shares_nothing()
+
+    (origin / "second.py").write_text("print('second')\n")
+    git(origin, "add", "-A")
+    git(origin, "commit", "-qm", "a second new file, fetched into each mirror")
+    for mirror in mirrors:
+        ensure_mirror(origin, mirror)
+
+    _assert_shares_nothing()

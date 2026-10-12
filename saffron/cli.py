@@ -1,5 +1,6 @@
-"""`saffron`: cell, batch, draft, queue, reconcile, watch, fold, migrate,
-chains, serve, replay. `ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, queue, reconcile, adopt, package, watch,
+fold, migrate, chains, serve, replay. `ratify` and `gc` are still unbuilt
+(§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_phase
-from saffron.reconcile import ReconcileResult, reconcile
+from saffron.reconcile import MERGE_ONLY_STATES, ReconcileResult, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
@@ -66,6 +67,7 @@ from saffron.task import (
     PinnedBase,
     Refused,
     ResolvedCeilings,
+    package_ready_task,
     run_task,
     spec_ceilings,
 )
@@ -161,6 +163,26 @@ def main(argv: list[str] | None = None) -> int:
         help="ask GitHub what happened to this repo's open pull requests",
     )
     reconcile_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
+    adopt_parser = subcommands.add_parser(
+        "adopt",
+        help="name a by-hand pull request as one spec's newest task's own",
+    )
+    adopt_parser.add_argument(
+        "spec_id", help="the spec id whose newest task adopts the pull request"
+    )
+    adopt_parser.add_argument("pr", type=int)
+    adopt_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
+    package_parser = subcommands.add_parser(
+        "package",
+        help="run PACKAGE alone on a READY_FOR_REVIEW task whose own "
+        "PACKAGE raised, no agent and no cell but re-verification's own",
+    )
+    package_parser.add_argument(
+        "spec_id", help="the spec id whose newest task PACKAGE runs against"
+    )
+    package_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
     watch_parser = subcommands.add_parser(
         "watch", help="follow one task's event log, or every task's, agent-free"
@@ -281,6 +303,12 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "reconcile":
             return _reconcile(args, ledger)
+
+        if args.command == "adopt":
+            return _adopt(args, ledger)
+
+        if args.command == "package":
+            return _package(args, ledger, out_dir)
 
         if args.command == "watch":
             return _watch(args, out_dir)
@@ -618,6 +646,35 @@ def _batch_runner(
     return run
 
 
+def _seed_branch(
+    predecessor: Candidate | None, stack_base: scheduler.StackBase | None
+) -> str | None:
+    """The branch a cell with no predecessor yet seeds on (ADR 7): the
+    predecessor's own branch, else the stack base's, else `None` for the
+    pinned `base_sha`. A predecessor always
+    outranks the stack base. A later layer is cut from the batch's own
+    chain, never from the pull request the whole order stacks on."""
+    if predecessor is not None:
+        return _branch(predecessor.spec.id)
+    if stack_base is not None:
+        return stack_base.branch
+    return None
+
+
+def _stack_base_alive(pinned: PinnedBase) -> Callable[[str], bool]:
+    """`run_stack_batch`'s `stack_base_alive` (ADR 7).
+
+    Whether `branch` is still on the remote, read fresh with `remote_sha`,
+    against the pinned base's own mirror and url. An unreachable remote's
+    `PackageError` is let through uncaught, the same raise `_drive` already
+    counts as an abort."""
+
+    def alive(branch: str) -> bool:
+        return package_phase.remote_sha(pinned.url, branch, cwd=pinned.mirror) != ""
+
+    return alive
+
+
 def _stack_runner(
     *,
     pinned: PinnedBase,
@@ -625,23 +682,26 @@ def _stack_runner(
     repo: Path,
     ledger: Ledger,
     out_dir: Path,
+    stack_base: scheduler.StackBase | None = None,
 ) -> Callable[[Candidate, Candidate | None], CellOutcome | Refused]:
     """`run_stack_batch`'s adapter. Given a predecessor, it fetches that
     task's branch fresh into the mirror and hands `run_task` a `Handoff`
-    built from the fetch, never from `_resolve_stacked_on`. A predecessor
-    branch the origin no longer has raises `package_phase.ParentGone`, and
-    this never catches it: an unstacked cell is not this function's call to
-    make. It hands `run_task` the candidate's own `task_id`, never the
-    predecessor's, so a review's task is the one this cell runs on."""
+    built from the fetch, never from `_resolve_stacked_on`. With no
+    predecessor, it fetches the stack base's own branch instead, when this
+    batch has one (`_seed_branch`). A branch the origin no longer has raises
+    `package_phase.ParentGone`, and this never catches it: an unstacked cell
+    is not this function's call to make. It hands `run_task` the candidate's
+    own `task_id`, never the predecessor's, so a review's task is the one
+    this cell runs on."""
 
     def run(
         candidate: Candidate, predecessor: Candidate | None
     ) -> CellOutcome | Refused:
         spec = candidate.spec
-        if predecessor is None:
+        branch = _seed_branch(predecessor, stack_base)
+        if branch is None:
             handoff = Handoff(stacked_on=None, target_branch=None)
         else:
-            branch = _branch(predecessor.spec.id)
             head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
             handoff = Handoff(stacked_on=head, target_branch=branch)
         ceilings = spec_ceilings(spec)
@@ -945,12 +1005,18 @@ def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
 
 
 def _stack_review(
-    *, pinned: PinnedBase, repo: Path, out_dir: Path
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    out_dir: Path,
+    stack_base: scheduler.StackBase | None = None,
 ) -> Callable[..., spec_review.SpecReviewSession]:
     """`run_stack_batch`'s `review` adapter (ADR 7). Given a layer, it
     fetches that spec's branch fresh and seeds the cell there. Given
-    `None`, it seeds the cell at the pinned `base_sha`. The system prompt and
-    gates always come from `base_sha`'s own export, never a layer's head.
+    `None`, it fetches the stack base's own branch instead, when this batch
+    has one, else it seeds the cell at the pinned `base_sha` (`_seed_branch`).
+    The system prompt and gates always come from `base_sha`'s own export,
+    never a layer's head.
     """
 
     def run(
@@ -960,10 +1026,10 @@ def _stack_review(
         spec_text: str | None = None,
         sentence: str | None = None,
     ) -> spec_review.SpecReviewSession:
-        if layer is None:
+        branch = _seed_branch(layer, stack_base)
+        if branch is None:
             head = pinned.base_sha
         else:
-            branch = _branch(layer.spec.id)
             head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
@@ -1021,16 +1087,22 @@ def _stack_review(
 
 
 def _stack_revise(
-    *, pinned: PinnedBase, repo: Path, out_dir: Path
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    out_dir: Path,
+    stack_base: scheduler.StackBase | None = None,
 ) -> Callable[
     [Candidate, Candidate | None, str | None, str], spec_review.SpecWriterSession
 ]:
     """`SA-0164`'s revision adapter (ADR 7), built the way
     `_stack_review` is. Given a layer, it fetches that spec's branch fresh
-    and seeds the cell there. Given `None`, it seeds the cell at the
-    pinned `base_sha`. The prompt and gates always come from `base_sha`'s
-    own export, never a layer's head. A `None` spec text reads the queued
-    file at `base_sha`, and a missing one raises `ValueError` before any cell.
+    and seeds the cell there. Given `None`, it fetches the stack base's own
+    branch instead, when this batch has one, else it seeds the cell at the
+    pinned `base_sha` (`_seed_branch`). The prompt and gates always come
+    from `base_sha`'s own export, never a layer's head. A `None` spec text
+    reads the queued file at `base_sha`, and a missing one raises
+    `ValueError` before any cell.
     """
 
     def run(
@@ -1047,10 +1119,10 @@ def _stack_revise(
             if queued is None:
                 raise ValueError(f"{path} not found at {pinned.base_sha}")
             spec_text = queued
-        if layer is None:
+        branch = _seed_branch(layer, stack_base)
+        if branch is None:
             head = pinned.base_sha
         else:
-            branch = _branch(layer.spec.id)
             head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
@@ -1884,6 +1956,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     open_prs: Callable[[], list[dict]] | None = None
     # Same: no finishing commit runs until then.
     stack_finish: Callable[[int, list[int]], object] | None = None
+    # Same: no spec is ever asked about a stack base, since none is chosen
+    # here (`SA-0267` does). The real callable is still built below.
+    stack_base_alive: Callable[[str], bool] | None = None
     # Set when the scan raises after readiness passed (item 95), so the raise
     # still reaches the batch loop and its row.
     resolution_error: Exception | None = None
@@ -1951,19 +2026,28 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
             if args.stack:
                 # A stack batch never rescans: the order is fixed right here.
                 # `repo_id` is still looked up fresh per task, not pinned now.
+                stack_base = (
+                    resolved.candidates[0].stack_base if resolved.candidates else None
+                )
                 stack_runner = _stack_runner(
                     pinned=pinned,
                     repo_id=lambda: ledger.resolve_repo_id(pinned.url),
                     repo=repo,
                     ledger=ledger,
                     out_dir=out_dir,
+                    stack_base=stack_base,
                 )
                 stack_end_review = _stack_end_review(
                     pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
                 )
-                stack_review = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir)
-                stack_revise = _stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+                stack_review = _stack_review(
+                    pinned=pinned, repo=repo, out_dir=out_dir, stack_base=stack_base
+                )
+                stack_revise = _stack_revise(
+                    pinned=pinned, repo=repo, out_dir=out_dir, stack_base=stack_base
+                )
                 stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
+                stack_base_alive = _stack_base_alive(pinned)
                 pooled: list[follow_up.Pooled] = []
                 assert writer_usd is not None  # set whenever `args.stack` is
                 follow_ups = _stack_follow_ups(
@@ -2032,6 +2116,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 follow_ups=follow_ups,
                 open_prs=open_prs,
                 finish=stack_finish,
+                stack_base_alive=stack_base_alive,
             )
             # The fixed order this batch ran, not every ledger task. A
             # follow-up's spec never joined it, so its layer shows no title.
@@ -2195,6 +2280,94 @@ def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
     if gh_failures:
         print(f"reconcile: gh could not be run ({gh_failures[0]})")
     return 0
+
+
+# A newest task in one of these carries no pull request yet and is the one
+# `reconcile` will later ask about (b-a7e5f3). Every other state refuses.
+_ADOPTABLE_STATES = MERGE_ONLY_STATES | {"READY_FOR_REVIEW"}
+
+
+def _adopt(args: argparse.Namespace, ledger: Ledger) -> int:
+    """`saffron adopt <spec id> <pr> --repo .`: name a pull request opened
+    by hand as the spec's newest task's own. `reconcile` can then ask
+    GitHub what happened to it (b-a7e5f3). Reads the ledger and refuses
+    before asking `gh` anything."""
+    repo = args.repo.resolve()
+    url = package_phase.real_remote(repo)
+    repo_id = ledger.resolve_repo_id(url)
+    rows = (
+        [row for row in ledger.tasks_by_repo(repo_id) if row["spec_id"] == args.spec_id]
+        if repo_id is not None
+        else []
+    )
+    if not rows:
+        print(f"adopt: {args.spec_id} has no task in this repo")
+        return 1
+    newest = rows[-1]
+    if newest["state"] not in _ADOPTABLE_STATES:
+        print(
+            f"adopt: {args.spec_id}'s newest task is {newest['state']}, "
+            "which adopt does not take"
+        )
+        return 1
+    if newest["pr_url"]:
+        print(f"adopt: {args.spec_id}'s newest task already carries {newest['pr_url']}")
+        return 1
+
+    slug = package_phase.github_slug(url)
+    found = run_gh(
+        [
+            "gh",
+            "pr",
+            "view",
+            str(args.pr),
+            "--repo",
+            slug,
+            "--json",
+            "url",
+            "--jq",
+            ".url",
+        ]
+    )
+    adopted_url = found.stdout.strip() if found.returncode == 0 else ""
+    if not adopted_url:
+        print(f"adopt: gh named no pull request numbered {args.pr}")
+        return 1
+
+    ledger.adopt_pull_request(newest["task_id"], adopted_url)
+    print(f"adopt: task {newest['task_id']} ({args.spec_id}) → {adopted_url}")
+    return 0
+
+
+def _package(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron package <spec id> --repo .`: run PACKAGE alone, re-
+    verification included, on the task `package_ready_task` rebuilds. No
+    agent runs here, and `run_one_cell` is never reached (§5.7)."""
+    token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+    if not token.strip():
+        raise RuntimeError(
+            "CLAUDE_CODE_OAUTH_TOKEN is unset; PACKAGE's credential scan needs it "
+            "(`claude setup-token`)"
+        )
+    repo = args.repo.resolve()
+    url = package_phase.real_remote(repo)
+    repo_id = ledger.resolve_repo_id(url)
+    mirror_path = _mirror_path(repo, args.home)
+
+    result = package_ready_task(
+        args.spec_id,
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
+        token=token.strip(),
+    )
+    if isinstance(result, Refused):
+        print(f"package: {result.reason}")
+        return 1
+    print(f"{args.spec_id:<10} {result.state}  {result.pr_url or result.note}")
+    return CELL_EXIT.get(result.state, 1)
 
 
 def _poll_interval(value: str) -> float:

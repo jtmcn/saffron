@@ -37,9 +37,13 @@ def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 
-# Undecided states. An `EXHAUSTED` row is asked too, below, and moves only on a merge.
+# Undecided states. A row in `MERGE_ONLY_STATES` is asked too, below, and moves only on a merge.
 # `MERGED`/`REJECTED` stay out, so a row never moves backwards once gh errors on it.
 PR_PENDING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "CHANGES_REQUESTED"})
+
+# A merge is the one answer that moves a settled task in these states, whether
+# PACKAGE opened its pull request or `saffron adopt` attached it (b-a7e5f3).
+MERGE_ONLY_STATES = frozenset({"EXHAUSTED", "NOT_IMPLEMENTED"})
 
 # §4.2.1: a corpse only at a batch scan's own premise (one batch runs at a
 # time). Neither `queue` nor `reconcile` is a batch scan, so this is
@@ -158,8 +162,11 @@ def reconcile(
 
     for row in rows:
         state, pr_url = row["state"], row["pr_url"]
-        # `EXHAUSTED` is askable too, below, through its own narrower rule.
-        if not pr_url or (state not in PR_PENDING_STATES and state != "EXHAUSTED"):
+        # `EXHAUSTED` and `NOT_IMPLEMENTED` are askable too, below, through
+        # `MERGE_ONLY_STATES`.
+        if not pr_url or (
+            state not in PR_PENDING_STATES and state not in MERGE_ONLY_STATES
+        ):
             continue
         merged_head = row["merged_head_sha"]
         if merged_head:
@@ -173,13 +180,17 @@ def reconcile(
             result.unasked.append(row["task_id"])
             continue
         # Before the state check, so a merge still reports a moved head.
-        # A non-merged `EXHAUSTED` row is asked every scan, so it can report each time.
+        # A non-merged row in `MERGE_ONLY_STATES` is asked every scan, reporting each time.
         head, pushed = pr.get("headRefOid"), row["pushed_sha"]
         if isinstance(head, str) and head and pushed and head != pushed:
             result.head_moved.append(HeadMoved(row["task_id"], pushed, head))
         candidate = _next_state(pr)
-        # A merge is the only answer that moves an `EXHAUSTED` row (b-8e30bd).
-        new_state = candidate if state != "EXHAUSTED" or candidate == "MERGED" else None
+        # Merging is the only answer that moves a row in `MERGE_ONLY_STATES` (b-8e30bd, b-a7e5f3).
+        new_state = (
+            candidate
+            if state not in MERGE_ONLY_STATES or candidate == "MERGED"
+            else None
+        )
         if new_state is None or new_state == state:
             continue
         # Bucket first: a state outside `_BUCKET` must not raise *after* the
