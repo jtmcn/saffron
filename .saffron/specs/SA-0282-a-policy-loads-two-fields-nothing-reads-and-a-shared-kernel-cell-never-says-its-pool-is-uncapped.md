@@ -4,7 +4,7 @@ title: A policy loads two fields nothing reads, and a shared-kernel cell never s
 type: feature
 priority: 2
 depends_on: [SA-0271, SA-0262, SA-0264]
-estimated_lines: 190
+estimated_lines: 200
 estimate_measured: true
 touches:
   - saffron/repos/policy.py
@@ -84,18 +84,23 @@ acceptance:
       - The member is declared on `Dialect` and implemented by podman's dialect alone.
   - claim: >-
       A cell that mints its own task decides at policy load whether its
-      thread pools run uncapped. That holds when the selected dialect shares
-      the host kernel and the policy has no `thread_env` key. Then the cell
-      emits one `Preflight` event with step `thread_env`, whose detail names
-      `thread_env`. The task still runs its plan and implement turns, and its
-      `task_created` fact carries `thread_pool_uncapped` set to `True`. The
-      witness drives three cells. Podman with no `thread_env` key warns and
-      records `True`. Podman with `thread_env` set to an empty map, and
-      apple/container with no key, emit no such event and record `False`.
-    witness: tests/test_session.py::test_a_shared_kernel_task_with_no_thread_env_key_warns_and_records_an_uncapped_pool
+      thread pools run uncapped. That holds when the selected dialect's
+      `shares_kernel` is true and the policy's `thread_env` holds no
+      entries. Then the cell emits one `Preflight` event with step
+      `thread_env`, whose detail names `thread_env` and the runtime's
+      binary. The task still runs its plan and implement turns, and its
+      `task_created` fact carries `thread_pool_uncapped` set to `True`.
+      Otherwise no such event is emitted and the fact carries `False`. The
+      witness drives five cells. Podman with no `thread_env` key, and podman
+      with an empty map, each warn and record `True`. Podman with one entry,
+      apple/container with no key, and a stub VM dialect whose `unattended`
+      is false, with no key, each record `False`.
+    witness: tests/test_session.py::test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_uncapped_pool
     wrong_versions:
-      - The check reads the map's truthiness, so `thread_env` set to an empty map warns and records `True`.
+      - An empty map counts as declared, so podman with `thread_env` set to an empty map records `False`.
       - The check ignores the runtime, so apple/container with no key warns too.
+      - The check reads `not unattended` in place of `shares_kernel`.
+      - The warning names `thread_env` and not the runtime.
       - The warning is emitted and the payload key is never passed, so the fact carries `None`.
       - The payload key is written only when the pool is uncapped, so a capped task records `None`.
       - The warning is computed and never emitted.
@@ -155,19 +160,28 @@ Delete `when` from `GateDeclaration` and `envelope_default` from
 at load.
 
 Add a property, `shares_kernel`, to `Dialect`, with a short docstring.
+Declare it above `unattended` in the protocol and in both dialects. The
+module docstring calls the last two members the exception in kind
+(`saffron/cell/runtimes/__init__.py:15-17`), and they stay last.
 Apple/container's dialect returns `False`, since each cell is its own VM.
 Podman's returns `True`. Cite the measurement each value rests on, in one
-comment line. Add the member to
+comment line. For podman that is the CPU count measured inside a cell, as its
+docstring records it (`saffron/cell/runtimes/podman.py:62-69`), and the
+evidence record's shared kernel
+(`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md:246-249`).
+For apple/container it is the VM per cell (`docs/appendices/G-the-cell-runtime.md:34`),
+beside the vCPU offset measured at `saffron/cell/runtimes/apple.py:31-33`. Add the member to
 `test_every_declared_runtime_satisfies_the_dialect`
 (`tests/test_runtime.py:226`).
 
 After the policy loads in `_drive_cell`, decide whether the pool is
-uncapped. That is the selected dialect's `shares_kernel`, and no
-`thread_env` key in the policy at all. Read the key's presence from
-`model_fields_set`, as `Spec.declared_risk` does (`saffron/intake.py:216`).
-An empty map is a declaration. When the pool is uncapped, emit one
-`Preflight` with step `thread_env`, naming the runtime and `thread_env`.
-Then run the task as before.
+uncapped. That is the selected dialect's `shares_kernel`, and a
+`thread_env` that holds no entries. An absent key and an empty map read
+alike, since neither caps a pool. This repo's policy and the setup
+skill's template both declare an empty map (`.saffron/policy.yaml:134`,
+`.claude/skills/setup-saffron/templates/policy.yaml:33`). When the pool is
+uncapped, emit one `Preflight` with step `thread_env`, naming the
+runtime's binary and `thread_env`. Then run the task as before.
 
 Give `create_task` a keyword parameter, `thread_pool_uncapped`, default
 `None`. Write it into the `task_created` payload under that name.
@@ -184,7 +198,9 @@ Update what the change makes false or breaks:
   (`tests/test_setup_saffron.py:174`) keeps its name and both parameters.
   `census_gate` fails a name collected at base and missing at head
   (`saffron/gates/core/census.py:41`). Rewrite its body. It asserts that
-  neither the template nor `SKILL.md` names the field.
+  neither the template nor `SKILL.md` holds the field's name in
+  backticks. It checks the backticked form only, because `SKILL.md` uses
+  the English word "when". Criterion 5 holds the template's YAML key.
 - `.claude/skills/setup-saffron/templates/policy.yaml:10` calls `when`
   unread, and `:19-20` declare `envelope_default`. Remove both.
 - `.claude/skills/setup-saffron/SKILL.md:41` says to declare a gate
@@ -197,12 +213,20 @@ Update what the change makes false or breaks:
 - **Schema versions.** `SA-0283` owns them.
 - **A task a stack batch mints.** `_stack_mint` creates its task before
   any policy is read (`saffron/cli.py:1108-1131`). Its fact carries
-  `None`. The warning still fires when its cell loads the policy.
+  `None`. The warning still fires when its cell loads the policy. Backlog
+  item b-e9153f owns the record.
+- **The `dead` allow entry for `envelope_default`.**
+  `.saffron/deadcode-allow.py:12` names it, and `.saffron/**` is
+  forbidden here. At `bc879e2c`, `dead` fails without that entry while
+  the field exists. A person removes the entry once this spec lands. The
+  entry names nothing afterwards, and `dead` passed with it in the
+  prototype.
 - **A `tasks` column.** Nothing reads the value from the ledger. The
   record is where it is read. `_TASKS_COLUMNS_NO_READER`
   (`tests/test_ledger.py:992`) lists the only columns allowed no reader.
 - **`DESIGN.md`, `CONTEXT.md` and `.saffron/policy.yaml`.** Their lines on
-  `when` and `envelope_default` are edited by hand with this spec.
+  `when` and `envelope_default` are edited by hand with this spec. They
+  describe the refusal before the cell lands it.
 - **Conditional gates.** Item 19 offered two fixes, reading `when`
   against changed paths or refusing it. This spec takes the second.
 
@@ -227,7 +251,7 @@ an empty list. The empty list is what kills the second wrong version.
 
 **Criterion 3** compares with `is`, so a truthy stand-in fails.
 
-**Criterion 4** drives `_drive` three times in one test, each in its own
+**Criterion 4** drives `_drive` five times in one test, each in its own
 directory (`tests/test_session.py:1350`). The record-backed pattern is
 `test_the_task_created_fact_carries_the_cells_declared_tier_and_null_where_none`
 (`tests/test_session.py:3857`). Per case:
@@ -237,11 +261,16 @@ directory (`tests/test_session.py:1350`). The record-backed pattern is
   apple/container for every unmarked test (`tests/conftest.py:52`). So a
   test that never sets `_selected` drives apple/container alone, and a
   check that ignores the runtime passes it.
+- The stub VM dialect subclasses apple/container's and overrides
+  `unattended` to return `False`. Both real dialects pair `unattended`
+  with the opposite of `shares_kernel`, so only the stub kills a build
+  that reads `not unattended`.
 - Pass `policy=` to `_drive`. Its default is `"gates: {}\n"`, which has no
   `thread_env` key. Pass `capture=` and `record=MemoryRecord()`.
-- Count `Preflight` events with step `thread_env`. Assert the plan and
-  implement turns ran, from `len(cell.turns)`. Read the `task_created`
-  fact and compare `thread_pool_uncapped` with `is`.
+- Count `Preflight` events with step `thread_env`. Where one is expected,
+  assert its detail holds `thread_env` and the dialect's `binary`. Assert
+  the plan and implement turns ran, from `len(cell.turns)`. Read the
+  `task_created` fact and compare `thread_pool_uncapped` with `is`.
 
 **At the tree base each witness fails.** Both fields load. No dialect has
 `shares_kernel`. No `thread_env` event exists and the payload has no such
@@ -255,8 +284,9 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words. Keep `create_task`'s docstring within ten lines,
 so explain the new key in a comment beside it.
 
-**Size.** A prototype at `bc879e2c` measured 547 tokens with `size_gate`'s
-counter, or 137 lines. It held every source edit in all six files, the four new
+**Size.** A prototype at `bc879e2c` measured 582 tokens with `size_gate`'s
+counter, or 146 lines. It held every source edit in all six files, the four new
 tests, the four test edits and both `.claude/` edits. Every wrong version above failed its witness there.
-A margin of 53 lines for docstrings makes `estimated_lines` 190. The
+It was measured without the three parents, which move the lines it edits.
+A margin of 54 lines for docstrings makes `estimated_lines` 200. The
 `feature` ceiling is 3000 tokens.

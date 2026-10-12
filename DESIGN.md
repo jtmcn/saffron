@@ -94,7 +94,7 @@ This list is a **living refusal record**, not a one-time scoping exercise. Each 
 │                                                                          │
 │   .saffron/                                                              │
 │     specs/         XX-0001-….md                   ← unit of work         │
-│     policy.yaml    gate roles, budgets, protected paths, envelopes       │
+│     policy.yaml    gate roles, budgets, protected paths, thread_env      │
 │     gates/         executables emitting the gate JSON contract (§5.4)    │
 │     Dockerfile     cell image; FROM a saffron base                       │
 │   CLAUDE.md        standing agent instructions (the learning surface)    │

@@ -773,8 +773,8 @@ of task, and that is the kind every consumer of either has to be right about.
 ## 7. Repos
 
 **Policy**: `.saffron/policy.yaml` in a target repo: gate roles and blocking
-levels, `elevate_on`, protected paths, envelope defaults, `integrity` patterns,
-thread env. Everything repo-shaped that is not an executable.
+levels, `elevate_on`, protected paths, `integrity` patterns, thread env.
+Everything repo-shaped that is not an executable.
 _Avoid_: "config", "settings", "the manifest".
 
 **Cell image**: Built from the repo's `.saffron/Dockerfile`, `FROM` a Saffron base

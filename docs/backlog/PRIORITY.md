@@ -268,6 +268,9 @@ sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then
 **b-0569f7**, **b-da550a** and last **b-a9ec4b**.
 
+**Placed 2026-10-11**, from reviewing `SA-0282`: **b-e9153f**, after b-0569f7.
+A task a `--stack` batch mints never records whether its thread pool was uncapped.
+
 **Placed 2026-10-06**, from stopping a cell by hand: ~~**b-5df2a7**~~. SIGTERM skips
 the cell's teardown, so its containers and its task stay in flight.
 
