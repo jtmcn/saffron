@@ -617,7 +617,7 @@ Each spec has one `events.jsonl`, shared by every task that spec runs. A stack b
 
 **The ceiling is one file per spec, with no rotation, compression or size cap.** One `Agent` event is cut at `BOUND_CHARS` characters. Nothing bounds the file.
 
-**A credential in an `Agent` event is redacted before the write.** `EventLog.append` replaces each credential shape PACKAGE refuses (§5.7) in the event's cell-authored fields. It replaces the cell's own token too, when the log was handed it. The event's `redacted` field names each shape it replaced, and never the value. The terminal line is printed before the write and is not redacted. This is not the `secrets` gate, which §5.4 still reserves.
+**A credential in an `Agent` event is redacted before the write.** `EventLog.append` replaces each credential shape PACKAGE refuses (§5.7) in the event's `event` and `line`. It does the same in `detail`, which is host text that can quote cell output. It replaces the cell's own token too, when the log was handed it. The event's `redacted` field names each shape it replaced, and never the value. For the token it holds a marker naming the cell's own token, which is not a shape. The terminal line is printed before the write and is not redacted. Under `launchd` that line lands in the batch log file on disk. This is not the `secrets` gate, which §5.4 still reserves.
 
 ---
 

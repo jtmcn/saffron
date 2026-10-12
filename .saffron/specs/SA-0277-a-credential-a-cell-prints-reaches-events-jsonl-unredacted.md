@@ -4,7 +4,7 @@ title: A credential a cell prints reaches events.jsonl unredacted, and PACKAGE's
 type: feature
 priority: 2
 depends_on: [SA-0271, SA-0268]
-estimated_lines: 355
+estimated_lines: 422
 estimate_measured: true
 touches:
   - saffron/credentials.py
@@ -54,7 +54,11 @@ acceptance:
       and the written file holds neither the credential nor the key
       block's body. The event read back keeps its other keys, the text on
       both sides of the credential, and a `redacted` field naming that
-      shape's description alone.
+      shape's description alone. The witness then drives two key blocks
+      with no END line. One is a header and a body clipped inside a
+      `tool_use` input, and the other is a raw `line` holding the header
+      alone. Each is written with neither its header nor its body, and
+      `redacted` names the private key block.
     witness: tests/test_credentials.py::test_every_shape_package_refuses_is_redacted_from_the_log
     wrong_versions:
       - A private key block redacted at its header line alone, so the key's body is written.
@@ -62,6 +66,7 @@ acceptance:
       - A marker that names a generic credential rather than the shape's description.
       - A description reworded when the shapes move, so PACKAGE's refusal note changes.
       - An event that carried a credential written with `event` set to `None`, so the evidence is lost.
+      - A block pattern that requires an END line, so a clipped block or a lone header is written whole.
   - claim: >-
       Redaction reaches every cell-authored place in an `Agent` event. The
       witness puts one AWS access key id in each of seven places. They are
@@ -70,13 +75,16 @@ acceptance:
       the innermost string of a list nested 999 deep inside an event too
       large to keep whole. Each is written without the credential, with
       the text around it, and read back with `redacted` naming the shape.
-      An event carrying no credential reads back equal to the one appended.
+      An eighth event carries two AWS key ids in one string and a third in
+      `detail`, and its `redacted` names the shape once. An event carrying
+      no credential reads back equal to the one appended.
     witness: tests/test_credentials.py::test_an_agent_events_credentials_are_redacted_in_every_field
     wrong_versions:
       - Only the top level of `event` walked, so a nested dict or a list keeps its credential.
       - Dict values walked and keys left alone.
       - The raw `line` left unredacted.
       - The `detail` field left unredacted.
+      - One `redacted` entry per match, so a shape found three times is named three times.
       - A recursive walk, so the 999-deep event raises `RecursionError` and is never written.
       - A recursive walk that falls back to the unredacted event on `RecursionError`.
       - The marker written as an extra JSON key rather than a dataclass field, so `read_log` drops it.
@@ -133,6 +141,10 @@ acceptance:
       carrying the token. The task's `events.jsonl` holds no token, and the
       event read back names the cell's own token in `redacted`.
     witness: tests/test_task.py::test_run_task_redacts_the_cells_own_token_from_its_log
+    mutant:
+      file: saffron/task.py
+      find: EventLog(out_dir / spec.id, token=token)
+      replace: EventLog(out_dir / spec.id)
     wrong_versions:
       - "`run_task`'s default log built without the token, so only shapes are redacted."
       - The log reading `CLAUDE_CODE_OAUTH_TOKEN` from the environment instead of the token `run_task` holds.
@@ -197,7 +209,7 @@ When its caller passes no `emit`, it builds `EventLog(out_dir / spec.id)`
 (`saffron/task.py:478`) and prints each line before it appends
 (`saffron/task.py:482-489`). Both `saffron cell` and `saffron batch` call it
 that way, reading `CLAUDE_CODE_OAUTH_TOKEN` at the edge
-(`saffron/cli.py:567`, `:615`).
+(`saffron/cli.py:567`, `:615`), as does the stack runner (`:657`).
 
 ## Problem
 
@@ -229,6 +241,11 @@ nothing. Make these changes.
    each of the four lines ends by naming what was redacted.
 5. **`run_task` hands over its token.** Its default `EventLog` takes the
    `token` argument `run_task` already holds.
+6. **`Agent`'s docstring stops claiming verbatim.** Its opening sentence
+   calls `event` verbatim and says `original_chars` names the event's full
+   size (`saffron/events.py:294`, `:303-304`). Say instead that
+   `event` is verbatim except where a credential was redacted, and that
+   `original_chars` counts the serialization after redaction.
 
 ## Out of scope
 
@@ -236,14 +253,25 @@ nothing. Make these changes.
 - **The terminal line.** Both default emitters print `describe` of the
   event before `append` redacts a copy (`saffron/task.py:482-489`,
   `saffron/cell/session.py:107-110`). That line stays unredacted.
-- **Other event kinds.** A `Teardown`, `Terminal` or `Preflight` detail can
-  quote cell text and is not redacted here.
+- **Other event kinds.** A `PhaseStart`, `Teardown`, `Terminal` or
+  `Preflight` detail can quote cell text (`saffron/events.py:690-691`), and
+  none is redacted here.
+- **A private key on raw stdout.** Each stdout line that is not an event
+  becomes its own `Agent` with `raw=True` (`saffron/events.py:295-297`). The
+  header's line is redacted, but each body line is its own event and
+  matches no shape, so it is written.
+- **A credential the cell clipped.** `agent_runner.py` cuts every string in
+  a tool input at 200 characters (`images/agent_runner.py:25`, `:78-79`). A
+  credential cut there short of its shape's length is written in part.
+- **Two keys that redact alike.** A dict whose two keys redact to one
+  placeholder keeps one of the two values.
 - **Logs built without the token.** The spec-session log,
   `EventLog(log_dir)` (`saffron/cli.py:944`), redacts the shapes only.
   So do the defaults `EventLog(out_dir / spec.spec_id)`
   (`saffron/cell/session.py:959`) and `EventLog(outcome.task_dir)`
-  (`saffron/phases/package.py:646`, `:1093`). The cell's OAuth token still
-  matches the Anthropic OAuth shape there.
+  (`saffron/phases/package.py:646`, `:1093`). A token of the `sk-ant-oat`
+  form still matches the Anthropic OAuth shape there. This spec did not
+  measure the form of a live token.
 - **More shapes.** A shape not in the five passes both readers, as
   `DESIGN.md` §5.7 already says.
 - **`DESIGN.md`.** §4.7's paragraph on this redaction is written by hand in
@@ -251,10 +279,11 @@ nothing. Make these changes.
 
 ## Notes for the agent
 
-**Edit or new.** The module, the walk, the field, the `describe` suffix and
-the `token` argument are all new code. So every criterion declares a
-witness and no mutant. The three `preserves` witnesses exist at your base
-and pass there.
+**Edit or new.** The module, the walk, the field and the `describe` suffix
+are new code. So criteria 1 to 6 declare a witness and no mutant.
+Criterion 7 edits one existing call, whose spelling step 5 and step 3
+determine, so it declares a mutant. The three `preserves` witnesses exist
+at your base and pass there.
 
 **Your base.** This spec stacks on `SA-0271`, which edits
 `saffron/phases/package.py` in its gate-only cell, and `SA-0268`, which edits
@@ -281,11 +310,14 @@ the test can compute the token's position in `json.dumps` from
 in the content never reaches the line, and only the marker can name the
 redaction.
 
-**Criterion 6's witness** imports `saffron.credentials` inside the test,
-never at module scope. A module-scope import of a name the change adds
-makes the reverted run a collection error, which `revert` reads as `skip`.
-It reads each pattern's `.pattern` and searches every `*.py` under
-`saffron/` for it as text.
+**Imports in the new tests.** Each test in `tests/test_credentials.py`
+imports a name the change adds inside its own body, never at module scope.
+So does the new test in `tests/test_task.py`. That covers `saffron.credentials` and
+anything else this spec adds. A module-scope import of such a name makes
+the reverted run a collection error, which `revert` reads as `skip`.
+
+**Criterion 6's witness** reads each pattern's `.pattern` and searches every
+`*.py` under `saffron/` for it as text.
 
 **`tests/test_task.py`.** `_drive` passes `token=None` to `run_task`
 (`tests/test_task.py:100`). Give it a `token` keyword, default `None`, that
@@ -299,14 +331,19 @@ It unsets `CLAUDE_CODE_OAUTH_TOKEN` with `monkeypatch.delenv`.
 **The `prose` gate.** `saffron/credentials.py` and `tests/test_credentials.py`
 start at zero. PACKAGE's three-line `ponytail:` comment moves with the
 shapes, so rewrite it in two lines and keep the `ponytail:` mark. `Agent`'s
-docstring is already past ten lines. Do not lengthen it. Name the new field
-in a one-line comment above it.
+docstring is already past ten lines. Keep its line count exactly, or the
+length hit counts as new. Name the new field in a one-line comment above
+it. The gate keys a hit on its sentence's text, so step 6 makes the edited
+sentence a new hit unless you rewrite it clean. Split it into sentences of
+25 words or fewer, with no em dash and no semicolon.
 
 **The `dead` gate.** `redacted` counts as used only because `describe`
 reads it, which is step 4.
 
-**Size.** A prototype at `bc879e2c` measured 1421 changed tokens with
-`size_gate`, and `estimated_lines` is that over four. It held all five
-steps above, the seven new witnesses and the `test_task.py` edits. Every
+**Size.** A prototype at `27ca2838` measured 1687 changed tokens with
+`size_gate`, and `estimated_lines` is that over four. It held all six
+steps above, the seven new witnesses and the `test_task.py` edits. Its
+step 6 rewrote the docstring's first thirteen lines clean, with no new
+`prose` hit. Every
 wrong version listed above failed its witness there, and each new witness
 failed with the source reverted.
