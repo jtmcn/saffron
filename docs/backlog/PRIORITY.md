@@ -247,6 +247,10 @@ diff ends `MERGE_FAILED`.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
+plan checkpoint still prices the tests that `size` leaves out, so an
+elevated plan can be refused when the gate would pass.
+
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
 sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and **b-ca3bc6**. Then

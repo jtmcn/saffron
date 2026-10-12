@@ -3,7 +3,7 @@ id: SA-0274
 title: The `size` gate counts the tests a spec's criteria demand against the same ceiling as its source
 type: feature
 priority: 2
-estimated_lines: 125
+estimated_lines: 140
 estimate_measured: true
 touches:
   - saffron/gates/core/size.py
@@ -50,10 +50,10 @@ acceptance:
       `size_gate` takes the repo's declared test paths, and a file whose
       path matches any one of them adds nothing to the count. The verdict,
       the pass summary, the fail summary and the failure message all use the
-      count without them. When files under a test path changed, the summary
-      names the tokens they carried. When none did, the pass summary is
-      exactly what it is today. An estimated file under a test path is not
-      named as estimated. The witness declares two globs, tests/** and
+      count without them. When files under a test path carried tokens, the
+      summary names how many. When none did, the pass and fail summaries are
+      exactly what they are today, with a rewrapped test file that carries
+      none. An estimated file under a test path is not named as estimated. The witness declares two globs, tests/** and
       *_test.go, and changes six files. It counts src/a.py, pkg/a_test.go
       and src/tests/util.py. It leaves out tests/unit/test_a.py, a_test.go
       and a tests/shared.py past the token-diff bound. A diff over the `bug`
@@ -71,6 +71,8 @@ acceptance:
       - The test-path note added to the pass summary alone, so the fail summary lacks it.
       - The test-path note printed when no test path changed, so the summary with nothing under a test path carries it.
       - The estimated-file note built from every file, so tests/shared.py is named.
+      - The test-path note printed when any test-path file changed, so a rewrapped test file that carries no tokens adds it.
+      - The fail summary carrying a zero test-path note when no test path carried tokens.
       - The test paths accepted and never read.
   - claim: >-
       The gate suite hands `size_gate` the test paths `policy.integrity`
@@ -150,8 +152,8 @@ Leave the repo's declared test paths out of what `size` counts.
   `estimated_lines` against the ceiling (`saffron/agents/artifacts.py:315`).
   The plan prompt asks for lines across the whole diff
   (`saffron/agents/prompts/implement.md:26-32`). At `elevated` a plan
-  whose tests take it over the ceiling is still refused. The forecast now
-  errs toward refusal, and `saffron/agents/**` is forbidden here.
+  whose tests take it over the ceiling is still refused. Backlog item
+  **b-15db6e** owns it, and `saffron/agents/**` is forbidden here.
 - **An unreadable file under a test path.** It is refused or named exactly
   as today. Its content is uncounted either way.
 - **`driver.py`.** Its `_size` and its `check` pricing keep counting every
@@ -182,14 +184,18 @@ the past-bound file with `_one_hunk` (`tests/test_size.py:171`), the
 uses. It is estimated at 8 tokens. So the counted total is 41 and the
 left-out total is 50. Assert the summary starts with
 `41 changed tokens within the bug ceiling` and carries the 50. Assert
-`tests/shared.py` appears nowhere in it. Then assert a diff of `src/a.py`
-alone, with the paths declared, has the exact summary
+`tests/shared.py` appears nowhere in it. Build a rewrapped test file with
+`_one_hunk(["-a b c d", "+a b", "+c d"], path=...)` under `tests/`. It
+carries no tokens. Then assert `src/a.py` beside it, with the paths
+declared, has the exact summary
 `11 changed tokens within the bug ceiling of 1300`. For the verdict, take
 the `bug` ceiling from `_CEILINGS`. A source file at the ceiling less 10
 beside a 100-token test file passes declared and fails undeclared. A
 source file at the ceiling plus 1 beside it fails declared. Assert its
 failure message and its summary both start with the ceiling plus 1, and
-that its summary carries the 100.
+that its summary carries the 100. Last, a source file at the ceiling plus 1
+beside the rewrapped test file fails declared. Assert its summary equals
+the fail summary today's tests pin, with no note.
 
 **Criterion 2's witness.** `_Tree` (`tests/test_suite.py:21`) returns
 `""` from `patch` by default. Every `size` result passes on that, so a
@@ -211,7 +217,7 @@ so every line it grows is a new hit. Put any reason in a one-line comment.
 and `size` blocks.
 
 **Size.** A prototype held both witnesses, the `size_gate` change and the
-suite's one argument. It measured 479 changed tokens with `size_gate`,
+suite's one argument. It measured 539 changed tokens with `size_gate`,
 counting its tests, against the `feature` ceiling of 3000. With
-`tests/**` left out it measured 72. `estimated_lines` is 479 over four,
+`tests/**` left out it measured 72. `estimated_lines` is 539 over four,
 plus a margin for one docstring sentence.
