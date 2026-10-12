@@ -3,7 +3,7 @@ id: SA-0273
 title: A test REBUT adds to kill a surviving probe fails `revert`, so a sound fix ends `EXHAUSTED`
 type: feature
 priority: 1
-depends_on: [SA-0262, SA-0271]
+depends_on: [SA-0272, SA-0262, SA-0271]
 estimated_lines: 478
 estimate_measured: true
 touches:
