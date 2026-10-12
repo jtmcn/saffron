@@ -2942,7 +2942,7 @@ def test_a_task_orphaned_by_anything_but_a_cut_leaves_the_retry(monkeypatch, tmp
 
 def test_a_second_cut_on_a_resumed_row_settles_the_spec(monkeypatch, tmp_path):
     """Criterion 1 (b-3bba0f). Each bound cuts a fresh task at zero commits,
-    which ends ORPHANED. A second cut on that same row, given back as
+    which ends ORPHANED. A second cut by the next bound on that row, given back as
     task_id, reads the row's own earlier cut and settles NOT_IMPLEMENTED.
     Three further rows look cut-shaped but are not: GATE_ERROR instead of
     ORPHANED, a raise's run ABORTED, and a scan's run left RUNNING. Each
@@ -2954,7 +2954,9 @@ def test_a_second_cut_on_a_resumed_row_settles_the_spec(monkeypatch, tmp_path):
         ),
         "budget cap": lambda: _budget_cut_turn(cost=0.4),
     }
-    for name, make_cut in bounds.items():
+    names = list(bounds)
+    for i, name in enumerate(names):
+        make_cut, make_second = bounds[name], bounds[names[(i + 1) % len(names)]]
         case_dir = tmp_path / name.replace(" ", "_")
         case_dir.mkdir()
         cell1 = _stub_the_runtime(monkeypatch, commits=0)
@@ -2971,7 +2973,7 @@ def test_a_second_cut_on_a_resumed_row_settles_the_spec(monkeypatch, tmp_path):
             monkeypatch,
             case_dir,
             cell=cell2,
-            turns=[_turn(_block(_PLAN)), make_cut(), _turn(cost=0.05)],
+            turns=[_turn(_block(_PLAN)), make_second(), _turn(cost=0.05)],
             spec=_spec(task_id=outcome1.task_id),
         )
         assert outcome2.state == "NOT_IMPLEMENTED", name
@@ -3065,9 +3067,9 @@ def test_a_cut_after_a_repair_a_review_or_a_rebuttal_still_counts(
     monkeypatch, tmp_path
 ):
     """Criterion 2 (b-3bba0f). The cap judges a row by its latest attempt, by
-    attempt_id, not by every attempt the row holds. Four shapes open
-    IMPLEMENTING then move past it: REPAIRING, REVIEWING, REPAIRING then
-    REVIEWING then REBUTTING, or SPEC_REVIEW then SPEC_WRITING. A trailing
+    attempt_id, not by every attempt the row holds. Three shapes open
+    IMPLEMENTING then move past it: REPAIRING, REVIEWING, or REPAIRING then
+    REVIEWING then REBUTTING. The fourth is SPEC_REVIEW then SPEC_WRITING. A trailing
     IMPLEMENTING attempt makes each count. Without one, the row still does
     not count. Each shape is driven both on another row and on the row cut
     itself."""
@@ -3117,13 +3119,15 @@ def test_a_cut_after_a_repair_a_review_or_a_rebuttal_still_counts(
         ledger._db.commit()
         ledger.set_task_state(task, "ORPHANED")
         ledger.finish_run(run, "COMPLETE")
-        rows = ledger._db.execute(
+        ledger.close()
+        reopened = Ledger(case_dir / "ledger.db")
+        rows = reopened._db.execute(
             "SELECT started_at FROM attempts WHERE task_id = ? ORDER BY attempt_id",
             (task,),
         ).fetchall()
+        reopened.close()
         started = [r["started_at"] for r in rows]
-        ledger.close()
-        assert started == sorted(started, reverse=True)
+        assert all(a > b for a, b in zip(started, started[1:], strict=False))
         return task
 
     for case, phases in shapes.items():

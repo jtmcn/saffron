@@ -477,6 +477,16 @@ def cut_off_at_budget_cap(attempt: AttemptResult) -> bool:
     )
 
 
+# One cut-row rule for another row and the resumed row, so the two cannot drift.
+_CUT_ROW = """t.state = 'ORPHANED'
+           AND rn.status = 'COMPLETE'
+           AND (
+               SELECT a.phase FROM attempts a
+                WHERE a.task_id = t.task_id
+                ORDER BY a.attempt_id DESC LIMIT 1
+           ) = 'IMPLEMENTING'"""
+
+
 def previous_cut_orphan(
     ledger: Ledger, repo_id: int, spec: CellSpec, task_id: int
 ) -> int | None:
@@ -491,7 +501,7 @@ def previous_cut_orphan(
     and nothing survived the salvage.
     """
     row = ledger._db.execute(
-        """
+        f"""
         SELECT t.task_id
           FROM tasks t
           JOIN runs rn ON rn.run_id = t.run_id
@@ -499,13 +509,7 @@ def previous_cut_orphan(
            AND t.spec_id = ?
            AND t.spec_sha = (SELECT spec_sha FROM tasks WHERE task_id = ?)
            AND t.task_id != ?
-           AND t.state = 'ORPHANED'
-           AND rn.status = 'COMPLETE'
-           AND (
-               SELECT a.phase FROM attempts a
-                WHERE a.task_id = t.task_id
-                ORDER BY a.attempt_id DESC LIMIT 1
-           ) = 'IMPLEMENTING'
+           AND {_CUT_ROW}
          ORDER BY t.task_id
          LIMIT 1
         """,
@@ -516,23 +520,17 @@ def previous_cut_orphan(
 
 def row_is_orphaned_cut(ledger: Ledger, task_id: int) -> bool:
     """Whether `task_id`'s own row, read before this cell moves it, already
-    settled as a cut (b-3bba0f). True only when its state is `ORPHANED`, its
+    ended `ORPHANED` by a cut (b-3bba0f). True only when its state is `ORPHANED`, its
     run finished `COMPLETE`, and its latest attempt, by `attempt_id`, is phase
     `IMPLEMENTING`.
     """
     row = ledger._db.execute(
-        """
+        f"""
         SELECT 1
           FROM tasks t
           JOIN runs rn ON rn.run_id = t.run_id
          WHERE t.task_id = ?
-           AND t.state = 'ORPHANED'
-           AND rn.status = 'COMPLETE'
-           AND (
-               SELECT a.phase FROM attempts a
-                WHERE a.task_id = t.task_id
-                ORDER BY a.attempt_id DESC LIMIT 1
-           ) = 'IMPLEMENTING'
+           AND {_CUT_ROW}
         """,
         (task_id,),
     ).fetchone()
