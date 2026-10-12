@@ -6,7 +6,7 @@ priority: 2
 depends_on: [SA-0275, SA-0271, SA-0268, SA-0265]
 consumes:
   - saffron/ledger.py:record_regate
-estimated_lines: 468
+estimated_lines: 478
 estimate_measured: true
 touches:
   - saffron/regate.py
@@ -79,6 +79,9 @@ acceptance:
       - The base fetched as the default branch whatever branch the pull request names.
       - The baseline taken as the base branch's head rather than the merge base.
       - The baseline taken as the task's run's `base_sha`.
+      - The merge base taken against the task row's `pushed_sha` rather than the fetched head.
+      - The spec loaded at a commit other than the run's `base_sha`.
+      - "`gh pr view` asked for the task's branch rather than its `pr_url`."
       - The head taken from the task row's `pushed_sha` rather than the fetched branch.
       - A mirror at a path other than `_mirror_path`'s.
       - "`cell_tag(repo)` passed as the image with no build."
@@ -298,11 +301,11 @@ not a subcommand, so `main` raises `SystemExit` from argparse and every
 witness fails. Import nothing at the witness module's top that this change
 adds. Every name the module imports exists at the tree base.
 
-**Writing against `SA-0270` and `SA-0271`.** At the tree base,
+**Writing against `SA-0270` and `SA-0271`.** Once `SA-0271` lands,
 `runtime.allocate_network(name)` claims a /24 of the pool and returns its
-subnet. `runtime.GATEWAY` and `create_network`'s default subnet are gone.
-`assert_host_is_unreachable` and `probe_addresses` take the gateway as a
-required parameter, and `SA-0271` moves it ahead of `ports`. So pass
+subnet. `runtime.GATEWAY` and `create_network`'s default subnet are then
+gone. `assert_host_is_unreachable` and `probe_addresses` then take the
+gateway as a required parameter, ahead of `ports`. So pass
 `gateway`, `ports` and `sockets` to `assert_host_is_unreachable` by
 keyword. Then the call is right under either order. Read `runtime` and
 `preflight` at the tree base before you write the probe.
@@ -333,7 +336,10 @@ Annotate the runner parameter with the `GhRunner` alias at
 
 - `gh` answers `OPEN` and a `baseRefName` the test sets. Left at `main`,
   a build that always fetches the default branch passes. So criterion 1
-  also sets a parent's branch.
+  also sets a parent's branch. The fake records its argv, and criterion 1
+  asserts it holds the task's `pr_url` and `state,baseRefName`.
+- `build_cell_image` returns a tag that is not `cell_tag(repo)`. Criterion
+  1 asserts that `reverify` received that tag.
 - `allocate_network` returns one pool /24 that is not the pool's first.
   A build that computes the gateway from a fixed subnet then fails.
 - `reverify` returns a green comparison with no results. It records its
@@ -345,17 +351,19 @@ Annotate the runner parameter with the `GhRunner` alias at
 **The origin is real git.** Build a checkout with a bare origin added as
 `origin`. Then `real_remote` reads a local path, and `fetch_parent_branch`
 fetches from it. On `main`, commit a policy with no spec, then the spec,
-then the task's `base_sha` with policy A. Then commit a policy B, fork a
-parent branch there, and fork the task's branch from the parent's commit.
-The task's branch holds a packaged and a review commit. Move the parent
-and `main` after both forks, and push all three branches. Make each
+then the task's `base_sha` with policy A. Then commit policy B with an
+edited spec text, and fork a parent branch there. Fork the task's branch
+from the parent's first commit, with a packaged commit. Move the parent
+and `main`. Then make the review commit merge moved `main` into the task's
+branch, as GitHub's "update branch" does. Push all three branches. Make each
 policy's `protected` list differ, so the witness can name which export it
 read. Then rewrite the working copy's policy and spec, so a read of the
 checkout shows. Seed the repo row with the origin's path and a run at
 `base_sha`. Seed a task with the spec's sha. Call `set_task_package` with
-the packaged commit and a pull request URL. The merge base is then the
-policy B commit for `main`, and the parent's first commit for the parent's
-branch. Criterion 1 also asserts that `reverify` was handed the mirror at
+the packaged commit and a pull request URL. The merge base is then moved
+`main` for `main`, where `pushed_sha` would give the policy B commit. For
+the parent's branch it is the parent's first commit. Every commit but
+`base_sha` holds a spec text whose sha is not the task's. Criterion 1 also asserts that `reverify` was handed the mirror at
 `_mirror_path`'s path.
 
 **Criterion 3's cases.** Seed a run at the commit with no spec for the
@@ -368,7 +376,7 @@ the earlier one in a `finally`. Its `reverify` fake sends the process
 SIGTERM. With the guard, `main` returns 143 and the test's handler never
 runs. Without it, the test's handler runs and `main` returns 0.
 
-**Four residuals, one line each.**
+**Five residuals, one line each.**
 
 - The probe adds one ephemeral container on the base image, as
   `run_one_cell`'s does.
@@ -378,9 +386,11 @@ runs. Without it, the test's handler runs and `main` returns 0.
 - A head pushed while the suite runs is not the head recorded. The record
   names the head it judged.
 - The cell image is built from the checkout, as `saffron cell` builds it.
+- An old `base_sha` whose policy or spec today's parser refuses raises,
+  and the command exits 2.
 
 **Wrong versions.** Each criterion lists the ones its witness must kill.
-A prototype's witnesses killed all 35 on 2026-10-11 and passed with the
+A prototype's witnesses killed all 38 on 2026-10-12 and passed with the
 change. Do not run them yourself.
 
 **The `prose` gate** counts every new comment and docstring. Write none
@@ -388,9 +398,9 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size.** No path in `touches` is in `elevate_on`, so the task is
-`standard` and `size` is advisory. A prototype measured 1870 tokens with
+`standard` and `size` is advisory. A prototype measured 1910 tokens with
 `size_gate`'s counter against the `feature` ceiling of 3000. It held the
 module, the dispatch and docstring edit, the five witnesses, the
 `CLAUDE.md` line and the `README.md` paragraph. `record_regate` and
-`allocate_network` were stand-ins outside the count. The witnesses were 1196 tokens of it.
+`allocate_network` were stand-ins outside the count. The witnesses were 1234 tokens of it.
 `estimated_lines` is that count over four.
