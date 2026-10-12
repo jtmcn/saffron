@@ -40,3 +40,7 @@ current cell runs.
   one shared proxy (`PROXY_NAME`, `saffron/cell/proxy.py:15`, removed first at
   `:54`) is also what blocks two independent layers of the spec DAG from
   running at once. `DESIGN.md` §4 holds K at 1, and N4 wants 3.
+- 2026-10-12: `SA-0269` ran in the spec loop's run 35 and ended
+  `EXHAUSTED` at $41.03 of $36 after three gate attempts. Its branch is
+  pushed with no pull request. `SA-0270` and `SA-0271` were refused for
+  depending on it. The operator decides whether to rerun, split or drop it.

@@ -2,7 +2,7 @@
 id: b-032c3e
 title: A lens that errors halts the task at REVIEWING, which the reconciler reads as in flight, so a deliberate halt is re-queued as a crash
 status: open
-tier: 3
+tier: 1
 filed: 2026-09-22
 specs: []
 prs: []
@@ -37,3 +37,7 @@ process died, and a witness covers the scan's choice.
   `REVIEWING` with green gates. The branch was pushed and no PR opened.
   The batch then closed `INCOMPLETE` and exited 2. The PR was opened by
   hand as #809. The probes the lens carried are b-f7a591.
+- 2026-10-12: moved to tier 1 by the operator, in the spec loop's run 35.
+  `SA-0259`'s halted row stayed `REVIEWING` after its hand-opened #809
+  merged. `reconcile` asks only about rows with a `pr_url`, so the delegate
+  stamped it `MERGED` by hand.

@@ -1,11 +1,12 @@
 ---
 id: b-883f74
 title: PACKAGE raising after a cell went `READY_FOR_REVIEW` leaves no branch and no way to resume it
-status: open
+status: done
 tier: 1
 filed: 2026-10-08
+closed: 2026-10-12
 specs: [SA-0226, SA-0266, SA-0268]
-prs: [745]
+prs: [745, 845, 847]
 commits: []
 cites: [§5.7]
 related: [b-6cd3c2, b-2247dd]
@@ -41,3 +42,6 @@ request. A command then runs PACKAGE alone on it, re-verify included.
   raised in PACKAGE after `READY_FOR_REVIEW` is now offered again, so the
   whole cell re-runs and is paid again. The fix belongs here, as re-running
   PACKAGE alone.
+- 2026-10-12: `SA-0266` and `SA-0268` ran in the spec loop's run 35 as
+  #845 and #847. `saffron package` rebuilds the outcome from the ledger and
+  runs PACKAGE alone. What review left is b-bff156 and b-d3b755.
