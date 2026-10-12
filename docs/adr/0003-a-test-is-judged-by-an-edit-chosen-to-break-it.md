@@ -17,7 +17,7 @@ and five surviving mutants described one artifact. Tests written by the code's
 author certify agreement, not correctness.
 
 The decision is spread across §5.4, §5.4.1, §5.5, §5.5.1, §11 and the backlog,
-and it changed five times.
+and it changed seven times.
 
 - 2026-08-25. §5.4 rejected mutation testing on cost, because `mutmut` reruns
   the suite per mutant. §11 corrected that reason. `mutmut` does not rerun per
@@ -37,6 +37,9 @@ and it changed five times.
   backlog item b-2750d5).
 - 2026-09-23. A vacuity probe killed only by a format test read as caught
   (backlog item b-19b255). Only a test the diff adds now kills one (`SA-0138`).
+- 2026-10-11. `revert` failed a test REBUT added to kill a probe, and a sound
+  fix ended `EXHAUSTED`. A probe now runs again after REBUT, and its kill
+  exempts that test from `revert` (`SA-0273`, backlog item b-4a63b7).
 
 ## Decision
 
@@ -45,7 +48,8 @@ break that behaviour. No mutation-testing tool sweeps the diff. Two gates and
 two host-run probes share the question, and each asks it differently.
 
 - `revert` reverts the diff's source files, keeps its test files, and requires
-  the new tests to fail. It asks whether the tests test anything.
+  the new tests to fail. It asks whether the tests test anything. A test REBUT
+  added is exempt when the probe run after REBUT shows it killing a probe.
 - `witness` applies a mutant the spec declares to the head tree, and requires
   the claim's witness to fail. It asks whether that one claim is guarded.
 - A criterion probe is an edit a fresh session names to make one claim false.
@@ -75,8 +79,10 @@ A spec's mutant is meant never to reach the implementer. `parse_spec` refuses a
 spec whose mutant text appears in its body or claims, before a cell starts.
 That refusal is a tripwire, not a boundary (backlog item 80). A probe is
 different. REBUT shows a surviving probe to the implementer on purpose, so it
-can answer the blocker. After REBUT a verdict session reads the diff, and no
-probe runs again.
+can answer the blocker. After a rebuttal that moved HEAD, the host asks each
+surviving probe again over the post-rebuttal patch, before the gates re-run.
+A test REBUT added that kills the probe is judged by that kill, and `revert`
+exempts it. A verdict session then reads the diff.
 
 A mutation tool stays out of the gate loop for two reasons that §11 measured.
 `mutmut` cannot scope below a function, and cannot run over a suite that gates
@@ -98,16 +104,18 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
 - **4** departs. Both withholdings live in the cell. The spec file sits in the
   worktree, so a spec's mutant is withheld from the prompt only. The criterion
   session reads files under `/work`, where the spec names every witness.
-- **5** departs. A test REBUT adds for a property already true at base still
-  passes once the source is reverted. No `preserves` criterion declares it, so
-  `revert` fails it. One task ended `EXHAUSTED` with a correct diff that way
-  (backlog item b-4a63b7).
+- **5** upholds. `revert` and a probe disagreed about a test REBUT adds for a
+  property already true at base. One task ended `EXHAUSTED` with a correct diff
+  that way (backlog item b-4a63b7). The choice is now explicit. A probe run
+  after REBUT decides that test, and `revert` exempts it when it kills a probe.
+  A probe that ends `unproven` there exempts nothing.
 - **6** departs. A surviving probe is a blocker, and blocking teaches the
   cheapest satisfaction. `SA-0079` killed the named edit and left a near
   neighbour surviving. Coverage stays advisory for the same reason.
 - **15** departs. The first verdict on a probe is a run of a declared gate.
-  After REBUT the verdict is a session reading the diff, and item 117's fresh
-  probe per round is not built.
+  After REBUT a second run decides only the tests REBUT added. The verdict on
+  the blocker is a session reading the diff, and item 117's fresh probe per
+  round is not built.
 - **17** upholds. `parse_spec` refuses a spec that discloses its own mutant
   before a cell starts.
 - **20** departs. A spec in the worktree is agent-visible. `SA-0064`'s
@@ -140,7 +148,7 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   fresh probe is asked for each round.
 - **52** departs. Vacuity is a property of how a test and its code respond to
   perturbation, so the first verdict comes from running an edit. After REBUT
-  the question returns to reading.
+  a run decides the tests REBUT added, and the blocker returns to reading.
 - **56** upholds. The 2026-08-25 measurement rejected two mutation tools for
   this gate loop, and nothing more. §11 names the constraints that would admit
   `mutmut`.
@@ -158,9 +166,10 @@ A spec creating new code declares no mutant, because a mutant cannot pin text
 the implementer is yet to write. Its claims still get criterion probes.
 
 `revert` is file-level (§5.4). When the reverted tests fail to import, `revert`
-reports `skip`, and the PR body misreports the reason (backlog item 50). It
-also fails a test REBUT adds for a property already true at base, which item
-b-4a63b7 records as open.
+reports `skip`, and the PR body misreports the reason (backlog item 50). A
+test REBUT adds is exempt from `revert` when the probe run after REBUT shows it
+killing a probe. That holds at the re-run after REBUT and at PACKAGE's
+re-verification. A test REBUT adds that kills no probe is still judged.
 
 `witness` as a suite gate is advisory at `standard` and blocking at `elevated`.
 A surviving probe of either kind is a blocker for REBUT, whatever the tier, once

@@ -4,7 +4,7 @@ title: '`revert` refuses a witness REBUT adds for a property already true at bas
 status: open
 tier: 1
 filed: 2026-09-22
-specs: [SA-0118]
+specs: [SA-0118, SA-0273]
 prs: [433]
 commits: []
 cites: [§5.4]
@@ -41,3 +41,7 @@ it writes one. A witness drives both halves.
   REBUT records no kill, because no probe runs after REBUT (ADR 3). `revert` also
   judges before any verdict session reads the rebuttal (`rebut.py:717`). So that
   arm needs a probe run after REBUT and before `rerun_gates`, which amends ADR 3.
+- 2026-10-11: specced as `SA-0273`. A probe runs again after a rebuttal that
+  moved HEAD. `revert` exempts a test REBUT added that kills a probe there, at
+  the re-run and at PACKAGE. ADR 3 and `DESIGN.md` §5.4 and §5.6
+  are amended by hand in the same branch.
