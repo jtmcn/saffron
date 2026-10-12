@@ -92,8 +92,8 @@ acceptance:
   - claim: >-
       `run_one_cell` returns `REBUTTAL_UNJUDGED` and writes it to the task
       row, for a silent rebuttal and for a lens that gave no verdict. A
-      reconcile that stamps orphans then leaves that row as it is. It stamps
-      nothing and asks GitHub nothing.
+      reconcile that stamps orphans then leaves that row as it is, while it
+      stamps a `REBUTTING` row beside it `ORPHANED`. It asks GitHub nothing.
     witness: tests/test_session.py::test_a_rebuttal_left_unjudged_ends_its_task_in_a_state_no_scan_stamps
     mutant:
       file: saffron/cell/session.py
@@ -103,6 +103,7 @@ acceptance:
       - The cell returns the new state but writes `REBUTTING` to the row, so the row stays in flight.
       - The new state joins the in-flight set, so a stamping reconcile stamps the row `ORPHANED`.
       - Only the silent rebuttal reaches the new state, so a lens with no verdict leaves the row `REBUTTING`.
+      - A reconcile that reads no rows, so it stamps nothing whatever the row's state.
   - claim: >-
       A REBUT its cap cut short still ends `EXHAUSTED` with its blockers
       standing and its line saying REBUT ran out of its budget, as it does
@@ -220,6 +221,10 @@ Leave every `REBUTTING` that names the live state or an attempt's phase.
   hand once this lands.
 - **Rows already left `REBUTTING`.** No migration rewrites them. A stamping
   scan still stamps them `ORPHANED`.
+- **A parent whose push was refused.** `push_unpackaged_work` can refuse,
+  and the row then records no push. The scheduler still admits the child,
+  which is cut from `base_sha` without the parent's code. Backlog item
+  b-f603c9 owns that. This spec adds no witness and no code for it.
 
 ## Notes for the agent
 
@@ -248,11 +253,15 @@ its own `tmp_path` subdirectory. Copy the silent form from
 `test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting`
 (`tests/test_session.py:5009-5030`). For a lens with no verdict, use
 `rebut_commits=1`, an argued rebuttal, and a verdict turn of plain text.
-Then call `saffron.reconcile.reconcile` with `stamp_orphaned=True` and a `gh`
-that raises when called. A `gh` that returned an empty answer would hide a
-build that asks GitHub about the row. Read the repo id from the ledger's
-`repos` table. Assert `result.orphaned` is empty and the row's state is
-unchanged.
+On each of the two ledgers, assert the outcome and the row are
+`REBUTTAL_UNJUDGED`. Then add a second task row in the same repo, set it
+`REBUTTING` through `ledger.set_task_state`, and call
+`saffron.reconcile.reconcile` with `stamp_orphaned=True`. Pass a `gh` that
+raises when called. A `gh` that returned an empty answer would hide a build
+that asks GitHub about the row. Read the repo id from the ledger's `repos`
+table. Assert `result.orphaned` is exactly the second row's id. Then assert
+the cell's row is still `REBUTTAL_UNJUDGED` and the second row is
+`ORPHANED`. Without the second row, a reconcile that reads no rows passes.
 
 **Criterion 4's witness exists.** Its two silence cases, `silence` and
 `spent-not-refused`, are two of the assertions to update. Its cut cases must
@@ -268,7 +277,7 @@ change adds.
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
-**Size.** A prototype measured 487 changed tokens with `size_gate`'s counter,
+**Size.** A prototype measured 523 changed tokens with `size_gate`'s counter,
 against the `bug` ceiling of 1300. It held both source edits, both docstring
 updates, all twenty assertion updates and the three new witnesses.
 `estimated_lines` is that count over four, plus a margin.

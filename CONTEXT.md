@@ -695,7 +695,8 @@ _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
 **`REBUTTAL_UNJUDGED`**: A task whose REBUT ended with its anchored blockers
 standing and no critic judging the rebuttal. Either the rebuttal moved no commit
 and made no argument, or a lens that started gave no verdict. No pull request
-opens. The cell's branch is pushed, so a dependent stacks on it. A REBUT that
+opens. The cell's branch is pushed only when `push_unpackaged_work` succeeds,
+and a dependent then stacks on it. A REBUT that
 its cap cut short ends `EXHAUSTED` instead.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
