@@ -5,7 +5,7 @@ status: partial
 tier: 1
 filed: 2026-09-17
 by_hand: true
-specs: [SA-0220, SA-0221, SA-0222, SA-0223, SA-0224]
+specs: [SA-0220, SA-0221, SA-0222, SA-0223, SA-0224, SA-0278]
 prs: [722, 724, 731, 733, 735]
 commits: []
 cites: [§4.1, §4.4, §4.6, §6]

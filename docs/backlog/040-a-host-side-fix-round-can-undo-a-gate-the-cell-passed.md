@@ -3,11 +3,11 @@ id: 40
 title: A host-side fix round can undo a gate the cell passed
 status: open
 tier: 1
-specs: [SA-0029, SA-0080, SA-0086]
+specs: [SA-0029, SA-0080, SA-0086, SA-0274, SA-0284]
 prs: [91, 247, 255]
 commits: [4ba8bdf]
 cites: [§5.4]
-related: []
+related: [97]
 ---
 
 ## Problem
@@ -48,3 +48,8 @@ on every unmoved-base pull request. `scope` runs in the cell against the cell's
 diff, so nothing on the branch records that it now carries a forbidden path. It
 is the same fix: re-run the gates the cell passed against the branch before it
 is marked ready, and have an operator's exemption leave a record.
+
+On 2026-10-11 the operator split the item in two. `SA-0274` takes the
+second half: `size` leaves the repo's declared test paths out of its count.
+The ceilings stay as they were. The first half, running the gates again on
+the branch after review commits, folds into item 97 and `SA-0275`.

@@ -36,6 +36,7 @@ _SETTLED_TABLE: dict[str, bool] = {
     "PROVIDER_UNREACHABLE": False,
     "SPEC_WITHHELD": True,
     "SPEC_DRAFTED": False,
+    "REBUTTAL_UNJUDGED": False,
     "APPROVED": False,
     "CHANGES_REQUESTED": False,
     "REJECTED": True,
@@ -88,7 +89,7 @@ def test_the_rate_is_merged_over_settled_and_names_the_count_below_twenty(tmp_pa
     assert trailing_accept_rate(empty) == "no settled task yet"
 
     not_settled = [name for name, settled in _SETTLED_TABLE.items() if not settled]
-    assert len(not_settled) == 19
+    assert len(not_settled) == 20
     ledger_not_settled = _ledger_with(tmp_path, "not-settled", not_settled)
     assert trailing_accept_rate(ledger_not_settled) == "no settled task yet"
 

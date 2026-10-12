@@ -3,7 +3,7 @@ id: 97
 title: A delegate's review fixes reach a task's pull request and no gate, critic or record
 status: partial
 tier: 1
-specs: [SA-0111]
+specs: [SA-0111, SA-0275, SA-0284]
 prs: [189, 381]
 commits: []
 cites: [§5.1, §5.4]

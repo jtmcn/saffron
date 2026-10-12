@@ -6,9 +6,8 @@ gates:
   tests:  { blocking: true }
   # Repo-defined, against a surface an agent cannot satisfy by writing plausible
   # code: the shapes either accept the graph or they do not (§5.4). Declared
-  # unconditionally rather than `when: "**/*.ttl"` — `GateDeclaration.when` is
-  # parsed and nothing reads it, and a control that reads as present and is not
-  # is the founding defect of Appendix I. Validation is milliseconds.
+  # unconditionally, since a policy declaring `when` is refused at load and
+  # validation takes milliseconds.
   shacl:  { blocking: true }
   # Invariants that were prose in CLAUDE.md and enforced by nothing: which module
   # may name the cell runtime, which file may import the Agent SDK, and that a

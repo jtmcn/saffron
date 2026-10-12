@@ -53,7 +53,9 @@ repo declared, through the same contract. It never runs the repo's toolchain.
 Git and the cell runtime are core's own vocabulary, so running them is no
 exception. `revert` and `witness` (§5.4.1) are the core gates that run a repo
 gate. Each re-invokes the repo's `tests` gate with a test subset, and `witness`
-first applies a mutant the spec declared.
+first applies a mutant the spec declared. Where a repo declares `witness:`
+patterns, `witness` also applies a constant mutant it derives from the diff
+with them.
 
 Before a new core gate takes that exception, the cheaper question comes first.
 Does a gate the repo already declares produce this data? `census` reads
