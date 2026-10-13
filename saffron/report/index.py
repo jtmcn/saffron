@@ -51,6 +51,8 @@ _STATE_RANK: dict[RowState, int] = {
     "SPEC_DRAFTED": 2,
     # REBUT halted with its blockers unjudged, and the branch waits for you (§5.6).
     "REBUTTAL_UNJUDGED": 2,
+    # A lens errored, so no review is complete, and the branch waits for you (§5.5).
+    "REVIEW_INCOMPLETE": 2,
     # A task the night left mid-phase, ranked with elevated risk (rev 17
     # shifted these from 3 to 4 to make room for level 3, sustained blockers,
     # below) rather than by omission.

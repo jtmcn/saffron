@@ -650,8 +650,8 @@ it to the vocabulary.
 the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
 `GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
-`SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`,
-`MERGED`, `ORPHANED`, `MERGE_TRAIN`.
+`SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `REVIEW_INCOMPLETE`, `APPROVED`,
+`CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
 A re-queue resumes the same row from six end states, so an end state need not be
 final. Every terminal state is an end state.
 
@@ -663,7 +663,8 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
-`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`.
+`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`,
+`REVIEW_INCOMPLETE`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -711,6 +712,13 @@ A row whose latest run's push was refused can carry an earlier run's
 `pushed_sha`, and a dependent then stacks on that older branch. A stack batch
 counts the task a miss and refuses its children. A REBUT that its cap cut
 short ends `EXHAUSTED` instead.
+
+**`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no
+findings, because its session failed or its output was not the schema. An unrun
+lens never reads as a clean review, and no finding set exists to rebut. No pull
+request opens. The cell's branch is pushed and stacked on as a
+`REBUTTAL_UNJUDGED` task's is. A stack batch counts the task a miss and refuses
+its children.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.

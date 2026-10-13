@@ -159,7 +159,7 @@ factory:MERGE_FAILED a factory:TerminalState . factory:PREFLIGHT_FAILED a factor
 factory:NOT_IMPLEMENTED a factory:TerminalState . factory:GATE_ERROR a factory:TerminalState .
 factory:RATE_LIMITED a factory:TerminalState . factory:SPEC_WITHHELD a factory:TerminalState .
 factory:PROVIDER_UNREACHABLE a factory:TerminalState . factory:SPEC_DRAFTED a factory:TerminalState .
-factory:REBUTTAL_UNJUDGED a factory:TerminalState .
+factory:REBUTTAL_UNJUDGED a factory:TerminalState . factory:REVIEW_INCOMPLETE a factory:TerminalState .
 
 # What the operator's decision produces, plus the state a crash produces. None of
 # these reaches the operator — they are downstream of a judgement they already made.

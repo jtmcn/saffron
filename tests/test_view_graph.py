@@ -606,10 +606,10 @@ def test_the_closed_sets_are_read_from_the_shapes_it_is_given(tmp_path: Path) ->
 
     original = DEFAULT_SHAPES.read_text()
 
-    drop_merged = "factory:MERGED factory:ORPHANED\n            factory:MERGE_TRAIN )"
+    drop_merged = "factory:MERGED\n            factory:ORPHANED factory:MERGE_TRAIN )"
     assert original.count(drop_merged) == 1
     edited = original.replace(
-        drop_merged, "factory:ORPHANED\n            factory:MERGE_TRAIN )"
+        drop_merged, "\n            factory:ORPHANED factory:MERGE_TRAIN )"
     )
 
     add_paused = "factory:REVIEWING factory:REBUTTING )"

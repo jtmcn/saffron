@@ -61,6 +61,7 @@ TaskState = Literal[
     "SPEC_WITHHELD",
     "SPEC_DRAFTED",
     "REBUTTAL_UNJUDGED",
+    "REVIEW_INCOMPLETE",
     "APPROVED",
     "CHANGES_REQUESTED",
     "REJECTED",

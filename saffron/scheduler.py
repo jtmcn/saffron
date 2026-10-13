@@ -82,6 +82,7 @@ DONE_STATES = frozenset(
         "SPEC_WITHHELD",
         "SPEC_DRAFTED",
         "REBUTTAL_UNJUDGED",
+        "REVIEW_INCOMPLETE",
     }
 )
 
@@ -96,7 +97,13 @@ DEPENDENCY_MERGED = "MERGED"
 # Not landed, and §4.2 admits each. A dependent stacks on the parent's pushed
 # branch rather than `base_sha` (`task._resolve_stacked_on`, `SA-0026`).
 DEPENDENCY_WAITING_STATES = frozenset(
-    {"READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REBUTTAL_UNJUDGED"}
+    {
+        "READY_FOR_REVIEW",
+        "APPROVED",
+        "MERGE_TRAIN",
+        "REBUTTAL_UNJUDGED",
+        "REVIEW_INCOMPLETE",
+    }
 )
 
 # Will not merge as it stands. Read only at the parent's *current* `spec_sha`:
@@ -121,7 +128,7 @@ REQUEUE_STATES = frozenset(
 )
 
 # Done, and not waiting on the operator (§6): `DONE_STATES` minus the
-# four dependent-stacking states, minus `SCOPE_REVIEW`, which still waits.
+# five dependent-stacking states, minus `SCOPE_REVIEW`, which still waits.
 SETTLED_STATES = (DONE_STATES - DEPENDENCY_WAITING_STATES) - {
     "SCOPE_REVIEW",
     "SPEC_DRAFTED",
