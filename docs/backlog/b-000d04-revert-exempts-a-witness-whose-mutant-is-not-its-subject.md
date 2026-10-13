@@ -4,7 +4,7 @@ title: "`revert` reads a mutant's file as its claim's subject, so a mutant point
 status: open
 tier: 1
 filed: 2026-10-13
-specs: []
+specs: [SA-0291]
 prs: []
 commits: []
 cites: [§5.4, §5.4.1]
@@ -56,3 +56,7 @@ their witnesses read changed files.
 
 - 2026-10-13: filed by the operator's delegate. The operator chose the
   declared field over running exempt witnesses or a rule alone.
+- 2026-10-13: specced as `SA-0291`, the declared field and the narrowed
+  rule. `issue-tracker.md` and `DESIGN.md` §5.4 changed by hand in the
+  spec's own commit. The glossary entry is b-cd1566, and the `driver.py
+  check` warning lands by hand after the cell.

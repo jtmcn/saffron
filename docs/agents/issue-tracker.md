@@ -140,6 +140,16 @@ GitHub issues remain in use only for research/evidence records under
   that does edit it (`saffron/scheduler.py`'s overlap refusal). Put such a file
   in `forbidden` instead, as `SA-0079` and `SA-0097` do.
 
+  *A mutant outside the diff costs a `revert` verdict.* `revert` sets aside a
+  witness whose mutant's file the diff left alone, and reads that file as the
+  code the claim is about. `SA-0286`'s mutants sat in a forbidden file while
+  its witnesses read prompts the diff changed. `revert` judged neither
+  witness (backlog item b-000d04). So prefer a mutant in a file the diff
+  changes. Where the claim's code lies elsewhere, a criterion can declare
+  `subject:`, the repo-relative path of that code. `revert` then sets the
+  witness aside only when the subject lies outside the diff's source too.
+  `SA-0291` adds the field. Until it lands, load refuses the key.
+
 - **A spec names the wrong versions its witnesses must kill, and never asks
   the cell to run them.** Each is one sentence under its criterion's
   `wrong_versions:`, such as "a fold that defaults a missing key to 0". The

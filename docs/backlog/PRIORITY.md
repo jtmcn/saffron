@@ -280,6 +280,9 @@ file exempts a witness of code the diff changed, so `revert` never judges it.
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
 `SA-0290` merges. `CONTEXT.md` has no entry for a removed name.
 
+**Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand after
+`SA-0291` merges. `CONTEXT.md` has no entry for a criterion's subject.
+
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
 plan checkpoint still prices the tests that `size` leaves out, so an
 elevated plan can be refused when the gate would pass.
