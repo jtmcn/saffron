@@ -58,9 +58,9 @@ acceptance:
       conventions prompts claims the bullet in its own remit.
     witness: tests/test_review.py::test_the_correctness_lens_asks_what_a_failure_leaves_behind
     mutant:
-      file: saffron/phases/review.py
-      find: '"correctness": "review-correctness.md",'
-      replace: '"correctness": "review-contract.md",'
+      file: saffron/agents/prompts/review-correctness.md
+      find: "idempotency of a retried operation.\n- **What a failure"
+      replace: "idempotency of a retried operation.\n- **What a crash"
     wrong_versions:
       - The failure-path bullet placed in the Not-yours list, after the edge sentence, or anywhere but last in the remit.
       - The failure-path bullet written over the order-and-state bullet, so the remit still holds five bullets.
@@ -68,7 +68,7 @@ acceptance:
       - The edge sentence left as it stands at base, so a truncated file reads as a stored format another lens holds stable.
       - A Not-yours bullet that hands what a failure leaves behind to the contract lens.
       - The bullet copied into the contract prompt's remit as well.
-      - A witness that reads the prompt file by path rather than through `review.lens_prompt`.
+      - The failure-path bullet copied into the adequacy or conventions remit.
   - claim: >-
       The correctness, contract and adequacy prompts, as `review.lens_prompt`
       renders each, name in their `blocker` level any finding that
@@ -81,14 +81,15 @@ acceptance:
       conventions prompt carries no such sentence.
     witness: tests/test_review.py::test_three_lenses_file_a_contradicted_ticked_criterion_as_a_blocker
     mutant:
-      file: saffron/phases/review.py
-      find: '"adequacy": "review-adequacy.md",'
-      replace: '"adequacy": "review-correctness.md",'
+      file: saffron/agents/prompts/review-correctness.md
+      find: "never as a `concern`.\n- `concern` — a person has to decide"
+      replace: "never as a `note`.\n- `concern` — a person has to decide"
     wrong_versions:
       - The contradicted-criterion sentences placed in the remit or the instruction rather than the `blocker` bullet of the severity section.
       - The sentences calling such a finding a candidate for a `blocker` rather than a `blocker`.
       - The coverage case dropped from the adequacy `blocker` bullet when the new case is added.
       - The sentences added to two of the three lenses, such as adequacy and correctness but not contract.
+      - The contradicted-criterion sentences added to contract and adequacy but not correctness.
       - The sentences added to the conventions prompt as well.
       - Text saying the gate results show which boxes tick when `criteria` fails, which its summary does not.
   - claim: >-
@@ -115,8 +116,10 @@ find.
 **Track C settles the shape.** Widen the correctness lens's remit first
 and score it on the harness. Then say in the adequacy prompt that a finding
 contradicting a criterion the pull request body renders as satisfied is a
-`blocker` (`docs/superpowers/plans/2026-09-07-trusting-the-queue.md:266-285`).
-The operator widened the second half to every lens whose instruction
+candidate for `blocker`
+(`docs/superpowers/plans/2026-09-07-trusting-the-queue.md:266-285`). The
+operator settled on `blocker` rather than a candidate for one. The operator
+also widened the second half to every lens whose instruction
 already names an acceptance criterion technically satisfied and not
 met. That instruction sits at line 16 of
 `saffron/agents/prompts/review-correctness.md`, `review-contract.md` and
@@ -126,8 +129,7 @@ met. That instruction sits at line 16 of
 (`saffron/phases/review.py:41-46`). `lens_prompt` reads that file from
 `prompts_dir` and renders it with `context.build_system_prompt`
 (`saffron/phases/review.py:191-214`). The witnesses below render through
-`lens_prompt`, so a test that agrees with the file but not with the lens
-fails.
+`lens_prompt`, the path each lens's prompt takes.
 
 **The correctness remit today.** It says the lens owns what the changed
 code computes (`saffron/agents/prompts/review-correctness.md:30`). Five
@@ -207,10 +209,18 @@ lens is told that a finding contradicting a ticked criterion is a
 ## Notes for the agent
 
 **This change edits existing files, so each criterion declares a mutant.**
-Each mutant points one lens's `LENSES` entry at another prompt file. The
-witness then renders the other file through `lens_prompt` and must fail.
-The `revert` gate checks the other half, the prompt text itself reverted.
-Criterion 3 is `preserves` and names a test that passes now.
+Both mutants edit `review-correctness.md`, which this change touches. The
+`witness` gate applies each to the head tree and runs its witness, which
+must fail. Because each mutant's file is source this diff changes, the
+`revert` gate keeps both witnesses in its subset. It reverts the three
+prompt files, keeps the tests, and requires both witnesses to fail.
+Criterion 3 is `preserves`, so `revert` leaves it out, and it names a test
+that passes now.
+
+**Render through `lens_prompt`, never the file's path.** Both mutants sit
+in the prompt file. So no mutant tells a witness that reads the file by
+path from one that renders it. That rule is held by this note and by
+REVIEW, not by a gate.
 
 **Write the prompt text exactly as below.** Each block is the text the
 witness restates as a constant and compares, joined on whitespace. Wrap the
@@ -285,7 +295,7 @@ Both are new tests in `tests/test_review.py`. Each renders a prompt with
 `review.lens_prompt`, passing `CONTEXT_MD`, `PROMPTS`, `DIFF` and the
 `spec_body` and `gates` values the neighbouring tests use
 (`tests/test_review.py:20-30`, `:348-357`). Reuse `_bullets_between` and
-`_not_yours_bullets_and_edge` (`:572-580`, `:624-647`).
+`_not_yours_bullets_and_edge` (`:624-647` and `:572-580`).
 
 - **Criterion 1.** Render the correctness prompt. Take the remit bullets
   between `## Your remit, and its edges` and `Not yours.`. Assert there are
