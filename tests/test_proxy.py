@@ -10,7 +10,8 @@ from saffron.cell import proxy, runtime
 from saffron.repos import image
 
 NETWORK = "saffron-test-cells"
-_NAME = proxy.proxy_name("proxytest")
+# A literal, so the module still collects at a base with no `proxy_name`.
+_NAME = "saffron-proxy-proxytest"
 
 
 def reach(url: str) -> list[str]:
