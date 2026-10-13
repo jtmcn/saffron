@@ -4,7 +4,7 @@ title: Preflight passes a cell runtime whose image store lacks the proxy or the 
 type: bug
 priority: 1
 depends_on: [SA-0271, SA-0270]
-estimated_lines: 225
+estimated_lines: 256
 estimate_measured: true
 touches:
   - saffron/cell/runtime.py
@@ -44,23 +44,25 @@ acceptance:
   - claim: >-
       `check_readiness` asks the selected cell runtime's image store for
       the proxy image, `proxy.PROXY_TAG`, and the base image,
-      `image.BASE_TAG`. It runs `image inspect` once per tag and makes no
-      other runtime call. It refuses at the step `images` when either
-      answer is nonzero. A clean miss is a nonzero exit, not timed out,
-      whose stderr holds `image not found`. For each clean miss, and for
-      no other image, the detail names a build command. Each reads
-      `<binary> build -t <tag> -f <file> .`, with the selected runtime's
-      binary. The proxy's file is `images/proxy.Dockerfile`, and the
-      base's is `images/cell-base.python.Dockerfile`. The detail names
-      the Saffron checkout's absolute root as the directory to run them
-      from. Any other nonzero answer refuses with no build command. Its
-      detail carries the runtime's stderr, or says the ask timed out.
-      The witness drives both runtimes over four stores of clean misses.
-      One holds neither image, one the proxy alone, one the base alone
-      and one both. It then drives a nonzero answer with other stderr, a
-      timed out answer, a runtime that cannot be executed, and an
-      unknown `SAFFRON_CELL_RUNTIME`. Each of the last two returns a named
-      refusal and never raises.
+      `image.BASE_TAG`. It runs `image inspect` once per tag, each with a
+      30 second timeout, and makes no other runtime call. It asks every
+      tag whatever an earlier tag's answer was, a raise included. It
+      refuses at the step `images` when any answer is not exit 0. A clean
+      miss is a nonzero exit, not timed out, whose stderr holds `image not
+      found` in that case. Each clean-miss tag, and no other, gets a build
+      command reading `<binary> build -t <tag> -f <file> .`, with the
+      selected runtime's binary. The proxy's file is
+      `images/proxy.Dockerfile`, and the base's is
+      `images/cell-base.python.Dockerfile`. The detail names the Saffron
+      checkout's absolute root as the directory to run them from, not the
+      working directory. Every other answer, raise or timeout is named with
+      its tag. Its detail carries the runtime's stderr or the raise's text,
+      or says the ask timed out. The witness drives both runtimes over four
+      stores of clean misses: neither image, the proxy alone, the base
+      alone and both. It then drives three answers that are not clean
+      misses, a mixed store, a raise on the first tag, and an unknown
+      `SAFFRON_CELL_RUNTIME`. The last returns a named refusal and never
+      raises.
     witness: tests/test_preflight.py::test_readiness_refuses_a_store_missing_the_proxy_or_the_base_and_names_each_build
     wrong_versions:
       - Only the proxy is asked for, so a store lacking the base passes.
@@ -73,6 +75,11 @@ acceptance:
       - A timed out answer is read as a clean miss, or its detail does not say it timed out.
       - The detail gives the commands with no directory to run them from.
       - The selected runtime is read before the check's `try`, so an unknown `SAFFRON_CELL_RUNTIME` raises out of `check_readiness`.
+      - The detail names the working directory rather than the Saffron root.
+      - A clean miss is matched on `"not found" in stderr`, so a stopped service reads as a missing image.
+      - A clean miss is matched without regard to case.
+      - The first tag's raise stops the check, so the second tag is never asked and its build command is lost.
+      - The image is asked for with a timeout other than 30 seconds.
   - claim: >-
       A batch that readiness refuses for a missing proxy image mints no
       task row. The witness runs `saffron batch` and `saffron batch
@@ -143,12 +150,15 @@ each build one argv and return `_call`'s `Completed`
 admits only what the two runtimes were measured to spell differently
 (`saffron/cell/runtimes/__init__.py:1-17`).
 
-**What the delegate measured, on apple/container 1.3.0.**
-`container image inspect saffron/proxy` exits 0 and prints JSON when the
-image is present. `container image inspect saffron/no-such-image:latest`
-exits 1 and prints `Error: image not found: saffron/no-such-image:latest`
-on stderr. Podman is not installed on that host, so its spelling is
-unmeasured.
+**What the delegate measured, on apple/container CLI 1.3.0.** Each
+ask ran through `saffron.cell.runtime.call`, so stdout and stderr were
+captured apart. `image inspect saffron/no-such-image:latest` returned
+rc 1, an empty stdout, and stderr
+`Error: image not found: saffron/no-such-image:latest` with a newline.
+`image inspect saffron/proxy`, which was present, returned rc 0, an
+empty stderr and JSON on stdout. A missing `saffron/proxy` itself was not
+measured, since that meant deleting the host's image. Podman is not
+installed on that host, so none of its answers is measured.
 
 ## Problem
 
@@ -167,10 +177,12 @@ which `saffron/repos/image.py:18` already holds as `_SAFFRON_ROOT`. A
 batch's `--repo` can be any target repo, so a relative command alone
 would send the operator to the wrong tree.
 
-Any other nonzero answer gets no build command. A timeout from `_call`
-returns 124 with `timed_out` set (`saffron/cell/runtime.py:280-287`).
-Its detail says the ask timed out. Every other answer's detail carries
-the runtime's stderr, such as a stopped runtime's error.
+Any other answer gets no build command, and its line in the detail
+names its tag. A timeout from `_call` returns 124 with `timed_out` set
+(`saffron/cell/runtime.py:280-287`). Its line says the ask timed out.
+Every other answer's line carries the runtime's stderr, such as a
+stopped runtime's error. Give each ask a 30 second timeout, the default
+`inspect_container` takes (`saffron/cell/runtime.py:625`).
 
 Ask through `runtime.py`. Add one function beside `inspect_container`
 that runs `image inspect <tag>` through `_call` and returns its
@@ -178,15 +190,18 @@ that runs `image inspect <tag>` through `_call` and returns its
 do. Add no `Dialect` member. Its comment says the apple spelling is
 measured and the podman spelling is inferred and unmeasured.
 
-A `CellRuntimeError` from that call becomes a refusal at `images`
-carrying its text. So does one from `dialect()`. For an unknown
-runtime name, `raise CellRuntimeError(` runs at
-`saffron/cell/runtime.py:63`.
-So the check reads the selected runtime only inside its `try`. A batch
-meets that raise earlier, in `runtime.unattended_refusal`
-(`saffron/cli.py:1901`). The draft path calls
-`preflight.check_readiness(` with no such guard (`saffron/cli.py:1310`). The disk check does the same with
-`except RuntimeError as exc:` (`saffron/preflight.py:537-538`).
+Catch a `CellRuntimeError` from each tag's ask on its own. Name it
+with its tag in the detail, then ask the next tag. The disk check turns
+its own raise into a refusal with `except RuntimeError as exc:`
+(`saffron/preflight.py:537-538`).
+
+A `CellRuntimeError` from `dialect()` becomes a refusal at `images` as
+well. For an unknown runtime name, `raise CellRuntimeError(` runs at
+`saffron/cell/runtime.py:63`. So the check reads the selected runtime
+only inside a `try`. A batch meets that raise earlier, in
+`runtime.unattended_refusal` (`saffron/cli.py:1901`). The draft path
+calls `preflight.check_readiness(` with no such guard
+(`saffron/cli.py:1310`).
 
 Update the two docstrings that list readiness's order
 (`saffron/preflight.py:15-17`, `:465-467`) to name the image check last.
@@ -235,16 +250,28 @@ runtime binary raises `HostToolExecInTest`, a `BaseException`
 must stub it.
 
 **The readiness witness** reuses `_stub_prepare`
-(`tests/test_preflight.py:409`) and stubs `disk_headroom_ok` to pass. For
-each runtime and store it asserts the recorded argvs equal exactly the
-two `image inspect` argvs. It asserts `ok`, `step` and which build
+(`tests/test_preflight.py:409`) and stubs `disk_headroom_ok` to pass.
+It calls `monkeypatch.chdir(tmp_path)` first. In a cell and in `make
+check` the working directory is the Saffron root, so without it a detail
+built from the working directory passes. For each runtime and store it
+asserts the recorded argvs equal exactly the two `image inspect` argvs. It asserts `ok`, `step` and which build
 commands the detail holds. It asserts the detail holds the root, read in
-the test as `image.BASE_DOCKERFILE.parents[1]`. Then it drives three
-answers that are not clean misses. One is exit 1 with other stderr. One
-is `Completed(124, "", "", timed_out=True)`. One is a `_call` raising
-`CellRuntimeError`. The first two hold no `build -t`. Last, it sets
-`runtime._selected` to `None` and `SAFFRON_CELL_RUNTIME` to an unknown
-name with `monkeypatch.setenv`.
+the test as `image.BASE_DOCKERFILE.parents[1]`.
+
+Then it gives both tags each of three answers that are not clean misses.
+Two are exit 1, with stderr `Error: service not found` and
+`Error: Image Not Found`. One is `Completed(124, "", "", timed_out=True)`.
+For each, the detail holds no `build -t` and names both tags with the
+answer. Each ask's recorded timeout is 30.
+
+A mixed store gives the proxy a clean miss and the base a timeout. Its
+detail holds exactly one `build -t`, the proxy's, and names the base as
+timed out. Then `_call` raises `CellRuntimeError` on the proxy and
+answers a clean miss on the base. The detail names the proxy with the
+raise's text and holds exactly one build command, the base's.
+
+Last, it sets `runtime._selected` to `None` and `SAFFRON_CELL_RUNTIME`
+to an unknown name with `monkeypatch.setenv`.
 
 **The batch witness** runs `main` once per form, each with its own
 `--home`. It sets `CLAUDE_CODE_OAUTH_TOKEN` with `monkeypatch.setenv`.
@@ -284,11 +311,13 @@ sentence over 25 words.
 **`saffron/cell/**` is in `elevate_on`,** so this task runs `elevated`
 and `size` blocks.
 
-**Podman's miss text is unmeasured.** If it lacks `image not found`,
-a podman miss refuses with its stderr instead of a build command. It
-still refuses.
+**Only `saffron draft` reaches the podman half.** A podman batch is
+refused before readiness (`saffron/cli.py:1901`), since podman's
+`unattended` is false (`saffron/cell/runtimes/podman.py:82-85`).
+Podman's miss text is unmeasured. If it lacks `image not found`, a
+podman miss refuses with its stderr and no build command.
 
-**Size.** A prototype measured 857 changed tokens with `size_gate`,
+**Size.** A prototype measured 986 changed tokens with `size_gate`,
 against the `bug` ceiling of 1300. It held the runtime function, the
 readiness check, both witnesses and the three test stubs. Those suites
 passed on it. It did not hold the docstring edits. `estimated_lines` is
