@@ -1,12 +1,12 @@
 ---
 id: b-6a692d
 title: A critic cell cannot run beside a task cell, because every cell shares one network and one proxy
-status: open
+status: partial
 tier: 3
 filed: 2026-09-23
 closed:
 specs: [SA-0269, SA-0270, SA-0271]
-prs: []
+prs: [855, 856]
 commits: []
 cites: [§4.2, §5.1]
 related: [b-792ab2]
@@ -44,3 +44,7 @@ current cell runs.
   `EXHAUSTED` at $41.03 of $36 after three gate attempts. Its branch is
   pushed with no pull request. `SA-0270` and `SA-0271` were refused for
   depending on it. The operator decides whether to rerun, split or drop it.
+- 2026-10-12: the spec loop's run 36 stacked `SA-0269` as #855 and `SA-0270`
+  as #856. Each task's networks and proxy are now named from the task, and its
+  networks claim a /24 of a pool. `SA-0271` still owns the Gate-only cell and
+  PACKAGE's re-verification, so the item stays partial.

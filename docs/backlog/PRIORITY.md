@@ -267,6 +267,10 @@ image store asks a registry for the proxy.
 in separate chains clashed on a name one deletes and the other reads. No
 check compares names, so the second to land would end `EXHAUSTED`.
 
+**Placed 2026-10-12**, from the spec loop's run 36: **b-1c59c3**. A spec
+removed a name whose reader sat outside its `touches`, so its cell could not
+pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
@@ -508,6 +512,10 @@ default value passes REBUT. A spec can prescribe a false line. No gate
 resolves a citation. A stack batch's follow-up guard has no witness. `migrate`
 writes a false package fact for an adopted row.
 
+**Placed 2026-10-12**, from the spec loop's run 36: **b-9efbe2**. A child's
+cell deleted its parent's witness setup, and the parent's own wrong version
+then passed it. No gate re-runs a parent's wrong versions.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -614,6 +622,9 @@ no socket list names no process.
 **Placed 2026-10-12**, from the spec loop's run 35: **b-bff156**,
 **b-d3b755**, then **b-d7959f**. `ready_task` returns a Refusal after a cell.
 The host-probe line is built twice. The Mint entry says a re-offer waits.
+
+**Placed 2026-10-12**, from the spec loop's run 36: **b-1c4a14**. §5.1 still
+sketches one fixed network and one fixed proxy after #855 and #856.
 
 **Placed 2026-10-11**, from the spec loop's run 34: **b-5a69db**,
 **b-c86c4b**, then **b-54fee5**. A stopped night closes `INFRASTRUCTURE`,

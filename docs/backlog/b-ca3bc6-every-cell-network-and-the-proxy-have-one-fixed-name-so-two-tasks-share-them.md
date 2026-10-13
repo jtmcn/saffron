@@ -1,11 +1,11 @@
 ---
 id: b-ca3bc6
 title: Every cell network and the proxy have one fixed name, so two tasks at once share them
-status: open
+status: partial
 tier: 3
 filed: 2026-10-01
 specs: [SA-0269, SA-0270, SA-0271]
-prs: []
+prs: [855, 856]
 commits: []
 cites: [§4.2.1, §5.1, §5.5]
 related: [135, 108]
@@ -35,7 +35,14 @@ allocation in `runtime.SUBNETS` has to become per task too.
 Each task's networks, subnets and proxy are named from the task. Two tasks
 brought up at once share none of them, and a cell-marked test starts two and
 probes that neither reaches the other.
+
+## Record
+
 - 2026-10-12: `SA-0269` ran in the spec loop's run 35 and ended
   `EXHAUSTED` at $41.03 of $36 after three gate attempts. Its branch is
   pushed with no pull request. `SA-0270` and `SA-0271` were refused for
   depending on it. The operator decides whether to rerun, split or drop it.
+- 2026-10-12: the spec loop's run 36 stacked `SA-0269` as #855 and `SA-0270`
+  as #856. Each task's networks and proxy are now named from the task, and its
+  networks claim a /24 of a pool. `SA-0271` still owns the Gate-only cell and
+  PACKAGE's re-verification, so the item stays partial.

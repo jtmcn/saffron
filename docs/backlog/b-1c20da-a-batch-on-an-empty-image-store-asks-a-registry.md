@@ -31,3 +31,7 @@ The delegate built both images by hand and started batch 24.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 35, batch 23.
+- 2026-10-12: the spec loop's run 36 hit the same class. Batch 25 started with
+  the cell runtime's service stopped. `container network create` failed with an
+  XPC connection error, the batch exited 2 at $0, and `SA-0269` got a
+  `GATE_ERROR` row. Preflight never asked whether the service was up.
