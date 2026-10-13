@@ -19,6 +19,7 @@ from saffron.repos import mirror as mirror_ops
 from tests.test_proxy import reach
 
 NETWORK = "saffron-test-wt-cells"
+_PROXY_NAME = proxy.proxy_name("worktreetest")
 
 
 @pytest.fixture
@@ -279,7 +280,9 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
     runtime.create_volume(volume)
     runtime.remove_container(container)
     try:
-        proxy_ip = proxy.start_proxy(network)
+        proxy_ip = proxy.start_proxy(
+            _PROXY_NAME, network, subnet=runtime.DEFAULT_SUBNET
+        )
         worktree.prepare_worktree(
             mirror=mirror,
             volume=volume,
@@ -302,7 +305,7 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
         assert "STATUS" in allowed.stdout, allowed.stderr
     finally:
         runtime.remove_container(container)
-        proxy.stop_proxy()
+        proxy.stop_proxy(_PROXY_NAME)
         runtime.remove_volume(volume)
         runtime.remove_volume(f"{volume}-state")
 

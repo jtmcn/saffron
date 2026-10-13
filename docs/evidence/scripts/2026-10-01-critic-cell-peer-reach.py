@@ -102,14 +102,15 @@ def main() -> int:
         spec_type="bug",
         body="",
     )
-    network = "saffron-cells"
-    critic_network = network if shared else session.CRITIC_NETWORK
+    network = f"saffron-cells-{SPEC_ID.lower()}"
+    critic_network = network if shared else f"saffron-critic-net-{SPEC_ID.lower()}"
     own_critic_network = None if shared else critic_network
+    proxy_name = proxy.proxy_name(SPEC_ID)
     volume, state = f"saffron-wt-{SPEC_ID}", f"saffron-st-{SPEC_ID}"
     impl = f"saffron-cell-{SPEC_ID}"
     created: set[str] = set()
     try:
-        session.cell_up(
+        subnets = session.cell_up(
             repo=repo,
             mirror=mirror,
             tree_base=base,
@@ -120,15 +121,20 @@ def main() -> int:
             note=lambda step, detail: print(f"[up] {step}: {detail}"),
             network=network,
             critic_network=own_critic_network,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=impl,
         )
-        proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
+        proxy_ip = runtime.container_ip(
+            proxy_name, runtime.subnet_prefix(subnets[network])
+        )
         if proxy_ip is None:
             raise runtime.CellRuntimeError("the proxy has no address")
         critic_proxy_ip = (
-            proxy_ip if shared else session.proxy_address(runtime.SUBNETS["critic"])
+            proxy_ip
+            if shared
+            else session.proxy_address(proxy_name, subnets[critic_network])
         )
         impl_ip = _py(impl, OWN_IP, proxy_ip)
         print(f"implementer {impl_ip}, proxy {proxy_ip}")
@@ -161,6 +167,7 @@ def main() -> int:
             note=lambda step, ok, detail: print(f"[down] {step} {ok} {detail}"),
             network=network,
             critic_network=own_critic_network,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=impl,

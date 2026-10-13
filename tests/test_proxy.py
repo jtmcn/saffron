@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+import ipaddress
 import socket
 from pathlib import Path
 
@@ -10,6 +12,8 @@ from saffron.cell import proxy, runtime
 from saffron.repos import image
 
 NETWORK = "saffron-test-cells"
+# A literal, so the module still collects at a base with no `proxy_name`.
+_NAME = "saffron-proxy-proxytest"
 
 
 def reach(url: str) -> list[str]:
@@ -36,7 +40,7 @@ def network():
 
 @pytest.mark.cell
 def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
-    proxy_ip = proxy.start_proxy(network)
+    proxy_ip = proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
     try:
         env = {"HTTPS_PROXY": f"http://{proxy_ip}:{proxy.PROXY_PORT}"}
         allowed = runtime.run_ephemeral(
@@ -65,10 +69,10 @@ def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
         # Read against a real log, holding a real tunnel, a real denial and
         # squid's own startup chatter: the parser's quiet half, which no
         # hand-written fixture can establish.
-        assert proxy.failed_egress() == [], "a working proxy reported a failure"
-        assert len(proxy.denied_egress()) == 1
+        assert proxy.failed_egress(_NAME) == [], "a working proxy reported a failure"
+        assert len(proxy.denied_egress(_NAME)) == 1
     finally:
-        proxy.stop_proxy()
+        proxy.stop_proxy(_NAME)
 
 
 @pytest.mark.cell
@@ -119,11 +123,11 @@ def test_the_probe_finds_a_host_service_that_is_actually_there(network):
     server.bind(("0.0.0.0", 0))
     server.listen(8)
     port = server.getsockname()[1]
-    proxy.start_proxy(network)
+    proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
     try:
         reachable = preflight.probe_host_bindings(image.BASE_TAG, network, [port])
     finally:
-        proxy.stop_proxy()
+        proxy.stop_proxy(_NAME)
         server.close()
     assert reachable, (
         f"a host service on 0.0.0.0:{port} was not seen from inside a cell — "
@@ -137,11 +141,11 @@ def test_preflight_confirms_the_real_proxy_reaches_the_upstream(network):
     """The assertion against a real proxy, started the way production starts
     one. This is the check that would have ended the 2026-08-28 run in seconds
     (DESIGN.md §5.1.1)."""
-    proxy_ip = proxy.start_proxy(network)
+    proxy_ip = proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
     try:
         preflight.assert_proxy_reaches_upstream(image.BASE_TAG, network, proxy_ip)
     finally:
-        proxy.stop_proxy()
+        proxy.stop_proxy(_NAME)
 
 
 @pytest.mark.cell
@@ -168,7 +172,7 @@ def test_only_the_denials_are_reported_and_only_before_teardown(monkeypatch):
     monkeypatch.setattr(
         proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
     )
-    denied = proxy.denied_egress()
+    denied = proxy.denied_egress(_NAME)
     assert len(denied) == 2
     assert "platform.claude.com:443" in denied[0]
     assert not any("TCP_TUNNEL" in line for line in denied)
@@ -191,7 +195,7 @@ def test_a_tunnel_the_allowlist_permitted_but_squid_could_not_open_is_reported(
     monkeypatch.setattr(
         proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
     )
-    failed = proxy.failed_egress()
+    failed = proxy.failed_egress(_NAME)
     assert len(failed) == 1
     assert "TCP_TUNNEL/503" in failed[0]
     # The denial is the other report's job, and the answered tunnel is nobody's.
@@ -266,8 +270,8 @@ def test_a_cell_chosen_url_cannot_forge_a_denial(monkeypatch):
     monkeypatch.setattr(
         proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
     )
-    assert proxy.denied_egress() == []
-    assert len(proxy.failed_egress()) == 1
+    assert proxy.denied_egress(_NAME) == []
+    assert len(proxy.failed_egress(_NAME)) == 1
 
 
 def test_both_reports_are_capped_so_one_outage_cannot_fill_the_teardown(monkeypatch):
@@ -279,9 +283,9 @@ def test_both_reports_are_capped_so_one_outage_cannot_fill_the_teardown(monkeypa
     monkeypatch.setattr(
         proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, log, "")
     )
-    assert len(proxy.failed_egress()) == 10
-    assert len(proxy.denied_egress()) == 10
-    assert len(proxy.failed_egress(limit=3)) == 3
+    assert len(proxy.failed_egress(_NAME)) == 10
+    assert len(proxy.denied_egress(_NAME)) == 10
+    assert len(proxy.failed_egress(_NAME, limit=3)) == 3
 
 
 def test_a_proxy_that_is_already_gone_reports_nothing_rather_than_its_error(
@@ -296,8 +300,107 @@ def test_a_proxy_that_is_already_gone_reports_nothing_rather_than_its_error(
             1, "", "Error: failed to get logs (notFound)"
         ),
     )
-    assert proxy.failed_egress() == []
-    assert proxy.denied_egress() == []
+    assert proxy.failed_egress(_NAME) == []
+    assert proxy.denied_egress(_NAME) == []
+
+
+def test_each_proxy_call_acts_on_the_proxy_it_is_named_and_no_other(monkeypatch):
+    """`start_proxy`, `denied_egress`, `failed_egress` and `stop_proxy` each
+    act on the name they are given, never on a fixed one and never on the
+    other key's name."""
+    monkeypatch.setattr(proxy, "_ensure_egress_network", lambda: None)
+    addresses = {
+        proxy.proxy_name("SA-1"): "10.1.0.2",
+        proxy.proxy_name("SA-2"): "10.1.0.3",
+    }
+    removed: list[str] = []
+    detached: list[str] = []
+    ip_read: list[str] = []
+    call_argv: list[list[str]] = []
+
+    monkeypatch.setattr(
+        proxy.runtime, "remove_container", lambda name: removed.append(name)
+    )
+    monkeypatch.setattr(
+        proxy.runtime, "run_detached", lambda name, tag, **kw: detached.append(name)
+    )
+
+    def answering(name, *a, **k):
+        ip_read.append(name)
+        return addresses.get(name)
+
+    monkeypatch.setattr(proxy.runtime, "container_ip", answering)
+
+    def record_call(argv, **k):
+        call_argv.append(list(argv))
+        return runtime.Completed(0, "a log line", "")
+
+    monkeypatch.setattr(proxy.runtime, "call", record_call)
+
+    for key in ("SA-1", "SA-2"):
+        name = proxy.proxy_name(key)
+        assert name == f"saffron-proxy-{key.lower()}"
+        removed.clear()
+        detached.clear()
+        ip_read.clear()
+        call_argv.clear()
+
+        address = proxy.start_proxy(name, "net", subnet=runtime.DEFAULT_SUBNET)
+        assert address == addresses[name]
+        proxy.denied_egress(name)
+        proxy.failed_egress(name)
+        proxy.stop_proxy(name)
+
+        # Pre-clean, then the removal `stop_proxy` makes, and no other name.
+        assert removed == [name, name]
+        assert detached == [name]
+        assert ip_read == [name]
+        logged = [argv for argv in call_argv if argv[1] == "logs"]
+        assert len(logged) == 2
+        assert all(argv[-1] == name for argv in logged)
+
+    def never_answers(name, *a, **k):
+        ip_read.append(name)
+        return None
+
+    monkeypatch.setattr(proxy.runtime, "container_ip", never_answers)
+
+    for key in ("SA-1", "SA-2"):
+        name = proxy.proxy_name(key)
+        removed.clear()
+        with pytest.raises(runtime.CellRuntimeError):
+            proxy.start_proxy(name, "net", subnet=runtime.DEFAULT_SUBNET, timeout_s=0)
+        # Pre-clean, then the give-up removal, both this key's own name.
+        assert removed == [name, name]
+
+
+def test_start_proxy_reads_its_address_on_the_subnet_it_is_given(monkeypatch):
+    """`subnet` is a required keyword, with no default, and `start_proxy`
+    reads the proxy's address with that subnet's own prefix, never a
+    fixed one."""
+    sig = inspect.signature(proxy.start_proxy)
+    assert sig.parameters["subnet"].kind == inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["subnet"].default is inspect.Parameter.empty
+
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    # The pool's second /24, never its first, so a version that ignores
+    # `subnet` and reads the first one anyway still has to be caught.
+    given_subnet = str(list(pool.subnets(new_prefix=24))[1])
+    given_prefix = runtime.subnet_prefix(given_subnet)
+
+    monkeypatch.setattr(
+        proxy.runtime, "call", lambda *a, **k: runtime.Completed(0, "", "")
+    )
+    monkeypatch.setattr(proxy.runtime, "run_detached", lambda *a, **k: None)
+    monkeypatch.setattr(proxy.runtime, "remove_container", lambda *a, **k: None)
+
+    def _container_ip(name, subnet_prefix=runtime.SUBNET_PREFIX):
+        return f"{given_prefix}9" if subnet_prefix == given_prefix else None
+
+    monkeypatch.setattr(proxy.runtime, "container_ip", _container_ip)
+
+    address = proxy.start_proxy(_NAME, "net", subnet=given_subnet, timeout_s=1)
+    assert address == f"{given_prefix}9"
 
 
 def test_a_proxy_that_never_answered_reports_nothing_rather_than_raising(
@@ -309,7 +412,7 @@ def test_a_proxy_that_never_answered_reports_nothing_rather_than_raising(
         raise runtime.CellRuntimeError("the runtime binary is gone")
 
     monkeypatch.setattr(proxy.runtime, "call", boom)
-    assert proxy.failed_egress() == []
+    assert proxy.failed_egress(_NAME) == []
 
 
 def test_the_allowlisted_host_and_the_squid_acl_agree():

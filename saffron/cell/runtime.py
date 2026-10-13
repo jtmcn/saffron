@@ -160,13 +160,12 @@ def probe() -> str | None:
 
 DEFAULT_SUBNET = "10.88.0.0/24"
 
-# Every subnet Saffron allocates, one entry per distinct value (item 143).
-# `reverify` shares "cells": PACKAGE runs after the task's cell is down.
+# Every subnet Saffron allocates but `DEFAULT_SUBNET`, which PACKAGE's re-verification
+# keeps until SA-0271. A task's own networks each claim one /24 of "pool" (item 143).
 SUBNETS: dict[str, str] = {
-    "cells": DEFAULT_SUBNET,  # saffron-cells, the task's own network
+    "pool": "10.200.0.0/16",  # a task's cells and critic networks, one /24 each
     "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
     "gate": "10.90.0.0/24",  # saffron-gate-net-<spec>, the Gate-only cell's
-    "critic": "10.91.0.0/24",  # saffron-critic-net, the critic cells' and the proxy's
 }
 
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
@@ -360,6 +359,31 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
         except ValueError:
             continue  # the header row, and anything else that is not a subnet
     return found
+
+
+def allocate_network(name: str) -> str:
+    """Claim one /24 of the pool for `name`, by creating it there.
+
+    Walks `SUBNETS["pool"]` in address order, since the create is the
+    claim and a listing taken first could go stale before it. A refused
+    create asks `networks_on_subnet` for that /24's holder: a name found
+    moves the walk on, and none re-raises the create's own error.
+    Exhaustion names every holder met along the way.
+    """
+    pool = ipaddress.ip_network(SUBNETS["pool"])
+    holders: list[str] = []
+    for candidate in pool.subnets(new_prefix=24):
+        subnet = str(candidate)
+        try:
+            create_network(name, subnet=subnet)
+        except CellRuntimeError:
+            found = networks_on_subnet(subnet, exclude=name)
+            if not found:
+                raise
+            holders += [holder for holder in found if holder not in holders]
+            continue
+        return subnet
+    raise CellRuntimeError(f"every /24 of the pool is held: {', '.join(holders)}")
 
 
 def remove_network(name: str) -> Completed:

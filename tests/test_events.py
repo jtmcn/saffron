@@ -8,6 +8,7 @@ real (stubbed runtime, no network, no cell) and read back what it emitted.
 from __future__ import annotations
 
 import ast
+import ipaddress
 import json
 import re
 import typing
@@ -1871,8 +1872,13 @@ def test_findings_name_what_the_table_could_not_type():
 # --- The fixture's normaliser -----------------------------------------------
 
 _IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
-# Each declared network's gateway is stable, so the probe line keeps them.
-_GATEWAYS = {_runtime.gateway(subnet) for subnet in _runtime.SUBNETS.values()}
+# Each declared network's gateway is stable, so the probe line keeps them,
+# every pool /24's included, since that is where a task's own networks move.
+_POOL = ipaddress.ip_network(_runtime.SUBNETS["pool"])
+_GATEWAYS = {_runtime.gateway(subnet) for subnet in _runtime.SUBNETS.values()} | {
+    _runtime.GATEWAY,
+    *(_runtime.gateway(str(net)) for net in _POOL.subnets(new_prefix=24)),
+}
 _PATCH_PATH = re.compile(r"\S*/patch\.diff\b")
 _PROMPT_CHARS = re.compile(r"system prompt \d+ chars")
 

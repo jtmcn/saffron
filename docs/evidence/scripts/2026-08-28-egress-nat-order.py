@@ -16,8 +16,10 @@ by IP: what fails is the route, and a hostname would report it as DNS. The host
 is checked against the same address first, so an address that has since moved
 reads as an unusable control rather than as a reproduction.
 
-Not safe beside a live run: it removes the shared `saffron-proxy` container, and
-it leaves `saffron-egress` behind because `start_proxy` creates it.
+Not safe beside PACKAGE's re-verification. Its network takes `DEFAULT_SUBNET`,
+which that re-verification also creates on, so whichever starts second fails at
+`create_network`. It leaves `saffron-egress` behind because `start_proxy`
+creates it.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import socket
 from saffron.cell import proxy, runtime
 
 NETWORK = "saffron-natorder"
+PROXY_NAME = proxy.proxy_name("natorder")
 # api.anthropic.com at the time of measurement. By IP on purpose: DNS to the
 # egress gateway fails the same way, and the resolver error hides the routing one.
 UPSTREAM = "160.79.104.10"
@@ -38,7 +41,7 @@ def egress_works() -> bool:
         [
             runtime.RUNTIME,
             "exec",
-            proxy.PROXY_NAME,
+            PROXY_NAME,
             "nc",
             "-z",
             "-w",
@@ -52,16 +55,16 @@ def egress_works() -> bool:
 
 
 def attempt(*, container_first: bool) -> bool:
-    proxy.stop_proxy()
+    proxy.stop_proxy(PROXY_NAME)
     runtime.remove_network(NETWORK)
     runtime.create_network(NETWORK)
     try:
         if container_first:
             runtime.run_ephemeral("alpine:3", ["true"], network=NETWORK, timeout_s=120)
-        proxy.start_proxy(NETWORK)
+        proxy.start_proxy(PROXY_NAME, NETWORK, subnet=runtime.DEFAULT_SUBNET)
         return egress_works()
     finally:
-        proxy.stop_proxy()
+        proxy.stop_proxy(PROXY_NAME)
         runtime.remove_network(NETWORK)
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from saffron.cell import proxy, runtime
+from saffron.cell import runtime
 
 _HEAD_ARGS = ("head", "-c", "65536")
 _EXEC_TIMEOUT_S = 30.0
@@ -28,11 +28,11 @@ def _from_call(label: str, call: Callable[[], runtime.Completed]) -> tuple[bool,
     return True, f"{label}: {done.stdout}{done.stderr}"
 
 
-def read_egress(container: str) -> list[tuple[bool, str]]:
+def read_egress(proxy_name: str, container: str) -> list[tuple[bool, str]]:
     """Proxy state, proxy log, cell resolver, cell route, in that order."""
     return [
-        _from_call("proxy state", lambda: runtime.inspect_container(proxy.PROXY_NAME)),
-        _from_call("proxy log", lambda: runtime.container_logs(proxy.PROXY_NAME)),
+        _from_call("proxy state", lambda: runtime.inspect_container(proxy_name)),
+        _from_call("proxy log", lambda: runtime.container_logs(proxy_name)),
         _from_call(
             "cell resolver",
             lambda: runtime.exec_(

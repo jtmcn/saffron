@@ -2076,3 +2076,31 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0268` (#847): the host-probe line is built twice, and `saffron
   package` never emits it.
   **Bucket 3**, conventions. **Open:** b-d3b755.
+
+## 2026-10-12, `SA-0269` and `SA-0270` (spec loop run 36, stack #855 to #856)
+
+- `SA-0269`: its `touches` left out `tests/test_sigterm.py`, which imports a
+  name the spec removes, so the first cell ended `EXHAUSTED`.
+  **Bucket 1**, a queue check. **Landed:** #853. **Open:** b-1c59c3.
+- `SA-0269` (#855): the two-task witness checked its proxy recorders with
+  `all()`, so a missing stop and a one-network proxy both passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #855.
+- `SA-0269` (#855): `test_proxy.py` built a name at module level, so at base
+  the module failed to collect and its witness never ran.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #855.
+- `SA-0269` (#855): three evidence-script docstrings claimed no collision
+  with a live batch, while every task still shared one subnet.
+  **Bucket 3**, conventions. **Landed:** a review commit on #855.
+- `SA-0269` (#855): one comment narrated the change, and one docstring lost
+  its subject.
+  **Bucket 3**, conventions. **Landed:** a review commit on #855.
+- `SA-0270` (#856): the pool walk's witness listed no row for the network
+  itself, so dropping `exclude=name` passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #856.
+- `SA-0270` (#856): the cell deleted the other task's networks from
+  `SA-0269`'s witness, so that spec's own wrong version passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #856.
+  **Open:** b-9efbe2.
+- `SA-0270` (#856): the comment above `SUBNETS` was not rewritten as the
+  spec asked, and still claimed every subnet.
+  **Bucket 3**, contract. **Landed:** a review commit on #856.

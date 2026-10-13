@@ -1436,7 +1436,7 @@ def test_a_layers_critic_cell_is_seeded_at_its_head_and_always_torn_down(
     assert up_kwargs["mirror"] == mirror
     assert up_kwargs["tree_base"] == fields.head
     assert up_kwargs["branch"] == fields.branch
-    assert up_kwargs["network"] == "saffron-cells"
+    assert up_kwargs["network"] == "saffron-cells-endreview-te-1"
     assert up_kwargs["gates_dir"] == gates_dir
     assert up_kwargs["thread_env"] == thread_env
     assert log[0] == ("remove", up_kwargs["container"])
@@ -1572,6 +1572,97 @@ def test_only_a_spec_sessions_layer_cell_is_granted_capabilities_and_checked(
         log.append(("body", "unreached"))
 
     assert [step for step, *_ in log] == ["remove", "up", "check", "down"]
+
+
+def test_two_layer_cells_name_their_own_network_and_proxy_apart_from_any_task(
+    tmp_path, monkeypatch
+):
+    """`layer_cell`'s network is `saffron-cells-endreview-` plus its own spec
+    id, and its proxy is `proxy.proxy_name` given `endreview-` plus that id.
+    Two layer cells, one per spec id, share neither name with each other nor
+    with `_drive_cell`'s own names for the same ids."""
+    import saffron.end_review as end_review
+    from saffron.cell import proxy, runtime, session
+
+    repo = tmp_path / "repo"
+    mirror = tmp_path / "mirror"
+    gates_dir = tmp_path / "gates"
+    thread_env = {"X": "1"}
+
+    removed_networks: list[str] = []
+    removed_containers: list[str] = []
+    up_calls: list[dict] = []
+    down_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        runtime, "remove_network", lambda name: removed_networks.append(name)
+    )
+    monkeypatch.setattr(
+        runtime, "remove_container", lambda name: removed_containers.append(name)
+    )
+    monkeypatch.setattr(session, "cell_up", lambda **kw: up_calls.append(kw))
+    monkeypatch.setattr(session, "cell_down", lambda **kw: down_calls.append(kw))
+    monkeypatch.setattr(session, "assert_bash_is_unprivileged", lambda container: None)
+
+    fields1 = end_review.LayerFields(
+        spec_id="SA-1",
+        branch="saffron/SA-1",
+        pr_url="https://h/pull/1",
+        base="b" * 40,
+        head="h" * 40,
+        known="",
+    )
+    fields2 = end_review.LayerFields(
+        spec_id="SA-2",
+        branch="saffron/SA-2",
+        pr_url="https://h/pull/2",
+        base="b" * 40,
+        head="h" * 40,
+        known="",
+    )
+
+    with end_review.layer_cell(
+        fields1,
+        repo=repo,
+        mirror=mirror,
+        gates_dir=gates_dir,
+        thread_env=thread_env,
+        spec_session=False,
+    ):
+        pass
+    with end_review.layer_cell(
+        fields2,
+        repo=repo,
+        mirror=mirror,
+        gates_dir=gates_dir,
+        thread_env=thread_env,
+        spec_session=True,
+    ):
+        pass
+
+    up1, up2 = up_calls
+    down1, down2 = down_calls
+    assert up1["network"] == "saffron-cells-endreview-sa-1"
+    assert up2["network"] == "saffron-cells-endreview-sa-2"
+    assert up1["proxy_name"] == proxy.proxy_name("endreview-SA-1")
+    assert up2["proxy_name"] == proxy.proxy_name("endreview-SA-2")
+    assert down1["network"] == up1["network"]
+    assert down1["proxy_name"] == up1["proxy_name"]
+    assert down2["network"] == up2["network"]
+    assert down2["proxy_name"] == up2["proxy_name"]
+    assert {up1["network"], up1["proxy_name"]}.isdisjoint(
+        {up2["network"], up2["proxy_name"]}
+    )
+    # Neither name is the one `_drive_cell` would give a task of the same id.
+    assert up1["network"] not in ("saffron-cells-sa-1", "saffron-cells-sa-2")
+    assert up1["proxy_name"] != proxy.proxy_name("SA-1")
+    assert up2["proxy_name"] != proxy.proxy_name("SA-2")
+
+    # `cell_up`/`cell_down` are faked, so only `layer_cell`'s own pre-clean
+    # shows here: one container per cell, and no network removal at all.
+    assert removed_networks == []
+    assert len(removed_containers) == 2
+    assert removed_containers[0] != removed_containers[1]
 
 
 # Runs as root in the layer's cell. Each probe goes through the prefix as the
