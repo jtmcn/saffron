@@ -160,8 +160,8 @@ def probe() -> str | None:
 
 DEFAULT_SUBNET = "10.88.0.0/24"
 
-# Every subnet Saffron allocates, one entry per distinct value (item 143).
-# "pool" is the range a task's own networks claim one /24 from (SA-0270).
+# Every subnet Saffron allocates but `DEFAULT_SUBNET`, which PACKAGE's re-verification
+# keeps until SA-0271. A task's own networks each claim one /24 of "pool" (item 143).
 SUBNETS: dict[str, str] = {
     "pool": "10.200.0.0/16",  # a task's cells and critic networks, one /24 each
     "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network

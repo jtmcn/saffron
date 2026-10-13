@@ -16,9 +16,10 @@ by IP: what fails is the route, and a hostname would report it as DNS. The host
 is checked against the same address first, so an address that has since moved
 reads as an unusable control rather than as a reproduction.
 
-Not safe beside a live task. Its network takes the default subnet, as every
-task's does, so whichever starts second fails at `create_network`. It leaves
-`saffron-egress` behind because `start_proxy` creates it.
+Not safe beside PACKAGE's re-verification. Its network takes `DEFAULT_SUBNET`,
+which that re-verification also creates on, so whichever starts second fails at
+`create_network`. It leaves `saffron-egress` behind because `start_proxy`
+creates it.
 """
 
 from __future__ import annotations
