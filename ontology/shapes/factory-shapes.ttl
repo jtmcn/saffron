@@ -19,9 +19,9 @@ factory:TaskShape a sh:NodeShape ;
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
             factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:SPEC_DRAFTED
-            factory:REBUTTAL_UNJUDGED factory:APPROVED factory:CHANGES_REQUESTED
-            factory:REJECTED factory:MERGED factory:ORPHANED
-            factory:MERGE_TRAIN ) ] ;
+            factory:REBUTTAL_UNJUDGED factory:REVIEW_INCOMPLETE factory:APPROVED
+            factory:CHANGES_REQUESTED factory:REJECTED factory:MERGED
+            factory:ORPHANED factory:MERGE_TRAIN ) ] ;
     sh:property [ sh:path factory:inState ; sh:maxCount 1 ; sh:class factory:TaskState ] ;
     sh:property [ sh:path factory:riskTier ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RiskTier ; sh:in ( factory:standard factory:elevated ) ] ;
@@ -40,7 +40,7 @@ factory:TerminalStateShape a sh:NodeShape ;
             factory:READY_FOR_REVIEW factory:MERGE_FAILED factory:PREFLIGHT_FAILED
             factory:NOT_IMPLEMENTED factory:GATE_ERROR factory:RATE_LIMITED
             factory:SPEC_WITHHELD factory:PROVIDER_UNREACHABLE factory:SPEC_DRAFTED
-            factory:REBUTTAL_UNJUDGED ) .
+            factory:REBUTTAL_UNJUDGED factory:REVIEW_INCOMPLETE ) .
 
 # Eight states in which Saffron advances the task, and no end state among them.
 # A batch scan stamps these ORPHANED, so one also typed an end state would read as done.
@@ -158,8 +158,8 @@ factory:ContractGateShape a sh:NodeShape ;
     sh:property [ sh:path factory:role ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:GateRole ] .
 
-# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` and
-# `witness` are the two a tier moves. Stated as constraints rather than left
+# Core gates' blocking levels are core-supplied: §5.4 fixes them, and a tier
+# moves `size`. Stated as constraints rather than left
 # as triples in the vocabulary — an unenforced fact in this ontology is what the
 # dead-term test exists to delete, one level up. `sh:in` rather than
 # `sh:hasValue` because `sh:targetNode` targets its node in every graph including
@@ -167,18 +167,18 @@ factory:ContractGateShape a sh:NodeShape ;
 factory:CoreGateBlockingShape a sh:NodeShape ;
     sh:targetNode factory:scope, factory:secrets, factory:integrity,
                   factory:census, factory:committed, factory:criteria,
-                  factory:revert ;
+                  factory:revert, factory:witness ;
     sh:property [ sh:path factory:blockingAt ; sh:in ( factory:alwaysBlocking ) ] .
 
-# The two core gates a risk tier moves, and the correction `SA-0001` forced on
+# The one core gate a risk tier moves, and the correction `SA-0001` forced on
 # the design: §5.4 had `size` always-blocking and §5.6 had it becoming blocking
-# at `elevated`, and both could not be true (Appendix B). `witness` takes the
-# same two levels for the same reason (§5.4.1) — an elevated diff is where a
-# claim guarded by nothing hurts most, and `contract.witness_blocking` is the
-# function that says so. The shape's name is narrower than its target set; it is
-# kept because renaming a shape is a `shacl` gate diff for a cosmetic gain.
+# at `elevated`, and both could not be true (Appendix B). `witness` took the
+# same two levels until a `standard` task packaged with its own declared mutant
+# surviving (backlog item b-02d328). The operator decided `witness` blocks at
+# every tier, and `SA-0288` builds it. Until it lands, the gate suite holds
+# `witness` advisory at `standard` (§5.4.1).
 factory:SizeTierShape a sh:NodeShape ;
-    sh:targetNode factory:size, factory:witness ;
+    sh:targetNode factory:size ;
     sh:property [ sh:path factory:blockingAt ; sh:in ( factory:blockingWhenElevated ) ] .
 
 # `coverage` is advisory at every tier — a design decision, not an oversight

@@ -17,8 +17,8 @@ and five surviving mutants described one artifact. Tests written by the code's
 author certify agreement, not correctness.
 
 The decision is spread across §5.4, §5.4.1, §5.5, §5.5.1, §11 and the backlog.
-The list below dates eight entries. The first sets the decision, and each of
-the seven after it changes it.
+The list below dates nine entries. The first sets the decision, and each of
+the eight after it changes it.
 
 - 2026-08-25. §5.4 rejected mutation testing on cost, because `mutmut` reruns
   the suite per mutant. §11 corrected that reason. `mutmut` does not rerun per
@@ -44,6 +44,13 @@ the seven after it changes it.
 - 2026-10-11. A witness that compared output with the constant it tested
   passed every gate (backlog item b-5b1f8a). `SA-0280` lets a repo declare
   `witness:` patterns, from which `witness` derives a constant mutant.
+- 2026-10-12. `SA-0267` was `standard`, and its declared mutant survived its
+  witness on two gate suites. The task went `READY_FOR_REVIEW` (backlog item
+  b-02d328). A claim guarded by nothing is the same defect at `standard` as at
+  `elevated`. So the operator decided `witness` blocks at every tier, and
+  `SA-0288` builds it. The ontology's blocking level carries no date. So Q3 over
+  a `standard` run from before `SA-0288` reads its advisory `witness` failure
+  as blocking.
 
 ## Decision
 
@@ -120,7 +127,9 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   A probe that ends `unproven` there exempts nothing.
 - **6** departs. A surviving probe is a blocker, and blocking teaches the
   cheapest satisfaction. `SA-0079` killed the named edit and left a near
-  neighbour surviving. Coverage stays advisory for the same reason.
+  neighbour surviving. Coverage stays advisory for the same reason. Once
+  `SA-0288` lands, a `witness` survivor blocks at `standard` too, so the
+  departure holds at every tier.
 - **15** departs. The first verdict on a probe is a run of a declared gate.
   After REBUT a second run decides only the tests REBUT added. The verdict on
   the blocker is a session reading the diff, and item 117's fresh probe per
@@ -137,7 +146,8 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   counts a host-filed survivor against the lens (backlog item b-b431c1).
 - **30** upholds. The pull request rewrites every sentence that still stated
   an older form, in §5.4, §5.4.1, §5.5.1, §7, §11 and `CONTEXT.md`. It deletes
-  §8's claim that `revert` replaced a lens.
+  §8's claim that `revert` replaced a lens. The 2026-10-12 level lands in the
+  prose before the code, and `SA-0288` is the change that closes that gap.
 - **34** departs. `witness` names every mutant that does not apply. `revert`
   reports `skip` when its tests fail to import, and the PR body renders that
   skip as a gate the repo does not declare. ADR 2 records that a `skip` reads
@@ -158,7 +168,9 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   same shown probe. A test REBUT adds is exempt because it kills the edit the
   implementer was told about, and no fresh probe is asked. The operator
   accepted that on 2026-10-11. Without it a sound fix ended `EXHAUSTED`, and
-  the kill is still a run of the declared `tests` gate, not a claim.
+  the kill is still a run of the declared `tests` gate, not a claim. Once
+  `SA-0288` lands, a `witness` survivor blocks at `standard` too, so the
+  departure holds at every tier.
 - **52** departs. Vacuity is a property of how a test and its code respond to
   perturbation, so the first verdict comes from running an edit. After REBUT
   a run decides the tests REBUT added, and the blocker returns to reading.
@@ -166,7 +178,7 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   this gate loop, and nothing more. §11 names the constraints that would admit
   `mutmut`.
 - **57** upholds. This ADR condenses five `DESIGN.md` sections, three
-  appendices and seven backlog records, and dates each change. It uses the
+  appendices and ten backlog records, and dates each change. It uses the
   glossary's three names, mutant, vacuity probe and criterion probe, rather
   than one general term.
 - **61** departs. The criterion probe's tests run it on fixtures only, so they
@@ -184,7 +196,8 @@ test REBUT adds is exempt from `revert` when the probe run after REBUT shows it
 killing a probe. That holds at the re-run after REBUT and at PACKAGE's
 re-verification. A test REBUT adds that kills no probe is still judged.
 
-`witness` as a suite gate is advisory at `standard` and blocking at `elevated`.
-A surviving probe of either kind is a blocker for REBUT, whatever the tier, once
+The operator decided that `witness` as a suite gate blocks at every tier, and
+`SA-0288` builds it. A false constant-mutant survivor then blocks as a true one
+does. A surviving probe of either kind is a blocker for REBUT, whatever the tier, once
 its finding anchors to the diff. A criterion-probe survivor that does not anchor
 stays in the record and never reaches REBUT.

@@ -37,6 +37,15 @@ GitHub issues remain in use only for research/evidence records under
   Load refuses an entry that is empty, or whose path or name is empty once
   split at the first colon. It also refuses a path that is not canonical. That
   covers an absolute path, a `.` or `..` segment, a trailing `/` and a `//`.
+- **`removes`** is optional and empty by default. Each entry is a
+  repo-relative `path` or `path:name` this spec deletes or renames. Load
+  refuses the shapes it refuses in `consumes`, and needs no `depends_on`.
+  The queue scan refuses a candidate when one of the two removes a name the
+  other's body, claims or `consumes` name, and no `depends_on` path joins
+  them. A removed bare path also matches a `consumes` entry under that path. The other is a candidate, or a spec whose task waits in
+  `DEPENDENCY_WAITING_STATES`. A waiting partner holds the candidate. Of two
+  candidates the later id is held. `SA-0290` adds the field. Until it
+  lands, load refuses the key.
 - **`pending_symbols`** lists dead code this spec will bring into use, one
   `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
   defers each one while the spec is open, so a parent spec can add what only its

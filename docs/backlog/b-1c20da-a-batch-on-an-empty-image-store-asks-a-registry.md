@@ -4,7 +4,7 @@ title: "A batch on a host whose cell runtime holds no images asks a registry for
 status: open
 tier: 1
 filed: 2026-10-12
-specs: []
+specs: [SA-0289]
 prs: []
 commits: []
 cites: [§5.1.2]

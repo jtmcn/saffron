@@ -4,7 +4,7 @@ title: A lens that errors halts the task at REVIEWING, which the reconciler read
 status: open
 tier: 1
 filed: 2026-09-22
-specs: []
+specs: [SA-0287]
 prs: []
 commits: []
 cites: [§4.2.1, §5.5]
@@ -41,3 +41,6 @@ process died, and a witness covers the scan's choice.
   `SA-0259`'s halted row stayed `REVIEWING` after its hand-opened #809
   merged. `reconcile` asks only about rows with a `pr_url`, so the delegate
   stamped it `MERGED` by hand.
+- 2026-10-12: the operator chose a terminal state for the halt,
+  `REVIEW_INCOMPLETE`. Its spec commit adds it to the vocabulary and the
+  scheduler's sets. `SA-0287` makes REVIEW write it.

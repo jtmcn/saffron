@@ -327,7 +327,9 @@ _Avoid_: conflating with `forbidden`, which is enforced.
 **Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically when
 the diff touches a path in the repo's `elevate_on`. At the plan checkpoint the same
 rule reads the plan's `files_to_change` instead, as a forecast. Elevated makes `size`
-and `witness` blocking, the only two gates a tier moves (`DESIGN.md` §5.4.1). It
+blocking (`DESIGN.md` §5.6). The operator decided `witness` blocks at every tier,
+and `SA-0288` builds it. Until it lands, the gate suite holds `witness` advisory at
+`standard` (§5.4.1). The tier
 also marks the queue entry. It adds no lens, because every declared lens runs at every tier
 (`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking: `coverage` is
 advisory at every tier (`DESIGN.md` §5.4).
@@ -360,9 +362,10 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
   `committed` reads the worktree's status instead, and `census` and `criteria`
   read other gates' results. `revert` and `witness` are the two that run
   something, and §2.1's rule is shaped around them rather than broken by them:
-  core invokes declared gates, never tools (`DESIGN.md` §2.1). `witness` is also
-  the second gate a risk tier moves (§5.4.1). The rest sit at the level §5.4
-  fixes for them.
+  core invokes declared gates, never tools (`DESIGN.md` §2.1). The operator
+  decided `witness` blocks at every tier, and `SA-0288` builds it. Until it
+  lands, the gate suite holds `witness` advisory at `standard` (§5.4.1). The
+  rest sit at the level §5.4 fixes for them.
 - **Contract gates**: the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates**: anything a repo adds against its own hard-to-fake
@@ -653,8 +656,8 @@ it to the vocabulary.
 the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`,
 `GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
-`SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`,
-`MERGED`, `ORPHANED`, `MERGE_TRAIN`.
+`SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `REVIEW_INCOMPLETE`, `APPROVED`,
+`CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
 A re-queue resumes the same row from six end states, so an end state need not be
 final. Every terminal state is an end state.
 
@@ -666,7 +669,8 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 **Terminal state**: A state that reaches the operator — `SCOPE_REVIEW`,
 `PLAN_REJECTED`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`,
 `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`,
-`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`.
+`SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`,
+`REVIEW_INCOMPLETE`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
 > `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
@@ -714,6 +718,13 @@ A row whose latest run's push was refused can carry an earlier run's
 `pushed_sha`, and a dependent then stacks on that older branch. A stack batch
 counts the task a miss and refuses its children. A REBUT that its cap cut
 short ends `EXHAUSTED` instead.
+
+**`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no
+findings, because its session failed or its output was not the schema. An unrun
+lens never reads as a clean review, and no finding set exists to rebut. No pull
+request opens. The cell's branch is pushed and stacked on as a
+`REBUTTAL_UNJUDGED` task's is. A stack batch counts the task a miss and refuses
+its children.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.

@@ -273,6 +273,9 @@ pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
+`SA-0290` merges. `CONTEXT.md` has no entry for a removed name.
+
 **Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
 plan checkpoint still prices the tests that `size` leaves out, so an
 elevated plan can be refused when the gate would pass.

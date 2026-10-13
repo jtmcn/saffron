@@ -2210,7 +2210,7 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
 
     takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"}
     others = sorted(state for state in typing.get_args(TaskState) if state not in takes)
-    assert len(others) == 24
+    assert len(others) == 25
 
     carried = {}
     for i, state in enumerate(sorted(takes)):

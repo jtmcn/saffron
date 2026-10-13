@@ -4,7 +4,7 @@ title: Three lenses read one diff and none asked what a failed write leaves behi
 status: open
 tier: 1
 filed: 2026-09-06
-specs: [SA-0062]
+specs: [SA-0062, SA-0286]
 prs: [154]
 commits: []
 cites: [§5.4, §5.5, §9]
@@ -13,11 +13,9 @@ related: [69, 78, 88]
 
 ## Problem
 
-**Still owed by this item:** the independent review itself is not kept beside
-the fixture. `recorded-findings.json` holds REVIEW's *production* output, which
-is what `calibrate` needs; the independent grading survives only as declared
-phrases and severities in `fixture.toml`, sourced from item 78. "With the
-independent review beside it" is not yet literally true.
+**Still owed by this item:** a corpus pass scored after `SA-0286`'s prompt
+change lands. The independent review now sits beside the fixture, as
+`docs/evidence/fixtures/SA-0062/independent-review.md` (2026-10-12).
 
 Found 2026-09-06, comparing REVIEW's output on PR #154 against an independent
 review of the same `base..head`. REVIEW filed **0 blockers and 3 concerns** and
