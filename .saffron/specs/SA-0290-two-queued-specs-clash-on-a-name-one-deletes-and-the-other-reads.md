@@ -4,7 +4,7 @@ title: Two queued specs in separate chains can clash on a name one deletes and t
 type: feature
 priority: 2
 depends_on: [SA-0279]
-estimated_lines: 390
+estimated_lines: 400
 estimate_measured: true
 touches:
   - saffron/intake.py
@@ -39,7 +39,7 @@ forbidden:
   - saffron/cell/**
   - tests/test_queued_specs.py
   - tests/test_consumes.py
-budget_usd: 45
+budget_usd: 50
 max_attempts: 3
 max_turns: 190
 acceptance:
@@ -57,7 +57,7 @@ acceptance:
     mutant:
       file: saffron/intake.py
       find: 'entry {entry!r} has a path that is not canonical"'
-      replace: 'entry {entry!r} has a path that is not canonical".removeprefix("consumes ")'
+      replace: 'entry {entry!r} has a path that is not canonical".replace("consumes", "")'
     wrong_versions:
       - The `consumes` validator extended to `removes` with its messages unchanged, so a refused `removes` entry reads as a `consumes` entry.
       - A shared validator whose messages name no field, so a `consumes` refusal no longer says `consumes`.
@@ -103,21 +103,24 @@ acceptance:
       The scan reads a removed name from the other spec's body, from its
       acceptance claims and from its `consumes`. A `path:name` entry is
       matched on its name, and a bare `path` entry on its path. A `consumes`
-      entry matches on its own name, or its path when it names none. The
-      witness drives four pairs, each holding the name in one place only.
-      Those are a bare path in the body, a name in a claim, a name as a
-      `consumes` entry's name under another path, and a bare path as a
-      `consumes` entry. Each refuses the reader, the later id.
+      entry matches on its own name, or its path when it names none. A
+      removed bare path also matches a `consumes` entry whose path half is
+      that path. The witness drives five pairs, each holding the name in one
+      place only. Those are a bare path in the body, a name in a claim, a
+      name as a `consumes` entry's name under another path, a bare path as a
+      `consumes` entry, and a bare path as the path half of a `consumes`
+      entry that names a name. Each refuses the reader, the later id.
     witness: tests/test_scheduler.py::test_a_removed_name_is_read_from_the_body_the_claims_and_consumes
     wrong_versions:
       - The body read alone, so a name in a claim admits the reader.
       - The reader's `consumes` left unread.
       - A `consumes` entry compared whole with the `removes` entry, so the same name under another path admits the reader.
       - A bare path entry skipped as naming nothing.
+      - Names compared alone, so a removed bare path admits a reader that consumes a name under it.
   - claim: >-
       A removed name matches only as a whole word. It needs no letter, digit
-      or underscore on either side, and its case must match. A reader whose
-      body holds only `GATEWAY_V2`, `NOGATEWAY` or `gateway` leaves both
+      or underscore on either side, and its case must match. In each case
+      below the reader has the later id. A reader whose body holds only `GATEWAY_V2`, `NOGATEWAY` or `gateway` leaves both
       specs candidates. So does a reader holding `saffron/cell/old_py` or
       `saffron/cell/old.pyc` beside a removed `saffron/cell/old.py`. A
       reader whose claim starts with `GATEWAY` is refused, and so is one
@@ -253,6 +256,8 @@ when it names none. The reader clashes with it when either holds.
   case must match.
 - One of the reader's `consumes` entries has the same subject, read the
   same way.
+- The removed entry is a bare path, and one of the reader's `consumes`
+  entries has that path as its path half.
 
 A clash counts only when no `depends_on` path joins the two, in either
 direction. Walk every `depends_on` entry of every spec the directory
@@ -298,9 +303,8 @@ Write the seven new tests the criteria name.
 ## Notes for the agent
 
 **The first criterion edits code, and the rest are new code.** The
-first changes the `consumes` validator, so it declares a mutant. It
-applies only while one validator serves both fields and its messages keep
-their base text after the field name. Every other criterion but the last
+first changes the `consumes` validator, so it declares a mutant. Every
+other criterion but the last
 declares a witness and no mutant, and `witness` will report `skip` for
 it. The last is `preserves`, and its test exists at base.
 
@@ -355,7 +359,7 @@ back to its spec with `load_spec`. For a waiting or `MERGED` partner, use
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
-**Size.** A prototype measured 1313 changed tokens with `size_gate`,
+**Size.** A prototype measured 1354 changed tokens with `size_gate`,
 against the `feature` ceiling of 3000. It held the field, the refusal,
 the count edit and the seven witnesses. Every test in the four files it
 edits passed on it, and so did `tests/test_queued_specs.py`. It did not

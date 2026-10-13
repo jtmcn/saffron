@@ -42,7 +42,7 @@ GitHub issues remain in use only for research/evidence records under
   refuses the shapes it refuses in `consumes`, and needs no `depends_on`.
   The queue scan refuses a candidate when one of the two removes a name the
   other's body, claims or `consumes` name, and no `depends_on` path joins
-  them. The other is a candidate, or a spec whose task waits in
+  them. A removed bare path also matches a `consumes` entry under that path. The other is a candidate, or a spec whose task waits in
   `DEPENDENCY_WAITING_STATES`. A waiting partner holds the candidate. Of two
   candidates the later id is held. `SA-0290` adds the field. Until it
   lands, load refuses the key.

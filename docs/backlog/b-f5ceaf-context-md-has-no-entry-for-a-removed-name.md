@@ -31,7 +31,8 @@ A **Removed name** entry in `CONTEXT.md`, beside **Consumed name**. It
 says an entry is a repo-relative path, or `path:name` for a name the spec
 deletes or renames. It says the queue scan refuses a candidate that
 clashes with another spec on one. The other names it in its body, claims or
-`consumes`, and no `depends_on` path joins them. The other is a candidate,
+`consumes`, and no `depends_on` path joins them. A removed bare path also
+matches a `consumes` entry under that path. The other is a candidate,
 or its task waits to land. A waiting partner holds the candidate, and of
 two candidates the later id is held. Its `_Avoid_` line names "deletion" and
 "breaking change". It lands after `SA-0290` merges.
