@@ -166,8 +166,9 @@ def task(tmp_path_factory):
         body="",
     )
     names = dict(
-        network="saffron-cells",
-        critic_network=session.CRITIC_NETWORK,
+        network=f"saffron-cells-{_SPEC_ID.lower()}",
+        critic_network=f"saffron-critic-net-{_SPEC_ID.lower()}",
+        proxy_name=proxy.proxy_name(_SPEC_ID),
         volume=f"saffron-wt-{_SPEC_ID}",
         state=f"saffron-st-{_SPEC_ID}",
         container=f"saffron-cell-{_SPEC_ID}",
@@ -181,6 +182,7 @@ def task(tmp_path_factory):
             branch=spec.branch,
             network=names["network"],
             critic_network=names["critic_network"],
+            proxy_name=names["proxy_name"],
             volume=names["volume"],
             state=names["state"],
             container=names["container"],
@@ -190,7 +192,7 @@ def task(tmp_path_factory):
             note=lambda *a: None,
         )
         impl = names["container"]
-        proxy_ip = runtime.container_ip(proxy.PROXY_NAME)
+        proxy_ip = runtime.container_ip(names["proxy_name"])
         assert proxy_ip
         runtime.exec_(impl, ["sh", "-c", _LISTEN], timeout_s=30)
         runtime.exec_(impl, ["sh", "-c", f"echo x > {_MARKER}"], timeout_s=30)
@@ -213,7 +215,7 @@ def task(tmp_path_factory):
         bare = runtime.run_ephemeral(
             repo_image.cell_tag(repo),
             ["sh", "-c", f"python3 --version; python3 -c '{_ENV_NAMES}'"],
-            network=session.CRITIC_NETWORK,
+            network=names["critic_network"],
             env={},
         )
         assert bare.returncode == 0, bare.stderr
@@ -228,7 +230,10 @@ def task(tmp_path_factory):
             "created": created,
             "impl_ip": found["ip"],
             "proxy_ip": proxy_ip,
-            "critic_proxy": session.proxy_address(runtime.SUBNETS["critic"]),
+            "critic_network": names["critic_network"],
+            "critic_proxy": session.proxy_address(
+                names["proxy_name"], runtime.SUBNETS["critic"]
+            ),
             "image_version": image_version,
             "image_env": set(json.loads(image_env)),
         }
@@ -236,6 +241,7 @@ def task(tmp_path_factory):
         session.cell_down(
             network=names["network"],
             critic_network=names["critic_network"],
+            proxy_name=names["proxy_name"],
             volume=names["volume"],
             state=names["state"],
             container=names["container"],
@@ -254,7 +260,7 @@ def _critic(task):
         spec=task["spec"],
         repo=task["repo"],
         mirror=task["mirror"],
-        network=session.CRITIC_NETWORK,
+        network=task["critic_network"],
         env=session.cell_env(task["critic_proxy"], task["policy"].thread_env),
         gates_dir=task["gates_dir"],
         patch=task["patch"],

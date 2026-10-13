@@ -23,14 +23,8 @@ that script directly: same `_read_head_at`, same agent binding, same
 is copied here rather than paraphrased (Appendix I: every mechanism reports
 success and applies to a different container).
 
-**Do not run this while a batch is live**, for the same reason the
-single-fixture driver's docstring gives: the container and volume names below
-are this driver's own, but the proxy and the `saffron-cells` network are
-shared, and `cell_up` removes the network on the way in while `cell_down`
-stops the proxy on the way out. The exposure here is longer than the
-single-fixture driver's — eight sequential cells over roughly the ~80 minutes
-above, where that driver holds one cell up for as many runs as `--runs`
-requests (its own docstring puts one run at ~8 minutes).
+Its own slug names its network and its proxy (`SA-0269`), like the
+single-fixture driver's, so it no longer collides with a batch's live cells.
 
 This module holds no scoring logic — `harness/corpus.py` is the predicate,
 linted and tested; this file only spends money. It cannot be run against a
@@ -403,9 +397,12 @@ def main() -> int:
         policy, _ = load_policy(gates_dir)
         gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 
+        from saffron.cell import proxy
+
         slug = f"lenscorpus-{fixture.spec_id.lower()}"
-        network, volume = "saffron-cells", f"saffron-wt-{slug}"
+        network, volume = f"saffron-cells-{slug}", f"saffron-wt-{slug}"
         state, container = f"saffron-st-{slug}", f"saffron-cell-{slug}"
+        proxy_name = proxy.proxy_name(slug)
         created: set[str] = set()
 
         # Rebuilt per fixture so its `spec_id` follows the fixture, not the
@@ -428,6 +425,7 @@ def main() -> int:
                 branch=f"lens-corpus/{fixture.spec_id}",
                 network=network,
                 critic_network=None,
+                proxy_name=proxy_name,
                 volume=volume,
                 state=state,
                 container=container,
@@ -494,6 +492,7 @@ def main() -> int:
             session.cell_down(
                 network=network,
                 critic_network=None,
+                proxy_name=proxy_name,
                 volume=volume,
                 state=state,
                 container=container,

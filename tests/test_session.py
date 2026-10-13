@@ -1784,6 +1784,7 @@ def test_the_n1_refusal_names_the_processes_behind_each_answering_port(
             branch="saffron/SY-1",
             network="net",
             critic_network="cnet",
+            proxy_name="saffron-proxy-sy-1",
             volume="vol",
             state="state",
             container="c",
@@ -1912,8 +1913,8 @@ def test_teardown_reports_only_what_this_run_created(monkeypatch, tmp_path):
         _drive(monkeypatch, tmp_path, cell=cell, turns=[])
 
     assert [line for line in cell.watched if "survived" in line] == [
-        "teardown: network saffron-cells survived — no such network",
-        "teardown: network saffron-critic-net survived — no such network",
+        "teardown: network saffron-cells-sy-1 survived — no such network",
+        "teardown: network saffron-critic-net-sy-1 survived — no such network",
     ]
 
 
@@ -6789,7 +6790,7 @@ def test_a_volume_create_that_fails_reports_only_that_volume(monkeypatch, tmp_pa
     survived = [line for line in cell.watched if "survived" in line]
     # The volume whose create was attempted, and the network this run made.
     assert any("volume saffron-wt-SY-1 survived" in line for line in survived)
-    assert any("network saffron-cells survived" in line for line in survived)
+    assert any("network saffron-cells-sy-1 survived" in line for line in survived)
     assert not any("saffron-st-SY-1" in line for line in survived)
     assert not any("saffron-cell-SY-1" in line for line in survived)
     # And nothing execs a patch export into a container that was never created.
@@ -7330,8 +7331,9 @@ def test_a_first_call_the_provider_never_served_reports_the_proxy_and_the_cell_b
     assert "nameserver 10.89.0.1" in reads[2].detail
     assert "Iface\tDestination" in reads[3].detail
 
-    assert calls[0] == ("inspect", proxy.PROXY_NAME, {})
-    assert calls[1] == ("logs", proxy.PROXY_NAME, {})
+    expected_proxy_name = proxy.proxy_name(_spec().spec_id)
+    assert calls[0] == ("inspect", expected_proxy_name, {})
+    assert calls[1] == ("logs", expected_proxy_name, {})
     assert calls[2] == (
         "exec",
         container,
@@ -7859,8 +7861,8 @@ def test_the_critic_cell_is_not_on_the_implementers_network(monkeypatch, tmp_pat
     )
     assert outcome.state == "READY_FOR_REVIEW"
     networks = {w["container"]: w["network"] for w in cell.worktrees}
-    assert networks[_CRITIC_CONTAINER] == "saffron-critic-net"
-    assert networks[_IMPLEMENTER_CONTAINER] == "saffron-cells"
+    assert networks[_CRITIC_CONTAINER] == "saffron-critic-net-sy-1"
+    assert networks[_IMPLEMENTER_CONTAINER] == "saffron-cells-sy-1"
     (critic,) = [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
     assert critic["env"]["HTTPS_PROXY"] == f"http://{critic_prefix}9:3128"
 
@@ -7875,8 +7877,8 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
     started: list[tuple] = []
     probed: list[tuple[str, str]] = []
 
-    def _start_proxy(*networks, **_k):
-        started.append(networks)
+    def _start_proxy(name, *networks, **_k):
+        started.append((name, networks))
         return "10.88.0.2"
 
     def _upstream(image_tag, network, proxy_ip, **_k):
@@ -7902,6 +7904,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
         branch="saffron/SY-1",
         network="net",
         critic_network="cnet",
+        proxy_name="saffron-proxy-sy-1",
         volume="vol",
         state="state",
         container="c",
@@ -7914,7 +7917,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
     assert cell.order.index("removed:network:cnet") < cell.order.index(
         "created:network:cnet"
     )
-    assert started == [("net", "cnet")]
+    assert started == [("saffron-proxy-sy-1", ("net", "cnet"))]
     critic_prefix = runtime.subnet_prefix(runtime.SUBNETS["critic"])
     assert probed == [("net", "10.88.0.2"), ("cnet", f"{critic_prefix}2")]
     # The host from each network, at that network's own gateway.
@@ -7922,6 +7925,125 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
         ("net", runtime.GATEWAY),
         ("cnet", runtime.gateway(runtime.SUBNETS["critic"])),
     ]
+
+
+def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
+    monkeypatch, tmp_path
+):
+    """Two tasks run side by side, each with the other's networks already
+    live on the shared subnets. Neither task's pre-clean or teardown
+    touches the other's network or proxy. Neither names a network or
+    proxy the old fixed name would have given it."""
+
+    def _rig_proxy(key: str) -> dict[str, list]:
+        name = proxy.proxy_name(key)
+        own: dict[str, list] = {"started": [], "stopped": [], "reads": [], "ips": []}
+
+        def _start(given, *networks, **_k):
+            own["started"].append((given, networks))
+            return "10.88.0.2"
+
+        def _stop(given):
+            own["stopped"].append(given)
+
+        def _denied(given):
+            own["reads"].append(given)
+            return []
+
+        def _failed(given):
+            own["reads"].append(given)
+            return []
+
+        def _ip(given, *a, **k):
+            own["ips"].append(given)
+            return "10.88.0.9"
+
+        monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start)
+        monkeypatch.setattr("saffron.cell.proxy.stop_proxy", _stop)
+        monkeypatch.setattr("saffron.cell.proxy.denied_egress", _denied)
+        monkeypatch.setattr("saffron.cell.proxy.failed_egress", _failed)
+        monkeypatch.setattr("saffron.cell.runtime.container_ip", _ip)
+        own["expected_name"] = [name]
+        return own
+
+    cell1 = _stub_the_runtime(
+        monkeypatch,
+        networks_on_subnet={
+            runtime.DEFAULT_SUBNET: ["saffron-cells-sy-2"],
+            runtime.SUBNETS["critic"]: ["saffron-critic-net-sy-2"],
+        },
+    )
+    sy1 = _rig_proxy("SY-1")
+    outcome1, _ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "sy-1",
+        cell=cell1,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_id="SY-1", branch="saffron/SY-1"),
+    )
+    assert outcome1.state == "READY_FOR_REVIEW"
+
+    cell2 = _stub_the_runtime(
+        monkeypatch,
+        networks_on_subnet={
+            runtime.DEFAULT_SUBNET: ["saffron-cells-sy-1"],
+            runtime.SUBNETS["critic"]: ["saffron-critic-net-sy-1"],
+        },
+    )
+    sy2 = _rig_proxy("SY-2")
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "sy-2",
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(spec_id="SY-2", branch="saffron/SY-2"),
+    )
+    assert outcome2.state == "READY_FOR_REVIEW"
+
+    # A third network, the gate-only cell's own, sits on its own subnet.
+    # SA-0271 covers it. Only the first two are this claim's.
+    assert cell1.networks_created[:2] == [
+        ("saffron-cells-sy-1", runtime.DEFAULT_SUBNET),
+        ("saffron-critic-net-sy-1", runtime.SUBNETS["critic"]),
+    ]
+    assert cell2.networks_created[:2] == [
+        ("saffron-cells-sy-2", runtime.DEFAULT_SUBNET),
+        ("saffron-critic-net-sy-2", runtime.SUBNETS["critic"]),
+    ]
+
+    removed1 = {name for kind, name in cell1.removed if kind == "network"}
+    removed2 = {name for kind, name in cell2.removed if kind == "network"}
+    assert {"saffron-cells-sy-1", "saffron-critic-net-sy-1"} <= removed1
+    assert {"saffron-cells-sy-2", "saffron-critic-net-sy-2"} <= removed2
+    assert removed1.isdisjoint({"saffron-cells-sy-2", "saffron-critic-net-sy-2"})
+    assert removed2.isdisjoint({"saffron-cells-sy-1", "saffron-critic-net-sy-1"})
+    assert "saffron-cells" not in removed1 | removed2
+    assert "saffron-critic-net" not in removed1 | removed2
+
+    for own in (sy1, sy2):
+        (expected,) = own.pop("expected_name")
+        assert all(name == expected for name, _networks in own.pop("started")), own
+        for calls in own.values():
+            assert all(name == expected for name in calls), own
+
+
+def test_the_egress_reads_name_each_tasks_own_proxy(monkeypatch, tmp_path):
+    """When the plan turn's first call is served nothing, teardown's proxy
+    state and proxy log reads name the task's own proxy. Never a name
+    shared with another spec."""
+    for spec_id in ("SY-1", "SY-2"):
+        cell, calls, _out_lines, _err_lines = _rigged_cell(monkeypatch)
+        outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / spec_id,
+            cell=cell,
+            turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+            spec=_spec(spec_id=spec_id, branch=f"saffron/{spec_id}"),
+        )
+        assert outcome.state == _task_state(ledger) == "PROVIDER_UNREACHABLE"
+        expected_name = proxy.proxy_name(spec_id)
+        assert calls[0] == ("inspect", expected_name, {})
+        assert calls[1] == ("logs", expected_name, {})
 
 
 def test_a_fired_bound_applying_the_patch_is_saffrons_own_not_the_agents(
@@ -8516,6 +8638,7 @@ def test_no_cell_a_task_brings_up_is_granted_a_capability(monkeypatch, tmp_path)
         branch="saffron/SY-1",
         network="net",
         critic_network=None,
+        proxy_name="saffron-proxy-sy-1",
         volume="vol",
         state="state",
         container="c-2",
@@ -10962,9 +11085,9 @@ def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_sp
     edit_wrong = {"file": "src/x.py", "find": "assert x == 1", "replace": "w"}
 
     rows = [
-        ("both", edit_probe, edit_wrong, [None, "saffron-critic-net", None]),
-        ("wrong_only", None, edit_wrong, [None, "saffron-critic-net", None]),
-        ("neither", None, None, [None, "saffron-critic-net"]),
+        ("both", edit_probe, edit_wrong, [None, "saffron-critic-net-sy-1", None]),
+        ("wrong_only", None, edit_wrong, [None, "saffron-critic-net-sy-1", None]),
+        ("neither", None, None, [None, "saffron-critic-net-sy-1"]),
     ]
 
     real_critic_cell = session.critic_cell
@@ -11363,8 +11486,8 @@ def test_cell_down_stops_the_proxy_before_removing_its_network(monkeypatch):
 
         return fake
 
-    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda: [])
-    monkeypatch.setattr("saffron.cell.proxy.failed_egress", lambda: [])
+    monkeypatch.setattr("saffron.cell.proxy.denied_egress", lambda name: [])
+    monkeypatch.setattr("saffron.cell.proxy.failed_egress", lambda name: [])
     monkeypatch.setattr("saffron.cell.proxy.stop_proxy", record("stop_proxy"))
     for name in ("remove_container", "remove_network", "remove_volume"):
         monkeypatch.setattr(f"saffron.cell.runtime.{name}", record(name))
@@ -11381,6 +11504,7 @@ def test_cell_down_stops_the_proxy_before_removing_its_network(monkeypatch):
     session.cell_down(
         network="n",
         critic_network="cn",
+        proxy_name="p",
         volume="v",
         state="s",
         container="c",

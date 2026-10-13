@@ -997,9 +997,8 @@ def run_one_cell(
     return outcome
 
 
-# The critic cells' own network: the proxy joins it and the implementer never
-# does (item 135). Its subnet is drawn from the one declaration, like every one.
-CRITIC_NETWORK = "saffron-critic-net"
+# The critic cells' own subnet, drawn from the one declaration like every one.
+# The network name itself is now per-task (`_drive_cell`), not a constant.
 _CRITIC_SUBNET = runtime.SUBNETS["critic"]
 
 
@@ -1012,11 +1011,9 @@ class _Leg(NamedTuple):
     where: str
 
 
-def proxy_address(subnet: str) -> str:
-    """The proxy's address on one of its internal networks."""
-    from saffron.cell import proxy
-
-    address = runtime.container_ip(proxy.PROXY_NAME, runtime.subnet_prefix(subnet))
+def proxy_address(proxy_name: str, subnet: str) -> str:
+    """The named proxy's address on one of its internal networks."""
+    address = runtime.container_ip(proxy_name, runtime.subnet_prefix(subnet))
     if address is None:
         # Infrastructure, not a task outcome: `cell_env` cannot take `None`.
         raise runtime.CellRuntimeError(f"the proxy has no address on {subnet}")
@@ -1031,6 +1028,7 @@ def cell_up(
     branch: str,
     network: str,
     critic_network: str | None,
+    proxy_name: str,
     volume: str,
     state: str,
     container: str,
@@ -1092,12 +1090,12 @@ def cell_up(
     # 2026-08-28), and a dead route found here costs one container start
     # rather than an image build and an attempt (§5.1.1).
     note("proxy_starting", "starting the proxy")
-    proxy_ip = proxy.start_proxy(*(leg.network for leg in legs))
+    proxy_ip = proxy.start_proxy(proxy_name, *(leg.network for leg in legs))
     note("proxy_addr", f"proxy at {proxy_ip}")
     # Per leg: a third one is unmeasured on either runtime.
     for leg in legs:
         answered = preflight.assert_proxy_reaches_upstream(
-            image.BASE_TAG, leg.network, proxy_address(leg.subnet)
+            image.BASE_TAG, leg.network, proxy_address(proxy_name, leg.subnet)
         )
         note(leg.step, f"proxy reaches {proxy.UPSTREAM_HOST}{leg.where} ({answered})")
 
@@ -1160,6 +1158,7 @@ def cell_down(
     *,
     network: str,
     critic_network: str | None,
+    proxy_name: str,
     volume: str,
     state: str,
     container: str,
@@ -1188,13 +1187,13 @@ def cell_down(
 
     removed = [("container", container, runtime.remove_container(container))]
     # Before the proxy goes: its log goes with it.
-    for denied in proxy.denied_egress():
+    for denied in proxy.denied_egress(proxy_name):
         note("proxy_denied", False, f"proxy DENIED {denied}")
     # Not a denial: an allowed CONNECT the proxy could not open. Reported apart
     # because the fix is the network, not the allowlist.
-    for failed in proxy.failed_egress():
+    for failed in proxy.failed_egress(proxy_name):
         note("proxy_failed", False, f"proxy FAILED {failed}")
-    proxy.stop_proxy()
+    proxy.stop_proxy(proxy_name)
     removed.append(("network", network, runtime.remove_network(network)))
     if critic_network is not None:
         removed.append(
@@ -1348,8 +1347,8 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
 
 
 # Drawn from the one declaration (runtime.SUBNETS, backlog item 143): neither
-# `saffron-cells` (the task's, still up when this cell is created) nor
-# `saffron-egress` (the proxy's) is torn down first, so this has to be a value
+# the task's own cells network, still up when this cell is created, nor
+# `saffron-egress` (the proxy's) is torn down first. This is the one value
 # nothing else holds — see runtime.py for every subnet Saffron allocates.
 _GATE_CELL_SUBNET = runtime.SUBNETS["gate"]
 
@@ -1384,10 +1383,10 @@ def critic_cell(
     the critic network `cell_up` built for the task, with the proxy on it and
     the implementer not. It neither starts, stops nor removes it; the container and its two volumes are named
     `saffron-critic-*`. Given `None`, this makes a network of its own, on
-    `_GATE_CELL_SUBNET` rather than the task's own `saffron-cells`, and pre-
-    cleans and tears it down itself, in the same `finally` as everything
-    else it made; the container, its two volumes and this network are named
-    `saffron-gate-*`. Keyword-only with no default either way — v0.5 shipped
+    `_GATE_CELL_SUBNET` rather than the task's own cells network. It
+    pre-cleans and tears itself down in the same `finally` as everything
+    else it made. The container, its two volumes and this network are
+    named `saffron-gate-*`. Keyword-only with no default either way — v0.5 shipped
     a cell with neither a declared network nor a declared env once, and every
     mechanism reported success while applying to a different container
     (Appendix I).
@@ -1893,7 +1892,7 @@ def _drive_cell(
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron import preflight
     from saffron.agents import artifacts, context
-    from saffron.cell import runtime, worktree
+    from saffron.cell import proxy, runtime, worktree
     from saffron.gates.core.criteria import witnesses_green_at_base
     from saffron.gates.suite import CellTree, GateSuite
     from saffron.repos import mirror as mirror_ops
@@ -1917,8 +1916,9 @@ def _drive_cell(
             )
         )
 
-    network = "saffron-cells"
-    critic_network = CRITIC_NETWORK
+    network = f"saffron-cells-{spec.spec_id.lower()}"
+    critic_network = f"saffron-critic-net-{spec.spec_id.lower()}"
+    proxy_name = proxy.proxy_name(spec.spec_id)
     volume = f"saffron-wt-{spec.spec_id}"
     state = f"saffron-st-{spec.spec_id}"
     container = f"saffron-cell-{spec.spec_id}"
@@ -2047,6 +2047,7 @@ def _drive_cell(
             branch=spec.branch,
             network=network,
             critic_network=critic_network,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=container,
@@ -2808,7 +2809,9 @@ def _drive_cell(
                 on_state("REVIEWING")
 
             # Read once: REVIEW's and REBUT's critic cells share this env.
-            critic_env = cell_env(proxy_address(_CRITIC_SUBNET), policy.thread_env)
+            critic_env = cell_env(
+                proxy_address(proxy_name, _CRITIC_SUBNET), policy.thread_env
+            )
 
             def _critic_teardown(step: str, ok: bool, detail: str) -> None:
                 emit(
@@ -3358,7 +3361,7 @@ def _drive_cell(
         if plan_first_call_unserved:
             from saffron.cell import egress_report
 
-            for ok, detail in egress_report.read_egress(container):
+            for ok, detail in egress_report.read_egress(proxy_name, container):
                 _teardown("egress_read", ok=ok, detail=detail)
         # Before `cell_down`, on every path the exception one included: the
         # export execs inside the cell, so it must precede the container's
@@ -3371,6 +3374,7 @@ def _drive_cell(
         cell_down(
             network=network,
             critic_network=critic_network,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=container,

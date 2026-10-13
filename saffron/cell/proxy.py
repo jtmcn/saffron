@@ -12,7 +12,6 @@ import time
 from saffron.cell import runtime
 
 PROXY_TAG = "saffron/proxy"
-PROXY_NAME = "saffron-proxy"
 PROXY_PORT = 3128
 # The one host the allowlist admits. `images/squid.conf` has to agree and a test
 # asserts it: this is what preflight probes, that is what lets it through.
@@ -48,17 +47,23 @@ def _ensure_egress_network() -> None:
         )
 
 
-def start_proxy(*internal_networks: str, timeout_s: float = 30) -> str:
-    """Start the proxy on the egress network and every internal network given,
-    and return its address on the first, the cells network."""
-    runtime.remove_container(PROXY_NAME)
+def proxy_name(key: str) -> str:
+    """The proxy a key owns, lowercased: the cell runtime refuses an
+    uppercase network name, and a proxy container name sits beside one."""
+    return f"saffron-proxy-{key.lower()}"
+
+
+def start_proxy(name: str, *internal_networks: str, timeout_s: float = 30) -> str:
+    """Start the named proxy on the egress network and every internal network
+    given, and return its address on the first, the cells network."""
+    runtime.remove_container(name)
     _ensure_egress_network()
     # Runs as the squid user from the start, not root: squid's own privilege
     # drop needs CAP_SETUID/CAP_SETGID, which this sibling doesn't need (R6).
     # Egress network first: apple/container routes the default gateway
     # through the first --network flag, and only the egress leg has one.
     runtime.run_detached(
-        PROXY_NAME,
+        name,
         PROXY_TAG,
         network=(EGRESS_NETWORK, *internal_networks),
         user="squid:squid",
@@ -66,47 +71,50 @@ def start_proxy(*internal_networks: str, timeout_s: float = 30) -> str:
 
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        address = runtime.container_ip(PROXY_NAME)
+        address = runtime.container_ip(name)
         if address:
             return address
         time.sleep(0.5)
-    runtime.remove_container(PROXY_NAME)
+    runtime.remove_container(name)
     raise runtime.CellRuntimeError(
         f"the proxy took an address longer than {timeout_s}s — a cell addressed "
         "by hostname would fail here with a DNS error instead"
     )
 
 
-def denied_egress(limit: int = 10) -> list[str]:
-    """What the proxy refused, read before `stop_proxy` or not at all: the log
-    is the container's stdout (squid.conf), so it dies with the container.
+def denied_egress(name: str, limit: int = 10) -> list[str]:
+    """What the named proxy refused, read before `stop_proxy` or not at all:
+    the log is the container's stdout (squid.conf), so it dies with the
+    container.
 
     A denied CONNECT otherwise reaches the operator as an unexplained API
     error — the allowlist is a hostname list, and the host it is missing is
     exactly the one nobody thought to put there."""
-    return [line for line in _proxy_log() if _status(line)[0] == "TCP_DENIED"][:limit]
+    return [line for line in _proxy_log(name) if _status(line)[0] == "TCP_DENIED"][
+        :limit
+    ]
 
 
-def failed_egress(limit: int = 10) -> list[str]:
-    """What the proxy allowed and could not open, read on the same terms as
-    `denied_egress` and never merged into it.
+def failed_egress(name: str, limit: int = 10) -> list[str]:
+    """What the named proxy allowed and could not open, read on the same
+    terms as `denied_egress` and never merged into it.
 
     Squid answers an allowed CONNECT it cannot complete with a 5xx and
     `HIER_NONE` — a route out that is missing rather than a hostname that is —
     and the operator meets it as the same unexplained API error. Kept apart
     from the denials because the fix is not: one is a line in the allowlist,
     the other is the network the proxy is on."""
-    return [line for line in _proxy_log() if _is_failure(line)][:limit]
+    return [line for line in _proxy_log(name) if _is_failure(line)][:limit]
 
 
-def _proxy_log() -> list[str]:
-    """The proxy's log, or nothing at all.
+def _proxy_log(name: str) -> list[str]:
+    """The named proxy's log, or nothing at all.
 
     Both readers run from teardown's `finally`, so neither may raise: `call`
     raises when the runtime binary cannot be executed, and a proxy that is
     already gone exits nonzero with a message that is not a log."""
     try:
-        done = runtime.call([runtime.RUNTIME, "logs", PROXY_NAME], timeout_s=10)
+        done = runtime.call([runtime.RUNTIME, "logs", name], timeout_s=10)
     except runtime.CellRuntimeError:
         return []
     if done.returncode != 0:
@@ -142,8 +150,8 @@ def _is_failure(line: str) -> bool:
     return code == "000" or (code.isdigit() and int(code) >= 500)
 
 
-def stop_proxy() -> None:
-    runtime.remove_container(PROXY_NAME)
+def stop_proxy(name: str) -> None:
+    runtime.remove_container(name)
 
 
 def proxy_env(address: str) -> dict[str, str]:

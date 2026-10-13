@@ -25,11 +25,8 @@ same function `_drive_cell` calls — proxy first, host ports probed, egress
 asserted — because a lens measured inside a weaker cell is measuring something
 else (Appendix I).
 
-Which is also why it must not run while a batch is live: the container and
-volume names are its own, but the proxy and the `saffron-cells` network are
-shared, and `cell_up` removes the network on the way in while `cell_down` stops
-the proxy on the way out. A scoring pass fired during a night takes both from
-under it.
+Its own slug names its network and its proxy (`SA-0269`), so a scoring pass
+no longer collides with a batch's live cells.
 """
 
 from __future__ import annotations
@@ -126,9 +123,12 @@ def main() -> int:
         mirror, fixture.head_sha, out_dir / "gates"
     )
 
+    from saffron.cell import proxy
+
     slug = f"lensscore-{fixture.spec_id.lower()}"
-    network, volume = "saffron-cells", f"saffron-wt-{slug}"
+    network, volume = f"saffron-cells-{slug}", f"saffron-wt-{slug}"
     state, container = f"saffron-st-{slug}", f"saffron-cell-{slug}"
+    proxy_name = proxy.proxy_name(slug)
     created: set[str] = set()
     runs: list[list[review.LensReview]] = []
 
@@ -155,6 +155,7 @@ def main() -> int:
             branch=f"lens-scoring/{fixture.spec_id}",
             network=network,
             critic_network=None,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=container,
@@ -216,6 +217,7 @@ def main() -> int:
         session.cell_down(
             network=network,
             critic_network=None,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=container,

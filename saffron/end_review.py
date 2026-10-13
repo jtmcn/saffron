@@ -581,12 +581,13 @@ def layer_cell(
     them there reaches this call too. `cell_down` always runs from a
     `finally`, whether `cell_up` raised, the body raised, or neither did.
     """
-    from saffron.cell import runtime, session
+    from saffron.cell import proxy, runtime, session
 
     container = f"saffron-endreview-{fields.spec_id}"
     volume = f"saffron-endreview-wt-{fields.spec_id}"
     state = f"saffron-endreview-st-{fields.spec_id}"
-    network = "saffron-cells"
+    network = f"saffron-cells-endreview-{fields.spec_id.lower()}"
+    proxy_name = proxy.proxy_name(f"endreview-{fields.spec_id}")
     created: set[str] = set()
 
     runtime.remove_container(container)
@@ -601,6 +602,7 @@ def layer_cell(
                 branch=fields.branch,
                 network=network,
                 critic_network=None,
+                proxy_name=proxy_name,
                 volume=volume,
                 state=state,
                 container=container,
@@ -619,6 +621,7 @@ def layer_cell(
                 branch=fields.branch,
                 network=network,
                 critic_network=None,
+                proxy_name=proxy_name,
                 volume=volume,
                 state=state,
                 container=container,
@@ -632,6 +635,7 @@ def layer_cell(
         session.cell_down(
             network=network,
             critic_network=None,
+            proxy_name=proxy_name,
             volume=volume,
             state=state,
             container=container,
