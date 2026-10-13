@@ -4,7 +4,7 @@ title: A `standard` task whose declared mutant survives its witness goes `READY_
 type: bug
 priority: 2
 depends_on: [SA-0283, SA-0282, SA-0281, SA-0280]
-estimated_lines: 208
+estimated_lines: 210
 estimate_measured: true
 touches:
   - saffron/gates/suite.py
@@ -137,6 +137,10 @@ spec.
 - **Constant mutants.** `SA-0280` derives them in the same gate. Once both
   land, a constant-mutant survivor blocks at `standard` too, a false one
   included. This spec makes no exception for them.
+- **Queued specs with declared mutants.** `SA-0270`, `SA-0271`, `SA-0276`,
+  `SA-0277` and `SA-0282` are `standard` and declare mutants. Once this
+  lands, each can end `EXHAUSTED` on a survivor. All but `SA-0277` touch
+  `saffron/cell/**`, so a diff that edits those paths already blocked there.
 - **The `witness` gate's own answers.** One comment in `witness.py`
   changes and nothing else does. Its inner-`error` trap stays as its
   `ponytail:` comment records (`saffron/gates/core/witness.py:224-233`).
@@ -175,11 +179,16 @@ so the first suite decides:
 - `risk="elevated"`, policy `gates: {}`.
 - `risk="standard"`, with `elevate_on` naming `src/**`.
 
-Each leg asserts `effective_risk`, then `state == "EXHAUSTED"`. It asserts
-`witness` is not in `advisory_gates`. The `(gate, file, code)` of the new
-failures is exactly the witness's one `survived-mutant`. Every recorded
-subset is the witness alone. Every recorded mutant is the criterion's own.
-The standard leg fails at `cf3db797`, which is what `revert` needs.
+Record per suite call. The replaced `run_suite` opens a new frame on each
+call. `run_tests` appends its subset to the open frame, and the patched
+`source_mutated` appends its mutant there. Each leg asserts `effective_risk`,
+then `state == "EXHAUSTED"`. It asserts `witness` is not in
+`advisory_gates`. The `(gate, file, code)` of the new failures is exactly
+the witness's one `survived-mutant`. The last frame, the head suite's, is
+exactly one subset holding the witness alone and one mutant equal to the
+criterion's. An empty frame fails that, so a canned `witness` result fails
+the witness. The standard leg fails at `cf3db797`, which is what `revert`
+needs.
 
 **Item 4, the seven tests.** A renamed test reads to `census` as a removed
 one, and the gate has no override. Its `ponytail:` comment says so
@@ -225,12 +234,15 @@ rewritten sentence takes no em dash and stays under 25 words.
 **Your own task is `elevated`.** `elevate_on` lists `saffron/gates/**`
 (`.saffron/policy.yaml:34`), so `size` blocks on this diff.
 
-**Measured on a prototype over `cf3db797`.** The diff was 820 changed
-tokens by the `size` gate's counter, against the `bug` ceiling of 1300. It
-held every item above but the `witness.py` comment, and the three-leg
-witness. `make check` passed on its first cut. The final cut passed ruff,
-the `prose` limit and every test module it edits. The
-witness failed with the source reverted, on its standard leg. The mutant
-and the first two wrong versions, applied as edits, each failed it.
+**Measured on a prototype over `cf3db797`.** The whole change came to 837
+changed tokens by the `size` gate's counter, against the `bug` ceiling of
+1300. That is 64%. The count includes the three-leg witness with its
+per-call frames. It also includes the seven edited tests, the prose edits
+and the code. `make check` passed on an
+earlier cut. The final cut passed ruff, the `prose` limit and every test
+module it edits. The witness failed with the source reverted, on its
+standard leg. The mutant and wrong versions 1, 2 and 5, applied as edits,
+each failed it. Version 5 ran as a suite that hands the gate no criteria
+and puts a canned survivor in its place.
 
 Commit after the witness passes. Uncommitted work dies with the cell.

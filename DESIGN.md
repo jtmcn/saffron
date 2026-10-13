@@ -1168,8 +1168,9 @@ not have run yet. `SA-0062` specified the opposite order and passed review
 (backlog item 78).
 
 **Blocking level.** Blocking at every tier. A claim guarded by nothing is
-the same defect at `standard` as at `elevated`. Until `SA-0288` it was advisory
-at `standard`, the level `size` carries. `SA-0267` was `standard`, and its own
+the same defect at `standard` as at `elevated`. `SA-0288` builds it. Until it
+lands, the gate suite holds `witness` advisory at `standard`, the level `size`
+carries. `SA-0267` was `standard`, and its own
 declared mutant survived its witness on two gate suites. The task still went
 `READY_FOR_REVIEW`, and REBUT never saw the survivor (backlog item b-02d328).
 A spec declaring no mutants, whose diff yields no constant mutant,

@@ -378,9 +378,11 @@ template's comments cite no `DESIGN.md` section, since
 **False survivors.** Two shapes stay green under a constant mutant
 although the witness is sound. One feeds the constant in, such as
 `LIMIT + 1`, and expects behaviour from it. The other names the constant
-only in a comment, a docstring or a string. `witness` is advisory at
-`standard` and blocks at `elevated` (§5.4.1). So such a survivor blocks
-only an elevated diff, and its message names the remedy.
+only in a comment, a docstring or a string. Its message names the
+remedy. Once `SA-0288` lands, `witness` blocks at every tier, so such a
+survivor blocks a `standard` diff too (§5.4.1). Write no tier rule into a
+docstring or comment. Where one must name the level, give the one §5.4.1
+states.
 
 **The estimate is measured.** A prototype held the policy model, the new
 module, the suite wiring, the template block and every witness above.
