@@ -4,6 +4,7 @@ title: "The spec loop's skill drives one attended cell per spec, while the opera
 status: open
 tier: 1
 filed: 2026-10-07
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -40,3 +41,6 @@ above with one command.
   three specs, while `queue --stack` planned five. The driver refuses a child
   whose parent is in the order, and the batch plans it. `record` still ran by
   hand for each task.
+- 2026-10-12: marked by hand at the operator's ruling. The skill and its
+  driver live under `.claude/`, and `SA-0279` refuses any spec that touches
+  it.
