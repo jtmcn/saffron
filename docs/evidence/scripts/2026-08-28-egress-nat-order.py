@@ -16,9 +16,9 @@ by IP: what fails is the route, and a hostname would report it as DNS. The host
 is checked against the same address first, so an address that has since moved
 reads as an unusable control rather than as a reproduction.
 
-Its proxy is named for this script alone, so it no longer removes a task's
-own, but it still leaves `saffron-egress` behind because `start_proxy`
-creates it.
+Not safe beside a live task. Its network takes the default subnet, as every
+task's does, so whichever starts second fails at `create_network`. It leaves
+`saffron-egress` behind because `start_proxy` creates it.
 """
 
 from __future__ import annotations

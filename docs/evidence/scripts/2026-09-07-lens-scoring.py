@@ -25,8 +25,9 @@ same function `_drive_cell` calls — proxy first, host ports probed, egress
 asserted — because a lens measured inside a weaker cell is measuring something
 else (Appendix I).
 
-Its own slug names its network and its proxy (`SA-0269`), so a scoring pass
-no longer collides with a batch's live cells.
+**Do not run this while a batch is live.** Its own slug names its network
+and its proxy. But its network still takes `runtime.DEFAULT_SUBNET`, as every
+task's does. So whichever starts second fails at `create_network`.
 """
 
 from __future__ import annotations

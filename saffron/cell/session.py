@@ -998,7 +998,6 @@ def run_one_cell(
 
 
 # The critic cells' own subnet, drawn from the one declaration like every one.
-# The network name itself is now per-task (`_drive_cell`), not a constant.
 _CRITIC_SUBNET = runtime.SUBNETS["critic"]
 
 
@@ -1384,8 +1383,8 @@ def critic_cell(
     the implementer not. It neither starts, stops nor removes it; the container and its two volumes are named
     `saffron-critic-*`. Given `None`, this makes a network of its own, on
     `_GATE_CELL_SUBNET` rather than the task's own cells network. It
-    pre-cleans and tears itself down in the same `finally` as everything
-    else it made. The container, its two volumes and this network are
+    pre-cleans that network and tears it down in the same `finally` as
+    everything else it made. The container, its two volumes and this network are
     named `saffron-gate-*`. Keyword-only with no default either way — v0.5 shipped
     a cell with neither a declared network nor a declared env once, and every
     mechanism reported success while applying to a different container

@@ -23,8 +23,9 @@ that script directly: same `_read_head_at`, same agent binding, same
 is copied here rather than paraphrased (Appendix I: every mechanism reports
 success and applies to a different container).
 
-Its own slug names its network and its proxy (`SA-0269`), like the
-single-fixture driver's, so it no longer collides with a batch's live cells.
+**Do not run this while a batch is live**, for the reason the single-fixture
+driver's docstring gives. Its network takes `runtime.DEFAULT_SUBNET`, as every
+task's does, so whichever starts second fails at `create_network`.
 
 This module holds no scoring logic — `harness/corpus.py` is the predicate,
 linted and tested; this file only spends money. It cannot be run against a
