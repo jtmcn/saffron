@@ -84,6 +84,9 @@ VM" (a cell now *has* one, so the phrase is ambiguous), "the hypervisor".
 A cell contains a worktree and is not one.
 _Avoid_: "the checkout", "the clone", "the workspace", "the sandbox dir".
 
+**Subnet pool**: The /16 that a task's internal networks draw from, one /24 each (`runtime.SUBNETS["pool"]`, `DESIGN.md` §5.1). A network claims its /24 by being created on it, never by a listing taken first.
+_Avoid_: a bare "pool". That word alone is a batch's concurrency pool.
+
 **Operator**: The human. Singular per deployment, by design (ADR 10).
 _Avoid_: "the user", "the reviewer" (reviewing is one of several things they do).
 
