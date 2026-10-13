@@ -271,6 +271,10 @@ check compares names, so the second to land would end `EXHAUSTED`.
 removed a name whose reader sat outside its `touches`, so its cell could not
 pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
 
+**Placed 2026-10-13**, from `SA-0286`'s second review: **b-000d04**. `revert`
+reads a mutant's file as its claim's subject. A mutant pointed at an untouched
+file exempts a witness of code the diff changed, so `revert` never judges it.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
