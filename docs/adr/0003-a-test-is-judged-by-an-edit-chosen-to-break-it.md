@@ -17,8 +17,8 @@ and five surviving mutants described one artifact. Tests written by the code's
 author certify agreement, not correctness.
 
 The decision is spread across §5.4, §5.4.1, §5.5, §5.5.1, §11 and the backlog.
-The list below dates eight entries. The first sets the decision, and each of
-the seven after it changes it.
+The list below dates nine entries. The first sets the decision, and each of
+the eight after it changes it.
 
 - 2026-08-25. §5.4 rejected mutation testing on cost, because `mutmut` reruns
   the suite per mutant. §11 corrected that reason. `mutmut` does not rerun per
@@ -44,6 +44,9 @@ the seven after it changes it.
 - 2026-10-11. A witness that compared output with the constant it tested
   passed every gate (backlog item b-5b1f8a). `SA-0280` lets a repo declare
   `witness:` patterns, from which `witness` derives a constant mutant.
+- 2026-10-12. `SA-0267` was `standard`, and its declared mutant survived its
+  witness on two gate suites. The task went `READY_FOR_REVIEW`. `witness` now
+  blocks at every tier (`SA-0288`, backlog item b-02d328).
 
 ## Decision
 
@@ -184,7 +187,7 @@ test REBUT adds is exempt from `revert` when the probe run after REBUT shows it
 killing a probe. That holds at the re-run after REBUT and at PACKAGE's
 re-verification. A test REBUT adds that kills no probe is still judged.
 
-`witness` as a suite gate is advisory at `standard` and blocking at `elevated`.
+`witness` as a suite gate blocks at every tier.
 A surviving probe of either kind is a blocker for REBUT, whatever the tier, once
 its finding anchors to the diff. A criterion-probe survivor that does not anchor
 stays in the record and never reaches REBUT.

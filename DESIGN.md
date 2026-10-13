@@ -1167,14 +1167,17 @@ Any future gate that edits the tree owes the same guard, since `committed` will
 not have run yet. `SA-0062` specified the opposite order and passed review
 (backlog item 78).
 
-**Blocking level.** Advisory at `standard`, blocking at `elevated`: the level
-`size` already carries, and for the same reason: an elevated diff is one where a
-plausible-looking wrong change hurts most, and a claim guarded by nothing is
-exactly that. A spec declaring no mutants, whose diff yields no constant mutant,
+**Blocking level.** Blocking at every tier. A claim guarded by nothing is
+the same defect at `standard` as at `elevated`. Until `SA-0288` it was advisory
+at `standard`, the level `size` carries. `SA-0267` was `standard`, and its own
+declared mutant survived its witness on two gate suites. The task still went
+`READY_FOR_REVIEW`, and REBUT never saw the survivor (backlog item b-02d328).
+A spec declaring no mutants, whose diff yields no constant mutant,
 reports `skip`. So this cannot fail a task retroactively until a repo
 declares `witness:` patterns, which is an operator step. Once it does, a
-queued elevated spec written before them can draw a constant-mutant survivor. A survivor at base is not subtracted (§5.4), so at `elevated`
-it blocks until the task kills its mutant.
+queued spec written before them can draw a constant-mutant survivor. A false
+survivor blocks as a true one does. A survivor at base is not subtracted
+(§5.4), so it blocks until the task kills its mutant.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)
 

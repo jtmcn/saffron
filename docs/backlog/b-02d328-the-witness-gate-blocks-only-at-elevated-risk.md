@@ -4,7 +4,7 @@ title: "The `witness` gate blocks only at `elevated` risk, so a spec's own decla
 status: open
 tier: 1
 filed: 2026-10-12
-specs: []
+specs: [SA-0288]
 prs: []
 commits: []
 cites: [§5.4]
@@ -39,3 +39,6 @@ hand.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 35 (#846).
+- 2026-10-12: `SA-0288` queued. The operator chose the first arm, so a
+  survivor blocks at every tier. The design record, the vocabulary, the
+  shapes and ADR 3 changed by hand in the spec's own commit.

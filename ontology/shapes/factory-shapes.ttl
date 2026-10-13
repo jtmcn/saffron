@@ -158,8 +158,8 @@ factory:ContractGateShape a sh:NodeShape ;
     sh:property [ sh:path factory:role ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:GateRole ] .
 
-# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` and
-# `witness` are the two a tier moves. Stated as constraints rather than left
+# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` is
+# the one a tier moves. Stated as constraints rather than left
 # as triples in the vocabulary — an unenforced fact in this ontology is what the
 # dead-term test exists to delete, one level up. `sh:in` rather than
 # `sh:hasValue` because `sh:targetNode` targets its node in every graph including
@@ -167,18 +167,16 @@ factory:ContractGateShape a sh:NodeShape ;
 factory:CoreGateBlockingShape a sh:NodeShape ;
     sh:targetNode factory:scope, factory:secrets, factory:integrity,
                   factory:census, factory:committed, factory:criteria,
-                  factory:revert ;
+                  factory:revert, factory:witness ;
     sh:property [ sh:path factory:blockingAt ; sh:in ( factory:alwaysBlocking ) ] .
 
-# The two core gates a risk tier moves, and the correction `SA-0001` forced on
+# The one core gate a risk tier moves, and the correction `SA-0001` forced on
 # the design: §5.4 had `size` always-blocking and §5.6 had it becoming blocking
-# at `elevated`, and both could not be true (Appendix B). `witness` takes the
-# same two levels for the same reason (§5.4.1) — an elevated diff is where a
-# claim guarded by nothing hurts most, and `contract.witness_blocking` is the
-# function that says so. The shape's name is narrower than its target set; it is
-# kept because renaming a shape is a `shacl` gate diff for a cosmetic gain.
+# at `elevated`, and both could not be true (Appendix B). `witness` took the
+# same two levels until a `standard` task packaged with its own declared mutant
+# surviving (backlog item b-02d328). It now blocks at every tier (§5.4.1).
 factory:SizeTierShape a sh:NodeShape ;
-    sh:targetNode factory:size, factory:witness ;
+    sh:targetNode factory:size ;
     sh:property [ sh:path factory:blockingAt ; sh:in ( factory:blockingWhenElevated ) ] .
 
 # `coverage` is advisory at every tier — a design decision, not an oversight

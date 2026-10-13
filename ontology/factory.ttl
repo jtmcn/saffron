@@ -79,9 +79,9 @@ factory:RepoDefinedGate a owl:Class ; rdfs:subClassOf factory:Gate ; rdfs:label 
 # named here and the gate is not. A repo-defined gate is neither: CONTEXT.md §4
 # says its name is not vocabulary, so none appears below.
 # Their blocking levels are core-supplied too, and belong here rather than in a
-# repo's policy: §5.4 fixes them, and `size` and `witness` are the two a tier
-# moves — both at `elevated`, for the same reason (§5.4.1). A `policy.yaml` that
-# declared otherwise would not be a different repo, it would be wrong.
+# repo's policy: §5.4 fixes them, and `size` is the one a tier moves (§5.6).
+# `witness` blocks at every tier (§5.4.1, backlog item b-02d328). A `policy.yaml`
+# that declared otherwise would not be a different repo, it would be wrong.
 factory:scope     a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
 factory:size      a factory:CoreGate ; factory:blockingAt factory:blockingWhenElevated .
 factory:secrets   a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
@@ -90,7 +90,7 @@ factory:census    a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking
 factory:committed a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
 factory:criteria  a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
 factory:revert    a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
-factory:witness   a factory:CoreGate ; factory:blockingAt factory:blockingWhenElevated .
+factory:witness   a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
 
 factory:GateRole a owl:Class ; rdfs:label "gate role" ;
     rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .
