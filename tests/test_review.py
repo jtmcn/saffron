@@ -684,12 +684,8 @@ def test_the_correctness_lens_asks_what_a_failure_leaves_behind():
     ):
         assert bullet.startswith(heading)
 
-    edge_start = prompt.index("The test at the edge", prompt.index("Not yours."))
-    edge = " ".join(prompt[edge_start:].split("\n\n")[0].split())
+    not_yours, edge = _not_yours_bullets_and_edge(prompt)
     assert edge == _CORRECTNESS_EDGE
-
-    not_yours, _edge = _not_yours_bullets_and_edge(prompt)
-    assert len(not_yours) == 4
     assert not_yours == _CORRECTNESS_NOT_YOURS
 
     for lens in ("contract", "adequacy", "conventions"):
