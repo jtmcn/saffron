@@ -58,7 +58,7 @@ forbidden:
   - tests/test_cli.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 37
+budget_usd: 52
 max_attempts: 3
 max_turns: 200
 risk: standard
