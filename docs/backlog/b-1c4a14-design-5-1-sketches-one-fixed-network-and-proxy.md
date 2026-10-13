@@ -1,11 +1,12 @@
 ---
 id: b-1c4a14
 title: DESIGN.md §5.1 still sketches one fixed cells network on 10.88.0.0/24 and one fixed proxy
-status: open
+status: done
+closed: 2026-10-13
 tier: 3
 filed: 2026-10-12
 specs: []
-prs: []
+prs: [865]
 commits: []
 cites: [§5.1]
 related: [b-ca3bc6]
@@ -33,3 +34,5 @@ either names the subnet pool or the code calls it something else.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 36.
+- 2026-10-13: #865 sketches per-task names and /24s claimed from the subnet
+  pool in §5.1. `CONTEXT.md` names the subnet pool.
