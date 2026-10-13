@@ -148,7 +148,7 @@ def test_the_probe_checks_the_ports_it_was_given(monkeypatch):
         raise AssertionError("the probe re-enumerated instead of using its argument")
 
     monkeypatch.setattr("saffron.preflight.host_probe_ports", _boom)
-    preflight.probe_host_bindings("img", "net", [4242])
+    preflight.probe_host_bindings("img", "net", "10.88.0.1", [4242])
     assert "ports=[4242]" in seen["script"]
     # And the connects are concurrent, or ~100 listeners exhaust the 300s cap.
     assert "ThreadPoolExecutor" in seen["script"]
@@ -194,7 +194,7 @@ def test_each_refusal_cell_up_can_reach_is_a_preflight_failure(monkeypatch):
         lambda *a, **k: runtime.Completed(1, "", "boom"),
     )
     with pytest.raises(preflight.PreflightFailed, match="did not run"):
-        preflight.probe_host_bindings("img", "net", [4242])
+        preflight.probe_host_bindings("img", "net", "10.88.0.1", [4242])
     monkeypatch.undo()
 
     monkeypatch.setattr(
@@ -203,7 +203,7 @@ def test_each_refusal_cell_up_can_reach_is_a_preflight_failure(monkeypatch):
         lambda *a, **k: runtime.Completed(0, "10.88.0.1:4242", ""),
     )
     with pytest.raises(preflight.PreflightFailed, match="N1 is not satisfied"):
-        preflight.assert_host_is_unreachable("img", "net", [4242])
+        preflight.assert_host_is_unreachable("img", "net", "10.88.0.1", [4242])
     monkeypatch.undo()
 
     monkeypatch.setattr(
@@ -234,7 +234,7 @@ def test_each_refusal_cell_up_can_reach_is_a_preflight_failure(monkeypatch):
         preflight.assert_proxy_reaches_upstream("img", "net", "10.88.0.2")
     assert not isinstance(upstream_raised.value, preflight.PreflightFailed)
     with pytest.raises(runtime.CellRuntimeError) as host_raised:
-        preflight.assert_host_is_unreachable("img", "net", [4242])
+        preflight.assert_host_is_unreachable("img", "net", "10.88.0.1", [4242])
     assert not isinstance(host_raised.value, preflight.PreflightFailed)
 
 

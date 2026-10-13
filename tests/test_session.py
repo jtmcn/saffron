@@ -1058,7 +1058,7 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.runtime.networks_on_subnet", _networks_on_subnet)
 
-    def _create_network(name, subnet=runtime.DEFAULT_SUBNET):
+    def _create_network(name, subnet):
         # Measured on apple/container 2026-09-16: `network create` refuses any
         # uppercase name as invalid, which containers and volumes do not.
         if name != name.lower():
@@ -7884,7 +7884,7 @@ def test_the_critic_cell_is_not_on_the_implementers_network(monkeypatch, tmp_pat
     cell = _stub_the_runtime(monkeypatch)
     critic_network = "saffron-critic-net-sy-1"
 
-    def _container_ip(name, subnet_prefix=runtime.SUBNET_PREFIX):
+    def _container_ip(name, subnet_prefix):
         return f"{subnet_prefix}9"
 
     monkeypatch.setattr("saffron.cell.runtime.container_ip", _container_ip)
@@ -7922,7 +7922,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
 
     host_probed: list[tuple[str, str]] = []
 
-    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY, sockets=()):
+    def _host(image_tag, network, ports=None, gateway="", sockets=()):
         host_probed.append((network, gateway))
 
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
@@ -7930,7 +7930,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
     monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", _host)
     monkeypatch.setattr(
         "saffron.cell.runtime.container_ip",
-        lambda name, subnet_prefix=runtime.SUBNET_PREFIX: f"{subnet_prefix}2",
+        lambda name, subnet_prefix: f"{subnet_prefix}2",
     )
     subnets = session.cell_up(
         repo=tmp_path / "repo",
@@ -7996,7 +7996,7 @@ def test_a_tasks_proxy_is_addressed_on_the_subnets_cell_up_claimed(
 
     host_probes: list[tuple[str, str]] = []
 
-    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY, sockets=()):
+    def _host(image_tag, network, ports=None, gateway="", sockets=()):
         host_probes.append((network, gateway))
 
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
@@ -8004,7 +8004,7 @@ def test_a_tasks_proxy_is_addressed_on_the_subnets_cell_up_claimed(
     monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", _host)
     monkeypatch.setattr(
         "saffron.cell.runtime.container_ip",
-        lambda name, subnet_prefix=runtime.SUBNET_PREFIX: f"{subnet_prefix}9",
+        lambda name, subnet_prefix: f"{subnet_prefix}9",
     )
 
     outcome, _ledger = _drive(
@@ -8411,10 +8411,9 @@ def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
     """`critic_cell` takes the network it runs on as an explicit, keyword-only
     argument with no default (backlog item 140). Given a name, it joins that
     network and creates and removes none of its own. Given `None`, it makes
-    one on a subnet that does not overlap the task's own cells network
-    (`runtime.DEFAULT_SUBNET`) and removes it in the same `finally`. Today
-    `critic_cell` takes no such argument at all, so both calls below raise
-    `TypeError` before either assertion is ever reached."""
+    one on a /24 claimed fresh from the pool and removes it in the same
+    `finally`. Today `critic_cell` takes no such argument at all, so both
+    calls below raise `TypeError` before either assertion is ever reached."""
     cell = _stub_the_runtime(monkeypatch)
     spec = _spec()
     repo = tmp_path / "repo"
@@ -8454,14 +8453,84 @@ def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
         pass
     assert len(cell2.networks_created) == 1
     created_name, created_subnet = cell2.networks_created[0]
-    assert not ipaddress.ip_network(created_subnet).overlaps(
-        ipaddress.ip_network(runtime.DEFAULT_SUBNET)
+    assert ipaddress.ip_network(runtime.SUBNETS["pool"]).overlaps(
+        ipaddress.ip_network(created_subnet)
     )
     # Twice, never `in`: `critic_cell` pre-cleans the same name before it
     # creates anything, so membership is satisfied with the whole teardown
     # gone — which the count below proves rather than assumes.
     assert cell2.removed.count(("network", created_name)) == 2
     assert [w["network"] for w in cell2.worktrees] == [created_name]
+
+
+def test_two_gate_only_cells_at_once_hold_disjoint_networks_and_neither_removes_the_other(
+    monkeypatch, tmp_path, network_model
+):
+    """Two gate-only cells of two specs can be up at once. Each claims its
+    network from the pool with `allocate_network`, so their names and
+    subnets are disjoint and each subnet lies inside `SUBNETS["pool"]`. The
+    second one's pre-clean and its teardown leave the first one's network
+    in place. A leftover under the second one's own name is still removed
+    before its claim, and each one's teardown removes its own network."""
+    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
+    monkeypatch.setattr(
+        "saffron.cell.session._apply_and_commit_patch", lambda *a, **k: None
+    )
+
+    spec1 = _spec(spec_id="SY-1", branch="saffron/SY-1")
+    spec2 = _spec(spec_id="SY-2", branch="saffron/SY-2")
+    repo = tmp_path / "repo"
+    mirror_path = tmp_path / "mirror"
+    gates_dir = tmp_path / "gates"
+
+    first_network = "saffron-gate-net-sy-1"
+    second_network = "saffron-gate-net-sy-2"
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    # A leftover under the second spec's own name, from a SIGKILLed run.
+    runtime.create_network(
+        second_network, subnet=str(next(pool.subnets(new_prefix=24)))
+    )
+    assert second_network in network_model
+
+    with session.critic_cell(
+        spec=spec1,
+        repo=repo,
+        mirror=mirror_path,
+        network=None,
+        env={},
+        gates_dir=gates_dir,
+        patch=_DIFF,
+        created=set(),
+        note=lambda *a: None,
+    ):
+        assert first_network in network_model
+
+        with session.critic_cell(
+            spec=spec2,
+            repo=repo,
+            mirror=mirror_path,
+            network=None,
+            env={},
+            gates_dir=gates_dir,
+            patch=_DIFF,
+            created=set(),
+            note=lambda *a: None,
+        ):
+            # The leftover is gone, both specs' own networks are live, and
+            # neither removed the other's.
+            assert first_network in network_model
+            assert second_network in network_model
+            first_subnet = ipaddress.ip_network(network_model[first_network])
+            second_subnet = ipaddress.ip_network(network_model[second_network])
+            assert not first_subnet.overlaps(second_subnet)
+            assert pool.overlaps(first_subnet)
+            assert pool.overlaps(second_subnet)
+
+        # The second cell's own teardown removed only its own network.
+        assert second_network not in network_model
+        assert first_network in network_model
+
+    assert first_network not in network_model
 
 
 def test_critic_cell_carries_the_environment_its_caller_asked_for(
@@ -8751,12 +8820,15 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     ]
     assert gate_execs[0][2] == _DIFF
 
-    # Its own network, on its own subnet — never the task's own `saffron-
-    # cells` (10.88.0.0/24, still held by the still-live implementer's cell
-    # at this point) and never the proxy's `saffron-egress` (10.89.0.0/24).
-    assert (_GATE_NETWORK, "10.90.0.0/24") in cell.networks_created
+    # Its own network, on its own claimed /24 of the pool: never the
+    # task's own live `saffron-cells` or the proxy's `saffron-egress`.
+    created = dict(cell.networks_created)
+    gate_subnet = created[_GATE_NETWORK]
+    assert ipaddress.ip_network(runtime.SUBNETS["pool"]).overlaps(
+        ipaddress.ip_network(gate_subnet)
+    )
     assert all(
-        subnet != "10.90.0.0/24"
+        subnet != gate_subnet
         for name, subnet in cell.networks_created
         if name != _GATE_NETWORK
     )
@@ -8926,29 +8998,18 @@ def test_the_bash_self_checks_probe_reports_a_writable_path_directory_as_written
 def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subnet_and_nothing_else(
     monkeypatch, tmp_path
 ):
-    """The by-name pre-clean only ever clears a leftover under *this* spec's
-    own name; the collision `create_network` raises on is by subnet, one name
-    over (backlog item 143). A SIGKILLed task of a *different* spec leaves
-    `saffron-gate-net-other-spec` on the Gate-only cell's subnet, and this
-    task's pre-clean must remove it — by value, before its own
-    create — while leaving a non-`saffron-`-prefixed holder on the same
-    subnet alone: a single holder cannot tell the prefix filter from a
-    pre-clean that removes every holder it is handed."""
+    """The sweep over the Gate-only cell's subnet is gone (backlog item 143):
+    a different spec's live network must survive untouched, however close
+    its claimed subnet sits to this one's. The by-name pre-clean still
+    removes a leftover under this spec's own name before its own claim."""
+    cell = _stub_the_runtime(monkeypatch)
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    first, second = list(pool.subnets(new_prefix=24))[:2]
     other_spec_network = "saffron-gate-net-other-spec"
-    other_saffron_network = "saffron-leftover"
-    unrelated_network = "operator-net"
-    cell = _stub_the_runtime(
-        monkeypatch,
-        networks_on_subnet={
-            # Not first, and not all `saffron-gate-net-`: a filter narrower
-            # than the prefix, or a first-holder-only loop, still fails.
-            runtime.SUBNETS["gate"]: [
-                unrelated_network,
-                other_spec_network,
-                other_saffron_network,
-            ]
-        },
-    )
+    runtime.create_network(other_spec_network, subnet=str(first))
+    runtime.create_network(_GATE_NETWORK, subnet=str(second))
+    del cell.networks_created[:2]
+
     outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
@@ -8957,13 +9018,18 @@ def test_the_gate_cells_pre_clean_removes_a_leftover_saffron_network_on_its_subn
     )
     assert outcome.state == "READY_FOR_REVIEW"
 
-    assert ("network", other_spec_network) in cell.removed
-    assert ("network", other_saffron_network) in cell.removed
-    assert ("network", unrelated_network) not in cell.removed
+    assert ("network", other_spec_network) not in cell.removed
+    assert cell.removed.count(("network", _GATE_NETWORK)) == 2
 
-    created_at = cell.order.index(f"created:network:{_GATE_NETWORK}")
-    for holder in (other_spec_network, other_saffron_network):
-        assert cell.order.index(f"removed:network:{holder}") < created_at
+    # The seed's own create, then the pre-clean, then the real create.
+    created_indices = [
+        i for i, e in enumerate(cell.order) if e == f"created:network:{_GATE_NETWORK}"
+    ]
+    removed_indices = [
+        i for i, e in enumerate(cell.order) if e == f"removed:network:{_GATE_NETWORK}"
+    ]
+    assert len(created_indices) == 2
+    assert removed_indices[0] < created_indices[1]
 
 
 def test_the_lens_gate_cell_is_torn_down_when_its_own_suite_raises(

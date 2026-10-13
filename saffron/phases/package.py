@@ -530,13 +530,13 @@ def reverify(
         volume = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         container = f"saffron-pkg-{label}-{packaged_sha[:12]}"
         network = f"{container}-net"
+        # A leftover from a SIGKILLed run must not make this run's own
+        # claim the first thing that fails.
+        runtime.remove_network(network)
         try:
-            # `create_network` hardcodes --internal (runtime.py:146) and
-            # returns None, so the name is ours to hold. Passed explicitly to
-            # `prepare_worktree` because a cell created without a network joins
-            # the runtime's default one with full egress, and every control the
-            # caller ran then applies to some other container (Appendix I).
-            runtime.create_network(network)
+            # `allocate_network` claims a /24 of the pool and creates it
+            # there. Only the name reaches `prepare_worktree` (Appendix I).
+            runtime.allocate_network(network)
             runtime.create_volume(volume)
             worktree.prepare_worktree(
                 mirror=mirror,

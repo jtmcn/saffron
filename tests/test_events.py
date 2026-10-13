@@ -1876,9 +1876,10 @@ _IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
 # every pool /24's included, since that is where a task's own networks move.
 _POOL = ipaddress.ip_network(_runtime.SUBNETS["pool"])
 _GATEWAYS = {_runtime.gateway(subnet) for subnet in _runtime.SUBNETS.values()} | {
-    _runtime.GATEWAY,
     *(_runtime.gateway(str(net)) for net in _POOL.subnets(new_prefix=24)),
 }
+# A stand-in for whichever pool /24 a probe line's own run claimed.
+_SAMPLE_GATEWAY = _runtime.gateway(str(next(_POOL.subnets(new_prefix=24))))
 _PATCH_PATH = re.compile(r"\S*/patch\.diff\b")
 _PROMPT_CHARS = re.compile(r"system prompt \d+ chars")
 
@@ -1898,11 +1899,11 @@ def _normalise(line: str) -> str:
 
 def test_normalise_replaces_exactly_the_three_volatile_substrings():
     port_line = (
-        f"preflight: probing 1 host ports at {_runtime.GATEWAY}, 192.168.1.42; "
+        f"preflight: probing 1 host ports at {_SAMPLE_GATEWAY}, 192.168.1.42; "
         "tolerating nothing"
     )
     assert _normalise(port_line) == (
-        f"preflight: probing 1 host ports at {_runtime.GATEWAY}, <LAN-ADDR>; "
+        f"preflight: probing 1 host ports at {_SAMPLE_GATEWAY}, <LAN-ADDR>; "
         "tolerating nothing"
     )
     path_line = "teardown: exported 12 bytes to /tmp/xyz/out/SY-1/patch.diff"

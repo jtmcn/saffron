@@ -158,14 +158,11 @@ def probe() -> str | None:
     return _probe_result
 
 
-DEFAULT_SUBNET = "10.88.0.0/24"
-
-# Every subnet Saffron allocates but `DEFAULT_SUBNET`, which PACKAGE's re-verification
-# keeps until SA-0271. A task's own networks each claim one /24 of "pool" (item 143).
+# Every subnet Saffron allocates. Every task network claims one /24
+# of "pool" (item 143).
 SUBNETS: dict[str, str] = {
     "pool": "10.200.0.0/16",  # a task's cells and critic networks, one /24 each
     "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
-    "gate": "10.90.0.0/24",  # saffron-gate-net-<spec>, the Gate-only cell's
 }
 
 # §4.3's idle and completion bounds. Idle has to clear the longest single tool
@@ -176,10 +173,6 @@ SUBNETS: dict[str, str] = {
 IDLE_TIMEOUT_S = 300.0
 COMPLETION_TIMEOUT_S = 10.0
 
-# Derived, never re-typed: a second literal of the subnet is a probe that
-# silently covers nothing the day the subnet moves.
-_NETWORK = ipaddress.ip_network(DEFAULT_SUBNET)
-
 
 def subnet_prefix(subnet: str) -> str:
     """The `a.b.c.` an address on a /24 starts with, for `container_ip`."""
@@ -189,10 +182,6 @@ def subnet_prefix(subnet: str) -> str:
 def gateway(subnet: str) -> str:
     """The host's address on a network, where a cell would reach a host listener."""
     return str(next(ipaddress.ip_network(subnet).hosts()))
-
-
-SUBNET_PREFIX = subnet_prefix(DEFAULT_SUBNET)
-GATEWAY = gateway(DEFAULT_SUBNET)
 
 
 @dataclass(frozen=True)
@@ -307,7 +296,7 @@ def _must(argv: Sequence[str], timeout_s: float = 120) -> Completed:
     return done
 
 
-def create_network(name: str, subnet: str = DEFAULT_SUBNET) -> None:
+def create_network(name: str, subnet: str) -> None:
     _admit()
     argv = [
         dialect().binary,
@@ -339,8 +328,9 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
     runtime rejects `10.89.0.128/25` against a holder on `10.89.0.0/24` with the
     same wording, and an equality test names nobody in exactly the case an
     operator cannot work out by eye. Empty when the listing itself fails: the
-    error `create_network` is raising goes undecorated, and the Gate-only
-    cell's pre-clean removes nothing, leaving that create to raise instead."""
+    error `create_network` is raising goes undecorated, and a by-name
+    pre-clean that asked it for a holder finds none, leaving that create
+    to raise instead."""
     done = _call([dialect().binary, "network", "list"], 60)
     if done.returncode != 0:
         return []
@@ -364,26 +354,34 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
 def allocate_network(name: str) -> str:
     """Claim one /24 of the pool for `name`, by creating it there.
 
-    Walks `SUBNETS["pool"]` in address order, since the create is the
+    `_admit()` runs once, ahead of the walk, so a host refusal raises as
+    itself rather than reading as an ordinary collision below. The walk
+    tries `SUBNETS["pool"]` in address order, since the create is the
     claim and a listing taken first could go stale before it. A refused
     create asks `networks_on_subnet` for that /24's holder: a name found
     moves the walk on, and none re-raises the create's own error.
-    Exhaustion names every holder met along the way.
+    Exhaustion carries the last refused create's own error text.
     """
+    _admit()
     pool = ipaddress.ip_network(SUBNETS["pool"])
     holders: list[str] = []
+    last_detail = ""
     for candidate in pool.subnets(new_prefix=24):
         subnet = str(candidate)
         try:
             create_network(name, subnet=subnet)
-        except CellRuntimeError:
+        except CellRuntimeError as exc:
+            last_detail = str(exc)
             found = networks_on_subnet(subnet, exclude=name)
             if not found:
                 raise
             holders += [holder for holder in found if holder not in holders]
             continue
         return subnet
-    raise CellRuntimeError(f"every /24 of the pool is held: {', '.join(holders)}")
+    raise CellRuntimeError(
+        f"every /24 of the pool is held: {', '.join(holders)}. "
+        f"The last refusal: {last_detail}"
+    )
 
 
 def remove_network(name: str) -> Completed:
@@ -639,7 +637,7 @@ def _first_address(inspected: str, subnet_prefix: str) -> str | None:
     return None
 
 
-def container_ip(name: str, subnet_prefix: str = SUBNET_PREFIX) -> str | None:
+def container_ip(name: str, subnet_prefix: str) -> str | None:
     done = _call([dialect().binary, "inspect", name], timeout_s=60)
     if done.returncode != 0:
         return None

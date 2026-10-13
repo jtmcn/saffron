@@ -155,7 +155,7 @@ def _lan_address() -> str:
         ) from exc
 
 
-def probe_addresses(gateway: str = runtime.GATEWAY) -> list[str]:
+def probe_addresses(gateway: str) -> list[str]:
     """What the probe covers: the cell's gateway and the host on its LAN."""
     return [gateway, _lan_address()]
 
@@ -183,8 +183,8 @@ def _probe_script(addresses: list[str], ports: list[int]) -> str:
 def probe_host_bindings(
     image_tag: str,
     network: str,
+    gateway: str,
     ports: list[int] | None = None,
-    gateway: str = runtime.GATEWAY,
 ) -> list[str]:
     """Addresses at which a host service answered from inside a cell.
 
@@ -229,11 +229,11 @@ def _named_hits(hits: list[str], sockets: Sequence[tuple[str, int]]) -> list[str
 def assert_host_is_unreachable(
     image_tag: str,
     network: str,
+    gateway: str,
     ports: list[int] | None = None,
-    gateway: str = runtime.GATEWAY,
     sockets: Sequence[tuple[str, int]] = (),
 ) -> None:
-    reachable = probe_host_bindings(image_tag, network, ports, gateway)
+    reachable = probe_host_bindings(image_tag, network, gateway, ports)
     if reachable:
         raise PreflightFailed(
             "host services answered from inside a cell at "

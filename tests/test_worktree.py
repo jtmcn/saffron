@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import os
 import shutil
 import subprocess
@@ -20,12 +21,17 @@ from tests.test_proxy import reach
 
 NETWORK = "saffron-test-wt-cells"
 _PROXY_NAME = proxy.proxy_name("worktreetest")
+# The pool's first /24: what the `network` fixture below claims, since
+# nothing else holds the pool when one test's fixture runs at a time.
+_SUBNET = str(
+    next(ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24))
+)
 
 
 @pytest.fixture
 def network():
     runtime.remove_network(NETWORK)
-    runtime.create_network(NETWORK)
+    runtime.allocate_network(NETWORK)
     yield NETWORK
     runtime.remove_network(NETWORK)
 
@@ -280,9 +286,7 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
     runtime.create_volume(volume)
     runtime.remove_container(container)
     try:
-        proxy_ip = proxy.start_proxy(
-            _PROXY_NAME, network, subnet=runtime.DEFAULT_SUBNET
-        )
+        proxy_ip = proxy.start_proxy(_PROXY_NAME, network, subnet=_SUBNET)
         worktree.prepare_worktree(
             mirror=mirror,
             volume=volume,

@@ -1034,9 +1034,10 @@ def package_ready_task(
     network = f"saffron-hostprobe-{spec_id}"
     runtime.remove_network(network)
     try:
-        runtime.create_network(network)
+        subnet = runtime.allocate_network(network)
+        gateway = runtime.gateway(subnet)
         ports, tolerated, sockets = preflight.host_probe_ports()
-        addresses = preflight.probe_addresses(runtime.GATEWAY)
+        addresses = preflight.probe_addresses(gateway)
         detail = (
             f"probing {len(ports)} host ports at "
             + ", ".join(addresses)
@@ -1054,7 +1055,7 @@ def package_ready_task(
             )
         )
         preflight.assert_host_is_unreachable(
-            repo_image.BASE_TAG, network, ports, runtime.GATEWAY, sockets
+            repo_image.BASE_TAG, network, gateway=gateway, ports=ports, sockets=sockets
         )
     finally:
         runtime.remove_network(network)

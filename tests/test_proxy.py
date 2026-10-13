@@ -14,6 +14,11 @@ from saffron.repos import image
 NETWORK = "saffron-test-cells"
 # A literal, so the module still collects at a base with no `proxy_name`.
 _NAME = "saffron-proxy-proxytest"
+# The pool's first /24: what the `network` fixture below claims, since
+# nothing else holds the pool when one test's fixture runs at a time.
+_SUBNET = str(
+    next(ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24))
+)
 
 
 def reach(url: str) -> list[str]:
@@ -33,14 +38,14 @@ def reach(url: str) -> list[str]:
 @pytest.fixture
 def network():
     runtime.remove_network(NETWORK)
-    runtime.create_network(NETWORK)
+    runtime.allocate_network(NETWORK)
     yield NETWORK
     runtime.remove_network(NETWORK)
 
 
 @pytest.mark.cell
 def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
-    proxy_ip = proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
+    proxy_ip = proxy.start_proxy(_NAME, network, subnet=_SUBNET)
     try:
         env = {"HTTPS_PROXY": f"http://{proxy_ip}:{proxy.PROXY_PORT}"}
         allowed = runtime.run_ephemeral(
@@ -102,7 +107,9 @@ def test_no_host_service_answers_from_inside_a_cell(network):
     `SAFFRON_ALLOW_HOST_PROCESS=rapportd` is the accepted risk this machine
     runs with (Appendix G). Without it this test fails here, which is the
     point: the exception is per-invocation and never a default."""
-    reachable = preflight.probe_host_bindings(image.BASE_TAG, network)
+    reachable = preflight.probe_host_bindings(
+        image.BASE_TAG, network, runtime.gateway(_SUBNET)
+    )
     assert reachable == [], (
         f"a host service answered from inside a cell at {reachable}; "
         "bind it to 127.0.0.1, or turn it off"
@@ -123,9 +130,11 @@ def test_the_probe_finds_a_host_service_that_is_actually_there(network):
     server.bind(("0.0.0.0", 0))
     server.listen(8)
     port = server.getsockname()[1]
-    proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
+    proxy.start_proxy(_NAME, network, subnet=_SUBNET)
     try:
-        reachable = preflight.probe_host_bindings(image.BASE_TAG, network, [port])
+        reachable = preflight.probe_host_bindings(
+            image.BASE_TAG, network, runtime.gateway(_SUBNET), [port]
+        )
     finally:
         proxy.stop_proxy(_NAME)
         server.close()
@@ -141,7 +150,7 @@ def test_preflight_confirms_the_real_proxy_reaches_the_upstream(network):
     """The assertion against a real proxy, started the way production starts
     one. This is the check that would have ended the 2026-08-28 run in seconds
     (DESIGN.md §5.1.1)."""
-    proxy_ip = proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
+    proxy_ip = proxy.start_proxy(_NAME, network, subnet=_SUBNET)
     try:
         preflight.assert_proxy_reaches_upstream(image.BASE_TAG, network, proxy_ip)
     finally:
@@ -345,7 +354,7 @@ def test_each_proxy_call_acts_on_the_proxy_it_is_named_and_no_other(monkeypatch)
         ip_read.clear()
         call_argv.clear()
 
-        address = proxy.start_proxy(name, "net", subnet=runtime.DEFAULT_SUBNET)
+        address = proxy.start_proxy(name, "net", subnet=_SUBNET)
         assert address == addresses[name]
         proxy.denied_egress(name)
         proxy.failed_egress(name)
@@ -369,7 +378,7 @@ def test_each_proxy_call_acts_on_the_proxy_it_is_named_and_no_other(monkeypatch)
         name = proxy.proxy_name(key)
         removed.clear()
         with pytest.raises(runtime.CellRuntimeError):
-            proxy.start_proxy(name, "net", subnet=runtime.DEFAULT_SUBNET, timeout_s=0)
+            proxy.start_proxy(name, "net", subnet=_SUBNET, timeout_s=0)
         # Pre-clean, then the give-up removal, both this key's own name.
         assert removed == [name, name]
 
@@ -394,7 +403,7 @@ def test_start_proxy_reads_its_address_on_the_subnet_it_is_given(monkeypatch):
     monkeypatch.setattr(proxy.runtime, "run_detached", lambda *a, **k: None)
     monkeypatch.setattr(proxy.runtime, "remove_container", lambda *a, **k: None)
 
-    def _container_ip(name, subnet_prefix=runtime.SUBNET_PREFIX):
+    def _container_ip(name, subnet_prefix):
         return f"{given_prefix}9" if subnet_prefix == given_prefix else None
 
     monkeypatch.setattr(proxy.runtime, "container_ip", _container_ip)

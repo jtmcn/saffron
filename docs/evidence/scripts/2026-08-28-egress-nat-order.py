@@ -57,11 +57,11 @@ def egress_works() -> bool:
 def attempt(*, container_first: bool) -> bool:
     proxy.stop_proxy(PROXY_NAME)
     runtime.remove_network(NETWORK)
-    runtime.create_network(NETWORK)
+    runtime.create_network(NETWORK, "10.88.0.0/24")
     try:
         if container_first:
             runtime.run_ephemeral("alpine:3", ["true"], network=NETWORK, timeout_s=120)
-        proxy.start_proxy(PROXY_NAME, NETWORK, subnet=runtime.DEFAULT_SUBNET)
+        proxy.start_proxy(PROXY_NAME, NETWORK, subnet="10.88.0.0/24")
         return egress_works()
     finally:
         proxy.stop_proxy(PROXY_NAME)
