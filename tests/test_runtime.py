@@ -684,9 +684,9 @@ _QUOTED_CIDR = re.compile(r'"\d{1,3}(?:\.\d{1,3}){3}/\d+"')
 
 
 def test_every_subnet_saffron_allocates_is_declared_in_one_place():
-    """`runtime.SUBNETS` is the one place a subnet is written (backlog item
-    143); `proxy.EGRESS_SUBNET` and `session._GATE_CELL_SUBNET` draw theirs
-    from it rather than spelling a second literal in their own module.
+    """`runtime.SUBNETS` is where every subnet but `DEFAULT_SUBNET` is written
+    (backlog item 143). `proxy.EGRESS_SUBNET` and `session._GATE_CELL_SUBNET`
+    draw theirs from it rather than spelling a second literal in their own module.
 
     Keeping both *values* unchanged means a membership check alone cannot
     tell this from the unfixed shape. A tuple in runtime.py that nothing
@@ -785,7 +785,10 @@ def test_allocate_network_skips_each_held_slash24_whatever_the_refusal_says(
             return runtime.Completed(
                 1, "", "Error: IPv4 subnet overlaps an existing network"
             )
-        return runtime.Completed(0, "NETWORK          SUBNET\n", "")
+        # The network's own row: only `exclude=name` keeps it from reading as a holder.
+        return runtime.Completed(
+            0, "NETWORK          SUBNET\nsaffron-test-cells 10.200.0.0/24\n", ""
+        )
 
     monkeypatch.setattr(runtime, "_call", fake_call_no_holder)
     with pytest.raises(runtime.CellRuntimeError):
