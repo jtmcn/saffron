@@ -8020,11 +8020,14 @@ def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
     assert "saffron-cells" not in removed1 | removed2
     assert "saffron-critic-net" not in removed1 | removed2
 
-    for own in (sy1, sy2):
-        (expected,) = own.pop("expected_name")
-        assert all(name == expected for name, _networks in own.pop("started")), own
-        for calls in own.values():
-            assert all(name == expected for name in calls), own
+    # Exact lists: an `all()` over an empty recorder passes a stop never made.
+    for own, sid in ((sy1, "sy-1"), (sy2, "sy-2")):
+        (expected,) = own["expected_name"]
+        nets = (f"saffron-cells-{sid}", f"saffron-critic-net-{sid}")
+        assert own["started"] == [(expected, nets)], own
+        assert own["stopped"] == [expected], own
+        assert own["reads"] == [expected, expected], own
+        assert own["ips"] and set(own["ips"]) == {expected}, own
 
 
 def test_the_egress_reads_name_each_tasks_own_proxy(monkeypatch, tmp_path):
@@ -8234,7 +8237,7 @@ def test_critic_cell_creates_its_own_network_only_when_it_is_not_given_one(
     """`critic_cell` takes the network it runs on as an explicit, keyword-only
     argument with no default (backlog item 140). Given a name, it joins that
     network and creates and removes none of its own. Given `None`, it makes
-    one on a subnet that does not overlap the task's own `saffron-cells`
+    one on a subnet that does not overlap the task's own cells network
     (`runtime.DEFAULT_SUBNET`) and removes it in the same `finally`. Today
     `critic_cell` takes no such argument at all, so both calls below raise
     `TypeError` before either assertion is ever reached."""
