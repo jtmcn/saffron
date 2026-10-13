@@ -280,7 +280,9 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
     runtime.create_volume(volume)
     runtime.remove_container(container)
     try:
-        proxy_ip = proxy.start_proxy(_PROXY_NAME, network)
+        proxy_ip = proxy.start_proxy(
+            _PROXY_NAME, network, subnet=runtime.DEFAULT_SUBNET
+        )
         worktree.prepare_worktree(
             mirror=mirror,
             volume=volume,

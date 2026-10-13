@@ -175,7 +175,7 @@ def task(tmp_path_factory):
     )
     created: set[str] = set()
     try:
-        session.cell_up(
+        subnets = session.cell_up(
             repo=repo,
             mirror=mirror,
             tree_base=base,
@@ -192,7 +192,9 @@ def task(tmp_path_factory):
             note=lambda *a: None,
         )
         impl = names["container"]
-        proxy_ip = runtime.container_ip(names["proxy_name"])
+        proxy_ip = runtime.container_ip(
+            names["proxy_name"], runtime.subnet_prefix(subnets[names["network"]])
+        )
         assert proxy_ip
         runtime.exec_(impl, ["sh", "-c", _LISTEN], timeout_s=30)
         runtime.exec_(impl, ["sh", "-c", f"echo x > {_MARKER}"], timeout_s=30)
@@ -232,7 +234,7 @@ def task(tmp_path_factory):
             "proxy_ip": proxy_ip,
             "critic_network": names["critic_network"],
             "critic_proxy": session.proxy_address(
-                names["proxy_name"], runtime.SUBNETS["critic"]
+                names["proxy_name"], subnets[names["critic_network"]]
             ),
             "image_version": image_version,
             "image_env": set(json.loads(image_env)),

@@ -1026,14 +1026,52 @@ def _stub_the_runtime(
         return _f
 
     monkeypatch.setattr("saffron.cell.runtime.remove_container", _remove("container"))
-    monkeypatch.setattr("saffron.cell.runtime.remove_network", _remove("network"))
     monkeypatch.setattr("saffron.cell.runtime.remove_volume", _remove("volume"))
+
+    # A claim per live network, name to subnet, so a create can model a real
+    # collision. Released by `remove_network`, never by the static holders below.
+    _live: dict[str, str] = {}
+
+    def _remove_network(name):
+        _live.pop(name, None)
+        cell.removed.append(("network", name))
+        cell.order.append(f"removed:network:{name}")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.remove_network", _remove_network)
+
+    # Per subnet, standing for a network this fake never created. Empty by
+    # default, so a pre-clean asking about the wrong one finds nothing.
+    _holders = {k: list(v) for k, v in (networks_on_subnet or {}).items()}
+
+    def _networks_on_subnet(subnet, exclude=""):
+        wanted = ipaddress.ip_network(subnet)
+        found = [name for name in _holders.get(subnet, []) if name != exclude]
+        for name, live_subnet in _live.items():
+            if (
+                name != exclude
+                and name not in found
+                and ipaddress.ip_network(live_subnet).overlaps(wanted)
+            ):
+                found.append(name)
+        return found
+
+    monkeypatch.setattr("saffron.cell.runtime.networks_on_subnet", _networks_on_subnet)
 
     def _create_network(name, subnet=runtime.DEFAULT_SUBNET):
         # Measured on apple/container 2026-09-16: `network create` refuses any
         # uppercase name as invalid, which containers and volumes do not.
         if name != name.lower():
             raise runtime.CellRuntimeError(f"invalid network name: {name}")
+        if name in _live:
+            raise runtime.CellRuntimeError(f"network {name} already exists")
+        wanted = ipaddress.ip_network(subnet)
+        for other_subnet in _live.values():
+            if ipaddress.ip_network(other_subnet).overlaps(wanted):
+                raise runtime.CellRuntimeError(
+                    f"Error: IPv4 subnet {subnet} overlaps an existing network"
+                )
+        _live[name] = subnet
         cell.networks_created.append((name, subnet))
         # On the same shared timeline as `_remove`'s `removed:` entries, so a
         # test can assert a removal happened *before* this create rather than
@@ -1042,15 +1080,6 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
     monkeypatch.setattr("saffron.cell.runtime.create_volume", lambda *a, **k: None)
-
-    # Per subnet, so a pre-clean asking about the wrong one finds nothing;
-    # empty by default, or every twice-removed count gains a third.
-    _holders = {k: list(v) for k, v in (networks_on_subnet or {}).items()}
-
-    def _networks_on_subnet(subnet, exclude=""):
-        return [name for name in _holders.get(subnet, []) if name != exclude]
-
-    monkeypatch.setattr("saffron.cell.runtime.networks_on_subnet", _networks_on_subnet)
 
     # The critic cell's own three, none stubbed before it existed (SA-0087):
     # the proxy address `_drive_cell` reads for it, and the two calls
@@ -1645,7 +1674,10 @@ def test_the_preflight_line_reports_what_was_tolerated(monkeypatch, tmp_path):
     cell = _stub_the_runtime(monkeypatch)
     _drive(monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()])
     (probing,) = [x for x in cell.watched if x.startswith("preflight: probing")]
-    assert probing.startswith("preflight: probing 1 host ports at 10.88.0.1")
+    # The claimed subnet's own gateway, not a fixed one: it is whichever /24
+    # of the pool the task's cells network got.
+    cells_gateway = runtime.gateway(cell.networks_created[0][1])
+    assert probing.startswith(f"preflight: probing 1 host ports at {cells_gateway}")
     assert probing.endswith("; tolerating rapportd:49152")
 
 
@@ -7850,7 +7882,7 @@ def test_the_critic_cell_is_not_on_the_implementers_network(monkeypatch, tmp_pat
     The critic cell joins a network the implementer is not on, and reaches the
     proxy at the address it holds there."""
     cell = _stub_the_runtime(monkeypatch)
-    critic_prefix = runtime.subnet_prefix(runtime.SUBNETS["critic"])
+    critic_network = "saffron-critic-net-sy-1"
 
     def _container_ip(name, subnet_prefix=runtime.SUBNET_PREFIX):
         return f"{subnet_prefix}9"
@@ -7861,8 +7893,11 @@ def test_the_critic_cell_is_not_on_the_implementers_network(monkeypatch, tmp_pat
     )
     assert outcome.state == "READY_FOR_REVIEW"
     networks = {w["container"]: w["network"] for w in cell.worktrees}
-    assert networks[_CRITIC_CONTAINER] == "saffron-critic-net-sy-1"
+    assert networks[_CRITIC_CONTAINER] == critic_network
     assert networks[_IMPLEMENTER_CONTAINER] == "saffron-cells-sy-1"
+    # Whichever /24 of the pool the critic network claimed, not a fixed one.
+    critic_subnet = dict(cell.networks_created)[critic_network]
+    critic_prefix = runtime.subnet_prefix(critic_subnet)
     (critic,) = [w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER]
     assert critic["env"]["HTTPS_PROXY"] == f"http://{critic_prefix}9:3128"
 
@@ -7877,8 +7912,8 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
     started: list[tuple] = []
     probed: list[tuple[str, str]] = []
 
-    def _start_proxy(name, *networks, **_k):
-        started.append((name, networks))
+    def _start_proxy(name, *networks, subnet, **_k):
+        started.append((name, networks, subnet))
         return "10.88.0.2"
 
     def _upstream(image_tag, network, proxy_ip, **_k):
@@ -7897,7 +7932,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
         "saffron.cell.runtime.container_ip",
         lambda name, subnet_prefix=runtime.SUBNET_PREFIX: f"{subnet_prefix}2",
     )
-    session.cell_up(
+    subnets = session.cell_up(
         repo=tmp_path / "repo",
         mirror=tmp_path / "mirror",
         tree_base="a" * 40,
@@ -7913,27 +7948,171 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
         created=set(),
         note=lambda *a: None,
     )
-    assert ("cnet", runtime.SUBNETS["critic"]) in cell.networks_created
+    assert set(subnets) == {"net", "cnet"}
+    net_subnet, cnet_subnet = subnets["net"], subnets["cnet"]
+    assert not ipaddress.ip_network(net_subnet).overlaps(
+        ipaddress.ip_network(cnet_subnet)
+    )
+    assert ("net", net_subnet) in cell.networks_created
+    assert ("cnet", cnet_subnet) in cell.networks_created
     assert cell.order.index("removed:network:cnet") < cell.order.index(
         "created:network:cnet"
     )
-    assert started == [("saffron-proxy-sy-1", ("net", "cnet"))]
-    critic_prefix = runtime.subnet_prefix(runtime.SUBNETS["critic"])
-    assert probed == [("net", "10.88.0.2"), ("cnet", f"{critic_prefix}2")]
+    # The cells leg's own claimed subnet, not a fixed one.
+    assert started == [("saffron-proxy-sy-1", ("net", "cnet"), net_subnet)]
+    net_prefix = runtime.subnet_prefix(net_subnet)
+    critic_prefix = runtime.subnet_prefix(cnet_subnet)
+    assert probed == [("net", f"{net_prefix}2"), ("cnet", f"{critic_prefix}2")]
     # The host from each network, at that network's own gateway.
     assert host_probed == [
-        ("net", runtime.GATEWAY),
-        ("cnet", runtime.gateway(runtime.SUBNETS["critic"])),
+        ("net", runtime.gateway(net_subnet)),
+        ("cnet", runtime.gateway(cnet_subnet)),
     ]
+
+
+def test_a_tasks_proxy_is_addressed_on_the_subnets_cell_up_claimed(
+    monkeypatch, tmp_path
+):
+    """`cell_up` hands `start_proxy` the subnet claimed for the cells
+    network. Every per-leg probe reads that leg's own claimed subnet, and
+    REVIEW's critic cells carry the proxy's address on the subnet claimed
+    for the critic network. None of the three is a fixed one."""
+    cell = _stub_the_runtime(monkeypatch)
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    held_subnet = str(next(pool.subnets(new_prefix=24)))
+    runtime.create_network("held", subnet=held_subnet)
+
+    started: list[tuple] = []
+
+    def _start_proxy(name, *networks, subnet, **_k):
+        started.append((name, networks, subnet))
+        return "10.88.0.2"
+
+    upstream_probes: list[tuple[str, str]] = []
+
+    def _upstream(image_tag, network, proxy_ip, **_k):
+        upstream_probes.append((network, proxy_ip))
+        return "401"
+
+    host_probes: list[tuple[str, str]] = []
+
+    def _host(image_tag, network, ports=None, gateway=runtime.GATEWAY, sockets=()):
+        host_probes.append((network, gateway))
+
+    monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
+    monkeypatch.setattr("saffron.preflight.assert_proxy_reaches_upstream", _upstream)
+    monkeypatch.setattr("saffron.preflight.assert_host_is_unreachable", _host)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.container_ip",
+        lambda name, subnet_prefix=runtime.SUBNET_PREFIX: f"{subnet_prefix}9",
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    cells_network = "saffron-cells-sy-1"
+    critic_network = "saffron-critic-net-sy-1"
+    claimed = dict(cell.networks_created)
+    cells_subnet = claimed[cells_network]
+    critic_subnet = claimed[critic_network]
+    # Neither leg landed on the /24 held before the task started, and the
+    # two legs never share one either.
+    assert held_subnet not in (cells_subnet, critic_subnet)
+    assert cells_subnet != critic_subnet
+
+    (proxy_started,) = [s for s in started if s[0].startswith("saffron-proxy-")]
+    assert proxy_started[2] == cells_subnet
+
+    assert (
+        dict(upstream_probes)[cells_network]
+        == f"{runtime.subnet_prefix(cells_subnet)}9"
+    )
+    assert (
+        dict(upstream_probes)[critic_network]
+        == f"{runtime.subnet_prefix(critic_subnet)}9"
+    )
+    assert dict(host_probes)[cells_network] == runtime.gateway(cells_subnet)
+    assert dict(host_probes)[critic_network] == runtime.gateway(critic_subnet)
+
+    (critic_worktree,) = [
+        w for w in cell.worktrees if w["container"] == _CRITIC_CONTAINER
+    ]
+    expected_proxy = f"http://{runtime.subnet_prefix(critic_subnet)}9:3128"
+    assert critic_worktree["env"]["HTTPS_PROXY"] == expected_proxy
+
+
+def test_two_tasks_and_an_end_review_cell_hold_disjoint_subnets(monkeypatch, tmp_path):
+    """Two tasks, each with a cells and a critic network, sit beside an
+    end-review layer. The five networks they bring up together hold five
+    distinct /24s of the pool, and each task's own `cell_up` call returns
+    exactly its two."""
+    from saffron.end_review import LayerFields, layer_cell
+
+    cell = _stub_the_runtime(monkeypatch)
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+
+    def _up(key: str) -> tuple[dict[str, str], str, str]:
+        net = f"saffron-cells-{key.lower()}"
+        critic = f"saffron-critic-net-{key.lower()}"
+        claimed = session.cell_up(
+            repo=tmp_path / "repo",
+            mirror=tmp_path / "mirror",
+            tree_base="a" * 40,
+            branch=f"saffron/{key}",
+            network=net,
+            critic_network=critic,
+            proxy_name=proxy.proxy_name(key),
+            volume=f"saffron-wt-{key}",
+            state=f"saffron-st-{key}",
+            container=f"saffron-cell-{key}",
+            gates_dir=tmp_path / "gates",
+            thread_env={},
+            created=set(),
+            note=lambda *a: None,
+        )
+        return claimed, net, critic
+
+    claimed1, net1, critic1 = _up("SY-1")
+    claimed2, net2, critic2 = _up("SY-2")
+
+    fields = LayerFields(
+        spec_id="SY-3",
+        branch="saffron/SY-3",
+        pr_url="",
+        base="a" * 40,
+        head="a" * 40,
+        known="",
+    )
+    with layer_cell(
+        fields,
+        repo=tmp_path / "repo",
+        mirror=tmp_path / "mirror",
+        gates_dir=tmp_path / "gates",
+        thread_env={},
+    ):
+        subnets = dict(cell.networks_created)
+
+    assert len(subnets) == 5
+    for subnet in subnets.values():
+        assert pool.overlaps(ipaddress.ip_network(subnet))
+    values = list(subnets.values())
+    for i, a in enumerate(values):
+        for b in values[i + 1 :]:
+            assert not ipaddress.ip_network(a).overlaps(ipaddress.ip_network(b))
+
+    assert claimed1 == {net1: subnets[net1], critic1: subnets[critic1]}
+    assert claimed2 == {net2: subnets[net2], critic2: subnets[critic2]}
 
 
 def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
     monkeypatch, tmp_path
 ):
-    """Two tasks run side by side, each with the other's networks already
-    live on the shared subnets. Neither task's pre-clean or teardown
-    touches the other's network or proxy. Neither names a network or
-    proxy the old fixed name would have given it."""
+    """Two tasks run one after the other, each over its own fake runtime.
+    Neither task's pre-clean or teardown touches the other's network or
+    proxy. Neither names a network or proxy the old fixed name would have
+    given it."""
 
     def _rig_proxy(key: str) -> dict[str, list]:
         name = proxy.proxy_name(key)
@@ -7966,13 +8145,7 @@ def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
         own["expected_name"] = [name]
         return own
 
-    cell1 = _stub_the_runtime(
-        monkeypatch,
-        networks_on_subnet={
-            runtime.DEFAULT_SUBNET: ["saffron-cells-sy-2"],
-            runtime.SUBNETS["critic"]: ["saffron-critic-net-sy-2"],
-        },
-    )
+    cell1 = _stub_the_runtime(monkeypatch)
     sy1 = _rig_proxy("SY-1")
     outcome1, _ledger1 = _drive(
         monkeypatch,
@@ -7983,13 +8156,7 @@ def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
     )
     assert outcome1.state == "READY_FOR_REVIEW"
 
-    cell2 = _stub_the_runtime(
-        monkeypatch,
-        networks_on_subnet={
-            runtime.DEFAULT_SUBNET: ["saffron-cells-sy-1"],
-            runtime.SUBNETS["critic"]: ["saffron-critic-net-sy-1"],
-        },
-    )
+    cell2 = _stub_the_runtime(monkeypatch)
     sy2 = _rig_proxy("SY-2")
     outcome2, _ledger2 = _drive(
         monkeypatch,
@@ -8002,14 +8169,10 @@ def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
 
     # A third network, the gate-only cell's own, sits on its own subnet.
     # SA-0271 covers it. Only the first two are this claim's.
-    assert cell1.networks_created[:2] == [
-        ("saffron-cells-sy-1", runtime.DEFAULT_SUBNET),
-        ("saffron-critic-net-sy-1", runtime.SUBNETS["critic"]),
-    ]
-    assert cell2.networks_created[:2] == [
-        ("saffron-cells-sy-2", runtime.DEFAULT_SUBNET),
-        ("saffron-critic-net-sy-2", runtime.SUBNETS["critic"]),
-    ]
+    names1 = [name for name, _subnet in cell1.networks_created[:2]]
+    names2 = [name for name, _subnet in cell2.networks_created[:2]]
+    assert names1 == ["saffron-cells-sy-1", "saffron-critic-net-sy-1"]
+    assert names2 == ["saffron-cells-sy-2", "saffron-critic-net-sy-2"]
 
     removed1 = {name for kind, name in cell1.removed if kind == "network"}
     removed2 = {name for kind, name in cell2.removed if kind == "network"}

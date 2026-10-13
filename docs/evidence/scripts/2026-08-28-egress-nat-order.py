@@ -60,7 +60,7 @@ def attempt(*, container_first: bool) -> bool:
     try:
         if container_first:
             runtime.run_ephemeral("alpine:3", ["true"], network=NETWORK, timeout_s=120)
-        proxy.start_proxy(PROXY_NAME, NETWORK)
+        proxy.start_proxy(PROXY_NAME, NETWORK, subnet=runtime.DEFAULT_SUBNET)
         return egress_works()
     finally:
         proxy.stop_proxy(PROXY_NAME)

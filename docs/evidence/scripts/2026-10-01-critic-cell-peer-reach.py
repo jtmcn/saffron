@@ -110,7 +110,7 @@ def main() -> int:
     impl = f"saffron-cell-{SPEC_ID}"
     created: set[str] = set()
     try:
-        session.cell_up(
+        subnets = session.cell_up(
             repo=repo,
             mirror=mirror,
             tree_base=base,
@@ -126,13 +126,15 @@ def main() -> int:
             state=state,
             container=impl,
         )
-        proxy_ip = runtime.container_ip(proxy_name)
+        proxy_ip = runtime.container_ip(
+            proxy_name, runtime.subnet_prefix(subnets[network])
+        )
         if proxy_ip is None:
             raise runtime.CellRuntimeError("the proxy has no address")
         critic_proxy_ip = (
             proxy_ip
             if shared
-            else session.proxy_address(proxy_name, runtime.SUBNETS["critic"])
+            else session.proxy_address(proxy_name, subnets[critic_network])
         )
         impl_ip = _py(impl, OWN_IP, proxy_ip)
         print(f"implementer {impl_ip}, proxy {proxy_ip}")

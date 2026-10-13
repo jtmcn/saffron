@@ -997,15 +997,10 @@ def run_one_cell(
     return outcome
 
 
-# The critic cells' own subnet, drawn from the one declaration like every one.
-_CRITIC_SUBNET = runtime.SUBNETS["critic"]
-
-
 class _Leg(NamedTuple):
     """One internal network the proxy joins, and how its preflight line reads."""
 
     network: str
-    subnet: str
     step: str
     where: str
 
@@ -1036,7 +1031,7 @@ def cell_up(
     created: set[str],
     note: Callable[[str, str], None],
     cap_add: Sequence[str] = (),
-) -> None:
+) -> dict[str, str]:
     """Bring a cell up: network, proxy, image, isolation asserts, worktree.
 
     Extracted from `_drive_cell` so a second caller cannot get a *nearly*
@@ -1056,23 +1051,16 @@ def cell_up(
     the progress lines: `_drive_cell` sends them to `Preflight` events, and a
     harness may simply print them.
 
-    Nothing bound here outlives the call — the proxy address, the built image
-    tag and the probed port list are all consumed before it returns.
+    Returns the subnet claimed for each network created. Everything else
+    here is consumed before the call returns and reaches no caller.
     """
     from saffron import preflight
     from saffron.cell import proxy, runtime, worktree
     from saffron.repos import image
 
-    legs = [_Leg(network, runtime.DEFAULT_SUBNET, "egress", "")]
+    legs = [_Leg(network, "egress", "")]
     if critic_network is not None:
-        legs.append(
-            _Leg(
-                critic_network,
-                _CRITIC_SUBNET,
-                "critic_egress",
-                " from the critic network",
-            )
-        )
+        legs.append(_Leg(critic_network, "critic_egress", " from the critic network"))
 
     # Inside the guarantee, not above it: a leftover network from a SIGKILLed
     # run makes `create_network` the first thing that raises on a re-run.
@@ -1080,21 +1068,28 @@ def cell_up(
         runtime.remove_network(leg.network)
     runtime.remove_volume(volume)
     runtime.remove_volume(state)
+    # The create is the claim: each leg asks the pool for a /24 of its own,
+    # one creation attempt at a time, never a listing taken ahead of it.
+    subnets: dict[str, str] = {}
     for leg in legs:
         created.add(leg.network)
-        runtime.create_network(leg.network, subnet=leg.subnet)
+        subnets[leg.network] = runtime.allocate_network(leg.network)
 
     # First of everything: on apple/container 1.3.0 a container on the
     # internal network before the proxy leaves it no route out (evidence
     # 2026-08-28), and a dead route found here costs one container start
     # rather than an image build and an attempt (§5.1.1).
     note("proxy_starting", "starting the proxy")
-    proxy_ip = proxy.start_proxy(proxy_name, *(leg.network for leg in legs))
+    proxy_ip = proxy.start_proxy(
+        proxy_name, *(leg.network for leg in legs), subnet=subnets[network]
+    )
     note("proxy_addr", f"proxy at {proxy_ip}")
     # Per leg: a third one is unmeasured on either runtime.
     for leg in legs:
         answered = preflight.assert_proxy_reaches_upstream(
-            image.BASE_TAG, leg.network, proxy_address(proxy_name, leg.subnet)
+            image.BASE_TAG,
+            leg.network,
+            proxy_address(proxy_name, subnets[leg.network]),
         )
         note(leg.step, f"proxy reaches {proxy.UPSTREAM_HOST}{leg.where} ({answered})")
 
@@ -1113,7 +1108,7 @@ def cell_up(
     # tolerated listeners print every run, including when there are none —
     # an exception that goes quiet is the invisibility it was granted around.
     ports, tolerated, sockets = preflight.host_probe_ports()
-    gateways = [runtime.gateway(leg.subnet) for leg in legs]
+    gateways = [runtime.gateway(subnets[leg.network]) for leg in legs]
     # Every gateway, then the LAN address each probe shares.
     addresses = dict.fromkeys([*gateways, *preflight.probe_addresses(gateways[0])])
     note(
@@ -1151,6 +1146,7 @@ def cell_up(
         cap_add=cap_add,
     )
     note("cell_up", f"{container} up, worktree at {tree_base[:8]}")
+    return subnets
 
 
 def cell_down(
@@ -2039,7 +2035,7 @@ def _drive_cell(
     plan_first_call_unserved = False
 
     try:
-        cell_up(
+        subnets = cell_up(
             repo=repo,
             mirror=mirror,
             tree_base=spec.tree_base,
@@ -2809,7 +2805,7 @@ def _drive_cell(
 
             # Read once: REVIEW's and REBUT's critic cells share this env.
             critic_env = cell_env(
-                proxy_address(proxy_name, _CRITIC_SUBNET), policy.thread_env
+                proxy_address(proxy_name, subnets[critic_network]), policy.thread_env
             )
 
             def _critic_teardown(step: str, ok: bool, detail: str) -> None:

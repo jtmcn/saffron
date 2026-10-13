@@ -53,9 +53,11 @@ def proxy_name(key: str) -> str:
     return f"saffron-proxy-{key.lower()}"
 
 
-def start_proxy(name: str, *internal_networks: str, timeout_s: float = 30) -> str:
+def start_proxy(
+    name: str, *internal_networks: str, subnet: str, timeout_s: float = 30
+) -> str:
     """Start the named proxy on the egress network and every internal network
-    given, and return its address on the first, the cells network."""
+    given, and return its address on `subnet`, one of those internal ones."""
     runtime.remove_container(name)
     _ensure_egress_network()
     # Runs as the squid user from the start, not root: squid's own privilege
@@ -69,9 +71,10 @@ def start_proxy(name: str, *internal_networks: str, timeout_s: float = 30) -> st
         user="squid:squid",
     )
 
+    prefix = runtime.subnet_prefix(subnet)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        address = runtime.container_ip(name)
+        address = runtime.container_ip(name, prefix)
         if address:
             return address
         time.sleep(0.5)

@@ -3,6 +3,7 @@ that actually chose this runtime live in spikes/cell-runtime.sh."""
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import subprocess
@@ -687,11 +688,11 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
     143); `proxy.EGRESS_SUBNET` and `session._GATE_CELL_SUBNET` draw theirs
     from it rather than spelling a second literal in their own module.
 
-    Keeping all three *values* unchanged means a membership check alone
-    cannot tell this from the unfixed shape — a tuple in runtime.py nothing
-    draws from would satisfy it too. Source-level instead: neither module
-    that held a literal at base may still contain a quoted CIDR, imported
-    here rather than at module scope so a reverted run collects cleanly and
+    Keeping both *values* unchanged means a membership check alone cannot
+    tell this from the unfixed shape. A tuple in runtime.py that nothing
+    draws from would satisfy it too. Source-level instead: neither module that
+    held a literal at base may still contain a quoted CIDR, imported here
+    rather than at module scope so a reverted run collects cleanly and
     fails honestly on the assertions below instead of at import time.
     """
     import saffron.cell.proxy as proxy_module
@@ -704,10 +705,8 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
         "session.py still spells a subnet literal"
     )
 
-    assert runtime.SUBNETS["cells"] == runtime.DEFAULT_SUBNET
     assert runtime.SUBNETS["egress"] == proxy_module.EGRESS_SUBNET
     assert runtime.SUBNETS["gate"] == session_module._GATE_CELL_SUBNET
-    assert runtime.SUBNETS["critic"] == session_module._CRITIC_SUBNET
 
     # Equal is not drawn: `"10.89.0.0" + "/24"` passes both checks above.
     import ast
@@ -715,7 +714,6 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
     for src, name in [
         (proxy_src, "EGRESS_SUBNET"),
         (session_src, "_GATE_CELL_SUBNET"),
-        (session_src, "_CRITIC_SUBNET"),
     ]:
         (value,) = [
             node.value
@@ -725,6 +723,103 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
         ]
         assert isinstance(value, ast.Subscript), name
         assert ast.unparse(value.value) == "runtime.SUBNETS", name
+
+
+def test_the_pool_is_declared_once_and_overlaps_no_fixed_subnet():
+    """One `"pool"` entry carries every task network's subnet, and the
+    `"cells"` and `"critic"` entries it replaced are gone."""
+    assert runtime.SUBNETS["pool"] == "10.200.0.0/16"
+    assert "cells" not in runtime.SUBNETS
+    assert "critic" not in runtime.SUBNETS
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    for name, subnet in runtime.SUBNETS.items():
+        if name == "pool":
+            continue
+        assert not pool.overlaps(ipaddress.ip_network(subnet)), name
+    assert not pool.overlaps(ipaddress.ip_network(runtime.DEFAULT_SUBNET))
+
+
+def test_allocate_network_skips_each_held_slash24_whatever_the_refusal_says(
+    monkeypatch,
+):
+    """A refused create moves the walk on when `networks_on_subnet` names a
+    holder. Two different refusal wordings both do this, since the move
+    never reads the refusal's own text."""
+    creates: list[list[str]] = []
+    listing = (
+        "NETWORK          SUBNET\n"
+        "existing-a       10.200.0.0/24\n"
+        "existing-b       10.200.1.0/24\n"
+    )
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            creates.append(list(argv))
+            if len(creates) == 1:
+                return runtime.Completed(
+                    1,
+                    "",
+                    "Error: IPv4 subnet 10.200.0.0/24 overlaps an existing network",
+                )
+            if len(creates) == 2:
+                return runtime.Completed(1, "", "Error: netavark: refused")
+            return runtime.Completed(0, "", "")
+        return runtime.Completed(0, listing, "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    claimed = runtime.allocate_network("saffron-test-cells")
+    assert claimed == "10.200.2.0/24"
+    assert [argv[argv.index("--subnet") + 1] for argv in creates] == [
+        "10.200.0.0/24",
+        "10.200.1.0/24",
+        "10.200.2.0/24",
+    ]
+
+    # No holder named for a refused first /24: the create's own error raises
+    # after exactly one attempt, and the walk goes no further.
+    creates.clear()
+
+    def fake_call_no_holder(argv, timeout_s=120):
+        if "create" in argv:
+            creates.append(list(argv))
+            return runtime.Completed(
+                1, "", "Error: IPv4 subnet overlaps an existing network"
+            )
+        return runtime.Completed(0, "NETWORK          SUBNET\n", "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call_no_holder)
+    with pytest.raises(runtime.CellRuntimeError):
+        runtime.allocate_network("saffron-test-cells")
+    assert len(creates) == 1
+
+
+def test_allocate_network_names_every_holder_once_the_pool_is_exhausted(monkeypatch):
+    """Every /24 of the pool is held, so the walk tries one create per /24,
+    in order, and raises naming every holder it met."""
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    subnets = list(pool.subnets(new_prefix=24))
+    half = len(subnets) // 2
+    rows = "\n".join(
+        f"{'holder-a' if i < half else 'holder-b'} {s}" for i, s in enumerate(subnets)
+    )
+    listing = f"NETWORK SUBNET\n{rows}\n"
+    creates: list[str] = []
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            subnet = argv[argv.index("--subnet") + 1]
+            creates.append(subnet)
+            return runtime.Completed(
+                1, "", f"Error: IPv4 subnet {subnet} overlaps an existing network"
+            )
+        return runtime.Completed(0, listing, "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    with pytest.raises(runtime.CellRuntimeError) as raised:
+        runtime.allocate_network("saffron-test-cells")
+    assert creates == [str(s) for s in subnets]
+    assert "holder-a" in str(raised.value)
+    assert "holder-b" in str(raised.value)
 
 
 def test_no_two_declared_subnets_overlap():
