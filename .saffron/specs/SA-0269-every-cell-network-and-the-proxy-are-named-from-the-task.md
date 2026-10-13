@@ -16,6 +16,7 @@ touches:
   - tests/test_cli.py
   - tests/test_review_cells.py
   - tests/test_worktree.py
+  - tests/test_sigterm.py
   - docs/evidence/scripts/2026-08-28-egress-nat-order.py
   - docs/evidence/scripts/2026-09-07-lens-scoring.py
   - docs/evidence/scripts/2026-09-08-lens-corpus.py
@@ -49,9 +50,9 @@ forbidden:
   - tests/test_runtime.py
   - tests/test_preflight.py
   - tests/test_scheduler.py
-budget_usd: 36
+budget_usd: 52
 max_attempts: 3
-max_turns: 180
+max_turns: 240
 acceptance:
   - claim: >-
       `proxy.proxy_name` names a key's proxy `saffron-proxy-` followed by
@@ -205,6 +206,8 @@ pre-clean names it. `SA-0270` removes both.
   as one-time objects (`DESIGN.md:626-628`). It is edited by hand.
 
 ## Notes for the agent
+
+**`tests/test_sigterm.py` names the fixed networks.** It imports `CRITIC_NETWORK` and expects `removed:network:saffron-cells` in its teardown order (`tests/test_sigterm.py:20`, `:42-43`). Rewrite both to the per-task names.
 
 **Commit as each witness passes**, so an attempt cut off keeps what it
 finished.
