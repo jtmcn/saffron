@@ -4,7 +4,7 @@ title: Three lenses read one diff and none asked what a failed write leaves behi
 status: open
 tier: 1
 filed: 2026-09-06
-specs: [SA-0062]
+specs: [SA-0062, SA-0286]
 prs: [154]
 commits: []
 cites: [§5.4, §5.5, §9]
