@@ -40,10 +40,12 @@ GitHub issues remain in use only for research/evidence records under
 - **`removes`** is optional and empty by default. Each entry is a
   repo-relative `path` or `path:name` this spec deletes or renames. Load
   refuses the shapes it refuses in `consumes`, and needs no `depends_on`.
-  The queue scan refuses a pair of queued specs when one removes a name the
-  other's body, claims or `consumes` name. It does so only when no
-  `depends_on` path joins the two, and it holds the later id. `SA-0290` adds
-  the field. Until it lands, load refuses the key.
+  The queue scan refuses a candidate when one of the two removes a name the
+  other's body, claims or `consumes` name, and no `depends_on` path joins
+  them. The other is a candidate, or a spec whose task waits in
+  `DEPENDENCY_WAITING_STATES`. A waiting partner holds the candidate. Of two
+  candidates the later id is held. `SA-0290` adds the field. Until it
+  lands, load refuses the key.
 - **`pending_symbols`** lists dead code this spec will bring into use, one
   `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
   defers each one while the spec is open, so a parent spec can add what only its
