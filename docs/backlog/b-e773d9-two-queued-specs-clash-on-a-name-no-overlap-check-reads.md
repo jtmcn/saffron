@@ -4,7 +4,7 @@ title: Two queued specs in separate chains clash on a name one deletes and the o
 status: open
 tier: 1
 filed: 2026-10-12
-specs: [SA-0268, SA-0271]
+specs: [SA-0268, SA-0271, SA-0290]
 prs: [849]
 commits: []
 cites: [§4.2.1]
@@ -41,3 +41,6 @@ first step.
 
 - 2026-10-12: filed from the SA-0268 and SA-0271 conflict, fixed by hand in
   PR #849.
+- 2026-10-12: specced as `SA-0290`, the declared field and the queue
+  refusal. The operator ruled out the pre-flight command for a cell, since
+  `SA-0279` refuses a spec touching `.claude/`.
