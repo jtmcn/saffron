@@ -245,7 +245,9 @@ def _authored_at(spec_path: Path) -> str | None:
     untracked = not _git("ls-files", "--", rel).strip()
     if untracked or _git("diff", "HEAD", "--name-only", pickaxe, "--", rel).strip():
         return None
-    return _git("log", "-1", "--format=%H", pickaxe, "--", rel).strip() or None
+    # A spec that first lands in a merge has no other commit to find.
+    first = ("-s", "--diff-merges=first-parent")
+    return _git("log", "-1", "--format=%H", *first, pickaxe, "--", rel).strip() or None
 
 
 def _defined_at(witness: str, sha: str | None) -> bool:
@@ -281,6 +283,21 @@ def test_a_committed_spec_is_read_at_a_commit_not_the_working_tree():
     # witnesses have not reached yet, so the check would pass unread.
     done = sorted((SPECS / "done").glob("SA-*.md"))[-1]
     assert _authored_at(done)
+
+
+@pytest.mark.parametrize("queued", CASES, ids=lambda d: d.path.name)
+def test_a_committed_queued_spec_has_a_commit_that_wrote_its_witnesses(queued):
+    # SA-0269 first landed in a merge, and the pickaxe skips merge diffs, so
+    # its own cell's witnesses read as present when it was written.
+    if not isinstance(queued, DiscoveredSpec):
+        return
+    rel = queued.path.relative_to(REPO).as_posix()
+    if (
+        not _git("ls-files", "--", rel).strip()
+        or _git("diff", "HEAD", "--name-only", "--", rel).strip()
+    ):
+        return
+    assert _authored_at(queued.path)
 
 
 def test_the_checkout_has_the_history_the_witness_check_reads():
