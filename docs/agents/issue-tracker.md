@@ -147,7 +147,8 @@ GitHub issues remain in use only for research/evidence records under
   witness (backlog item b-000d04). So prefer a mutant in a file the diff
   changes. Where the claim's code lies elsewhere, a criterion can declare
   `subject:`, the repo-relative path of that code. `revert` then sets the
-  witness aside only when the subject lies outside the diff's source too.
+  witness aside only when the subject lies outside the diff's source too. A
+  subject inside the repo's test paths also keeps the witness judged.
   `SA-0291` adds the field. Until it lands, load refuses the key.
 
 - **A spec names the wrong versions its witnesses must kill, and never asks

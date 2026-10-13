@@ -58,8 +58,10 @@ acceptance:
       judged too. The gate's summary names each witness its `subject` kept
       judged, with that subject, on a `fail` verdict and on a `pass`
       verdict. The summary names no other witness that way. That covers a
-      witness its mutant's file already kept judged, one with no `subject`
-      and one the head run never collected.
+      witness its mutant's file already kept judged, one with no `subject`,
+      one set aside with a `subject` outside the source, and one the head
+      run never collected. The note naming a set-aside witness never calls
+      its mutant's file a subject.
     witness: tests/test_revert.py::test_a_witness_whose_declared_subject_the_diff_changed_is_judged_and_named
     mutant:
       file: saffron/gates/core/revert.py
@@ -73,6 +75,8 @@ acceptance:
       - The summary naming a criterion whose witness the head run never collected.
       - A subject compared with the source alone, so a subject in the test paths exempts the witness.
       - The new text added to the `fail` summary alone, so a `pass` verdict names nothing.
+      - The kept set taken as every witness whose mutant lies outside with any `subject`, before the set-aside ones leave it, so a set-aside witness's subject is named.
+      - The set-aside note left worded as at base, so it still calls the mutant's file a subject.
   - claim: >-
       `revert` sets a witness aside only when its mutant's file and its
       declared `subject` both lie outside the diff's source and outside the
@@ -184,9 +188,11 @@ of these hold.
 - Its criterion declares no `subject`, or the `subject` also lies outside
   `source` and outside the test paths.
 
-Leave the existing conditions of the rule as they read at base, and add the
-subject's condition beside them. A criterion with no `subject` is judged
-exactly as at base.
+Compute the mutant-file condition once, with its existing conditions as
+they read at base. Derive both the set-aside witnesses and the witnesses a
+`subject` keeps judged from that one result. Do not repeat the condition
+for the second set. A criterion with no `subject` is judged exactly as at
+base.
 
 **The summary.** A witness its `subject` kept judged is one the mutant's
 file alone would set aside. Its `subject` lies in `source` or in the test
@@ -194,6 +200,12 @@ paths. Only a witness in the run's subset counts. Add each such
 witness and its `subject` to the summary note, as the set-aside witnesses
 are added at `saffron/gates/core/revert.py:208-211`. The note already
 reaches the `fail` and `pass` verdicts.
+
+**The set-aside note.** At base it calls each set-aside witness one "whose
+subject this diff never touched" (`saffron/gates/core/revert.py:208-211`).
+Once `subject` is a declared field, that wording misleads. Reword it to name
+the mutant's file, with no "subject" in it. Keep the witness and its
+mutant's file in the note.
 
 **The comment.** Rewrite the comment above the rule
 (`saffron/gates/core/revert.py:176-194`) so it no longer says the mutant's
@@ -251,11 +263,21 @@ run, so the gate reports `skip`.
   in the summary.
 - The first leg with the reverted run failing the witness. Assert `pass`,
   and the witness and the subject in the summary.
-- One run with five criteria, each but the fourth with a `subject` the
-  diff changed. Their mutants sit in the untouched file, the changed file, the
-  file under `tests/`, the changed file with no `subject`, and the
-  untouched file. Head collects every witness but the fifth. Assert the
-  first four fail, the first is named, and none of the others appears.
+- One run with six criteria. The first five follow, each but the fourth
+  with a `subject` the diff changed. Their mutants sit in the untouched
+  file, the changed file, the file under `tests/`, the changed file with no
+  `subject`, and the untouched file. The sixth has its mutant in the
+  untouched file and its `subject` at a second untouched path. Head
+  collects every witness but the fifth. Assert the first four fail, and the
+  first is named. Assert none of the second to fifth witnesses appears, and
+  the sixth's `subject` path does not appear.
+- A lone criterion with its mutant in the untouched file and no `subject`.
+  Assert `skip`, the witness and the mutant's file in the summary, and no
+  "subject" anywhere in it.
+
+**Keep criterion 2's mutant text unique.** The rule's mutant-file condition is
+computed once, and both sets derive from it (see Problem). A prototype built
+that way holds that condition's text once at its head.
 
 **Criterion 2** loops over the three mutant paths and the four `subject`
 values, absent included, in one plain test. Each pair runs alone. The two
@@ -278,7 +300,7 @@ six paths as a quoted `subject`, and assert each message holds the path's
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words. Keep each to two lines naming the reason.
 
-**Size.** A prototype at `9466b17b` measured 787 changed tokens with
+**Size.** A prototype at `9466b17b` measured 839 changed tokens with
 `size_gate`, against the `feature` ceiling of 3000. It held the field, both
 validators, the rule, the note, the comment rewrite and the three
 witnesses. Every test in `tests/test_revert.py`, `tests/test_intake.py`

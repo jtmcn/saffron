@@ -19,7 +19,8 @@ Found 2026-10-13, writing `SA-0291`.
 `SA-0291` adds `subject:` to an acceptance criterion. It names the path a
 claim is about when the mutant's file is not that code. `revert` then sets
 a witness aside only when its mutant's file and its subject both lie
-outside the diff's source.
+outside the diff's source. Each must also lie outside the repo's test
+paths.
 
 `CONTEXT.md` has no entry for it. Its **Mutant** entry says a mutant is
 declared "against its own subject". That reads the mutant's file as the
