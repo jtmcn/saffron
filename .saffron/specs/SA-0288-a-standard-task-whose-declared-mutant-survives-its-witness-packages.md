@@ -155,12 +155,25 @@ that exists. The mutant puts `witness` back into the advisory set beside
 **Why deletion and not a constant `True`.** The `dead` gate's vulture scan
 reads names, not branches. So a `witness_blocking` returning true at both
 tiers would pass it, and `_advisory`'s `if not ...` would never run. The
-docstring's caveat about an inner `error` already lives in the
-`ponytail:` comment at `saffron/gates/core/witness.py:224-233`. So
-deleting the function loses no record. An inner `error` already aborts the
-attempt at every tier, since `_compare` checks `aborted_gates` before the
-advisory split (`saffron/gates/suite.py:238-239`). `tests/test_artifacts.py:344` already calls `suite._advisory`
-directly, which is the precedent for item 4's `test_gates.py` body.
+docstring carries two caveats, and each already has a home. An inner
+`error` that discards an earlier survivor is recorded at
+`saffron/gates/runner.py:218-219`. The `error` against `skip` disagreement
+with `revert` is the `ponytail:` comment at
+`saffron/gates/core/witness.py:224-233`. So deleting the function loses no
+record. An inner `error` already aborts the attempt at every tier, since
+`_compare` checks `aborted_gates` before the advisory split
+(`saffron/gates/suite.py:238-239`). `tests/test_artifacts.py:344` already
+calls `suite._advisory` directly, which is the precedent for item 4's
+`test_gates.py` body.
+
+**Before you edit, re-read what the chain changed.** `SA-0273`, `SA-0274`,
+`SA-0280` and `SA-0283` edit `suite.py`, `contract.py`, `witness.py` and the
+tests before this task runs. The line numbers here were read before them. Run
+`git grep -n -E 'advisory_gates|_advisory\(|witness_blocking' -- tests saffron`
+first. If a test outside `touches` pins `witness` advisory at `standard`,
+stop and name it as the reason, since you cannot edit it. Also
+confirm that the line in `_advisory` adding `size` to the set occurs exactly
+once in `suite.py`. The criterion's mutant must match exactly once.
 
 **Criterion 1's witness.** Write it in `tests/test_session.py`, after
 `test_a_skipped_witness_blocks_nothing_at_either_tier` (`:9696`). Take that
@@ -229,7 +242,12 @@ and `saffron/agents/prompts/spec-review.md:35-37` tie the witness gate to
 `saffron/gates/core/witness.py:251-252` says the survivor's message
 reaches REPAIR at `elevated`. Each says instead that `witness`
 blocks at every tier. The `prose` gate counts new hits per file, so a
-rewritten sentence takes no em dash and stays under 25 words.
+rewritten sentence takes no em dash and stays under 25 words. Each prompt
+keeps the half of its sentence about `size`.
+`tests/test_spec_review.py:1092-1115` refuses `DESIGN.md`, `saffron/` and
+`docs/` anywhere in `spec-review.md`, so cite no section there.
+`tests/test_spec_review.py:1413-1418` requires `spec-writer.md` to keep
+exactly its four placeholders, so add none.
 
 **Your own task is `elevated`.** `elevate_on` lists `saffron/gates/**`
 (`.saffron/policy.yaml:34`), so `size` blocks on this diff.
@@ -241,8 +259,11 @@ per-call frames. It also includes the seven edited tests, the prose edits
 and the code. `make check` passed on an
 earlier cut. The final cut passed ruff, the `prose` limit and every test
 module it edits. The witness failed with the source reverted, on its
-standard leg. The mutant and wrong versions 1, 2 and 5, applied as edits,
-each failed it. Version 5 ran as a suite that hands the gate no criteria
-and puts a canned survivor in its place.
+standard leg. The mutant and all five wrong versions, applied as edits,
+each failed it. Version 3 reported `witness` advisory while the comparison
+still blocked on it, and failed on the advisory-gates assertion. Version 4
+returned `error` for a survivor, and failed on the state. Version 5 handed
+the gate no criteria and put a canned survivor in its place, and failed on
+the head frame.
 
 Commit after the witness passes. Uncommitted work dies with the cell.

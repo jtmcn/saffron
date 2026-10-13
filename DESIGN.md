@@ -1176,8 +1176,9 @@ declared mutant survived its witness on two gate suites. The task still went
 A spec declaring no mutants, whose diff yields no constant mutant,
 reports `skip`. So this cannot fail a task retroactively until a repo
 declares `witness:` patterns, which is an operator step. Once it does, a
-queued spec written before them can draw a constant-mutant survivor. A false
-survivor blocks as a true one does. A survivor at base is not subtracted
+queued spec written before them can draw a constant-mutant survivor. Once
+`SA-0280` and `SA-0288` both land, a false survivor blocks as a true one does.
+A survivor at base is not subtracted
 (§5.4), so it blocks until the task kills its mutant.
 
 ### 5.5 Phase 4 — REVIEW (adversarial)

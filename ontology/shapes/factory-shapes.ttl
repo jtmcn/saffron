@@ -158,8 +158,8 @@ factory:ContractGateShape a sh:NodeShape ;
     sh:property [ sh:path factory:role ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:GateRole ] .
 
-# Core gates' blocking levels are core-supplied: §5.4 fixes them, and `size` is
-# the one a tier moves. Stated as constraints rather than left
+# Core gates' blocking levels are core-supplied: §5.4 fixes them, and a tier
+# moves `size`. Stated as constraints rather than left
 # as triples in the vocabulary — an unenforced fact in this ontology is what the
 # dead-term test exists to delete, one level up. `sh:in` rather than
 # `sh:hasValue` because `sh:targetNode` targets its node in every graph including
@@ -174,7 +174,9 @@ factory:CoreGateBlockingShape a sh:NodeShape ;
 # the design: §5.4 had `size` always-blocking and §5.6 had it becoming blocking
 # at `elevated`, and both could not be true (Appendix B). `witness` took the
 # same two levels until a `standard` task packaged with its own declared mutant
-# surviving (backlog item b-02d328). It now blocks at every tier (§5.4.1).
+# surviving (backlog item b-02d328). The operator decided `witness` blocks at
+# every tier, and `SA-0288` builds it. Until it lands, the gate suite holds
+# `witness` advisory at `standard` (§5.4.1).
 factory:SizeTierShape a sh:NodeShape ;
     sh:targetNode factory:size ;
     sh:property [ sh:path factory:blockingAt ; sh:in ( factory:blockingWhenElevated ) ] .
