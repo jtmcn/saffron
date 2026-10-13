@@ -3,7 +3,7 @@ id: SA-0287
 title: A lens that errors halts its task at `REVIEWING`, so a stamping scan reads the halt as a crash
 type: bug
 priority: 2
-depends_on: [SA-0276, SA-0273, SA-0282]
+depends_on: [SA-0276]
 estimated_lines: 110
 estimate_measured: true
 touches:
@@ -76,6 +76,7 @@ acceptance:
       - The new state returned only when every lens errored, so an errored lens beside a clean one ends `READY_FOR_REVIEW`.
       - The blocker check moved ahead of the errored check, so an errored lens beside an anchored blocker ends `REBUTTING`.
       - The errored check reads only the first lens, so an errored lens after a lens with findings goes unseen.
+      - The errored check reads only the last lens, so an errored lens before a lens with findings goes unseen.
       - The new state returned for any review with no anchored finding, so a clean review reads as incomplete.
   - claim: >-
       `run_one_cell` returns `REVIEW_INCOMPLETE` for a lens whose session
@@ -86,13 +87,14 @@ acceptance:
       then offers only the stamped one, resuming its row.
     witness: tests/test_session.py::test_a_lens_that_errored_ends_its_task_in_a_state_no_batch_scan_takes_back
     mutant:
-      file: saffron/cell/session.py
-      find: ledger.set_task_state(task_id, outcome)
-      replace: ledger.set_task_state(task_id, "REVIEWING" if outcome == "REVIEW_INCOMPLETE" else outcome)
+      file: saffron/phases/review.py
+      find: return LensReview(lens, cost_usd=cost, error=str(failed))
+      replace: return LensReview(lens, cost_usd=cost)
     wrong_versions:
       - The cell returns the new state but writes `REVIEWING` to the row, so the scan stamps it `ORPHANED` and the queue offers it again.
       - The new state joins the in-flight set, so a stamping reconcile stamps the row `ORPHANED`.
       - The new state sits in the re-queue set rather than the done set, so `build_queue` offers its spec again.
+      - The new state sits in neither the done set nor the re-queue set, so `build_queue` offers its spec as a fresh task.
       - The cell writes the new state as REVIEW starts, so `on_state` never hears `REVIEWING`.
       - A reconcile that reads no rows, so it stamps nothing whatever the row's state.
 ---
@@ -179,6 +181,17 @@ in-flight task. `tests/test_batch.py`, `tests/test_cli.py` and
   hold for this state.
 - **ADR 4 and ADR 8.** Each still says a lens that errors stops the task at
   `REVIEWING`. They are edited by hand once this lands.
+- **`saffron adopt`.** It refuses a task outside `_ADOPTABLE_STATES`
+  (`saffron/cli.py:2287`, `:2306-2311`). It refuses `REVIEW_INCOMPLETE` as
+  it refuses `REVIEWING` today, so `SA-0259`'s adopt path stays closed.
+- **The spec loop's own rules.** Its driver holds a child back unless the
+  parent is `READY_FOR_REVIEW`
+  (`.claude/skills/run-saffron-spec-loop/driver.py:1005-1009`). Its record
+  command files the new state as decided
+  (`.claude/skills/run-saffron-spec-loop/driver.py:1165-1167`). It prints no
+  halted-at guidance for it
+  (`.claude/skills/run-saffron-spec-loop/driver.py:1188-1196`). Its `GOTCHAS.md` names only `REBUTTING` as a halt. All
+  three are edited by hand once this lands.
 - **Rows already left `REVIEWING`.** No migration rewrites them. A stamping
   scan still stamps them `ORPHANED`.
 - **Exit code.** The new state has no entry in `CELL_EXIT`
@@ -188,8 +201,13 @@ in-flight task. `tests/test_batch.py`, `tests/test_cli.py` and
 ## Notes for the agent
 
 **Each criterion pins existing text.** Criterion 1 swaps a literal in place
-in a return that already exists. Criterion 2 mutates the end of the cell,
-which this change leaves alone. So each declares a mutant.
+in a return that already exists. Criterion 2 mutates the return for a lens
+whose session failed (`saffron/phases/review.py:321-326`), which this change
+leaves alone. So each declares a mutant. Both mutants sit in
+`saffron/phases/review.py`, a source file this diff changes. The revert
+gate's `unreachable` set drops a witness whose mutant names a file outside
+the diff's source (`saffron/gates/core/revert.py:195-211`). So both
+witnesses stay in its reverted run.
 
 **Criterion 1's return grows past the line limit.** `ruff format` then wraps
 it into a parenthesised two-line tuple. Run `make fmt` before committing.
@@ -219,6 +237,11 @@ directory. Assert its candidates are exactly `SY-2`, resuming the second
 row's `task_id`. Without the second row, a reconcile that reads no rows
 passes.
 
+**Overlaps.** `tests/test_session.py` is in the `touches` of several queued
+specs, and `SA-0286` touches `tests/test_review.py`. Each overlap is a test
+file only, so `depends_on` leaves it to the scheduler's open pull request
+overlap refusal. `SA-0276` is the one semantic parent.
+
 **At base each new witness fails in its body.** Neither imports a name this
 change adds. Both fail on the state `review_state` returns.
 
@@ -226,7 +249,7 @@ change adds. Both fail on the state `review_state` returns.
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
-**Size.** A prototype measured 337 changed tokens with `size_gate`'s
+**Size.** A prototype measured 341 changed tokens with `size_gate`'s
 counter, against the `bug` ceiling of 1300. It held the source edit, the
 docstring update, both assertion updates and the two new witnesses.
 `estimated_lines` is that count over four, plus a margin.
