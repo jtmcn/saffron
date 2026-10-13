@@ -141,8 +141,8 @@ GitHub issues remain in use only for research/evidence records under
   in `forbidden` instead, as `SA-0079` and `SA-0097` do.
 
   *A mutant outside the diff costs a `revert` verdict.* `revert` sets aside a
-  witness whose mutant's file the diff left alone, and reads that file as the
-  code the claim is about. `SA-0286`'s mutants sat in a forbidden file while
+  witness whose mutant's file the diff left alone, unless that file sits in
+  the repo's test paths. It reads that file as the code the claim is about. `SA-0286`'s mutants sat in a forbidden file while
   its witnesses read prompts the diff changed. `revert` judged neither
   witness (backlog item b-000d04). So prefer a mutant in a file the diff
   changes. Where the claim's code lies elsewhere, a criterion can declare

@@ -192,11 +192,15 @@ Compute the mutant-file condition once, with its existing conditions as
 they read at base. Derive both the set-aside witnesses and the witnesses a
 `subject` keeps judged from that one result. Do not repeat the condition
 for the second set. A criterion with no `subject` is judged exactly as at
-base.
+base. Keep the mutant file's test-path check inline, written as at base.
+Test the `subject` in an expression of its own. Never route the mutant's
+file through a helper it shares with the `subject`.
 
 **The summary.** A witness its `subject` kept judged is one the mutant's
 file alone would set aside. Its `subject` lies in `source` or in the test
-paths. Only a witness in the run's subset counts. Add each such
+paths. Only a witness in the run's subset counts. A witness that any
+criterion sets aside is never named as kept, though another of its criteria
+declares a `subject` in `source`. Add each such
 witness and its `subject` to the summary note, as the set-aside witnesses
 are added at `saffron/gates/core/revert.py:208-211`. The note already
 reaches the `fail` and `pass` verdicts.
@@ -211,6 +215,9 @@ mutant's file in the note.
 (`saffron/gates/core/revert.py:176-194`) so it no longer says the mutant's
 file is always the subject. Keep it to the reasons. Item 84 is the case for
 the exemption, and the test paths stay judged for the reason at `:188-194`.
+The docstring at `tests/test_revert.py:605` says the same thing, so rewrite
+it too. In the leg that asserts no "subject" in the note, name no witness
+or path with that word in it.
 
 ## Out of scope
 
