@@ -645,15 +645,19 @@ REVIEW is a separate session because it must be adversarial. It cannot be allowe
 
 ```
 # one-time
-container network create --internal --subnet 10.88.0.0/24 saffron-cells
-container run -d --name saffron-proxy \
-  --network saffron-cells --network saffron-egress \
+container network create --subnet 10.89.0.0/24 saffron-egress
+
+# per task: each network claims the first free /24 of the subnet pool, 10.200.0.0/16
+container network create --internal --subnet 10.200.0.0/24 saffron-cells-te0142
+container network create --internal --subnet 10.200.1.0/24 saffron-critic-net-te0142
+container run -d --name saffron-proxy-te0142 --user squid:squid \
+  --network saffron-egress \                      # first: the default route
+  --network saffron-cells-te0142 --network saffron-critic-net-te0142 \
   saffron/proxy            # hostname CONNECT allowlist, addressed by IP
 
-# per task
 container run --rm \
-  --network saffron-cells \                       # no default route
-  -e HTTPS_PROXY=http://10.88.0.2:3128 \          # by IP: internal nets have no DNS
+  --network saffron-cells-te0142 \                # no default route
+  -e HTTPS_PROXY=http://<proxy>:3128 \            # its address on the cells /24, read back
   -e CLAUDE_CODE_OAUTH_TOKEN \
   -e CLAUDE_CONFIG_DIR=/agent-state \
   $(policy.thread_env) \                          # repo-declared, see below
@@ -664,6 +668,8 @@ container run --rm \
   --mount type=bind,source=<task-dir>/gates,target=/gates,readonly \   # gates at base_sha
   saffron/cell:thermal-edge                       # built from the checkout — see below
 ```
+
+**Every name in the per-task block is the task's own, and so is every internal subnet**. A task's networks and proxy carry its spec id, lowercased. Each internal network claims one /24 of the subnet pool by creating on it. A refused create moves the walk on only while another network holds that /24. So two tasks, or a task and an end review, never share a network or a proxy (`SA-0269`, `SA-0270`). `saffron-egress` alone is shared. PACKAGE's re-verification still creates on `DEFAULT_SUBNET`, `10.88.0.0/24`, until `SA-0271`.
 
 **Every flag in the per-task block is a requirement, and the wiring is the control**. v0.5 shipped a cell created without `--network` and without the proxy environment. The isolated network was created, and the host-binding probe ran against it. The proxy started on it and printed its address. None of it was passed to the container holding the agent. Every mechanism ran, every mechanism reported success, and all of it applied to a different container. So `network` and `env` are **required** arguments where a cell is created. Omission is an error, not a default. The test that proves isolation must start a cell *the way production starts one*. It must probe **from inside that container**, not from an ephemeral sibling (Appendix I). **That rule is about a *container's* egress**. A preflight probe establishing a property of the *network* (N1's host-binding probe) necessarily runs in an ephemeral sibling on that same network. That probe gates whether a cell is started at all, so it cannot run inside a cell that does not exist yet.
 
