@@ -1,13 +1,14 @@
 ---
 id: SA-0286
-title: No lens asks what a failure leaves behind, and an adequacy finding that contradicts a ticked criterion files as a concern
+title: No lens asks what a failure leaves behind, and a finding that contradicts a ticked criterion files as a concern
 type: bug
 priority: 1
 depends_on: []
-estimated_lines: 155
+estimated_lines: 204
 estimate_measured: true
 touches:
   - saffron/agents/prompts/review-correctness.md
+  - saffron/agents/prompts/review-contract.md
   - saffron/agents/prompts/review-adequacy.md
   - tests/test_review.py
 forbidden:
@@ -29,7 +30,6 @@ forbidden:
   - saffron/cell/**
   - saffron/report/**
   - saffron/agents/context.py
-  - saffron/agents/prompts/review-contract.md
   - saffron/agents/prompts/review-conventions.md
   - saffron/agents/prompts/end-review-join.md
   - saffron/agents/prompts/end-review-spec.md
@@ -70,23 +70,27 @@ acceptance:
       - The bullet copied into the contract prompt's remit as well.
       - A witness that reads the prompt file by path rather than through `review.lens_prompt`.
   - claim: >-
-      The adequacy lens's prompt, as `review.lens_prompt` renders it, keeps
-      its `blocker` level for a test that reads as coverage of an acceptance
-      criterion but is not. That level now also names any adequacy finding
-      that contradicts an acceptance criterion the pull request body renders
-      as satisfied, and says it files as a `blocker`, never as a `concern`.
-      None of the correctness, contract and conventions prompts carries that
-      sentence.
-    witness: tests/test_review.py::test_the_adequacy_lens_files_a_contradicted_ticked_criterion_as_a_blocker
+      The correctness, contract and adequacy prompts, as `review.lens_prompt`
+      renders each, name in their `blocker` level any finding that
+      contradicts an acceptance criterion the pull request body renders as
+      satisfied. Each says the task lists every criterion with an empty box,
+      that a `criteria` gate `pass` means the body renders every criterion
+      as satisfied, and that such a finding files as a `blocker`, never as a
+      `concern`. The adequacy prompt's `blocker` level keeps its case for a
+      test that reads as coverage of an acceptance criterion but is not. The
+      conventions prompt carries no such sentence.
+    witness: tests/test_review.py::test_three_lenses_file_a_contradicted_ticked_criterion_as_a_blocker
     mutant:
       file: saffron/phases/review.py
       find: '"adequacy": "review-adequacy.md",'
       replace: '"adequacy": "review-correctness.md",'
     wrong_versions:
-      - The contradicted-criterion sentence placed in the remit or the instruction rather than the `blocker` bullet of the severity section.
-      - The sentence calling such a finding a candidate for a `blocker` rather than a `blocker`.
-      - The coverage case dropped from the `blocker` bullet when the new case is added.
-      - The sentence added to every lens prompt rather than the adequacy prompt alone.
+      - The contradicted-criterion sentences placed in the remit or the instruction rather than the `blocker` bullet of the severity section.
+      - The sentences calling such a finding a candidate for a `blocker` rather than a `blocker`.
+      - The coverage case dropped from the adequacy `blocker` bullet when the new case is added.
+      - The sentences added to two of the three lenses, such as adequacy and correctness but not contract.
+      - The sentences added to the conventions prompt as well.
+      - Text saying the gate results show which boxes tick when `criteria` fails, which its summary does not.
   - claim: >-
       The conventions prompt's list of the other lenses' remits is unchanged.
       The correctness, contract and adequacy prompts' Not-yours lists each
@@ -112,6 +116,11 @@ find.
 and score it on the harness. Then say in the adequacy prompt that a finding
 contradicting a criterion the pull request body renders as satisfied is a
 `blocker` (`docs/superpowers/plans/2026-09-07-trusting-the-queue.md:266-285`).
+The operator widened the second half to every lens whose instruction
+already names an acceptance criterion technically satisfied and not
+met. That instruction sits at line 16 of
+`saffron/agents/prompts/review-correctness.md`, `review-contract.md` and
+`review-adequacy.md`. The conventions prompt does not carry it.
 
 **How a prompt reaches a lens.** `LENSES` maps each lens to its prompt file
 (`saffron/phases/review.py:41-46`). `lens_prompt` reads that file from
@@ -129,9 +138,13 @@ at `:62-64` gives the lens what the code computes and takes from it holding
 an interface or a stored format stable. Nothing in the remit names what a
 raise, a non-zero exit or an interrupted write leaves on disk.
 
-**The adequacy `blocker` today.** It is reserved for one case, a test that
-reads as coverage of the acceptance criterion but is not
-(`saffron/agents/prompts/review-adequacy.md:97-100`). Item 79 records the
+**The `blocker` level today.** The correctness and contract prompts each
+give it one sentence, which forbids the merge as the change stands
+(`saffron/agents/prompts/review-correctness.md:68`,
+`saffron/agents/prompts/review-contract.md:73`). The adequacy prompt
+reserves it for one case, a test that reads as coverage of the acceptance
+criterion but is not (`saffron/agents/prompts/review-adequacy.md:97-100`).
+Item 79 records the
 adequacy concern on PR #154 that contradicted a criterion the same body
 ticked. §5.5 holds that a lens filing everything as a `concern` is a
 prompting defect.
@@ -139,17 +152,21 @@ prompting defect.
 **What "renders as satisfied" means.** The pull request body ticks a
 criterion's box from the `criteria` gate's result. When that gate passed
 or failed, a criterion whose witness it names as a failure stays unticked,
-and every other box ticks (`saffron/report/pr_body.py:214-231`). Each lens sees the gate
-results as `- <gate>: <status> (<tool>)` lines
-(`saffron/phases/review.py:170-187`), and sees each claim as a `- [ ]`
-line under `## Acceptance criteria` in its task
-(`saffron/agents/context.py:220-231`, `saffron/cell/session.py:2930-2931`).
+and every other box ticks (`saffron/report/pr_body.py:214-231`). A lens
+never sees the body. It sees the gate results as `- <gate>: <status>
+(<tool>)` lines with a summary (`saffron/phases/review.py:170-187`). On a
+`fail`, the `criteria` summary gives only a count of unmet criteria and
+names none (`saffron/gates/core/criteria.py:183`). So only a `pass` tells
+a lens which criteria render as satisfied, and then it is all of them. The
+lens's task lists every claim as an empty box under `## Acceptance
+criteria`, whatever the gate found (`saffron/agents/context.py:220-231`,
+`saffron/cell/session.py:2930-2931`).
 
 ## Problem
 
-The correctness lens has no remit over what a failure leaves behind. The
-adequacy lens files a finding that contradicts a ticked criterion at
-whatever level it likes.
+The correctness lens has no remit over what a failure leaves behind. No
+lens is told that a finding contradicting a ticked criterion is a
+`blocker`.
 
 1. **The correctness remit.** The sentence introducing the remit in
    `review-correctness.md` ends with the text under **The remit's
@@ -157,9 +174,11 @@ whatever level it likes.
    text under **The failure-path bullet**. The edge sentence is replaced by
    the text under **The correctness edge**. The Not-yours list is
    unchanged.
-2. **The adequacy `blocker`.** In `review-adequacy.md`, the `blocker`
-   bullet of the severity section becomes the text under **The adequacy
-   blocker**. The `concern` and `note` bullets are unchanged.
+2. **The `blocker` level.** In `review-correctness.md` and
+   `review-contract.md`, the `blocker` bullet of the severity section
+   becomes the text under **The correctness and contract blocker**. In
+   `review-adequacy.md` it becomes the text under **The adequacy
+   blocker**. The `concern` and `note` bullets are unchanged in all three.
 
 ## Out of scope
 
@@ -174,9 +193,14 @@ whatever level it likes.
   Problem.
 - **The other lenses' Not-yours lists.** The contract, adequacy and
   conventions prompts keep their bullet naming the correctness lens's
-  territory as it stands. The contract lens filed `truncating-write`
-  through a written contract in the 2026-09-07 pass, and this spec does
-  not take that route from it.
+  territory as it stands. A truncating write can
+  then sit in both the correctness remit and the contract remit, an
+  overlap §5.5's disjoint remits argue against. It is accepted on purpose.
+  The contract lens filed `truncating-write` through a written contract in
+  the 2026-09-07 pass, and this spec does not take that route from it.
+- **The conventions `blocker`.** Its instruction names no acceptance
+  criterion technically satisfied but not met, so its severity section is
+  unchanged.
 - **`DESIGN.md` §5.5's list for lens #1.** It is protected, and its
   examples stay as they are here.
 
@@ -218,8 +242,24 @@ true of the bullet below.
 
 ```text
 The test at the edge: if the fix changes what the code computes, or what a
-failure leaves behind, it is yours. If the fix holds an interface or a stored
-format stable, it is not.
+failure leaves behind, it is yours. If the fix only holds an interface or a
+stored format stable, it is not.
+```
+
+"Only" keeps the second sentence from firing on a fix that does both, such
+as an atomic write that also keeps a stored format stable.
+
+### The correctness and contract blocker
+
+The same text in both prompts.
+
+```text
+- `blocker` — this change should not merge as it stands. That includes any
+  finding of yours that contradicts an acceptance criterion the pull request
+  body renders as satisfied. The task below lists every criterion with an
+  empty box, whatever the gates found. A `criteria: pass` line in the gate
+  results means the body renders every criterion as satisfied. File such a
+  finding as a `blocker`, never as a `concern`.
 ```
 
 ### The adequacy blocker
@@ -230,12 +270,14 @@ format stable, it is not.
   criterion but is not. The gap alone then stands between "the suite is
   green" and "the criterion is met". The second is any finding of yours that
   contradicts an acceptance criterion the pull request body renders as
-  satisfied. The body ticks each criterion's box from the `criteria` gate's
-  result, which the gate results below show. File such a finding as a
-  `blocker`, never as a `concern`.
+  satisfied. The task below lists every criterion with an empty box,
+  whatever the gates found. A `criteria: pass` line in the gate results
+  means the body renders every criterion as satisfied. File such a finding
+  as a `blocker`, never as a `concern`.
 ```
 
-The first sentence is unchanged from base, em dash included.
+In all three blocks the first sentence is unchanged from base, em dash
+included.
 
 ### The witnesses
 
@@ -250,16 +292,21 @@ Both are new tests in `tests/test_review.py`. Each renders a prompt with
   six, and the last equals the failure-path bullet joined on whitespace.
   Assert the first five open, in order, with the bold headings they carry
   at base: Time, Boundaries, Missing data, Units and scale, and Order and
-  state. Assert the edge sentence equals the correctness edge. Assert no Not-yours
-  bullet contains `leaves behind`. Render the contract, adequacy and
-  conventions prompts. For each, the text before its first `Not yours.`
-  does not contain `What a failure leaves behind`.
-- **Criterion 2.** Render the adequacy prompt. Take the section from the
-  line opening `## Severity` to the next line opening `## `. Take the
-  `blocker` bullet's text, up to the `concern` bullet, joined on whitespace.
-  Assert it equals the adequacy blocker without its leading dash. Render the
-  correctness, contract and conventions prompts, and assert none contains
-  `renders as satisfied` once joined on whitespace.
+  state. Assert the edge sentence equals the correctness edge. Assert no
+  Not-yours bullet, joined on whitespace, contains `leaves behind`. Render
+  the contract, adequacy and conventions prompts. Join each on whitespace,
+  and assert the text before its first `Not yours.` does not contain
+  `What a failure leaves behind`. A Not-yours bullet that hands the
+  failure path away in other words, without `leaves behind`, escapes this
+  check. The dictated text leaves the list unchanged, so none is expected.
+- **Criterion 2.** Table three rows: correctness and contract expect the
+  correctness and contract blocker, and adequacy expects the adequacy
+  blocker, each without its leading dash and joined on whitespace. For each
+  row, render the lens's prompt. Take the section from the line opening
+  `## Severity` to the next line opening `## `. Take the `blocker` bullet's
+  text, up to the `concern` bullet, joined on whitespace. Assert it equals
+  the row's text. Render the conventions prompt and assert it does not
+  contain `renders as satisfied` once joined on whitespace.
 
 **Existing tests that read these prompts stay green unchanged.**
 `test_the_lenses_declare_disjoint_remits` (`tests/test_review.py:496`),
@@ -270,5 +317,6 @@ correctness remit uses the word "notice", which the bullet above does not.
 
 **Commit as each witness passes.**
 
-**Size.** A prototype of both prompt edits and both witnesses measured 618
-changed tokens under `size_gate`. `estimated_lines` is that over four.
+**Size.** A prototype of the three prompt edits and both witnesses
+measured 814 changed tokens under `size_gate`. `estimated_lines` is that
+over four.
