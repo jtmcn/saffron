@@ -8109,9 +8109,9 @@ def test_two_tasks_and_an_end_review_cell_hold_disjoint_subnets(monkeypatch, tmp
 def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
     monkeypatch, tmp_path
 ):
-    """Two tasks run one after the other, each over its own fake runtime.
-    Neither task's pre-clean or teardown touches the other's network or
-    proxy. Neither names a network or proxy the old fixed name would have
+    """Two tasks run side by side, each with the other's networks already
+    live on the pool's first two /24s. Neither task's pre-clean or teardown
+    touches the other's network or proxy. Neither names a network or proxy the old fixed name would have
     given it."""
 
     def _rig_proxy(key: str) -> dict[str, list]:
@@ -8145,7 +8145,17 @@ def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
         own["expected_name"] = [name]
         return own
 
+    def _hold_the_others(cell, other: str) -> None:
+        # Live claims, so each walk moves past them and a sweep would find them.
+        first, second = list(
+            ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24)
+        )[:2]
+        runtime.create_network(f"saffron-cells-{other}", subnet=str(first))
+        runtime.create_network(f"saffron-critic-net-{other}", subnet=str(second))
+        del cell.networks_created[:2]
+
     cell1 = _stub_the_runtime(monkeypatch)
+    _hold_the_others(cell1, "sy-2")
     sy1 = _rig_proxy("SY-1")
     outcome1, _ledger1 = _drive(
         monkeypatch,
@@ -8157,6 +8167,7 @@ def test_two_tasks_bring_up_and_tear_down_only_their_own_networks_and_proxy(
     assert outcome1.state == "READY_FOR_REVIEW"
 
     cell2 = _stub_the_runtime(monkeypatch)
+    _hold_the_others(cell2, "sy-1")
     sy2 = _rig_proxy("SY-2")
     outcome2, _ledger2 = _drive(
         monkeypatch,
