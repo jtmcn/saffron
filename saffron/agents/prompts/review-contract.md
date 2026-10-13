@@ -70,7 +70,12 @@ it is not.
 
 ## Severity — three levels, and the third one matters
 
-- `blocker` — this change should not merge as it stands.
+- `blocker` — this change should not merge as it stands. That includes any
+  finding of yours that contradicts an acceptance criterion the pull request
+  body renders as satisfied. The task below lists every criterion with an
+  empty box, whatever the gates found. A `criteria: pass` line in the gate
+  results means the body renders every criterion as satisfied. File such a
+  finding as a `blocker`, never as a `concern`.
 - `concern` — a person has to decide about this. Concerns are the number the
   morning queue sorts on, so every one you file spends someone's attention.
 - `note` — true but trivial. Counted nowhere, and it exists so that filing

@@ -621,6 +621,168 @@ def test_the_other_three_lenses_hand_a_restated_type_to_conventions():
     assert "a constant or helper restated" not in joined
 
 
+_CORRECTNESS_FAILURE_BULLET = (
+    "**What a failure leaves behind**: the state on disk or in a worktree "
+    "after a raise, a non-zero exit or an interrupted write. A truncated "
+    "file, a half-applied restore, an undo over uncommitted work, and "
+    "cleanup that runs only on success are each yours. Follow every path "
+    "that can stop before it finishes, and name what it leaves for the "
+    "next reader."
+)
+
+_CORRECTNESS_EDGE = (
+    "The test at the edge: if the fix changes what the code computes, or "
+    "what a failure leaves behind, it is yours. If the fix only holds an "
+    "interface or a stored format stable, it is not."
+)
+
+_CORRECTNESS_NOT_YOURS = [
+    "Public API, CLI or wire-format compatibility, serialization, schema "
+    "changes, migration reversibility, anything a downstream consumer "
+    "depends on — that is the contract & schema lens.",
+    "What else in the repository calls the changed code, and what breaks "
+    "downstream of it — that is the blast-radius lens.",
+    "Whether a test would actually notice this code being wrong — an "
+    "assertion weaker than the criterion it claims to cover, one built "
+    "from a value the test itself constructed, or one a rename or "
+    "reformat would defeat without the behaviour changing. That is the "
+    "test-adequacy lens; a data-semantics defect you can name is yours "
+    "even when the test around it is also weak, but the weakness of the "
+    "test itself is not.",
+    _APPENDED_BULLET,
+]
+
+
+def test_the_correctness_lens_asks_what_a_failure_leaves_behind():
+    """The correctness remit ends with a bullet asking what a failure
+    leaves behind: three ways a path stops early, four things it leaves.
+    The Not-yours list stays, and no other lens claims the bullet."""
+    prompt = review.lens_prompt(
+        "correctness",
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    remit_bullets = _bullets_between(
+        prompt, "## Your remit, and its edges", "Not yours."
+    )
+    assert len(remit_bullets) == 6
+    assert remit_bullets[-1] == _CORRECTNESS_FAILURE_BULLET
+    for bullet, heading in zip(
+        remit_bullets[:5],
+        (
+            "**Time**",
+            "**Boundaries**",
+            "**Missing data**",
+            "**Units and scale**",
+            "**Order and state**",
+        ),
+        strict=True,
+    ):
+        assert bullet.startswith(heading)
+
+    edge_start = prompt.index("The test at the edge", prompt.index("Not yours."))
+    edge = " ".join(prompt[edge_start:].split("\n\n")[0].split())
+    assert edge == _CORRECTNESS_EDGE
+
+    not_yours, _edge = _not_yours_bullets_and_edge(prompt)
+    assert len(not_yours) == 4
+    assert not_yours == _CORRECTNESS_NOT_YOURS
+
+    for lens in ("contract", "adequacy", "conventions"):
+        text = review.lens_prompt(
+            lens,
+            context_md=CONTEXT_MD,
+            claude_md=None,
+            prompts_dir=PROMPTS,
+            spec_body="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+        )
+        before = " ".join(text.split("Not yours.")[0].split())
+        assert "What a failure leaves behind" not in before
+
+
+_CORRECTNESS_CONTRACT_BLOCKER = (
+    "`blocker` — this change should not merge as it stands. That includes "
+    "any finding of yours that contradicts an acceptance criterion the "
+    "pull request body renders as satisfied. The task below lists every "
+    "criterion with an empty box, whatever the gates found. A `criteria: "
+    "pass` line in the gate results means the body renders every "
+    "criterion as satisfied. File such a finding as a `blocker`, never as "
+    "a `concern`."
+)
+
+_ADEQUACY_BLOCKER = (
+    "`blocker` — this change should not merge as it stands. Reserve this "
+    "for two cases. The first is a test that reads as coverage of the "
+    "acceptance criterion but is not. The gap alone then stands between "
+    '"the suite is green" and "the criterion is met". The second is any '
+    "finding of yours that contradicts an acceptance criterion the pull "
+    "request body renders as satisfied. The task below lists every "
+    "criterion with an empty box, whatever the gates found. A `criteria: "
+    "pass` line in the gate results means the body renders every "
+    "criterion as satisfied. File such a finding as a `blocker`, never as "
+    "a `concern`."
+)
+
+
+def _blocker_bullet(prompt):
+    """The `## Severity` section's `blocker` bullet, up to the `concern`
+    bullet, joined on whitespace and stripped of its leading dash."""
+    lines = prompt.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("## Severity"))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("## "))
+    section = lines[start + 1 : end]
+    blocker_start = next(
+        i for i, line in enumerate(section) if line.startswith("- `blocker`")
+    )
+    blocker_end = next(
+        i
+        for i in range(blocker_start + 1, len(section))
+        if section[i].startswith("- `concern`")
+    )
+    bullet_lines = list(section[blocker_start:blocker_end])
+    bullet_lines[0] = bullet_lines[0][2:]
+    return " ".join(" ".join(bullet_lines).split())
+
+
+def test_three_lenses_file_a_contradicted_ticked_criterion_as_a_blocker():
+    """Correctness, contract and adequacy each name a finding that
+    contradicts a ticked criterion as a `blocker`, never a `concern`.
+    The conventions prompt names no such case."""
+    rows = {
+        "correctness": _CORRECTNESS_CONTRACT_BLOCKER,
+        "contract": _CORRECTNESS_CONTRACT_BLOCKER,
+        "adequacy": _ADEQUACY_BLOCKER,
+    }
+    for lens, expected in rows.items():
+        prompt = review.lens_prompt(
+            lens,
+            context_md=CONTEXT_MD,
+            claude_md=None,
+            prompts_dir=PROMPTS,
+            spec_body="fix the gap",
+            diff=DIFF,
+            gates="- tests: pass (pytest 8.0)",
+        )
+        assert _blocker_bullet(prompt) == expected
+
+    conventions = review.lens_prompt(
+        "conventions",
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        spec_body="fix the gap",
+        diff=DIFF,
+        gates="- tests: pass (pytest 8.0)",
+    )
+    assert "renders as satisfied" not in " ".join(conventions.split())
+
+
 def _bullets_between(text, start_marker, end_marker):
     """The bulleted list between two markers, each bullet joined on
     whitespace. `_not_yours_bullets_and_edge` calls it with the
