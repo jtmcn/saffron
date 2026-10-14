@@ -9,6 +9,8 @@ import pytest
 
 from saffron import preflight
 from saffron.cell import proxy, runtime
+from saffron.cell.runtimes import apple, podman
+from saffron.repos import image
 
 LSOF = (Path(__file__).parent / "fixtures" / "lsof-listen.txt").read_text()
 
@@ -509,8 +511,8 @@ def test_a_disk_check_that_cannot_run_is_named_not_raised(monkeypatch, tmp_path)
 
 def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_path):
     """§4.2.1: auth, mirror fetch, origin refusal, default-branch pin, policy
-    validation, disk headroom — asserted on the order calls land in, and on
-    the result naming what passed rather than a bare boolean."""
+    validation, disk headroom, images. Asserted on the order calls land in,
+    and on the result naming what passed rather than a bare boolean."""
     order: list[str] = []
 
     def _mk(name, result):
@@ -539,6 +541,7 @@ def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_pat
     )
     monkeypatch.setattr(preflight, "load_policy", _mk("policy", (object(), "sha")))
     monkeypatch.setattr(preflight, "disk_headroom_ok", _mk("disk", True))
+    monkeypatch.setattr(preflight, "_check_images", _mk("images", None))
 
     def _auth(token):
         order.append("auth")
@@ -563,6 +566,7 @@ def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_pat
         < order.index("export")
         < order.index("policy")
         < order.index("disk")
+        < order.index("images")
     )
 
 
@@ -865,6 +869,7 @@ def test_readiness_and_prepare_mirror_run_the_same_three_steps_in_the_same_order
         lambda *_a, **_k: None,
     )
     monkeypatch.setattr(preflight, "disk_headroom_ok", lambda *_a, **_k: True)
+    monkeypatch.setattr(preflight, "_check_images", lambda: None)
     preflight.check_readiness(
         tmp_path / "repo",
         tmp_path / "mirror",
@@ -893,6 +898,7 @@ def test_a_passing_readiness_carries_the_base_it_pinned(monkeypatch, tmp_path):
     (exported / ".saffron").mkdir(parents=True)
     _stub_prepare(monkeypatch, exported=exported)
     monkeypatch.setattr(preflight, "disk_headroom_ok", lambda home: True)
+    monkeypatch.setattr(preflight, "_check_images", lambda: None)
 
     result = preflight.check_readiness(
         tmp_path / "repo",
@@ -907,3 +913,141 @@ def test_a_passing_readiness_carries_the_base_it_pinned(monkeypatch, tmp_path):
     assert result.mirror == tmp_path / "mirror"
     assert result.url == "https://github.com/o/r.git"
     assert result.base_sha == "a" * 40
+
+
+def _ready_with_images(monkeypatch, tmp_path):
+    """Every step before `images` is stubbed to pass. `monkeypatch.chdir(tmp_path)`
+    runs first, so a detail built from the working directory would pass here
+    and fail in a cell."""
+    monkeypatch.chdir(tmp_path)
+    exported = tmp_path / "exported"
+    (exported / ".saffron").mkdir(parents=True, exist_ok=True)
+    _stub_prepare(monkeypatch, exported=exported)
+    monkeypatch.setattr(preflight, "disk_headroom_ok", lambda home: True)
+
+    def _run():
+        return preflight.check_readiness(
+            tmp_path / "repo",
+            tmp_path / "mirror",
+            scratch=tmp_path / "scratch",
+            home=tmp_path / "home",
+            token="tok",
+            validate_token=lambda _t: preflight.TokenCheck(
+                preflight.TokenVerdict.VALID
+            ),
+        )
+
+    return _run
+
+
+def _stub_image_answers(monkeypatch, dialect, answers):
+    """`runtime._call` stubbed to answer each `image inspect <tag>` argv from
+    `answers`, a `{tag: Completed-or-exception}` map. Returns the argvs and
+    timeouts `_call` was asked, in the order it asked them."""
+    monkeypatch.setattr(runtime, "_selected", dialect)
+    seen: list[tuple[list[str], float]] = []
+
+    def _fake_call(argv, timeout_s):
+        seen.append((list(argv), timeout_s))
+        answer = answers[argv[-1]]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(runtime, "_call", _fake_call)
+    return seen
+
+
+def _miss(tag: str) -> runtime.Completed:
+    """apple's measured clean miss: a nonzero exit, not timed out, whose
+    stderr holds the literal substring "image not found"."""
+    return runtime.Completed(1, "", f"Error: image not found: {tag}\n")
+
+
+_PRESENT = runtime.Completed(0, '{"ok": true}', "")
+
+
+def test_readiness_refuses_a_store_missing_the_proxy_or_the_base_and_names_each_build(
+    monkeypatch, tmp_path
+):
+    """The `images` step asks the runtime for `proxy.PROXY_TAG`, then
+    `image.BASE_TAG`, each under a 30 second timeout. A clean miss, apple's
+    measured nonzero exit with "image not found" in stderr and no timeout,
+    earns a build command. The command names the runtime's binary, its own
+    Dockerfile, and the Saffron root. Every other answer is named with its
+    own text."""
+    root = image.BASE_DOCKERFILE.parents[1]
+    proxy_tag, base_tag = proxy.PROXY_TAG, image.BASE_TAG
+
+    def _refused(answers, dialect=apple.DIALECT):
+        _stub_image_answers(monkeypatch, dialect, answers)
+        result = _ready_with_images(monkeypatch, tmp_path)()
+        assert result.ok is False
+        assert result.step == "images"
+        return result.detail
+
+    for dialect in (apple.DIALECT, podman.DIALECT):
+        # The lone passing case, pinned on its own argvs and timeouts.
+        seen = _stub_image_answers(
+            monkeypatch, dialect, {proxy_tag: _PRESENT, base_tag: _PRESENT}
+        )
+        assert _ready_with_images(monkeypatch, tmp_path)().ok
+        assert seen == [
+            ([dialect.binary, "image", "inspect", proxy_tag], 30),
+            ([dialect.binary, "image", "inspect", base_tag], 30),
+        ]
+
+    # Neither present: one build command per tag, each from its own Dockerfile.
+    detail = _refused({proxy_tag: _miss(proxy_tag), base_tag: _miss(base_tag)})
+    assert detail.count("build -t") == 2
+    assert detail.count(str(root)) == 2
+    assert f"-t {proxy_tag} -f images/proxy.Dockerfile ." in detail
+    assert f"-t {base_tag} -f images/cell-base.python.Dockerfile ." in detail
+
+    # The base alone missing, under podman: only its own build command
+    # appears, spelling podman's binary.
+    detail = _refused(
+        {proxy_tag: _PRESENT, base_tag: _miss(base_tag)}, dialect=podman.DIALECT
+    )
+    assert detail.count("build -t") == 1
+    assert f"podman build -t {base_tag} " in detail
+    assert proxy_tag not in detail
+
+    # Not clean misses: a stopped service, capitalised text, and a timeout.
+    for stuck in (
+        runtime.Completed(1, "", "Error: service not found\n"),
+        runtime.Completed(1, "", "Error: Image Not Found\n"),
+        runtime.Completed(124, "", "", timed_out=True),
+    ):
+        detail = _refused({proxy_tag: stuck, base_tag: stuck})
+        assert "build -t" not in detail
+        assert proxy_tag in detail
+        assert base_tag in detail
+        if stuck.timed_out:
+            assert "timed out" in detail
+
+    # `timed_out` decides first: this stderr also matches the clean-miss text.
+    timed_out_miss = runtime.Completed(
+        124, "", f"image not found: {proxy_tag}", timed_out=True
+    )
+    detail = _refused({proxy_tag: timed_out_miss, base_tag: _PRESENT})
+    assert "build -t" not in detail and "timed out" in detail
+
+    # The proxy's own ask raises. The base is still asked and found missing.
+    detail = _refused(
+        {
+            proxy_tag: runtime.CellRuntimeError("the runtime is not running"),
+            base_tag: _miss(base_tag),
+        }
+    )
+    assert detail.count("build -t") == 1
+    assert f"-t {base_tag} " in detail
+    assert "the runtime is not running" in detail
+
+    # An unknown runtime: `dialect()` raises inside the `images` step's own
+    # ask, and the step returns a named refusal rather than letting it out.
+    monkeypatch.setattr(runtime, "_selected", None)
+    monkeypatch.setenv(runtime.RUNTIME_ENV, "no-such-runtime")
+    result = _ready_with_images(monkeypatch, tmp_path)()
+    assert result.ok is False
+    assert result.step == "images"

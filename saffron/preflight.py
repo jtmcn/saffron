@@ -14,8 +14,9 @@ fix, and reported on every run so it cannot go quiet (Appendix G).
 
 `check_readiness` is the third thing here: "preflight is what a task already
 does, hoisted, plus two" (§4.2.1) — auth, mirror fetch, origin refusal,
-default-branch pin, policy validation, disk headroom, in that order, stopping
-at the first failure and naming it. `saffron cell` calls `prepare_mirror`
+default-branch pin, policy validation, disk headroom, in that order,
+stopping at the first failure and naming it. The `images` check `SA-0289`
+added runs last, after disk headroom. `saffron cell` calls `prepare_mirror`
 alone, never `check_readiness` — the auth-validity probe and the disk check
 are reached through the readiness entry point, whose first caller is a batch
 loop (`SA-0050`), not the attended path.
@@ -37,6 +38,7 @@ from pathlib import Path
 
 from saffron.cell import proxy, runtime
 from saffron.phases import package as package_phase
+from saffron.repos import image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import PolicyError, load_policy
 
@@ -392,6 +394,48 @@ def validate_claude_token(token: str, *, timeout_s: float = 20) -> TokenCheck:
         return TokenCheck(TokenVerdict.UNKNOWN, f"{_TOKEN_PROBE_URL}: {exc.reason}")
 
 
+# The two tags a cell needs, read from `proxy.py` and `image.py` so a
+# renamed tag cannot drift from what this step asks for.
+_IMAGE_SOURCES: tuple[tuple[str, str], ...] = (
+    (proxy.PROXY_TAG, "images/proxy.Dockerfile"),
+    (image.BASE_TAG, "images/cell-base.python.Dockerfile"),
+)
+
+
+def _image_refusal_line(tag: str, dockerfile: str) -> str | None:
+    """One tag's own line for the `images` step, or `None` once it is
+    there. A clean miss, apple's measured text, earns a build command.
+    Any other answer, a raise included, is named with no command."""
+    try:
+        done = runtime.inspect_image(tag, timeout_s=30)
+    except runtime.CellRuntimeError as exc:
+        return f"{tag}: {exc}"
+    if done.returncode == 0:
+        return None
+    if not done.timed_out and "image not found" in done.stderr:
+        binary = runtime.dialect().binary
+        return (
+            f"{tag}: missing — build it with `{binary} build -t {tag} "
+            f"-f {dockerfile} .` from {image._SAFFRON_ROOT}"
+        )
+    if done.timed_out:
+        return f"{tag}: the ask timed out"
+    return f"{tag}: {done.stderr.strip() or done.stdout.strip()}"
+
+
+def _check_images() -> Readiness | None:
+    """The `images` step: every tag in `_IMAGE_SOURCES`, asked on its own so
+    one tag's raise never costs the next tag its own line (`SA-0289`)."""
+    lines = [
+        line
+        for tag, dockerfile in _IMAGE_SOURCES
+        if (line := _image_refusal_line(tag, dockerfile)) is not None
+    ]
+    if not lines:
+        return None
+    return Readiness(False, "images", "; ".join(lines))
+
+
 # 10 GiB: room for a night's mirrors, worktrees and agent-state volumes for
 # K concurrent cells plus one cell-image pull, with slack left over for
 # whatever else the same disk is holding. Chosen against §4.5's endgame —
@@ -464,7 +508,7 @@ def check_readiness(
 ) -> Readiness:
     """§4.2.1, followed to the letter: auth, mirror fetch, origin refusal,
     default-branch pin, policy validation, disk headroom — in that order,
-    stopping at the first failure and naming it.
+    stopping at the first failure and naming it. `images` runs last (`SA-0289`).
 
     Not called by `saffron cell` (`_run_cell` calls `prepare_mirror` alone):
     this is the once-per-run entry point a batch loop calls (`SA-0050`), and
@@ -542,5 +586,9 @@ def check_readiness(
             "disk",
             f"fewer than {_MIN_FREE_BYTES / 1024**3:g}GiB free on {home}",
         )
+
+    missing_images = _check_images()
+    if missing_images is not None:
+        return missing_images
 
     return Readiness(True, mirror=mirror, url=url, base_sha=base_sha)

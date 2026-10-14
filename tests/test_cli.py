@@ -33,7 +33,8 @@ from saffron import (
 )
 from saffron.agents import context
 from saffron.agents.findings import Finding
-from saffron.cell import session
+from saffron.cell import proxy, runtime, session
+from saffron.cell.runtimes import apple
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
 from saffron.events import (
@@ -4419,6 +4420,121 @@ def _fake_batch_resolution(tmp_path, *, repo_id=None, candidates=None):
         gh_failures=[],
         policy_unread=[],
     )
+
+
+_REAL_CHECK_READINESS = preflight.check_readiness
+
+
+def _real_readiness_with_a_valid_token(repo, mirror_path, *, scratch, home, token):
+    """The real `check_readiness`, bound before any patch, with a
+    `validate_token` that never reaches the network."""
+    return _REAL_CHECK_READINESS(
+        repo,
+        mirror_path,
+        scratch=scratch,
+        home=home,
+        token=token,
+        validate_token=lambda _t: preflight.TokenCheck(preflight.TokenVerdict.VALID),
+    )
+
+
+def _stub_readiness_prepare_steps(monkeypatch):
+    """The steps before `images`, stubbed to pass (`test_preflight.py`'s
+    own `_stub_prepare`, for this module)."""
+    monkeypatch.setattr(preflight.git_mirror, "ensure_mirror", lambda repo, path: path)
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "real_remote",
+        lambda repo: "https://github.com/o/r.git",
+    )
+    monkeypatch.setattr(preflight.package_phase, "github_slug", lambda url: "o/r")
+    monkeypatch.setattr(
+        preflight.package_phase,
+        "fetch_default_branch",
+        lambda mirror, url: ("main", "a" * 40),
+    )
+    monkeypatch.setattr(
+        preflight.git_mirror, "export_saffron_dir", lambda mirror, sha, scratch: None
+    )
+    monkeypatch.setattr(preflight, "disk_headroom_ok", lambda home: True)
+
+
+def _tasks_and_latest_batch_status(home):
+    ledger = Ledger(home / "ledger.db")
+    tasks = ledger._db.execute("SELECT COUNT(*) AS n FROM tasks").fetchone()["n"]
+    status = ledger._db.execute(
+        "SELECT status FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()["status"]
+    ledger.close()
+    return tasks, status
+
+
+def test_a_batch_whose_store_lacks_the_proxy_is_refused_and_mints_no_task_row(
+    tmp_path, monkeypatch, capsys
+):
+    """Batch 23's own failure: a store missing the proxy image, reproduced
+    on both batch forms. The queue holds one spec, whose review and task
+    are stubbed to raise `CellRuntimeError` after minting a row, as the
+    real ones did. Readiness refuses first, so neither stub runs: each
+    form exits 2, closes `INFRASTRUCTURE`, prints the build command, and
+    leaves no `tasks` row behind."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+    monkeypatch.setattr(
+        cli.preflight, "check_readiness", _real_readiness_with_a_valid_token
+    )
+    _stub_readiness_prepare_steps(monkeypatch)
+    monkeypatch.setattr(runtime, "_selected", apple.DIALECT)
+
+    def _fake_call(argv, timeout_s):
+        tag = argv[-1]
+        if tag == proxy.PROXY_TAG:
+            return runtime.Completed(1, "", f"Error: image not found: {tag}\n")
+        return runtime.Completed(0, '{"ok": true}', "")
+
+    monkeypatch.setattr(runtime, "_call", _fake_call)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore"),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: _fake_batch_resolution(tmp_path, candidates=[candidate]),
+    )
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    def _raise_stack_review(**_kwargs):
+        def _review(candidate, pred, **_kw):
+            raise runtime.CellRuntimeError("the proxy could not be started")
+
+        return _review
+
+    monkeypatch.setattr(cli, "_stack_review", _raise_stack_review)
+
+    home_stack = tmp_path / "home-stack"
+    out = main(["--home", str(home_stack), "batch", "--stack", "--repo", str(tmp_path)])
+    printed = capsys.readouterr().out
+    assert out == 2
+    assert _tasks_and_latest_batch_status(home_stack) == (0, "INFRASTRUCTURE")
+    assert f"build -t {proxy.PROXY_TAG}" in printed
+
+    def _mint_then_raise(spec, spec_sha, *, base, repo, ledger, out_dir, **_kw):
+        rid = ledger.upsert_repo(repo.name, base.url, str(base.mirror), policy_sha=None)
+        run_id = ledger.create_run(rid, base.base_sha)
+        ledger.create_task(run_id, spec.id, spec_sha, f"saffron/{spec.id}")
+        raise runtime.CellRuntimeError("the proxy could not be started")
+
+    monkeypatch.setattr(cli, "run_task", _mint_then_raise)
+
+    home_plain = tmp_path / "home-plain"
+    out = main(["--home", str(home_plain), "batch", "--repo", str(tmp_path)])
+    printed = capsys.readouterr().out
+    assert out == 2
+    assert _tasks_and_latest_batch_status(home_plain) == (0, "INFRASTRUCTURE")
+    assert f"build -t {proxy.PROXY_TAG}" in printed
 
 
 def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
