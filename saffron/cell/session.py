@@ -47,7 +47,7 @@ from saffron.events import (
 from saffron.events import GateResult as GateResultEvent
 from saffron.gates.baseline import NewFailure, is_no_progress
 from saffron.gates.contract import GateResult
-from saffron.intake import Criterion, Mutant
+from saffron.intake import Criterion, History, Mutant
 from saffron.phases import implement, rebut, review
 from saffron.phases.implement import AttemptResult
 
@@ -333,6 +333,9 @@ class CellSpec:
     # `intake.Spec.declared_risk`, `None` included, so the fact can tell a
     # declared "standard" from no declaration at all (item 170).
     declared_risk: str | None = None
+    # `intake.Spec.history`, carried through unread until `SA-0272` runs it
+    # in a gate-only cell over a read-only ledger snapshot (b-a8270f).
+    history: History | None = None
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
     # by tests. Two defaults for one ceiling is a drift vector — they disagreed

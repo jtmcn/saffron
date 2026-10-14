@@ -679,3 +679,59 @@ def test_a_pending_symbol_not_of_the_form_path_and_name_is_rejected(entry):
         parse_spec(
             f"---\nid: TE-1\ntitle: t\ntype: chore\npending_symbols: ['{entry}']\n---\n"
         )
+
+
+def test_a_history_declaration_parses_and_a_malformed_one_is_refused():
+    """`history` is `None` by default, and parses with its `command` and
+    `batches` where the frontmatter declares them (backlog item b-a8270f).
+    `batches` defaults false, and a spec cannot declare a lax truthy value, a
+    blank or missing `command`, or an unknown key under `history`."""
+    from saffron.intake import History
+
+    bare = parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\n---\n")
+    assert bare.history is None
+
+    declared = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "history:\n  command: saffron chains\n  batches: true\n---\n"
+    )
+    assert declared.history == History(command="saffron chains", batches=True)
+
+    defaulted = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "history:\n  command: saffron chains\n---\n"
+    )
+    assert defaulted.history == History(command="saffron chains", batches=False)
+
+    blank_command = (
+        "---\nid: TE-1\ntitle: t\ntype: chore\nhistory:\n  command: '   '\n---\n"
+    )
+    with pytest.raises(SpecError):
+        parse_spec(blank_command)
+
+    missing_command = (
+        "---\nid: TE-1\ntitle: t\ntype: chore\nhistory:\n  batches: true\n---\n"
+    )
+    with pytest.raises(SpecError):
+        parse_spec(missing_command)
+
+    quoted_yes = (
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "history:\n  command: saffron chains\n  batches: 'yes'\n---\n"
+    )
+    with pytest.raises(SpecError):
+        parse_spec(quoted_yes)
+
+    integer_batches = (
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "history:\n  command: saffron chains\n  batches: 1\n---\n"
+    )
+    with pytest.raises(SpecError):
+        parse_spec(integer_batches)
+
+    unknown_key = (
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "history:\n  command: saffron chains\n  frequency: nightly\n---\n"
+    )
+    with pytest.raises(SpecError):
+        parse_spec(unknown_key)

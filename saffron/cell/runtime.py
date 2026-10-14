@@ -651,6 +651,16 @@ def inspect_container(name: str, timeout_s: float = 30) -> Completed:
     return _call([dialect().binary, "inspect", name], timeout_s=timeout_s)
 
 
+def inspect_image(tag: str, timeout_s: float = 30) -> Completed:
+    """Whether the selected runtime's image store holds `tag`.
+
+    Built from `dialect().binary`, as `inspect_container`'s argv is. Apple's
+    clean-miss spelling, a nonzero exit with `image not found` in stderr, is
+    measured (`docs/evidence/2026-10-12-spec-chain-feedback.md`). Podman's own miss is inferred and
+    unmeasured, since no host that measured apple also had podman."""
+    return _call([dialect().binary, "image", "inspect", tag], timeout_s=timeout_s)
+
+
 def container_logs(name: str, timeout_s: float = 30) -> Completed:
     """A container's whole log, both streams, without raising."""
     return _call([dialect().binary, "logs", name], timeout_s=timeout_s)

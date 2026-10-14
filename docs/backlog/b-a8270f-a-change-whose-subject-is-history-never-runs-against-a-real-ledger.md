@@ -1,11 +1,11 @@
 ---
 id: b-a8270f
 title: A change whose subject is history never runs against a real ledger in the cell, and #355 left out 75 of 76 merged tasks
-status: open
+status: partial
 tier: 1
 filed: 2026-09-19
 specs: [SA-0272, SA-0285]
-prs: []
+prs: [872]
 commits: []
 cites: [§4.1, §5.4]
 related: [b-2750d5, b-952c34, b-946f03, 97]
@@ -42,3 +42,6 @@ that cites `.saffron/specs/` paths gets a step 1b question: does the code need
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353). Ranked second in
   `docs/evidence/2026-09-19-spec-loop-skill-feedback-run-8.md`.
+- 2026-10-14: the spec loop's run 38 stacked `SA-0285` as #872. A spec can
+  declare `history`, the ledger can snapshot itself, and a cell can take an
+  extra mount. `SA-0272` still owns the History run, so the item stays partial.

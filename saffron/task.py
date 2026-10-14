@@ -556,6 +556,7 @@ def run_task(
         acceptance=spec.acceptance,
         risk=spec.risk,
         declared_risk=spec.declared_risk,
+        history=spec.history,
         stacked_on=stacked_on,
         budget_usd=ceilings.budget_usd,
         max_attempts=ceilings.max_attempts,

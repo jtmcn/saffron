@@ -2010,3 +2010,39 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
         None,
     )
     third.close()
+
+
+def test_a_snapshot_is_a_rollback_journal_copy_carrying_every_committed_row(
+    ledger, task, tmp_path
+):
+    """`Ledger.snapshot` writes a copy via sqlite's own backup API, not a
+    copy of `ledger.db` alone (backlog item b-a8270f). The live ledger is
+    WAL, and the `task` fixture's row is committed to the live connection
+    with no checkpoint yet. That is the row a plain file copy would miss.
+    The copy lands in rollback-journal mode. A reader needs nothing beside
+    the one file, and a later write to the live ledger never reaches it.
+    """
+    _, task_id = task
+
+    snapshot_dir = tmp_path / "snapshot"
+    dest = snapshot_dir / "ledger.db"
+    ledger.snapshot(dest)
+
+    # A write after the snapshot must never reach the copy.
+    ledger.set_task_state(task_id, "EXHAUSTED")
+
+    # No `-wal`/`-shm` (or anything else) lands beside the one file.
+    assert sorted(p.name for p in snapshot_dir.iterdir()) == ["ledger.db"]
+
+    reader = sqlite3.connect(f"file:{dest}?mode=ro", uri=True)
+    try:
+        row = reader.execute(
+            "SELECT spec_id, state FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "TE-9001"
+        # The row the snapshot carries predates the live ledger's later write.
+        assert row[1] != "EXHAUSTED"
+        assert reader.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    finally:
+        reader.close()

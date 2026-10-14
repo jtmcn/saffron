@@ -2135,3 +2135,29 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0271` (#868): `DESIGN.md` §5.1 said re-verification creates on a
   subnet the change deletes.
   **Bucket 2**, a hand edit the spec named. **Landed:** this pull request.
+
+## 2026-10-14, `SA-0289` and `SA-0285` (spec loop run 38, stack #871 to #872)
+
+- `SA-0289` (#871): the `images` witness asserted the runtime calls only when
+  both images were present, so a pull on a miss passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #871.
+- `SA-0289` (#871): the witness never drove the proxy-alone miss, or each
+  store on both runtimes, so apple's binary in podman's command passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #871.
+- `SA-0289` (#871): the raise case never named its tag, so a line that
+  dropped it passed.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #871.
+- `SA-0289` (#871): a test docstring had its guard backwards, a test copied a
+  sibling module's helper, and a measured claim cited a bare directory.
+  **Bucket 3**, conventions. **Landed:** a review commit on #871.
+- `SA-0285` (#872): the history field was called a check, an _Avoid_ term,
+  and cited a section that never names it.
+  **Bucket 3**, conventions. **Landed:** a review commit on #872.
+- `SA-0285` (#872): model-wide strict mode carried no reason, and a test
+  parameter went unannotated. The snapshot docstring did not say its claim
+  was documented.
+  **Bucket 3**, conventions. **Landed:** review commits on #872.
+- `SA-0285`: the follow-up writer's spec carried 21 `prose` hits and failed
+  the queue's checks, and the finish that wrote it went red.
+  **Bucket 1**, `prose` and the queue. **Landed:** nothing, the finish
+  escalated. **Open:** b-703e64.
