@@ -398,7 +398,7 @@ def validate_claude_token(token: str, *, timeout_s: float = 20) -> TokenCheck:
 # renamed tag cannot drift from what this step asks for.
 _IMAGE_SOURCES: tuple[tuple[str, str], ...] = (
     (proxy.PROXY_TAG, "images/proxy.Dockerfile"),
-    (image.BASE_TAG, "images/cell-base.python.Dockerfile"),
+    (image.BASE_TAG, str(image.BASE_DOCKERFILE.relative_to(image._SAFFRON_ROOT))),
 )
 
 

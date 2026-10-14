@@ -55,6 +55,7 @@ from saffron.repos.policy import Policy, load_policy
 from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
 from tests.conftest import HostToolExecInTest
 from tests.test_batch import MintDouble
+from tests.test_preflight import _stub_prepare
 from tests.test_replay import target  # noqa: F401 — a pytest fixture, used by name
 
 
@@ -4438,27 +4439,6 @@ def _real_readiness_with_a_valid_token(repo, mirror_path, *, scratch, home, toke
     )
 
 
-def _stub_readiness_prepare_steps(monkeypatch):
-    """The steps before `images`, stubbed to pass (`test_preflight.py`'s
-    own `_stub_prepare`, for this module)."""
-    monkeypatch.setattr(preflight.git_mirror, "ensure_mirror", lambda repo, path: path)
-    monkeypatch.setattr(
-        preflight.package_phase,
-        "real_remote",
-        lambda repo: "https://github.com/o/r.git",
-    )
-    monkeypatch.setattr(preflight.package_phase, "github_slug", lambda url: "o/r")
-    monkeypatch.setattr(
-        preflight.package_phase,
-        "fetch_default_branch",
-        lambda mirror, url: ("main", "a" * 40),
-    )
-    monkeypatch.setattr(
-        preflight.git_mirror, "export_saffron_dir", lambda mirror, sha, scratch: None
-    )
-    monkeypatch.setattr(preflight, "disk_headroom_ok", lambda home: True)
-
-
 def _tasks_and_latest_batch_status(home):
     ledger = Ledger(home / "ledger.db")
     tasks = ledger._db.execute("SELECT COUNT(*) AS n FROM tasks").fetchone()["n"]
@@ -4482,7 +4462,8 @@ def test_a_batch_whose_store_lacks_the_proxy_is_refused_and_mints_no_task_row(
     monkeypatch.setattr(
         cli.preflight, "check_readiness", _real_readiness_with_a_valid_token
     )
-    _stub_readiness_prepare_steps(monkeypatch)
+    _stub_prepare(monkeypatch, exported=tmp_path / "exported")
+    monkeypatch.setattr(cli.preflight, "disk_headroom_ok", lambda home: True)
     monkeypatch.setattr(runtime, "_selected", apple.DIALECT)
 
     def _fake_call(argv, timeout_s):

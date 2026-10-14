@@ -656,7 +656,7 @@ def inspect_image(tag: str, timeout_s: float = 30) -> Completed:
 
     Built from `dialect().binary`, as `inspect_container`'s argv is. Apple's
     clean-miss spelling, a nonzero exit with `image not found` in stderr, is
-    measured (`docs/evidence/`). Podman's own miss is inferred and
+    measured (`docs/evidence/2026-10-12-spec-chain-feedback.md`). Podman's own miss is inferred and
     unmeasured, since no host that measured apple also had podman."""
     return _call([dialect().binary, "image", "inspect", tag], timeout_s=timeout_s)
 
