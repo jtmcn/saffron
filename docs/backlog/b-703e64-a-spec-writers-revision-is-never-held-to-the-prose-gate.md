@@ -33,8 +33,15 @@ A revision the spec writer returns is run through the `prose` gate before the
 batch accepts it. A hit sends it back to the writer, or the batch keeps the
 last text that passed. The finish's write-back of a revision then cannot be
 the commit that turns re-verification red.
+The follow-up writer's spec meets the same gate, and the queue's own checks,
+before the finish commits it.
 
 ## Record
 
 - 2026-10-13: filed from the spec loop's run 37. The queued `SA-0286` text
   was retired to `done/`, since the task's `spec_sha` is that text's.
+- 2026-10-14: recurred in the spec loop's run 38, batch 30. The follow-up
+  writer turned an end-review concern into `SA-0292`. The spec carried 21
+  `prose` hits, the queue refused it on its own text, and a criterion named a
+  path outside its `touches`. Re-verification reported 24 new failures and the
+  finish escalated. Review fixed the concern with one comment on #872.

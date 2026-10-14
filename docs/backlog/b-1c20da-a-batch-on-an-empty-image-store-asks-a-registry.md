@@ -1,11 +1,12 @@
 ---
 id: b-1c20da
 title: "A batch on a host whose cell runtime holds no images asks a registry for the proxy, and writes a task row for the failure"
-status: open
+status: done
+closed: 2026-10-14
 tier: 1
 filed: 2026-10-12
 specs: [SA-0289]
-prs: []
+prs: [871]
 commits: []
 cites: [§5.1.2]
 related: []
@@ -35,3 +36,7 @@ The delegate built both images by hand and started batch 24.
   the cell runtime's service stopped. `container network create` failed with an
   XPC connection error, the batch exited 2 at $0, and `SA-0269` got a
   `GATE_ERROR` row. Preflight never asked whether the service was up.
+- 2026-10-14: the spec loop's run 38 stacked `SA-0289` as #871. Readiness now
+  asks the image store for the proxy and the base before any task row exists.
+  A miss names its build command, and a stopped runtime is named by its own
+  error.

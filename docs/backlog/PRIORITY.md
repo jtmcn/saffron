@@ -644,6 +644,10 @@ The host-probe line is built twice. The Mint entry says a re-offer waits.
 **Placed 2026-10-12**, from the spec loop's run 36: **b-1c4a14**. §5.1 still
 sketches one fixed network and one fixed proxy after #855 and #856.
 
+**Placed 2026-10-14**, from the spec loop's run 38: **b-6d4704**, **b-65dbbd**,
+then **b-573746**. An attended cell never asks the image store. Preflight
+spells the proxy's Dockerfile by hand. §5.1 calls `/gates` the one bind mount.
+
 **Placed 2026-10-13**, from the spec loop's run 37: **b-be3adc**, then
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
 subnet pool a bare pool.
