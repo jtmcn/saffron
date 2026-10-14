@@ -22,7 +22,7 @@ from saffron.agents.findings import Finding
 from saffron.cell.session import CellOutcome
 from saffron.events import Ceilings, Event, Teardown, read_log
 from saffron.gates.contract import GateResult
-from saffron.intake import Spec, parse_spec
+from saffron.intake import History, Spec, parse_spec
 from saffron.ledger import Ledger, TaskState
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import (
@@ -52,7 +52,7 @@ def _drive(
     attempts: int = 0,
     events: Sequence[Event] | None = None,
     on_cell: Callable[[dict], None] | None = None,
-    history=None,
+    history: History | None = None,
     **outcome_fields,
 ) -> CellOutcome:
     """One `run_task` call whose cell ends in `state`.

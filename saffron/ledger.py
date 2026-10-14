@@ -566,8 +566,8 @@ class Ledger:
         """A consistent copy of this ledger at `dest`, in rollback-journal
         mode (backlog item b-a8270f). `SA-0272` reads it in a gate-only cell.
 
-        sqlite's own backup API copies the live, write-ahead log included,
-        so a row this connection recently committed is never missed. The
+        sqlite's backup API copies the live, write-ahead log included, as its
+        documentation says. A plain file copy misses those rows. The
         copy is then switched out of WAL, so `dest` needs no `-wal` or
         `-shm` file beside it.
         """

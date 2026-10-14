@@ -155,8 +155,8 @@ class Criterion(BaseModel):
 
 
 class History(BaseModel):
-    """A spec's declared check against the real ledger (`DESIGN.md` §4.1,
-    §5.4, backlog item b-a8270f). `SA-0272` runs `command` in a gate-only
+    """A spec's declared `history` command, which a History run executes
+    (`DESIGN.md` §3.2, backlog item b-a8270f). `SA-0272` runs it in a gate-only
     cell over a read-only snapshot. This module only parses the
     declaration.
     """
@@ -217,7 +217,7 @@ class Spec(BaseModel):
     # `declared_risk` below is where "no tier was declared" is readable.
     # This field and its default stay as every existing reader expects them.
     risk: RiskTier = "standard"
-    # The real-ledger check `SA-0272` runs (`DESIGN.md` §4.1, §5.4).
+    # The command a History run executes (`DESIGN.md` §3.2).
     # `None` where the spec declares none.
     history: History | None = None
 
