@@ -1037,7 +1037,7 @@ def package_ready_task(
         subnet = runtime.allocate_network(network)
         gateway = runtime.gateway(subnet)
         ports, tolerated, sockets = preflight.host_probe_ports()
-        addresses = preflight.probe_addresses(gateway)
+        addresses = preflight.probe_addresses(gateway=gateway)
         detail = (
             f"probing {len(ports)} host ports at "
             + ", ".join(addresses)

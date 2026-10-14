@@ -534,8 +534,8 @@ def reverify(
         # claim the first thing that fails.
         runtime.remove_network(network)
         try:
-            # `allocate_network` claims a /24 of the pool and creates it
-            # there. Only the name reaches `prepare_worktree` (Appendix I).
+            # Passed to `prepare_worktree` by name: a cell created without a
+            # network joins the runtime's default one with full egress (Appendix I).
             runtime.allocate_network(network)
             runtime.create_volume(volume)
             worktree.prepare_worktree(

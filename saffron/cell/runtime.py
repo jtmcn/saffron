@@ -161,7 +161,7 @@ def probe() -> str | None:
 # Every subnet Saffron allocates. Every task network claims one /24
 # of "pool" (item 143).
 SUBNETS: dict[str, str] = {
-    "pool": "10.200.0.0/16",  # a task's cells and critic networks, one /24 each
+    "pool": "10.200.0.0/16",  # every internal network, one /24 each
     "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
 }
 
@@ -328,9 +328,8 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
     runtime rejects `10.89.0.128/25` against a holder on `10.89.0.0/24` with the
     same wording, and an equality test names nobody in exactly the case an
     operator cannot work out by eye. Empty when the listing itself fails: the
-    error `create_network` is raising goes undecorated, and a by-name
-    pre-clean that asked it for a holder finds none, leaving that create
-    to raise instead."""
+    error `create_network` is raising goes undecorated, and the walk in
+    `allocate_network`, finding no holder, re-raises that create's error."""
     done = _call([dialect().binary, "network", "list"], 60)
     if done.returncode != 0:
         return []

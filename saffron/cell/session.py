@@ -1371,7 +1371,7 @@ def critic_cell(
     the critic network `cell_up` built for the task, with the proxy on it and
     the implementer not. It neither starts, stops nor removes it; the container and its two volumes are named
     `saffron-critic-*`. Given `None`, this makes a network of its own, claimed fresh
-    from the pool rather than the task's own cells network. It pre-cleans a leftover
+    from the subnet pool rather than the task's own cells network. It pre-cleans a leftover
     under that name and tears the network down in the same `finally` as everything else
     it made. The container, its two volumes and this network are named `saffron-gate-*`.
     Keyword-only with no default either way — v0.5 shipped
