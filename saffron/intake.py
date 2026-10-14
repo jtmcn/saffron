@@ -161,6 +161,7 @@ class History(BaseModel):
     declaration.
     """
 
+    # Strict, since a lax `bool` reads `1` and "yes" as true (the witness pins both).
     model_config = ConfigDict(extra="forbid", strict=True)
 
     command: str
