@@ -2535,11 +2535,11 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
         return [5432], ["Tailscale"], sockets
 
     monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
-    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw, "192.168.1.9"])
+    monkeypatch.setattr(
+        preflight, "probe_addresses", lambda gateway: [gateway, "192.168.1.9"]
+    )
 
-    def fake_assert_unreachable(
-        image_tag, network, ports=None, gateway=None, sockets=()
-    ):
+    def fake_assert_unreachable(image_tag, network, gateway, ports=None, sockets=()):
         calls.append(
             (
                 "assert_host_is_unreachable",
@@ -2732,7 +2732,7 @@ def test_package_exits_by_the_token_and_by_what_package_returned_or_raised(
         lambda name: subprocess.CompletedProcess([name], 0, "", ""),
     )
     monkeypatch.setattr(preflight, "host_probe_ports", lambda: ([], [], []))
-    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gateway: [gateway])
     monkeypatch.setattr(preflight, "assert_host_is_unreachable", lambda *a, **k: None)
 
     monkeypatch.setattr(
@@ -2848,7 +2848,7 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
                 raise preflight.PreflightFailed("host answered")
 
             monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
-            monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+            monkeypatch.setattr(preflight, "probe_addresses", lambda gateway: [gateway])
             monkeypatch.setattr(
                 preflight, "assert_host_is_unreachable", fake_assert_unreachable
             )
@@ -2902,7 +2902,6 @@ def test_package_probe_claims_its_network_from_the_pool_and_probes_its_gateway(
     name is still removed before the claim, and its `finally` removes its
     network before `package()` runs. Another spec's live network on the
     pool survives the probe."""
-    import ipaddress
 
     from saffron.cell import runtime
     from saffron.repos import image as repo_image
@@ -2998,6 +2997,7 @@ def test_package_probe_claims_its_network_from_the_pool_and_probes_its_gateway(
     assert len(unreachable_seen) == 1
     assert len(package_calls) == 1
 
+    assert network_name in claimed, "the probe never claimed its network"
     probe_subnet = claimed[network_name]
     assert pool.overlaps(ipaddress.ip_network(probe_subnet))
     assert probe_subnet != held_subnet

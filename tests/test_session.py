@@ -7922,7 +7922,7 @@ def test_cell_up_puts_the_proxy_on_the_critic_network_and_probes_it(
 
     host_probed: list[tuple[str, str]] = []
 
-    def _host(image_tag, network, ports=None, gateway="", sockets=()):
+    def _host(image_tag, network, gateway, ports=None, sockets=()):
         host_probed.append((network, gateway))
 
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
@@ -7996,7 +7996,7 @@ def test_a_tasks_proxy_is_addressed_on_the_subnets_cell_up_claimed(
 
     host_probes: list[tuple[str, str]] = []
 
-    def _host(image_tag, network, ports=None, gateway="", sockets=()):
+    def _host(image_tag, network, gateway, ports=None, sockets=()):
         host_probes.append((network, gateway))
 
     monkeypatch.setattr("saffron.cell.proxy.start_proxy", _start_proxy)
