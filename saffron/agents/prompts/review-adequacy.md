@@ -94,10 +94,15 @@ exercising the actual changed path.
 
 ## Severity — three levels, and the third one matters here most of all
 
-- `blocker` — this change should not merge as it stands. Reserve this for a
-  test that reads as coverage of the acceptance criterion but is not — the
-  gap is the only thing standing between "the suite is green" and "the
-  criterion is met".
+- `blocker` — this change should not merge as it stands. Reserve this for two
+  cases. The first is a test that reads as coverage of the acceptance
+  criterion but is not. The gap alone then stands between "the suite is
+  green" and "the criterion is met". The second is any finding of yours that
+  contradicts an acceptance criterion the pull request body renders as
+  satisfied. The task below lists every criterion with an empty box,
+  whatever the gates found. A `criteria: pass` line in the gate results
+  means the body renders every criterion as satisfied. File such a finding
+  as a `blocker`, never as a `concern`.
 - `concern` — a person has to decide about this. Concerns are the number the
   morning queue sorts on, so every one you file spends someone's attention.
 - `note` — true but trivial. Every test in a diff can be made to assert more

@@ -275,6 +275,10 @@ pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
 reads a mutant's file as its claim's subject. A mutant pointed at an untouched
 file exempts a witness of code the diff changed, so `revert` never judges it.
 
+**Placed 2026-10-13**, from the spec loop's run 37: **b-703e64**. A stack
+batch's spec writer revised a spec no `prose` gate read. The finish wrote it
+back, and re-verification went red.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
@@ -526,6 +530,10 @@ writes a false package fact for an adopted row.
 cell deleted its parent's witness setup, and the parent's own wrong version
 then passed it. No gate re-runs a parent's wrong versions.
 
+**Placed 2026-10-13**, from the spec loop's run 37: **b-7c8bc4**, then
+**b-a12047**. Fakes kept a reordered function's old signature, so a revert
+passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
+
 ### Tier 3 — real, not urgent
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
@@ -635,6 +643,10 @@ The host-probe line is built twice. The Mint entry says a re-offer waits.
 
 **Placed 2026-10-12**, from the spec loop's run 36: **b-1c4a14**. §5.1 still
 sketches one fixed network and one fixed proxy after #855 and #856.
+
+**Placed 2026-10-13**, from the spec loop's run 37: **b-be3adc**, then
+**b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
+subnet pool a bare pool.
 
 **Placed 2026-10-11**, from the spec loop's run 34: **b-5a69db**,
 **b-c86c4b**, then **b-54fee5**. A stopped night closes `INFRASTRUCTURE`,

@@ -419,7 +419,7 @@ def test_without_a_credential_the_agent_fails_rather_than_reporting_success():
     container = "saffron-test-runner-cell"
     runtime.remove_container(container)
     runtime.remove_network(network)
-    runtime.create_network(network)
+    runtime.allocate_network(network)
     try:
         runtime.run_detached(
             container,
@@ -452,7 +452,7 @@ def test_a_verdict_sized_system_prompt_reaches_the_cli_without_an_argument_list_
     container = "saffron-test-runner-cell-prompt"
     runtime.remove_container(container)
     runtime.remove_network(network)
-    runtime.create_network(network)
+    runtime.allocate_network(network)
     watched: list = []
     try:
         runtime.run_detached(

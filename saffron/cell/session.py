@@ -1122,7 +1122,7 @@ def cell_up(
     # gateway. No cell exists yet, and none will until this returns.
     for leg, gw in zip(legs, gateways, strict=True):
         preflight.assert_host_is_unreachable(
-            image.BASE_TAG, leg.network, ports, gw, sockets
+            image.BASE_TAG, leg.network, gateway=gw, ports=ports, sockets=sockets
         )
 
     created.add(volume)
@@ -1341,13 +1341,6 @@ def _apply_and_commit_patch(container: str, patch: str) -> None:
         )
 
 
-# Drawn from the one declaration (runtime.SUBNETS, backlog item 143): neither
-# the task's own cells network, still up when this cell is created, nor
-# `saffron-egress` (the proxy's) is torn down first. This is the one value
-# nothing else holds — see runtime.py for every subnet Saffron allocates.
-_GATE_CELL_SUBNET = runtime.SUBNETS["gate"]
-
-
 @contextlib.contextmanager
 def critic_cell(
     *,
@@ -1377,11 +1370,11 @@ def critic_cell(
     is what keeps a Gate-only cell off the proxy. Given a name, this joins it:
     the critic network `cell_up` built for the task, with the proxy on it and
     the implementer not. It neither starts, stops nor removes it; the container and its two volumes are named
-    `saffron-critic-*`. Given `None`, this makes a network of its own, on
-    `_GATE_CELL_SUBNET` rather than the task's own cells network. It
-    pre-cleans that network and tears it down in the same `finally` as
-    everything else it made. The container, its two volumes and this network are
-    named `saffron-gate-*`. Keyword-only with no default either way — v0.5 shipped
+    `saffron-critic-*`. Given `None`, this makes a network of its own, claimed fresh
+    from the subnet pool rather than the task's own cells network. It pre-cleans a leftover
+    under that name and tears the network down in the same `finally` as everything else
+    it made. The container, its two volumes and this network are named `saffron-gate-*`.
+    Keyword-only with no default either way — v0.5 shipped
     a cell with neither a declared network nor a declared env once, and every
     mechanism reported success while applying to a different container
     (Appendix I).
@@ -1420,17 +1413,12 @@ def critic_cell(
     runtime.remove_container(container)
     if own_network:
         runtime.remove_network(network)
-        # The collision is by subnet, and another spec's leftover holds it
-        # under its own name: remove ours, never an operator's (item 143).
-        for holder in runtime.networks_on_subnet(_GATE_CELL_SUBNET):
-            if holder.startswith("saffron-"):
-                runtime.remove_network(holder)
     runtime.remove_volume(volume)
     runtime.remove_volume(state)
     try:
         if own_network:
             created.add(network)
-            runtime.create_network(network, subnet=_GATE_CELL_SUBNET)
+            runtime.allocate_network(network)
         created.add(volume)
         runtime.create_volume(volume)
         worktree.prepare_worktree(

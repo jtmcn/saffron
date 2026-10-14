@@ -146,7 +146,7 @@ def test_a_rootful_podman_is_refused_before_any_container(monkeypatch):
     with pytest.raises(runtime.CellRuntimeError, match="rootful"):
         runtime.run_ephemeral("i", ["true"])
     with pytest.raises(runtime.CellRuntimeError, match="rootful"):
-        runtime.create_network("n")
+        runtime.create_network("n", "10.88.0.0/24")
     assert all(argv[1] == "info" for argv in seen), seen
 
 
@@ -503,9 +503,43 @@ def test_a_bare_carriage_return_in_stdout_survives_the_call():
 def test_the_subnet_is_the_only_place_the_network_is_written():
     """Derived, not re-typed: a stale second copy probes an address that no
     longer exists and reports 'unreachable' having reached nothing."""
-    assert runtime.SUBNET_PREFIX == "10.88.0."
-    assert runtime.GATEWAY == "10.88.0.1"
-    assert runtime.GATEWAY.startswith(runtime.SUBNET_PREFIX)
+    subnet = str(
+        next(ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24))
+    )
+    assert runtime.subnet_prefix(subnet) == "10.200.0."
+    assert runtime.gateway(subnet) == "10.200.0.1"
+    assert runtime.gateway(subnet).startswith(runtime.subnet_prefix(subnet))
+
+
+def test_every_network_call_names_its_subnet_and_no_default_subnet_is_left():
+    """No subnet is assumed any more. Each of these six parameters is
+    required, with no default: `create_network`'s subnet, `container_ip`'s
+    subnet prefix, `proxy.start_proxy`'s subnet, and the gateway of
+    `probe_addresses`, `probe_host_bindings` and `assert_host_is_unreachable`.
+    `runtime` defines none of `DEFAULT_SUBNET`, `SUBNET_PREFIX` and
+    `GATEWAY`. `SUBNETS` has no "gate" key, and `session` defines no
+    `_GATE_CELL_SUBNET`."""
+    import inspect
+
+    from saffron import preflight
+    from saffron.cell import proxy, session
+
+    no_default = [
+        (runtime.create_network, "subnet"),
+        (runtime.container_ip, "subnet_prefix"),
+        (proxy.start_proxy, "subnet"),
+        (preflight.probe_addresses, "gateway"),
+        (preflight.probe_host_bindings, "gateway"),
+        (preflight.assert_host_is_unreachable, "gateway"),
+    ]
+    for func, param in no_default:
+        default = inspect.signature(func).parameters[param].default
+        assert default is inspect.Parameter.empty, (func, param)
+
+    for removed in ("DEFAULT_SUBNET", "SUBNET_PREFIX", "GATEWAY"):
+        assert not hasattr(runtime, removed), removed
+    assert "gate" not in runtime.SUBNETS
+    assert not hasattr(session, "_GATE_CELL_SUBNET")
 
 
 def _script(monkeypatch, body: str) -> None:
@@ -656,7 +690,7 @@ def test_an_overlapping_network_names_the_one_already_holding_the_subnet(
 
     monkeypatch.setattr(runtime, "_call", fake_call)
     try:
-        runtime.create_network("saffron-test-cells")
+        runtime.create_network("saffron-test-cells", "10.88.0.0/24")
     except runtime.CellRuntimeError as exc:
         assert "saffron-cells" in str(exc), exc
     else:
@@ -684,45 +718,35 @@ _QUOTED_CIDR = re.compile(r'"\d{1,3}(?:\.\d{1,3}){3}/\d+"')
 
 
 def test_every_subnet_saffron_allocates_is_declared_in_one_place():
-    """`runtime.SUBNETS` is where every subnet but `DEFAULT_SUBNET` is written
-    (backlog item 143). `proxy.EGRESS_SUBNET` and `session._GATE_CELL_SUBNET`
-    draw theirs from it rather than spelling a second literal in their own module.
+    """`runtime.SUBNETS` is where every subnet is written (backlog item 143).
+    `proxy.EGRESS_SUBNET` draws its value from it rather than spelling a
+    second literal in its own module.
 
-    Keeping both *values* unchanged means a membership check alone cannot
+    Keeping the *value* unchanged means a membership check alone cannot
     tell this from the unfixed shape. A tuple in runtime.py that nothing
-    draws from would satisfy it too. Source-level instead: neither module that
-    held a literal at base may still contain a quoted CIDR, imported here
-    rather than at module scope so a reverted run collects cleanly and
-    fails honestly on the assertions below instead of at import time.
+    draws from would satisfy it too. Source-level instead: a module that
+    held a literal at base must not still contain a quoted CIDR. It is
+    imported here, not at module scope, so a reverted run collects
+    cleanly and fails on the assertions below, not at import time.
     """
     import saffron.cell.proxy as proxy_module
-    import saffron.cell.session as session_module
 
     proxy_src = Path(proxy_module.__file__).read_text()
-    session_src = Path(session_module.__file__).read_text()
     assert not _QUOTED_CIDR.search(proxy_src), "proxy.py still spells a subnet literal"
-    assert not _QUOTED_CIDR.search(session_src), (
-        "session.py still spells a subnet literal"
-    )
 
     assert runtime.SUBNETS["egress"] == proxy_module.EGRESS_SUBNET
-    assert runtime.SUBNETS["gate"] == session_module._GATE_CELL_SUBNET
 
-    # Equal is not drawn: `"10.89.0.0" + "/24"` passes both checks above.
+    # Equal is not drawn: `"10.89.0.0" + "/24"` passes the check above.
     import ast
 
-    for src, name in [
-        (proxy_src, "EGRESS_SUBNET"),
-        (session_src, "_GATE_CELL_SUBNET"),
-    ]:
-        (value,) = [
-            node.value
-            for node in ast.parse(src).body
-            if isinstance(node, ast.Assign)
-            and [ast.unparse(t) for t in node.targets] == [name]
-        ]
-        assert isinstance(value, ast.Subscript), name
-        assert ast.unparse(value.value) == "runtime.SUBNETS", name
+    (value,) = [
+        node.value
+        for node in ast.parse(proxy_src).body
+        if isinstance(node, ast.Assign)
+        and [ast.unparse(t) for t in node.targets] == ["EGRESS_SUBNET"]
+    ]
+    assert isinstance(value, ast.Subscript)
+    assert ast.unparse(value.value) == "runtime.SUBNETS"
 
 
 def test_the_pool_is_declared_once_and_overlaps_no_fixed_subnet():
@@ -731,12 +755,12 @@ def test_the_pool_is_declared_once_and_overlaps_no_fixed_subnet():
     assert runtime.SUBNETS["pool"] == "10.200.0.0/16"
     assert "cells" not in runtime.SUBNETS
     assert "critic" not in runtime.SUBNETS
+    assert "gate" not in runtime.SUBNETS
     pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
     for name, subnet in runtime.SUBNETS.items():
         if name == "pool":
             continue
         assert not pool.overlaps(ipaddress.ip_network(subnet)), name
-    assert not pool.overlaps(ipaddress.ip_network(runtime.DEFAULT_SUBNET))
 
 
 def test_allocate_network_skips_each_held_slash24_whatever_the_refusal_says(
@@ -825,6 +849,66 @@ def test_allocate_network_names_every_holder_once_the_pool_is_exhausted(monkeypa
     assert "holder-b" in str(raised.value)
 
 
+def test_allocate_network_admits_the_host_before_its_walk_and_names_the_last_refusal(
+    monkeypatch,
+):
+    """`allocate_network` admits the host once, before its walk. On a host
+    the selected runtime refuses, it raises that refusal after one `info`
+    call and no `network` call. When every /24 of the pool is refused, its
+    error carries the last refused create's own error text, and not the
+    first one's."""
+    seen = _as_podman(monkeypatch, runtime.Completed(0, "false\n", ""))
+    with pytest.raises(runtime.CellRuntimeError, match="rootful") as refused:
+        runtime.allocate_network("saffron-test-cells")
+    assert sum(1 for argv in seen if argv[1] == "info") == 1
+    assert not any(argv[1] == "network" for argv in seen)
+    assert "held" not in str(refused.value)
+
+    # Under the default runtime, every /24 of the pool is held and every
+    # create is refused, each with its own ordinal in the refusal's text.
+    monkeypatch.setattr(runtime, "_selected", apple.DIALECT)
+    monkeypatch.setattr(runtime, "_admitted", False)
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    subnets = [str(s) for s in pool.subnets(new_prefix=24)]
+    rows = "\n".join(f"holder-{i} {s}" for i, s in enumerate(subnets))
+    listing = f"NETWORK SUBNET\n{rows}\n"
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            subnet = argv[argv.index("--subnet") + 1]
+            ordinal = subnets.index(subnet) + 1
+            return runtime.Completed(
+                1,
+                "",
+                f"Error: IPv4 subnet {subnet} overlaps an existing network r{ordinal}x",
+            )
+        return runtime.Completed(0, listing, "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    with pytest.raises(runtime.CellRuntimeError) as exhausted:
+        runtime.allocate_network("saffron-test-cells")
+    assert f"r{len(subnets)}x" in str(exhausted.value)
+    assert "r1x" not in str(exhausted.value)
+
+    # A refusal with no holder named at all raises at once. It is not a
+    # collision the walk skips past.
+    monkeypatch.setattr(runtime, "_admitted", False)
+    creates: list[str] = []
+
+    def fake_call_no_holder(argv, timeout_s=120):
+        if "create" in argv:
+            creates.append(argv[argv.index("--subnet") + 1])
+            return runtime.Completed(
+                1, "", "Error: IPv4 subnet overlaps an existing network"
+            )
+        return runtime.Completed(0, "NETWORK SUBNET\n", "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call_no_holder)
+    with pytest.raises(runtime.CellRuntimeError):
+        runtime.allocate_network("saffron-test-cells")
+    assert len(creates) == 1
+
+
 def test_no_two_declared_subnets_overlap():
     """Nothing compared the declared subnets against each other before this —
     the first report of a collision between two of Saffron's own was
@@ -856,7 +940,7 @@ def test_a_listing_that_could_not_be_read_adds_no_detail_and_still_raises(monkey
     monkeypatch.setattr(runtime, "_call", fake_call)
     assert runtime.networks_on_subnet("10.88.0.0/24") == []
     try:
-        runtime.create_network("saffron-test-cells")
+        runtime.create_network("saffron-test-cells", "10.88.0.0/24")
     except runtime.CellRuntimeError as exc:
         assert "overlaps" in str(exc)
     else:

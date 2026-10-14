@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -92,3 +93,43 @@ def no_host_tool_exec(request, monkeypatch):
         return real(argv, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", guarded)
+
+
+@pytest.fixture
+def network_model(monkeypatch):
+    """A model of the runtime's own networks, name to subnet, behind a fake
+    `runtime._call`. The real `allocate_network` and `networks_on_subnet`
+    run against it, rather than against a flat stub.
+
+    Not autouse: only the handful of tests that bring up two cells, or two
+    package runs, at once need the pool walked for real.
+    """
+    live: dict[str, str] = {}
+
+    def fake_call(argv, timeout_s=120):
+        argv = list(argv)
+        if argv[1:3] == ["network", "create"]:
+            name = argv[-1]
+            subnet = argv[argv.index("--subnet") + 1]
+            if name in live:
+                return runtime.Completed(1, "", f"Error: network {name} already exists")
+            wanted = ipaddress.ip_network(subnet)
+            for held in live.values():
+                if ipaddress.ip_network(held).overlaps(wanted):
+                    return runtime.Completed(
+                        1,
+                        "",
+                        f"Error: IPv4 subnet {subnet} overlaps an existing network",
+                    )
+            live[name] = subnet
+            return runtime.Completed(0, "", "")
+        if argv[1:3] == ["network", "list"]:
+            rows = "\n".join(f"{n} {s}" for n, s in live.items())
+            return runtime.Completed(0, f"NETWORK SUBNET\n{rows}\n", "")
+        if argv[1:3] == ["network", "rm"]:
+            live.pop(argv[-1], None)
+            return runtime.Completed(0, "", "")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    return live

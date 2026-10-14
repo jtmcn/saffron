@@ -5,6 +5,7 @@ import ast
 import functools
 import hashlib
 import inspect
+import ipaddress
 import json
 import os
 import re
@@ -2534,9 +2535,11 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
         return [5432], ["Tailscale"], sockets
 
     monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
-    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw, "192.168.1.9"])
+    monkeypatch.setattr(
+        preflight, "probe_addresses", lambda gateway: [gateway, "192.168.1.9"]
+    )
 
-    def fake_assert_unreachable(image_tag, network, ports, gateway, sockets_arg):
+    def fake_assert_unreachable(image_tag, network, gateway, ports=None, sockets=()):
         calls.append(
             (
                 "assert_host_is_unreachable",
@@ -2544,7 +2547,7 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
                 network,
                 ports,
                 gateway,
-                sockets_arg,
+                sockets,
             )
         )
 
@@ -2576,9 +2579,15 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     assert pr_url in out
     assert "tolerating Tailscale" in out
     assert "probing 1 host ports" in out
+    # Nothing else is live, so the probe's own claim lands on the pool's
+    # first /24.
+    claimed_subnet = str(
+        next(ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24))
+    )
+    claimed_gateway = runtime.gateway(claimed_subnet)
     # Not a substring alone: the two addresses the probe covered must
     # both appear, so a dropped address cannot hide behind this check.
-    assert runtime.GATEWAY in out
+    assert claimed_gateway in out
     assert "192.168.1.9" in out
 
     names = [c[0] for c in calls]
@@ -2599,7 +2608,7 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     assert calls[1][1:] == (resolved_repo, cli._mirror_path(resolved_repo, home))
     assert calls[2][1] == resolved_repo
     assert calls[3][1] == network_name
-    assert calls[4][1:] == (network_name, (), {})
+    assert calls[4][1:] == (network_name, (), {"subnet": claimed_subnet})
     assert calls[7][1] == network_name
 
     _, image_tag, assert_network, assert_ports, assert_gateway, assert_sockets = calls[
@@ -2608,7 +2617,7 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     assert image_tag == repo_image.BASE_TAG
     assert assert_network == network_name
     assert assert_ports == [5432]
-    assert assert_gateway == runtime.GATEWAY
+    assert assert_gateway == claimed_gateway
     assert assert_sockets == sockets
 
     package_outcome, package_kwargs = calls[8][1], calls[8][2]
@@ -2723,7 +2732,7 @@ def test_package_exits_by_the_token_and_by_what_package_returned_or_raised(
         lambda name: subprocess.CompletedProcess([name], 0, "", ""),
     )
     monkeypatch.setattr(preflight, "host_probe_ports", lambda: ([], [], []))
-    monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gateway: [gateway])
     monkeypatch.setattr(preflight, "assert_host_is_unreachable", lambda *a, **k: None)
 
     monkeypatch.setattr(
@@ -2765,10 +2774,14 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
 ):
     """A `PreflightFailed` from `host_probe_ports` or from
     `assert_host_is_unreachable` exits 2. A leftover network is removed
-    first, the scratch network is created with no subnet, and it is
+    first, the scratch network is claimed on a pool /24, and it is
     removed again. `package()` is never called. The witness drives both."""
     from saffron.cell import runtime
     from saffron.repos import image as repo_image
+
+    claimed_subnet = str(
+        next(ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24))
+    )
 
     def one_trial(break_step, spec_id, dirname):
         checkout = _checkout_with_origin(
@@ -2835,7 +2848,7 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
                 raise preflight.PreflightFailed("host answered")
 
             monkeypatch.setattr(preflight, "host_probe_ports", fake_host_probe_ports)
-            monkeypatch.setattr(preflight, "probe_addresses", lambda gw: [gw])
+            monkeypatch.setattr(preflight, "probe_addresses", lambda gateway: [gateway])
             monkeypatch.setattr(
                 preflight, "assert_host_is_unreachable", fake_assert_unreachable
             )
@@ -2871,11 +2884,129 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
         assert names == expected_names
         network_name = f"saffron-hostprobe-{spec_id}"
         assert calls[0][1] == network_name
-        assert calls[1][1:] == (network_name, (), {})
+        assert calls[1][1:] == (network_name, (), {"subnet": claimed_subnet})
         assert calls[-1][1] == network_name
 
     one_trial("host_probe_ports", "SY-PROBE-A", "checkout-probe-a")
     one_trial("assert_host_is_unreachable", "SY-PROBE-B", "checkout-probe-b")
+
+
+def test_package_probe_claims_its_network_from_the_pool_and_probes_its_gateway(
+    tmp_path, monkeypatch, capsys, network_model
+):
+    """`saffron package`'s host probe claims its network from the pool. The
+    probe in `package_ready_task` claims `saffron-hostprobe-<spec id>` with
+    `allocate_network`, and the subnet it gets lies inside `SUBNETS["pool"]`.
+    It passes that subnet's gateway to `probe_addresses` and to
+    `assert_host_is_unreachable`, both by keyword. A leftover under its own
+    name is still removed before the claim, and its `finally` removes its
+    network before `package()` runs. Another spec's live network on the
+    pool survives the probe."""
+
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    checkout = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    task_id = _seed_task(
+        ledger, repo_id, spec_id="SY-PROBE-POOL", state="READY_FOR_REVIEW"
+    )
+    ledger.close()
+
+    spec = intake.parse_spec(_A_SPEC).model_copy(update={"id": "SY-PROBE-POOL"})
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW", task_id=task_id, run_id=1, task_dir=tmp_path / "td"
+    )
+    ready = task.ReadyTask(outcome=outcome, spec=spec, parent_branch=None)
+    monkeypatch.setattr(task, "ready_task", lambda *a, **k: ready)
+    monkeypatch.setattr(
+        preflight,
+        "prepare_mirror",
+        lambda repo, mp: (tmp_path / "m.git", "u", "b" * 40),
+    )
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "img")
+    monkeypatch.setattr(preflight, "host_probe_ports", lambda: ([], [], []))
+
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    pool_subnets = list(pool.subnets(new_prefix=24))
+    held_subnet = str(pool_subnets[0])
+    held_network = "saffron-other-spec-net"
+    runtime.create_network(held_network, subnet=held_subnet)
+
+    network_name = "saffron-hostprobe-SY-PROBE-POOL"
+    leftover_subnet = str(pool_subnets[1])
+    runtime.create_network(network_name, subnet=leftover_subnet)
+
+    claimed: dict[str, str] = {}
+    real_allocate = runtime.allocate_network
+
+    def recording_allocate(name):
+        subnet = real_allocate(name)
+        claimed[name] = subnet
+        return subnet
+
+    monkeypatch.setattr(runtime, "allocate_network", recording_allocate)
+
+    addresses_seen = []
+    unreachable_seen = []
+    real_probe_addresses = preflight.probe_addresses
+    real_assert_unreachable = preflight.assert_host_is_unreachable
+
+    def recording_probe_addresses(gateway):
+        addresses_seen.append(gateway)
+        return real_probe_addresses(gateway)
+
+    def recording_assert_unreachable(image_tag, network, **kwargs):
+        unreachable_seen.append(kwargs.get("gateway"))
+        return real_assert_unreachable(image_tag, network, **kwargs)
+
+    monkeypatch.setattr(preflight, "probe_addresses", recording_probe_addresses)
+    monkeypatch.setattr(
+        preflight, "assert_host_is_unreachable", recording_assert_unreachable
+    )
+
+    package_calls = []
+
+    def fake_package(outcome_arg, **kwargs):
+        package_calls.append(outcome_arg)
+        return package.PackageResult(
+            state="READY_FOR_REVIEW",
+            pr_url="https://github.com/owner/repo/pull/1",
+            branch="saffron/SY-PROBE-POOL",
+        )
+
+    monkeypatch.setattr(package, "package", fake_package)
+
+    def must_not_run(*a, **k):
+        raise AssertionError("run_one_cell must not run")
+
+    monkeypatch.setattr(task, "run_one_cell", must_not_run)
+
+    code = cli.main(
+        ["--home", str(home), "package", "SY-PROBE-POOL", "--repo", str(checkout)]
+    )
+
+    assert code == 0
+    # `assert_host_is_unreachable` runs once. Its own body reaches
+    # `probe_addresses` again, so every call is checked by value.
+    assert len(unreachable_seen) == 1
+    assert len(package_calls) == 1
+
+    assert network_name in claimed, "the probe never claimed its network"
+    probe_subnet = claimed[network_name]
+    assert pool.overlaps(ipaddress.ip_network(probe_subnet))
+    assert probe_subnet != held_subnet
+    probe_gateway = runtime.gateway(probe_subnet)
+    assert addresses_seen == [probe_gateway, probe_gateway]
+    assert unreachable_seen == [probe_gateway]
+
+    assert held_network in network_model
+    assert network_name not in network_model
 
 
 def test_watch_reads_the_batch_tree_the_cli_already_computes(tmp_path, monkeypatch):

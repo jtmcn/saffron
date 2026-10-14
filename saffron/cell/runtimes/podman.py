@@ -81,7 +81,7 @@ class Podman:
     @property
     def unattended(self) -> bool:
         # No cell has started end to end here: the measured host refused
-        # `DEFAULT_SUBNET`, and `--memory` went unenforced (backlog item 108).
+        # `10.88.0.0/24`, and `--memory` went unenforced (backlog item 108).
         return False
 
     def host_refusal(self, call: Callable[[Sequence[str]], Completed]) -> str | None:

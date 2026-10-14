@@ -16,10 +16,8 @@ by IP: what fails is the route, and a hostname would report it as DNS. The host
 is checked against the same address first, so an address that has since moved
 reads as an unusable control rather than as a reproduction.
 
-Not safe beside PACKAGE's re-verification. Its network takes `DEFAULT_SUBNET`,
-which that re-verification also creates on, so whichever starts second fails at
-`create_network`. It leaves `saffron-egress` behind because `start_proxy`
-creates it.
+Its network takes `10.88.0.0/24`, which no Saffron network claims now. It leaves
+`saffron-egress` behind because `start_proxy` creates it.
 """
 
 from __future__ import annotations
@@ -57,11 +55,11 @@ def egress_works() -> bool:
 def attempt(*, container_first: bool) -> bool:
     proxy.stop_proxy(PROXY_NAME)
     runtime.remove_network(NETWORK)
-    runtime.create_network(NETWORK)
+    runtime.create_network(NETWORK, "10.88.0.0/24")
     try:
         if container_first:
             runtime.run_ephemeral("alpine:3", ["true"], network=NETWORK, timeout_s=120)
-        proxy.start_proxy(PROXY_NAME, NETWORK, subnet=runtime.DEFAULT_SUBNET)
+        proxy.start_proxy(PROXY_NAME, NETWORK, subnet="10.88.0.0/24")
         return egress_works()
     finally:
         proxy.stop_proxy(PROXY_NAME)

@@ -23,11 +23,22 @@ _PROXY_NAME = proxy.proxy_name("worktreetest")
 
 
 @pytest.fixture
-def network():
+def claimed():
     runtime.remove_network(NETWORK)
-    runtime.create_network(NETWORK)
-    yield NETWORK
+    subnet = runtime.allocate_network(NETWORK)
+    yield NETWORK, subnet
     runtime.remove_network(NETWORK)
+
+
+@pytest.fixture
+def network(claimed):
+    return claimed[0]
+
+
+@pytest.fixture
+def subnet(claimed):
+    """The /24 the walk claimed, which beside a live task is not the first."""
+    return claimed[1]
 
 
 def _gates_dir(tmp_path):
@@ -265,7 +276,7 @@ def test_the_cell_cannot_reach_the_real_remote(tmp_path, network):
 
 
 @pytest.mark.cell
-def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
+def test_the_cell_reaches_nothing_but_the_api(tmp_path, network, subnet):
     """The containment question is about *this* container — the long-lived cell
     prepare_worktree starts — not about an ephemeral probe run beside it."""
     origin = tmp_path / "origin"
@@ -280,9 +291,7 @@ def test_the_cell_reaches_nothing_but_the_api(tmp_path, network):
     runtime.create_volume(volume)
     runtime.remove_container(container)
     try:
-        proxy_ip = proxy.start_proxy(
-            _PROXY_NAME, network, subnet=runtime.DEFAULT_SUBNET
-        )
+        proxy_ip = proxy.start_proxy(_PROXY_NAME, network, subnet=subnet)
         worktree.prepare_worktree(
             mirror=mirror,
             volume=volume,

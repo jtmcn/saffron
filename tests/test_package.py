@@ -346,6 +346,104 @@ def test_a_gate_that_errored_in_either_suite_aborts_the_package(monkeypatch, tmp
             _reverify_stubbed(tmp_path)
 
 
+def test_two_reverify_runs_at_once_hold_disjoint_networks_and_neither_removes_the_other(
+    monkeypatch, tmp_path, network_model
+):
+    """Two reverify runs for two packaged commits can overlap. Each of
+    reverify's two gate-only cells, baseline and head, claims its network
+    from the pool with `allocate_network`. All four subnets the two runs
+    claim lie inside `SUBNETS["pool"]`. The second run's networks are
+    disjoint by name and subnet from the first run's live baseline network.
+    The second run's pre-clean and teardown leave that network in place. A
+    leftover under either cell's own network name is removed before that
+    cell's claim, and every cell's teardown removes its own network."""
+    import ipaddress
+
+    from saffron.cell import runtime
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    for name in ("create_volume", "remove_container", "remove_volume"):
+        monkeypatch.setattr(f"saffron.cell.runtime.{name}", lambda *a, **k: None)
+    monkeypatch.setattr("saffron.cell.worktree.prepare_worktree", lambda **k: None)
+    monkeypatch.setattr(
+        "saffron.gates.runner.CellExecutor", lambda container: container
+    )
+    monkeypatch.setattr("saffron.cell.worktree.changed_files", lambda c, base: [])
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, base: "")
+    monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda c: [])
+
+    claimed: list[tuple[str, str]] = []
+    real_allocate = runtime.allocate_network
+
+    def recording_allocate(name):
+        subnet = real_allocate(name)
+        claimed.append((name, subnet))
+        return subnet
+
+    monkeypatch.setattr(runtime, "allocate_network", recording_allocate)
+
+    pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
+    first_sha = "a" * 40
+    second_sha = "c" * 40
+    first_baseline_name = f"saffron-pkg-baseline-{first_sha[:12]}-net"
+    leftover_subnets = list(pool.subnets(new_prefix=24))[:2]
+    for label, subnet in zip(("baseline", "head"), leftover_subnets, strict=True):
+        leftover = f"saffron-pkg-{label}-{second_sha[:12]}-net"
+        runtime.create_network(leftover, subnet=str(subnet))
+
+    entered = False
+
+    def _run_suite(gates, **_k):
+        nonlocal entered
+        if not entered:
+            entered = True
+            reverify(
+                mirror=tmp_path / "m2.git",
+                packaged_sha=second_sha,
+                new_base_sha="d" * 40,
+                policy=Policy(gates={"tests": GateDeclaration()}),
+                gates_dir=tmp_path / "gates",
+                image="img",
+                spec=Spec(id="SA-0006", title="t2", type="feature", touches=["src/**"]),
+            )
+            # The nested run's own pre-clean and teardown touch no
+            # name but their own, so this baseline network survives.
+            assert first_baseline_name in network_model
+        return []
+
+    monkeypatch.setattr("saffron.gates.runner.run_suite", _run_suite)
+
+    _reverify_stubbed(tmp_path)
+
+    assert len(claimed) == 4
+    for name, subnet in claimed:
+        assert pool.overlaps(ipaddress.ip_network(subnet)), (name, subnet)
+
+    by_name = dict(claimed)
+    first_baseline = by_name[first_baseline_name]
+    second_baseline = by_name[f"saffron-pkg-baseline-{second_sha[:12]}-net"]
+    second_head = by_name[f"saffron-pkg-head-{second_sha[:12]}-net"]
+    assert not ipaddress.ip_network(first_baseline).overlaps(
+        ipaddress.ip_network(second_baseline)
+    )
+    assert not ipaddress.ip_network(first_baseline).overlaps(
+        ipaddress.ip_network(second_head)
+    )
+
+    # Every cell's own teardown removed its own network, the outer
+    # run's head included, torn down only once this call returns.
+    first_head_name = f"saffron-pkg-head-{first_sha[:12]}-net"
+    second_baseline_name = f"saffron-pkg-baseline-{second_sha[:12]}-net"
+    second_head_name = f"saffron-pkg-head-{second_sha[:12]}-net"
+    for name in (
+        first_baseline_name,
+        first_head_name,
+        second_baseline_name,
+        second_head_name,
+    ):
+        assert name not in network_model, name
+
+
 def _reverified(*new, results=(), risk="standard", advisory=()):
     """What `reverify` returns: its head run, judged against a fresh baseline."""
     return SuiteComparison(

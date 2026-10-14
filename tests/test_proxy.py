@@ -14,6 +14,10 @@ from saffron.repos import image
 NETWORK = "saffron-test-cells"
 # A literal, so the module still collects at a base with no `proxy_name`.
 _NAME = "saffron-proxy-proxytest"
+# Any /24 of the subnet pool, for the fakes that start no container.
+_SUBNET = str(
+    next(ipaddress.ip_network(runtime.SUBNETS["pool"]).subnets(new_prefix=24))
+)
 
 
 def reach(url: str) -> list[str]:
@@ -31,16 +35,27 @@ def reach(url: str) -> list[str]:
 
 
 @pytest.fixture
-def network():
+def claimed():
     runtime.remove_network(NETWORK)
-    runtime.create_network(NETWORK)
-    yield NETWORK
+    subnet = runtime.allocate_network(NETWORK)
+    yield NETWORK, subnet
     runtime.remove_network(NETWORK)
+
+
+@pytest.fixture
+def network(claimed):
+    return claimed[0]
+
+
+@pytest.fixture
+def subnet(claimed):
+    """The /24 the walk claimed, which beside a live task is not the first."""
+    return claimed[1]
 
 
 @pytest.mark.cell
-def test_the_proxy_allows_anthropic_and_denies_everything_else(network):
-    proxy_ip = proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
+def test_the_proxy_allows_anthropic_and_denies_everything_else(network, subnet):
+    proxy_ip = proxy.start_proxy(_NAME, network, subnet=subnet)
     try:
         env = {"HTTPS_PROXY": f"http://{proxy_ip}:{proxy.PROXY_PORT}"}
         allowed = runtime.run_ephemeral(
@@ -88,7 +103,7 @@ def test_a_cell_without_the_proxy_reaches_nothing(network):
 
 
 @pytest.mark.cell
-def test_no_host_service_answers_from_inside_a_cell(network):
+def test_no_host_service_answers_from_inside_a_cell(network, subnet):
     """N1 rests on this. Appendix G's spike found a 0.0.0.0-bound service
     reachable at the gateway and the LAN address; the countermeasure is a host
     binding choice, and this is what checks it.
@@ -102,7 +117,9 @@ def test_no_host_service_answers_from_inside_a_cell(network):
     `SAFFRON_ALLOW_HOST_PROCESS=rapportd` is the accepted risk this machine
     runs with (Appendix G). Without it this test fails here, which is the
     point: the exception is per-invocation and never a default."""
-    reachable = preflight.probe_host_bindings(image.BASE_TAG, network)
+    reachable = preflight.probe_host_bindings(
+        image.BASE_TAG, network, runtime.gateway(subnet)
+    )
     assert reachable == [], (
         f"a host service answered from inside a cell at {reachable}; "
         "bind it to 127.0.0.1, or turn it off"
@@ -110,7 +127,7 @@ def test_no_host_service_answers_from_inside_a_cell(network):
 
 
 @pytest.mark.cell
-def test_the_probe_finds_a_host_service_that_is_actually_there(network):
+def test_the_probe_finds_a_host_service_that_is_actually_there(network, subnet):
     """The positive half, and the one the suite was missing: an empty result is
     the passing answer, so a probe that silently covers nothing reads exactly
     like a machine that is clean.
@@ -123,9 +140,11 @@ def test_the_probe_finds_a_host_service_that_is_actually_there(network):
     server.bind(("0.0.0.0", 0))
     server.listen(8)
     port = server.getsockname()[1]
-    proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
+    proxy.start_proxy(_NAME, network, subnet=subnet)
     try:
-        reachable = preflight.probe_host_bindings(image.BASE_TAG, network, [port])
+        reachable = preflight.probe_host_bindings(
+            image.BASE_TAG, network, runtime.gateway(subnet), [port]
+        )
     finally:
         proxy.stop_proxy(_NAME)
         server.close()
@@ -137,11 +156,11 @@ def test_the_probe_finds_a_host_service_that_is_actually_there(network):
 
 
 @pytest.mark.cell
-def test_preflight_confirms_the_real_proxy_reaches_the_upstream(network):
+def test_preflight_confirms_the_real_proxy_reaches_the_upstream(network, subnet):
     """The assertion against a real proxy, started the way production starts
     one. This is the check that would have ended the 2026-08-28 run in seconds
     (DESIGN.md §5.1.1)."""
-    proxy_ip = proxy.start_proxy(_NAME, network, subnet=runtime.DEFAULT_SUBNET)
+    proxy_ip = proxy.start_proxy(_NAME, network, subnet=subnet)
     try:
         preflight.assert_proxy_reaches_upstream(image.BASE_TAG, network, proxy_ip)
     finally:
@@ -345,7 +364,7 @@ def test_each_proxy_call_acts_on_the_proxy_it_is_named_and_no_other(monkeypatch)
         ip_read.clear()
         call_argv.clear()
 
-        address = proxy.start_proxy(name, "net", subnet=runtime.DEFAULT_SUBNET)
+        address = proxy.start_proxy(name, "net", subnet=_SUBNET)
         assert address == addresses[name]
         proxy.denied_egress(name)
         proxy.failed_egress(name)
@@ -369,7 +388,7 @@ def test_each_proxy_call_acts_on_the_proxy_it_is_named_and_no_other(monkeypatch)
         name = proxy.proxy_name(key)
         removed.clear()
         with pytest.raises(runtime.CellRuntimeError):
-            proxy.start_proxy(name, "net", subnet=runtime.DEFAULT_SUBNET, timeout_s=0)
+            proxy.start_proxy(name, "net", subnet=_SUBNET, timeout_s=0)
         # Pre-clean, then the give-up removal, both this key's own name.
         assert removed == [name, name]
 
@@ -394,7 +413,7 @@ def test_start_proxy_reads_its_address_on_the_subnet_it_is_given(monkeypatch):
     monkeypatch.setattr(proxy.runtime, "run_detached", lambda *a, **k: None)
     monkeypatch.setattr(proxy.runtime, "remove_container", lambda *a, **k: None)
 
-    def _container_ip(name, subnet_prefix=runtime.SUBNET_PREFIX):
+    def _container_ip(name, subnet_prefix):
         return f"{given_prefix}9" if subnet_prefix == given_prefix else None
 
     monkeypatch.setattr(proxy.runtime, "container_ip", _container_ip)
