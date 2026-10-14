@@ -2104,3 +2104,34 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0270` (#856): the comment above `SUBNETS` was not rewritten as the
   spec asked, and still claimed every subnet.
   **Bucket 3**, contract. **Landed:** a review commit on #856.
+
+## 2026-10-13, `SA-0286` and `SA-0271` (spec loop run 37, stack #867 to #868)
+
+- `SA-0286` (#867): the body named no measured pass for a prompt change and
+  did not say it was unmeasured, though the spec deferred the pass.
+  **Bucket 1**, PACKAGE. **Landed:** the body, by hand. **Open:** b-a12047.
+- `SA-0286` (#867): the failure-path witness recomputed the edge sentence its
+  helper already returns.
+  **Bucket 3**, conventions. **Landed:** a review commit on #867.
+- `SA-0286`: the batch's spec writer returned a revision with 12 `prose`
+  hits, and the finish that wrote it back went red.
+  **Bucket 1**, `prose`. **Landed:** nothing, the finish escalated.
+  **Open:** b-703e64.
+- `SA-0271` (#868): two `cell` fixtures discarded the subnet they claimed and
+  read the pool's first /24, so beside a live task the probes aimed elsewhere.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #868.
+  **Open:** b-7c8bc4.
+- `SA-0271` (#868): three fakes kept the old order of a reordered function,
+  so a revert to the old positional call passed.
+  **Bucket 1**, a fake's signature against its target's. **Landed:** a review
+  commit on #868. **Open:** b-7c8bc4.
+- `SA-0271` (#868): an evidence script still warned of a collision on a
+  subnet the change removed.
+  **Bucket 3**, conventions. **Landed:** a review commit on #868.
+- `SA-0271` (#868): new comments said a bare "pool" and lost the reason a
+  network is passed by name. The probe took its gateway by position.
+  **Bucket 3**, conventions. **Landed:** a review commit on #868.
+  **Open:** b-e4ab6f.
+- `SA-0271` (#868): `DESIGN.md` §5.1 said re-verification creates on a
+  subnet the change deletes.
+  **Bucket 2**, a hand edit the spec named. **Landed:** this pull request.

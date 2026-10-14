@@ -1,11 +1,11 @@
 ---
 id: b-e773d9
 title: Two queued specs in separate chains clash on a name one deletes and the other reads, and no check compares names
-status: open
+status: partial
 tier: 1
 filed: 2026-10-12
 specs: [SA-0268, SA-0271, SA-0290]
-prs: [849]
+prs: [849, 868]
 commits: []
 cites: [§4.2.1]
 related: []
@@ -44,3 +44,6 @@ first step.
 - 2026-10-12: specced as `SA-0290`, the declared field and the queue
   refusal. The operator ruled out the pre-flight command for a cell, since
   `SA-0279` refuses a spec touching `.claude/`.
+- 2026-10-13: `SA-0271` landed as #868 in the spec loop's run 37, over the
+  names #849 reconciled. `SA-0290` still owns the check, so the item stays
+  partial.

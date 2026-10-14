@@ -1,11 +1,11 @@
 ---
 id: 79
 title: Three lenses read one diff and none asked what a failed write leaves behind
-status: open
+status: partial
 tier: 1
 filed: 2026-09-06
 specs: [SA-0062, SA-0286]
-prs: [154]
+prs: [154, 867]
 commits: []
 cites: [§5.4, §5.5, §9]
 related: [69, 78, 88]
@@ -99,3 +99,7 @@ twelve declared defects, `3/12` graded. The exit criterion in
 item's one fixture onto that corpus. **This item is not thereby closed**: it asks
 whether a lens owns the failure-path question, and a corpus that grades 3 of 12
 is a measurement of that gap rather than a closing of it.
+- 2026-10-13: the spec loop's run 37 stacked `SA-0286` as #867. The correctness
+  lens now asks what a failure leaves behind, and three lenses file a
+  contradicted ticked criterion as a `blocker`. The corpus pass that scores the
+  change is still owed, so the item stays partial.
