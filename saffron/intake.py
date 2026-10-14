@@ -154,6 +154,26 @@ class Criterion(BaseModel):
         return value
 
 
+class History(BaseModel):
+    """A spec's declared check against the real ledger (`DESIGN.md` §4.1,
+    §5.4, backlog item b-a8270f). `SA-0272` runs `command` in a gate-only
+    cell over a read-only snapshot. This module only parses the
+    declaration.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    command: str
+    batches: bool = False
+
+    @field_validator("command")
+    @classmethod
+    def _command_is_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("history command is blank")
+        return value
+
+
 class Spec(BaseModel):
     """The unit of work a cell runs, validated from a spec file's frontmatter."""
 
@@ -197,6 +217,9 @@ class Spec(BaseModel):
     # `declared_risk` below is where "no tier was declared" is readable.
     # This field and its default stay as every existing reader expects them.
     risk: RiskTier = "standard"
+    # The real-ledger check `SA-0272` runs (`DESIGN.md` §4.1, §5.4).
+    # `None` where the spec declares none.
+    history: History | None = None
 
     body: str = ""
     acceptance_criteria: list[str] = Field(default_factory=list)

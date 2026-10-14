@@ -52,6 +52,7 @@ def _drive(
     attempts: int = 0,
     events: Sequence[Event] | None = None,
     on_cell: Callable[[dict], None] | None = None,
+    history=None,
     **outcome_fields,
 ) -> CellOutcome:
     """One `run_task` call whose cell ends in `state`.
@@ -89,6 +90,7 @@ def _drive(
             type="feature",
             touches=["src/**"],
             acceptance_criteria=["it works"],
+            history=history,
         ),
         "s" * 40,
         ceilings=ResolvedCeilings(
@@ -169,6 +171,59 @@ def test_run_task_hands_its_cell_the_task_it_was_given(tmp_path, monkeypatch):
     )
 
     assert built == [9, None]
+
+
+def test_the_cell_spec_carries_the_specs_history_declaration(tmp_path, monkeypatch):
+    """`run_task` passes `spec.history` straight onto the `CellSpec` it
+    builds (backlog item b-a8270f). A spec with no `history` still reaches
+    the cell with `None` there. One that leaves `batches` undeclared still
+    carries its default of `False`."""
+    from saffron.intake import History
+
+    built: list[History | None] = []
+    real_cell_spec = task_module.CellSpec
+
+    def _recording_cell_spec(**kwargs):
+        built.append(kwargs.get("history"))
+        return real_cell_spec(**kwargs)
+
+    monkeypatch.setattr(task_module, "CellSpec", _recording_cell_spec)
+    out_dir = tmp_path / "out"
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-3",
+        state="EXHAUSTED",
+        task_id=3,
+        out_dir=out_dir,
+        history=History(command="saffron chains", batches=True),
+    )
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-4",
+        state="EXHAUSTED",
+        task_id=4,
+        out_dir=out_dir,
+        history=History(command="saffron chains"),
+    )
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-5",
+        state="EXHAUSTED",
+        task_id=5,
+        out_dir=out_dir,
+        history=None,
+    )
+
+    assert built == [
+        History(command="saffron chains", batches=True),
+        History(command="saffron chains", batches=False),
+        None,
+    ]
 
 
 def test_a_task_that_never_packaged_still_reaches_the_index(tmp_path, monkeypatch):

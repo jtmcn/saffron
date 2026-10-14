@@ -562,6 +562,23 @@ class Ledger:
     def close(self) -> None:
         self._db.close()
 
+    def snapshot(self, dest: Path) -> None:
+        """A consistent copy of this ledger at `dest`, in rollback-journal
+        mode (backlog item b-a8270f). `SA-0272` reads it in a gate-only cell.
+
+        sqlite's own backup API copies the live, write-ahead log included,
+        so a row this connection recently committed is never missed. The
+        copy is then switched out of WAL, so `dest` needs no `-wal` or
+        `-shm` file beside it.
+        """
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        copy = sqlite3.connect(dest)
+        try:
+            self._db.backup(copy)
+            copy.execute("PRAGMA journal_mode=DELETE")
+        finally:
+            copy.close()
+
     def record_key(self, task_id: int) -> str | None:
         row = self._db.execute(
             "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)

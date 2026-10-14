@@ -82,6 +82,59 @@ def test_prepare_worktree_requires_a_gates_dir():
         )
 
 
+def test_prepare_worktree_keeps_every_extra_mount_beside_its_own_three(
+    monkeypatch, tmp_path
+):
+    """`extra_mounts` land after `mounts()`'s own three, on the cell alone
+    (backlog item b-a8270f). The seed, which only ever clones from the
+    mirror, carries none of them. No cell: `create_volume`,
+    `run_ephemeral` and `run_detached` are monkeypatched to record what
+    they were asked to do, the same way
+    `test_prepare_worktree_checks_out_exactly_the_base_it_is_given` does.
+    """
+    monkeypatch.setattr(runtime, "create_volume", lambda name: None)
+
+    seed_calls: list[list[runtime.Mount]] = []
+
+    def _run_ephemeral(image, command, *, mounts=(), **_kwargs):
+        seed_calls.append(list(mounts))
+        return runtime.Completed(0, "", "")
+
+    cell_calls: list[list[runtime.Mount]] = []
+
+    def _run_detached(*_args, mounts=(), **_kwargs):
+        cell_calls.append(list(mounts))
+
+    monkeypatch.setattr(runtime, "run_ephemeral", _run_ephemeral)
+    monkeypatch.setattr(runtime, "run_detached", _run_detached)
+
+    gates_dir = _gates_dir(tmp_path)
+    extra = [
+        runtime.Mount("bind", "/host/snapshot/ledger.db", "/ledger.db", readonly=True),
+        runtime.Mount("volume", "scratch-vol", "/scratch"),
+    ]
+
+    worktree.prepare_worktree(
+        mirror=tmp_path / "m.git",
+        volume="vol",
+        base_sha="b" * 40,
+        branch="saffron/SY-1",
+        image="img",
+        container="c",
+        network="net",
+        env={},
+        gates_dir=gates_dir,
+        extra_mounts=extra,
+    )
+
+    own_three = worktree.mounts("vol", "vol-state", gates_dir)
+    assert cell_calls == [[*own_three, *extra]]
+    # The seed is untouched: its own two mounts, and none of `extra_mounts`.
+    assert len(seed_calls) == 1
+    for mount in extra:
+        assert mount not in seed_calls[0]
+
+
 def _seed_repo(path):
     path.mkdir(parents=True, exist_ok=True)
     run = lambda *a: subprocess.run(a, cwd=path, check=True, capture_output=True)  # noqa: E731

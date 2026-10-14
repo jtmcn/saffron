@@ -105,6 +105,7 @@ def prepare_worktree(
     state_volume: str | None = None,
     created: set[str] | None = None,
     cap_add: Sequence[str] = (),
+    extra_mounts: Sequence[runtime.Mount] = (),
 ) -> None:
     """Clone the mirror into the volume at the base it is given, on `branch`,
     cell running.
@@ -131,6 +132,8 @@ def prepare_worktree(
     copy of the rule is two things sharing one word again, one layer down, and
     the two copies can disagree with nothing to notice.
     """
+    # `extra_mounts` land after `mounts()`'s own three, on the cell alone.
+    # The seed only ever needs the mirror and the worktree volume (below).
     state = state_volume or f"{volume}-state"
     if created is not None:
         created.add(state)
@@ -166,7 +169,7 @@ def prepare_worktree(
         command=["sleep", "infinity"],
         network=network,
         env=env,
-        mounts=mounts(volume, state, gates_dir),
+        mounts=[*mounts(volume, state, gates_dir), *extra_mounts],
         cpus=1,
         memory="4g",
         cap_add=cap_add,
