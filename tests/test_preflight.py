@@ -511,7 +511,7 @@ def test_a_disk_check_that_cannot_run_is_named_not_raised(monkeypatch, tmp_path)
 
 def test_readiness_runs_its_checks_in_the_order_4_2_1_gives(monkeypatch, tmp_path):
     """§4.2.1: auth, mirror fetch, origin refusal, default-branch pin, policy
-    validation, disk headroom, images. Asserted on the order calls land in,
+    validation, disk headroom, then `SA-0289`'s images. Asserted on the order calls land in,
     and on the result naming what passed rather than a bare boolean."""
     order: list[str] = []
 
@@ -917,8 +917,8 @@ def test_a_passing_readiness_carries_the_base_it_pinned(monkeypatch, tmp_path):
 
 def _ready_with_images(monkeypatch, tmp_path):
     """Every step before `images` is stubbed to pass. `monkeypatch.chdir(tmp_path)`
-    runs first, so a detail built from the working directory would pass here
-    and fail in a cell."""
+    runs first, so a detail built from the working directory fails here. In a
+    cell the working directory is the Saffron root, where it would pass."""
     monkeypatch.chdir(tmp_path)
     exported = tmp_path / "exported"
     (exported / ".saffron").mkdir(parents=True, exist_ok=True)
@@ -980,12 +980,21 @@ def test_readiness_refuses_a_store_missing_the_proxy_or_the_base_and_names_each_
     proxy_tag, base_tag = proxy.PROXY_TAG, image.BASE_TAG
 
     def _refused(answers, dialect=apple.DIALECT):
-        _stub_image_answers(monkeypatch, dialect, answers)
+        seen = _stub_image_answers(monkeypatch, dialect, answers)
         result = _ready_with_images(monkeypatch, tmp_path)()
         assert result.ok is False
         assert result.step == "images"
+        # Never a pull or a retry: exactly the two asks, on every store.
+        assert seen == [
+            ([dialect.binary, "image", "inspect", proxy_tag], 30),
+            ([dialect.binary, "image", "inspect", base_tag], 30),
+        ]
         return result.detail
 
+    builds = {
+        proxy_tag: "-f images/proxy.Dockerfile .",
+        base_tag: "-f images/cell-base.python.Dockerfile .",
+    }
     for dialect in (apple.DIALECT, podman.DIALECT):
         # The lone passing case, pinned on its own argvs and timeouts.
         seen = _stub_image_answers(
@@ -996,22 +1005,30 @@ def test_readiness_refuses_a_store_missing_the_proxy_or_the_base_and_names_each_
             ([dialect.binary, "image", "inspect", proxy_tag], 30),
             ([dialect.binary, "image", "inspect", base_tag], 30),
         ]
+        # Each store of clean misses: one build command per missing tag, from
+        # its own Dockerfile, spelling this runtime's binary.
+        for missing in ((proxy_tag,), (base_tag,), (proxy_tag, base_tag)):
+            answers = {
+                tag: _miss(tag) if tag in missing else _PRESENT
+                for tag in (proxy_tag, base_tag)
+            }
+            detail = _refused(answers, dialect=dialect)
+            assert detail.count("build -t") == len(missing)
+            assert detail.count(str(root)) == len(missing)
+            for tag in (proxy_tag, base_tag):
+                command = f"{dialect.binary} build -t {tag} {builds[tag]}"
+                assert (command in detail) == (tag in missing)
 
-    # Neither present: one build command per tag, each from its own Dockerfile.
-    detail = _refused({proxy_tag: _miss(proxy_tag), base_tag: _miss(base_tag)})
-    assert detail.count("build -t") == 2
-    assert detail.count(str(root)) == 2
-    assert f"-t {proxy_tag} -f images/proxy.Dockerfile ." in detail
-    assert f"-t {base_tag} -f images/cell-base.python.Dockerfile ." in detail
-
-    # The base alone missing, under podman: only its own build command
-    # appears, spelling podman's binary.
+    # The spec's mixed store: the proxy a clean miss, the base timed out.
     detail = _refused(
-        {proxy_tag: _PRESENT, base_tag: _miss(base_tag)}, dialect=podman.DIALECT
+        {
+            proxy_tag: _miss(proxy_tag),
+            base_tag: runtime.Completed(124, "", "", timed_out=True),
+        }
     )
     assert detail.count("build -t") == 1
-    assert f"podman build -t {base_tag} " in detail
-    assert proxy_tag not in detail
+    assert f"-t {proxy_tag} " in detail
+    assert f"{base_tag}: the ask timed out" in detail
 
     # Not clean misses: a stopped service, capitalised text, and a timeout.
     for stuck in (
@@ -1042,7 +1059,7 @@ def test_readiness_refuses_a_store_missing_the_proxy_or_the_base_and_names_each_
     )
     assert detail.count("build -t") == 1
     assert f"-t {base_tag} " in detail
-    assert "the runtime is not running" in detail
+    assert f"{proxy_tag}: the runtime is not running" in detail
 
     # An unknown runtime: `dialect()` raises inside the `images` step's own
     # ask, and the step returns a named refusal rather than letting it out.
