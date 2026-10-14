@@ -97,7 +97,7 @@ SALVAGE_RESERVE_USD = 1.0
 REBUT_CAP_USD = 10.0
 
 # `session.run_history`'s host-side snapshot directory (backlog item
-# b-a8270f), never under `out_dir` and never under TMPDIR, unmeasured on apple/container.
+# b-a8270f), never under `out_dir` and never under TMPDIR, whose bind is unmeasured on apple/container.
 HISTORY_SOURCE_ROOT = Path.home() / ".saffron" / "history"
 
 # Each stream a History run produces is kept to this many characters.
@@ -346,8 +346,8 @@ class CellSpec:
     # `intake.Spec.declared_risk`, `None` included, so the fact can tell a
     # declared "standard" from no declaration at all (item 170).
     declared_risk: str | None = None
-    # `intake.Spec.history`, carried through unread until `SA-0272` runs it
-    # in a gate-only cell over a read-only ledger snapshot (b-a8270f).
+    # `intake.Spec.history`, which `run_history` runs in a Gate-only cell
+    # over a read-only ledger snapshot (`SA-0272`, b-a8270f).
     history: History | None = None
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
@@ -1450,8 +1450,6 @@ def critic_cell(
             gates_dir=gates_dir,
             state_volume=state,
             created=created,
-            # Lands on the cell alone, after `mounts()`'s own three:
-            # `run_history`'s read-only ledger, mirrors and batch tree.
             extra_mounts=extra_mounts,
         )
         _apply_and_commit_patch(container, patch)
@@ -1494,7 +1492,8 @@ def _history_prompt_section(command: str, result: dict) -> str:
     timed out, or it exited with a code. Both streams follow, already
     bounded by `_bounded_history_stream`.
     """
-    lines = ["## History run", "", f"Command: `{command}`", ""]
+    # Leading blank line: `criteria_section` ends on a claim with no newline.
+    lines = ["", "", "## History run", "", f"Command: `{command}`", ""]
     if not result["started"]:
         lines.append("The history run did not start.")
     elif result["timed_out"]:
@@ -3093,6 +3092,7 @@ def _drive_cell(
                 # `None` for a spec declaring no `history` (backlog item b-a8270f).
                 # `lens_spec_body` reads it after the lens cell opens below.
                 history_result: dict | None = None
+                where = "the Gate-only cell"
                 try:
                     # Before the lens critic cell, inside the same try: a refused patch
                     # here ends the task, exactly as the lens cell's own refusal does.
@@ -3113,6 +3113,7 @@ def _drive_cell(
                             json.dumps(history_result, indent=2)
                         )
 
+                    where = "the critic cell"
                     with critic_cell(
                         spec=spec,
                         repo=repo,
@@ -3204,7 +3205,7 @@ def _drive_cell(
                     _phase_start(
                         "REVIEW",
                         "REVIEW",
-                        rejected.reason("the critic cell"),
+                        rejected.reason(where),
                     )
                 except CriticPatchUnrepresentable as binary:
                     outcome = "GATE_ERROR"
