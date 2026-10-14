@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -94,6 +95,18 @@ SALVAGE_RESERVE_USD = 1.0
 # One pool for every REBUT's own sessions, at any spend: the measured
 # maximum, $9.29 on SA-0223 (67 REBUTs, 2026-10-07), rounded up.
 REBUT_CAP_USD = 10.0
+
+# `session.run_history`'s host-side snapshot directory (backlog item
+# b-a8270f), never under `out_dir` and never under TMPDIR, unmeasured on apple/container.
+HISTORY_SOURCE_ROOT = Path.home() / ".saffron" / "history"
+
+# Each stream a History run produces is kept to this many characters.
+# Reasoned, not measured: no history command has run in a cell yet.
+HISTORY_OUTPUT_CHARS = 20_000
+
+# Each of a History run's two in-cell execs gets this long, the copy and
+# the declared command alike. Reasoned, not measured, the same as above.
+HISTORY_EXEC_TIMEOUT_S = 600.0
 
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
@@ -1356,6 +1369,7 @@ def critic_cell(
     patch: str,
     created: set[str],
     note: Callable[[str, bool, str], None],
+    extra_mounts: Sequence[runtime.Mount] = (),
 ) -> Iterator[str]:
     """A fresh container from the repo's cell image, seeded at the task's tree
     base and carrying the implementer's exported patch, applied and committed
@@ -1436,6 +1450,9 @@ def critic_cell(
             gates_dir=gates_dir,
             state_volume=state,
             created=created,
+            # Lands on the cell alone, after `mounts()`'s own three:
+            # `run_history`'s read-only ledger, mirrors and batch tree.
+            extra_mounts=extra_mounts,
         )
         _apply_and_commit_patch(container, patch)
         yield container
@@ -1455,6 +1472,193 @@ def critic_cell(
                     False,
                     f"{kind} {name} survived — {done.stderr.strip()[:160]}",
                 )
+
+
+def _bounded_history_stream(text: str) -> str:
+    """The first `HISTORY_OUTPUT_CHARS` characters of `text`.
+
+    A stream within the bound is returned whole. A longer one is cut to
+    the bound and ends with a note naming how many characters were cut.
+    """
+    if len(text) <= HISTORY_OUTPUT_CHARS:
+        return text
+    cut = len(text) - HISTORY_OUTPUT_CHARS
+    return text[:HISTORY_OUTPUT_CHARS] + f"\n[{cut} characters cut]"
+
+
+def _history_prompt_section(command: str, result: dict) -> str:
+    """The `## History run` section every lens reads for a spec declaring
+    `history`.
+
+    Names the command, then says what happened: the run did not start, it
+    timed out, or it exited with a code. Both streams follow, already
+    bounded by `_bounded_history_stream`.
+    """
+    lines = ["## History run", "", f"Command: `{command}`", ""]
+    if not result["started"]:
+        lines.append("The history run did not start.")
+    elif result["timed_out"]:
+        lines.append("The history run timed out.")
+    else:
+        lines.append(f"The history run exited {result['exit_code']}.")
+    lines.extend(["", "stdout:", result["stdout"], "", "stderr:", result["stderr"]])
+    return "\n".join(lines)
+
+
+def _history_copy_script(
+    *, home: str, ledger_source: str, mirrors_mount: str, link_batches: str | None
+) -> str:
+    """The in-cell copy step's own argv, a single `python3 -c` string:
+    `exec_` carries no stdin, so a script must travel as one argument.
+
+    Writes a writable copy of `ledger_source` and rewrites every repo's
+    `mirror_path` to the same file name under `mirrors_mount` (backlog
+    item b-a8270f). `link_batches`, given, names the mounted batch tree
+    to link in as the copy's own `batches/v0`.
+    """
+    script = (
+        "import pathlib, shutil, sqlite3\n"
+        f"home = pathlib.Path({home!r})\n"
+        "home.mkdir(parents=True, exist_ok=True)\n"
+        "dest = home / 'ledger.db'\n"
+        f"shutil.copyfile({ledger_source!r}, dest)\n"
+        "conn = sqlite3.connect(dest)\n"
+        "rows = conn.execute("
+        "'SELECT repo_id, mirror_path FROM repos'"
+        ").fetchall()\n"
+        "for repo_id, mirror_path in rows:\n"
+        "    name = pathlib.PurePosixPath(mirror_path).name\n"
+        f"    rewritten = str(pathlib.PurePosixPath({mirrors_mount!r}) / name)\n"
+        "    conn.execute(\n"
+        "        'UPDATE repos SET mirror_path = ? WHERE repo_id = ?',\n"
+        "        (rewritten, repo_id),\n"
+        "    )\n"
+        "conn.commit()\n"
+        "conn.close()\n"
+    )
+    if link_batches is not None:
+        script += (
+            "batches = home / 'batches'\n"
+            "batches.mkdir(parents=True, exist_ok=True)\n"
+            "link = batches / 'v0'\n"
+            "if not link.exists():\n"
+            f"    link.symlink_to({link_batches!r})\n"
+        )
+    return script
+
+
+def run_history(
+    *,
+    spec: CellSpec,
+    repo: Path,
+    mirror: Path,
+    gates_dir: Path,
+    thread_env: Mapping[str, str],
+    patch: str,
+    ledger: Ledger,
+    out_dir: Path,
+    created: set[str],
+    note: Callable[[str, bool, str], None],
+) -> dict:
+    """Run a spec's declared `history.command` against a read-only
+    snapshot of the real ledger (backlog item b-a8270f).
+
+    The snapshot lives under `HISTORY_SOURCE_ROOT`, cleared first, and
+    removed again in this function's own `finally`. Bound read-only into
+    a Gate-only cell with the real mirrors directory and, when
+    `spec.history.batches`, `out_dir` itself.
+    """
+    from saffron.cell import runtime, worktree
+
+    history = spec.history
+    assert history is not None
+
+    source = HISTORY_SOURCE_ROOT / spec.spec_id
+    if source.exists():
+        shutil.rmtree(source)
+    source.mkdir(parents=True)
+    try:
+        ledger.snapshot(source / "ledger.db")
+
+        extra_mounts = [
+            runtime.Mount("bind", str(source), worktree.HISTORY_MOUNT, readonly=True),
+            runtime.Mount(
+                "bind", str(mirror.parent), worktree.MIRRORS_MOUNT, readonly=True
+            ),
+        ]
+        if history.batches:
+            extra_mounts.append(
+                runtime.Mount(
+                    "bind", str(out_dir), worktree.BATCHES_MOUNT, readonly=True
+                )
+            )
+
+        with critic_cell(
+            spec=spec,
+            repo=repo,
+            mirror=mirror,
+            network=None,
+            # The repo's declared gate env, nothing more. This cell runs
+            # the patch's own code, never host-side, and reaches no proxy.
+            env=dict(thread_env),
+            gates_dir=gates_dir,
+            patch=patch,
+            created=created,
+            note=note,
+            extra_mounts=extra_mounts,
+        ) as container:
+            home = f"{worktree.STATE_MOUNT}/history"
+            # ponytail: the snapshot copy lands on the state volume,
+            # unmeasured. The container filesystem copy is measured (b-a8270f).
+            copy_script = _history_copy_script(
+                home=home,
+                ledger_source=f"{worktree.HISTORY_MOUNT}/ledger.db",
+                mirrors_mount=worktree.MIRRORS_MOUNT,
+                link_batches=worktree.BATCHES_MOUNT if history.batches else None,
+            )
+            copied = runtime.exec_(
+                container,
+                ["python3", "-c", copy_script],
+                workdir=worktree.WORKTREE_MOUNT,
+                # Reasoned, not measured: no history command has run in a
+                # cell yet.
+                timeout_s=HISTORY_EXEC_TIMEOUT_S,
+            )
+            if copied.returncode != 0 or copied.timed_out:
+                return {
+                    "command": history.command,
+                    "batches": history.batches,
+                    "started": False,
+                    "exit_code": copied.returncode,
+                    "timed_out": copied.timed_out,
+                    "stdout": _bounded_history_stream(copied.stdout),
+                    "stderr": _bounded_history_stream(copied.stderr),
+                }
+
+            ran = runtime.exec_(
+                container,
+                [
+                    "env",
+                    f"SAFFRON_HISTORY_HOME={home}",
+                    "sh",
+                    "-c",
+                    history.command,
+                ],
+                workdir=worktree.WORKTREE_MOUNT,
+                # Reasoned, not measured, the same reason the exec above is.
+                timeout_s=HISTORY_EXEC_TIMEOUT_S,
+            )
+            return {
+                "command": history.command,
+                "batches": history.batches,
+                "started": True,
+                "exit_code": ran.returncode,
+                "timed_out": ran.timed_out,
+                "stdout": _bounded_history_stream(ran.stdout),
+                "stderr": _bounded_history_stream(ran.stderr),
+            }
+    finally:
+        shutil.rmtree(source, ignore_errors=True)
 
 
 def _gate_cell_suite(
@@ -2886,7 +3090,29 @@ def _drive_cell(
                 # One ceiling for every lens and every criterion-probe
                 # session alike (backlog item b-2750d5), computed once.
                 probe_budget = critic_budget(spec.budget_usd, spent)
+                # `None` for a spec declaring no `history` (backlog item b-a8270f).
+                # `lens_spec_body` reads it after the lens cell opens below.
+                history_result: dict | None = None
                 try:
+                    # Before the lens critic cell, inside the same try: a refused patch
+                    # here ends the task, exactly as the lens cell's own refusal does.
+                    if spec.history is not None:
+                        history_result = run_history(
+                            spec=spec,
+                            repo=repo,
+                            mirror=mirror,
+                            gates_dir=gates_dir,
+                            thread_env=policy.thread_env,
+                            patch=patch_to_review,
+                            ledger=ledger,
+                            out_dir=out_dir,
+                            created=created,
+                            note=_critic_teardown,
+                        )
+                        (task_dir / "history.json").write_text(
+                            json.dumps(history_result, indent=2)
+                        )
+
                     with critic_cell(
                         spec=spec,
                         repo=repo,
@@ -2907,17 +3133,26 @@ def _drive_cell(
                         reviewed_diff = worktree.export_patch(
                             critic_container, spec.tree_base
                         )
+                        # A witnessed spec's claims live only in frontmatter
+                        # (§3.2); append them so the critic sees what a
+                        # markdown spec already gives.
+                        lens_spec_body = spec.body + context.criteria_section(
+                            spec.acceptance
+                        )
+                        # When the spec declares `history`, every lens reads
+                        # its run too (backlog item b-a8270f).
+                        if spec.history is not None:
+                            assert history_result is not None
+                            lens_spec_body += _history_prompt_section(
+                                spec.history.command, history_result
+                            )
                         reviews = review.run_review(
                             critic_container,
                             diff=reviewed_diff,
                             read_head=lambda path: worktree.read_at_head(
                                 critic_container, path
                             ),
-                            # A witnessed spec's claims live only in frontmatter
-                            # (§3.2); append them so the critic sees what a
-                            # markdown spec already gives.
-                            spec_body=spec.body
-                            + context.criteria_section(spec.acceptance),
+                            spec_body=lens_spec_body,
                             # The Gate-only cell's own comparison, never `latest` —
                             # the implementer's last suite is exactly the input
                             # this cell exists to stop feeding the critic.
