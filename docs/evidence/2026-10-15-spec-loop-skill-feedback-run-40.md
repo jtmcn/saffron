@@ -3,8 +3,8 @@
 Run 40's order was `SA-0273` then `SA-0274`. The 15 specs behind them form
 one chain, and each waits on the one before it.
 
-`SA-0273` ended `EXHAUSTED` at $50.91 of $45, or $56.22 with both spec
-reviews. PACKAGE still opened draft #881. The operator chose to review it as
+`SA-0273` ended `EXHAUSTED` at $50.91 of $45, its second spec review
+included. Both batches spent $53.23. PACKAGE still opened draft #881. The operator chose to review it as
 it stood. `SA-0274` never started, because its parent was not reviewable.
 
 ## What happened, in order
