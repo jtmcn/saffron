@@ -4,7 +4,7 @@ title: REBUT's verdict shares its cap with the fixes, so a task whose gates are 
 type: bug
 priority: 1
 depends_on: [SA-0288, SA-0287]
-estimated_lines: 160
+estimated_lines: 175
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -68,11 +68,16 @@ acceptance:
       - The reserve opened only when the cap refused a rebuttal call, so a REBUT under the cap gets none.
   - claim: >-
       A verdict the reserve cuts short ends the task `EXHAUSTED` with its
-      blocker standing. Its line names the verdict and the $2.00 reserve,
-      in `rebuttal.json` and in the REBUT phase event alike. A cut during
-      the rebuttal turns keeps today's line, which names neither. The
-      witness drives a verdict that spends the pool and a verdict the pool
-      refuses, then a rebuttal turn and an extraction the cap cut.
+      blockers standing. Its line names the verdict and the $2.00 reserve,
+      in `rebuttal.json` and in the REBUT phase event alike. It carries the
+      cut verdict's own error, never the rebuttal turn's or an earlier
+      lens's. A cut during the rebuttal turns keeps today's line, which
+      names neither. The witness drives four verdict cuts and three
+      rebuttal-half cuts. The verdict cuts are one that spends the pool, one
+      the pool refuses, one after a refused extraction, and a second lens
+      cut after the first failed with money left. The rebuttal-half cuts are
+      a turn cut at the cap, an extraction the cap refused, and an
+      extraction that spends the rest of the cap.
     witness: tests/test_session.py::test_a_verdict_the_reserve_cut_short_says_so_apart_from_a_rebuttal_cut
     mutant:
       file: saffron/cell/session.py
@@ -83,6 +88,8 @@ acceptance:
       - The verdict's line chosen only when the pool refuses a call, so a verdict session that spends the pool reads as a rebuttal cut.
       - The verdict's line chosen for every cut, so a cut during the rebuttal turns names the verdict too.
       - The verdict's line written to `rebuttal.json` after the REBUT phase event was emitted, so the event keeps the rebuttal's line.
+      - The verdict's line carrying today's detail, the rebuttal turn's error ahead of the first lens's, so a verdict cut after a refused extraction reads "is already spent".
+      - A rebuttal-half cut decided only by a refused call, so an extraction that spends the rest of the cap and fails reads as silence.
   - claim: >-
       A verdict session that starts and fails with money left in its pool is
       no cut, even after the cap refused the extraction. The task ends
@@ -116,11 +123,12 @@ sets `refused` (`:196-201`, `:211-213`). `run_rebut` passes that one agent
 to the rebuttal turn and its extraction (`saffron/phases/rebut.py:676-686`).
 It then passes the same agent to each lens verdict (`:744-768`).
 
-**The verdict comes last, so it gets what the fixes left.** On `SA-0272` the
-rebuttal turn spent $6.41 and its extraction $3.08. The gates re-ran green.
-The verdict then started with $0.56 and ran out
+**The verdict comes last, so it gets what the fixes left.** The batch log
+gives `SA-0272`'s figures. Its rebuttal turn spent $6.4137 and its
+extraction $3.0779. The gates re-ran green. The verdict then started with $0.51 of the cap,
+spent $0.5580 and ran out, slightly past the cap
 (`~/.saffron/batches/v0/<task>/rebuttal.json`, `why` says
-`error_max_budget_usd`). The cell read the halt as a cut
+`error_max_budget_usd`). REBUT's total was $10.0496. The cell read the halt as a cut
 (`saffron/cell/session.py:3427`). It rewrote the line to say REBUT ran out
 of its budget (`:3428-3435`) and ended the task `EXHAUSTED` (`:3480-3482`).
 The code was sound, and the operator had to settle draft #875 by hand.
@@ -140,7 +148,7 @@ REBUT phase event with the same text (`:3465`, `:3484`).
 `~/.saffron/batches/v0/`, 86 with a verdict. The verdict sessions of one
 REBUT summed to $1.16 at most (`SA-0266`, three lenses). The median was
 $0.34. The most one verdict session spent was $0.70 (`SA-0271`).
-`SA-0272`'s $0.56 was cut, so it is a floor and not counted.
+`SA-0272`'s $0.5580 was cut, so it is a floor and not counted.
 
 ## Problem
 
@@ -158,9 +166,12 @@ gets what that pool has left, as each rebuttal session does today.
 
 Keep `SA-0276`'s contract: a REBUT the cap cut short ends `EXHAUSTED`. Say
 which half cut it. A cut while the verdicts ran gets a line naming the
-verdict and the reserve's dollars, and still saying it ran out. A cut during
-the rebuttal turns keeps today's line unchanged. Either line still carries
-the error of the session that was cut, as today.
+verdict and the reserve's dollars, and still saying it ran out. It carries
+the error of the verdict session the pool cut, never the rebuttal turn's and
+never an earlier lens's. The rebuttal turn's error can be a refused
+extraction's "is already spent", which names the wrong session and the wrong
+dollars. A cut during the rebuttal turns keeps today's line and today's
+detail unchanged.
 
 A refusal by the cap during the rebuttal turns no longer decides the
 outcome once a verdict has its own money. A verdict that then fails with
@@ -220,6 +231,12 @@ returns `REBUTTING` at base (`saffron/phases/rebut.py:501-518`). The cell's
 cut check compares against that state (`saffron/cell/session.py:3427` at
 base). Read both at your own base before you edit.
 
+**`SA-0273` adds a second `result.why` rewrite** after `run_rebut` returns
+(its step 4 under "The cell."). A probe cell that rejects the patch keeps
+its own reason in place of `run_rebut`'s text. That rewrite ends the task
+`EXHAUSTED` or `GATE_ERROR`, never `REBUTTAL_UNJUDGED`, so the cut check
+never fires on it. The two do not conflict. Read both at your own base.
+
 **A prototype at `841a62e1`** kept every change inside
 `saffron/cell/session.py`. It gave `_RebutCap` the reserve, opened the
 verdict pool from `_rebut_critic_container` before the critic cell is built,
@@ -237,8 +254,9 @@ rebuttal turn buys no extraction either (`saffron/phases/rebut.py:211-216`).
 So where the extraction never runs, the verdict takes the turn scripted for
 the extraction. Give that turn the verdict's own answer. `_rebut_capped`'s
 `extracted` argument sets it. Criterion 3's two failures ride on the same
-slot: plain text with no structured output, and a scripted
-`implement.AgentFailed` costing less than the pool.
+slot: a structured output that is not a verdict set, and a scripted
+`implement.AgentFailed` costing less than the pool. `extracted=None`
+scripts the default rebuttal set there, so it cannot script plain text.
 
 **Criterion 1's cases**, each with one commit unless named. The verdict pool
 is the reserve plus the cap less the rebuttal turns' spend, floored at the
@@ -255,15 +273,30 @@ reserve.
 
 Each ends `READY_FOR_REVIEW`, since each verdict withdraws its blocker.
 
-**Criterion 2's cases.** The verdict that spends its pool runs $6.00, $2.50,
-then a budget cut costing $3.50. The verdict the pool refuses follows a
-first lens that spent it: $6.00, $4.50, $2.25, then a second lens. The two
-rebuttal-half cuts have no commit. One is a rebuttal turn cut at $10.00. The
-other is a $10.25 turn whose extraction is refused. For each, read the line
-from `rebuttal.json` and from the last REBUT `PhaseStart`. Assert each case
-ends `EXHAUSTED` with no rebut result and its blocker standing. Assert the
-verdict's line does not begin with the rebuttal cut's text. Assert the
-rebuttal cut's line begins with it and names no verdict and no $2.00.
+**Criterion 2's cases.** Each verdict cut has one commit.
+
+| case | costs | blockers standing | line holds | line lacks |
+|---|---|---|---|---|
+| spends the pool | $6.00, $2.50, budget cut $3.50 | 1 | `max_budget_usd` | |
+| pool refuses | $6.00, $4.50, $2.25, second lens | 2 | `is already spent` | |
+| after a refused extraction | $10.25, budget cut $2.00 | 1 | `max_budget_usd` | `is already spent` |
+| second lens cut | $6.00, $2.50, crash $0.50, budget cut $3.00 | 2 | `max_budget_usd` | `provider crashed` |
+
+The refused-pool case and the second-lens case run two lenses, so both
+blockers stand, not the one `tests/test_session.py:4967` asserts. In the
+third case the verdict takes the extraction's slot. The crash is
+`implement.AgentFailed("provider crashed", _cut_off_turn(cost=0.50))`.
+
+The three rebuttal-half cuts have no commit. One is a rebuttal turn cut at
+$10.00. One is a $10.25 turn whose extraction is refused. The last is a
+$6.00 turn whose extraction is a budget cut costing $4.00. No call refuses
+it, and only its spend reaches the cap.
+
+For each case, read the line from `rebuttal.json` and from the last REBUT
+`PhaseStart`. Assert each ends `EXHAUSTED` with no rebut result. Assert the
+verdict's line does not begin with the rebuttal cut's text, and names the
+verdict, $2.00 and running out. Assert the rebuttal cut's line begins with
+that text and names no verdict and no $2.00.
 
 **Criterion 3's cases** run $10.25 with one commit, so the extraction is
 refused and the verdict starts with $2.00. A verdict that never started
@@ -272,6 +305,10 @@ that is not `None`, and a line that does not say it ran out.
 
 **At base each new witness fails in its body.** None imports a name this
 change adds. The prototype ran all three red against the unchanged source.
+
+**A second prototype at `f2f136e8`** ran each criterion's `wrong_versions`
+against the three witnesses, and each failed at least one. So did the three
+mutants.
 
 **`saffron/cell/**` is in `elevate_on`**, so this task runs `elevated` and
 `size` blocks.
