@@ -709,8 +709,7 @@ def test_a_mutant_naming_a_test_file_does_not_exempt_its_witness():
 
 
 def test_an_exempt_new_test_is_left_out_of_the_reverted_run_and_named():
-    """REBUT's own witness (`CONTEXT.md`): a name a post-rebuttal probe
-    already killed is dropped from the reverted run, the same way a
+    """A name a post-rebuttal probe already killed is dropped from the reverted run, the same way a
     `preserves` witness is. `t.py::test_a` names a test exempt but never a
     candidate, so it is neither handed nor named."""
     captured: list[list[str]] = []
@@ -734,6 +733,28 @@ def test_an_exempt_new_test_is_left_out_of_the_reverted_run_and_named():
     assert result.status == "pass"
     assert "t.py::test_rebut" in result.summary
     assert "t.py::test_a" not in result.summary
+
+
+def test_a_diff_whose_every_new_test_is_exempt_skips_saying_so_and_names_each():
+    """Review of SA-0273: an all-exempt diff did add tests, so the skip must
+    not say it added none, and every exempt name is spelled out."""
+    from saffron.gates.core.revert import revert_gate
+
+    rebut = [f"t.py::test_r{i}" for i in range(5)]
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", *rebut)],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=lambda subset: _tests(*subset),
+        exempt=rebut,
+    )
+    assert result.status == "skip"
+    assert result.summary.startswith("every new test is exempt")
+    assert all(name in result.summary for name in rebut)
 
 
 def _tests_uncollected(*, collected=(), uncollected=None, failed=()):

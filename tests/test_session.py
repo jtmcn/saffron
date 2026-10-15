@@ -7765,7 +7765,7 @@ def _drive_rebut_probe(
 
     `probe_results` scripts only REBUT's own re-ask, after REVIEW's own
     two. The implementer's own `revert` run fails every handed name except
-    `t.py::test_rebut`, which always passes reverted until a probe kills it.
+    `t.py::test_rebut`, which passes reverted.
     """
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF, suites=suites)
     _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
@@ -7920,8 +7920,8 @@ def test_a_rebuttal_that_moved_no_commit_runs_no_probe_and_exempts_nothing(
     """Criterion 3: an argued rebuttal that moved no commit asks no probe
     again. Only the two Gate-only cells REVIEW already made exist, and a
     third would be the defect. `commits_ahead` is measured from the head the
-    rebuttal started at, never the tree base `_rebuttable`'s own stub
-    ignores."""
+    rebuttal started at, never from the tree base, which `_rebuttable`'s stub
+    would accept."""
     outcome, _ledger, cell, _reverted = _drive_rebut_probe(
         monkeypatch,
         tmp_path,
@@ -8037,7 +8037,10 @@ def test_a_post_rebuttal_patch_the_probe_cell_cannot_apply_ends_the_task_as_rebu
         rebuttal = json.loads(
             (tmp_path / "empty" / "out" / "SY-1" / "rebuttal.json").read_text()
         )
-        assert rebuttal["why"]
+        assert "no change" in rebuttal["why"]
+        assert any(
+            line.startswith("REBUT:") and "no change" in line for line in cell.watched
+        )
 
 
 def test_a_probe_that_never_answered_after_rebut_ends_gate_error_not_exhausted(
@@ -8045,8 +8048,8 @@ def test_a_probe_that_never_answered_after_rebut_ends_gate_error_not_exhausted(
 ):
     """Criterion 6: infrastructure that leaves the probe unanswered must not
     read as a survivor. A probe cell that cannot be entered, or whose
-    baseline cannot run, ends `GATE_ERROR` on the lone `revert` failure a
-    rebuttal test leaves. A probe that survives still ends `EXHAUSTED`, and
+    baseline cannot run, ends `GATE_ERROR` when `revert` failing rebuttal
+    tests is all that is red. A probe that survives still ends `EXHAUSTED`, and
     so does infrastructure beside another red gate."""
     rebut_turns = [
         _turn("I fixed the guard."),

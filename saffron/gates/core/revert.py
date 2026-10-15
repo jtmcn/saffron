@@ -147,11 +147,10 @@ def revert_gate(
         else ""
     )
     if exempted:
-        note += f" — {len(exempted)} exempt test(s): {', '.join(exempted[:3])}"
+        note += f" — {len(exempted)} exempt test(s): {', '.join(exempted)}"
     if not subset:
-        return GateResult(
-            gate="revert", status="skip", summary=f"the diff adds no new test{note}"
-        )
+        what = "every new test is exempt" if exempted else "the diff adds no new test"
+        return GateResult(gate="revert", status="skip", summary=f"{what}{note}")
 
     # File-level, not hunk-level: a changed file matching none of the repo's
     # declared test paths is source.

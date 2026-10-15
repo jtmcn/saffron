@@ -3363,11 +3363,10 @@ def _drive_cell(
                 not re-enter the repair loop. An errored gate is still
                 infrastructure and still not charged to the task (§5.4).
 
-                Before the re-run, each surviving adequacy probe is asked
-                again over the post-rebuttal patch, in its own gate-only
-                cell. A rebuttal test that kills one guards a property
-                already true at base, so `revert` must not call it theater
-                (b-4a63b7).
+                Each blocker whose probe survived REVIEW, of any lens, is
+                asked again over the post-rebuttal patch in a gate-only cell.
+                A rebuttal test that kills one can guard a property already
+                true at base, so `revert` spares it (b-4a63b7).
                 """
                 nonlocal revert_exempt, probe_patch_why
                 survived = [
@@ -3377,9 +3376,9 @@ def _drive_cell(
                 ]
                 # The same head `head_moved` measures from, reused rather
                 # than read fresh, so both ask the identical question.
-                moved = worktree.commits_ahead(container, before) > 0
+                moved = bool(survived) and worktree.commits_ahead(container, before) > 0
                 # Captured before `_judge` runs, since it replaces `latest`
-                # with the re-run's own suite (§5.4's own note on `_judge`).
+                # with the re-run's own suite.
                 prior_tests = next(
                     (r for r in latest.results if r.gate == "tests"), None
                 )
@@ -3460,14 +3459,13 @@ def _drive_cell(
                 )
                 if comparison.aborted or comparison.drift:
                     return "GATE_ERROR"
-                # An infra fault left the probe unanswered. A lone `revert`
-                # failure on a rebuttal test is then Saffron's own ceiling.
+                # An infrastructure fault left the probe unanswered. `revert`
+                # failures on rebuttal tests alone are then Saffron's ceiling.
                 if (
                     probe_infra
                     and comparison.new_failures
                     and all(
                         nf.gate == "revert"
-                        and nf.failure.code == "passed-without-source"
                         and (
                             prior_collected is None
                             or nf.failure.file not in prior_collected
