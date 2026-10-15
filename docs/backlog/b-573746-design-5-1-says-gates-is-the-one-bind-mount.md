@@ -1,11 +1,12 @@
 ---
 id: b-573746
 title: DESIGN.md §5.1 says `/gates` is a cell's one bind mount, which SA-0272's snapshot mount makes false
-status: open
+status: done
 tier: 3
+closed: 2026-10-14
 filed: 2026-10-14
 specs: [SA-0285, SA-0272]
-prs: [872]
+prs: [872, 875]
 commits: []
 cites: [§5.1]
 related: [b-a8270f]
@@ -28,3 +29,5 @@ in the pull request that lands `SA-0272`.
 ## Record
 
 - 2026-10-14: filed from the spec loop's run 38.
+- 2026-10-14: §5.1 names the History run's read-only mounts, edited by hand
+  in the spec loop's run 39 PR, beside #875.

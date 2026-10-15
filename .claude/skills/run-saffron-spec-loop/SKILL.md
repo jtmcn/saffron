@@ -83,6 +83,11 @@ run the spec as written, split it, or drop it. A spec of a shape no past cell
 matches prints `no past cells of this shape to compare against`, which is a
 note rather than a pass.
 
+A spec whose code reads `.saffron/specs/` gets one more question. Does it
+need `done/`, where every merged spec lives? A projection that missed it kept
+1 of 76 merged tasks (b-a8270f). If its subject is history and it declares
+no `history`, raise that with the operator before its cell.
+
 **Done when** every spec in the order has a `check` line and every blocker is
 answered by the operator.
 
@@ -223,16 +228,18 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
    uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
    ```
 
-   `size` measures what was pushed, so it runs after the push; the PR is a
-   draft, so a branch over its ceiling is still the operator's to answer. The
+   `size` measures what was pushed, so it runs after the push. A branch over
+   its ceiling is usually yours to accept: note the overrun in the PR body and
+   carry on. The operator set this on 2026-10-14, in run 39. Ask only when the
+   overrun is large, or comes from scope rather than tests the review owed. The
    dry `stack` finds a conflict between neighbours while the branch is fresh. It
 needs two reviewable PRs, so it errors after the first.
 
-**Done when** each criterion has a file:line and a probe result, each finding is
-fixed, answered, or kept, every witness the review added fails at the spec's
-base with its imports inside the test, `size` reports the branch within its
-ceiling or the operator has been asked, `make check` echoes `make exit: 0`, and
-the commit is pushed.
+**Done when** each criterion has a file:line and a probe result, and each
+finding is fixed, answered, or kept. Every witness the review added fails at
+the spec's base with its imports inside the test. `size` reports the branch
+within its ceiling, or the PR body notes the overrun. `make check` echoes
+`make exit: 0`, and the commit is pushed.
 
 ## 3. Stack the pull requests
 
@@ -281,7 +288,7 @@ frontmatter shape of any open item, id from `uv run python -m records new-id` â€
 `PRIORITY.md`'s tier index, with `uv run pytest tests/records -q` green before
 committing. Each item a spec came from gets its `status`, `closed` and `prs` set,
 and `specs` where it applies. Add a dated line to its `## Record`. The PR sits on top of the stack and assumes every PR below it
-is merged. Cite each layer by its PR number, never its commits. The stack's
+is merged. Cut its branch from the top layer's head, never from `main`. Cite each layer by its PR number, never its commits. The stack's
 merge can rebase them off `main` (`docs/backlog/README.md`, Closing an item).
 So it retires each spec to `.saffron/specs/done/`, updates the
 scheduler smoke test with `driver.py bookkeeping SA-NNNN`, and sets each origin

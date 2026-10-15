@@ -23,6 +23,12 @@ STATE_MOUNT = "/agent-state"
 GATES_MOUNT = "/gates"
 _MIRROR_MOUNT = "/mirror"
 
+# `session.run_history`'s three extra mounts (backlog item b-a8270f): the
+# ledger snapshot, the real mirrors, and, with `history.batches`, the batch tree.
+HISTORY_MOUNT = "/history"
+BATCHES_MOUNT = "/history-batches"
+MIRRORS_MOUNT = "/history-mirrors"
+
 # Printed to the seed's own stdout the moment `git fetch` fails. A failed
 # fetch and a failed checkout both exit 128 (measured, b-f582ee).
 _FETCH_FAILED_MARKER = "SAFFRON_SEED_FETCH_FAILED"
