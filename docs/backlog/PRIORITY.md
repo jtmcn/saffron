@@ -150,7 +150,7 @@ being paid to satisfy a spec that cannot be satisfied.
 blocking `size` ceiling packed its SQL onto long lines, and passed. The gate
 rewards the reformat, and the operator asked for a fix soon.
 
-**From the spec loop's run 13** (2026-09-22): **b-4a63b7**. `revert` failed a
+**From the spec loop's run 13** (2026-09-22): ~~**b-4a63b7**~~. `revert` failed a
 witness REBUT added to kill a surviving probe, since the property it pins was
 already true at base. A correct diff ended `EXHAUSTED`, and the operator
 opened #433 by hand.
@@ -283,7 +283,15 @@ back, and re-verification went red.
 verdict shares its $10 with the fixes. A task whose gates were green ended
 `EXHAUSTED`, because the verdict ran out of money.
 
+**Placed 2026-10-15**, from the spec loop's run 40: **b-b24cf7**. A stack
+batch holds the spec writer's share back, then charges the writer again. At
+$134 it could not revise a $45 spec, and no cell ran.
+
 ### Tier 2 — the morning after
+
+**Placed 2026-10-15**, from the spec loop's run 40: **b-d31930**, then
+**b-bba47a**. A queued spec's citations drift and nothing checks them before
+its batch. The `tests` gate takes a printed warning for every failure.
 
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
 `SA-0290` merges. `CONTEXT.md` has no entry for a removed name.

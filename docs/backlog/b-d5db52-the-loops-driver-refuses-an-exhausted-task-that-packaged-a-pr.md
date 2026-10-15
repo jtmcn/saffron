@@ -5,7 +5,7 @@ status: open
 tier: 3
 filed: 2026-10-14
 specs: [SA-0272]
-prs: [875]
+prs: [875, 881]
 commits: []
 cites: [§5.7]
 related: [b-4901d2]
@@ -29,3 +29,5 @@ operator chooses to review one, `size` and `stack` take it as a layer.
 ## Record
 
 - 2026-10-14: filed from the spec loop's run 39.
+- 2026-10-15: again in run 40. `SA-0273` ended `EXHAUSTED` with draft #881, and
+  the delegate measured its size through `_size` by hand.

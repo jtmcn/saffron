@@ -1,11 +1,12 @@
 ---
 id: b-4a63b7
 title: '`revert` refuses a witness REBUT adds for a property already true at base, so a sound fix ends `EXHAUSTED`'
-status: open
+status: done
+closed: 2026-10-15
 tier: 1
 filed: 2026-09-22
 specs: [SA-0118, SA-0273]
-prs: [433]
+prs: [433, 881]
 commits: []
 cites: [§5.4]
 related: [103, b-2750d5, b-66e82d]
@@ -45,3 +46,7 @@ it writes one. A witness drives both halves.
   moved HEAD. `revert` exempts a test REBUT added that kills a probe there, at
   the re-run and at PACKAGE. ADR 3 and `DESIGN.md` §5.4 and §5.6
   are amended by hand in the same branch.
+- 2026-10-15: the spec loop's run 40 packaged `SA-0273` as #881. A probe runs
+  again after a rebuttal that moved HEAD, and `revert` exempts each test the
+  rebuttal added that killed one. The task itself ended `EXHAUSTED` at $50.91
+  of $45, because REBUT ran out of its $10 (b-4901d2).
