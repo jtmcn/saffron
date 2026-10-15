@@ -63,3 +63,5 @@ line in each, and leaves the hole open for anyone who does not read them.
 - 2026-09-19: filed by hand from PR #378, whose **Not covered** section names
   this. The measurement above is that branch's, and `SA-0112` is the spec that
   paid for it.
+- 2026-10-14: recurred in the spec loop's run 39. `make check` passed a
+  review commit whose new docstring the commit hook then refused.

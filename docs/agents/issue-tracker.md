@@ -28,8 +28,8 @@ GitHub issues remain in use only for research/evidence records under
   It takes a `command` and a strict boolean `batches`, false by default.
   REVIEW runs the command in a Gate-only cell over a snapshot of the host
   ledger, and every lens reads what it printed (`DESIGN.md` §3.2). Point the
-  command at `--home "$SAFFRON_HISTORY_HOME"`. `SA-0285` adds the field and
-  `SA-0272` runs it. No spec can use it until both land.
+  command at `--home "$SAFFRON_HISTORY_HOME"`. `SA-0285` added the field and
+  `SA-0272` runs it.
 - **`consumes`** is optional and empty by default. Each entry is a
   repo-relative `path` or `path:name` that `depends_on[0]` produces. A spec
   that declares it needs a `depends_on`. `run_task` resolves each entry at

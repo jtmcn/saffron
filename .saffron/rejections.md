@@ -2161,3 +2161,28 @@ seat finding the in-cell critic and the end review both passed.
   the queue's checks, and the finish that wrote it went red.
   **Bucket 1**, `prose` and the queue. **Landed:** nothing, the finish
   escalated. **Open:** b-703e64.
+
+## 2026-10-14, `SA-0272` (spec loop run 39, #875)
+
+- `SA-0272` (#875): the History run section was glued to the last acceptance
+  line, because `criteria_section` ends with no newline.
+  **Bucket 3**, correctness. **Landed:** a review commit on #875.
+- `SA-0272` (#875): a patch the history Gate-only cell refused was reported
+  as refused in the critic cell.
+  **Bucket 3**, conventions. **Landed:** a review commit on #875.
+- `SA-0272` (#875): the witness never pinned each exec's workdir and timeout,
+  every mount's kind and `readonly`, or the repo's `thread_env`.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #875.
+- `SA-0272` (#875): the witness never pinned one copy and one command exec,
+  `history.json`'s command, a timed-out copy, or no history cell without
+  `history`.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #875.
+- `SA-0272` (#875): a test named its script a history check, and called a
+  Gate-only cell a suite cell, both _Avoid_ terms. A comment used bare "run".
+  **Bucket 1**, `terms`. **Landed:** a review commit on #875.
+- `SA-0272` (#875): one comment called the wrong path unmeasured, and another
+  restated a callee's comment.
+  **Bucket 3**, conventions. **Landed:** a review commit on #875.
+- `SA-0272`: REBUT fixed six blockers and the gates went green, then the
+  verdict ran out of REBUT's $10 and the task ended `EXHAUSTED`.
+  **No bucket**, a phase's budget. **Open:** b-4901d2.

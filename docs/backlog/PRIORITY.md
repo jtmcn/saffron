@@ -116,7 +116,7 @@ host.
 A test red only in the cell is subtracted from every cell's result.
 
 **From the spec loop's run 8, 2026-09-19** (stack #351 ← #360 ← #355 ← #366 ←
-#353): ~~**b-2750d5**~~, **b-a8270f**, then ~~**b-36b551**~~. The first two are checks
+#353): ~~**b-2750d5**~~, ~~**b-a8270f**~~, then ~~**b-36b551**~~. The first two are checks
 the loop's delegate ran by hand after every cell. Mutating the line behind
 each criterion found a witness hole in all five pull requests. A run over a
 real ledger found #355 leaving out 75 of 76 merged tasks. ~~**b-36b551**~~ is a
@@ -278,6 +278,10 @@ file exempts a witness of code the diff changed, so `revert` never judges it.
 **Placed 2026-10-13**, from the spec loop's run 37: **b-703e64**. A stack
 batch's spec writer revised a spec no `prose` gate read. The finish wrote it
 back, and re-verification went red.
+
+**Placed 2026-10-14**, from the spec loop's run 39: **b-4901d2**. REBUT's
+verdict shares its $10 with the fixes. A task whose gates were green ended
+`EXHAUSTED`, because the verdict ran out of money.
 
 ### Tier 2 — the morning after
 
@@ -645,8 +649,12 @@ The host-probe line is built twice. The Mint entry says a re-offer waits.
 sketches one fixed network and one fixed proxy after #855 and #856.
 
 **Placed 2026-10-14**, from the spec loop's run 38: **b-6d4704**, **b-65dbbd**,
-then **b-573746**. An attended cell never asks the image store. Preflight
+then ~~**b-573746**~~. An attended cell never asks the image store. Preflight
 spells the proxy's Dockerfile by hand. §5.1 calls `/gates` the one bind mount.
+
+**Placed 2026-10-14**, from the spec loop's run 39: **b-d5db52**, then
+**b-dc41ef**. The loop's driver refuses an `EXHAUSTED` task with a PR. A
+History run's snapshot ignores `--home`.
 
 **Placed 2026-10-13**, from the spec loop's run 37: **b-be3adc**, then
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the

@@ -1,11 +1,12 @@
 ---
 id: b-a8270f
 title: A change whose subject is history never runs against a real ledger in the cell, and #355 left out 75 of 76 merged tasks
-status: partial
+status: done
 tier: 1
+closed: 2026-10-14
 filed: 2026-09-19
 specs: [SA-0272, SA-0285]
-prs: [872]
+prs: [872, 875]
 commits: []
 cites: [§4.1, §5.4]
 related: [b-2750d5, b-952c34, b-946f03, 97]
@@ -45,3 +46,7 @@ that cites `.saffron/specs/` paths gets a step 1b question: does the code need
 - 2026-10-14: the spec loop's run 38 stacked `SA-0285` as #872. A spec can
   declare `history`, the ledger can snapshot itself, and a cell can take an
   extra mount. `SA-0272` still owns the History run, so the item stays partial.
+- 2026-10-14: the spec loop's run 39 stacked `SA-0272` as #875. REVIEW runs
+  a declared `history` command in a Gate-only cell, and every lens reads it.
+  Step 1b of the loop's skill now asks whether code reading `.saffron/specs/`
+  needs `done/`, so the item is done.
