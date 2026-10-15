@@ -143,7 +143,7 @@ acceptance:
 
 Backlog item **b-4a63b7**, found in the spec loop's run 13 on `SA-0118`.
 It cites `DESIGN.md` §5.4. Every line number below was read at
-`bc879e2c`.
+`84bcb923`.
 
 **What happened.** The adequacy lens named a probe, and the probe
 survived. REBUT added a test that kills it. That test guards a property
@@ -162,8 +162,8 @@ option, so it stays a candidate.
 **Why the task ends there.** After the rebuttal turn, `run_rebut` calls
 `rerun_gates` (`saffron/phases/rebut.py:717`). A red re-run ends the task
 `EXHAUSTED` (`:717-724`). In the cell, `_rebut_gates` is that callable
-(`saffron/cell/session.py:3091-3108`). It calls `_judge`, which runs
-`suite.against(tree, baseline)` (`:2590-2594`). That method takes no more
+(`saffron/cell/session.py:3346-3363`). It calls `_judge`, which runs
+`suite.against(tree, baseline)` (`:2810-2814`). That method takes no more
 than the tree and the baseline (`saffron/gates/suite.py:143-144`). The
 `revert_gate` call it reaches passes the spec's criteria and nothing that
 names a test to spare (`:166-187`).
@@ -174,16 +174,16 @@ verdict cell from the post-rebuttal patch. A `CriticPatchRejected`, which
 `CriticPatchUnrepresentable` ends it `GATE_ERROR`
 (`saffron/phases/rebut.py:729-741`). `rerun_gates` runs with no such guard
 (`:717`). An exception escaping a cell ends the task `ORPHANED`
-(`saffron/cell/session.py:3304-3310`).
+(`saffron/cell/session.py:3559-3566`).
 
 **No probe runs after REBUT today.** REVIEW asks each anchored adequacy
 finding's probe through `probe_findings`
-(`saffron/cell/session.py:1506-1663`), through `_probe_adequacy` at
-`:2966-2979`. That
+(`saffron/cell/session.py:1717-1874`), through `_probe_adequacy` at
+`:3221-3235`. That
 function enters a gate-only cell from a patch, runs the `tests` gate once
 as a baseline, then once per probe. A cell that cannot be entered, and a
 baseline that cannot run, each leave every probe `unproven` with a reason
-naming that (`:1618-1627`). Only `CellRuntimeError` is caught there, so a
+naming that (`:1829-1838`). Only `CellRuntimeError` is caught there, so a
 patch the cell cannot apply escapes. A kill counts only for a test the
 diff added. That set is `probe.added_tests` over the task's pre-turn
 baseline and that cell's baseline (`saffron/probe.py:302-316`). A
@@ -241,7 +241,7 @@ empty by default. Inside `_rebut_gates`, before `_judge` runs:
    `EXHAUSTED`. On `CriticPatchUnrepresentable`, emit a REBUT line naming
    the binary change and return `GATE_ERROR`. Neither runs `_judge`.
    Keep that reason. After `run_rebut` returns, set `result.why` to it,
-   as the cap path rewrites `result.why` (`saffron/cell/session.py:3171-3179`).
+   as the cap path rewrites `result.why` (`saffron/cell/session.py:3426-3434`).
    `run_rebut`'s own text would say the gates are red.
 5. Write the returned entries to `rebut-probes.json` in the task
    directory.
@@ -253,8 +253,9 @@ empty by default. Inside `_rebut_gates`, before `_judge` runs:
 7. Note whether any entry is `unproven` because something raised: the
    probe cell could not be entered, or its baseline `tests` gate raised.
    Its reason starts with one of the two prefixes the `unproven` calls
-   write at `saffron/cell/session.py:1618-1627`. Make each prefix a
-   module constant. Use it there, and use the first at `:1787` too.
+   write at `saffron/cell/session.py:1829-1838`. Make each prefix a
+   module constant. Use it there, and use the first at `:1998` too,
+   in the criterion-probe path.
 8. Pass the exemption to `_judge`, and from there to `suite.against`.
    Store it so the returned `CellOutcome` carries it, sorted.
 9. After an aborted or drifted re-run, keep returning `GATE_ERROR`.
@@ -264,18 +265,18 @@ empty by default. Inside `_rebut_gates`, before `_judge` runs:
    its `code` is always `passed-without-source` (`saffron/gates/core/revert.py:384-391`). A
    test the rebuttal added is one the loop's last `tests` result did not
    collect. Capture that result before `_judge` runs, since `_judge`
-   replaces `latest` (`saffron/cell/session.py:2598`). Otherwise keep
+   replaces `latest` (`saffron/cell/session.py:2818`). Otherwise keep
    today's `EXHAUSTED` and `None`.
 
 **PACKAGE.** `reverify` takes the exemption as a keyword argument that
 defaults to empty, and passes it to its head suite's `suite.against`.
 `package` passes the outcome's `revert_exempt`. The finishing suite's
-`reverify` call in `saffron/cli.py:783-791` keeps the default. A
+`reverify` call in `saffron/cli.py:843-851` keeps the default. A
 finishing commit touches only `.saffron/specs/*.md` (`saffron/finish.py:38`).
 
 Two test stand-ins for `CellOutcome` gain `revert_exempt=[]`:
-`_cell_outcome` in `tests/test_package.py:773-791`, and `pkg_outcome` in
-`tests/test_session.py:10998`.
+`_cell_outcome` in `tests/test_package.py:871-889`, and `pkg_outcome` in
+`tests/test_session.py:11607`.
 
 ## Out of scope
 
@@ -284,7 +285,7 @@ Two test stand-ins for `CellOutcome` gain `revert_exempt=[]`:
   is another. That covers a baseline gate that reported `error` or `skip`
   (`saffron/probe.py:198-203`) and a probed run that did
   (`saffron/probe.py:216-222`). It also covers a probe whose apply raised
-  after the baseline ran (`saffron/cell/session.py:1645-1650`). Each
+  after the baseline ran (`saffron/cell/session.py:1855-1864`). Each
   exempts nothing, so a test REBUT added for it is still judged by
   `revert`, and the task still ends `EXHAUSTED`.
 - **Criterion-probe and wrong-version survivors.** Their blockers also
