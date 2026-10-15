@@ -50,9 +50,9 @@ forbidden:
   - saffron/cell/worktree.py
   - saffron/cell/runtime.py
   - tests/test_scheduler.py
-budget_usd: 36
+budget_usd: 45
 max_attempts: 3
-max_turns: 180
+max_turns: 240
 acceptance:
   - claim: >-
       `revert_gate` takes an argument naming the tests to exempt. A new
