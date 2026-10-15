@@ -86,6 +86,7 @@ def revert_gate(
     dirty: DirtyPaths,
     reverted: Reverted,
     run_tests: RunTests,
+    exempt: Sequence[str],
 ) -> GateResult:
     """New tests, run with their own source reverted, must not pass.
 
@@ -127,7 +128,11 @@ def revert_gate(
     # witness as a live `criteria` hole; this widens the same hole rather than
     # opening a new one, and the spec's own subset claim is what asks for it.
     declared = {c.witness for c in acceptance}
-    candidates = ((set(after) - set(before)) | (declared & set(after))) - preserved
+    before_exempt = ((set(after) - set(before)) | (declared & set(after))) - preserved
+    # Named only where it was a candidate: a test never added, or one
+    # `preserves` dropped, was never going to reach `run_tests` either way.
+    exempted = sorted(before_exempt & set(exempt))
+    candidates = before_exempt - set(exempt)
     subset = sorted(name for name in candidates if _argv_safe(name))
     # A dropped name is the only evidence the operator gets that something in
     # the cell printed a collection line it had no business printing. Carried
@@ -141,6 +146,8 @@ def revert_gate(
         if dropped
         else ""
     )
+    if exempted:
+        note += f" — {len(exempted)} exempt test(s): {', '.join(exempted[:3])}"
     if not subset:
         return GateResult(
             gate="revert", status="skip", summary=f"the diff adds no new test{note}"
@@ -203,10 +210,10 @@ def revert_gate(
         }
     )
     if unreachable:
-        exempt = {witness for witness, _ in unreachable}
-        subset = [name for name in subset if name not in exempt]
+        unreached = {witness for witness, _ in unreachable}
+        subset = [name for name in subset if name not in unreached]
         note += (
-            f" — {len(exempt)} witness(es) whose subject this diff never "
+            f" — {len(unreached)} witness(es) whose subject this diff never "
             f"touched: " + ", ".join(f"{w} ({f})" for w, f in unreachable)
         )
     if not subset:

@@ -7721,6 +7721,464 @@ def test_a_plan_rejected_on_shape_reports_both_turns_it_spent(monkeypatch, tmp_p
     assert any("$0.80 spent" in line for line in cell.watched)
 
 
+# --- backlog item b-4a63b7: a probe asked again after a rebuttal moves HEAD ---
+# `_rebuttal_turn_has_run` is the one already defined above.
+
+_REBUT_PROBE_FINDINGS = {
+    "findings": [
+        _adequacy_finding(_CONCERN_CLAIM, "src/a.py", "if x < 0:", "if False:"),
+        _adequacy_finding(
+            "u is never bounds-checked", "src/u.py", "u", "U", severity="blocker"
+        ),
+    ]
+}
+
+_GROWN_PATCH = _ANCHORING_DIFF + "# the rebuttal's own fix\n"
+
+# The re-run's own `tests` result: `t.py::test_rebut` is the rebuttal's own
+# new test, collected for the first time here.
+_TASK_HEAD_PLUS_REBUT = GateResult(
+    gate="tests",
+    status="pass",
+    tool="pytest 8.0",
+    collected=["t.py::test_old", "t.py::test_a", "t.py::test_rebut"],
+)
+
+
+def _drive_rebut_probe(
+    monkeypatch,
+    tmp_path,
+    *,
+    rebut_commits,
+    rebut_turns,
+    probe_results=(),
+    suites=(_TASK_BASE, _TASK_HEAD),
+    gates=("tests",),
+    grown_patch=_GROWN_PATCH,
+    extra_setup=None,
+):
+    """The shared drive for criteria 2, 3, 5 and 6. The adequacy lens files
+    two findings: a concern whose probe edits `src/a.py`, and a blocker
+    whose probe edits `src/u.py`. REVIEW's own probe cell always sees a
+    green baseline and a green `src/a.py` run, so that finding survives.
+    `src/u.py`'s mutate always refuses, so REVIEW leaves that one unproven.
+
+    `probe_results` scripts only REBUT's own re-ask, after REVIEW's own
+    two. The implementer's own `revert` run fails every handed name except
+    `t.py::test_rebut`, which always passes reverted until a probe kills it.
+    """
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF, suites=suites)
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+
+    @contextlib.contextmanager
+    def _mutate(_container, mutant):
+        if mutant.file == "src/u.py":
+            raise runtime.CellRuntimeError("src/u.py carries uncommitted work")
+        cell.mutated.append(mutant)
+        yield None
+
+    monkeypatch.setattr("saffron.cell.worktree.source_mutated", _mutate)
+
+    def _export_patch(_container, sha):
+        cell.exported_from = sha
+        cell.export_calls.append((_container, sha))
+        return grown_patch if _rebuttal_turn_has_run(cell) else _ANCHORING_DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    answers = iter([_GREEN_TESTS, _GREEN_TESTS, *probe_results])
+    reverted: list[list[str]] = []
+
+    def _run_gate(name, executable, cwd, *, subset=None, executor=None, **kw):
+        container = getattr(executor, "container", None)
+        if container is not None and container.startswith("saffron-gate-"):
+            answer = next(answers)
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+        handed = list(subset or [])
+        reverted.append(handed)
+        failed = [n for n in handed if n != "t.py::test_rebut"]
+        return GateResult(
+            gate="tests",
+            status="fail" if failed else "pass",
+            tool="pytest 8.0",
+            collected=handed,
+            failures=[Failure(file=n, code=n, message="assert") for n in failed],
+        )
+
+    monkeypatch.setattr("saffron.gates.runner.run_gate", _run_gate)
+
+    if extra_setup is not None:
+        extra_setup(monkeypatch, cell)
+
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_adequacy_turns(_REBUT_PROBE_FINDINGS, rebut=list(rebut_turns)),
+        policy=_PROBE_POLICY,
+        gates=gates,
+    )
+    return outcome, ledger, cell, reverted
+
+
+def test_a_test_rebut_added_that_kills_the_surviving_probe_reaches_ready_for_review(
+    monkeypatch, tmp_path
+):
+    """Criterion 2: a rebuttal test that kills the surviving `src/a.py` probe
+    is exempt from the `revert` re-run. The task reaches `READY_FOR_REVIEW`,
+    not `EXHAUSTED`, on a test that guards a property already true at base."""
+    rebut_baseline = GateResult(
+        gate="tests",
+        tool="pytest 8.0",
+        status="pass",
+        collected=[
+            "t.py::test_old",
+            "t.py::test_a",
+            "t.py::test_rebut",
+            "t.py::test_rebut_other",
+        ],
+    )
+    killed = GateResult(
+        gate="tests",
+        tool="pytest 8.0",
+        status="fail",
+        collected=[
+            "t.py::test_old",
+            "t.py::test_a",
+            "t.py::test_rebut",
+            "t.py::test_rebut_other",
+        ],
+        failures=[
+            Failure(file="t.py::test_a", code="t.py::test_a", message="x"),
+            Failure(file="t.py::test_rebut", code="t.py::test_rebut", message="x"),
+        ],
+    )
+    green_full = GateResult(
+        gate="tests",
+        tool="pytest 8.0",
+        status="pass",
+        collected=[
+            "t.py::test_old",
+            "t.py::test_a",
+            "t.py::test_rebut",
+            "t.py::test_rebut_other",
+        ],
+    )
+    outcome, _ledger, cell, reverted = _drive_rebut_probe(
+        monkeypatch,
+        tmp_path,
+        rebut_commits=1,
+        rebut_turns=[
+            _turn("I fixed the guard."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "fixed a.py"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed"},
+                        {"finding": 2, "verdict": "withdrawn", "reason": "fixed"},
+                    ]
+                }
+            ),
+        ],
+        probe_results=[rebut_baseline, killed],
+        suites=(_TASK_BASE, _TASK_HEAD, [green_full]),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.revert_exempt == ["t.py::test_rebut"]
+    recorded_exempt = json.loads(
+        (tmp_path / "out" / "SY-1" / "revert-exempt.json").read_text()
+    )
+    assert recorded_exempt == ["t.py::test_rebut"]
+    assert reverted[-1] == ["t.py::test_a", "t.py::test_rebut_other"]
+    probes = json.loads((tmp_path / "out" / "SY-1" / "rebut-probes.json").read_text())
+    (entry,) = probes
+    assert entry["probe_verdict"] == "killed"
+    assert sorted(entry["failures"]) == ["t.py::test_a", "t.py::test_rebut"]
+    (finding,) = entry["findings"]
+    assert finding["filed_severity"] == "concern"
+    rebuttal = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert [b["probe_verdict"] for b in rebuttal["blockers"]] == [
+        "survived",
+        "unproven",
+    ]
+    assert [m.file for m in cell.mutated] == ["src/a.py", "src/a.py"]
+    applies = [e for e in cell.execs if e[0] == "saffron-gate-SY-1" and "apply" in e[1]]
+    assert applies[-1][2] == _GROWN_PATCH
+
+
+def test_a_rebuttal_that_moved_no_commit_runs_no_probe_and_exempts_nothing(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: an argued rebuttal that moved no commit asks no probe
+    again. Only the two Gate-only cells REVIEW already made exist, and a
+    third would be the defect. `commits_ahead` is measured from the head the
+    rebuttal started at, never the tree base `_rebuttable`'s own stub
+    ignores."""
+    outcome, _ledger, cell, _reverted = _drive_rebut_probe(
+        monkeypatch,
+        tmp_path,
+        rebut_commits=0,
+        rebut_turns=[
+            _turn("I cannot reproduce this."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {
+                            "finding": 1,
+                            "action": "argued",
+                            "argument": "the guard is correct as written",
+                        }
+                    ]
+                }
+            ),
+        ],
+        suites=(_TASK_BASE, _TASK_HEAD, _TASK_HEAD),
+    )
+    assert outcome.revert_exempt == []
+    assert not (tmp_path / "out" / "SY-1" / "rebut-probes.json").exists()
+    assert not (tmp_path / "out" / "SY-1" / "revert-exempt.json").exists()
+    gate_only = [w for w in cell.worktrees if w["container"] == "saffron-gate-SY-1"]
+    assert len(gate_only) == 2
+    assert cell.measured_from == "c" * 40
+
+
+def test_a_post_rebuttal_patch_the_probe_cell_cannot_apply_ends_the_task_as_rebut_does(
+    monkeypatch, tmp_path
+):
+    """Criterion 5: a post-rebuttal patch the probe cell cannot apply ends the
+    task the way the verdict cell's own fault would. A refused apply and an
+    empty patch both end `EXHAUSTED`, a binary one `GATE_ERROR`, and the
+    gates never re-run."""
+    rebut_turns = [
+        _turn("I fixed the guard."),
+        _turn(
+            structured_output={
+                "rebuttals": [{"finding": 1, "action": "fixed", "argument": "fixed it"}]
+            }
+        ),
+    ]
+
+    def _refuse_apply(m, _cell):
+        def _exec_stream(container, command, *, stdin_data="", on_line=None, **k):
+            # Only REBUT's own probe cell: REVIEW's two reuse this
+            # container name first, with the un-grown diff.
+            if (
+                container == "saffron-gate-SY-1"
+                and "apply" in command
+                and stdin_data == _GROWN_PATCH
+            ):
+                return runtime.Completed(1, "", "patch does not apply")
+            return runtime.Completed(0, "", "")
+
+        m.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
+
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "rejected",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            extra_setup=_refuse_apply,
+        )
+        assert outcome.state == "EXHAUSTED"
+        assert len(reverted) == 1
+        assert any("did not apply" in line for line in cell.watched)
+        rebuttal = json.loads(
+            (tmp_path / "rejected" / "out" / "SY-1" / "rebuttal.json").read_text()
+        )
+        assert "did not apply" in rebuttal["why"]
+
+    def _binary_apply(m, _cell):
+        def _exec_stream(container, command, *, stdin_data="", on_line=None, **k):
+            if (
+                container == "saffron-gate-SY-1"
+                and "apply" in command
+                and stdin_data == _GROWN_PATCH
+            ):
+                return runtime.Completed(128, "", "fatal: without full index line")
+            return runtime.Completed(0, "", "")
+
+        m.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
+
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "binary",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            extra_setup=_binary_apply,
+        )
+        assert outcome.state == "GATE_ERROR"
+        assert len(reverted) == 1
+        assert any("binary change" in line for line in cell.watched)
+        rebuttal = json.loads(
+            (tmp_path / "binary" / "out" / "SY-1" / "rebuttal.json").read_text()
+        )
+        assert "binary change" in rebuttal["why"]
+
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "empty",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            grown_patch="",
+        )
+        assert outcome.state == "EXHAUSTED"
+        assert len(reverted) == 1
+        rebuttal = json.loads(
+            (tmp_path / "empty" / "out" / "SY-1" / "rebuttal.json").read_text()
+        )
+        assert rebuttal["why"]
+
+
+def test_a_probe_that_never_answered_after_rebut_ends_gate_error_not_exhausted(
+    monkeypatch, tmp_path
+):
+    """Criterion 6: infrastructure that leaves the probe unanswered must not
+    read as a survivor. A probe cell that cannot be entered, or whose
+    baseline cannot run, ends `GATE_ERROR` on the lone `revert` failure a
+    rebuttal test leaves. A probe that survives still ends `EXHAUSTED`, and
+    so does infrastructure beside another red gate."""
+    rebut_turns = [
+        _turn("I fixed the guard."),
+        _turn(
+            structured_output={
+                "rebuttals": [{"finding": 1, "action": "fixed", "argument": "fixed it"}]
+            }
+        ),
+    ]
+
+    def _unenterable(m, cell):
+        real_critic_cell = session.critic_cell
+
+        def _spy(**kwargs):
+            if kwargs.get("network") is None and _rebuttal_turn_has_run(cell):
+                raise runtime.CellRuntimeError("the probe cell refused to come up")
+            return real_critic_cell(**kwargs)
+
+        m.setattr("saffron.cell.session.critic_cell", _spy)
+
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "unenterable",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            suites=(_TASK_BASE, _TASK_HEAD, [_TASK_HEAD_PLUS_REBUT]),
+            extra_setup=_unenterable,
+        )
+        assert outcome.state == "GATE_ERROR"
+        assert outcome.revert_exempt == []
+        assert "t.py::test_rebut" in reverted[-1]
+
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "baseline-raises",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            probe_results=[runtime.CellRuntimeError("the baseline could not run")],
+            suites=(_TASK_BASE, _TASK_HEAD, [_TASK_HEAD_PLUS_REBUT]),
+        )
+        assert outcome.state == "GATE_ERROR"
+        assert outcome.revert_exempt == []
+        assert "t.py::test_rebut" in reverted[-1]
+
+    survives = GateResult(
+        gate="tests",
+        tool="pytest 8.0",
+        status="pass",
+        collected=["t.py::test_old", "t.py::test_a", "t.py::test_rebut"],
+    )
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "survives",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            probe_results=[survives, survives],
+            suites=(_TASK_BASE, _TASK_HEAD, [_TASK_HEAD_PLUS_REBUT]),
+        )
+        assert outcome.state == "EXHAUSTED"
+        assert outcome.revert_exempt == []
+        assert "t.py::test_rebut" in reverted[-1]
+
+    lint_ok = GateResult(gate="lint", tool="ruff 1.0", status="pass")
+    lint_red = GateResult(
+        gate="lint",
+        tool="ruff 1.0",
+        status="fail",
+        failures=[Failure(file="src/x.py", code="E1", message="bad")],
+    )
+    with monkeypatch.context() as m:
+        outcome, _ledger, cell, reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "another-red-gate",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            gates=("tests", "lint"),
+            suites=(
+                [*_TASK_BASE, lint_ok],
+                [*_TASK_HEAD, lint_ok],
+                [_TASK_HEAD_PLUS_REBUT, lint_red],
+            ),
+            extra_setup=_unenterable,
+        )
+        assert outcome.state == "EXHAUSTED"
+        assert outcome.revert_exempt == []
+        assert "t.py::test_rebut" in reverted[-1]
+
+    # A fifth leg: a second new `revert` failure names `t.py::test_a`, a
+    # test the loop's last suite already collected, pinning `failure.file`.
+    def _unenterable_and_test_a_also_theater(m, cell, reverted):
+        _unenterable(m, cell)
+        calls = {"n": 0}
+
+        def _run_gate(_name, _executable, cwd, *, subset=None, **_kw):
+            # Only two reverted runs reach here: attempt 1's own, unchanged,
+            # then REBUT's re-run, where `t.py::test_a` turns theater too.
+            calls["n"] += 1
+            handed = list(subset or [])
+            reverted.append(handed)
+            failed = (
+                [] if calls["n"] > 1 else [n for n in handed if n != "t.py::test_rebut"]
+            )
+            return GateResult(
+                gate="tests",
+                tool="pytest 8.0",
+                status="fail" if failed else "pass",
+                collected=handed,
+                failures=[Failure(file=n, code=n, message="assert") for n in failed],
+            )
+
+        m.setattr("saffron.gates.runner.run_gate", _run_gate)
+
+    with monkeypatch.context() as m:
+        theater_reverted: list[list[str]] = []
+        outcome, _ledger, cell, _reverted = _drive_rebut_probe(
+            m,
+            tmp_path / "another-theater-test",
+            rebut_commits=1,
+            rebut_turns=rebut_turns,
+            suites=(_TASK_BASE, _TASK_HEAD, [_TASK_HEAD_PLUS_REBUT]),
+            extra_setup=lambda mm, c: _unenterable_and_test_a_also_theater(
+                mm, c, theater_reverted
+            ),
+        )
+        assert outcome.state == "EXHAUSTED"
+        assert outcome.revert_exempt == []
+        assert "t.py::test_rebut" in theater_reverted[-1]
+
+
 # --- the critic cell (SA-0087, backlog item 118) -----------------------------
 #
 # The implementer runs as root on a writable rootfs for the whole repair loop,
@@ -11624,6 +12082,7 @@ def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
         # produced above — not a fresh literal, so this can only pass if
         # both halves of the channel actually ran.
         notes=outcome.notes,
+        revert_exempt=[],
     )
     pkg_spec = parse_spec(
         "---\nid: SA-9\ntitle: package the notes\ntype: feature\nrisk: standard\n---\n"

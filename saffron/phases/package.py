@@ -19,7 +19,7 @@ import json
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -488,6 +488,7 @@ def reverify(
     gates_dir: Path,
     image: str,
     spec: Spec,
+    exempt: Sequence[str] = (),
 ) -> SuiteComparison:
     """The whole gate suite on the packaged commit, judged against a fresh
     baseline at `new_base_sha`, each in its own gate-only cell (§5.7). The
@@ -577,7 +578,7 @@ def reverify(
             "errored rather than ran — infrastructure, not a task defect"
         )
     with _gate_cell("head", packaged_sha) as tree:
-        comparison = suite.against(tree, baseline)
+        comparison = suite.against(tree, baseline, exempt=exempt)
     if comparison.aborted:
         raise PackageError(
             f"head suite at {packaged_sha[:12]}: {', '.join(comparison.aborted)} "
@@ -839,6 +840,7 @@ def package(
             gates_dir=gates_dir,
             image=image,
             spec=spec,
+            exempt=outcome.revert_exempt,
         )
         verified_on, gates = "packaged", comparison.run.results
         # The body and the queue line report the tier the verifying suite ran

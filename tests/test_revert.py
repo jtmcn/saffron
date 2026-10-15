@@ -86,6 +86,7 @@ def test_a_new_test_that_passes_without_the_source_is_a_failure():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["t.py::test_new"]
@@ -123,6 +124,7 @@ def test_the_subset_is_the_new_names_and_excludes_a_preserved_witness():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert captured == [["t.py::test_new"]]
 
@@ -154,6 +156,7 @@ def test_a_collected_name_that_reads_as_an_option_never_reaches_the_runner():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert captured == [["t.py::test_new"]]
     # And the real name is still judged — the drop narrows the subset, it does
@@ -180,6 +183,7 @@ def test_the_source_is_restored_when_the_run_raises():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "error"
     assert result.status != "fail"
@@ -209,6 +213,7 @@ def test_a_restore_that_failed_is_also_an_error():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[], fail_on_exit=True),
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
+        exempt=[],
     )
     assert result.status == "error"
 
@@ -223,6 +228,7 @@ def test_a_checkout_that_failed_is_an_error_not_a_failure():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[], fail_on_enter=True),
         run_tests=_refuse_run,
+        exempt=[],
     )
     assert result.status == "error"
     assert result.status != "fail"
@@ -279,6 +285,7 @@ def test_each_kind_of_nothing_to_revert_is_a_skip():
             dirty=lambda: [],
             reverted=_refuse,
             run_tests=_refuse_run,
+            exempt=[],
         )
         assert result.status == "skip", result
         assert summary in result.summary, result
@@ -306,6 +313,7 @@ def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "skip", result
     assert "node id" in result.summary
@@ -331,6 +339,7 @@ def test_a_reverted_run_that_did_not_enumerate_is_a_skip():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "skip", result
     assert "no collected tests" in result.summary
@@ -356,6 +365,7 @@ def test_a_reverted_run_that_enumerated_nothing_still_passes():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "pass", result
     # Pinned to the exact string, not a substring: with no `uncollected`
@@ -394,6 +404,7 @@ def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error()
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "skip", result
     assert result.status != "error", "an untrustworthy result ends the attempt"
@@ -417,6 +428,7 @@ def test_a_repo_that_declares_no_test_paths_is_a_skip_and_never_reverts():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
+        exempt=[],
     )
     assert result.status == "skip", result
     assert log == [], "nothing may be reverted when source cannot be identified"
@@ -441,6 +453,7 @@ def test_the_verdict_is_scoped_to_the_subset_not_the_whole_enumeration():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "pass", result
 
@@ -462,6 +475,7 @@ def test_the_tool_is_the_one_that_actually_ran():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "pass"
     assert result.tool == "pytest 8.3.2"
@@ -488,6 +502,7 @@ def test_a_declared_witness_joins_the_subset_even_when_it_existed_at_base():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "fail", result
     assert [f.file for f in result.failures] == ["t.py::test_w"]
@@ -509,6 +524,7 @@ def test_a_declared_witness_the_head_run_never_collected_is_not_asserted():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
+        exempt=[],
     )
     assert result.status == "skip", result
     assert log == [], "an unenumerated witness must not reach the worktree"
@@ -532,6 +548,7 @@ def test_uncommitted_work_on_a_path_this_would_revert_is_a_skip():
         # Never entered: refusing is how this proves the worktree was untouched.
         reverted=_refuse,
         run_tests=_refuse_run,
+        exempt=[],
     )
     assert result.status == "skip", result
     assert "pkg/a.py" in result.summary
@@ -556,6 +573,7 @@ def test_uncommitted_work_somewhere_else_does_not_stop_the_gate():
         dirty=lambda: ["docs/unrelated.md", "tests/test_new.py"],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
+        exempt=[],
     )
     assert result.status == "pass", result
     assert ("revert", ["pkg/a.py"]) in log
@@ -584,6 +602,7 @@ def test_the_dirty_read_happens_before_anything_is_reverted():
         dirty=dirty,
         reverted=reverted,
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
+        exempt=[],
     )
     assert order == ["dirty", "revert"]
 
@@ -624,6 +643,7 @@ def test_a_witness_whose_subject_the_diff_never_touched_is_skipped():
         dirty=lambda: [],
         reverted=_refuse,
         run_tests=_refuse_run,
+        exempt=[],
     )
     assert result.status == "skip"
     assert "session.py" in result.summary
@@ -648,6 +668,7 @@ def test_a_witness_whose_subject_the_diff_did_touch_is_still_judged():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda subset: _tests(*subset),
+        exempt=[],
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
@@ -681,9 +702,38 @@ def test_a_mutant_naming_a_test_file_does_not_exempt_its_witness():
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=lambda subset: _tests(*subset),
+        exempt=[],
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
+
+
+def test_an_exempt_new_test_is_left_out_of_the_reverted_run_and_named():
+    """REBUT's own witness (`CONTEXT.md`): a name a post-rebuttal probe
+    already killed is dropped from the reverted run, the same way a
+    `preserves` witness is. `t.py::test_a` names a test exempt but never a
+    candidate, so it is neither handed nor named."""
+    captured: list[list[str]] = []
+
+    def run_tests(subset):
+        captured.append(subset)
+        return _tests(*subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", "t.py::test_new", "t.py::test_rebut")],
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+        exempt=["t.py::test_rebut", "t.py::test_a"],
+    )
+    assert captured == [["t.py::test_new"]]
+    assert result.status == "pass"
+    assert "t.py::test_rebut" in result.summary
+    assert "t.py::test_a" not in result.summary
 
 
 def _tests_uncollected(*, collected=(), uncollected=None, failed=()):
@@ -709,6 +759,7 @@ def _revert(run_tests, *, acceptance=(), results=None, changed_files=("pkg/a.py"
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
+        exempt=[],
     )
 
 
@@ -923,6 +974,7 @@ def _one_absent_id_beside(tmp_path, witness_body):
         dirty=lambda: [],
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=_real_tests_gate(tmp_path),
+        exempt=[],
     )
 
 
