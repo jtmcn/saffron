@@ -4,7 +4,7 @@ title: REBUT's verdict shares its cap with the fixes, so a task whose gates are 
 status: open
 tier: 1
 filed: 2026-10-14
-specs: [SA-0272]
+specs: [SA-0272, SA-0293]
 prs: [875]
 commits: []
 cites: [§5.5]
@@ -33,3 +33,6 @@ runs out is reported apart from `EXHAUSTED`.
 ## Record
 
 - 2026-10-14: filed from the spec loop's run 39.
+- 2026-10-14: specced as `SA-0293`. The verdicts draw on a $2.00 reserve on
+  top of `REBUT_CAP_USD`, plus what the rebuttal turns left. Its commit
+  updates `DESIGN.md` §5.6 and §5.7 and amends ADR 4.
