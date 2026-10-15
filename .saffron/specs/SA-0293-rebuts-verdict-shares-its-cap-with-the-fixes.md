@@ -70,8 +70,10 @@ acceptance:
       A verdict the reserve cuts short ends the task `EXHAUSTED` with its
       blockers standing. Its line names the verdict and the $2.00 reserve,
       in `rebuttal.json` and in the REBUT phase event alike. It carries the
-      cut verdict's own error, never the rebuttal turn's or an earlier
-      lens's. A cut during the rebuttal turns keeps today's line, which
+      error of the first verdict session the pool cut, by its spend or by a
+      refusal. It never carries the rebuttal turn's error, or that of a lens
+      that failed with money left. A refusal by the pool names the pool,
+      never the $10.00 cap. A cut during the rebuttal turns keeps today's line, which
       names neither. The witness drives four verdict cuts and three
       rebuttal-half cuts. The verdict cuts are one that spends the pool, one
       the pool refuses, one after a refused extraction, and a second lens
@@ -92,8 +94,9 @@ acceptance:
       - A rebuttal-half cut decided only by a refused call, so an extraction that spends the rest of the cap and fails reads as silence.
   - claim: >-
       A verdict session that starts and fails with money left in its pool is
-      no cut, even after the cap refused the extraction. The task ends
-      `REBUTTAL_UNJUDGED` with its own line and keeps its rebut result. The
+      no cut, even after the cap refused the extraction. When no later
+      verdict is cut, the task ends `REBUTTAL_UNJUDGED` with its own line and
+      keeps its rebut result. The
       witness drives a verdict outside the schema and a verdict session that
       crashes.
     witness: tests/test_session.py::test_a_verdict_that_fails_on_its_own_after_the_cap_is_spent_is_no_cut
@@ -167,8 +170,10 @@ gets what that pool has left, as each rebuttal session does today.
 Keep `SA-0276`'s contract: a REBUT the cap cut short ends `EXHAUSTED`. Say
 which half cut it. A cut while the verdicts ran gets a line naming the
 verdict and the reserve's dollars, and still saying it ran out. It carries
-the error of the verdict session the pool cut, never the rebuttal turn's and
-never an earlier lens's. The rebuttal turn's error can be a refused
+the error of the first verdict session the pool cut, by its spend or by a
+refusal. It never carries the rebuttal turn's error, or that of a lens that
+failed with money left. The pool's own refusal names the pool, never the
+$10.00 cap. The rebuttal turn's error can be a refused
 extraction's "is already spent", which names the wrong session and the wrong
 dollars. A cut during the rebuttal turns keeps today's line and today's
 detail unchanged.
@@ -278,7 +283,7 @@ Each ends `READY_FOR_REVIEW`, since each verdict withdraws its blocker.
 | case | costs | blockers standing | line holds | line lacks |
 |---|---|---|---|---|
 | spends the pool | $6.00, $2.50, budget cut $3.50 | 1 | `max_budget_usd` | |
-| pool refuses | $6.00, $4.50, $2.25, second lens | 2 | `is already spent` | |
+| pool refuses | $6.00, $4.50, $2.25, second lens | 2 | `is already spent` | `$10.00` |
 | after a refused extraction | $10.25, budget cut $2.00 | 1 | `max_budget_usd` | `is already spent` |
 | second lens cut | $6.00, $2.50, crash $0.50, budget cut $3.00 | 2 | `max_budget_usd` | `provider crashed` |
 
