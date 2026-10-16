@@ -96,7 +96,7 @@ acceptance:
 ## Context
 
 Backlog item **40**, the second half of its finding. It cites `DESIGN.md`
-§5.4. Every line number below was read at `bc879e2c`.
+§5.4. Every line number below was read at `473cea7e`.
 
 **`size` counts every changed file.** `size_gate` takes a diff, a spec
 type and `touches` (`saffron/gates/core/size.py:202-204`). It looks up the
@@ -107,8 +107,8 @@ filter on its path (`:155-158`). The ceilings are 1300 tokens for `bug`,
 
 **A repo already declares its test paths.** `IntegrityPatterns` carries a
 `test_paths` list, empty by default (`saffron/repos/policy.py:61`). This
-repo declares `["tests/**"]` (`.saffron/policy.yaml:71`). The gate suite
-already hands that list to `revert_gate` (`saffron/gates/suite.py:168-173`).
+repo declares `["tests/**"]` (`.saffron/policy.yaml:70`). The gate suite
+already hands that list to `revert_gate` (`saffron/gates/suite.py:176-181`).
 That gate tells source from test by matching each changed path against
 the list (`saffron/gates/core/revert.py:166-168`).
 The suite calls `size_gate` with the diff, the spec's type and its
@@ -171,7 +171,7 @@ Leave the repo's declared test paths out of what `size` counts.
 **Both criteria are new code**, so each declares a witness and no mutant,
 and `witness` will report `skip`. The exclusion does not exist at base.
 The suite's new keyword argument would read the same text as the
-`revert_gate` call's at `saffron/gates/suite.py:168-173`. A mutant's
+`revert_gate` call's at `saffron/gates/suite.py:176-181`. A mutant's
 `find` must match exactly once (§5.4.1), and that text would match twice.
 
 **At base both witnesses fail.** Criterion 1's witness passes a keyword
