@@ -222,7 +222,10 @@ its anchored files and their tests, or whose budget exceeds its origin spec's.
 **Money.** Spec work holds its own share of the batch budget, `writer_usd`.
 It sits beside the end review's `reserve_usd`, not inside it. Writing costs
 about six times a review, measured on the writer and reviewer chain. Once
-`writer_usd` is spent, the remaining groups go to the backlog pool.
+`writer_usd` is spent, the remaining groups go to the backlog pool. A
+revision of a spec in the order is spec work too. It draws on `writer_usd`,
+and what it spends leaves the share rather than being held back again
+(b-b24cf7).
 
 ## 4. Finishing the stack, escalations, and the delegate
 

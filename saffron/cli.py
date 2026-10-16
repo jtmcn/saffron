@@ -28,7 +28,7 @@ from saffron import (
     spec_review,
 )
 from saffron.agents import context
-from saffron.batch import run_batch, run_stack_batch
+from saffron.batch import run_batch, run_stack_batch, writer_left
 from saffron.cell import runtime, worktree
 from saffron.cell.session import (
     _SAFFRON_ROOT,
@@ -1480,7 +1480,8 @@ def _stack_follow_ups(
                 specs_dir=exported / ".saffron" / "specs",
                 repo_id=repo_id,
                 test_paths=policy.integrity.test_paths,
-                cap_usd=cap_usd,
+                # Revisions this batch ran have already drawn on the share.
+                cap_usd=writer_left(ledger, int(batch_key), cap_usd),
                 emit=print,
                 pooled=pooled,
             )

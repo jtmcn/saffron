@@ -1328,6 +1328,19 @@ class Ledger:
         ).fetchone()
         return float(row["spent"])
 
+    def batch_phase_spend(self, batch_id: int, phase: str) -> float:
+        """What this batch's attempts of one `phase` cost, through the same
+        join as `batch_spend`'s first term."""
+        row = self._db.execute(
+            """SELECT COALESCE(SUM(a.cost_usd_est), 0.0) AS spent
+                 FROM attempts a
+                 JOIN tasks t ON t.task_id = a.task_id
+                 JOIN runs r ON r.run_id = t.run_id
+                WHERE r.batch_id = ? AND a.phase = ?""",
+            (batch_id, phase),
+        ).fetchone()
+        return float(row["spent"])
+
     def batch_tasks(self, batch_id: int) -> list[sqlite3.Row]:
         """Every task whose run belongs to this batch, lowest run id first,
         then lowest task id. Each row carries `task_id`, `spec_id`, `state`
