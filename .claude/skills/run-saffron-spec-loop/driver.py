@@ -647,7 +647,13 @@ def _depends_on_chain(spec_id: str) -> list[str]:
 
 
 def _size(
-    lower: str, upper: str, spec_type: str, touches: list[str], *, cwd: Path = REPO
+    lower: str,
+    upper: str,
+    spec_type: str,
+    touches: list[str],
+    *,
+    test_paths: Sequence[str] = (),
+    cwd: Path = REPO,
 ) -> GateResult:
     """The `size` gate's own verdict from `lower` to `upper`. It runs only in
     the cell, so review commits can take a branch past it unseen (item 40)."""
@@ -655,7 +661,7 @@ def _size(
     from saffron.gates.core.size import size_gate
 
     diff = _git("diff", *DIFF_FLAGS, f"{lower}...{upper}", cwd=cwd)
-    return size_gate(diff, spec_type, touches, blocking=False)
+    return size_gate(diff, spec_type, touches, blocking=False, test_paths=test_paths)
 
 
 def _merge_conflicts(lower: str, upper: str, cwd: Path = REPO) -> list[str]:
@@ -1796,7 +1802,11 @@ def cmd_size(args) -> int:
         lower = _own_base(upper, below, _trunk())
     except GitError as err:
         return _fail(str(err))
-    result = _size(lower, upper, spec.type, spec.touches)
+    from saffron.repos.policy import load_policy
+
+    # The cell's `size` leaves the declared test paths out (SA-0274), so this does too.
+    test_paths = load_policy(REPO)[0].integrity.test_paths
+    result = _size(lower, upper, spec.type, spec.touches, test_paths=test_paths)
     ask = "" if result.status == "pass" else "; ask the operator (item 40)"
     print(f"{match.spec_id} since {lower[:8]}: {result.summary}{ask}")
     return 0 if result.status == "pass" else 1
