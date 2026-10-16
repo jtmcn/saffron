@@ -488,3 +488,100 @@ def test_a_real_binary_inside_touches_is_refused_where_the_gate_blocks(tmp_path)
     advisory = size_gate(diff, "bug", ["src/**"], blocking=False)
     assert advisory.status == "pass"
     assert "logo.png" in advisory.summary
+
+
+def test_files_under_the_declared_test_paths_are_left_out_of_the_count():
+    ceiling = _CEILINGS["bug"]
+    # Two globs, so a pattern read alone, or `*` crossing a slash, or a
+    # prefix matched as a substring, each misclassifies a different file.
+    test_paths = ["tests/**", "*_test.go"]
+
+    # Counted: none of these three paths matches a declared test path,
+    # though each looks close, by slash-crossing, nesting or pattern count.
+    counted_source = _diff(added=11, removed=0, path="src/a.py")
+    # `*_test.go` cannot cross the `/` before `pkg`, so this stays source.
+    counted_go_test = _diff(added=13, removed=0, path="pkg/a_test.go")
+    # Nested under `tests/`, but `tests/**` is anchored at the path's start.
+    counted_nested = _diff(added=17, removed=0, path="src/tests/util.py")
+
+    # Left out: each of these three does match one of the two globs.
+    left_out_nested_tests = _diff(added=19, removed=0, path="tests/unit/test_a.py")
+    left_out_go_test = _diff(added=23, removed=0, path="a_test.go")
+
+    # Shared first/last token, 32,000-token reversed middle: past the
+    # token-diff bound, estimated at 2 physical lines * 4 tokens = 8.
+    middle = [f"m{i}" for i in range(32_000)]
+    old_line = "FIRST " + " ".join(middle) + " LAST"
+    new_line = "FIRST " + " ".join(reversed(middle)) + " LAST"
+    estimated_test_file = _one_hunk(
+        [" keep", "-" + old_line, "+" + new_line], path="tests/shared.py"
+    )
+
+    diff = (
+        counted_source
+        + counted_go_test
+        + counted_nested
+        + left_out_nested_tests
+        + left_out_go_test
+        + estimated_test_file
+    )
+    result = size_gate(diff, "bug", touches=[], test_paths=test_paths)
+    assert result.summary.startswith("41 changed tokens within the bug ceiling")
+    assert "50" in result.summary
+    assert "tests/shared.py" not in result.summary
+
+    rewrapped = _one_hunk(["-a b c d", "+a b", "+c d"], path="tests/rewrapped.py")
+    source_11 = _diff(added=11, removed=0, path="src/a.py")
+    declared_exact = size_gate(
+        source_11 + rewrapped, "bug", touches=[], test_paths=test_paths
+    )
+    assert (
+        declared_exact.summary
+        == f"11 changed tokens within the bug ceiling of {ceiling}"
+    )
+
+    source_under = _diff(added=ceiling - 10, removed=0, path="src/a.py")
+    test_100 = _diff(added=100, removed=0, path="tests/t.py")
+    under_bundle = source_under + test_100
+    assert (
+        size_gate(under_bundle, "bug", touches=[], test_paths=test_paths).status
+        == "pass"
+    )
+    assert size_gate(under_bundle, "bug", touches=[]).status == "fail"
+
+    source_over = _diff(added=ceiling + 1, removed=0, path="src/a.py")
+    over_bundle = source_over + test_100
+    over_declared = size_gate(over_bundle, "bug", touches=[], test_paths=test_paths)
+    assert over_declared.status == "fail"
+    assert over_declared.failures[0].message.startswith(str(ceiling + 1))
+    assert over_declared.summary.startswith(str(ceiling + 1))
+    assert "100" in over_declared.summary
+
+    pinned = size_gate(
+        source_over + rewrapped, "bug", touches=[], test_paths=test_paths
+    )
+    assert (
+        pinned.summary
+        == f"{ceiling + 1} changed tokens exceeds the bug ceiling of {ceiling}"
+    )
+
+    binary_block = (
+        "diff --git a/tests/logo.png b/tests/logo.png\n"
+        "Binary files /dev/null and b/tests/logo.png differ\n"
+    )
+    mixed = source_11 + binary_block
+    blocked = size_gate(
+        mixed, "bug", touches=["src/**", "tests/**"], test_paths=test_paths
+    )
+    assert blocked.status == "error"
+    assert "tests/logo.png" in blocked.summary
+
+    advisory = size_gate(
+        mixed,
+        "bug",
+        touches=["src/**", "tests/**"],
+        test_paths=test_paths,
+        blocking=False,
+    )
+    assert advisory.status == "pass"
+    assert "tests/logo.png unreadable, not counted" in advisory.summary

@@ -206,7 +206,11 @@ class GateSuite:
             # An unreadable diff refused here aborts the attempt, which no
             # advisory filter can soften — so it refuses only where it blocks.
             size_gate(
-                diff, spec.spec_type, spec.touches, blocking="size" not in advisory
+                diff,
+                spec.spec_type,
+                spec.touches,
+                blocking="size" not in advisory,
+                test_paths=policy.integrity.test_paths,
             ),
             *declared,
             *reverted,
