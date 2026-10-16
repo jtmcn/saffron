@@ -36,3 +36,7 @@ runs out is reported apart from `EXHAUSTED`.
 - 2026-10-14: specced as `SA-0293`. The verdicts draw on a $2.00 reserve on
   top of `REBUT_CAP_USD`, plus what the rebuttal turns left. Its commit
   updates `DESIGN.md` §5.6 and §5.7 and amends ADR 4.
+- 2026-10-15: run 40's `SA-0273` ended the same way. Its rebuttal turn spent
+  $7.53 and moved HEAD, and its extraction was cut at $3.07, so no rebuttal was
+  recorded and both verdicts were refused. `SA-0293`'s reserve covers the
+  verdicts only. A cut extraction would still leave them nothing to judge.

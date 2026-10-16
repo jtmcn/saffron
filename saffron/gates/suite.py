@@ -137,13 +137,21 @@ class GateSuite:
 
     def baseline(self, tree: Tree) -> SuiteRun:
         """At the base the diff is empty, so `scope` and `integrity` pass, and
-        `revert`, `census` and `criteria` have no baseline of their own and skip."""
+        `revert`, `census` and `criteria` have no baseline of their own and skip.
+        Never exempts anything: an exemption is earned by a post-rebuttal probe,
+        which has no counterpart at the base."""
         return self._run(tree, prior=[])
 
-    def against(self, tree: Tree, baseline: SuiteRun) -> SuiteComparison:
-        return _compare(self._run(tree, prior=baseline.results), baseline)
+    def against(
+        self, tree: Tree, baseline: SuiteRun, *, exempt: Sequence[str] = ()
+    ) -> SuiteComparison:
+        return _compare(
+            self._run(tree, prior=baseline.results, exempt=exempt), baseline
+        )
 
-    def _run(self, tree: Tree, *, prior: list[GateResult]) -> SuiteRun:
+    def _run(
+        self, tree: Tree, *, prior: list[GateResult], exempt: Sequence[str] = ()
+    ) -> SuiteRun:
         spec, policy = self.spec, self.policy
         changed = tree.changed_files(self.diff_base)
         diff = tree.patch(self.diff_base)
@@ -180,6 +188,7 @@ class GateSuite:
                         subset=subset,
                         executor=tree.executor,
                     ),
+                    exempt=exempt,
                 )
             ]
             if "tests" in self.gates

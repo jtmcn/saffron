@@ -108,6 +108,11 @@ HISTORY_OUTPUT_CHARS = 20_000
 # the declared command alike. Reasoned, not measured, the same as above.
 HISTORY_EXEC_TIMEOUT_S = 600.0
 
+# What `probe_findings`/`_apply_criterion_probes` write when something
+# raised, named once so a caller can tell that apart from a refusal (b-4a63b7).
+_PROBE_CELL_UNENTERABLE = "the probe cell could not be entered: "
+_PROBE_BASELINE_UNREADABLE = "the baseline tests gate could not run: "
+
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
     """What `run_one_cell` fans an event out to when the caller (every direct
@@ -435,6 +440,9 @@ class CellOutcome:
     # The reset time a closed window reported, the same value the `RATE_LIMITED`
     # `TaskOutcome` carries. `None` on every path that never raised `RateLimited`.
     resets_at: int | None = None
+    # A rebuttal test a post-rebuttal probe killed, exempt from `revert`
+    # at the re-run and at PACKAGE's re-verification (b-4a63b7).
+    revert_exempt: list[str] = field(default_factory=list)
 
 
 def repair_decision(
@@ -1827,14 +1835,14 @@ def probe_findings(
             )
         )
     except runtime.CellRuntimeError as exc:
-        unproven(remaining, f"the probe cell could not be entered: {exc}")
+        unproven(remaining, f"{_PROBE_CELL_UNENTERABLE}{exc}")
         return entries
     with stack:
         run_tests = partial(_run_tests, container, gates["tests"], repo)
         try:
             baseline = run_tests([])
         except runtime.CellRuntimeError as exc:
-            unproven(remaining, f"the baseline tests gate could not run: {exc}")
+            unproven(remaining, f"{_PROBE_BASELINE_UNREADABLE}{exc}")
             return entries
         # `check_probe` builds its own for each result it returns, so this
         # copy is only for the entries the host authors: the raise path's.
@@ -1995,7 +2003,7 @@ def _apply_criterion_probes(
             )
         )
     except runtime.CellRuntimeError as exc:
-        _unproven(with_edit, f"the probe cell could not be entered: {exc}")
+        _unproven(with_edit, f"{_PROBE_CELL_UNENTERABLE}{exc}")
         return
 
     with stack:
@@ -2808,10 +2816,13 @@ def _drive_cell(
             )
 
         def _judge(
-            attempt: int, *, against: Literal["attempt", "rebuttal"]
+            attempt: int,
+            *,
+            against: Literal["attempt", "rebuttal"],
+            exempt: Sequence[str] = (),
         ) -> SuiteComparison:
             nonlocal latest, suite_attempt
-            comparison = suite.against(tree, baseline)
+            comparison = suite.against(tree, baseline, exempt=exempt)
             # Kept for the `CellOutcome`'s own gates, effective_risk and
             # advisory_gates. Not for the critic: its table comes from the
             # gate-only cell now, never the implementer's own run.
@@ -3332,6 +3343,10 @@ def _drive_cell(
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
         # branch below, and READY_FOR_REVIEW's own outcomes skip it entirely.
         rebut_result: rebut.RebutResult | None = None
+        # `_rebut_gates` below writes these (b-4a63b7), bound here so the
+        # final `CellOutcome` can read them on every path, not only REBUT's.
+        revert_exempt: list[str] = []
+        probe_patch_why: str | None = None
 
         if outcome == "REBUTTING":
             ledger.set_task_state(task_id, "REBUTTING")
@@ -3346,10 +3361,94 @@ def _drive_cell(
             def _rebut_gates() -> str | None:
                 """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
                 not re-enter the repair loop. An errored gate is still
-                infrastructure and still not charged to the task (§5.4)."""
+                infrastructure and still not charged to the task (§5.4).
+
+                Each blocker whose probe survived REVIEW, of any lens, is
+                asked again over the post-rebuttal patch in a gate-only cell.
+                A rebuttal test that kills one can guard a property already
+                true at base, so `revert` spares it (b-4a63b7).
+                """
+                nonlocal revert_exempt, probe_patch_why
+                survived = [
+                    f
+                    for f in blockers
+                    if f.probe is not None and f.probe_verdict == "survived"
+                ]
+                # The same head `head_moved` measures from, reused rather
+                # than read fresh, so both ask the identical question.
+                moved = bool(survived) and worktree.commits_ahead(container, before) > 0
+                # Captured before `_judge` runs, since it replaces `latest`
+                # with the re-run's own suite.
+                prior_tests = next(
+                    (r for r in latest.results if r.gate == "tests"), None
+                )
+                prior_collected = (
+                    set(prior_tests.collected)
+                    if prior_tests is not None and prior_tests.collected is not None
+                    else None
+                )
+                probe_infra = False
+                if survived and moved:
+                    edited = [f.model_copy() for f in survived]
+                    for finding in edited:
+                        # The severity the lens filed, not the `blocker`
+                        # its own probe promoted it to, already on record.
+                        finding.severity = finding.filed_severity or finding.severity
+                    rebuttal_patch = worktree.export_patch(container, spec.tree_base)
+                    try:
+                        entries = probe_findings(
+                            edited,
+                            spec=spec,
+                            repo=repo,
+                            mirror=mirror,
+                            gates_dir=gates_dir,
+                            thread_env=policy.thread_env,
+                            test_paths=policy.integrity.test_paths,
+                            base_results=baseline.results,
+                            gates=gates,
+                            patch=rebuttal_patch,
+                            created=created,
+                            note=_critic_teardown,
+                        )
+                    except CriticPatchRejected as rejected:
+                        # Mapped as `run_rebut` maps the verdict cell's own
+                        # fault (§5.5): the agent's problem, already paid for.
+                        probe_patch_why = rejected.reason(
+                            "the probe cell", "the post-rebuttal patch"
+                        )
+                        return "EXHAUSTED"
+                    except CriticPatchUnrepresentable as binary:
+                        probe_patch_why = (
+                            "the probe cell's post-rebuttal patch carries a "
+                            f"binary change — {binary}"
+                        )
+                        return "GATE_ERROR"
+                    (task_dir / "rebut-probes.json").write_text(
+                        json.dumps(entries, indent=2)
+                    )
+                    killed = {
+                        name
+                        for entry in entries
+                        if entry["probe_verdict"] == "killed"
+                        for name in entry["failures"]
+                    }
+                    if prior_collected is not None:
+                        revert_exempt = sorted(killed - prior_collected)
+                    (task_dir / "revert-exempt.json").write_text(
+                        json.dumps(revert_exempt, indent=2)
+                    )
+                    probe_infra = any(
+                        entry["probe_verdict"] == "unproven"
+                        and entry["reason"].startswith(
+                            (_PROBE_CELL_UNENTERABLE, _PROBE_BASELINE_UNREADABLE)
+                        )
+                        for entry in entries
+                    )
                 # The suite after the loop's last, so the count continues
                 # rather than restarting at 1, under its own "rebuttal" (item 47).
-                comparison = _judge(attempts + 1, against="rebuttal")
+                comparison = _judge(
+                    attempts + 1, against="rebuttal", exempt=revert_exempt
+                )
                 emit(
                     attempt_event(
                         comparison,
@@ -3359,6 +3458,21 @@ def _drive_cell(
                     )
                 )
                 if comparison.aborted or comparison.drift:
+                    return "GATE_ERROR"
+                # An infrastructure fault left the probe unanswered. `revert`
+                # failures on rebuttal tests alone are then Saffron's ceiling.
+                if (
+                    probe_infra
+                    and comparison.new_failures
+                    and all(
+                        nf.gate == "revert"
+                        and (
+                            prior_collected is None
+                            or nf.failure.file not in prior_collected
+                        )
+                        for nf in comparison.new_failures
+                    )
+                ):
                     return "GATE_ERROR"
                 return "EXHAUSTED" if comparison.new_failures else None
 
@@ -3432,6 +3546,10 @@ def _drive_cell(
                 result.why = f"REBUT ran out of its ${REBUT_CAP_USD:.2f} budget" + (
                     f" — {detail}" if detail else ""
                 )
+            # The probe cell's own patch fault, not `run_rebut`'s text
+            # naming red gates: the gates never ran at all (§5.6).
+            if probe_patch_why is not None:
+                result.why = probe_patch_why
             rebut_result = result
             spent += result.cost_usd
             session_id = result.rebuttal.session_id or session_id
@@ -3513,6 +3631,7 @@ def _drive_cell(
             advisory_gates=sorted(latest.advisory_gates),
             notes=notes,
             notes_sha256=notes_sha256,
+            revert_exempt=sorted(revert_exempt),
         )
     except RateLimited as stopped:
         # Read back, not reported: `spent` loses the walled turn — the raise

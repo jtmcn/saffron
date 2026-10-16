@@ -2186,3 +2186,25 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0272`: REBUT fixed six blockers and the gates went green, then the
   verdict ran out of REBUT's $10 and the task ended `EXHAUSTED`.
   **No bucket**, a phase's budget. **Open:** b-4901d2.
+
+## 2026-10-15, `SA-0273` (spec loop run 40, #881)
+
+- `SA-0273`: the batch's spec review found 15 citations into `session.py`,
+  `cli.py` and two test files that had moved since the spec was written.
+  **No bucket**, a pre-batch check. **Open:** b-d31930.
+- `SA-0273`: the batch could not revise the spec, because it charged the
+  writer on top of the writer's share it held back.
+  **No bucket**, a batch's budget. **Open:** b-b24cf7.
+- `SA-0273` (#881): criterion 5's empty-patch leg asserted only a non-empty
+  `why`, so a build keeping the gates-are-red text survived.
+  **Bucket 1**, `witness`. **Landed:** a review commit on #881.
+- `SA-0273` (#881): `revert` skipped an all-exempt diff saying it added no
+  new test, and named only three exempt tests.
+  **Bucket 3**, correctness. **Landed:** a review commit on #881.
+- `SA-0273` (#881): a comment cited a §5.4 note that section never makes, a
+  clause restated `revert`'s failure code, and test docstrings described
+  stubs wrongly.
+  **Bucket 3**, conventions. **Landed:** a review commit on #881.
+- `SA-0273`: REBUT's rebuttal turn moved HEAD, then its extraction ran out of
+  REBUT's $10, and the task ended `EXHAUSTED` with green gates.
+  **No bucket**, a phase's budget. **Open:** b-4901d2.

@@ -886,6 +886,7 @@ def _cell_outcome(task_dir, task_id, run_id):
         effective_risk="standard",
         advisory_gates=[],
         notes="",
+        revert_exempt=[],
     )
 
 
@@ -1105,6 +1106,33 @@ def packageable(monkeypatch, tmp_path):
         outcome=_cell_outcome(task_dir, task_id, run_id),
     )
     ledger.close()
+
+
+def test_package_re_verifies_with_the_cells_revert_exemption(monkeypatch, packageable):
+    """Criterion 4: `package()` hands `reverify` the cell's own
+    `revert_exempt`, and `reverify` hands it on to its head suite's
+    `GateSuite.against`, never dropping it on the way through."""
+    from saffron.gates.suite import GateSuite
+
+    # The real `reverify`, not the fixture's own clean stub: the call under
+    # test is what it does with `exempt`, not what re-verification measures.
+    monkeypatch.setattr("saffron.phases.package.reverify", reverify)
+    seen: list[object] = []
+
+    def _spy(self, tree, baseline, *, exempt=None):
+        seen.append(exempt)
+        return _reverified()
+
+    monkeypatch.setattr(GateSuite, "against", _spy)
+    _stub_package_cells(monkeypatch)
+    packageable.outcome.revert_exempt = ["t.py::test_rebut"]
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+    assert seen == [["t.py::test_rebut"]]
 
 
 def _state(ledger, task_id):
