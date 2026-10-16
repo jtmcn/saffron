@@ -68,14 +68,16 @@ acceptance:
       A cite and the review after it share one fetch. For a candidate with
       a layer, and for one with no layer under a stack base, the cite
       adapter fetches once. The review then fetches nothing, and its cell
-      starts at the commit the check was handed. A review given a different
-      layer for the same candidate fetches its own branch. A second review
-      with no cite before it fetches again.
+      starts at the commit the check was handed. A review after a cite still
+      fetches its own branch when its layer differs, or when its candidate
+      differs on the same layer. A second review with no cite between them
+      fetches again.
     witness: tests/test_cli.py::test_a_stack_batchs_citation_check_and_spec_review_read_one_fetch
     wrong_versions:
       - The cite adapter fetches through its own call and `_stack_review` fetches again, so the two can read different commits.
       - The review takes the shared commit and leaves it in place, so a later review with no cite before it reads that commit without a fetch.
       - The shared commit keyed by spec id alone, so a review with another layer reads the first layer's commit.
+      - The shared commit keyed by layer alone, so a review of another candidate on that layer reads the first candidate's commit.
       - The commit shared only for a layer, so the stack base's seed still fetches twice.
   - claim: >-
       `saffron batch --stack` builds the cite adapter once readiness passes. It passes the pinned base and the order's stack base, and it
@@ -134,11 +136,14 @@ parent's head fresh every call, because a predecessor's branch does not
 hold still (`saffron/phases/package.py:173-177`). So a check and a review
 that each fetch can read two different commits.
 
-**`_batch` builds every stack callable after readiness passes.** Under
+**`_batch` builds every stack callable once the scan resolves.** Under
 `--stack` it builds `_stack_review`, `_stack_revise` and the rest inside
-the `if readiness.ok` branch. Each one is `None` until then. It passes
-them to `run_stack_batch` by keyword (`saffron/cli.py`, the function
-`_batch`).
+`if readiness.ok`. They sit in the `else:` of the `try` around
+`_resolve_queue`.
+`stack_review`, `stack_revise` and the rest stay `None` until then.
+`stack_runner` keeps its `_no_stack_candidate_should_run` default. It
+passes them to `run_stack_batch` by keyword (`saffron/cli.py`, the
+function `_batch`).
 
 **A queued spec's text is read at `base_sha`.** ADR 7 says every spec the
 operator queued is first read at `base_sha`. A stack batch runs other text
@@ -174,7 +179,7 @@ optional `heads` keyword. Its callable pops a matching entry and seeds
 there with no fetch. With no entry it resolves its own commit as today.
 
 In `_batch`, build the adapter under `--stack` beside `_stack_review`. Pass
-it to `run_stack_batch` as `cite`, `None` until readiness passes.
+it to `run_stack_batch` as `cite`, `None` until the scan resolves.
 
 ## Out of scope
 
@@ -216,19 +221,45 @@ change adds. The first two call `cli._stack_cite`, which raises
 
 **The first two witnesses** use `_spec_session_rig` with
 `.saffron/specs/SY-1-x.md`. That file reads differently at the rig's base
-commit, at its head commit and in the operator's checkout. Replace the rig's
-`fetch_parent_branch` double with one that records each call and returns
-the mirror's `HEAD` commit, so a fetched commit is real and readable.
-Replace `SA-0294`'s check, at the name `cli` calls it by, with a double
+commit, at its head commit and in the operator's checkout. Leave
+`_spec_session_rig` unchanged, since both `preserves` witnesses assert its
+`"d" * 40` fetch. Inside each new witness, monkeypatch
+`package.fetch_parent_branch` over the rig's double with one that records
+each branch and returns the mirror's `HEAD` commit. A fetched commit is
+then real and readable. Monkeypatch `SA-0294`'s check, at the name `cli` calls it by, with a double
 that records what it was handed. Drive a layer through an adapter built
 with a stack base and through one built without. Pass a candidate whose
 file is absent to drive the `ValueError`. Pass that same candidate with a
-recorded `spec_text` too, which must reach the check with no raise. In the
-second witness, take the cell's start
-commit from the rig's `cell_up_calls`.
+recorded `spec_text` too, which must reach the check with no raise.
 
-**The third witness** copies
-`test_a_stack_batch_passes_run_stack_batch_its_spec_revision`. Fake
+**The second witness** runs five sequences. Each builds a fresh `heads`
+dict and a fresh cite and review pair over it, and clears the fetch log
+first. Take the cell's start commit from the rig's `cell_up_calls`.
+
+- **A layer, no stack base.** `cite(c, A, None)`, then `review(c, A)`.
+  One fetch of `A`'s branch, and the cell starts at the commit the check
+  was handed.
+- **No layer, a stack base.** Build the pair with a stack base.
+  `cite(c, None, None)`, then `review(c, None)`. One fetch of the stack
+  base's branch, and the same start commit.
+- **Another layer.** `cite(c, A, None)`, then `review(c, B)`. Two fetches,
+  `A`'s branch then `B`'s.
+- **Another candidate.** `cite(c, A, None)`, then `review(d, A)`. Two
+  fetches of `A`'s branch.
+- **A second review.** `cite(c, A, None)`, then `review(c, A)` twice. Two
+  fetches of `A`'s branch.
+
+A prototype over this rig failed one sequence for each wrong version.
+Keyed by spec id alone fails the third. Keyed by layer alone fails the
+fourth. Leaving the entry in place fails the fifth. Sharing only for a
+layer fails the second. Fetching in both fails the first.
+
+**The third witness** takes its two `--stack` cases from
+`test_a_stack_batch_passes_run_stack_batch_its_spec_revision`, where
+readiness passes and then fails. It takes the third case, a batch
+without `--stack`, from
+`test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes`.
+That case fakes `run_batch` too and asserts no `_stack_cite` call. Fake
 `_stack_cite` and `_stack_review`, each recording its keywords. Assert the
 same object reaches both as `heads`, by identity. Give the order a stack
 base, as
