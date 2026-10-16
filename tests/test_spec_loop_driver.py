@@ -3409,3 +3409,60 @@ def test_status_with_only_the_legacy_plan_still_says_to_delete_it(
         driver.cmd_status(argparse.Namespace())
     assert exit_.value.code == 1
     assert "plan.json is the previous driver's file" in capsys.readouterr().err
+
+
+def test_check_blocks_a_queued_spec_whose_citations_drifted_at_its_cut_base(
+    empty_repo, monkeypatch, capsys
+):
+    """Kills four wrong shapes. `check` skips `cite`, or a cite defect never
+    blocks. A child's base is read from the trunk, or a missing parent blocks."""
+    repo = empty_repo
+    specs_dir = repo / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    monkeypatch.setattr(driver, "REPO", repo)
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+    (repo / "mod.py").write_text("a\nb\n")
+    _git(repo, "add", "mod.py")
+    _git(repo, "commit", "-qm", "trunk")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+    parent, child = _spec("SA-0001"), _spec("SA-0002")
+    child.depends_on = ["SA-0001"]
+    monkeypatch.setattr(
+        driver, "_known_specs", lambda: {s.id: s for s in (parent, child)}
+    )
+    (specs_dir / "SA-0001-p.md").write_text("Reads `mod.py:2`.\n")
+    (specs_dir / "SA-0002-c.md").write_text("Reads `mod.py:4`.\n")
+
+    def check(spec_id):
+        rc = driver.cmd_check(argparse.Namespace(spec_id=spec_id))
+        return rc, capsys.readouterr().out
+
+    rc, out = check("SA-0001")
+    assert rc == 0 and "cite: 1 citation(s) resolve at origin/main" in out
+
+    # The parent has no branch yet: the child's base is unknown, not the trunk.
+    rc, out = check("SA-0002")
+    assert rc == 0 and "note: cite not run, SA-0001 has no branch on origin" in out
+
+    (repo / "mod.py").write_text("a\nb\nc\nd\n")
+    _git(repo, "commit", "-qam", "parent")
+    _git(repo, "update-ref", "refs/remotes/origin/saffron/SA-0001", "HEAD")
+    rc, out = check("SA-0002")
+    assert rc == 0 and "resolve at origin/saffron/SA-0001" in out
+
+    (specs_dir / "SA-0001-p.md").write_text("Reads `mod.py:9`.\n")
+    rc, out = check("SA-0001")
+    assert rc == 1
+    assert "cite: mod.py:9: mod.py has 2 lines at origin/main" in out
+    assert "blocker: 1 of 1 citation(s) do not resolve at origin/main" in out
+
+    # The same defect blocks when past cells of this shape vote too.
+    row = _cell("SA-2000", "bug", 2, 3)
+    row.peak_turns = 1
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [row])
+    parent.max_turns, parent.budget_usd = 1000, 1000.0
+    rc, out = check("SA-0001")
+    assert rc == 1 and "blocker: 1 of 1 citation(s)" in out

@@ -2303,10 +2303,12 @@ def cmd_check(args) -> int:
         print(f"concern: {size_concern}")
     for line in _review_change_lines(target, specs):
         print(line)
+    cite_blocker = _cite_blocker(target, specs)
     if not rows:
-        if size_blocker:
-            print(f"blocker: {size_blocker}")
-        return 1 if size_blocker else 0
+        for blocker in (size_blocker, cite_blocker):
+            if blocker:
+                print(f"blocker: {blocker}")
+        return 1 if size_blocker or cite_blocker else 0
     blockers = [
         b
         for b in (
@@ -2323,7 +2325,50 @@ def cmd_check(args) -> int:
         print(f"concern: {concern}")
     if not blockers and not concern:
         print("check: ceilings clear this shape's history")
-    return 1 if blockers else 0
+    if cite_blocker:
+        print(f"blocker: {cite_blocker}")
+    return 1 if blockers or cite_blocker else 0
+
+
+def _cite_base(spec: Spec, specs: dict[str, Spec]) -> str | None:
+    """The ref a cell would cut `spec` from: its queued parent's branch, or
+    the trunk. `None` when that parent has no branch on origin yet."""
+    parent = spec.depends_on[0] if spec.depends_on else None
+    if parent is None or parent not in specs or not _queued_file(parent):
+        return "origin/main"
+    ref = f"origin/saffron/{parent}"
+    try:
+        _git("rev-parse", "--verify", "--quiet", ref, cwd=REPO)
+    except GitError:
+        return None
+    return ref
+
+
+def _queued_file(spec_id: str) -> Path | None:
+    """A spec's file in the live queue. A retired spec has no batch ahead."""
+    return next(iter(sorted(SPECS_DIR.glob(f"{spec_id}-*.md"))), None)
+
+
+def _cite_blocker(spec: Spec, specs: dict[str, Spec]) -> str | None:
+    """`cite` over a queued spec, so a drifted citation blocks before a
+    batch's spec review pays to find it (b-d31930)."""
+    path = _queued_file(spec.id)
+    if path is None:
+        return None
+    base = _cite_base(spec, specs)
+    if base is None:
+        print(f"note: cite not run, {spec.depends_on[0]} has no branch on origin")
+        return None
+    try:
+        count, defects = _cite_defects(path, base)
+    except GitError as err:
+        return f"cite could not read {base}: {err}"
+    for defect in defects:
+        print(f"cite: {defect}")
+    if not defects:
+        print(f"cite: {count} citation(s) resolve at {base}")
+        return None
+    return f"{len(defects)} of {count} citation(s) do not resolve at {base}"
 
 
 def cmd_history(args) -> int:
@@ -2495,10 +2540,19 @@ def cmd_cite(args) -> int:
     if not spec_path.is_file():
         return _fail(f"no such spec: {spec_path}")
     try:
-        base = _git("rev-parse", args.base, cwd=REPO)
-        names = set(_git("ls-tree", "-r", "--name-only", base, cwd=REPO).splitlines())
+        count, defects = _cite_defects(spec_path, args.base)
     except GitError as err:
         return _fail(str(err))
+    for defect in defects:
+        print(defect)
+    print(f"{count} citation(s) checked")
+    return 1 if defects else 0
+
+
+def _cite_defects(spec_path: Path, ref: str) -> tuple[int, list[str]]:
+    """How many citations `spec_path` makes, and each that fails at `ref`."""
+    base = _git("rev-parse", ref, cwd=REPO)
+    names = set(_git("ls-tree", "-r", "--name-only", base, cwd=REPO).splitlines())
     suffixes = {Path(n).suffix for n in names if Path(n).suffix}
     citations = _extract_citations(spec_path.read_text(), suffixes)
 
@@ -2520,11 +2574,11 @@ def cmd_cite(args) -> int:
             continue
         lines = lines_of(cite.path)
         if lines is None:
-            defects.append(f"{cite.path}:{_range(cite)}: no such file at {args.base}")
+            defects.append(f"{cite.path}:{_range(cite)}: no such file at {ref}")
         elif cite.end > len(lines):
             defects.append(
                 f"{cite.path}:{_range(cite)}: {cite.path} has {len(lines)} lines "
-                f"at {args.base}"
+                f"at {ref}"
             )
         elif moved := _moved_lines(cite, lines):
             where = ", ".join(str(n) for n in moved)
@@ -2532,10 +2586,7 @@ def cmd_cite(args) -> int:
                 f"{cite.path}:{_range(cite)}: quoted text sits at "
                 f"{cite.path}:{where} instead"
             )
-    for defect in defects:
-        print(defect)
-    print(f"{len(citations)} citation(s) checked")
-    return 1 if defects else 0
+    return len(citations), defects
 
 
 # --------------------------------------------------------- enumerators
