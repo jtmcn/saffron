@@ -496,8 +496,8 @@ def test_files_under_the_declared_test_paths_are_left_out_of_the_count():
     # prefix matched as a substring, each misclassifies a different file.
     test_paths = ["tests/**", "*_test.go"]
 
-    # Counted: none of these three paths matches a declared test path,
-    # though each looks close, by slash-crossing, nesting or pattern count.
+    # Counted: none of these three paths matches a declared test path.
+    # `src/a.py` is the control. The other two look close, by slash-crossing or nesting.
     counted_source = _diff(added=11, removed=0, path="src/a.py")
     # `*_test.go` cannot cross the `/` before `pkg`, so this stays source.
     counted_go_test = _diff(added=13, removed=0, path="pkg/a_test.go")
