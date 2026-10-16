@@ -232,7 +232,9 @@ when every citation resolves.
   Record neither for a follow-up. Then raise again, as a `mint` raise does.
   `_drive` counts it as an abort.
 
-Update `run_stack_batch`'s docstring to name `cite`.
+Name `cite` in `run_stack_batch`'s docstring within its existing ten lines.
+It sits at the `prose` gate's `DOCSTRING_LIMIT` of 10 already
+(`.saffron/gates/prose.py:67`), so fold it into the `review` sentence.
 
 **What `SA-0295` passes.** For a candidate and its predecessor, it resolves
 the commit as `_stack_review` does. Then it calls
@@ -272,7 +274,7 @@ holding one file, and cite that directory at line 3 in the defective text.
 Its expected line is the missing-file line, last in the list. Check
 `path in names` against the `ls-tree -r --name-only` listing before any
 `file_at` read, as the driver does. `file_at` raises `UnreadablePath` for a
-directory (`saffron/repos/mirror.py:245-251`). Also add one call with a
+directory (`saffron/repos/mirror.py:266-271`). Also add one call with a
 commit of forty zeros and assert it raises `GitError`. Import `citation_defects` inside each
 test body, never at module scope. A module-scope import of a name the change
 adds turns the reverted run into a collection error, which `revert` reads as
@@ -316,7 +318,9 @@ lines and the one `raised` line. Assert the line naming the defective
 follow-up alone under `follow-ups unrun` is among the emitted lines. Assert
 the tasks of rows 1 and 3 and of that follow-up are still `QUEUED`. Read
 them through `_task_state` (`tests/test_batch.py:3857`) by the `task_id`
-the double recorded.
+the double recorded. Read each one's routes through `_task_routes`
+(`tests/test_batch.py:3864`). Row 1 and that follow-up have `[]`, and row 3
+has `["revise"]`. A refusal that records a spec review then fails.
 
 A prototype measured both rows. Without them, the two placements in
 criterion 4's `wrong_versions` pass this witness. Row 9 kills the check
@@ -338,9 +342,9 @@ nothing. Once this spec is retired to `done/`, and until `SA-0295`
 merges, `dead` reports `citation_defects` at base. Baseline subtraction absorbs that for every other task.
 
 **Where the port and the driver part.** The driver's `_git` strips its output
-(`.claude/skills/run-saffron-spec-loop/driver.py:109-113`). So `cmd_cite`
-drops a blob's leading blank lines, and its line numbers shift for such a
-file. `file_at` keeps the exact text, so the port numbers those lines
+(`.claude/skills/run-saffron-spec-loop/driver.py:111-115`). So `cmd_cite`
+drops a blob's leading and trailing blank lines. Its line numbers and its
+line count shift for such a file. `file_at` keeps the exact text, so the port numbers those lines
 correctly. The driver's three tests build no such file. A symlink or a
 submodule is listed by `ls-tree` and read through `file_at`, which can raise
 for one. No criterion covers either.

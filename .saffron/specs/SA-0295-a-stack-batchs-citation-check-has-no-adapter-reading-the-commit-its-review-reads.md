@@ -227,8 +227,12 @@ commit, at its head commit and in the operator's checkout. Leave
 `package.fetch_parent_branch` over the rig's double with one that records
 each branch and returns the mirror's `HEAD` commit. A fetched commit is
 then real and readable. Monkeypatch `SA-0294`'s check, at the name `cli` calls it by, with a double
-that records what it was handed. Drive a layer through an adapter built
-with a stack base and through one built without. Pass a candidate whose
+that records what it was handed. Run the witness with `monkeypatch.chdir(rig.repo)`, so a read from the
+checkout is caught by its text. Drive a layer through an adapter built
+with a stack base and through one built without. Drive no layer on each
+too: `cite(c, None, None)` with a stack base hands the check the fetched
+`HEAD` after one fetch of the stack base's branch. Without one it hands
+the check `base_sha`, fetches nothing, and reads the text queued there. Pass a candidate whose
 file is absent to drive the `ValueError`. Pass that same candidate with a
 recorded `spec_text` too, which must reach the check with no raise.
 
@@ -261,10 +265,16 @@ without `--stack`, from
 `test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes`.
 That case fakes `run_batch` too and asserts no `_stack_cite` call. Fake
 `_stack_cite` and `_stack_review`, each recording its keywords. Assert the
-same object reaches both as `heads`, by identity. Give the order a stack
+same object reaches both as `heads`, by identity, and that it is a
+`dict`, so `heads=None` to both fails. Give the order a stack
 base, as
 `test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing`
 does.
+
+**Where `SA-0294` sits.** The cell is cut from `SA-0279`'s branch. A
+stack batch cuts each layer from the one below, so `SA-0294` is under it
+whenever both run in one stack or `SA-0294` merged first. If neither
+holds, `cite` is missing at your base. Stop and say so.
 
 **Why a remembered commit is safe here.** §5.7 fetches a parent's head
 and never trusts a recorded one. The cite adapter fetches fresh, and the
