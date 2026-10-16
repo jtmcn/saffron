@@ -2208,3 +2208,15 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0273`: REBUT's rebuttal turn moved HEAD, then its extraction ran out of
   REBUT's $10, and the task ended `EXHAUSTED` with green gates.
   **No bucket**, a phase's budget. **Open:** b-4901d2.
+
+## 2026-10-16, `SA-0274` (spec loop run 41, #887)
+
+- `SA-0274` (#887): a witness comment called `src/a.py` a near miss to a
+  test glob, though it is the plain control.
+  **Bucket 3**, conventions. **Landed:** a review commit on #887.
+- `SA-0274` (#887): the loop's `driver.py size` still counted tests after
+  the cell's `size` gate stopped counting them, so the two readouts differed.
+  **No bucket**, the loop's driver. **Landed:** this run's step 5 PR.
+- `SA-0275`: the batch's spec review found a blocker, and the batch could not
+  revise the spec. It held back the writer's share from the revision.
+  **No bucket**, a batch's budget. **Landed:** #886, merged mid-batch.

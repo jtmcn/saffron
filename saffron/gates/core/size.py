@@ -17,6 +17,8 @@ with no `tool` into `error`. So the wiring spec calls this from
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from saffron.gates.contract import Failure, GateResult, split_lines
 from saffron.gates.core.integrity import _BINARY, _FILE_HEADER
 from saffron.gates.core.scope import matches
@@ -184,6 +186,13 @@ def _declared(path: str, touches: list[str]) -> bool:
     return not touches or any(matches(path, pattern) for pattern in touches)
 
 
+def _under_test_path(path: str, test_paths: Sequence[str]) -> bool:
+    """Whether `path` matches one of the repo's declared test paths, with the
+    same glob semantics `revert_gate` already applies to its own `test_paths`
+    argument."""
+    return any(matches(path, pattern) for pattern in test_paths)
+
+
 def _unreadable_declared_path(diff: str, touches: list[str]) -> str | None:
     """The path of the first `Binary files ... differ` block whose path is
     inside `touches`, or `None` if every such block (if any) is outside it.
@@ -200,7 +209,12 @@ def _unreadable_declared_path(diff: str, touches: list[str]) -> str | None:
 
 
 def size_gate(
-    diff: str, spec_type: str, touches: list[str], *, blocking: bool = True
+    diff: str,
+    spec_type: str,
+    touches: list[str],
+    *,
+    blocking: bool = True,
+    test_paths: Sequence[str] = (),
 ) -> GateResult:
     """The diff's changed tokens (added + removed, by the shortest per-file
     edit) against the ceiling `spec_type` sets.
@@ -257,11 +271,22 @@ def size_gate(
         )
 
     ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
-    tokens = _changed_lines(diff)
+    counts = _token_counts(diff)
+    # A block under a declared test path adds nothing to the counted total.
+    excluded_tokens = sum(
+        count
+        for path, count, _estimated in counts
+        if _under_test_path(path, test_paths)
+    )
+    tokens = _changed_lines(diff) - excluded_tokens
     # Named, never silent. A count over a diff with a hidden or estimated
     # file has a hole in it, and the reader must be told which one.
     hidden = _unreadable_paths(diff)
-    estimated = [path for path, _count, past_bound in _token_counts(diff) if past_bound]
+    estimated = [
+        path
+        for path, _count, past_bound in counts
+        if past_bound and not _under_test_path(path, test_paths)
+    ]
     notes = []
     if hidden:
         notes.append(f"{', '.join(hidden)} unreadable, not counted")
@@ -269,6 +294,11 @@ def size_gate(
         notes.append(
             f"{', '.join(estimated)} past the token-diff bound, estimated at "
             f"{_TOKENS_PER_LINE} tokens a changed line"
+        )
+    if excluded_tokens:
+        notes.append(
+            f"{excluded_tokens} changed tokens under the declared test paths, "
+            "not counted"
         )
     caveat = f" ({'; '.join(notes)})" if notes else ""
 

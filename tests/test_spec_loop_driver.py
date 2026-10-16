@@ -188,6 +188,15 @@ def test_size_counts_a_branch_against_the_gates_own_ceiling(
     )
 
 
+def test_size_leaves_the_declared_test_paths_out_as_the_cells_gate_does(repo):
+    # The loop's readout counted tests after SA-0274's gate stopped counting them.
+    tmp, _tips = repo
+    result = driver._size("a", "b", "feature", [], test_paths=["b.txt"], cwd=tmp)
+    assert result.status == "pass"
+    assert result.summary.startswith("0 changed tokens within the feature ceiling")
+    assert "1 changed tokens under the declared test paths" in result.summary
+
+
 def test_size_measures_a_parent_from_below_it_not_from_its_own_child(repo):
     # Every other loop branch was a candidate base, so a parent whose child had
     # been cut from it measured from its own tip: 0 changed lines.

@@ -12,7 +12,7 @@ from pathlib import Path
 from saffron.cell.runtime import Completed
 from saffron.gates.suite import GateSuite
 from saffron.intake import Criterion, Mutant
-from saffron.repos.policy import GateDeclaration, Policy
+from saffron.repos.policy import GateDeclaration, IntegrityPatterns, Policy
 
 FAIL = {"file": "a.py", "code": "E501", "message": "too long"}
 FAIL_B = {"file": "b.py", "code": "E501", "message": "too long"}
@@ -436,3 +436,48 @@ def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing()
     abort_comparison = suite.against(abort_head, baseline)
     assert abort_comparison.aborted != ()
     assert abort_comparison.advisory_failures == ()
+
+
+def test_the_suite_leaves_the_policys_test_paths_out_of_size():
+    from saffron.gates.core.size import _CEILINGS
+
+    source_tokens = _CEILINGS["feature"] - 10
+    test_tokens = 20
+    diff = "".join(
+        [
+            "diff --git a/infra/x.tf b/infra/x.tf\n",
+            f"--- a/infra/x.tf\n+++ b/infra/x.tf\n@@ -0,0 +1,{source_tokens} @@\n",
+            "+x\n" * source_tokens,
+            "diff --git a/tests/test_x.py b/tests/test_x.py\n",
+            f"--- a/tests/test_x.py\n+++ b/tests/test_x.py\n@@ -0,0 +1,{test_tokens} @@\n",
+            "+y\n" * test_tokens,
+        ]
+    )
+    spec = _Spec(touches=["src/**", "infra/**", "tests/**"])
+    changed = ["infra/x.tf", "tests/test_x.py"]
+
+    declared_policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
+        elevate_on=["infra/**"],
+        integrity=IntegrityPatterns(test_paths=["tests/**"]),
+    )
+    declared_suite = _suite(policy=declared_policy, spec=spec)
+    declared_baseline = declared_suite.baseline(_Tree())
+    declared_comparison = declared_suite.against(
+        _Tree(changed=changed, patch=diff), declared_baseline
+    )
+    size_result = next(r for r in declared_comparison.run.results if r.gate == "size")
+    assert size_result.status == "pass"
+    assert size_result.summary.startswith(f"{source_tokens} changed tokens")
+    assert declared_comparison.new_failures == ()
+
+    undeclared_policy = Policy(
+        gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
+        elevate_on=["infra/**"],
+    )
+    undeclared_suite = _suite(policy=undeclared_policy, spec=spec)
+    undeclared_baseline = undeclared_suite.baseline(_Tree())
+    undeclared_comparison = undeclared_suite.against(
+        _Tree(changed=changed, patch=diff), undeclared_baseline
+    )
+    assert [n.gate for n in undeclared_comparison.new_failures] == ["size"]
