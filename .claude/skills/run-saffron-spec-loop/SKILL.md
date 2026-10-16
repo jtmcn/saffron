@@ -88,13 +88,14 @@ need `done/`, where every merged spec lives? A projection that missed it kept
 1 of 76 merged tasks (b-a8270f). If its subject is history and it declares
 no `history`, raise that with the operator before its cell.
 
-Run `driver.py cite <spec>` over each spec as well. A spec written before
-its neighbours landed cites lines that moved since. The batch's own spec
-review then blocks it, and a stack batch cannot afford to revise it
-(b-d31930, b-b24cf7). Refresh what `cite` names in a spec PR before the batch.
+`check` also runs `cite` over each queued spec, at the branch its cell would
+cut from. A spec written before its neighbours landed cites lines that moved
+since, and the batch's own spec review would pay to find them (b-d31930).
+Refresh what `cite` names in a spec PR before the batch. A child whose parent
+has no branch yet prints a note, and is checked once the parent has one.
 
-**Done when** every spec in the order has a `check` line and a clean `cite`,
-and every blocker is answered by the operator.
+**Done when** every spec in the order has a `check` line and every blocker is
+answered by the operator.
 
 ## 2. Run each spec
 
