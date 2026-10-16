@@ -686,7 +686,7 @@ checkpoint, ends `ORPHANED` the first time at a `spec_sha`. The second such cut 
 **`EXHAUSTED`**: A task that could not pass its own gates within `max_attempts`. An
 informative outcome about the spec or the codebase. Five more ways in share the state.
 The spend ceiling stops the task before its next turn. Its gates go red after the
-rebuttal. A REBUT that would end `REBUTTAL_UNJUDGED` is cut short by its $10.00 cap, or its verdict by the reserve beside it. Its exported patch
+rebuttal. A REBUT that would end `REBUTTAL_UNJUDGED` is cut short by its $10.00 cap, or its extraction or verdict by the reserve each draws on. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
 
 **`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
@@ -716,7 +716,7 @@ unjudged blockers stand. No pull request opens. The cell's branch is pushed
 only when `push_unpackaged_work` succeeds, and a dependent then stacks on it.
 A row whose latest run's push was refused can carry an earlier run's
 `pushed_sha`, and a dependent then stacks on that older branch. A stack batch
-counts the task a miss and refuses its children. A REBUT that its cap cut
+counts the task a miss and refuses its children. A REBUT that one of its pools cut
 short ends `EXHAUSTED` instead.
 
 **`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no

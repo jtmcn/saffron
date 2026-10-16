@@ -1,11 +1,12 @@
 ---
 id: b-4901d2
 title: REBUT's verdict shares its cap with the fixes, so a task whose gates are green ends EXHAUSTED
-status: open
+status: done
 tier: 1
 filed: 2026-10-14
+closed: 2026-10-15
 specs: [SA-0272, SA-0293]
-prs: [875]
+prs: [875, 884]
 commits: []
 cites: [§5.5]
 related: [b-2750d5]
@@ -40,3 +41,7 @@ runs out is reported apart from `EXHAUSTED`.
   $7.53 and moved HEAD, and its extraction was cut at $3.07, so no rebuttal was
   recorded and both verdicts were refused. `SA-0293`'s reserve covers the
   verdicts only. A cut extraction would still leave them nothing to judge.
+- 2026-10-15: fixed by hand in place of `SA-0293`, which was retired to
+  `done/`. The rebuttal turn keeps the $10.00 cap. The extraction draws on a
+  $4.00 reserve plus what the turn left, and the verdicts on $2.00 plus what
+  the extraction left. `run_rebut` tells the cell when each stage starts.

@@ -63,6 +63,7 @@ nothing.
 | `SA-0071` | Cell task `MERGED`, PR #215; all four declared witnesses exist in `tests/test_report.py` |
 | `SA-0072` | Cell task `MERGED`, PR #219; all four declared witnesses exist in `tests/test_scope.py` |
 | `SA-0073` | Cell task `MERGED`, PR #220; all five declared witnesses exist in `tests/test_retired_vocabulary_hook.py` |
+| `SA-0293` | Implemented by hand for b-4901d2, because the extraction needed a reserve too and a cell fixing REBUT runs the broken REBUT. No cell task records it. Its three witnesses were never written. `test_a_costly_rebuttal_turn_leaves_its_extraction_and_verdict_their_own_money` and the four pool tests it named stand in for them, in `tests/test_session.py` |
 
 **Stack #222 (`SA-0066`–`SA-0073`, merged 2026-09-12).** Every one of its eight
 pull requests carries review fixes committed after its cell's last gate, so each
