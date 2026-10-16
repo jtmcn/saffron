@@ -5000,6 +5000,19 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
             "REBUT's verdict ran out of its $2.00 reserve",
             2,
         ),
+        # The line keeps the error of the first session the pool cut.
+        (
+            "h",
+            (
+                6.00,
+                2.50,
+                implement.AgentFailed("budget spent", _cut_off_turn(cost=7.50)),
+                0.25,
+            ),
+            {},
+            "REBUT's verdict ran out of its $2.00 reserve — budget spent",
+            2,
+        ),
     ]
     for path, costs, extra, line, standing in cut_short:
         outcome, ledger, _cell, capture = _run(path, *costs, **extra)

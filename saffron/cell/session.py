@@ -98,7 +98,10 @@ REBUT_CAP_USD = 10.0
 
 # Measured maxima, rounded up: an extraction $3.08 (SA-0272, 88 REBUTs) and one
 # REBUT's verdicts $1.16 (SA-0266, 86 REBUTs). DESIGN.md §5.6 has the pools.
-REBUT_RESERVES_USD = {"extraction": 4.0, "verdict": 2.0}
+REBUT_RESERVES_USD: dict[Literal["extraction", "verdict"], float] = {
+    "extraction": 4.0,
+    "verdict": 2.0,
+}
 
 # `session.run_history`'s host-side snapshot directory (backlog item
 # b-a8270f), never under `out_dir` and never under TMPDIR, whose bind is unmeasured on apple/container.
@@ -191,24 +194,21 @@ class _RebutCap:
     error of the current stage's first session the pool cut.
     """
 
-    def __init__(self, cap: float, reserves: Mapping[str, float]) -> None:
+    def __init__(
+        self, cap: float, reserves: Mapping[Literal["extraction", "verdict"], float]
+    ) -> None:
         self.cap = cap
         self.reserves = reserves
         self.limit = cap
         self.spent = 0.0
-        self.stage = "rebuttal"
+        self.stage: Literal["rebuttal", "extraction", "verdict"] = "rebuttal"
         self.cut: str | None = None
 
-    def open(self, stage: str) -> None:
+    def open(self, stage: Literal["extraction", "verdict"]) -> None:
         """Starts `stage`: a rebuttal turn that ran past its pool leaves nothing."""
         self.limit = max(self.limit, self.spent) + self.reserves[stage]
         self.stage = stage
         self.cut = None
-
-    def _pool(self) -> str:
-        if self.stage == "rebuttal":
-            return f"the REBUT cap, ${self.cap:.2f},"
-        return f"the REBUT {self.stage} pool"
 
     def wrap(
         self, agent: Callable[..., implement.AttemptResult]
@@ -220,7 +220,10 @@ class _RebutCap:
         ) -> implement.AttemptResult:
             remaining = self.limit - self.spent
             if remaining <= 0:
-                refused = implement.AgentFailed(f"{self._pool()} is already spent")
+                # Only a verdict meets this: each earlier stage runs one session.
+                refused = implement.AgentFailed(
+                    f"the REBUT {self.stage} pool is already spent"
+                )
                 self.cut = self.cut or str(refused)
                 raise refused
             try:

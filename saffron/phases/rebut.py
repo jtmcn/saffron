@@ -193,7 +193,7 @@ def run_rebuttal(
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
     # Told before the extraction, so a caller can fund it apart from the fix.
-    open_pool: Callable[[str], None] = lambda stage: None,
+    open_pool: Callable[[Literal["extraction", "verdict"]], None] = lambda stage: None,
 ) -> RebuttalTurn:
     """The implementer's one attempt, plus the turn that records it.
 
@@ -664,7 +664,7 @@ def run_rebut(
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
     # Told before the extraction and before the verdicts (b-4901d2).
-    open_pool: Callable[[str], None] = lambda stage: None,
+    open_pool: Callable[[Literal["extraction", "verdict"]], None] = lambda stage: None,
 ) -> RebutResult:
     """One rebuttal in the implementer's own container, the gate re-run there
     too, then one verdict session per lens in a fresh critic cell the

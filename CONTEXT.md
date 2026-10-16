@@ -716,7 +716,7 @@ unjudged blockers stand. No pull request opens. The cell's branch is pushed
 only when `push_unpackaged_work` succeeds, and a dependent then stacks on it.
 A row whose latest run's push was refused can carry an earlier run's
 `pushed_sha`, and a dependent then stacks on that older branch. A stack batch
-counts the task a miss and refuses its children. A REBUT that its cap cut
+counts the task a miss and refuses its children. A REBUT that one of its pools cut
 short ends `EXHAUSTED` instead.
 
 **`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no
