@@ -84,17 +84,21 @@ WALL_CAP_S = 3600.0
 # growing moves that number rather than dividing it. The floor is
 # what keeps "not gated" true when nothing is left: below it a lens would be
 # refused for having no room, and the task would reach the operator unreviewed.
-# REBUT keeps its own ceiling below, REBUT_CAP_USD, at any spend, not
-# only once budget_usd is spent.
+# REBUT keeps its own ceilings below, at any spend, not only once
+# budget_usd is spent.
 REVIEW_FLOOR_USD = 2.0
 
 # The measured maximum of seven salvage turns, $0.40 on SA-0204, rounded up.
 # Held out of IMPLEMENT's own cap, so a cut with nothing committed keeps room.
 SALVAGE_RESERVE_USD = 1.0
 
-# One pool for every REBUT's own sessions, at any spend: the measured
-# maximum, $9.29 on SA-0223 (67 REBUTs, 2026-10-07), rounded up.
+# The rebuttal turn's pool, at any spend: the measured maximum, $9.29 on
+# SA-0223 (67 REBUTs, 2026-10-07), rounded up.
 REBUT_CAP_USD = 10.0
+
+# Measured maxima, rounded up: an extraction $3.08 (SA-0272, 88 REBUTs) and one
+# REBUT's verdicts $1.16 (SA-0266, 86 REBUTs). DESIGN.md §5.6 has the pools.
+REBUT_RESERVES_USD = {"extraction": 4.0, "verdict": 2.0}
 
 # `session.run_history`'s host-side snapshot directory (backlog item
 # b-a8270f), never under `out_dir` and never under TMPDIR, whose bind is unmeasured on apple/container.
@@ -179,17 +183,32 @@ def critic_budget(budget_usd: float, spent: float) -> float:
 
 
 class _RebutCap:
-    """Shares one ceiling across a single REBUT's own sessions, at any
-    spend: the rebuttal turn, its extraction turn, and each lens verdict
-    draw against the same pool. A call that would get nothing, or less, is
-    refused the way a failed turn already reads to every caller here, with
-    implement.AgentFailed.
+    """One REBUT's pools, at any spend. The rebuttal turn draws on the cap.
+    `open` adds a stage's reserve to what the stage before it left, so a
+    costly fix cannot starve the extraction or the verdicts (b-4901d2). A
+    call the pool cannot cover is refused with implement.AgentFailed, the
+    way a failed turn already reads to every caller here. `cut` holds the
+    error of the current stage's first session the pool cut.
     """
 
-    def __init__(self, cap: float) -> None:
+    def __init__(self, cap: float, reserves: Mapping[str, float]) -> None:
         self.cap = cap
+        self.reserves = reserves
+        self.limit = cap
         self.spent = 0.0
-        self.refused = False
+        self.stage = "rebuttal"
+        self.cut: str | None = None
+
+    def open(self, stage: str) -> None:
+        """Starts `stage`: a rebuttal turn that ran past its pool leaves nothing."""
+        self.limit = max(self.limit, self.spent) + self.reserves[stage]
+        self.stage = stage
+        self.cut = None
+
+    def _pool(self) -> str:
+        if self.stage == "rebuttal":
+            return f"the REBUT cap, ${self.cap:.2f},"
+        return f"the REBUT {self.stage} pool"
 
     def wrap(
         self, agent: Callable[..., implement.AttemptResult]
@@ -199,12 +218,11 @@ class _RebutCap:
         def capped(
             container: str, *, options: dict, **kwargs: object
         ) -> implement.AttemptResult:
-            remaining = self.cap - self.spent
+            remaining = self.limit - self.spent
             if remaining <= 0:
-                self.refused = True
-                raise implement.AgentFailed(
-                    f"the REBUT cap, ${self.cap:.2f}, is already spent"
-                )
+                refused = implement.AgentFailed(f"{self._pool()} is already spent")
+                self.cut = self.cut or str(refused)
+                raise refused
             try:
                 attempt = agent(
                     container,
@@ -213,9 +231,9 @@ class _RebutCap:
                 )
             except implement.AgentFailed as failed:
                 self.spent += failed.attempt.cost_usd_est if failed.attempt else 0.0
-                # Spending the cap means the cap cut it, with no later call to refuse.
-                if self.spent >= self.cap:
-                    self.refused = True
+                # Spending the pool means the pool cut it, with no later call to refuse.
+                if self.spent >= self.limit:
+                    self.cut = self.cut or str(failed)
                 raise
             self.spent += attempt.cost_usd_est
             return attempt
@@ -3476,9 +3494,8 @@ def _drive_cell(
                     return "GATE_ERROR"
                 return "EXHAUSTED" if comparison.new_failures else None
 
-            # REBUT's sessions always share one cap, at any spend. `cap`
-            # also says whether one call was refused.
-            cap = _RebutCap(REBUT_CAP_USD)
+            # REBUT's own pools, at any spend. `cap` also says whether one cut a session.
+            cap = _RebutCap(REBUT_CAP_USD, REBUT_RESERVES_USD)
             rebut_agent = cap.wrap(agent)
 
             with contextlib.ExitStack() as critic_stack:
@@ -3535,17 +3552,19 @@ def _drive_cell(
                     reviewed_diff=reviewed_diff,
                     emit=emit,
                     last_cost_usd=last_cost,
+                    open_pool=cap.open,
                 )
-            # The cap, not the agent, ended this REBUT: its blockers stand,
+            # A pool, not the agent, ended this REBUT: its blockers stand,
             # and the record must not read as the silence `rebut_state` names.
-            cut = cap.refused and result.state == "REBUTTING"
+            cut = cap.cut is not None and result.state == "REBUTTING"
             if cut:
-                detail = result.rebuttal.error or next(
-                    (v.error for v in result.verdicts if v.error), None
+                ran_out = (
+                    f"REBUT ran out of its ${REBUT_CAP_USD:.2f} budget"
+                    if cap.stage == "rebuttal"
+                    else f"REBUT's {cap.stage} ran out of its "
+                    f"${cap.reserves[cap.stage]:.2f} reserve"
                 )
-                result.why = f"REBUT ran out of its ${REBUT_CAP_USD:.2f} budget" + (
-                    f" — {detail}" if detail else ""
-                )
+                result.why = f"{ran_out} — {cap.cut}"
             # The probe cell's own patch fault, not `run_rebut`'s text
             # naming red gates: the gates never ran at all (§5.6).
             if probe_patch_why is not None:

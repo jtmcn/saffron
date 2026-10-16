@@ -192,6 +192,8 @@ def run_rebuttal(
     agent: Callable[..., implement.AttemptResult],
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
+    # Told before the extraction, so a caller can fund it apart from the fix.
+    open_pool: Callable[[str], None] = lambda stage: None,
 ) -> RebuttalTurn:
     """The implementer's one attempt, plus the turn that records it.
 
@@ -216,6 +218,7 @@ def run_rebuttal(
         return RebuttalTurn(cost_usd=cost, session_id=session_id, error=str(failed))
 
     session_id = attempt.session_id or session_id
+    open_pool("extraction")
     try:
         extracted = agent(
             container,
@@ -660,6 +663,8 @@ def run_rebut(
     reviewed_diff: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
+    # Told before the extraction and before the verdicts (b-4901d2).
+    open_pool: Callable[[str], None] = lambda stage: None,
 ) -> RebutResult:
     """One rebuttal in the implementer's own container, the gate re-run there
     too, then one verdict session per lens in a fresh critic cell the
@@ -684,6 +689,7 @@ def run_rebut(
         agent=agent,
         emit=emit,
         last_cost_usd=last_cost_usd,
+        open_pool=open_pool,
     )
     moved = head_moved()
     emit(
@@ -741,6 +747,7 @@ def run_rebut(
         return result
 
     changed = diff(critic)
+    open_pool("verdict")
     for lens in [
         lens for lens in review.LENSES if any(f.lens == lens for f in blockers)
     ]:

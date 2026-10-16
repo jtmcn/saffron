@@ -4859,9 +4859,10 @@ def test_a_rebut_past_the_budget_leaves_one_budget_line_naming_its_spend(
 def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
     monkeypatch, tmp_path
 ):
-    """SA-0203, criterion 3: REBUT's sessions share one $10.00 cap, each
-    session's own `max_budget_usd` the cap less what the phase's earlier
-    sessions already cost."""
+    """SA-0203, criterion 3, as b-4901d2 left it: the rebuttal turn gets the
+    $10.00 cap. The extraction gets $4.00 on top of what the turn left of it,
+    and the verdicts $2.00 on top of what the extraction left. Each verdict
+    gets its pool less what earlier verdicts cost."""
 
     def _caps(path, *costs, budget_usd):
         outcome, _ledger, cell, capture = _rebut_capped(
@@ -4874,16 +4875,17 @@ def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
         )
 
     caps, state, _capture = _caps("a", 6.00, 2.50, 1.00, budget_usd=0.25)
-    assert caps == pytest.approx([10.00, 4.00, 1.50])
+    assert caps == pytest.approx([10.00, 8.00, 7.50])
     assert state == "READY_FOR_REVIEW"
 
     caps, state, _capture = _caps("b", 6.00, 2.50, 1.00, budget_usd=0.75)
-    assert caps == pytest.approx([10.00, 4.00, 1.50])
+    assert caps == pytest.approx([10.00, 8.00, 7.50])
     assert state == "READY_FOR_REVIEW"
 
+    # A turn past the cap leaves nothing, and each reserve stays whole.
     caps, state, _capture = _caps("c", 10.25, 0.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([10.00])
-    assert state == "EXHAUSTED"
+    assert caps == pytest.approx([10.00, 4.00, 5.50])
+    assert state == "READY_FOR_REVIEW"
 
     caps, state, _capture = _caps(
         "d",
@@ -4892,24 +4894,47 @@ def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
         0.75,
         budget_usd=0.25,
     )
-    assert caps == pytest.approx([10.00])
-    assert state == "EXHAUSTED"
+    # The verdict takes the extraction's scripted turn, which is no verdict
+    # set. It failed with money left, so the rebuttal stands unjudged.
+    assert caps == pytest.approx([10.00, 2.00])
+    assert state == "REBUTTING"
 
     caps, state, _capture = _caps("e", 6.00, 4.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([10.00, 4.00])
-    assert state == "EXHAUSTED"
+    assert caps == pytest.approx([10.00, 8.00, 5.50])
+    assert state == "READY_FOR_REVIEW"
 
     caps, state, _capture = _caps("e0", 10.00, 0.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([10.00])
-    assert state == "EXHAUSTED"
+    assert caps == pytest.approx([10.00, 4.00, 5.50])
+    assert state == "READY_FOR_REVIEW"
 
     caps, state, _capture = _caps("e1", 9.75, 0.50, 0.75, budget_usd=0.25)
-    assert caps == pytest.approx([10.00, 0.25])
-    assert state == "EXHAUSTED"
+    assert caps == pytest.approx([10.00, 4.25, 5.75])
+    assert state == "READY_FOR_REVIEW"
 
     caps, state, _capture = _caps("f", 5.00, 1.00, 1.50, 0.50, budget_usd=0.25)
-    assert caps == pytest.approx([10.00, 5.00, 4.00, 2.50])
+    assert caps == pytest.approx([10.00, 9.00, 10.00, 8.50])
     assert state == "READY_FOR_REVIEW"
+
+
+def test_a_costly_rebuttal_turn_leaves_its_extraction_and_verdict_their_own_money(
+    monkeypatch, tmp_path
+):
+    """b-4901d2: SA-0273's rebuttal turn spent $7.53, and its $3.07
+    extraction ran past the $10.00 cap. SA-0272's turn and extraction left
+    its verdict $0.51. Each REBUT now ends `READY_FOR_REVIEW`, and each
+    later session's budget holds its own reserve."""
+    cases = (
+        ("sa-0273", (7.53, 3.07, 0.50), [10.00, 6.47, 5.40]),
+        ("sa-0272", (6.41, 3.08, 0.56), [10.00, 7.59, 6.51]),
+    )
+    for path, costs, budgets in cases:
+        outcome, _ledger, cell, _capture = _rebut_capped(
+            monkeypatch, tmp_path / path, *costs, budget_usd=36.00
+        )
+        assert [o["max_budget_usd"] for o in _rebut_turn_options(cell)] == (
+            pytest.approx(budgets)
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
 
 
 def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
@@ -4931,40 +4956,62 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
             suites=suites,
         )
 
-    cut_short: list[tuple[str, tuple, dict]] = [
-        ("a", (10.25, 0.50, 0.75), {}),
+    rebuttal_cut = "REBUT ran out of its $10.00 budget"
+    cut_short: list[tuple[str, tuple, dict, str, int]] = [
         (
-            "b",
+            "a",
             (
                 implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
                 0.50,
                 0.75,
             ),
-            {},
+            {"rebut_commits": 0},
+            rebuttal_cut,
+            1,
         ),
-        ("c", (6.00, 4.50, 0.75), {}),
-        # The last verdict is the session the cap cuts, and no call follows it.
+        (
+            "c",
+            (
+                6.00,
+                implement.AgentFailed("budget spent", _cut_off_turn(cost=8.00)),
+                0.75,
+            ),
+            {"rebut_commits": 0},
+            "REBUT's extraction ran out of its $4.00 reserve",
+            1,
+        ),
+        # The last verdict is the session its pool cuts, and no call follows it.
         (
             "f",
             (
                 6.00,
                 2.50,
-                implement.AgentFailed("budget spent", _cut_off_turn(cost=1.50)),
+                implement.AgentFailed("budget spent", _cut_off_turn(cost=7.50)),
             ),
             {},
+            "REBUT's verdict ran out of its $2.00 reserve",
+            1,
+        ),
+        # The first verdict spends the pool, and the pool refuses the second.
+        (
+            "g",
+            (6.00, 2.50, 7.50, 0.25),
+            {},
+            "REBUT's verdict ran out of its $2.00 reserve",
+            2,
         ),
     ]
-    for path, costs, extra in cut_short:
+    for path, costs, extra, line, standing in cut_short:
         outcome, ledger, _cell, capture = _run(path, *costs, **extra)
         assert outcome.state == "EXHAUSTED"
         assert outcome.rebut_result is None
         [*_, rebut_start] = [
             e for e in capture if isinstance(e, PhaseStart) and e.phase == "REBUT"
         ]
-        assert "REBUT ran out of its $10.00 budget" in rebut_start.detail
+        assert rebut_start.detail.startswith(line)
         assert "moved no commit" not in rebut_start.detail
         assert "made no argument" not in rebut_start.detail
-        assert len(review.anchored_blockers(outcome.reviews)) == 1
+        assert len(review.anchored_blockers(outcome.reviews)) == standing
         (queued,) = ledger.queue_lines()
         assert queued["state"] == "EXHAUSTED"
         budgets = [e for e in capture if isinstance(e, Budget)]
@@ -4978,7 +5025,7 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
         assert budgets[0].limit == pytest.approx(0.25)
 
     outcome_d, ledger_d, cell_d, capture_d = _run(
-        "d", 10.25, 0.50, 0.75, rebut_commits=0
+        "d", _budget_cut_turn(cost=10.00), 0.50, 0.75, rebut_commits=0
     )
     assert outcome_d.state == "EXHAUSTED"
     assert outcome_d.rebut_result is None
@@ -5118,10 +5165,9 @@ def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
 
 
 def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_path):
-    """SA-0231, criterion 1: REBUT's sessions share one $10.00 cap, at any
-    spend. Each call's own max_budget_usd is the cap less what REBUT's
-    earlier sessions already cost. A rebuttal turn that spends the cap ends
-    EXHAUSTED, even where run_rebut would halt at REBUTTING. A Budget event
+    """SA-0231, criterion 1: REBUT's pools hold at any spend, and none is
+    the task's remainder. A rebuttal turn the cap cuts, with nothing committed,
+    ends EXHAUSTED where run_rebut would halt at REBUTTING. A Budget event
     still follows only a REBUT that started at or past budget_usd. A REBUT
     that only crosses it during its own spend gets none."""
     for budget_usd in (20.00, 3.75, 1.00, 0.75, 0.25):
@@ -5135,7 +5181,7 @@ def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_
             budget_usd=budget_usd,
         )
         caps = [o["max_budget_usd"] for o in _rebut_turn_options(cell)]
-        assert caps == pytest.approx([10.00, 7.00, 4.50])
+        assert caps == pytest.approx([10.00, 11.00, 10.50])
         assert outcome.state == "READY_FOR_REVIEW"
         budgets_seen = [e for e in capture if isinstance(e, Budget)]
         if budget_usd <= 0.75:
@@ -5146,10 +5192,11 @@ def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_
         outcome2, _ledger2, cell2, capture2 = _rebut_capped(
             monkeypatch,
             tmp_path / f"cut-{path}",
-            10.25,
+            _budget_cut_turn(cost=10.25),
             0.50,
             0.75,
             budget_usd=budget_usd,
+            rebut_commits=0,
         )
         caps2 = [o["max_budget_usd"] for o in _rebut_turn_options(cell2)]
         assert caps2 == pytest.approx([10.00])
@@ -5190,12 +5237,17 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
         return rebut_start.detail
 
     cap_text = f"REBUT ran out of its ${session.REBUT_CAP_USD:.2f} budget"
+    lines = {
+        "rebuttal": cap_text,
+        "extraction": "REBUT's extraction ran out of its $4.00 reserve",
+        "verdict": "REBUT's verdict ran out of its $2.00 reserve",
+    }
     for budget_usd in (20.00, 3.75, 1.00, 0.75, 0.25):
         path = str(budget_usd).replace(".", "_")
         cuts = [
             ("rebuttal", (_budget_cut_turn(cost=10.00), 0.50, 0.75), 0),
-            ("extraction", (10.25, 0.50, 0.75), 1),
-            ("verdict", (4.00, 4.50, _budget_cut_turn(cost=1.50)), 1),
+            ("extraction", (6.00, _budget_cut_turn(cost=8.00), 0.75), 0),
+            ("verdict", (4.00, 4.50, _budget_cut_turn(cost=7.50)), 1),
         ]
         for label, costs, rebut_commits in cuts:
             outcome, ledger, _cell, capture = _rebut_capped(
@@ -5212,12 +5264,14 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
             assert queued["state"] == "EXHAUSTED"
             record = json.loads((outcome.task_dir / "rebuttal.json").read_text())
             for text in (_last_rebut_detail(capture), record["why"]):
-                assert cap_text in text
+                assert text.startswith(lines[label])
+                assert all(
+                    other not in text for k, other in lines.items() if k != label
+                )
                 assert "moved no commit" not in text
                 assert "made no argument" not in text
-                if label != "extraction":
-                    # The error of the session the cap ended follows the line.
-                    assert "max_budget_usd" in text
+                # The error of the session its pool ended follows the line.
+                assert "max_budget_usd" in text
 
         for suites, expected in (
             (errored_suite, "GATE_ERROR"),

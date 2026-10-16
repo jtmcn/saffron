@@ -279,7 +279,7 @@ file exempts a witness of code the diff changed, so `revert` never judges it.
 batch's spec writer revised a spec no `prose` gate read. The finish wrote it
 back, and re-verification went red.
 
-**Placed 2026-10-14**, from the spec loop's run 39: **b-4901d2**. REBUT's
+**Placed 2026-10-14**, from the spec loop's run 39: ~~**b-4901d2**~~. REBUT's
 verdict shares its $10 with the fixes. A task whose gates were green ended
 `EXHAUSTED`, because the verdict ran out of money.
 

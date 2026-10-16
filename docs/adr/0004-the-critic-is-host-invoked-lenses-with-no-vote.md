@@ -76,6 +76,10 @@ up. A REBUT it cuts short, where `run_rebut` would halt at
 Amended 2026-10-14, `SA-0293`: the verdicts draw on a $2.00 reserve on top
 of the cap, plus what the rebuttal turns left of it. A costly fix can no
 longer starve the verdict (b-4901d2).
+Amended 2026-10-15, by hand for b-4901d2 in place of `SA-0293`: the
+extraction draws on a $4.00 reserve plus what the rebuttal turn left. The
+verdicts draw on $2.00 plus what the extraction left. A costly fix starved
+the extraction of `SA-0273`.
 
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the
