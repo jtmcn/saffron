@@ -70,6 +70,10 @@ The loop's own gaps from run 40:
 - **The ceilings check ignores revision cost**: smaller since #886. A
   revision now needs the spec's budget and $26.50 past the reserve.
 
+A new gap: **`stack --execute --top` refuses a stack of one layer.** It
+needs two reviewable PRs before it counts the step 5 PR. The delegate
+marked #887 ready by hand, and #888 opened ready.
+
 ## Summary: what Saffron should absorb next
 
 Each item moves a step the delegate did by hand into a gate, a lens or a
