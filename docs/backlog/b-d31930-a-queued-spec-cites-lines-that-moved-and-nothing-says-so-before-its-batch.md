@@ -4,7 +4,7 @@ title: A queued spec cites lines that moved since it was written, and nothing sa
 status: open
 tier: 2
 filed: 2026-10-15
-specs: [SA-0273]
+specs: [SA-0273, SA-0294, SA-0295]
 prs: [880]
 commits: []
 cites: [§3.2]
