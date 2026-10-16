@@ -185,6 +185,13 @@ def run_batch(
             _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
 
 
+def writer_left(ledger: Ledger, batch_id: int, writer_usd: float) -> float:
+    """What remains of the writer's share once this batch's spec writing,
+    revisions included, has drawn on it (the stack-batch design's Money)."""
+    spent = ledger.batch_phase_spend(batch_id, spec_review.WRITING_PHASE)
+    return max(0.0, writer_usd - spent)
+
+
 def _drive(
     candidates: Sequence[Candidate],
     ledger: Ledger,
@@ -200,6 +207,7 @@ def _drive(
     in_flight: list[tuple[str, str]],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
     reserve_usd: float = 0.0,
+    writer_usd: float = 0.0,
     sleep: Callable[[float], None] | None = None,
     consecutive_aborts: int = 0,
 ) -> tuple[StopReason, int]:
@@ -245,7 +253,12 @@ def _drive(
 
         # `reserve_usd` is held back here, not subtracted from `budget_usd`
         # itself. The batch row still records the whole budget it was given.
-        remaining = budget_usd - reserve_usd - ledger.batch_spend(batch_id)
+        remaining = (
+            budget_usd
+            - reserve_usd
+            - writer_left(ledger, batch_id, writer_usd)
+            - ledger.batch_spend(batch_id)
+        )
         if candidate.spec.budget_usd > remaining:
             return "BUDGET", consecutive_aborts
 
@@ -416,8 +429,8 @@ def run_stack_batch(
     clock: Callable[[], datetime] = datetime.now,
     emit: Callable[[str], None] = print,
     reserve_usd: float = 0.0,
-    # The spec writer's own share, held back beside `reserve_usd` (the
-    # stack-batch design's section 3, Money). `SA-0165` passes `--budget * WRITER_SHARE`.
+    # The spec writer's own share, held back beside `reserve_usd` less what spec writing spent.
+    # A revision draws on it (the stack-batch design's Money). `SA-0165` passes `--budget * WRITER_SHARE`.
     writer_usd: float = 0.0,
     end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None,
     # Runs once, right after `end_review`, when both are given. Its return runs
@@ -705,9 +718,9 @@ def run_stack_batch(
                     + spec_review.SPEC_REVIEW_SESSION_USD
                     + candidate.spec.budget_usd
                 )
-                # Held back for a spec of the order only: a follow-up's
-                # revision runs after both already left `batch_spend`.
-                held_back = 0.0 if is_follow_up else reserve_usd + writer_usd
+                # A revision is spec work, so the writer's share pays for it.
+                # A follow-up's revision runs after the reserve left `batch_spend`.
+                held_back = 0.0 if is_follow_up else reserve_usd
                 budget_left = (
                     budget_usd
                     - held_back
@@ -806,7 +819,8 @@ def run_stack_batch(
             emit=emit,
             in_flight=in_flight,
             after_attach=record_layer,
-            reserve_usd=reserve_usd + writer_usd,
+            reserve_usd=reserve_usd,
+            writer_usd=writer_usd,
             sleep=sleep,
         )
         # Filled only when `follow_ups` runs, below. Otherwise it stays `[]`,

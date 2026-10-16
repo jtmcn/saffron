@@ -283,7 +283,7 @@ back, and re-verification went red.
 verdict shares its $10 with the fixes. A task whose gates were green ended
 `EXHAUSTED`, because the verdict ran out of money.
 
-**Placed 2026-10-15**, from the spec loop's run 40: **b-b24cf7**. A stack
+**Placed 2026-10-15**, from the spec loop's run 40: ~~**b-b24cf7**~~. A stack
 batch holds the spec writer's share back, then charges the writer again. At
 $134 it could not revise a $45 spec, and no cell ran.
 

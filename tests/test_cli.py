@@ -8534,6 +8534,15 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         ],
     )
 
+    # The writer's cap is what revisions left of the share, read at call time.
+    left_calls: list = []
+
+    def _writer_left(ledger_arg, batch_id, writer_usd):
+        left_calls.append((ledger_arg, batch_id, writer_usd))
+        return 2.25
+
+    monkeypatch.setattr(cli, "writer_left", _writer_left)
+
     make = cli._stack_follow_ups(
         pinned=pinned,
         repo=checkout,
@@ -8559,7 +8568,8 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     assert call["mirror"] == mirror
     assert call["repo_id"] == 2
     assert call["test_paths"] == ["tests/**"]
-    assert call["cap_usd"] == 6.5
+    assert call["cap_usd"] == 2.25
+    assert left_calls == [(ledger, 7, 6.5)]
     specs_dir = call["specs_dir"]
     assert out_dir in specs_dir.parents
     assert (specs_dir / "SY-1-x.md").read_text() == "at base\n"

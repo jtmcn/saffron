@@ -1,11 +1,12 @@
 ---
 id: b-b24cf7
 title: A stack batch holds the spec writer's share back, then charges the writer again, so a spec can only be revised under a budget twice its cost
-status: open
+status: done
 tier: 1
 filed: 2026-10-15
+closed: 2026-10-16
 specs: [SA-0273]
-prs: [880]
+prs: [880, 886]
 commits: []
 cites: [§4.2.1]
 related: [b-792ab2]
@@ -39,3 +40,6 @@ it. A batch sized at twice its specs' budgets can revise any one of them.
 ## Record
 
 - 2026-10-15: filed from the spec loop's run 40.
+- 2026-10-16: closed by hand. The operator chose that a revision draws on the
+  writer's share. Spec writing now leaves the share as it spends, so a later
+  cell and the follow-up writer see only what is left.

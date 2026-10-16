@@ -4785,8 +4785,8 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     ledger, repo_id
 ):
     """`writer_usd` sits beside `reserve_usd`, never inside it (the stack-batch
-    design's section 3, Money). Both hold back the per-task check and the pre-revision check.
-    `end_review` still keeps `reserve_usd` alone, and the batch row still
+    design's section 3, Money). Both hold back the per-task check. A revision
+    is spec work, so only the reserve holds back its check. `end_review` still keeps `reserve_usd` alone, and the batch row still
     records the whole budget given. `follow_ups` runs once, right after
     `end_review`, with its return, whenever both are given, whatever the
     order's own pass stopped on. A follow-up it returns runs only once that
@@ -4912,12 +4912,11 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     assert raised_end == []
     assert raised_follow == []
 
-    # `writer_usd` is held back before each round too. `need` is the
+    # Only `reserve_usd` is held back before each round. `need` is the
     # writer's session, the reviewer's session and the spec's own budget.
     from saffron.spec_review import SPEC_REVIEW_SESSION_USD, SPEC_WRITER_SESSION_USD
 
     need = SPEC_WRITER_SESSION_USD + SPEC_REVIEW_SESSION_USD + 12.0
-    revision_budget = 3.0 + need + 2.0
 
     def _build_blocker_review(candidate, predecessor=None, **kwargs):
         return _review_session([_blocker("build")], cost=0.0)
@@ -4930,13 +4929,12 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
             self.calls += 1
             return _written(f"rev{self.calls}\n", session_id=f"w-{self.calls}")
 
-    # `writer_usd` of 4.0 leaves `need` less 2: too little for the first
-    # round, so `revise` is never called.
+    # Half a dollar short of `need` past the reserve: `revise` is never called.
     revise_never = _RecordingRevise()
     reason3 = run_stack_batch(
         [_candidate_x("SY-3", budget_usd=12.0)],
         ledger,
-        revision_budget,
+        3.0 + need - 0.5,
         None,
         FakeStackRunner({}),
         readiness_check=_ready,
@@ -4949,20 +4947,20 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     assert reason3 == "DRAINED"
     assert revise_never.calls == 0
 
-    # `writer_usd` of 1.5 leaves `need` plus 0.5 for the first round, which
-    # admits one `revise` call. The second round leaves `need` less 0.5.
+    # `need` plus 0.5 past the reserve admits one `revise` call, whatever the
+    # writer's share. That call's dollar leaves `need` less 0.5 for the second.
     revise_once = _RecordingRevise()
     end_calls2: list = []
     follow_calls2: list = []
     reason4 = run_stack_batch(
         [_candidate_x("SY-3", budget_usd=12.0)],
         ledger,
-        revision_budget,
+        3.0 + need + 0.5,
         None,
         FakeStackRunner({}),
         readiness_check=_ready,
         reserve_usd=3.0,
-        writer_usd=1.5,
+        writer_usd=4.0,
         review=_build_blocker_review,
         mint=MintDouble(ledger, repo_id),
         revise=revise_once,
@@ -4978,6 +4976,57 @@ def test_a_stack_batch_hands_its_end_review_to_follow_ups_and_holds_the_writer_s
     batch_id4 = _latest_batch_id(ledger)
     assert end_calls2 == [(str(batch_id4), 3.0)]
     assert follow_calls2 == [(str(batch_id4), "stack-review-sentinel-2")]
+
+
+def test_a_revision_draws_on_the_writer_share_so_its_cell_still_runs(ledger, repo_id):
+    """b-b24cf7's shape: $134 with a quarter each held back, and a $45 spec
+    whose first review blocks. The revision is paid from the writer's share,
+    and what it spent leaves that share rather than being held back twice.
+    So both cells run, the $50 one above it included, and the follow-up
+    writer gets only what remains."""
+    from saffron.batch import run_stack_batch, writer_left
+
+    reviews = _RevisionReview({"SY-7": [[_blocker("build")], []], "SY-8": [[]]})
+    revised: list[str] = []
+
+    def revise(candidate, predecessor, spec_text, review_text):
+        revised.append(candidate.spec.id)
+        return _written("rev\n", cost=25.0)
+
+    ran: list[str] = []
+
+    def runner(candidate, predecessor=None):
+        ran.append(candidate.spec.id)
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+        task_id = ledger.create_task(
+            run_id,
+            spec_id=candidate.spec.id,
+            spec_sha="s" * 64,
+            branch=f"saffron/{candidate.spec.id}",
+        )
+        return _outcome(state="READY_FOR_REVIEW", run_id=run_id, task_id=task_id)
+
+    lines: list[str] = []
+    reason = run_stack_batch(
+        [_candidate_x("SY-7", budget_usd=45.0), _candidate_x("SY-8", budget_usd=50.0)],
+        ledger,
+        134.0,
+        None,
+        runner,
+        readiness_check=_ready,
+        reserve_usd=33.5,
+        writer_usd=33.5,
+        review=reviews,
+        mint=MintDouble(ledger, repo_id),
+        revise=revise,
+        emit=lines.append,
+    )
+
+    assert not any("unrevised" in line for line in lines), lines
+    assert revised == ["SY-7"]
+    assert ran == ["SY-7", "SY-8"]
+    assert reason == "DRAINED"
+    assert writer_left(ledger, _latest_batch_id(ledger), 33.5) == 8.5
 
 
 _REV_ONE = "---\nid: SY-1\ntitle: t\ntype: chore\n---\nrev one\n"
@@ -6115,8 +6164,8 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
     assert not any(line.startswith("follow-ups unrun") for line in lines6)
     assert any(line.startswith("TE-62") and "in flight" in line for line in lines6)
 
-    # Batch 7: a revision's own check holds `reserve_usd` and `writer_usd`
-    # for a spec of the order, and holds neither for a follow-up's.
+    # Batch 7: a revision's own check holds `reserve_usd` for a spec of the
+    # order and nothing for a follow-up's. The writer's share pays for both.
     monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 10.0)
     monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 8.0)
     rows7 = {
@@ -6137,7 +6186,7 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
         None,
         doubles7.runner,
         readiness_check=_ready,
-        reserve_usd=6.0,
+        reserve_usd=8.0,
         writer_usd=2.0,
         review=doubles7.review,
         mint=doubles7.mint,
