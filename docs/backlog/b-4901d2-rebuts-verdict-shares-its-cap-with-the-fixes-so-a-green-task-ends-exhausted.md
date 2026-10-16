@@ -6,7 +6,7 @@ tier: 1
 filed: 2026-10-14
 closed: 2026-10-15
 specs: [SA-0272, SA-0293]
-prs: [875]
+prs: [875, 884]
 commits: []
 cites: [§5.5]
 related: [b-2750d5]
