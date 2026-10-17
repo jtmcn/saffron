@@ -155,7 +155,7 @@ at a head other than the one PACKAGE pushed
 records three. `SA-0029`'s cell left 548 changed lines, and two host-side
 review rounds took it to 863 against a 600 ceiling. `SA-0086`'s review
 round edited a file its spec forbade. `reconcile` already names a head
-that moved past `pushed_sha` (`saffron/reconcile.py:177-179`).
+that moved past `pushed_sha` (`saffron/reconcile.py:195-197`).
 `tasks.merged_head_sha` keeps the head a merge landed at
 (`saffron/ledger.py:146-148`). No gate judges either head.
 
@@ -166,7 +166,7 @@ its own gate-only cell. It reads its gates from the caller's `gates_dir`
 and raises `PackageError` on an errored gate or on drift. It returns a
 `SuiteComparison` whose `new_failures` are `NewFailure(gate, failure)`
 pairs (`saffron/gates/suite.py:112-125`, `saffron/gates/baseline.py:20-22`).
-`_finish_verify` calls it outside PACKAGE already (`saffron/cli.py:768-795`).
+`_finish_verify` calls it outside PACKAGE already (`saffron/cli.py:828-854`).
 
 **PACKAGE takes its gates from the default branch's head.** It exports
 `.saffron/` at `fetch_head` and loads the policy from that export
@@ -177,17 +177,17 @@ run's `base_sha` (`DESIGN.md` §5.4).
 `preflight.host_probe_ports`. It prints the count, the addresses and
 `tolerating` with the tolerated names or `nothing`. It then calls
 `preflight.assert_host_is_unreachable` per network
-(`saffron/cell/session.py:1095-1111`). A command that calls `reverify`
+(`saffron/cell/session.py:1155-1171`). A command that calls `reverify`
 alone has had no probe in its invocation.
 
 **What the ledger holds.** A task row carries `spec_id`, `spec_sha`,
 `branch`, `pushed_sha` and `pr_url`, and its run carries `base_sha` and
 `repo_id` (`saffron/ledger.py:117-146`). `create_task` writes `spec_sha`
-once (`saffron/ledger.py:730`), and nothing rewrites it. A stack batch can
+once (`saffron/ledger.py:1422-1460`), and nothing rewrites it. A stack batch can
 run a task on a recorded text in place of its file
 (`saffron/task.py:464-471`). That text lives in `spec_texts`, and
 `Ledger.spec_text` returns the newest or `None`
-(`saffron/ledger.py:1828-1839`). So such a task's `spec_sha` still matches
+(`saffron/ledger.py:1945-1956`). So such a task's `spec_sha` still matches
 its file at `base_sha`. Modules outside `ledger.py` read a task row through
 `ledger._db` already (`saffron/chain_walk.py:64`,
 `saffron/end_review.py:111`). A stack batch creates its task with the
@@ -198,11 +198,11 @@ named branch into the mirror, checks its objects, and returns its head
 (`saffron/phases/package.py:173-205`). `git_mirror.export_saffron_dir`
 writes `.saffron/` under its `dest` (`saffron/repos/mirror.py:182-227`).
 `load_spec` returns a spec and the sha256 of its file's bytes
-(`saffron/intake.py:348-359`). `_mirror_path` is the mirror path
-`saffron cell` uses (`saffron/cli.py:1651-1657`). `_guarding_sigterm`
+(`saffron/intake.py:372-383`). `_mirror_path` is the mirror path
+`saffron cell` uses (`saffron/cli.py:1724-1730`). `_guarding_sigterm`
 turns a SIGTERM into exit 143 after the stack unwinds
-(`saffron/cli.py:451-474`). The dispatch's `except Exception` turns any
-other raise into exit 2 (`saffron/cli.py:300-307`).
+(`saffron/cli.py:479-502`). The dispatch's `except Exception` turns any
+other raise into exit 2 (`saffron/cli.py:328-335`).
 
 ## Problem
 

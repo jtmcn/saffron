@@ -154,11 +154,11 @@ start at `_Citation` (`.claude/skills/run-saffron-spec-loop/driver.py:2427-2435`
 They end at `_moved_lines` (`.claude/skills/run-saffron-spec-loop/driver.py:2519-2531`).
 Three tests hold its behaviour. They are
 `test_cite_resolves_a_specs_citations_at_the_base_commit`
-(`tests/test_spec_loop_driver.py:2260`),
+(`tests/test_spec_loop_driver.py:2262`),
 `test_cite_anchors_a_bare_line_number_inside_its_own_paragraph`
-(`tests/test_spec_loop_driver.py:2315`) and
+(`tests/test_spec_loop_driver.py:2317`) and
 `test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines`
-(`tests/test_spec_loop_driver.py:2358`). Each builds its repository with the
+(`tests/test_spec_loop_driver.py:2360`). Each builds its repository with the
 `empty_repo` fixture (`tests/test_spec_loop_driver.py:135-143`).
 
 **A stack batch reviews each spec before its cell.** `run_stack_batch` takes
