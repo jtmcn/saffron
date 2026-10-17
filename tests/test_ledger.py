@@ -2089,6 +2089,8 @@ def test_a_regate_is_one_fact_that_folds_back_as_the_tasks_newest_row(tmp_path):
             999, head_sha="h" * 40, baseline_sha="i" * 40, new_failures=9
         )
     assert len(_raw_regates(path)) == 2
+    with pytest.raises(ValueError, match="no task 999"):
+        read(999)
 
     te1_facts = [f for f in record.read(te1_key) if f.kind == "task_regate"]
     te2_facts = [f for f in record.read(te2_key) if f.kind == "task_regate"]
@@ -2104,10 +2106,11 @@ def test_a_regate_is_one_fact_that_folds_back_as_the_tasks_newest_row(tmp_path):
     assert _raw_regates(path) == rows
 
     fresh.fold_task(te2_key, [])
-    # The raw table, not `regate(te2)`: dropping the task row would read
-    # back as `None` even if the `regates` row itself survived underneath.
+    # The raw table, not `regate(te2)`, which raises once the task row is
+    # gone even if the `regates` row itself survived underneath.
     assert [r[0] for r in _raw_regates(tmp_path / "fresh.db")] == [te1_key]
-    assert fresh.regate(te2) is None
+    with pytest.raises(ValueError, match=f"no task {te2}"):
+        fresh.regate(te2)
     remaining = fresh.regate(te1)
     assert remaining is not None
     assert remaining["head_sha"] == "f" * 40
@@ -2120,7 +2123,11 @@ def test_a_regate_is_one_fact_that_folds_back_as_the_tasks_newest_row(tmp_path):
     conn.close()
 
     reopened = Ledger(path)
-    assert reopened.regate(te1) is None
+    # The fold renumbered the tasks, so find TE-1 by its key.
+    (te1_now,) = reopened._db.execute(
+        "SELECT task_id FROM tasks WHERE record_key = ?", (te1_key,)
+    ).fetchone()
+    assert reopened.regate(te1_now) is None
     reopened.close()
 
 

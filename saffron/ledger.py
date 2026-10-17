@@ -1790,10 +1790,11 @@ class Ledger:
 
     def regate(self, task_id: int) -> sqlite3.Row | None:
         """The task's newest re-gate, or `None` for a task with none
-        (backlog item 97)."""
+        (backlog item 97). Raises `ValueError` for a task id that names no
+        task."""
         key = self.record_key(task_id)
         if key is None:
-            return None
+            raise ValueError(f"no task {task_id} to read a re-gate for")
         return self._db.execute(
             "SELECT * FROM regates WHERE task_key = ?", (key,)
         ).fetchone()
