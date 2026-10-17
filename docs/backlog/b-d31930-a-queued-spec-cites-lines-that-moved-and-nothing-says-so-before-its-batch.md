@@ -5,7 +5,7 @@ status: open
 tier: 2
 filed: 2026-10-15
 specs: [SA-0273, SA-0294, SA-0295]
-prs: [880]
+prs: [880, 890, 891, 892]
 commits: []
 cites: [§3.2]
 related: [b-b24cf7]
@@ -32,3 +32,7 @@ money is spent.
 ## Record
 
 - 2026-10-15: filed from the spec loop's run 40.
+- 2026-10-16: #891 makes `driver.py check` run `cite` at the branch a cell
+  is cut from. #890 adds `SA-0294` and `SA-0295` for the batch's arm, and
+  #892 refreshed the citations `check` then blocked on. The check's own
+  match is loose both ways (b-2da959).
