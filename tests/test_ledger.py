@@ -2012,6 +2012,118 @@ def test_a_stack_finish_is_one_fact_under_the_top_layer_and_folds_back_by_batch(
     third.close()
 
 
+def _raw_regates(path):
+    """Every `regates` row, read with a connection of the test's own rather
+    than through any `Ledger`, ordered by `task_key`."""
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute(
+            "SELECT task_key, head_sha, baseline_sha, new_failures "
+            "FROM regates ORDER BY task_key"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def test_a_regate_is_one_fact_that_folds_back_as_the_tasks_newest_row(tmp_path):
+    """`record_regate` files one `task_regate` fact, replacing the task's
+    `regates` row whole (backlog item 97)."""
+    from saffron.record.fold import fold
+    from saffron.record.memory import MemoryRecord
+
+    path = tmp_path / "ledger.db"
+    record = MemoryRecord()
+    writer = Ledger(path, record=record)
+    repo_id = writer.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+
+    run_1 = writer.create_run(repo_id, base_sha="a" * 40)
+    te1 = writer.create_task(
+        run_1, spec_id="TE-1", spec_sha="s" * 64, branch="saffron/TE-1"
+    )
+    te1_key = writer.record_key(te1)
+    assert te1_key is not None
+    run_2 = writer.create_run(repo_id, base_sha="a" * 40)
+    te2 = writer.create_task(
+        run_2, spec_id="TE-2", spec_sha="s" * 64, branch="saffron/TE-2"
+    )
+    te2_key = writer.record_key(te2)
+    assert te2_key is not None
+
+    def read(task_id):
+        reader = Ledger(path)
+        try:
+            return reader.regate(task_id)
+        finally:
+            reader.close()
+
+    # Before any write, TE-1 has no re-gate.
+    assert read(te1) is None
+
+    writer.record_regate(te2, head_sha="b" * 40, baseline_sha="c" * 40, new_failures=2)
+    row = read(te2)
+    assert isinstance(row, sqlite3.Row)
+    assert row["head_sha"] == "b" * 40
+    assert row["baseline_sha"] == "c" * 40
+    assert row["new_failures"] == 2
+    assert read(te1) is None
+
+    # A second write for the same task replaces the row whole.
+    writer.record_regate(te2, head_sha="d" * 40, baseline_sha="e" * 40, new_failures=0)
+    row = read(te2)
+    assert row["head_sha"] == "d" * 40
+    assert row["baseline_sha"] == "e" * 40
+    assert row["new_failures"] == 0
+
+    # TE-1's own write leaves TE-2's row exactly as it was.
+    writer.record_regate(te1, head_sha="f" * 40, baseline_sha="g" * 40, new_failures=1)
+    row_1 = read(te1)
+    assert row_1["head_sha"] == "f" * 40
+    assert row_1["baseline_sha"] == "g" * 40
+    assert row_1["new_failures"] == 1
+    row_2 = read(te2)
+    assert row_2["head_sha"] == "d" * 40
+
+    # A task id naming no task raises, writing no row and no fact.
+    with pytest.raises(ValueError, match="no task 999"):
+        writer.record_regate(
+            999, head_sha="h" * 40, baseline_sha="i" * 40, new_failures=9
+        )
+    assert len(_raw_regates(path)) == 2
+
+    te1_facts = [f for f in record.read(te1_key) if f.kind == "task_regate"]
+    te2_facts = [f for f in record.read(te2_key) if f.kind == "task_regate"]
+    assert len(te1_facts) == 1
+    assert len(te2_facts) == 2
+    assert [f.payload["head_sha"] for f in te2_facts] == ["b" * 40, "d" * 40]
+
+    rows = _raw_regates(path)
+    fresh = Ledger(tmp_path / "fresh.db")
+    fold(record, fresh)
+    assert _raw_regates(tmp_path / "fresh.db") == rows
+    fold(record, writer)
+    assert _raw_regates(path) == rows
+
+    fresh.fold_task(te2_key, [])
+    # The raw table, not `regate(te2)`: dropping the task row would read
+    # back as `None` even if the `regates` row itself survived underneath.
+    assert [r[0] for r in _raw_regates(tmp_path / "fresh.db")] == [te1_key]
+    assert fresh.regate(te2) is None
+    remaining = fresh.regate(te1)
+    assert remaining is not None
+    assert remaining["head_sha"] == "f" * 40
+    fresh.close()
+
+    writer.close()
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE regates")
+    conn.commit()
+    conn.close()
+
+    reopened = Ledger(path)
+    assert reopened.regate(te1) is None
+    reopened.close()
+
+
 def test_a_snapshot_is_a_rollback_journal_copy_carrying_every_committed_row(
     ledger, task, tmp_path
 ):

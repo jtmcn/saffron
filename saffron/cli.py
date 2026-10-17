@@ -2509,11 +2509,36 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
             print(f"reconcile: task {task_id} → {label}")
     for task_id in result.unasked:
         print(f"reconcile: task {task_id} could not be asked about")
+    # Each `Regated` is matched to a head-moved line by task and head
+    # together, never by either alone (backlog item 97).
+    by_task_head = {(r.task_id, r.head): r for r in result.regated}
+    taken = set()
     for moved in result.head_moved:
+        regate = by_task_head.get((moved.task_id, moved.head))
+        if regate is not None:
+            taken.add((regate.task_id, regate.head))
+            ending = (
+                f"; re-gated, new failures: {regate.new_failures}"
+                if regate.new_failures
+                else "; re-gated, no new failures"
+            )
+        else:
+            ending = "; no gate judged that tree"
         print(
             f"reconcile: task {moved.task_id}'s pull request head differs from what "
-            f"PACKAGE pushed ({moved.packaged[:12]}..{moved.head[:12]}); no gate "
-            "judged that tree"
+            f"PACKAGE pushed ({moved.packaged[:12]}..{moved.head[:12]}){ending}"
+        )
+    for regate in result.regated:
+        if (regate.task_id, regate.head) in taken:
+            continue
+        count = (
+            f"new failures: {regate.new_failures}"
+            if regate.new_failures
+            else "no new failures"
+        )
+        print(
+            f"reconcile: task {regate.task_id}'s pull request head "
+            f"{regate.head[:12]} re-gated, {count}"
         )
     # Silence read identically to "there was nothing to ask about". A run
     # that asked and found every answer unchanged now says which it was.
@@ -2526,6 +2551,7 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
             result.orphaned,
             result.unasked,
             result.head_moved,
+            result.regated,
         )
     ):
         print("reconcile: nothing moved")

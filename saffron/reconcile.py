@@ -73,13 +73,22 @@ _BUCKET = {
 
 
 class HeadMoved(NamedTuple):
-    """A pull request whose head is not the commit PACKAGE pushed — review
-    fixes or a restack, judged by no gate, critic or record (backlog
+    """A pull request whose head is not the commit PACKAGE pushed. Review
+    fixes or a restack moved it, and only a re-gate judges it (backlog
     item 97)."""
 
     task_id: int
     packaged: str
     head: str
+
+
+class Regated(NamedTuple):
+    """One task's re-gate, reported when it matches the head GitHub
+    answered for the row (backlog item 97)."""
+
+    task_id: int
+    head: str
+    new_failures: int
 
 
 @dataclass
@@ -100,6 +109,8 @@ class ReconcileResult:
     # The merge path writes a head onto the ledger at the merge below;
     # `head_moved` is reported only — the extra commits are not ours to judge.
     head_moved: list[HeadMoved] = field(default_factory=list)
+    # A re-gate at the head GitHub answered this scan. Moves no state.
+    regated: list[Regated] = field(default_factory=list)
 
 
 def _pr_status(url: str, gh: GhRunner) -> dict | None:
@@ -184,6 +195,11 @@ def reconcile(
         head, pushed = pr.get("headRefOid"), row["pushed_sha"]
         if isinstance(head, str) and head and pushed and head != pushed:
             result.head_moved.append(HeadMoved(row["task_id"], pushed, head))
+        # Also before the state check, so the re-gate is reported whatever
+        # the row becomes, including a merge or an approval.
+        regate = ledger.regate(row["task_id"])
+        if regate is not None and isinstance(head, str) and head == regate["head_sha"]:
+            result.regated.append(Regated(row["task_id"], head, regate["new_failures"]))
         candidate = _next_state(pr)
         # Merging is the only answer that moves a row in `MERGE_ONLY_STATES` (b-8e30bd, b-a7e5f3).
         new_state = (

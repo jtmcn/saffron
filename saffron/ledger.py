@@ -3,7 +3,7 @@
 Still true of what runs. No caller constructs a `Ledger` with a record, so no
 row here is derived from one and §4.6 rule 1 holds as written. The record
 design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the eighteen kinds
+by `saffron/record/fold.py`, deletable at any time. Only the nineteen kinds
 `_append` writes fold back, so even then it stays authoritative for the rest.
 That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
 with it rather than ahead of it.
@@ -14,6 +14,7 @@ to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
 twelfth, a thirteenth, a fourteenth and a fifteenth table, outside that
 count: `DESIGN.md` §4.1 does not list any of them.
 `stack_finishes` is a sixteenth table, also outside that count.
+`regates` is a seventeenth table, also outside that count.
 """
 
 from __future__ import annotations
@@ -321,6 +322,14 @@ CREATE TABLE IF NOT EXISTS stack_finishes (
     branch    TEXT NOT NULL,
     head_sha  TEXT NOT NULL,
     pr_url    TEXT
+);
+
+-- A task's newest re-gate (backlog item 97). One row, replaced whole.
+CREATE TABLE IF NOT EXISTS regates (
+    task_key      TEXT PRIMARY KEY,
+    head_sha      TEXT NOT NULL,
+    baseline_sha  TEXT NOT NULL,
+    new_failures  INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS failures_by_result ON failures(gate_result_id);
@@ -631,8 +640,8 @@ class Ledger:
         """Delete every row under `record_key = key`, task row last. Makes
         `fold_task` an upsert, and a no-op on a task with no row yet.
         `stack_layers`, `end_reviews`, `qualifications`, `spec_reviews`,
-        `spec_findings`, `spec_texts` and `stack_finishes` are filed under
-        `key`, so all seven deletes run first."""
+        `spec_findings`, `spec_texts`, `stack_finishes` and `regates` are
+        filed under `key`, so all eight deletes run first."""
         self._db.execute("DELETE FROM stack_layers WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM end_reviews WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM qualifications WHERE task_key = ?", (key,))
@@ -640,6 +649,7 @@ class Ledger:
         self._db.execute("DELETE FROM spec_findings WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM spec_texts WHERE task_key = ?", (key,))
         self._db.execute("DELETE FROM stack_finishes WHERE task_key = ?", (key,))
+        self._db.execute("DELETE FROM regates WHERE task_key = ?", (key,))
         row = self._db.execute(
             "SELECT task_id FROM tasks WHERE record_key = ?", (key,)
         ).fetchone()
@@ -998,6 +1008,21 @@ class Ledger:
                     payload["branch"],
                     payload["head_sha"],
                     payload["pr_url"],
+                ),
+            )
+            return None
+        if fact.kind == "task_regate":
+            # One row a task holds its newest re-gate. A fold replays a
+            # task's facts in order, so the last one wins.
+            self._db.execute(
+                "INSERT OR REPLACE INTO regates "
+                "(task_key, head_sha, baseline_sha, new_failures) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    fact.task_key,
+                    payload["head_sha"],
+                    payload["baseline_sha"],
+                    payload["new_failures"],
                 ),
             )
             return None
@@ -1739,6 +1764,38 @@ class Ledger:
         return self._db.execute(
             "SELECT * FROM stack_finishes WHERE batch_key = ?",
             (str(batch_id),),
+        ).fetchone()
+
+    def record_regate(
+        self,
+        task_id: int,
+        *,
+        head_sha: str,
+        baseline_sha: str,
+        new_failures: int,
+    ) -> None:
+        """One `task_regate` fact, replacing the task's `regates` row whole
+        (backlog item 97). Raises `ValueError` for a task id that names no
+        task, writing no row and no fact."""
+        fact = self._build_fact(
+            task_id,
+            "task_regate",
+            {
+                "head_sha": head_sha,
+                "baseline_sha": baseline_sha,
+                "new_failures": new_failures,
+            },
+        )
+        self._commit_and_append(fact)
+
+    def regate(self, task_id: int) -> sqlite3.Row | None:
+        """The task's newest re-gate, or `None` for a task with none
+        (backlog item 97)."""
+        key = self.record_key(task_id)
+        if key is None:
+            return None
+        return self._db.execute(
+            "SELECT * FROM regates WHERE task_key = ?", (key,)
         ).fetchone()
 
     def qualifications(self, task_id: int) -> list[sqlite3.Row]:
