@@ -42,7 +42,7 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_phase
-from saffron.reconcile import MERGE_ONLY_STATES, ReconcileResult, reconcile
+from saffron.reconcile import MERGE_ONLY_STATES, ReconcileResult, Regated, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
@@ -2512,16 +2512,18 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
     # Each `Regated` is matched to a head-moved line by task and head
     # together, never by either alone (backlog item 97).
     by_task_head = {(r.task_id, r.head): r for r in result.regated}
+
+    def count(regate: Regated) -> str:
+        if regate.new_failures:
+            return f"new failures: {regate.new_failures}"
+        return "no new failures"
+
     taken = set()
     for moved in result.head_moved:
         regate = by_task_head.get((moved.task_id, moved.head))
         if regate is not None:
             taken.add((regate.task_id, regate.head))
-            ending = (
-                f"; re-gated, new failures: {regate.new_failures}"
-                if regate.new_failures
-                else "; re-gated, no new failures"
-            )
+            ending = f"; re-gated, {count(regate)}"
         else:
             ending = "; no gate judged that tree"
         print(
@@ -2531,14 +2533,9 @@ def _print_reconcile_summary(result: ReconcileResult) -> None:
     for regate in result.regated:
         if (regate.task_id, regate.head) in taken:
             continue
-        count = (
-            f"new failures: {regate.new_failures}"
-            if regate.new_failures
-            else "no new failures"
-        )
         print(
             f"reconcile: task {regate.task_id}'s pull request head "
-            f"{regate.head[:12]} re-gated, {count}"
+            f"{regate.head[:12]} re-gated, {count(regate)}"
         )
     # Silence read identically to "there was nothing to ask about". A run
     # that asked and found every answer unchanged now says which it was.
