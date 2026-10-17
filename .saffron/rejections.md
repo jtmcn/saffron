@@ -2220,3 +2220,22 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0275`: the batch's spec review found a blocker, and the batch could not
   revise the spec. It held back the writer's share from the revision.
   **No bucket**, a batch's budget. **Landed:** #886, merged mid-batch.
+
+## 2026-10-16, `SA-0275` (spec loop run 42, #893)
+
+- `SA-0275` (#893): `Ledger.regate` read an id naming no task as a task
+  with no re-gate, where its sibling readers raise `ValueError`. The end
+  review and the Standards seat raised it, and no in-cell lens did.
+  **Bucket 3**, conventions. **Landed:** a review commit on #893.
+- `SA-0275` (#893): the ledger witness's reopen check passed only because
+  the fold had renumbered the tasks, so it read an id naming nothing.
+  Making `regate` raise exposed it. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #893.
+- `SA-0275` (#893): `_print_reconcile_summary` built a re-gate's count in
+  two places. **Bucket 3**, conventions. **Landed:** a review commit on #893.
+- `SA-0275` (#893): `reconcile`'s `head_moved` comment still says a moved
+  head is not ours to judge. The spec said to leave it. **No bucket**, a
+  spec's scope. **Open:** b-60317d.
+- #891: a `check` test read the host's `origin/main`, so every cell's
+  baseline found `main` red. **No bucket**, the loop's driver. **Landed:**
+  this run's step 5 PR.

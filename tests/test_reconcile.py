@@ -481,6 +481,210 @@ def test_a_head_is_recorded_only_for_an_observed_merge(ledger):
         assert _merged_head(ledger, task_id) is None
 
 
+def test_a_regate_at_the_current_head_is_reported_and_moves_no_state(ledger):
+    """A re-gate is read for every row asked about, before the state check
+    (backlog item 97). It is reported only when its head matches the one
+    GitHub answered, and it never moves a row."""
+    from saffron.reconcile import Regated
+
+    repo_id = _repo(ledger)
+
+    def _url(n):
+        return f"https://github.com/jtmcn/saffron/pull/{n}"
+
+    moved_draft_green = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9501",
+        state="READY_FOR_REVIEW",
+        pr_url=_url(501),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        moved_draft_green, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=2
+    )
+    unmoved_at_pushed = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9502",
+        state="READY_FOR_REVIEW",
+        pr_url=_url(502),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        unmoved_at_pushed, head_sha=_PUSHED, baseline_sha="z" * 40, new_failures=0
+    )
+    stale_regate = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9503",
+        state="READY_FOR_REVIEW",
+        pr_url=_url(503),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        stale_regate, head_sha=_PUSHED, baseline_sha="z" * 40, new_failures=3
+    )
+    no_regate = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9504",
+        state="READY_FOR_REVIEW",
+        pr_url=_url(504),
+        pushed_sha=_PUSHED,
+    )
+    merged = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9505",
+        state="READY_FOR_REVIEW",
+        pr_url=_url(505),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(merged, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=1)
+    approved = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9506",
+        state="READY_FOR_REVIEW",
+        pr_url=_url(506),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        approved, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=4
+    )
+    already_approved = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9507",
+        state="APPROVED",
+        pr_url=_url(507),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        already_approved, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=5
+    )
+    exhausted = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9508",
+        state="EXHAUSTED",
+        pr_url=_url(508),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        exhausted, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=6
+    )
+    not_implemented = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9509",
+        state="NOT_IMPLEMENTED",
+        pr_url=_url(509),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        not_implemented, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=7
+    )
+    changes_requested = _task(
+        ledger,
+        repo_id,
+        spec_id="SA-9510",
+        state="CHANGES_REQUESTED",
+        pr_url=_url(510),
+        pushed_sha=_PUSHED,
+    )
+    ledger.record_regate(
+        changes_requested, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=8
+    )
+
+    gh = _FakeGh(
+        {
+            _url(501): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": _FIXED,
+            },
+            _url(502): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": _PUSHED,
+            },
+            _url(503): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": _FIXED,
+            },
+            _url(504): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": _FIXED,
+            },
+            _url(505): {
+                "state": "MERGED",
+                "reviewDecision": None,
+                "headRefOid": _FIXED,
+            },
+            _url(506): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": False,
+                "headRefOid": _FIXED,
+            },
+            _url(507): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": False,
+                "headRefOid": _FIXED,
+            },
+            _url(508): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": _FIXED,
+            },
+            _url(509): {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": _FIXED,
+            },
+            _url(510): {
+                "state": "OPEN",
+                "reviewDecision": "CHANGES_REQUESTED",
+                "headRefOid": _FIXED,
+            },
+        }
+    )
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert result.regated == [
+        Regated(moved_draft_green, _FIXED, 2),
+        Regated(unmoved_at_pushed, _PUSHED, 0),
+        Regated(merged, _FIXED, 1),
+        Regated(approved, _FIXED, 4),
+        Regated(already_approved, _FIXED, 5),
+        Regated(exhausted, _FIXED, 6),
+        Regated(not_implemented, _FIXED, 7),
+        Regated(changes_requested, _FIXED, 8),
+    ]
+    assert _state(ledger, moved_draft_green) == "READY_FOR_REVIEW"
+    assert _state(ledger, unmoved_at_pushed) == "READY_FOR_REVIEW"
+    assert _state(ledger, stale_regate) == "READY_FOR_REVIEW"
+    assert _state(ledger, no_regate) == "READY_FOR_REVIEW"
+    assert _state(ledger, merged) == "MERGED"
+    assert _state(ledger, approved) == "APPROVED"
+    assert _state(ledger, already_approved) == "APPROVED"
+    assert _state(ledger, exhausted) == "EXHAUSTED"
+    assert _state(ledger, not_implemented) == "NOT_IMPLEMENTED"
+    assert _state(ledger, changes_requested) == "CHANGES_REQUESTED"
+
+
 def test_the_merged_head_is_written_before_the_state_moves(ledger, monkeypatch):
     """A `MERGED` row is never asked about again, so a crash between the two
     writes must be able to lose only the second one: the head has to land

@@ -6,6 +6,8 @@ priority: 2
 depends_on: [SA-0275, SA-0271, SA-0268, SA-0265]
 consumes:
   - saffron/ledger.py:record_regate
+pending_symbols:
+  - saffron/ledger.py::record_regate
 estimated_lines: 478
 estimate_measured: true
 touches:

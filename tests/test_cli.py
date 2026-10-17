@@ -4375,6 +4375,55 @@ def test_a_moved_head_is_named_with_both_shas(capsys):
     assert "nothing moved" not in printed
 
 
+def test_a_regated_head_prints_its_new_failures_in_place_of_no_gate_judged(capsys):
+    """Item 97: a head-moved line whose task and head match a re-gate ends
+    with that re-gate's count instead of "no gate judged that tree". A
+    re-gate with no matching head-moved line prints a line of its own. A
+    match is never by head alone: that would put task 10's count on task
+    7's line, since the two share a head."""
+    from saffron.reconcile import Regated
+
+    cli._print_reconcile_summary(
+        ReconcileResult(
+            head_moved=[
+                HeadMoved(7, "a" * 40, "b" * 40),
+                HeadMoved(8, "a" * 40, "c" * 40),
+                HeadMoved(9, "a" * 40, "d" * 40),
+            ],
+            regated=[
+                Regated(7, "b" * 40, 2),
+                Regated(8, "c" * 40, 0),
+                Regated(9, "f" * 40, 1),
+                Regated(10, "b" * 40, 3),
+            ],
+        )
+    )
+
+    lines = sorted(
+        line for line in capsys.readouterr().out.splitlines() if line.strip()
+    )
+    assert lines == sorted(
+        [
+            "reconcile: task 7's pull request head differs from what PACKAGE "
+            "pushed (aaaaaaaaaaaa..bbbbbbbbbbbb); re-gated, new failures: 2",
+            "reconcile: task 8's pull request head differs from what PACKAGE "
+            "pushed (aaaaaaaaaaaa..cccccccccccc); re-gated, no new failures",
+            "reconcile: task 9's pull request head differs from what PACKAGE "
+            "pushed (aaaaaaaaaaaa..dddddddddddd); no gate judged that tree",
+            "reconcile: task 9's pull request head ffffffffffff re-gated, "
+            "new failures: 1",
+            "reconcile: task 10's pull request head bbbbbbbbbbbb re-gated, "
+            "new failures: 3",
+        ]
+    )
+
+    cli._print_reconcile_summary(ReconcileResult(regated=[Regated(1, "e" * 40, 0)]))
+    printed = capsys.readouterr().out
+    assert printed == (
+        "reconcile: task 1's pull request head eeeeeeeeeeee re-gated, no new failures\n"
+    )
+
+
 def test_a_resolution_that_changed_nothing_still_says_so(capsys):
     """The other half: silence must not read as "there was nothing to ask
     about"."""

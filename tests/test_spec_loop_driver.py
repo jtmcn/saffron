@@ -1690,6 +1690,8 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
     monkeypatch.setattr(driver, "_overrun", lambda *a, **k: (1, "run 19"))
     monkeypatch.setattr(driver, "_elevate_on", lambda: [])
+    # A cell's checkout has no `origin/main` for `cite` to read.
+    monkeypatch.setattr(driver, "_cite_blocker", lambda *a: None)
 
     def write(spec_id, depends_on, touches, done=False):
         target = (specs_dir / "done") if done else specs_dir
