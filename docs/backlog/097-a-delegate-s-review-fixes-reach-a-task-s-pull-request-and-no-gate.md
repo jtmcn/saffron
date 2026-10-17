@@ -4,7 +4,7 @@ title: A delegate's review fixes reach a task's pull request and no gate, critic
 status: partial
 tier: 1
 specs: [SA-0111, SA-0275, SA-0284]
-prs: [189, 381]
+prs: [189, 381, 893]
 commits: []
 cites: [§5.1, §5.4]
 related: [b-1c7019, b-3e0dbe]
@@ -83,3 +83,8 @@ at `a269ecd3`, its own review commit, and task 118 packaged `69a1a631` and
 merged at `8f539867`. That is the 34-of-38 case this item was filed on,
 happening twice more. These are the first two rows in the ledger that keep it.
 No gate judged either tree, which is the re-gate this item still owes.
+
+**The re-gate has a record, 2026-10-16.** `SA-0275` (#893) adds the
+`regates` table and the `task_regate` fact. `reconcile` reports a re-gate
+at the head GitHub answered, and moves no state. `SA-0284` still owes the
+command that runs one.

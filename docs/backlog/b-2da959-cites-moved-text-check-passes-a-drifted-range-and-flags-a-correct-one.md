@@ -1,0 +1,39 @@
+---
+id: b-2da959
+title: "`cite`'s moved-text check passes a range that drifted and flags a range that is right"
+status: open
+tier: 2
+filed: 2026-10-16
+specs: []
+prs: []
+commits: []
+cites: [§3.2]
+related: [b-d31930]
+---
+
+## Problem
+
+Found in the spec loop's run 42, refreshing 18 citations in #892.
+
+`_moved_lines` reports a move only when none of the sentence's backticked
+strings sits in the cited range. A common token in the range passes it.
+`SA-0275` cited `saffron/ledger.py:314-321` for `stack_finishes`, which had
+moved to 318-324. The check passed it, because `IF NOT EXISTS` sits in both.
+
+It fails the other way too. Four of the 18 ranges were right, but the name
+the sentence quotes sat on the `def` or `class` line above the range.
+The check reported each one as moved.
+
+`SA-0294` ports this check into core as the batch's preflight. It carries
+both faults with it.
+
+## Done looks like
+
+A citation is judged by the construct it names, not by any string in its
+sentence. A range that holds the named body passes, and so does one that
+starts a line below its `def`. A range that moved off its construct fails,
+whatever common tokens it still holds. Each case has a test.
+
+## Record
+
+- 2026-10-16: filed from the spec loop's run 42.
