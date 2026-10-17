@@ -1,11 +1,11 @@
 ---
 id: b-5e443c
 title: The cell image predates `agent_runner.py`'s token fields, so no event log carries a token count and nothing says why
-status: open
+status: partial
 tier: 2
 filed: 2026-09-19
 specs: []
-prs: []
+prs: [369]
 commits: []
 cites: [§4.1, §5.1.2]
 related: [146, 147, 10]
@@ -47,3 +47,11 @@ decision says the event log is their only home.
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-09-19: base rebuilt by hand with `container build`, and timed. The
+  rebuild after the runner changed took 8.2 s. The apt, SDK and binary layers
+  were cached, and the runner layer onward re-ran. A second build straight after,
+  with all 8 steps cached, took 4.8 s. The image now carries the token fields.
+  A base rebuild at every cell would cost about 5 s.
+- 2026-10-17: partial. #369 rebuilds the base at every cell, so the
+  image's runner can no longer lag the checkout's. Token counts still reach
+  only the event log, which items 146 and 147 hold.
