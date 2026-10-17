@@ -1,11 +1,12 @@
 ---
 id: b-f71105
 title: "`prepare_worktree`'s retry pause reaches `time.sleep` by module attribute, not an injected `sleep`"
-status: open
+status: done
 tier: 3
 filed: 2026-10-09
+closed: 2026-10-17
 specs: []
-prs: [779]
+prs: [779, 895]
 commits: []
 cites: []
 related: [b-8a0c9a, b-f582ee]
@@ -32,3 +33,5 @@ dropped it. Its spec text is under `follow_ups` in
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-10-17: done by hand (#895) from `SA-0257`'s unpackaged cell commit,
+  rebased onto `main` and checked by a probe that restores `time.sleep`.
