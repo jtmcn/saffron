@@ -77,21 +77,23 @@ acceptance:
   - claim: >-
       For every row `reconcile` asks GitHub about, it reads the task's
       re-gate. Those are the rows in `READY_FOR_REVIEW`, `APPROVED`,
-      `CHANGES_REQUESTED` or `EXHAUSTED` that carry a `pr_url`. When the
+      `CHANGES_REQUESTED`, `EXHAUSTED` or `NOT_IMPLEMENTED` that carry a
+      `pr_url`. When the
       re-gate's `head_sha` equals the `headRefOid` GitHub answered, the
       task id, that head and the re-gate's `new_failures` land in a new
       `regated` list on the result. A green re-gate and a red one both
       land there. A re-gate at any other head lands nowhere, and so does a
-      task with none. The re-gate moves no state. The witness drives nine
+      task with none. The re-gate moves no state. The witness drives ten
       rows. Six are `READY_FOR_REVIEW`. A moved head re-gated red keeps
       its draft state. An unmoved head re-gated green keeps it too. A
       re-gate at the commit PACKAGE pushed reports nothing once the head
       has moved past it. A moved head with no re-gate reports nothing. A
       merged answer over a red re-gate still moves the row to `MERGED`. A
       ready, non-draft answer over a red re-gate still moves it to
-      `APPROVED`. The other three are an `APPROVED` row answered ready, an
-      `EXHAUSTED` row answered as an open draft, and a
-      `CHANGES_REQUESTED` row answered with changes requested. Each is
+      `APPROVED`. The other four are an `APPROVED` row answered ready, an
+      `EXHAUSTED` row answered as an open draft, a `NOT_IMPLEMENTED` row
+      answered as an open draft, and a `CHANGES_REQUESTED` row answered
+      with changes requested. Each is
       re-gated red at the answered head, is reported, and keeps its
       state.
     witness: tests/test_reconcile.py::test_a_regate_at_the_current_head_is_reported_and_moves_no_state
@@ -103,6 +105,7 @@ acceptance:
       - A version that moves a red re-gate's task to `CHANGES_REQUESTED`.
       - A version that withholds `APPROVED` from a task whose re-gate is red.
       - A version that reads the re-gate only for `READY_FOR_REVIEW` rows.
+      - A version that reads the re-gate for `PR_PENDING_STATES` and `EXHAUSTED` alone, so an adopted `NOT_IMPLEMENTED` row is skipped.
   - claim: >-
       `_print_reconcile_summary` gives the re-gate's new failures on the
       head-moved line of a task re-gated at that same head. The line keeps
@@ -148,20 +151,20 @@ records `SA-0029` and `SA-0080` merging over the `size` ceiling, and
 round, and nothing recorded it.
 
 **`reconcile` already names the moved head.** It asks `gh` for
-`headRefOid` (`saffron/reconcile.py:101-113`). For each row it asks, it
+`headRefOid` (`saffron/reconcile.py:105-117`). For each row it asks, it
 compares that head with `pushed_sha` and appends a `HeadMoved` when the two
-differ (`saffron/reconcile.py:175-179`). It does this before the state
+differ (`saffron/reconcile.py:184-186`). It does this before the state
 check, so a merged answer reports too. `_print_reconcile_summary` prints
 one line per `HeadMoved`, which ends `no gate judged that tree`
-(`saffron/cli.py:2338-2343`). `saffron batch`, `saffron queue` and
-`saffron reconcile` all print that summary (`saffron/cli.py:1922`, `:2167`,
-`:2194`). Once `SA-0284` re-gates a head, the line is false for it.
+(`saffron/cli.py:2493-2517`). `saffron batch`, `saffron queue` and
+`saffron reconcile` all call `_print_reconcile_summary`
+(`saffron/cli.py:1998`, `:2253`, `:2280`). Once `SA-0284` re-gates a head, the line is false for it.
 
 **Two callers run the engine.** `reverify` runs the whole gate suite
 on a commit in a gate-only cell. It judges that run against a fresh baseline in a second cell
-(`saffron/phases/package.py:482-591`). Its callers are PACKAGE
-(`saffron/phases/package.py:834`) and `_finish_verify`
-(`saffron/cli.py:770-790`). `SA-0284` makes `regate` a third caller. It
+(`saffron/phases/package.py:482-592`). Its callers are PACKAGE
+(`saffron/phases/package.py:835`) and `_finish_verify`
+(`saffron/cli.py:828-854`). `SA-0284` makes `regate` a third caller. It
 reads the policy and gates from the export at the task's `base_sha`, as
 item 97 asks. It records the head it judged, the commit its baseline ran
 at, and the count of new failures. This spec stores those three values
@@ -169,12 +172,12 @@ and reads them. It runs no gate itself.
 
 **A re-gate is a fact.** A `gate_results` row needs an attempt or a
 run, and its `CHECK` requires exactly one of the two
-(`saffron/ledger.py:195`). A re-gate has neither, as item 97's record
+(`saffron/ledger.py:197`). A re-gate has neither, as item 97's record
 says. So the operator decided the re-gate is a record fact in a table of
 its own. A red one leaves the task's state alone.
 
 **The fact kind is already in.** This spec's own commit adds
-`task_regate` to `KINDS` (`saffron/record/contract.py:45`), to
+`task_regate` to `KINDS` (`saffron/record/contract.py:46`), to
 `ontology/factory.ttl` and, by render, to `CONTEXT.md`'s **Fact kind**
 entry. That is how `729133f6` added `stack_finish` and `30636ea7`
 added `spec_text`. So `Fact(kind="task_regate", ...)` constructs at the
@@ -185,20 +188,20 @@ its words. A re-gate yields new failures, as a suite comparison does.
 **What the base offers, and the shape to copy.** `SA-0177` gave the
 finishing layer a fact and a table, and this spec copies that shape.
 - `stack_finishes` is a table in `SCHEMA` with no reference to another
-  table (`saffron/ledger.py:314-321`).
+  table (`saffron/ledger.py:318-324`).
 - `record_stack_finish` builds its fact with `_build_fact` and passes it
-  to `_commit_and_append` (`saffron/ledger.py:1649-1675`).
+  to `_commit_and_append` (`saffron/ledger.py:1708-1734`).
 - `_build_fact` raises `ValueError` for a task id that names no task,
-  before anything is written (`saffron/ledger.py:569-588`).
+  before anything is written (`saffron/ledger.py:588-607`).
 - `_commit_and_append` applies the fact, commits, then appends it
-  (`saffron/ledger.py:596-601`).
+  (`saffron/ledger.py:615-620`).
 - `_apply`'s `stack_finish` branch runs one `INSERT OR REPLACE`
-  (`saffron/ledger.py:969-983`). A kind with no branch reaches the
-  `ValueError` at `saffron/ledger.py:997`.
+  (`saffron/ledger.py:988-1003`). A kind with no branch reaches the
+  `ValueError` at `saffron/ledger.py:1016`.
 - `_drop_task_rows` deletes the rows of seven key-filed tables before the
-  task's own (`saffron/ledger.py:611-640`).
+  task's own (`saffron/ledger.py:630-659`).
 - `SCHEMA` runs on every open, and each table in it is `IF NOT EXISTS`
-  (`saffron/ledger.py:388-395`).
+  (`saffron/ledger.py:393-397`).
 
 ## Problem
 
@@ -246,15 +249,15 @@ a sixteenth table outside the count (`saffron/ledger.py:16`). Add a short
 sentence of its own after that one, naming `regates` as a seventeenth. The
 `prose` gate identifies a sentence by a hash of its text, so a longer
 sentence counts as a new one. `_drop_task_rows`' docstring names seven
-tables and says "all seven deletes run first" (`saffron/ledger.py:614-616`).
+tables and says "all seven deletes run first" (`saffron/ledger.py:630-635`).
 Name `regates` too, and make it eight.
 
 `HeadMoved`'s docstring says a moved head is "judged by no gate, critic or
-record" (`saffron/reconcile.py:71-73`). A re-gate now records one. Rewrite
+record" (`saffron/reconcile.py:75-78`). A re-gate now records one. Rewrite
 it with no dash: "A pull request whose head is not the commit PACKAGE
 pushed. Review fixes or a restack moved it, and only a re-gate judges it
 (backlog item 97)." Leave the `head_moved` comment at
-`saffron/reconcile.py:96-97` as it is.
+`saffron/reconcile.py:100-101` as it is.
 
 ## Out of scope
 
@@ -262,14 +265,14 @@ pushed. Review fixes or a restack moved it, and only a re-gate judges it
   `reverify` and then `record_regate`. Here no production code calls
   `record_regate`, so it is a `pending_symbols` entry.
 - **`migrate`.** `saffron/record/migrate.py` writes six key-filed tables
-  into the record (`saffron/record/migrate.py:475-584`). It does not carry
+  into the record in `_key_filed_facts` (`saffron/record/migrate.py:475-584`). It does not carry
   `regates`, so `saffron migrate` drops a re-gate row written before the
   record is wired. That stays open.
 - **Any state change.** A red re-gate does not hold `APPROVED`, and a
   green one does not mark a pull request ready. The operator decided this,
   and also that the re-gate is not deferred to a merge train.
 - **A row `reconcile` does not ask about.** A row with `merged_head_sha`
-  already set moves without asking (`saffron/reconcile.py:164-170`). It
+  already set moves without asking (`saffron/reconcile.py:171-177`). It
   reports no re-gate.
 - **History.** The table keeps the newest re-gate alone. The record keeps
   every fact.
@@ -332,21 +335,24 @@ Each answer carries `state`, `reviewDecision`, `isDraft` and
 - An open answer with `isDraft` false at a moved head, re-gated there
   with 4. It is reported, and the row is `APPROVED`.
 
-The other three rows start in the state named, each at a moved head and
+The other four rows start in the state named, each at a moved head and
 re-gated there red.
 - `APPROVED`, answered open with `isDraft` false. It is reported, and
   stays `APPROVED`.
 - `EXHAUSTED`, answered as an open draft. It is reported, and stays
   `EXHAUSTED`.
+- `NOT_IMPLEMENTED`, answered as an open draft. This is the row
+  `saffron adopt` leaves (`saffron/reconcile.py:44-46`). It is reported,
+  and stays `NOT_IMPLEMENTED`.
 - `CHANGES_REQUESTED`, answered open with `reviewDecision`
   `CHANGES_REQUESTED`. It is reported, and stays `CHANGES_REQUESTED`.
 
-Assert `result.regated` equals the seven reported rows in task order, as
+Assert `result.regated` equals the eight reported rows in task order, as
 tuples.
 
 **The summary witness** calls `cli._print_reconcile_summary` directly,
 as `test_a_moved_head_is_named_with_both_shas` does
-(`tests/test_cli.py:3405-3416`).
+(`tests/test_cli.py:4364-4375`).
 - Moved heads: task 7 to `b`×40, task 8 to `c`×40 and task 9 to `d`×40,
   each from `a`×40.
 - Re-gates: task 7 at `b`×40 with 2, task 8 at `c`×40 with 0, task 9 at
@@ -369,7 +375,7 @@ contraction, the perfect tense, a hedge or a sentence over 25 words. Keep
 the table's SQL comment to two lines, as for every table beside it.
 
 **Size.** `saffron/ledger.py` is in `elevate_on`, so `size` blocks at the
-`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:26`). A
+`feature` ceiling of 3000 tokens (`saffron/gates/core/size.py:28`). A
 prototype of all three criteria measured 1131 tokens with `size_gate`'s
 counter on 2026-10-11. The source was 307 of them and the three witnesses
 824. It held the table, both methods, the `_apply` branch, the drop, the
