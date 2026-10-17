@@ -147,11 +147,11 @@ pointing at the wrong code and blocked the spec, at a cost of $2.32. The
 spec loop's `driver.py cite` finds that shape in seconds. Nothing in the
 batch runs it.
 
-**The check exists only in the spec loop's driver.** `cmd_cite` reads a spec
-as text and resolves each citation at `--base`
-(`.claude/skills/run-saffron-spec-loop/driver.py:2489-2538`). Its helpers
-start at `_Citation` (`.claude/skills/run-saffron-spec-loop/driver.py:2382-2391`).
-They end at `_moved_lines` (`.claude/skills/run-saffron-spec-loop/driver.py:2474-2486`).
+**The check exists only in the spec loop's driver.** `cmd_cite` prints what
+`_cite_defects` finds (`.claude/skills/run-saffron-spec-loop/driver.py:2534-2589`). That reads a spec as text and
+resolves each citation at a ref. `driver.py check` calls it too. Its helpers
+start at `_Citation` (`.claude/skills/run-saffron-spec-loop/driver.py:2427-2435`).
+They end at `_moved_lines` (`.claude/skills/run-saffron-spec-loop/driver.py:2519-2531`).
 Three tests hold its behaviour. They are
 `test_cite_resolves_a_specs_citations_at_the_base_commit`
 (`tests/test_spec_loop_driver.py:2260`),
@@ -342,7 +342,7 @@ nothing. Once this spec is retired to `done/`, and until `SA-0295`
 merges, `dead` reports `citation_defects` at base. Baseline subtraction absorbs that for every other task.
 
 **Where the port and the driver part.** The driver's `_git` strips its output
-(`.claude/skills/run-saffron-spec-loop/driver.py:111-115`). So `cmd_cite`
+(`.claude/skills/run-saffron-spec-loop/driver.py:111-115`). So `_cite_defects`
 drops a blob's leading and trailing blank lines. Its line numbers and its
 line count shift for such a file. `file_at` keeps the exact text, so the port numbers those lines
 correctly. The driver's three tests build no such file. A symlink or a
