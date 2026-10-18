@@ -46,9 +46,9 @@ forbidden:
   - saffron/scheduler.py
   - tests/test_scheduler.py
   - tests/test_ledger.py
-budget_usd: 36
+budget_usd: 52
 max_attempts: 3
-max_turns: 180
+max_turns: 220
 acceptance:
   - claim: >-
       `load_policy` refuses a gate declaration that carries a `when` key. It

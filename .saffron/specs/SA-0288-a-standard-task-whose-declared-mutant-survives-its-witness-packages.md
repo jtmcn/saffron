@@ -44,7 +44,7 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 24
 max_attempts: 3
-max_turns: 140
+max_turns: 180
 acceptance:
   - claim: >-
       A task whose declared mutant survives its witness never goes

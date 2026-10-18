@@ -49,7 +49,7 @@ forbidden:
   - tests/test_spec_loop_driver.py
 budget_usd: 25
 max_attempts: 3
-max_turns: 140
+max_turns: 180
 acceptance:
   - claim: >-
       `run_rebut` ends `REBUTTAL_UNJUDGED` when HEAD did not move and the
@@ -126,28 +126,28 @@ this spec's own commit applied.
 
 **REBUT halts its task in an in-flight state.** `rebut_state` returns
 `REBUTTING` in two places. One is a rebuttal that neither moved HEAD nor
-argued (`saffron/phases/rebut.py:501-510`). The other is a lens that started
-and gave no verdict (`:517-518`). A lens that never started returns
-`GATE_ERROR` first (`:511-516`). `run_rebut` reaches the first through its
-early exit (`:711-715`) and the second after the verdict sessions
-(`:780-782`). The cell writes `REBUTTING` to the row as REBUT starts
-(`saffron/cell/session.py:3081-3082`). It writes the outcome again at the end
-(`:3242-3243`), so the row keeps `REBUTTING` after the cell exits.
+argued (`saffron/phases/rebut.py:504-513`). The other is a lens that started
+and gave no verdict (`:520-521`). A lens that never started returns
+`GATE_ERROR` first (`:514-519`). `run_rebut` reaches the first through its
+early exit (`:717-721`) and the second after the verdict sessions
+(`:787-789`). The cell writes `REBUTTING` to the row as REBUT starts
+(`saffron/cell/session.py:3372-3373`). It writes the outcome again at the end
+(`:3637-3638`), so the row keeps `REBUTTING` after the cell exits.
 
 **Each reader takes that row for a live cell or a corpse.** `REBUTTING` is in
-`IN_FLIGHT_STATES` (`saffron/reconcile.py:49-60`). A reconcile that stamps
-orphans sets every such row `ORPHANED` (`:195-199`). `saffron batch` passes
-`stamp_orphaned=True` (`saffron/cli.py:1903-1910`), and `ORPHANED` re-queues the spec. `saffron batch`
+`IN_FLIGHT_STATES` (`saffron/reconcile.py:53-64`). A reconcile that stamps
+orphans sets every such row `ORPHANED` (`:222-226`). `saffron batch` passes
+`stamp_orphaned=True` (`saffron/cli.py:1992-1999`), and `ORPHANED` re-queues the spec. `saffron batch`
 also ends a night `INCOMPLETE` when a task returns in an in-flight state
-(`saffron/batch.py:332-337`, `:864-867`). A child cannot stack on the row, because
+(`saffron/batch.py:349-354`, `:933-936`). A child cannot stack on the row, because
 `REBUTTING` is in no waiting state. PACKAGE never runs on it. `run_task`
 pushes the cell's branch through `push_unpackaged_work` and opens no pull
-request (`saffron/task.py:715-727`).
+request (`saffron/task.py:730-742`).
 
 **This spec's own commit adds the state.** `REBUTTAL_UNJUDGED` is a terminal
 state in `ontology/factory.ttl`, `CONTEXT.md` §6 and `DESIGN.md` §3.3. It is
-in `ledger.TaskState` (`saffron/ledger.py:63`) and in `DONE_STATES`
-(`saffron/scheduler.py:69-85`). It is in `DEPENDENCY_WAITING_STATES` (`:97-99`),
+in `ledger.TaskState` (`saffron/ledger.py:64`) and in `DONE_STATES`
+(`saffron/scheduler.py:70-87`). It is in `DEPENDENCY_WAITING_STATES` (`:99-107`),
 so a child stacks on the pushed branch. The morning queue ranks it with the
 states that need you (`saffron/report/index.py:52-53`). It is not in
 `IN_FLIGHT_STATES`, so no reader above takes it for a live cell. Nothing
@@ -155,7 +155,7 @@ writes it yet.
 
 **The cap's cut reads the halt.** `SA-0231` ends a REBUT its cap cut short
 `EXHAUSTED`. It decides the cut by comparing `result.state` with
-`REBUTTING` (`saffron/cell/session.py:3172`).
+`REBUTTING` (`saffron/cell/session.py:3562`).
 
 ## Problem
 
@@ -163,16 +163,16 @@ Make REBUT's halt write `REBUTTAL_UNJUDGED`.
 
 Return `REBUTTAL_UNJUDGED` from both `REBUTTING` returns in `rebut_state`.
 Keep each return's own line of text. Keep the never-started check ahead of
-the errored one. Then make the cut check at `saffron/cell/session.py:3172`
+the errored one. Then make the cut check at `saffron/cell/session.py:3562`
 compare against the new state, so a REBUT the cap cut short still ends
 `EXHAUSTED`. Leave the write that marks REBUT live
-(`saffron/cell/session.py:3081-3082`) as it is: `REBUTTING` stays the state
+(`saffron/cell/session.py:3372-3373`) as it is: `REBUTTING` stays the state
 while REBUT runs.
 
 Update the two docstrings that describe the halt.
-`rebut_state`'s says §3.3 has no state for it (`saffron/phases/rebut.py:488-498`).
+`rebut_state`'s says §3.3 has no state for it (`saffron/phases/rebut.py:491-501`).
 `unkept_fixes`'s says the task reaches the queue as `REBUTTING` and ranks
-with elevated risk (`:616-622`). It now ranks with the states that need you.
+with elevated risk (`:619-625`). It now ranks with the states that need you.
 
 Then update every existing assertion of `REBUTTING` as a halt's outcome to the
 new state. Twenty such assertions sit in eighteen tests, one per test except
@@ -212,11 +212,11 @@ Leave every `REBUTTING` that names the live state or an attempt's phase.
 - **The state's vocabulary, its scheduler sets and its rank.** This spec's
   own commit lands them, with `DESIGN.md` and `CONTEXT.md`.
 - **A stack batch's layer.** `_is_layer` admits only `READY_FOR_REVIEW`
-  (`saffron/batch.py:371-378`). A `REBUTTAL_UNJUDGED` task stays a miss
+  (`saffron/batch.py:389-395`). A `REBUTTAL_UNJUDGED` task stays a miss
   there, as `REBUTTING` is today.
 - **The spec loop's own rules.** Its driver holds a child back unless the
   parent is `READY_FOR_REVIEW`
-  (`.claude/skills/run-saffron-spec-loop/driver.py:1005-1009`). Its
+  (`.claude/skills/run-saffron-spec-loop/driver.py:1011-1015`). Its
   `GOTCHAS.md` still describes the halt as `REBUTTING`. Both are edited by
   hand once this lands.
 - **Rows already left `REBUTTING`.** No migration rewrites them. A stamping
@@ -252,10 +252,10 @@ Text with no structured output is outside the schema.
 `never_started=False`, and the other lens one `withdrawn` verdict. Drive the
 `GATE_ERROR` case with all three lenses, the never-started one last.
 
-**Criterion 3** drives `_drive` (`tests/test_session.py:1350`) twice, each on
+**Criterion 3** drives `_drive` (`tests/test_session.py:1379`) twice, each on
 its own `tmp_path` subdirectory. Copy the silent form from
 `test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting`
-(`tests/test_session.py:5009-5030`). For a lens with no verdict, use
+(`tests/test_session.py:5352-5373`). For a lens with no verdict, use
 `rebut_commits=1`, an argued rebuttal, and a verdict turn of plain text.
 On each of the two ledgers, assert the outcome and the row are
 `REBUTTAL_UNJUDGED`. Then add a second task row in the same repo, set it
