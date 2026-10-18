@@ -4,6 +4,8 @@ title: A stack batch's citation check has no adapter that reads the commit its s
 type: bug
 priority: 2
 depends_on: [SA-0279, SA-0294]
+pending_symbols:
+  - saffron/spec_citations.py::citation_defects
 estimated_lines: 90
 touches:
   - saffron/cli.py
