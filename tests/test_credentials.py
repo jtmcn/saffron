@@ -10,6 +10,10 @@ from pathlib import Path
 from saffron.events import BOUND_CHARS, Agent, EventLog, describe, read_log
 from saffron.phases import package as package_phase
 
+# Joined at runtime, like the token shapes below: a literal header is what PACKAGE refuses.
+_KEY = "PRIVATE " + "KEY"
+_HEADER = f"-----BEGIN RSA {_KEY}-----"
+
 
 def _append_one(event: Agent, *, token: str | None = None) -> Agent:
     """Append `event` to a fresh log and return the one line read back."""
@@ -64,9 +68,7 @@ def test_every_shape_package_refuses_is_redacted_from_the_log():
             assert description in written
 
     body_line = "MIIBOGUSBODYLINEONLYONE=="
-    key_block = (
-        f"-----BEGIN RSA PRIVATE KEY-----\n{body_line}\n-----END RSA PRIVATE KEY-----"
-    )
+    key_block = f"{_HEADER}\n{body_line}\n-----END RSA {_KEY}-----"
     found = package_phase.find_credentials_in_text(key_block, token=None, where="w")
     assert found == ["w: a private key block"]
     with tempfile.TemporaryDirectory() as tmp:
@@ -93,7 +95,7 @@ def test_every_shape_package_refuses_is_redacted_from_the_log():
 
     # Two further blocks with no END line: a clipped `tool_use` input and a
     # bare raw line holding only the header.
-    header = "-----BEGIN RSA PRIVATE KEY-----"
+    header = _HEADER
     clipped_body = "\n".join(f"line-of-body-{n}-abcdefghijklmnop" for n in range(4))
     clipped = (header + "\n" + clipped_body)[:200] + "...[clip]"
     with tempfile.TemporaryDirectory() as tmp:
