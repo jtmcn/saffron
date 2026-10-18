@@ -17,6 +17,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from saffron import cli, preflight
 from saffron.cell import runtime
 from saffron.gates.baseline import NewFailure
@@ -28,6 +30,21 @@ from saffron.repos import image as repo_image
 
 SPEC_ID = "SA-0005"
 SPEC_FILENAME = f"{SPEC_ID}-regate-test.md"
+
+
+@pytest.fixture(autouse=True)
+def _no_token_and_no_agent(monkeypatch):
+    """Every witness runs with no token and with each agent path raising, so
+    a `regate` that reads one fails whatever the operator's shell holds."""
+    from saffron import task
+    from saffron.phases import implement
+
+    def _reached(*_args, **_kwargs):
+        raise AssertionError("regate reached an agent path")
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(task, "run_one_cell", _reached)
+    monkeypatch.setattr(implement, "run_agent", _reached)
 
 
 def _git(repo, *args: str) -> str:
@@ -264,7 +281,13 @@ def _assert_green_case(monkeypatch, case_root, capsys, base_ref):
     _install_probe_fakes(monkeypatch, order)
 
     reverify_calls: list = []
-    monkeypatch.setattr(package_phase, "reverify", _fake_reverify(reverify_calls))
+    fake_reverify = _fake_reverify(reverify_calls)
+
+    def _ordered_reverify(**kwargs):
+        order.append(("reverify",))
+        return fake_reverify(**kwargs)
+
+    monkeypatch.setattr(package_phase, "reverify", _ordered_reverify)
 
     monkeypatch.chdir(work)
     result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
@@ -281,9 +304,10 @@ def _assert_green_case(monkeypatch, case_root, capsys, base_ref):
     network = f"saffron-regate-probe-{task_id}"
     assert order[0] == ("remove", network)
     assert order[1] == ("allocate", network)
-    assert order[-2][:3] == ("assert", "saffron/cell-base:python", network)
+    assert order[-3][:3] == ("assert", "saffron/cell-base:python", network)
     # Removed again, after the probe and before `reverify` ran.
-    assert order[-1] == ("remove", network)
+    assert order[-2] == ("remove", network)
+    assert order[-1] == ("reverify",)
     assert order.count(("remove", network)) == 2
 
     assert len(reverify_calls) == 1
@@ -564,9 +588,22 @@ def test_regate_refuses_each_task_it_cannot_judge_before_any_cell_and_exits_one(
     for task_id in cases:
         result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
         assert result == 1, task_id
-    out = capsys.readouterr().out
-    for line in out.splitlines():
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == len(cases), lines
+    for line in lines:
         assert line.startswith("regate: "), line
+    reasons = [
+        f"task {unknown_task_id} names no task",
+        f"task {task_no_pr} carries no pull request",
+        f"task {task_recorded_text} ran a recorded spec text",
+        f"task {task_foreign_repo} belongs to another repo",
+        f"{pr_merged} is MERGED, not OPEN",
+        f"{pr_closed} is CLOSED, not OPEN",
+        f"no spec file for {SPEC_ID}",
+        "does not hash to task's recorded spec_sha",
+    ]
+    for line, reason in zip(lines, reasons, strict=True):
+        assert reason in line, (reason, line)
 
     assert build_calls == []
     assert order == []
@@ -574,7 +611,9 @@ def test_regate_refuses_each_task_it_cannot_judge_before_any_cell_and_exits_one(
     assert record_calls == []
 
 
-def test_regate_exits_two_on_infrastructure_and_records_nothing(monkeypatch, tmp_path):
+def test_regate_exits_two_on_infrastructure_and_records_nothing(
+    monkeypatch, tmp_path, capsys
+):
     fixture = _build_fixture(tmp_path)
     home = tmp_path / "home"
     work = fixture.work.resolve()
@@ -638,6 +677,25 @@ def test_regate_exits_two_on_infrastructure_and_records_nothing(monkeypatch, tmp
     monkeypatch.setattr(package_phase, "reverify", _raising_reverify)
     task_id = _seed()
     assert cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."]) == 2
+
+    # A task branch the origin no longer carries names itself, not a parent.
+    ledger = Ledger(home / "ledger.db")
+    task_id = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005-deleted",
+        pr_url=pr_url,
+        pushed_sha=fixture.packaged_sha,
+    )
+    ledger.close()
+    capsys.readouterr()
+    assert cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."]) == 2
+    printed = capsys.readouterr().out
+    assert "task branch saffron/SA-0005-deleted could not be fetched" in printed
+    assert "parent" not in printed
 
     assert record_calls == []
 
