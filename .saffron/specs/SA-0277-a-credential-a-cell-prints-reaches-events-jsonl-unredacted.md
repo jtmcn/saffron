@@ -306,6 +306,10 @@ editing the caller's dict.
 
 **Test tokens.** Build each credential at run time from pieces, as
 `"sk-ant-" + "api03-" + ...`, so no line of a test is itself a credential.
+That covers a private key's header too. Join `"PRIVATE " + "KEY"` before
+you format the BEGIN and END lines. PACKAGE scans the diff for the whole
+header and refuses the push, and no gate in the cell runs that scan. Run
+44's cell spelled it whole and ended `MERGE_FAILED`.
 For the token criteria, use a token that matches none of the five shapes,
 so only the literal check can catch it. Each witness reads the written file
 as text and reads it back with `read_log`.
