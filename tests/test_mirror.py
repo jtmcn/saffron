@@ -73,6 +73,40 @@ def test_ensure_mirror_is_idempotent_and_fetches(tmp_path, origin):
     assert git(mirror, "log", "--oneline", "-1", "main").endswith("later")
 
 
+def test_a_mirror_fetch_neither_prunes_nor_overwrites_the_records_refs(
+    tmp_path, origin
+):
+    """`ensure_mirror`'s fetch of an existing mirror neither prunes nor
+    overwrites a ref under `refs/saffron/`. A task ref and a
+    `refs/saffron/values/` ref the checkout lacks both survive. A task ref
+    the checkout holds at another commit keeps the mirror's own one. A
+    branch the checkout deleted is still pruned, and a branch it gained is
+    still fetched."""
+    mirror = ensure_mirror(origin, tmp_path / "m.git")
+
+    main_sha = git(mirror, "rev-parse", "main")
+    feature_sha = git(mirror, "rev-parse", "feature")
+    key1, key2 = "a" * 32, "b" * 32
+    git(mirror, "update-ref", f"refs/saffron/tasks/{key1}", main_sha)
+    git(mirror, "update-ref", f"refs/saffron/tasks/{key2}", feature_sha)
+    git(mirror, "update-ref", "refs/saffron/values/some-key", main_sha)
+
+    # The checkout holds its own ref for key1, at another commit.
+    git(origin, "update-ref", f"refs/saffron/tasks/{key1}", feature_sha)
+    # A branch the checkout drops, and one it gains.
+    git(origin, "branch", "-D", "feature")
+    git(origin, "checkout", "-qb", "other")
+
+    ensure_mirror(origin, tmp_path / "m.git")
+
+    assert git(mirror, "rev-parse", f"refs/saffron/tasks/{key1}") == main_sha
+    assert git(mirror, "rev-parse", f"refs/saffron/tasks/{key2}") == feature_sha
+    assert git(mirror, "rev-parse", "refs/saffron/values/some-key") == main_sha
+    with pytest.raises(subprocess.CalledProcessError):
+        git(mirror, "rev-parse", "--verify", "-q", "refs/heads/feature")
+    assert git(mirror, "rev-parse", "other") == git(origin, "rev-parse", "other")
+
+
 def test_resolve_pull_request_finds_base_and_head(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "m.git")
     base, head, title = resolve_pull_request(mirror, 42)

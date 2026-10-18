@@ -1972,8 +1972,17 @@ def test_queue_reads_the_specs_at_base_sha_not_the_working_copy(tmp_path, capsys
     assert "SY-2" not in out
 
 
+def _bare(path: Path) -> Path:
+    """A real bare repository at `path`, so a `RoutedRecord` resolving it
+    as a mirror can append to it (item 170)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
+    return path
+
+
 def _seed_repo(ledger, origin, *, name="repo"):
-    return ledger.upsert_repo(name, origin, "/m.git", policy_sha="p" * 64)
+    mirror = _bare(Path(tempfile.mkdtemp()) / "mirror.git")
+    return ledger.upsert_repo(name, origin, str(mirror), policy_sha="p" * 64)
 
 
 def _seed_task(
@@ -2080,6 +2089,46 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
 
     assert expect_substring in capsys.readouterr().out
     assert _task_state(home, task_id) == expect_state
+
+
+def test_a_command_files_each_fact_it_writes_in_the_tasks_own_mirror(
+    tmp_path, monkeypatch
+):
+    """The `Ledger` every `saffron` command shares is built with a
+    `RoutedRecord` (item 170). `saffron reconcile` writes a `task_state`
+    fact that lands on the seeded task's own ref, in its repo's own
+    mirror, and nowhere else."""
+    from saffron.record.refs import RefsRecord
+
+    repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-routed-cli")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    mirror_path = Path(
+        dict(
+            ledger._db.execute(
+                "SELECT mirror_path FROM repos WHERE repo_id = ?", (repo_id,)
+            ).fetchone()
+        )["mirror_path"]
+    )
+    task_id = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9",
+        state="READY_FOR_REVIEW",
+        pr_url="https://github.com/o/r/pull/9",
+    )
+    key = ledger.record_key(task_id)
+    assert key is not None
+    ledger.close()
+    monkeypatch.setattr("saffron.cli.run_gh", _fake_gh_says_merged)
+
+    assert cli.main(["--home", str(home), "reconcile", "--repo", str(repo)]) == 0
+
+    facts = RefsRecord(mirror_path).read(key)
+    states = [f.payload.get("state") for f in facts if f.kind == "task_state"]
+    assert "MERGED" in states
 
 
 _ADOPT_PR_NUMBER = "123"
@@ -2324,7 +2373,9 @@ def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch)
     home = tmp_path / "home"
     home.mkdir()
     record = MemoryRecord()
-    monkeypatch.setattr(cli, "Ledger", lambda path: Ledger(path, record=record))
+    # `main` now passes its own `record` keyword. This fake ignores it and
+    # keeps using the `MemoryRecord` above.
+    monkeypatch.setattr(cli, "Ledger", lambda path, **_: Ledger(path, record=record))
 
     seed = Ledger(home / "ledger.db", record=record)
     repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
@@ -4082,7 +4133,10 @@ def _drive_fake_stack_batch(order, budget, home, monkeypatch):
         **_ignored,
     ):
         repo_id = ledger.upsert_repo(
-            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+            "r",
+            "https://github.com/o/r.git",
+            str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+            policy_sha=None,
         )
         mint = MintDouble(ledger, repo_id)
         runner = _AdmissionRunner(ledger)
@@ -4440,13 +4494,14 @@ def _readiness_passes(monkeypatch):
     Carries real-shaped `mirror`/`url`/`base_sha` dummy values, not the bare
     `ok=True` this once was: `_batch` now reads and shares them with
     `_resolve_queue`, and a passing `Readiness` with none set is not a shape
-    `check_readiness` itself ever returns."""
+    `check_readiness` itself ever returns. The mirror is a real bare
+    repository, so a command that mints a task can append to it."""
     monkeypatch.setattr(
         cli.preflight,
         "check_readiness",
         lambda *a, **k: preflight.Readiness(
             True,
-            mirror=Path("/tmp/pinned-mirror.git"),
+            mirror=_bare(Path("/tmp/pinned-mirror.git")),
             url="https://github.com/o/r.git",
             base_sha="a" * 40,
         ),
@@ -4871,7 +4926,10 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
         recorded["candidates"] = candidates
         recorded["runner"] = runner
         recorded["upserted_repo_id"] = ledger.upsert_repo(
-            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+            "r",
+            "https://github.com/o/r.git",
+            str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+            policy_sha=None,
         )
         built = real_stack_runner(**stack_runner_calls[0])
         built(candidates[0], None)
@@ -4982,7 +5040,10 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
         ):
             batch_id = ledger.create_batch(budget_usd)
             repo_id = ledger.upsert_repo(
-                "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+                "r",
+                "https://github.com/o/r.git",
+                str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+                policy_sha=None,
             )
             run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
             task_id = ledger.create_task(
@@ -5037,7 +5098,10 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
     ):
         batch_id = ledger.create_batch(budget_usd)
         repo_id = ledger.upsert_repo(
-            "r", "https://github.com/o/r.git", "/m.git", policy_sha=None
+            "r",
+            "https://github.com/o/r.git",
+            str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+            policy_sha=None,
         )
         run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
         task_id = ledger.create_task(

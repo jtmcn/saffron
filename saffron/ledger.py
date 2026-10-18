@@ -1,12 +1,13 @@
 """The ledger. SQLite, one file, WAL, authoritative for state (`DESIGN.md` §4.1).
 
-Still true of what runs. No caller constructs a `Ledger` with a record, so no
-row here is derived from one and §4.6 rule 1 holds as written. The record
-design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the nineteen kinds
-`_append` writes fold back, so even then it stays authoritative for the rest.
-That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
-with it rather than ahead of it.
+Now true of what runs: every command's `Ledger` is constructed with a
+`RoutedRecord` (backlog item 170 step 3). No row here is derived from one,
+and §4.6 rule 1 holds as written. The record design reverses that: the
+ledger becomes a store folded out of `refs/saffron/*` by
+`saffron/record/fold.py`, deletable at any time. Only the nineteen kinds
+`_append` writes fold back, so even then it stays authoritative for the
+rest. That reversal waits on the batch and run folds. §4.6 and `CONTEXT.md`
+§8 are amended with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
@@ -32,7 +33,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import Failure, GateResult
-from saffron.record.contract import Fact, Record, new_task_key
+from saffron.record.contract import Fact, Record, RecordError, new_task_key
+from saffron.record.routed import RoutedRecord
 
 if TYPE_CHECKING:
     # At runtime it would load the cell runtime and the phases into every ledger reader.
@@ -593,6 +595,33 @@ class Ledger:
             "SELECT record_key FROM tasks WHERE task_id = ?", (task_id,)
         ).fetchone()
         return row["record_key"] if row else None
+
+    def record_home(self, key: str) -> tuple[Path, str]:
+        """The mirror and origin of the repo row that key's own task ran
+        against, joined through `tasks.record_key`. Raises for a key no
+        task holds, since a `RoutedRecord` has nowhere else to append."""
+        row = self._db.execute(
+            """SELECT r.mirror_path AS mirror_path, r.origin AS origin
+                 FROM tasks t
+                 JOIN runs rn ON rn.run_id = t.run_id
+                 JOIN repos r ON r.repo_id = rn.repo_id
+                WHERE t.record_key = ?""",
+            (key,),
+        ).fetchone()
+        if row is None:
+            raise RecordError(f"no task holds record key {key!r}")
+        return Path(row["mirror_path"]), row["origin"]
+
+    def push_record(self, task_id: int) -> None:
+        """Push the task's own ref to its origin, through the ledger's
+        `RoutedRecord`. Returns at once for any other record, and for a
+        task id with no row, so a task that never minted writes nothing."""
+        if not isinstance(self._record, RoutedRecord):
+            return
+        key = self.record_key(task_id)
+        if key is None:
+            return
+        self._record.push(key)
 
     def _build_fact(self, task_id: int, kind: str, payload: dict[str, Any]) -> Fact:
         """Every write method's one fact. Raises if `task_id` names nothing."""

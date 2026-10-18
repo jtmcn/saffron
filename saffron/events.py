@@ -370,7 +370,10 @@ class Teardown:
 
     When the plan turn's first call was unserved, four more events land here
     too, read before the cell or the proxy goes down: proxy state, proxy
-    log, cell resolver, cell route (`SA-0235`)."""
+    log, cell resolver, cell route (`SA-0235`).
+
+    A refused push of the task's own record also lands here, past
+    `run_task` rather than inside the cell (backlog item 170)."""
 
     timestamp: float
     spec_id: str
@@ -1077,6 +1080,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family(
         "teardown: {proxy state|proxy log|cell resolver|cell route}:", _S, Teardown
     ),
+    _Family("teardown: record push refused", _RT, Teardown),
     _Family("agent: (raw)", _IA, Agent),
     _Family("agent: (request digest)", _IA, Agent),
     _Family("agent: (event dict rendering)", _IC, Agent),
