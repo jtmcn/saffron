@@ -1632,7 +1632,7 @@ def test_a_cell_reports_each_phase_state_as_it_enters_it(monkeypatch, tmp_path):
         ),
         on_state=heard.append,
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     assert heard == ["IMPLEMENTING", "REVIEWING", "REBUTTING"]
 
     # An EXHAUSTED end: the same new failure twice is no progress.
@@ -4897,7 +4897,7 @@ def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
     # The verdict takes the extraction's scripted turn, which is no verdict
     # set. It failed with money left, so the rebuttal stands unjudged.
     assert caps == pytest.approx([10.00, 2.00])
-    assert state == "REBUTTING"
+    assert state == "REBUTTAL_UNJUDGED"
 
     caps, state, _capture = _caps("e", 6.00, 4.50, 0.75, budget_usd=0.25)
     assert caps == pytest.approx([10.00, 8.00, 5.50])
@@ -5060,7 +5060,7 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     outcome5, *_rest5 = _run(
         "e", 1.50, 0.50, 0.75, rebut_commits=0, extracted=_CLAIMED_FIX
     )
-    assert outcome5.state == "REBUTTING"
+    assert outcome5.state == "REBUTTAL_UNJUDGED"
     assert outcome5.rebut_result is not None
 
     outcome6, *_rest6 = _run(
@@ -5313,7 +5313,7 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
             budget_usd=budget_usd,
             rebut_commits=0,
         )
-        assert outcome.state == "REBUTTING"
+        assert outcome.state == "REBUTTAL_UNJUDGED"
         detail = _last_rebut_detail(capture)
         assert "moved no commit and made no argument" in detail
         assert "ran out of" not in detail
@@ -5330,7 +5330,7 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
             rebut_commits=0,
             extracted=_CLAIMED_FIX,
         )
-        assert outcome.state == "REBUTTING"
+        assert outcome.state == "REBUTTAL_UNJUDGED"
         detail = _last_rebut_detail(capture)
         assert "moved no commit and made no argument" in detail
         assert "ran out of" not in detail
@@ -5365,12 +5365,79 @@ def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
             _turn(structured_output=_CLAIMED_FIX),
         ),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     (queued,) = ledger.queue_lines()
-    assert queued["state"] == "REBUTTING"
+    assert queued["state"] == "REBUTTAL_UNJUDGED"
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
     assert record["head_moved"] is False
     assert record["verdicts"] == []
+
+
+def test_a_rebuttal_left_unjudged_ends_its_task_in_a_state_no_scan_stamps(
+    monkeypatch, tmp_path
+):
+    """backlog item 120: both unjudged shapes land the row on
+    `REBUTTAL_UNJUDGED`, never the live-looking `REBUTTING`. A stamping
+    reconcile then leaves it alone, while it still stamps a plain orphaned
+    `REBUTTING` row `ORPHANED` and asks GitHub nothing."""
+    from saffron import reconcile
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "silent",
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    (queued,) = ledger.queue_lines()
+    assert queued["state"] == "REBUTTAL_UNJUDGED"
+
+    cell2 = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell2, rebut_commits=1)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "unverdicted",
+        cell=cell2,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
+            ),
+            _turn("I still think it is wrong."),
+        ),
+    )
+    assert outcome2.state == "REBUTTAL_UNJUDGED"
+    (queued2,) = ledger2.queue_lines()
+    assert queued2["state"] == "REBUTTAL_UNJUDGED"
+
+    (repo_row,) = ledger._db.execute("SELECT repo_id FROM repos").fetchall()
+    repo_id = repo_row["repo_id"]
+    run_id = ledger.create_run(repo_id, "b" * 40)
+    second_task = ledger.create_task(run_id, "SY-2", "b" * 64, branch="saffron/SY-2")
+    ledger.set_task_state(second_task, "REBUTTING")
+
+    def _raising_gh(_argv):
+        raise AssertionError("gh must not be asked")
+
+    result = reconcile.reconcile(ledger, repo_id, gh=_raising_gh, stamp_orphaned=True)
+    assert result.orphaned == [second_task]
+    (cell_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert cell_row["state"] == "REBUTTAL_UNJUDGED"
+    (second_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (second_task,)
+    ).fetchall()
+    assert second_row["state"] == "ORPHANED"
 
 
 # --- backlog item 117: the adequacy lens's own probe, run for real ---
@@ -5496,7 +5563,7 @@ def test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker(monkeypatch, tm
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
     assert [b["finding"] for b in record["blockers"]] == [1, 2]
     assert [b["claim"] for b in record["blockers"]] == [
@@ -5758,7 +5825,7 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     probes = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
     by_file = {p["probe"]["file"]: p for p in probes}
     assert by_file["src/a.py"]["probe_verdict"] == "survived"
@@ -5852,7 +5919,7 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
 
     entries = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
     by_file = {e["probe"]["file"]: e for e in entries}
@@ -11184,7 +11251,7 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     assert subsets == [["t.py::a"], ["t.py::b"]]
 
     entries = json.loads(
@@ -11530,7 +11597,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     assert subsets == [["t.py::a"], ["t.py::a"]]
 
     entry = json.loads((tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text())

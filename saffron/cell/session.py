@@ -3559,7 +3559,7 @@ def _drive_cell(
                 )
             # A pool, not the agent, ended this REBUT: its blockers stand,
             # and the record must not read as the silence `rebut_state` names.
-            cut = cap.cut is not None and result.state == "REBUTTING"
+            cut = cap.cut is not None and result.state == "REBUTTAL_UNJUDGED"
             if cut:
                 ran_out = (
                     f"REBUT ran out of its ${REBUT_CAP_USD:.2f} budget"
