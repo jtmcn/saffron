@@ -137,6 +137,15 @@ uv run saffron adopt <spec id> <pr> --repo .
 uv run saffron replay <repo> <pr>
 ```
 
+Judge a task's pull request at its current head with the task's own gates. Those
+are the gates and policy its cell was judged by, not today's default branch. No
+agent runs, and no token is needed. Exit `0` is green, `1` is a task it will not
+judge or new failures, and `2` is infrastructure:
+
+```sh
+uv run saffron regate <task id> --repo .
+```
+
 Run PACKAGE alone on a `READY_FOR_REVIEW` task whose own PACKAGE raised. No agent
 runs, and the token is scoped the same way:
 

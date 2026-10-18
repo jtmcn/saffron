@@ -441,6 +441,9 @@ def run_stack_batch(
     # `None` means no review runs, and nothing here changes. `SA-0156` passes
     # the production one, and `saffron batch` passes none until then.
     review: Callable[..., spec_review.SpecReviewSession] | None = None,
+    # `None` checks nothing. Given, it runs before each `review` call and a
+    # non-empty return refuses the spec with no review. `SA-0295` supplies it.
+    cite: Callable[[Candidate, Candidate | None, str | None], list[str]] | None = None,
     # Required whenever `review` is given (checked below). Mints the task a
     # review's own facts are recorded against. `SA-0156` passes the real one.
     mint: Callable[[Candidate], int] | None = None,
@@ -465,17 +468,18 @@ def run_stack_batch(
     """Run one stack's planned `order`, then its follow-ups, without rescanning (`SA-0142`,
     `SA-0162`). `runner` takes each candidate and its predecessor, the last one that reached
     `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED` task waits on it instead
-    of refusing (`sleep`, SA-0148). `review`, when given, runs first and can refuse, raise,
-    or wait (`SpecReviewWait`, ADR 7), with `revise` run up to `MAX_REVISE_ROUNDS` times.
-
-    An order candidate whose `depends_on` reaches a missed spec is refused. `reserve_usd` and
-    `writer_usd` hold back only the order's checks. `end_review`, `follow_ups` (run one
-    generation up only on `DRAINED`) and then `finish` run before the row closes, unless one
-    of the first two raises."""
+    of refusing (`sleep`, SA-0148). `cite` and then `review` run first when given, and either
+    can refuse. `review` can also raise or wait (`SpecReviewWait`, ADR 7), with `revise` run
+    up to `MAX_REVISE_ROUNDS` times. An order candidate whose `depends_on` reaches a missed
+    spec is refused. `reserve_usd` and `writer_usd` hold back only the order's checks.
+    `end_review`, `follow_ups` (run one generation up only on `DRAINED`) and then `finish`
+    run before the row closes, unless one of the first two raises."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     if follow_ups is not None and review is None:
         raise ValueError("run_stack_batch needs review whenever follow_ups is given")
+    if cite is not None and review is None:
+        raise ValueError("run_stack_batch needs review whenever cite is given")
     order = list(order)
     stack_base = order[0].stack_base if order else None
     remaining = list(order)
@@ -607,6 +611,25 @@ def run_stack_batch(
                 if pending is None:
                     text_row = ledger.spec_text(task_id)
                     spec_text = text_row["text"] if text_row is not None else None
+                    if cite is not None:
+                        try:
+                            defects = cite(candidate, pred, spec_text)
+                        except Exception:
+                            if not is_follow_up:
+                                missed[candidate.spec.id] = frozenset(
+                                    {candidate.spec.id}
+                                )
+                                remaining.remove(original)
+                            raise
+                        if defects:
+                            reason = f"{len(defects)} citation(s) do not resolve"
+                            emit(f"{candidate.spec.id:<10} refused  {reason}")
+                            if not is_follow_up:
+                                missed[candidate.spec.id] = frozenset(
+                                    {candidate.spec.id}
+                                )
+                                remaining.remove(original)
+                            return Refused(reason=reason)
                     kwargs = {} if spec_text is None else {"spec_text": spec_text}
                     # A raise from `review` records an `error` round and no attempt.
                     # It is a miss unless it is a `CellRuntimeError`.

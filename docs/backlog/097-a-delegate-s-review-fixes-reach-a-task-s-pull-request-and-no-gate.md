@@ -1,10 +1,11 @@
 ---
 id: 97
 title: A delegate's review fixes reach a task's pull request and no gate, critic or record
-status: partial
+status: done
+closed: 2026-10-17
 tier: 1
 specs: [SA-0111, SA-0275, SA-0284]
-prs: [189, 381, 893]
+prs: [189, 381, 893, 899]
 commits: []
 cites: [§5.1, §5.4]
 related: [b-1c7019, b-3e0dbe]
@@ -88,3 +89,10 @@ No gate judged either tree, which is the re-gate this item still owes.
 `regates` table and the `task_regate` fact. `reconcile` reports a re-gate
 at the head GitHub answered, and moves no state. `SA-0284` still owes the
 command that runs one.
+
+**The re-gate ships, 2026-10-17.** `SA-0284` (#899) adds `saffron regate`. It
+runs the task's own gate suite over its pull request's current head, from the
+`base_sha` export its cell was judged by. It records the count in `regates`
+and leaves the task's state alone. b-6b06e1 carries the one gap left: a task
+whose PACKAGE exempted a test from `revert` loses that exemption under it.
+- 2026-10-17: closed by #899 (`SA-0284`), from the spec loop's run 43.

@@ -2239,3 +2239,32 @@ seat finding the in-cell critic and the end review both passed.
 - #891: a `check` test read the host's `origin/main`, so every cell's
   baseline found `main` red. **No bucket**, the loop's driver. **Landed:**
   this run's step 5 PR.
+
+## 2026-10-17, `SA-0294` and `SA-0284` (spec loop run 43, #898 and #899)
+
+- `SA-0294` (#898): `run_stack_batch`'s docstring stayed at ten lines only by
+  leaving two lines at 114 and 144 characters. `prose` counts lines, not
+  width. **Bucket 1**, `prose`. **Landed:** a review commit on #898.
+- `SA-0294` (#898): no witness held that a follow-up whose `cite` raises
+  records no miss. The Spec seat's probe of that branch survived.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #898.
+- `SA-0294` (#898): `CONTEXT.md`'s Refusal entry does not list the citation
+  cause. **No bucket**, a spec's scope. **Open:** b-74a122.
+- `SA-0284` (#899): `_Declined`'s docstring called a decline a rejection, a
+  word on Refusal's _Avoid_ line. The `terms` gate's table lacks it.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #899.
+- `SA-0284` (#899): the README called a declined task a refused one, though
+  a Refusal happens before any cell starts. **Bucket 3**, conventions.
+  **Landed:** a review commit on #899.
+- `SA-0284` (#899): the module docstring carried an evidence statistic and a
+  stale "today". **Bucket 3**, conventions. **Landed:** a review commit on #899.
+- `SA-0284` (#899): the decline witness passed with the reason dropped from
+  each printed line. **Bucket 3**, adequacy. **Landed:** a review commit on #899.
+- `SA-0284` (#899): no witness unset `CLAUDE_CODE_OAUTH_TOKEN` or made the
+  agent paths raise, as the spec's notes asked. A token read passed with the
+  token in the shell. **Bucket 3**, adequacy. **Landed:** a review commit on #899.
+- `SA-0284` (#899): the green witness could not see the probe run before
+  `reverify`. **Bucket 3**, adequacy. **Landed:** a review commit on #899.
+- Run 43: `driver.py stack` ordered #899 below #898, the reverse of the
+  branches a stack batch built. **No bucket**, the loop's driver.
+  **Open:** b-3a79a0.

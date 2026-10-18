@@ -6997,3 +6997,268 @@ def test_a_preflight_failure_is_offered_again_only_until_the_breaker(ledger, rep
     )
     assert reason2 == "DRAINED"
     assert runner.calls == candidates
+
+
+def test_a_stack_batch_needs_review_whenever_cite_is_given(ledger, repo_id):
+    """`cite` needs `review` the same way `follow_ups` does: given alone, it
+    raises before the batch row even opens."""
+    from saffron.batch import run_stack_batch
+
+    doubles = StackDoubles(ledger, repo_id, {})
+
+    with pytest.raises(ValueError, match="needs review whenever cite is given"):
+        run_stack_batch(
+            [_candidate("TE-801")],
+            ledger,
+            30.0,
+            None,
+            doubles.runner,
+            readiness_check=_ready,
+            cite=lambda *_args: [],
+        )
+
+    assert ledger.latest_batch_id() == 0
+
+
+def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each_review(
+    ledger, repo_id, monkeypatch
+):
+    """`cite`, when given, runs before each `review` call: on a spec's first
+    text, on a revision's and on a follow-up's, and at no other point. A
+    reviewed spec offered again after a wait, and a writer turn retried after
+    its own wait, each skip it. A non-empty return refuses the spec with no
+    review session, a miss for a spec of the order, and no miss for a
+    follow-up. A raise from `cite` is the same split, raised again."""
+    from saffron import spec_review as spec_review_module
+    from saffron.batch import run_stack_batch
+    from saffron.spec_review import SpecWriterSession
+
+    monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 1.0)
+    monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 1.0)
+
+    order_log: list[str] = []
+    cite_table: dict[str, list] = {
+        "TE-301": [["citation one", "citation two"]],
+        "TE-303": [[], ["c1", "c2", "c3"]],
+        "TE-305": [[], []],
+        "TE-306": [RuntimeError("cite boom")],
+        "TE-308": [[]],
+        "TE-309": [[]],
+        "TE-310": [[], []],
+        "TE-320": [[]],
+        "TE-321": [["c1"]],
+        "TE-322": [RuntimeError("follow-up cite boom")],
+    }
+    cite_calls: list[tuple[str, str | None, str | None, int | None]] = []
+    task_id_by_spec: dict[str, int] = {}
+
+    def cite(candidate, pred, spec_text):
+        spec_id = candidate.spec.id
+        order_log.append(f"cite:{spec_id}")
+        cite_calls.append(
+            (spec_id, pred.spec.id if pred else None, spec_text, candidate.task_id)
+        )
+        result = cite_table[spec_id].pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    rows = {
+        "TE-303": {"route": ["revise", "run"], "revised_touches": []},
+        "TE-305": {"route": ["revise", "run"], "revised_touches": []},
+        "TE-310": {"route": ["revise", "run"], "revised_touches": []},
+        "__end_review__": {},
+        "__follow_ups__": [
+            {"id": "TE-320", "budget_usd": 1.0},
+            {"id": "TE-321", "budget_usd": 1.0},
+            {"id": "TE-322", "budget_usd": 1.0},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows, order=order_log)
+
+    def mint(candidate):
+        task_id = doubles.mint(candidate)
+        task_id_by_spec[candidate.spec.id] = task_id
+        return task_id
+
+    def follow_ups(batch_key, stack_review):
+        candidates = doubles.follow_ups(batch_key, stack_review)
+        for candidate in candidates:
+            assert candidate.task_id is not None
+            task_id_by_spec[candidate.spec.id] = candidate.task_id
+        return candidates
+
+    te309_started = False
+
+    def runner(candidate, predecessor=None):
+        nonlocal te309_started
+        if candidate.spec.id == "TE-309" and not te309_started:
+            te309_started = True
+            order_log.append("runner:TE-309")
+            doubles.runner_calls.append(
+                ("TE-309", predecessor.spec.id if predecessor else None)
+            )
+            run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+            task_id = ledger.create_task(
+                run_id,
+                spec_id="TE-309",
+                spec_sha="s" * 64,
+                branch="saffron/TE-309-run",
+            )
+            ledger.set_task_state(task_id, "RATE_LIMITED")
+            outcome = _outcome(state="RATE_LIMITED", run_id=run_id, task_id=task_id)
+            return dataclasses.replace(outcome, resets_at=10**12)
+        return doubles.runner(candidate, predecessor)
+
+    te310_waited = False
+
+    def revise(candidate, predecessor, spec_text, review_text):
+        nonlocal te310_waited
+        if candidate.spec.id == "TE-310" and not te310_waited:
+            te310_waited = True
+            order_log.append("revise:TE-310")
+            doubles.revise_calls.append("TE-310")
+            return SpecWriterSession(
+                text="",
+                cost_usd=0.0,
+                error=None,
+                resets_at=10**12,
+                session_id="w-TE-310-wait",
+                num_turns=0,
+                spec_sha=None,
+            )
+        return doubles.revise(candidate, predecessor, spec_text, review_text)
+
+    order = [
+        _candidate("TE-301", budget_usd=1.0),
+        _candidate("TE-302", budget_usd=1.0, depends_on=["TE-301"]),
+        _candidate("TE-303", budget_usd=1.0),
+        _candidate("TE-304", budget_usd=1.0, depends_on=["TE-303"]),
+        _candidate("TE-305", budget_usd=1.0),
+        _candidate("TE-306", budget_usd=1.0),
+        _candidate("TE-307", budget_usd=1.0, depends_on=["TE-306"]),
+        _candidate("TE-308", budget_usd=1.0),
+        _candidate("TE-309", budget_usd=1.0),
+        _candidate("TE-310", budget_usd=1.0),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        40.0,
+        None,
+        runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=mint,
+        revise=revise,
+        cite=cite,
+        end_review=doubles.end_review,
+        follow_ups=follow_ups,
+        sleep=lambda _seconds: None,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+
+    te303 = _spec_text("TE-303", touches=[])
+    te305 = _spec_text("TE-305", touches=[])
+    te310 = _spec_text("TE-310", touches=[])
+    te320 = _spec_text("TE-320", touches=[])
+    te321 = _spec_text("TE-321", touches=[])
+    te322 = _spec_text("TE-322", touches=[])
+
+    assert cite_calls == [
+        ("TE-301", None, None, task_id_by_spec["TE-301"]),
+        ("TE-303", None, None, task_id_by_spec["TE-303"]),
+        ("TE-303", None, te303, task_id_by_spec["TE-303"]),
+        ("TE-305", None, None, task_id_by_spec["TE-305"]),
+        ("TE-305", None, te305, task_id_by_spec["TE-305"]),
+        ("TE-306", "TE-305", None, task_id_by_spec["TE-306"]),
+        ("TE-308", "TE-305", None, task_id_by_spec["TE-308"]),
+        ("TE-309", "TE-308", None, task_id_by_spec["TE-309"]),
+        ("TE-310", "TE-309", None, task_id_by_spec["TE-310"]),
+        ("TE-310", "TE-309", te310, task_id_by_spec["TE-310"]),
+        ("TE-320", "TE-310", te320, task_id_by_spec["TE-320"]),
+        ("TE-321", "TE-320", te321, task_id_by_spec["TE-321"]),
+        ("TE-322", "TE-320", te322, task_id_by_spec["TE-322"]),
+    ]
+
+    assert order_log == [
+        "mint:TE-301",
+        "cite:TE-301",
+        "mint:TE-303",
+        "cite:TE-303",
+        "review:TE-303",
+        "revise:TE-303",
+        "cite:TE-303",
+        "mint:TE-305",
+        "cite:TE-305",
+        "review:TE-305",
+        "revise:TE-305",
+        "cite:TE-305",
+        "review:TE-305",
+        "runner:TE-305",
+        "mint:TE-306",
+        "cite:TE-306",
+        "mint:TE-308",
+        "cite:TE-308",
+        "review:TE-308",
+        "runner:TE-308",
+        "mint:TE-309",
+        "cite:TE-309",
+        "review:TE-309",
+        "runner:TE-309",
+        "runner:TE-309",
+        "mint:TE-310",
+        "cite:TE-310",
+        "review:TE-310",
+        "revise:TE-310",
+        "revise:TE-310",
+        "cite:TE-310",
+        "review:TE-310",
+        "runner:TE-310",
+        "end_review",
+        "follow_ups",
+        "cite:TE-320",
+        "review:TE-320",
+        "runner:TE-320",
+        "cite:TE-321",
+        "cite:TE-322",
+    ]
+
+    assert doubles.runner_calls == [
+        ("TE-305", None),
+        ("TE-308", "TE-305"),
+        ("TE-309", "TE-308"),
+        ("TE-309", "TE-308"),
+        ("TE-310", "TE-309"),
+        ("TE-320", "TE-310"),
+    ]
+
+    refused_or_raised = [
+        line for line in lines if "refused" in line or "raised" in line
+    ]
+    assert refused_or_raised == [
+        f"{'TE-301':<10} refused  2 citation(s) do not resolve",
+        f"{'TE-302':<10} refused  reaches TE-301",
+        f"{'TE-303':<10} refused  3 citation(s) do not resolve",
+        f"{'TE-304':<10} refused  reaches TE-303",
+        f"{'TE-306':<10} raised RuntimeError: cite boom",
+        f"{'TE-307':<10} refused  reaches TE-306",
+        f"{'TE-321':<10} refused  1 citation(s) do not resolve",
+        f"{'TE-322':<10} raised RuntimeError: follow-up cite boom",
+    ]
+    assert "follow-ups unrun  TE-321 TE-322" in lines
+
+    assert _task_state(ledger, task_id_by_spec["TE-301"]) == "QUEUED"
+    assert _task_state(ledger, task_id_by_spec["TE-303"]) == "QUEUED"
+    assert _task_state(ledger, task_id_by_spec["TE-321"]) == "QUEUED"
+    assert _task_state(ledger, task_id_by_spec["TE-322"]) == "QUEUED"
+    assert _task_routes(ledger, task_id_by_spec["TE-301"]) == []
+    assert _task_routes(ledger, task_id_by_spec["TE-303"]) == ["revise"]
+    assert _task_routes(ledger, task_id_by_spec["TE-321"]) == []
+    assert _task_routes(ledger, task_id_by_spec["TE-322"]) == []
