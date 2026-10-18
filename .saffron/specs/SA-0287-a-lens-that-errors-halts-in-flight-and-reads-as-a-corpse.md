@@ -52,7 +52,7 @@ forbidden:
   - tests/test_view_graph.py
 budget_usd: 25
 max_attempts: 3
-max_turns: 140
+max_turns: 180
 acceptance:
   - claim: >-
       `review_state` ends `REVIEW_INCOMPLETE` when any lens carries an error.
