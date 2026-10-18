@@ -1,13 +1,10 @@
 """`saffron regate`: judge an open pull request's current head with the
 task's own gates, agent-free (backlog item 97, the re-gate half of item 40).
 
-A packaged commit is what `run_task` judged. A review round can add commits
-on top of it, and nothing judges those today.
-`docs/evidence/2026-09-10-review-fixes-past-package.md` found 34 of 38
-merged pull requests landing past `pushed_sha`. This module re-runs the
-task's own gate suite over the branch as GitHub shows it now, against the
-`base_sha` export its cell was judged by. It records the result and leaves
-the task's state alone.
+A packaged commit is what `run_task` judged, and a review round can add
+commits on top of it. This module re-runs the task's own gate suite over the
+branch as GitHub shows it now, against the `base_sha` export its cell was
+judged by. It records the result and leaves the task's state alone.
 """
 
 from __future__ import annotations
@@ -41,8 +38,8 @@ class _Declined(Exception):
 
     Named differently from `Refusal` on purpose, since
     `tests/test_refusal_count.py` scans every file but `scheduler.py` for
-    that constructor. This is a rejection before any gate executes, not
-    one of §4.2.1's eight queue-scan kinds."""
+    that constructor. It declines a task before any gate executes, and is
+    not one of §4.2.1's eight queue-scan kinds."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
@@ -74,6 +71,16 @@ def _pull_request_state(gh: package_phase.GhRunner, pr_url: str) -> tuple[str, s
     if state != _JUDGEABLE_STATE:
         raise _Declined(f"{pr_url} is {state}, not {_JUDGEABLE_STATE}")
     return state, base_ref
+
+
+def _fetch(mirror: Path, url: str, role: str, branch: str) -> str:
+    # `fetch_parent_branch`'s own message would call either branch a parent.
+    try:
+        return package_phase.fetch_parent_branch(mirror, url, branch)
+    except package_phase.ParentGone as gone:
+        raise package_phase.PackageError(
+            f"{role} branch {branch} could not be fetched"
+        ) from gone
 
 
 def _spec_at_base(exported: Path, spec_id: str, spec_sha: str):
@@ -122,11 +129,11 @@ def run_regate(
     mirror_path: Path,
     gh: package_phase.GhRunner,
 ) -> int:
-    """Everything `saffron regate` does: refuse, or judge the pull request's
+    """Everything `saffron regate` does: decline, or judge the pull request's
     current head with the task's own gates and record the count.
 
     No agent runs here, and `CLAUDE_CODE_OAUTH_TOKEN` is never read. A
-    refusal prints `regate:` and its reason, then returns 1. Any other
+    decline prints `regate:` and its reason, then returns 1. Any other
     raise, a failed `gh`, a `PreflightFailed`, a `PackageError`, is left
     to the caller, which exits 2.
     """
@@ -136,8 +143,8 @@ def run_regate(
         _state, base_ref = _pull_request_state(gh, row["pr_url"])
 
         mirror = git_mirror.ensure_mirror(repo, mirror_path)
-        base_head = package_phase.fetch_parent_branch(mirror, url, base_ref)
-        head = package_phase.fetch_parent_branch(mirror, url, row["branch"])
+        base_head = _fetch(mirror, url, "base", base_ref)
+        head = _fetch(mirror, url, "task", row["branch"])
         baseline_sha = git_mirror._git(mirror, "merge-base", base_head, head)
 
         exported = git_mirror.export_saffron_dir(

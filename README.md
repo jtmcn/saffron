@@ -139,8 +139,8 @@ uv run saffron replay <repo> <pr>
 
 Judge a task's pull request at its current head with the task's own gates. Those
 are the gates and policy its cell was judged by, not today's default branch. No
-agent runs, and no token is needed. Exit `0` is green, `1` is a refused task or new
-failures, and `2` is infrastructure:
+agent runs, and no token is needed. Exit `0` is green, `1` is a task it will not
+judge or new failures, and `2` is infrastructure:
 
 ```sh
 uv run saffron regate <task id> --repo .
