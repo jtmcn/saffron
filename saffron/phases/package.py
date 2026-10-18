@@ -24,7 +24,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
-from saffron.credentials import CREDENTIAL_SHAPES, matches_own_token
+from saffron.credentials import (
+    CREDENTIAL_SHAPES,
+    OWN_TOKEN_DESCRIPTION,
+    matches_own_token,
+)
 from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.contract import split_lines
 from saffron.gates.core.scope import scope_gate
@@ -272,7 +276,7 @@ def _scan(lines: list[tuple[str, str]], token: str | None) -> list[str]:
     found = []
     for path, line in lines:
         if matches_own_token(token, line):
-            found.append(f"{path}: the cell's own CLAUDE_CODE_OAUTH_TOKEN")
+            found.append(f"{path}: {OWN_TOKEN_DESCRIPTION}")
             continue
         for what, pattern in CREDENTIAL_SHAPES:
             if pattern.search(line):

@@ -541,10 +541,8 @@ class EventLog:
                 handle.write(json.dumps(payload) + "\n")
                 handle.flush()
         except (OSError, RecursionError, TypeError, ValueError):
-            # Everything reachable in the four statements above; narrower than
-            # bare `Exception` so a programming error introduced when SA-0030
-            # wires 64 producers still surfaces. `self.failed` is the
-            # breadcrumb — silence here must not read as "nothing happened".
+            # What the statements above can raise, and no wider, so a programming error surfaces.
+            # `self.failed` marks the silence, so it never reads as "nothing happened".
             self.failed = True
             return
 
@@ -916,8 +914,8 @@ def describe(event: Event) -> str:
         return f"budget: ${event.value:.2f} of ${event.limit:.2f} — stopping"
 
     if isinstance(event, Agent):
-        # Named once per kind, on every shape this renders. The credential
-        # itself never reaches a line this short to begin with (item 46).
+        # Named once per kind, on every shape this renders: the placeholder
+        # can sit past the 160-character cut (item 46).
         redacted = f" (redacted: {', '.join(event.redacted)})" if event.redacted else ""
         if event.bounded:
             return (

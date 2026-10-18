@@ -1,11 +1,14 @@
-"""The credential shapes PACKAGE refuses to push, and the ones `EventLog`
-redacts before anything reaches disk. One module, so neither reader drifts
-from the other (backlog item 46, `DESIGN.md` §5.4, §9).
+"""The credential shapes PACKAGE refuses to push (`DESIGN.md` §5.7), and the
+ones `EventLog` redacts from `events.jsonl` before the write (§4.7). One
+module, so neither reader drifts from the other (backlog item 46, §5.4, §9).
 """
 
 from __future__ import annotations
 
 import re
+
+OWN_TOKEN_DESCRIPTION = "the cell's own CLAUDE_CODE_OAUTH_TOKEN"
+_PRIVATE_KEY_HEADER = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 
 # ponytail: a refusal and a redaction, not the `secrets` gate (§5.4). v1's to build.
 # A shape not listed here still reaches the remote and the log unredacted.
@@ -14,15 +17,13 @@ CREDENTIAL_SHAPES = (
     ("an Anthropic OAuth token", re.compile(r"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{8,}")),
     ("a GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{16,}")),
     ("an AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("a private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("a private key block", _PRIVATE_KEY_HEADER),
 )
 
-# `redact` treats this one specially: a header-only match would leave the
-# key's body written, so it sweeps through to the next END line instead.
-_PRIVATE_KEY_DESCRIPTION = "a private key block"
+# A header-only match would leave the key's body written, so `redact` sweeps
+# from the header through the next END line instead.
 _PRIVATE_KEY_BLOCK = re.compile(
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*\Z)",
+    _PRIVATE_KEY_HEADER.pattern + r"(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*\Z)",
     re.DOTALL,
 )
 
@@ -39,12 +40,10 @@ def redact(text: str, *, token: str | None) -> tuple[str, tuple[str, ...]]:
     raises. Returns `text` unchanged, and an empty tuple, when nothing matched."""
     found: list[str] = []
     if matches_own_token(token, text) and token is not None:
-        text = text.replace(token, "[redacted: the cell's own CLAUDE_CODE_OAUTH_TOKEN]")
-        found.append("the cell's own CLAUDE_CODE_OAUTH_TOKEN")
+        text = text.replace(token, f"[redacted: {OWN_TOKEN_DESCRIPTION}]")
+        found.append(OWN_TOKEN_DESCRIPTION)
     for description, pattern in CREDENTIAL_SHAPES:
-        sweep = (
-            _PRIVATE_KEY_BLOCK if description == _PRIVATE_KEY_DESCRIPTION else pattern
-        )
+        sweep = _PRIVATE_KEY_BLOCK if pattern is _PRIVATE_KEY_HEADER else pattern
         new_text, count = sweep.subn(f"[redacted: {description}]", text)
         if count:
             text = new_text
