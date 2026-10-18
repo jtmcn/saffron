@@ -468,13 +468,12 @@ def run_stack_batch(
     """Run one stack's planned `order`, then its follow-ups, without rescanning (`SA-0142`,
     `SA-0162`). `runner` takes each candidate and its predecessor, the last one that reached
     `READY_FOR_REVIEW`, or `None` before any has. A `RATE_LIMITED` task waits on it instead
-    of refusing (`sleep`, SA-0148). `cite`, when given, runs before `review` and can refuse a spec with no review.
-    `review`, when given, then runs and can refuse, raise, or wait (`SpecReviewWait`, ADR 7), with `revise` run up to `MAX_REVISE_ROUNDS` times.
-
-    An order candidate whose `depends_on` reaches a missed spec is refused. `reserve_usd` and
-    `writer_usd` hold back only the order's checks. `end_review`, `follow_ups` (run one
-    generation up only on `DRAINED`) and then `finish` run before the row closes, unless one
-    of the first two raises."""
+    of refusing (`sleep`, SA-0148). `cite` and then `review` run first when given, and either
+    can refuse. `review` can also raise or wait (`SpecReviewWait`, ADR 7), with `revise` run
+    up to `MAX_REVISE_ROUNDS` times. An order candidate whose `depends_on` reaches a missed
+    spec is refused. `reserve_usd` and `writer_usd` hold back only the order's checks.
+    `end_review`, `follow_ups` (run one generation up only on `DRAINED`) and then `finish`
+    run before the row closes, unless one of the first two raises."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     if follow_ups is not None and review is None:
