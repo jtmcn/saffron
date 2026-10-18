@@ -74,7 +74,7 @@ def test_ensure_mirror_is_idempotent_and_fetches(tmp_path, origin):
 
 
 def test_a_mirror_fetch_neither_prunes_nor_overwrites_the_records_refs(
-    tmp_path, origin
+    tmp_path, origin, monkeypatch
 ):
     """`ensure_mirror`'s fetch of an existing mirror neither prunes nor
     overwrites a ref under `refs/saffron/`. A task ref and a
@@ -82,6 +82,11 @@ def test_a_mirror_fetch_neither_prunes_nor_overwrites_the_records_refs(
     the checkout holds at another commit keeps the mirror's own one. A
     branch the checkout deleted is still pruned, and a branch it gained is
     still fetched."""
+    isolated = tmp_path / "git-home"
+    isolated.mkdir()
+    monkeypatch.setenv("HOME", str(isolated))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     mirror = ensure_mirror(origin, tmp_path / "m.git")
 
     main_sha = git(mirror, "rev-parse", "main")

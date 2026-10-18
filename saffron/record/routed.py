@@ -49,11 +49,11 @@ class RoutedRecord:
     def task_keys(self) -> list[str]:
         raise RecordError(
             "a routed record answers for no repo on its own, "
-            "the fold reads each repo's own RefsRecord instead (§10)"
+            "the fold reads each repo's own RefsRecord instead (§4 of the record design)"
         )
 
     def compare_and_swap(self, key: str, expected: str | None, new: str) -> bool:
         raise RecordError(
             "a routed record holds no values of its own, "
-            "a value's home is a single repo's RefsRecord (§10)"
+            "a value's home is a single repo's RefsRecord (§10 of the record design)"
         )

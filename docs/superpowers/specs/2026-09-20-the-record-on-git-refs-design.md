@@ -165,9 +165,10 @@ git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 A non-fast-forward refusal therefore means a stale writer. The wiring
 appends into each task's mirror with no remote, and `run_task` pushes the
 task's own ref once, as the task ends. A refused push is an event, and
-nothing here re-reads or retries. The spike measured that refusal directly, and it is the primitive the
-cross-host budget needs later — the thing `batch.py:194` cannot provide across
-hosts, because a SQLite file is local to one.
+nothing here re-reads or retries. The spike measured that refusal directly,
+and it is the primitive the cross-host budget needs later — the thing
+`batch.py:194` cannot provide across hosts, because a SQLite file is local to
+one.
 
 **What the spike settled about this layout.** A cell reaches neither the ref nor
 its objects, by two independent mechanisms: `worktree.py`'s seed sequence fetches
@@ -365,8 +366,9 @@ the exact defect this design exists to close. One rule prevents it:
 > **Every record append also emits an event. No event implies an append.**
 
 The rule binds from the point a production caller constructs a `Ledger` with a
-record. Nothing does yet, and `_append` emits nothing, so the rule is stated
-here and implemented with that wiring.
+record. A production caller now constructs one. That wiring does not build the
+rule, and the ledger's append still emits no event. Backlog item b-6677b6
+holds the rule.
 
 One direction only. The two can differ in prose, and can never differ on whether
 something happened. An append that failed to emit is a missing line in a log; an

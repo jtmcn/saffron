@@ -1,6 +1,6 @@
 """The ledger. SQLite, one file, WAL, authoritative for state (`DESIGN.md` §4.1).
 
-Now true of what runs: every command's `Ledger` is constructed with a
+Now true of what runs: every command's shared `Ledger` is constructed with a
 `RoutedRecord` (backlog item 170 step 3). No row here is derived from one,
 and §4.6 rule 1 holds as written. The record design reverses that: the
 ledger becomes a store folded out of `refs/saffron/*` by

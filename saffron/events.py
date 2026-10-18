@@ -365,15 +365,15 @@ class TaskOutcome:
 
 @dataclass(frozen=True, slots=True)
 class Teardown:
-    """One fact from the cell's teardown — the patch export, a proxy denial or
+    """One event from the cell's teardown — the patch export, a proxy denial or
     failure, or a container/network/volume that would not go away.
 
     When the plan turn's first call was unserved, four more events land here
     too, read before the cell or the proxy goes down: proxy state, proxy
     log, cell resolver, cell route (`SA-0235`).
 
-    A refused push of the task's own record also lands here, past
-    `run_task` rather than inside the cell (backlog item 170)."""
+    A refused push of the task's own record also lands here, from
+    `run_task` once the cell returns (backlog item 170)."""
 
     timestamp: float
     spec_id: str

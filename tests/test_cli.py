@@ -723,7 +723,7 @@ def test_a_resolvable_parent_reaches_the_cell_stacked(tmp_path, monkeypatch, cap
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
@@ -751,7 +751,7 @@ def test_a_parent_branch_the_mirror_cannot_reach_is_an_unstacked_cell(
 
     # Everything the ledger can say is right; the branch is simply not there.
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
@@ -802,7 +802,7 @@ def test_saffron_cell_cuts_from_the_default_branch_once_its_parents_newest_task_
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     older_pr = "https://github.com/o/r/pull/1"
     newer_pr = "https://github.com/o/r/pull/2"
     sibling_pr = "https://github.com/o/r/pull/3"
@@ -899,7 +899,7 @@ def test_saffron_cell_stacks_on_a_parent_it_could_not_ask_about_and_says_so_once
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     older_pr = "https://github.com/o/r/pull/1"
     newer_pr = "https://github.com/o/r/pull/2"
     older = _seed_task(
@@ -978,7 +978,7 @@ def test_saffron_cell_stacks_on_a_changes_requested_parent_and_names_the_state(
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     parent_pr = "https://github.com/o/r/pull/1"
     parent = _seed_task(
         ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW", pr_url=parent_pr
@@ -1027,7 +1027,7 @@ def test_the_cell_is_cut_from_the_branchs_head_not_the_ledgers_recorded_sha(
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, packaged)
 
@@ -1059,7 +1059,7 @@ def test_a_stacked_worktree_passes_its_parents_branch_to_package(
     args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
 
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
@@ -1100,7 +1100,7 @@ def test_an_unstacked_worktree_passes_no_parent_branch_to_package(
     # Seeded, so the repo row exists and resolution genuinely runs — the
     # parent's task is `MERGED`, which needs no stacking.
     ledger = Ledger(tmp_path / "seeded.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="MERGED")
     ledger.record_push(parent, "d" * 40)
 
@@ -1135,7 +1135,7 @@ def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
     _push_parent_branch(repo, "saffron/SY-2")
     mirror, url = _mirror_of(tmp_path, repo)
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
     ledger.record_push(second, "b" * 40)
 
@@ -1163,7 +1163,7 @@ def test_which_of_a_parents_rows_supplies_the_sha_is_the_newest_waiting_one(
     head = _push_parent_branch(repo, "saffron/SA-0013")
     mirror, url = _mirror_of(tmp_path, repo)
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     states = [
         "QUEUED",
         "ORPHANED",
@@ -1233,7 +1233,7 @@ def test_the_newest_of_several_waiting_rows_wins_not_the_first(tmp_path):
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     for state, branch in [
         ("READY_FOR_REVIEW", "saffron/SY-9-first"),
         ("ORPHANED", "saffron/SY-9-orphan"),
@@ -1276,7 +1276,7 @@ def test_an_unresolved_pushed_sha_yields_an_unstacked_cell_not_a_construction_er
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
     if bad_sha is not None:
         ledger.record_push(task_id, bad_sha)
@@ -1304,7 +1304,7 @@ def test_a_row_with_no_branch_recorded_resolves_unstacked(tmp_path):
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
     ledger.record_push(task_id, "1" * 40)
     ledger._db.execute("UPDATE tasks SET branch = NULL WHERE task_id = ?", (task_id,))
@@ -1343,7 +1343,7 @@ def test_a_parent_branch_that_is_gone_says_so_through_emit(tmp_path):
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
     ledger.record_push(task_id, "1" * 40)
 
@@ -1374,7 +1374,7 @@ def test_no_repo_id_or_no_depends_on_resolves_unstacked(tmp_path):
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, "/o")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
     task_id = _seed_task(ledger, repo_id, spec_id="SY-9", state="READY_FOR_REVIEW")
     ledger.record_push(task_id, "1" * 40)
 
@@ -1980,8 +1980,8 @@ def _bare(path: Path) -> Path:
     return path
 
 
-def _seed_repo(ledger, origin, *, name="repo"):
-    mirror = _bare(Path(tempfile.mkdtemp()) / "mirror.git")
+def _seed_repo(tmp_path, ledger, origin, *, name="repo"):
+    mirror = _bare(Path(tempfile.mkdtemp(dir=tmp_path)) / "mirror.git")
     return ledger.upsert_repo(name, origin, str(mirror), policy_sha="p" * 64)
 
 
@@ -2074,7 +2074,7 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(
         ledger,
         repo_id,
@@ -2097,14 +2097,19 @@ def test_a_command_files_each_fact_it_writes_in_the_tasks_own_mirror(
     """The `Ledger` every `saffron` command shares is built with a
     `RoutedRecord` (item 170). `saffron reconcile` writes a `task_state`
     fact that lands on the seeded task's own ref, in its repo's own
-    mirror, and nowhere else."""
+    mirror."""
+    isolated = tmp_path / "git-home"
+    isolated.mkdir()
+    monkeypatch.setenv("HOME", str(isolated))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     from saffron.record.refs import RefsRecord
 
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-routed-cli")
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     mirror_path = Path(
         dict(
             ledger._db.execute(
@@ -2165,7 +2170,7 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url))
 
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     older = _seed_task(
         ledger,
@@ -2258,7 +2263,7 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"}
     others = sorted(state for state in typing.get_args(TaskState) if state not in takes)
@@ -2378,7 +2383,7 @@ def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch)
     monkeypatch.setattr(cli, "Ledger", lambda path, **_: Ledger(path, record=record))
 
     seed = Ledger(home / "ledger.db", record=record)
-    repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
     not_implemented = _seed_task(
         seed, repo_id, spec_id="SY-FOLD-NI", state="NOT_IMPLEMENTED"
     )
@@ -2456,7 +2461,7 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
         return Ledger(home / "ledger.db")
 
     seed = open_ledger()
-    repo_id = _seed_repo(seed, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
     parent_task = _seed_task(
         seed,
         repo_id,
@@ -2533,7 +2538,7 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
 
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
     task_id = _seed_task(ledger, repo_id, spec_id="SY-PKG", state="READY_FOR_REVIEW")
     ledger.close()
 
@@ -2735,7 +2740,7 @@ def test_package_exits_by_the_token_and_by_what_package_returned_or_raised(
     home.mkdir()
 
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
     task_id = _seed_task(ledger, repo_id, spec_id="SY-TOKEN", state="READY_FOR_REVIEW")
     ledger.close()
 
@@ -2845,7 +2850,7 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
 
         ledger = Ledger(home / "ledger.db")
-        repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+        repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
         task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state="READY_FOR_REVIEW")
         ledger.close()
 
@@ -2965,7 +2970,7 @@ def test_package_probe_claims_its_network_from_the_pool_and_probes_its_gateway(
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
 
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, "https://github.com/owner/repo.git")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
     task_id = _seed_task(
         ledger, repo_id, spec_id="SY-PROBE-POOL", state="READY_FOR_REVIEW"
     )
@@ -3311,7 +3316,7 @@ def test_an_in_flight_task_survives_being_looked_at(tmp_path, command):
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(ledger, repo_id, spec_id="SY-11", state="IMPLEMENTING")
     ledger.close()
 
@@ -3329,7 +3334,7 @@ def test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     _seed_task(
         ledger,
         repo_id,
@@ -3442,7 +3447,7 @@ def test_queue_admits_a_child_whose_exhausted_parent_merged_by_hand(tmp_path, ca
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
     url = package.real_remote(repo)
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
     for spec_id, text, pushed_sha in (
         ("SY-1", _A_SPEC, parent1_sha),
         ("SY-3", sy3_text, parent2_sha),
@@ -3514,7 +3519,7 @@ def test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state(
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     _seed_task(
         ledger,
         repo_id,
@@ -3578,7 +3583,7 @@ def test_resolving_a_queue_is_one_function_over_the_pinned_base(tmp_path, monkey
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     # A task at a spec id the queue's own directory need not carry — reconcile
     # scans every row in the repo, not just this scan's candidates, so this is
     # a clean witness that reconcile ran without disturbing SY-1's own status.
@@ -3765,7 +3770,7 @@ def test_told_to_stamp_it_orphans_an_in_flight_task_and_re_queues_it(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(
         ledger,
         repo_id,
@@ -3794,7 +3799,7 @@ def test_told_not_to_stamp_it_leaves_an_in_flight_task_alone(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(
         ledger,
         repo_id,
@@ -4135,7 +4140,7 @@ def _drive_fake_stack_batch(order, budget, home, monkeypatch):
         repo_id = ledger.upsert_repo(
             "r",
             "https://github.com/o/r.git",
-            str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+            str(_bare(Path(tempfile.mkdtemp(dir=home.parent)) / "mirror.git")),
             policy_sha=None,
         )
         mint = MintDouble(ledger, repo_id)
@@ -4155,7 +4160,7 @@ def _drive_fake_stack_batch(order, budget, home, monkeypatch):
         )
 
     with monkeypatch.context() as m:
-        _readiness_passes(m)
+        _readiness_passes(m, home.parent)
         m.setattr(cli, "_resolve_queue", _fake_resolve_queue)
         m.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
         repo_dir = home.parent / f"{home.name}-repo"
@@ -4345,7 +4350,7 @@ def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     ledger = Ledger(home / "ledger.db")
-    repo_id = _seed_repo(ledger, package.real_remote(repo))
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="IMPLEMENTING")
     ledger.close()
 
@@ -4486,7 +4491,7 @@ def test_a_resolution_that_changed_nothing_still_says_so(capsys):
     assert "reconcile: nothing moved" in capsys.readouterr().out
 
 
-def _readiness_passes(monkeypatch):
+def _readiness_passes(monkeypatch, tmp_path):
     """Readiness now runs *before* the scan (§4.4 step 1 ahead of step 4), so
     a test that fakes `_resolve_queue` and not this one never reaches the
     scan at all.
@@ -4501,7 +4506,7 @@ def _readiness_passes(monkeypatch):
         "check_readiness",
         lambda *a, **k: preflight.Readiness(
             True,
-            mirror=_bare(Path("/tmp/pinned-mirror.git")),
+            mirror=_bare(tmp_path / "pinned-mirror.git"),
             url="https://github.com/o/r.git",
             base_sha="a" * 40,
         ),
@@ -4648,7 +4653,7 @@ def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
         captured["until"] = until
         return "DRAINED"
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
     monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
@@ -4725,7 +4730,7 @@ def test_the_batch_rescans_through_the_pinned_base_without_stamping_orphans(
             state="READY_FOR_REVIEW", task_id=1, run_id=1, task_dir=tmp_path
         )
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
     monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
@@ -4754,11 +4759,11 @@ def test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps(
     monkeypatch.chdir(tmp_path)
     repo_name = tmp_path.resolve().name
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
 
     def _seed_night(home: Path):
         ledger = Ledger(home / "ledger.db")
-        repo_id = _seed_repo(ledger, "https://github.com/o/r.git")
+        repo_id = _seed_repo(tmp_path, ledger, "https://github.com/o/r.git")
         first = _seed_task(ledger, repo_id, spec_id="SY-1", state="REVIEWING")
         _seed_task(ledger, repo_id, spec_id="SY-2", state="REVIEWING")
         _seed_task(ledger, repo_id, spec_id="SY-3", state="MERGED")
@@ -4928,14 +4933,14 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
         recorded["upserted_repo_id"] = ledger.upsert_repo(
             "r",
             "https://github.com/o/r.git",
-            str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+            str(_bare(Path(tempfile.mkdtemp(dir=tmp_path)) / "mirror.git")),
             policy_sha=None,
         )
         built = real_stack_runner(**stack_runner_calls[0])
         built(candidates[0], None)
         return "DRAINED"
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
     monkeypatch.setattr(cli, "_stack_runner", _fake_stack_runner)
@@ -4981,7 +4986,7 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
     assert row["ended_at"] is not None
 
     # Case 3: `_resolve_queue` raises, with the real `run_stack_batch`.
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
 
     def _raise(*a, **k):
         raise RuntimeError("the mirror could not be fetched mid-scan")
@@ -5042,7 +5047,7 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
             repo_id = ledger.upsert_repo(
                 "r",
                 "https://github.com/o/r.git",
-                str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+                str(_bare(Path(tempfile.mkdtemp(dir=tmp_path)) / "mirror.git")),
                 policy_sha=None,
             )
             run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
@@ -5080,7 +5085,7 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
         monkeypatch.setattr(
             cli, "run_stack_batch", _make_fake_run_stack_batch(stop_reason)
         )
-        _readiness_passes(monkeypatch)
+        _readiness_passes(monkeypatch, tmp_path)
         home = tmp_path / f"home-{stop_reason}"
         assert main(["--home", str(home), "batch", "--stack"]) == expected_exit
 
@@ -5100,7 +5105,7 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
         repo_id = ledger.upsert_repo(
             "r",
             "https://github.com/o/r.git",
-            str(_bare(Path(tempfile.mkdtemp()) / "mirror.git")),
+            str(_bare(Path(tempfile.mkdtemp(dir=tmp_path)) / "mirror.git")),
             policy_sha=None,
         )
         run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
@@ -5122,7 +5127,7 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
     monkeypatch.setattr(cli, "_resolve_queue", _fake_resolve_queue)
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
     monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home_plain = tmp_path / "home-plain"
     assert main(["--home", str(home_plain), "batch"]) == 0
     assert not (home_plain / "batches" / "v0" / "index.html").exists()
@@ -5133,7 +5138,7 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
         "write_stack_view",
         lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
     )
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home_raise = tmp_path / "home-write-raises"
     assert main(["--home", str(home_raise), "batch", "--stack"]) == 2
     printed = capsys.readouterr().out
@@ -5795,7 +5800,7 @@ def test_the_adapter_packages_a_ready_task_and_reports_what_packaging_made_of_it
     repo = _local_origin(tmp_path)
     mirror, url = _mirror_of(tmp_path, repo)
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
 
     runner = cli._batch_runner(
         pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
@@ -5865,7 +5870,7 @@ def test_a_night_says_what_its_own_scan_could_not_check(tmp_path, monkeypatch, c
         gh_failures=["gh: command not found"],
         policy_unread=["policy.yaml: no such file"],
     )
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
     monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
     monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
@@ -5903,7 +5908,7 @@ def test_the_unattended_path_records_the_ceilings_that_bound_each_task(
     repo = _local_origin(tmp_path)
     mirror, url = _mirror_of(tmp_path, repo)
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
 
     runner = cli._batch_runner(
         pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
@@ -5961,7 +5966,7 @@ def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch)
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
@@ -6011,7 +6016,7 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
     second = _seed_task(ledger, repo_id, spec_id="SY-2", state="READY_FOR_REVIEW")
     ledger.record_push(second, "b" * 40)
 
@@ -6069,7 +6074,7 @@ def test_the_stack_runner_hands_each_task_its_predecessors_fetched_branch(
         _rev_parse(mirror, "refs/heads/saffron/SY-9000")
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
     parent = _seed_task(ledger, repo_id, spec_id="SY-5555", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
@@ -6400,7 +6405,7 @@ def test_the_adapter_packages_a_stacked_child_against_its_parents_branch(
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
     parent = _seed_task(ledger, repo_id, spec_id="SY-9000", state="READY_FOR_REVIEW")
     ledger.record_push(parent, "d" * 40)
 
@@ -6458,7 +6463,7 @@ def test_an_unstacked_task_is_packaged_against_no_parent(tmp_path, monkeypatch):
     repo = _local_origin(tmp_path)
     mirror, url = _mirror_of(tmp_path, repo)
     ledger = Ledger(tmp_path / "l.db")
-    repo_id = _seed_repo(ledger, url)
+    repo_id = _seed_repo(tmp_path, ledger, url)
 
     runner = cli._batch_runner(
         pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
@@ -6715,7 +6720,7 @@ def test_a_queue_discovery_refuses_still_leaves_a_closed_batch_row(
     `run_batch`, and no row existed at all for the night that was
     attempted."""
     home = tmp_path / "home"
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
 
     def _raise(*a, **k):
         raise intake.SpecError("spec directory does not exist")
@@ -6744,7 +6749,7 @@ def test_any_raise_resolving_the_queue_still_closes_the_batch_row(
     readiness has already passed, must still reach the same close. A
     `SpecError` from discovery is only the case that was measured."""
     home = tmp_path / "home"
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
 
     def _raise(*a, **k):
         raise RuntimeError("the mirror could not be fetched mid-scan")
@@ -6773,7 +6778,7 @@ def test_a_queue_that_cannot_be_resolved_says_so_on_the_batch_line(
     readiness passed. A line naming the wrong step sends the operator to
     re-check a token and a mirror that were fine."""
     home = tmp_path / "home"
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
 
     def _raise(*a, **k):
         raise RuntimeError("spec directory /nowhere does not exist")
@@ -6796,7 +6801,7 @@ def test_a_raise_from_the_loop_itself_is_not_blamed_on_the_queue(
     catch-all as itself, not be relabelled "the queue could not be resolved"
     — a line naming the wrong step is what the resolution line exists to stop."""
     home = tmp_path / "home"
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(
         cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
     )
@@ -6820,7 +6825,7 @@ def test_a_ledger_failure_after_a_failed_scan_is_not_blamed_on_the_queue(
     """The scan raised, then `create_batch` raised before the row existed. The
     line must name the ledger's failure, not send the operator to the specs."""
     home = tmp_path / "home"
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
 
     def _scan(*a, **k):
         raise intake.SpecError("spec directory does not exist")
@@ -6862,7 +6867,7 @@ def test_a_night_names_the_specs_its_scan_refused(tmp_path, monkeypatch, capsys)
         gh_failures=[],
         policy_unread=[],
     )
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
     monkeypatch.setattr(cli.package_phase, "real_remote", lambda _repo: "u")
     monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
@@ -6885,7 +6890,7 @@ def test_a_night_says_what_it_set_out_to_do_before_what_became_of_it(
 ):
     """The unattended twin of `_run_cell`'s `ceilings:` line. Without it the
     log's first word about the night is its last."""
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(
         cli,
         "_resolve_queue",
@@ -6946,7 +6951,7 @@ def test_the_printed_night_is_unchanged_by_sharing_the_base(
         gh_failures=["gh: command not found"],
         policy_unread=["policy.yaml: no such file"],
     )
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_resolve_queue", lambda *a, **k: resolved)
     monkeypatch.setattr(cli, "_batch_runner", lambda *a, **k: lambda _c: None)
     monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
@@ -7687,14 +7692,14 @@ def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
     monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
 
     # Case 1: readiness passes, `--stack`.
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home1 = tmp_path / "home1"
     assert main(["--home", str(home1), "batch", "--stack"]) == 0
 
     assert len(review_calls) == 1
     assert len(mint_calls) == 1
     pinned = task.PinnedBase(
-        mirror=Path("/tmp/pinned-mirror.git"),
+        mirror=tmp_path / "pinned-mirror.git",
         url="https://github.com/o/r.git",
         base_sha="a" * 40,
     )
@@ -7732,7 +7737,7 @@ def test_a_stack_batch_wires_its_spec_review_and_mint_once_readiness_passes(
     review_calls.clear()
     mint_calls.clear()
     plain_batch_calls.clear()
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home3 = tmp_path / "home3"
     assert main(["--home", str(home3), "batch"]) == 0
 
@@ -7770,13 +7775,13 @@ def test_a_stack_batch_passes_run_stack_batch_its_spec_revision(tmp_path, monkey
     monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
 
     # Case 1: readiness passes, `--stack`.
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home1 = tmp_path / "home1"
     assert main(["--home", str(home1), "batch", "--stack", "--repo", "."]) == 0
 
     assert len(revise_calls) == 1
     pinned = task.PinnedBase(
-        mirror=Path("/tmp/pinned-mirror.git"),
+        mirror=tmp_path / "pinned-mirror.git",
         url="https://github.com/o/r.git",
         base_sha="a" * 40,
     )
@@ -7827,7 +7832,7 @@ def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing
     from saffron.scheduler import StackBase
 
     pinned = task.PinnedBase(
-        mirror=Path("/tmp/pinned-mirror.git"),
+        mirror=tmp_path / "pinned-mirror.git",
         url="https://github.com/o/r.git",
         base_sha="a" * 40,
     )
@@ -7863,7 +7868,7 @@ def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing
 
         # Case 1: readiness passes, `--stack`. Built once, on the pinned base,
         # and the order's stack base reaches the three seeding callables.
-        _readiness_passes(m)
+        _readiness_passes(m, tmp_path)
         home1 = tmp_path / "home1"
         assert main(["--home", str(home1), "batch", "--stack"]) == 0
 
@@ -7894,7 +7899,7 @@ def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing
         # Case 3: `batch` without `--stack`. Never built either.
         alive_calls.clear()
         stack_batch_calls.clear()
-        _readiness_passes(m)
+        _readiness_passes(m, tmp_path)
         home3 = tmp_path / "home3"
         m.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
         assert main(["--home", str(home3), "batch"]) == 0
@@ -8163,7 +8168,7 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
 
     # Case 1: readiness passes.
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home1 = tmp_path / "home1"
     assert main(["--home", str(home1), "batch", "--stack", "--budget", "42"]) == 0
 
@@ -8180,7 +8185,7 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     assert len(follow_ups_builds) == 1
     built = follow_ups_builds[0]
     pinned = task.PinnedBase(
-        mirror=Path("/tmp/pinned-mirror.git"),
+        mirror=tmp_path / "pinned-mirror.git",
         url="https://github.com/o/r.git",
         base_sha="a" * 40,
     )
@@ -8248,7 +8253,7 @@ def test_a_stack_batch_reads_the_open_pull_requests_a_follow_up_meets(
         raise OSError("no gh")
 
     # Case 1: slug `o/r`, a working `gh`.
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(
         cli,
         "_resolve_queue",
@@ -8997,7 +9002,7 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
     monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
     monkeypatch.setattr(finish_module, "publish_finish", lambda *a, **k: [])
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home = tmp_path / "home"
     assert main(["--home", str(home), "batch", "--stack"]) == 0
 
@@ -9005,7 +9010,7 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
     call = commit_calls[0]
     assert call["batch_id"] == 3
     assert call["unrun"] == [5, 6]
-    assert call["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert call["mirror"] == tmp_path / "pinned-mirror.git"
     assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "tree"
     printed = capsys.readouterr().out
     assert f"finish: committed {'c' * 40}" in printed.splitlines()
@@ -9108,7 +9113,7 @@ def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_fille
     monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
     monkeypatch.setattr(finish_module, "publish_finish", lambda *a, **k: [])
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home = tmp_path / "home"
     assert main(["--home", str(home), "batch", "--stack"]) == 0
 
@@ -9237,7 +9242,7 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
 
     monkeypatch.setattr(finish_module, "publish_finish", _fake_publish_finish)
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home = tmp_path / "home"
     assert main(["--home", str(home), "batch", "--stack"]) == 0
 
@@ -9251,16 +9256,16 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
     gates_dir = home / "batches" / "v0" / "finish" / "3" / "gates"
     assert call["batch_id"] == 3
     assert call["sha"] == "c" * 40
-    assert call["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert call["mirror"] == tmp_path / "pinned-mirror.git"
     assert call["url"] == "https://github.com/o/r.git"
     assert call["slug"] == "o/r"
     assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "push"
     assert verify_result["value"] == 2
-    assert export_calls == [(Path("/tmp/pinned-mirror.git"), "a" * 40, gates_dir)]
+    assert export_calls == [(tmp_path / "pinned-mirror.git", "a" * 40, gates_dir)]
 
     assert len(reverify_calls) == 1
     rcall = reverify_calls[0]
-    assert rcall["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert rcall["mirror"] == tmp_path / "pinned-mirror.git"
     assert rcall["packaged_sha"] == "c" * 40
     assert rcall["new_base_sha"] == "d" * 40
     assert rcall["gates_dir"] == gates_dir
@@ -9371,7 +9376,7 @@ def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
 
     monkeypatch.setattr(finish_module, "link_stack", _fake_link_stack)
 
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     home = tmp_path / "home"
     # A `--repo` apart from the process's own directory, so a runner that
     # reads `Path.cwd()` in place of the repository fails.
@@ -9394,7 +9399,7 @@ def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(
     assert len(link_calls) == 1
     call = link_calls[0]
     assert call["batch_id"] == 3
-    assert call["mirror"] == Path("/tmp/pinned-mirror.git")
+    assert call["mirror"] == tmp_path / "pinned-mirror.git"
     assert call["url"] == "https://github.com/o/r.git"
 
     gh = call["gh"]
@@ -9647,7 +9652,7 @@ def test_saffron_draft_writes_the_last_recorded_text_and_exits_by_how_the_draft_
         item = tmp_path / f"item-{idx}.md"
         item.write_text("an item worth drafting\n")
 
-        _readiness_passes(monkeypatch)
+        _readiness_passes(monkeypatch, tmp_path)
         calls = _scripted_draft_adapters(
             monkeypatch, write=write, reviews=reviews, revise=revise
         )
@@ -9842,7 +9847,7 @@ def test_saffron_draft_numbers_its_spec_past_the_working_tree_its_retirees_and_t
         item = parent / "item.md"
         item.write_bytes(item_bytes)
 
-        _readiness_passes(monkeypatch)
+        _readiness_passes(monkeypatch, tmp_path)
         calls = _scripted_draft_adapters(
             monkeypatch,
             write=_writer_session(_spec_text(expected_id, "Numbered")),
@@ -9933,7 +9938,7 @@ def test_saffron_draft_mints_nothing_without_readiness_or_a_single_id_prefix(
     _draft_specs_dir(repo, specs={"notes.md": "not a spec id\n"})
     item = tmp_path / "item-no-prefix.md"
     item.write_text("an item\n")
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
     code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
     assert code == 2
@@ -9946,7 +9951,7 @@ def test_saffron_draft_mints_nothing_without_readiness_or_a_single_id_prefix(
     _draft_specs_dir(repo, specs={"TE-001.md": "x\n", "SY-002.md": "y\n"})
     item = tmp_path / "item-two-prefixes.md"
     item.write_text("an item\n")
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
     code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
     assert code == 2
@@ -9958,7 +9963,7 @@ def test_saffron_draft_mints_nothing_without_readiness_or_a_single_id_prefix(
     _draft_specs_dir(repo, specs={"TE-001-x.md": "x\n"})
     item = tmp_path / "item-bad-utf8.md"
     item.write_bytes(b"\xff\xfe not utf-8")
-    _readiness_passes(monkeypatch)
+    _readiness_passes(monkeypatch, tmp_path)
     monkeypatch.setattr(cli, "_draft_adapters", _no_adapters)
     code = main(["--home", str(home), "draft", str(item), "--repo", str(repo)])
     assert code == 2
