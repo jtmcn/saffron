@@ -127,9 +127,9 @@ def citation_defects(mirror: Path, commit: str, text: str) -> list[str]:
     """Every `file:line` citation in `text` that does not resolve at `commit`
     in `mirror`, in text order. `mirror` is any git repository holding
     `commit`, bare or not. A citation resolves when its path is a regular
-    file at `commit` and its range sits inside that file. Its sentence's
-    other quoted text, if any, must sit inside the range too. A commit
-    `mirror` lacks raises `GitError`."""
+    file at `commit` and its range sits inside that file. Where its
+    sentence quotes other text the file holds, one of those strings must
+    sit inside the range. A commit `mirror` lacks raises `GitError`."""
     names = set(_git(mirror, "ls-tree", "-r", "--name-only", commit).splitlines())
     suffixes = {Path(n).suffix for n in names if Path(n).suffix}
     citations = _extract_citations(text, suffixes)
