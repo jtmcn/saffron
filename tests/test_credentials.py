@@ -68,14 +68,16 @@ def test_every_shape_package_refuses_is_redacted_from_the_log(tmp_path):
     for index, (description, credential) in enumerate(cases):
         spec_id = f"CR-shape-{index}"
         text = f"before {credential} after"
+        appended = {
+            "type": "text",
+            "text": text,
+            "index": 3,
+            "is_error": False,
+            "n": None,
+        }
         log = EventLog(tmp_path / spec_id)
         log.append(
-            Agent(
-                timestamp=1.0,
-                spec_id=spec_id,
-                raw=False,
-                event={"type": "text", "text": text},
-            )
+            Agent(timestamp=1.0, spec_id=spec_id, raw=False, event=dict(appended))
         )
 
         scanned = find_credentials_in_text(text, token=None, where="where")
@@ -96,6 +98,8 @@ def test_every_shape_package_refuses_is_redacted_from_the_log(tmp_path):
         # The marker written in place of the credential names this shape,
         # not a generic one every shape would share.
         assert description in logged.event["text"]
+        # Every other key, the non-string ones too, is read back unchanged.
+        assert logged.event == {**appended, "text": logged.event["text"]}
         assert description in written
 
     # A clipped block, no END line: a header and four body lines inside a
@@ -232,7 +236,7 @@ def test_an_agent_events_credentials_are_redacted_in_every_field(tmp_path):
     assert "before " in e6.detail and " after" in e6.detail
 
     # 7: the innermost string of a list nested 999 deep, inside an event too
-    # large to keep whole.
+    # large to keep whole. It precedes the padding, so it lands in the written line.
     deep: object = f"before {aws} after"
     for _ in range(999):
         deep = [deep]
@@ -242,13 +246,15 @@ def test_an_agent_events_credentials_are_redacted_in_every_field(tmp_path):
             timestamp=1.0,
             spec_id="A7",
             raw=False,
-            event={"type": "text", "text": "z" * 8192, "deep": deep},
+            event={"type": "text", "deep": deep, "text": "z" * 8192},
         )
     )
     assert aws not in _written("A7")
     e7 = _logged("A7")
     assert e7.redacted == (description,)
     assert e7.bounded is True
+    assert e7.line is not None
+    assert f"before [redacted: {description}] after" in e7.line
 
     # 8: two matches in one string, and a third in `detail`, named once.
     aws_b, aws_c = _aws_key(), _aws_key()
@@ -334,7 +340,12 @@ def test_a_credential_cut_by_the_size_bound_is_redacted_whole(tmp_path):
     api_key = _api_key()
 
     def _event(pad_len: int) -> dict:
-        return {"type": "text", "text": "P" * pad_len + token, "model": api_key}
+        return {
+            "type": "text",
+            "text": "P" * pad_len + token,
+            "model": api_key,
+            "input_tokens": 7,
+        }
 
     probe = json.dumps(_event(0))
     prefix_len = probe.index(token)
@@ -356,6 +367,7 @@ def test_a_credential_cut_by_the_size_bound_is_redacted_whole(tmp_path):
     assert logged.bounded is True
     assert logged.usage is not None
     assert api_key not in json.dumps(logged.usage)
+    assert logged.usage["input_tokens"] == 7
     assert set(logged.redacted) == {"a GitHub token", "an Anthropic API key"}
 
 
