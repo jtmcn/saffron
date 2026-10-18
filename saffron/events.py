@@ -47,6 +47,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Literal
 
+from saffron.credentials import redact
 from saffron.gates.contract import GateStatus
 
 # The one size bound feeding both paths a cell's stdout can reach the host's
@@ -290,27 +291,26 @@ class Budget:
 
 @dataclass(frozen=True, slots=True)
 class Agent:
-    """One line of the cell's stdout, or a host-authored fact about that stream. One of
-    four shapes: `event` — a parsed cell event, verbatim, under one key, never re-typed
-    (no Agent SDK type is imported here or anywhere outside `agent_runner.py`), and
-    whose JSON serialization is at most `BOUND_CHARS` characters; `line` — a raw line
-    that was not an event at all, from a process sharing the runner's stdout inside an
-    untrusted cell, quarantined by `raw=True` rather than dropped; `line` again but for
-    a different reason, when `bounded` is set instead — a parsed event whose own
-    `json.dumps` serialization exceeded `BOUND_CHARS`, too large to keep as `event` (a
-    dict truncated to a size budget is not a smaller version of the same event, so
-    `event` is `None` here rather than a partial one), stored as that serialization
-    sliced to `BOUND_CHARS` characters, with `original_chars` naming how large it really
-    was; or `detail` — a host-authored fact with no cell event behind it (a reap
-    outcome, a pipe closing), which can still quote the cell runtime's stderr. `raw` is
-    the field that must survive the log: a raw line that loses its flag on round-trip is
-    a quarantine that stopped being one. `bounded` is the same kind of fact for the
-    fourth shape — a bounded event that loses its flag reads as a whole one, which is
-    worse than the unbounded line it replaced (item 46). `describe()` renders a bounded
-    event as `agent: (bounded, N chars) <line, cut again to 160 for the terminal>` — the
-    same truncation the raw shape gets, on top of the one already applied for storage. A
-    bounded event's own counts and `model` survive separately in `usage`, kept verbatim.
-    `usage` is `None` when none were carried, or their `json.dumps` exceeds `_USAGE_BOUND_CHARS`."""
+    """One line of the cell's stdout, or a host-authored fact about the stream. Four shapes.
+    `event` is a parsed cell event, under one key, never re-typed. It is verbatim except
+    where redacted, and its JSON serialization is at most `BOUND_CHARS` characters. `line`
+    with `raw=True` is a raw line that was not an event, from a process sharing the
+    runner's stdout inside an untrusted cell: quarantined rather than dropped. `line`
+    again with `bounded=True` is a parsed event whose own `json.dumps` serialization
+    exceeded `BOUND_CHARS`, too large to keep as `event`. A truncated dict is not a
+    smaller version of the same event, so `event` is `None` here: stored as that
+    serialization sliced to `BOUND_CHARS` characters. `original_chars` names that
+    post-redaction length, never the pre-redaction size. `detail` is a host-authored fact
+    with no cell event behind it, such as a reap outcome or a pipe closing: it can still
+    quote the cell runtime's stderr. `raw` must survive the log round-trip: a raw line
+    that loses its flag reads as a quarantine that stopped being one. `bounded` is the
+    same kind of fact for the third shape above: a bounded event that loses its flag reads
+    as a whole one, worse than the unbounded line it replaced (item 46). `describe()`
+    renders a bounded event as `agent: (bounded, N chars) <line, cut again to 160 for the
+    terminal>`, the same truncation the raw shape gets, atop the one already applied for
+    storage. A bounded event's own counts and `model` survive separately in `usage`, kept
+    as redacted. `usage` is `None` when none were carried, or their `json.dumps` exceeds
+    `_USAGE_BOUND_CHARS`."""
 
     timestamp: float
     spec_id: str
@@ -321,6 +321,8 @@ class Agent:
     bounded: bool = False
     original_chars: int | None = None
     usage: dict | None = None
+    # Each credential description `EventLog.append` found and replaced, once per kind.
+    redacted: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -411,7 +413,7 @@ _KINDS: dict[str, type[Event]] = {
 
 def _bounded_usage(event: dict) -> dict | None:
     """The counts and `model` a bounded event's own cell-authored dict
-    carried, kept verbatim. Present or absent, never by truthiness, so a
+    carried, kept as redacted. Present or absent, never by truthiness, so a
     null count and a `0` both survive. An uncarried key is never
     backfilled. `None` when nothing was carried, or when the kept dict's
     own `json.dumps` exceeds `_USAGE_BOUND_CHARS`."""
@@ -423,6 +425,51 @@ def _bounded_usage(event: dict) -> dict | None:
     return usage
 
 
+def _redact_nested(value: object, token: str | None) -> tuple[object, list[str]]:
+    """`value` walked at every depth, dict keys included, every string leaf
+    passed through `credentials.redact`. An explicit stack, never recursion:
+    a cell-authored event can nest hundreds of levels deep, and a recursive
+    walk would raise before `append` could write anything (item 46).
+
+    Returns a value built from new containers, never the caller's own, and
+    the descriptions found, each named once in first-seen order."""
+    found: list[str] = []
+
+    def leaf(text: str) -> str:
+        new_text, kinds = redact(text, token=token)
+        for kind in kinds:
+            if kind not in found:
+                found.append(kind)
+        return new_text
+
+    if isinstance(value, str):
+        return leaf(value), found
+    if not isinstance(value, (dict, list)):
+        return value, found
+
+    root: dict | list = {} if isinstance(value, dict) else []
+    stack: list[tuple[dict | list, dict | list]] = [(value, root)]
+    while stack:
+        orig, new = stack.pop()
+        pairs = orig.items() if isinstance(orig, dict) else enumerate(orig)
+        for key, child in pairs:
+            if isinstance(child, str):
+                built: object = leaf(child)
+            elif isinstance(child, dict):
+                built = {}
+                stack.append((child, built))
+            elif isinstance(child, list):
+                built = []
+                stack.append((child, built))
+            else:
+                built = child
+            if isinstance(new, dict):
+                new[leaf(key) if isinstance(key, str) else key] = built
+            else:
+                new.append(built)
+    return root, found
+
+
 class EventLog:
     """Appends `Event`s to one task's `events.jsonl`, and nothing else.
 
@@ -431,8 +478,11 @@ class EventLog:
     (`plan.json`, `patch.diff`, `baseline.json`).
     """
 
-    def __init__(self, task_dir: Path) -> None:
+    def __init__(self, task_dir: Path, *, token: str | None = None) -> None:
         self._path = Path(task_dir) / "events.jsonl"
+        # The cell's own token, for `append`'s redaction. Never read from
+        # the environment here (item 46).
+        self._token = token
         # A disk-full night must not render as a night in which nothing
         # happened. `append` never raises; this is how anyone can tell.
         self.failed = False
@@ -449,6 +499,29 @@ class EventLog:
         5 MB written before this bound; 16517 characters now for 5 MB of `"`,
         the worst case, since writing escapes each stored character once."""
         try:
+            # Redacted first, before the size bound, so a credential the
+            # bound's cut would split is never written in part (item 46).
+            if isinstance(event, Agent):
+                kinds: list[str] = []
+                new_payload = event.event
+                if event.event is not None:
+                    new_payload, found = _redact_nested(event.event, self._token)
+                    kinds.extend(found)
+                new_line = event.line
+                if event.line is not None:
+                    new_line, found = redact(event.line, token=self._token)
+                    kinds.extend(found)
+                new_detail, found = redact(event.detail, token=self._token)
+                kinds.extend(found)
+                if kinds:
+                    seen = dict.fromkeys(kinds)
+                    event = replace(
+                        event,
+                        event=new_payload,
+                        line=new_line,
+                        detail=new_detail,
+                        redacted=tuple(seen),
+                    )
             if isinstance(event, Agent) and event.event is not None:
                 serialized = json.dumps(event.event)
                 if len(serialized) > BOUND_CHARS:
@@ -843,16 +916,19 @@ def describe(event: Event) -> str:
         return f"budget: ${event.value:.2f} of ${event.limit:.2f} — stopping"
 
     if isinstance(event, Agent):
+        # Named once per kind, on every shape this renders. The credential
+        # itself never reaches a line this short to begin with (item 46).
+        redacted = f" (redacted: {', '.join(event.redacted)})" if event.redacted else ""
         if event.bounded:
             return (
                 f"agent: (bounded, {event.original_chars} chars) "
-                f"{_clean(event.line or '', 160)}"
+                f"{_clean(event.line or '', 160)}{redacted}"
             )
         if event.raw:
-            return f"agent: (raw) {_clean(event.line or '', 160)}"
+            return f"agent: (raw) {_clean(event.line or '', 160)}{redacted}"
         if event.event is not None:
-            return _describe_agent_event(event.event)
-        return f"agent: {_clean(event.detail, _DETAIL_BOUND)}"
+            return _describe_agent_event(event.event) + redacted
+        return f"agent: {_clean(event.detail, _DETAIL_BOUND)}{redacted}"
 
     if isinstance(event, Terminal):
         if event.reason == "cut_off_no_salvage_room":
