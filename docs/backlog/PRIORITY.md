@@ -298,6 +298,9 @@ its batch. The `tests` gate takes a printed warning for every failure.
 `SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
 later one fits.
 
+**Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
+driver orders a stack by `depends_on`, not by the stack base a batch built.
+
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
 `SA-0290` merges. `CONTEXT.md` has no entry for a removed name.
 
@@ -555,6 +558,9 @@ passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
+
+**Placed 2026-10-17**, from the spec loop's run 43: **b-74a122**.
+`CONTEXT.md`'s Refusal entry lacks the citation cause.
 
 ~~**22**~~, ~~**23**~~, **31**, **19**, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

@@ -33,3 +33,4 @@ test names the ref each fixture needs.
 ## Record
 
 - 2026-09-22: filed from the spec loop's run 13.
+- 2026-10-17: the three local branches were deleted, and `SA-0294`'s cell baseline failed 4 `tests/test_corpus.py` witnesses. GitHub holds all 26 `refs/fixtures/*`, but the checkout held 10. The mirror copies refs from the checkout, so the cell lacked five fixture heads. `git fetch origin '+refs/fixtures/*:refs/fixtures/*'` restored them. A fresh clone fetches none of them.

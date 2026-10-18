@@ -34,3 +34,4 @@ layer's dependents are refused, as a missed layer's are.
 ## Record
 
 - 2026-10-16: filed from the spec loop's run 42.
+- 2026-10-17: recurred in the spec loop's run 43. A plain batch rescans into `SA-0276` after `SA-0284`. A `--stack` batch orders `SA-0294` behind 13 chained specs. The operator ran `SA-0294` as an attended cell first.

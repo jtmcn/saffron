@@ -1,10 +1,11 @@
 ---
 id: 40
 title: A host-side fix round can undo a gate the cell passed
-status: partial
+status: done
+closed: 2026-10-17
 tier: 1
 specs: [SA-0029, SA-0080, SA-0086, SA-0274, SA-0284]
-prs: [91, 247, 255, 887]
+prs: [91, 247, 255, 887, 899]
 commits: [4ba8bdf]
 cites: [§5.4]
 related: [97]
@@ -58,3 +59,4 @@ On 2026-10-16 `SA-0274` landed the second half in #887. `size` leaves
 the declared test paths out of its count, and the spec loop's `driver.py
 size` does the same. The first half stays open, beside item 97, with
 `SA-0275` and `SA-0284`.
+- 2026-10-17: the first half ships in #899. `saffron regate` runs the gates again on a branch after its review commits. Closed from the spec loop's run 43.

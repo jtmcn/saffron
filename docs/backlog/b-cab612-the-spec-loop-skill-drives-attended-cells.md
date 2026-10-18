@@ -44,3 +44,4 @@ above with one command.
 - 2026-10-12: marked by hand at the operator's ruling. The skill and its
   driver live under `.claude/`, and `SA-0279` refuses any spec that touches
   it.
+- 2026-10-17: run 43 restacked `SA-0284` onto #898's review commits by hand, after the batch drained. b-3a79a0 records the push that reached a stack base mid-batch.
