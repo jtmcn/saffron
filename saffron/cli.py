@@ -1,6 +1,6 @@
-"""`saffron`: cell, batch, draft, queue, reconcile, adopt, package, watch,
-fold, migrate, chains, serve, replay. `ratify` and `gc` are still unbuilt
-(§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, queue, reconcile, regate, adopt, package,
+watch, fold, migrate, chains, serve, replay. `ratify` and `gc` are still
+unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from saffron import (
     follow_up,
     preflight,
     qualify,
+    regate,
     scheduler,
     spec_review,
 )
@@ -164,6 +165,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     reconcile_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    regate_parser = subcommands.add_parser(
+        "regate",
+        help="judge a task's pull request at its current head with the "
+        "task's own gates, agent-free (backlog item 97)",
+    )
+    regate_parser.add_argument("task_id", type=int)
+    regate_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     adopt_parser = subcommands.add_parser(
         "adopt",
         help="name a by-hand pull request as one spec's newest task's own",
@@ -303,6 +312,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "reconcile":
             return _reconcile(args, ledger)
+
+        if args.command == "regate":
+            return _guarding_sigterm(lambda: _regate(args, ledger, out_dir))
 
         if args.command == "adopt":
             return _adopt(args, ledger)
@@ -2281,6 +2293,22 @@ def _reconcile(args: argparse.Namespace, ledger: Ledger) -> int:
     if gh_failures:
         print(f"reconcile: gh could not be run ({gh_failures[0]})")
     return 0
+
+
+def _regate(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron regate <task id> --repo .`: `regate.run_regate`'s whole
+    body, with `--repo` resolved and the host's ledger, batch tree, mirror
+    path and `gh` runner handed down. No agent runs, so this needs no
+    token, and a red result moves no task state."""
+    repo = args.repo.resolve()
+    return regate.run_regate(
+        args.task_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=_mirror_path(repo, args.home),
+        gh=run_gh,
+    )
 
 
 # A newest task in one of these carries no pull request yet and is the one

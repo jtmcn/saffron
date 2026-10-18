@@ -60,6 +60,7 @@ uv run saffron replay <repo> <pr>          # v0: replay a merged PR, agent-free
 uv run saffron cell .saffron/specs/SA-NNNN-<slug>.md --repo .    # v0.5: one attended cell
 uv run saffron queue --repo .              # v0.5: what a batch would run; reconciles PR state first
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
+uv run saffron regate <task id> --repo .   # judge a pull request's current head with the task's own gates
 uv run saffron package SA-NNNN --repo .    # run PACKAGE alone on a task whose own PACKAGE raised
 uv run saffron adopt SA-NNNN 502 --repo .  # name a by-hand pull request as a task's own
 uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
