@@ -891,7 +891,7 @@ def test_a_verdict_session_that_never_started_ends_rebut_gate_error(monkeypatch)
             (_silent_wall_kill, _no_reap, _no_exec),
         ],
     )
-    assert result_b.state == "REBUTTING"
+    assert result_b.state == "REBUTTAL_UNJUDGED"
 
     # Case C: correctness reuses A's "started then raised" session again,
     # contract reuses A's own never-started session.
