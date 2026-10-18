@@ -273,8 +273,8 @@ def _order(
     exclude: frozenset[str] = frozenset(),
 ) -> tuple[list[OrderRow], list[Path]]:
     """Parents before children, then priority, then id. A spec refused only
-    for an unmet `depends_on` on a parent in the order is admitted; every
-    other refusal stands. A `carried` row outranks the scan's row for its id,
+    for unmet `depends_on` parents, each in the order or in `done/`, is
+    admitted. Every other refusal stands. A `carried` row outranks the scan's row for its id,
     and an `exclude`d id is admitted by neither."""
     from saffron.intake import load_spec
 
@@ -309,12 +309,16 @@ def _order(
             continue
         deferred.append((spec, refusal.path))
 
+    # A parent retired to done/ merged, so it is met without being in the order.
+    merged = {
+        p.name[:7] for p in (REPO / ".saffron" / "specs" / "done").glob("SA-*.md")
+    }
     for _ in range(len(deferred) + 1):  # enough passes for a chain
         for spec, path in deferred:
             if (
                 spec.id not in admitted
                 and spec.id not in exclude
-                and all(d in admitted for d in spec.depends_on)
+                and all(d in admitted or d in merged for d in spec.depends_on)
             ):
                 admitted[spec.id] = row_for(spec, path)
 
