@@ -1618,13 +1618,13 @@ def test_a_cell_reports_each_phase_state_as_it_enters_it(monkeypatch, tmp_path):
     assert outcome.state == "READY_FOR_REVIEW"
     assert heard == ["IMPLEMENTING", "REVIEWING"]
 
-    # A REBUTTING end: a claimed fix with nothing committed and no argument.
+    # A REBUTTAL_UNJUDGED end: a claimed fix with nothing committed and no argument.
     heard = []
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=0)
     outcome, _ledger = _drive(
         monkeypatch,
-        tmp_path / "rebutting",
+        tmp_path / "unjudged",
         cell=cell,
         turns=_through_rebut(
             _turn("I have addressed the findings."),
@@ -5180,7 +5180,7 @@ def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
 def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_path):
     """SA-0231, criterion 1: REBUT's pools hold at any spend, and none is
     the task's remainder. A rebuttal turn the cap cuts, with nothing committed,
-    ends EXHAUSTED where run_rebut would halt at REBUTTING. A Budget event
+    ends EXHAUSTED where run_rebut would halt at REBUTTAL_UNJUDGED. A Budget event
     still follows only a REBUT that started at or past budget_usd. A REBUT
     that only crosses it during its own spend gets none."""
     for budget_usd in (20.00, 3.75, 1.00, 0.75, 0.25):
