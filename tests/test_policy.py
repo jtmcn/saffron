@@ -1,6 +1,8 @@
 import os
+import re
 
 import pytest
+import yaml
 
 from saffron.repos.policy import PolicyError, effective_risk, load_policy
 
@@ -174,3 +176,97 @@ def test_no_match_and_no_declaration_leaves_the_tier_alone():
         effective_risk("standard", ["docs/readme.md"], ["saffron/cell/**"])
         == "standard"
     )
+
+
+def test_a_witness_block_is_checked_when_the_policy_loads(tmp_path):
+    """`load_policy` refuses a bad `witness:` block with `PolicyError`.
+    A constant pattern missing `name` or `value`, or not a regular
+    expression. A `replace` naming a group its pattern lacks. A bad
+    `witness_name`. A `witness_body` missing `{name}`, or invalid once
+    filled in. It also loads a full block and reads it back.
+
+    Each message matches the validator's own wording. A bare
+    `extra_forbidden` error for an undeclared `witness:` key embeds
+    the whole mapping, which can repeat the same text (item b-5b1f8a).
+    """
+    good_pattern = r"(?P<name>[A-Z]+) = (?P<value>\d+)"
+    cases = []
+
+    no_name = r"(?P<value>\d+)"
+    cases.append(
+        (
+            {"constants": [{"pattern": no_name, "replace": ""}]},
+            f"witness constant pattern {no_name!r} has no `name` group",
+        )
+    )
+
+    no_value = r"(?P<name>[A-Z]+)"
+    cases.append(
+        (
+            {"constants": [{"pattern": no_value, "replace": ""}]},
+            f"witness constant pattern {no_value!r} has no `value` group",
+        )
+    )
+
+    not_a_regex = r"(?P<name>[A-Z]+"
+    cases.append(
+        (
+            {"constants": [{"pattern": not_a_regex, "replace": ""}]},
+            f"witness constant pattern {not_a_regex!r} is not a valid regular expression",
+        )
+    )
+
+    bad_replace = r"\g<nope>"
+    cases.append(
+        (
+            {"constants": [{"pattern": good_pattern, "replace": bad_replace}]},
+            f"witness constant replace {bad_replace!r} for pattern {good_pattern!r}",
+        )
+    )
+
+    bad_witness_name = r"::\w+$"
+    cases.append(
+        (
+            {"witness_name": bad_witness_name},
+            f"witness_name {bad_witness_name!r} has no `name` group",
+        )
+    )
+
+    no_placeholder = "def foo(("
+    cases.append(
+        (
+            {"witness_body": no_placeholder},
+            f"witness_body {no_placeholder!r} has no {{name}} in it",
+        )
+    )
+
+    invalid_once_filled = "def {name}(("
+    cases.append(
+        (
+            {"witness_body": invalid_once_filled},
+            f"witness_body {invalid_once_filled!r} is not a valid regular "
+            "expression once {name} is filled in",
+        )
+    )
+
+    for index, (witness_block, expected) in enumerate(cases):
+        text = yaml.dump({"gates": {}, "witness": witness_block})
+        case_dir = tmp_path / str(index)
+        case_dir.mkdir()
+        repo = write_repo(case_dir, policy_text=text, gates=())
+        with pytest.raises(PolicyError, match=re.escape(expected)):
+            load_policy(repo)
+
+    full_block = {
+        "witness_name": r"::(?P<name>\w+)$",
+        "witness_body": r"def {name}\(",
+        "constants": [{"pattern": good_pattern, "replace": r"(\g<value> + 1)"}],
+    }
+    full_dir = tmp_path / "full"
+    full_dir.mkdir()
+    text = yaml.dump({"gates": {}, "witness": full_block})
+    policy, _ = load_policy(write_repo(full_dir, policy_text=text, gates=()))
+    assert policy.witness.witness_name == full_block["witness_name"]
+    assert policy.witness.witness_body == full_block["witness_body"]
+    assert len(policy.witness.constants) == 1
+    assert policy.witness.constants[0].pattern == good_pattern

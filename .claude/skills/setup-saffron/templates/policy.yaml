@@ -29,5 +29,14 @@ integrity:
     - .saffron/**
     - "**/.gitignore"
 
+witness:
+  # FILL: Python `re`, checked when this policy loads. Each pattern's
+  # `name` group is a constant's name; a constant pattern's `value` group
+  # is the span a derived mutant edits, and its `replace` must leave every
+  # matched file importable.
+  witness_name: null
+  witness_body: null
+  constants: []
+
 # FILL: caps for a thread pool sized from the CPU count.
 thread_env: {}

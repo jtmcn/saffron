@@ -43,12 +43,13 @@ A migration round-trip, a schema check, an invariant only this repo states. Prop
 **C. `elevate_on`.** This is most of what onboarding means, so ask even when you have a guess. Offer the guess as the recommendation.
 The question is §5.6's: *where in here does a plausible-looking wrong change hurt most?*
 
-**D. `protected` and `integrity`.** Propose these from what step 1 found, without a question per list:
+**D. `protected`, `integrity` and `witness`.** Propose these from what step 1 found, without a question per list:
 
 - `protected`: files no task edits, such as a lockfile or a design record the owner names.
 - `integrity.test_paths`: where the tests live.
 - `integrity.suppressions`: each language's skip, expected-failure and ignore-comment tokens. A token the list omits is a hole `integrity` cannot see.
 - `integrity.gate_config`: every file that changes what a gate measures. That includes each tool's config, a `conftest.py` or its analogue, and `**/.gitignore`. Saffron's own `.saffron/policy.yaml` shows the reasoning behind each entry.
+- `witness.witness_name`, `witness.witness_body` and `witness.constants`: Python `re` patterns naming the language's own constant shape and where a test's own text ends. Left `null`/empty when the language's constants are not worth deriving a mutant from yet.
 
 `envelope_default` stays empty. It is parsed and not read yet.
 

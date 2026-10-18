@@ -156,10 +156,15 @@ def _template_policy() -> dict:
 
 
 def test_the_policy_template_names_every_policy_field() -> None:
+    # A new name this spec adds, imported inside the body (`CLAUDE.md`'s
+    # own note on why: `revert` must still collect this file).
+    from saffron.repos.policy import WitnessPatterns
+
     policy = _template_policy()
     Policy.model_validate(policy)
     assert set(policy) == set(Policy.model_fields)
     assert set(policy["integrity"]) == set(IntegrityPatterns.model_fields)
+    assert set(policy["witness"]) == set(WitnessPatterns.model_fields)
 
 
 def test_the_policy_template_declares_every_repo_owned_role() -> None:

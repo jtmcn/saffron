@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from saffron.gates.core.scope import matches
 
@@ -63,6 +71,91 @@ class IntegrityPatterns(BaseModel):
     gate_config: list[str] = Field(default_factory=list)
 
 
+class ConstantPattern(BaseModel):
+    """One spelling of a constant, and the mutant that falsifies it.
+
+    `pattern` is a Python `re` expression whose `name` group names the
+    constant and whose `value` group is the span `constant_mutants` edits.
+    `replace` is a template `re` expands against a match of `pattern`.
+    It takes the `value` span's place, so it names the value's own group
+    and nothing else a match of `pattern` does not also carry.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pattern: str
+    replace: str = ""
+
+    @model_validator(mode="after")
+    def _is_checkable(self) -> ConstantPattern:
+        try:
+            compiled = re.compile(self.pattern)
+        except re.error as exc:
+            raise ValueError(
+                f"witness constant pattern {self.pattern!r} is not a valid regular expression: {exc}"
+            ) from exc
+        if "name" not in compiled.groupindex:
+            raise ValueError(
+                f"witness constant pattern {self.pattern!r} has no `name` group"
+            )
+        if "value" not in compiled.groupindex:
+            raise ValueError(
+                f"witness constant pattern {self.pattern!r} has no `value` group"
+            )
+        try:
+            compiled.sub(self.replace, "")
+        except (re.error, IndexError) as exc:
+            raise ValueError(
+                f"witness constant replace {self.replace!r} for pattern {self.pattern!r}: {exc}"
+            ) from exc
+        return self
+
+
+class WitnessPatterns(BaseModel):
+    """The repo's vocabulary for deriving a constant mutant from its own
+    diff (DESIGN.md §5.4.1, backlog item b-5b1f8a).
+
+    Every field is absent by default. An omitted `witness:` block must
+    derive nothing, since every spec and every repo predates this field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    witness_name: str | None = None
+    witness_body: str | None = None
+    constants: list[ConstantPattern] = Field(default_factory=list)
+
+    @field_validator("witness_name")
+    @classmethod
+    def _witness_name_is_checkable(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            compiled = re.compile(value)
+        except re.error as exc:
+            raise ValueError(
+                f"witness_name {value!r} is not a valid regular expression: {exc}"
+            ) from exc
+        if "name" not in compiled.groupindex:
+            raise ValueError(f"witness_name {value!r} has no `name` group")
+        return value
+
+    @field_validator("witness_body")
+    @classmethod
+    def _witness_body_is_checkable(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if "{name}" not in value:
+            raise ValueError(f"witness_body {value!r} has no {{name}} in it")
+        try:
+            re.compile(value.format(name=re.escape("x")))
+        except re.error as exc:
+            raise ValueError(
+                f"witness_body {value!r} is not a valid regular expression once {{name}} is filled in: {exc}"
+            ) from exc
+        return value
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,6 +164,7 @@ class Policy(BaseModel):
     protected: list[str] = Field(default_factory=list)
     envelope_default: list[str] = Field(default_factory=list)
     integrity: IntegrityPatterns = Field(default_factory=IntegrityPatterns)
+    witness: WitnessPatterns = Field(default_factory=WitnessPatterns)
     thread_env: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("gates")

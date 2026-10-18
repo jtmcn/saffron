@@ -16,7 +16,9 @@ It is `revert`'s exception, not a new one (§2.1). This gate executes no
 tool: it applies a text edit the *spec* supplied — data, not code — through
 an injected `mutate` context manager, and then invokes a gate the repo
 already declared, through the same JSON contract every gate uses, with the
-subset argument `revert` established. It runs no runner, knows no framework,
+subset argument `revert` established. The edit can come from the repo's
+own declared `witness:` patterns instead, applied the identical way. It
+runs no runner, knows no framework,
 parses no node id, and does no file I/O of its own — `mutate` is a callable
 from a `Mutant` to a context manager, and holds whatever path it needs so
 this gate never has to (`SA-0060`).
@@ -44,12 +46,21 @@ this gate exists to refuse.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from typing import Literal
 
 from saffron.gates.contract import Failure, GateResult
+from saffron.gates.core.integrity import (
+    _DiffError,
+    _FileDiff,
+    _parse_block,
+    _split_blocks,
+)
+from saffron.gates.core.scope import matches
 from saffron.intake import Criterion, Mutant
+from saffron.repos.policy import WitnessPatterns
 
 # Run the repo's declared `tests` gate over exactly this subset — never
 # discovered here; core knows nothing about which gate fills the role (§2.1).
@@ -107,7 +118,7 @@ def witness_gate(
     edit_noun: EditNoun = "mutant",
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
-    undone.
+    undone. A mutant can also come from `constant_mutants`.
 
     `skip` is the answer for a spec that declares no mutants — every spec
     that exists today, and this gate must not fail a task for a field its
@@ -301,3 +312,157 @@ def witness_gate(
         status="skip",
         summary=f"no declared {edit_noun} produced a trustworthy verdict{note}",
     )
+
+
+# A mutant the repo derives from the diff itself (§5.4.1, b-5b1f8a),
+# through its own declared `witness:` patterns (`WitnessPatterns`).
+
+CLAIM_TEMPLATE = (
+    "the witness names `{name}` and passes with any value of it, so pin the "
+    "value as a literal"
+)
+
+
+def _new_side(
+    hunk: list[tuple[str, str, int | None]],
+) -> tuple[str, list[tuple[int, int]]]:
+    """A hunk's context and added lines, joined with `\\n`.
+
+    Also each kept line's `(start, end)` offset in that text, as a parallel
+    list. A removed line contributes nothing: it has no new side.
+    """
+    lines = [content for kind, content, _ in hunk if kind != "-"]
+    kinds = [kind for kind, _content, _ in hunk if kind != "-"]
+    text_parts: list[str] = []
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    for content in lines:
+        start = pos
+        end = start + len(content)
+        spans.append((start, end))
+        text_parts.append(content)
+        pos = end + 1  # the "\n" this function joins with
+    return "\n".join(text_parts), [
+        span for span, kind in zip(spans, kinds, strict=True) if kind == "+"
+    ]
+
+
+def _overlaps_added(span: tuple[int, int], added: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(start < a_end and end > a_start for a_start, a_end in added)
+
+
+def _readable_files(diff: str, test_paths: Sequence[str]) -> list[_FileDiff]:
+    try:
+        blocks = _split_blocks(diff)
+    except _DiffError:
+        return []
+    files = []
+    for block in blocks:
+        try:
+            file_diff = _parse_block(block)
+        except _DiffError:
+            continue
+        if file_diff.unreadable or file_diff.new_path is None:
+            continue
+        if any(matches(file_diff.path, pattern) for pattern in test_paths):
+            continue
+        files.append(file_diff)
+    return files
+
+
+def _candidate_constants(
+    diff: str, patterns: WitnessPatterns, test_paths: Sequence[str]
+) -> list[tuple[str, str, str, str]]:
+    """Every `(name, file, find, replace)` the diff's non-test files add or
+    change, where the match overlaps an added line."""
+    candidates: list[tuple[str, str, str, str]] = []
+    for file_diff in _readable_files(diff, test_paths):
+        for hunk in file_diff.hunks:
+            text, added = _new_side(hunk)
+            for entry in patterns.constants:
+                for match in re.finditer(entry.pattern, text):
+                    if not _overlaps_added((match.start(), match.end()), added):
+                        continue
+                    name = match.group("name")
+                    find = text[match.start() : match.end()]
+                    value_start = match.start("value") - match.start()
+                    value_end = match.end("value") - match.start()
+                    expanded = match.expand(entry.replace)
+                    replace = find[:value_start] + expanded + find[value_end:]
+                    candidates.append((name, file_diff.path, find, replace))
+    return candidates
+
+
+def _witness_name(criterion: Criterion, patterns: WitnessPatterns) -> str | None:
+    assert patterns.witness_name is not None  # callers check this first
+    found = re.search(patterns.witness_name, criterion.witness)
+    if found is None:
+        return None
+    return found.group("name")
+
+
+def _witness_text(name: str, diff: str, patterns: WitnessPatterns) -> str:
+    """Every `witness_body` match, over every file's hunks' new sides,
+    concatenated. Not filtered by `test_paths`: a witness commonly lives
+    under one."""
+    assert patterns.witness_body is not None  # callers check this first
+    body_pattern = patterns.witness_body.format(name=re.escape(name))
+    pieces = []
+    for file_diff in _readable_files(diff, ()):
+        for hunk in file_diff.hunks:
+            text, _added = _new_side(hunk)
+            pieces.extend(m.group(0) for m in re.finditer(body_pattern, text))
+    return "\n".join(pieces)
+
+
+def _names_whole_word(text: str, name: str) -> bool:
+    return re.search(rf"\b{re.escape(name)}\b", text) is not None
+
+
+def constant_mutants(
+    diff: str,
+    acceptance: Sequence[Criterion],
+    patterns: WitnessPatterns,
+    test_paths: Sequence[str],
+) -> list[Criterion]:
+    """A derived `Criterion` carries a `Mutant`. One exists for each pair
+    of a constant and a criterion whose own witness names that constant.
+
+    `[]`, never a raise, when the repo declares no patterns, or `diff`
+    is not the shape `integrity`'s own parser trusts (§5.4.1).
+    """
+    if not patterns.witness_name or not patterns.witness_body or not patterns.constants:
+        return []
+
+    candidates = _candidate_constants(diff, patterns, test_paths)
+    if not candidates:
+        return []
+
+    witness_texts: dict[str, str] = {}
+    derived: list[Criterion] = []
+    emitted: set[tuple[str, str]] = set()
+    for criterion in acceptance:
+        if criterion.witness not in witness_texts:
+            name = _witness_name(criterion, patterns)
+            witness_texts[criterion.witness] = (
+                _witness_text(name, diff, patterns) if name is not None else ""
+            )
+        text = witness_texts[criterion.witness]
+        if not text:
+            continue
+        for name, file_, find, replace in candidates:
+            key = (criterion.witness, name)
+            if key in emitted:
+                continue
+            if not _names_whole_word(text, name):
+                continue
+            emitted.add(key)
+            derived.append(
+                Criterion(
+                    claim=CLAIM_TEMPLATE.format(name=name),
+                    witness=criterion.witness,
+                    mutant=Mutant(file=file_, find=find, replace=replace),
+                )
+            )
+    return derived
