@@ -53,6 +53,7 @@ def _drive(
     events: Sequence[Event] | None = None,
     on_cell: Callable[[dict], None] | None = None,
     history: History | None = None,
+    token: str | None = None,
     **outcome_fields,
 ) -> CellOutcome:
     """One `run_task` call whose cell ends in `state`.
@@ -110,7 +111,7 @@ def _drive(
         repo=tmp_path / "target-repo",
         ledger=Ledger(tmp_path / f"{spec_id}.db"),
         out_dir=out_dir,
-        token=None,
+        token=token,
     )
     # None of this module's specs declare `consumes`, so `run_task` never
     # refuses here.
@@ -590,8 +591,8 @@ def test_a_log_that_failed_on_its_first_write_still_warns(
         real thing. `saffron.task.EventLog` is what `run_task` builds from,
         so this is where the substitution has to land."""
 
-        def __init__(self, task_dir):
-            super().__init__(task_dir)
+        def __init__(self, task_dir, *, token=None):
+            super().__init__(task_dir, token=token)
             self._first = True
 
         def append(self, event):
@@ -640,8 +641,8 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
         onward fails without writing, as a disk that fills partway through a
         night would."""
 
-        def __init__(self, task_dir):
-            super().__init__(task_dir)
+        def __init__(self, task_dir, *, token=None):
+            super().__init__(task_dir, token=token)
             self._count = 0
 
         def append(self, event):
@@ -676,6 +677,41 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
     logged = read_log(out_dir / "SY-11")
     assert len(logged) == 2, "only the two appends that ran before the flip land"
     assert logged[1] == events[0]
+
+
+def test_run_task_redacts_the_cells_own_token_from_its_log(tmp_path, monkeypatch):
+    """`run_task` hands its default log the token it was given, and never
+    reads the environment for it. The witness unsets
+    `CLAUDE_CODE_OAUTH_TOKEN` and drives a token of no listed shape through
+    a raw line the cell double emits."""
+    from saffron.events import Agent
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    token = "zz-" + "token-" + "abcdef0123456789"
+    out_dir = tmp_path / "out"
+    events = [
+        Agent(timestamp=1.0, spec_id="SY-12", raw=True, line=f"hello {token} world")
+    ]
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-12",
+        state="EXHAUSTED",
+        task_id=13,
+        out_dir=out_dir,
+        events=events,
+        token=token,
+    )
+
+    log_path = out_dir / "SY-12" / "events.jsonl"
+    assert token not in log_path.read_text()
+
+    logged = read_log(out_dir / "SY-12")
+    agent_events = [event for event in logged if isinstance(event, Agent)]
+    assert agent_events
+    assert agent_events[0].redacted == ("the cell's own CLAUDE_CODE_OAUTH_TOKEN",)
 
 
 def test_a_handoff_carries_both_halves_or_neither():

@@ -489,7 +489,7 @@ def run_task(
         # `package()` both default to: a caller that passes nothing must still
         # get `events.jsonl`. A print-only default is the defect item 43 is
         # about, and is not this.
-        log = EventLog(out_dir / spec.id)
+        log = EventLog(out_dir / spec.id, token=token)
         # ponytail: re-derives `EventLog`'s private path, since it has no accessor.
         log_path = out_dir / spec.id / "events.jsonl"
 
