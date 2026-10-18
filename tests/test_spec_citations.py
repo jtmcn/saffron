@@ -1,0 +1,165 @@
+"""Tests for `saffron/spec_citations.py`: a spec's `file:line` citations
+checked against a git commit. Ported from the spec loop driver's `cite`
+command. Each fixture builds its own small repository, so this module shares
+no fixture with `tests/test_spec_loop_driver.py`.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+
+import pytest
+
+
+def _git(cwd, *args):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def empty_repo(tmp_path, monkeypatch):
+    """A git repo on `main` with no commits, blind to the host's git config."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+    return tmp_path
+
+
+def test_citation_defects_resolve_each_citation_at_the_given_commit(empty_repo):
+    from saffron.repos.mirror import GitError
+    from saffron.spec_citations import citation_defects
+
+    repo = empty_repo
+    thing = "\n".join(f"line {i}" for i in range(1, 21)) + "\n"  # 20 lines
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "thing.py").write_text(thing)
+    (repo / "pkg" / "README").write_text("no suffix at all\n")
+    (repo / "run.zzz").write_text("a\nb\nc\nd\n")  # 4 lines, an unlisted suffix
+    (repo / "pkg" / "sub").mkdir()
+    (repo / "pkg" / "sub" / "deep.py").write_text("one\n")
+    _git(
+        repo,
+        "add",
+        "pkg/thing.py",
+        "pkg/README",
+        "run.zzz",
+        "pkg/sub/deep.py",
+    )
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    # A read from the working tree, not the committed blob, would see this.
+    (repo / "pkg" / "thing.py").write_text("only\ntwo\n")
+
+    clean = (
+        "The loop reads `pkg/thing.py:5` for its shape. It also reads "
+        "`pkg/thing.py:20` at the tail. A `localhost:8080` fixture stub sits "
+        "beside it, never a citation. Neither is `importlib.util:3`. Nor is "
+        "a plain `06:30` deploy window."
+    )
+    assert citation_defects(repo, base, clean) == []
+
+    defective = clean + (
+        " A now-missing `pkg/missing.py:5` citation points at nothing. Another "
+        "dangling `dir/README:3` points at nothing too. The range "
+        "`pkg/thing.py:2-999` overruns the file. The helper `run.zzz:9` "
+        "overruns too. A directory `pkg/sub:3` is cited directly."
+    )
+    assert citation_defects(repo, base, defective) == [
+        f"pkg/missing.py:5: no such file at {base}",
+        f"dir/README:3: no such file at {base}",
+        f"pkg/thing.py:2-999: pkg/thing.py has 20 lines at {base}",
+        f"run.zzz:9: run.zzz has 4 lines at {base}",
+        f"pkg/sub:3: no such file at {base}",
+    ]
+
+    with pytest.raises(GitError):
+        citation_defects(repo, "0" * 40, "See `README.md:1` for the shape.")
+
+
+def test_citation_defects_anchor_a_bare_line_number_inside_its_own_paragraph(
+    empty_repo,
+):
+    from saffron.spec_citations import citation_defects
+
+    repo = empty_repo
+    (repo / "a").mkdir()
+    (repo / "b").mkdir()
+    (repo / "a" / "thing.py").write_text(
+        "\n".join(f"a{i}" for i in range(1, 31)) + "\n"
+    )
+    (repo / "b" / "other.py").write_text(
+        "\n".join(f"b{i}" for i in range(1, 51)) + "\n"
+    )
+    _git(repo, "add", "a/thing.py", "b/other.py")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "The loop reads `a/thing.py` for its shape. See `:5` for where it starts "
+        "and `:31` for the tail.\n"
+        "\n"
+        "Read `b/other.py:3` for the check. It matches no `importlib.util:2`. "
+        "Then `:4` confirms it.\n"
+        "\n"
+        "Nothing here names a path. See `:9-45` for confirmation.\n"
+    )
+
+    assert citation_defects(repo, base, text) == [
+        f"a/thing.py:31: a/thing.py has 30 lines at {base}",
+        ":9-45: no path named earlier in its paragraph",
+    ]
+
+
+def test_citation_defects_report_quoted_text_that_sits_on_other_lines(empty_repo):
+    from saffron.spec_citations import citation_defects
+
+    repo = empty_repo
+    lines = [f"L{i}" for i in range(1, 72)]
+    lines[2] = "alpha marker"  # line 3, "alpha" found elsewhere (case 1)
+    lines[4] = "delta marker"  # line 5, "delta" found elsewhere (case 4)
+    lines[6] = "alpha marker"  # line 7, "alpha" found elsewhere (case 1)
+    lines[8] = "omega marker"  # line 9, "omega" found elsewhere (case 5)
+    lines[24] = "beta marker"  # line 25, inside case 2's range, not its first line
+    lines[44] = "epsilon marker"  # line 45, inside case 4's range
+    lines[64] = "iota marker"  # line 65, inside case 6's range only if merged in
+    lines[70] = "theta marker"  # line 71, "theta" found elsewhere (case 6)
+    (repo / "mod").mkdir()
+    (repo / "mod" / "lib.py").write_text("\n".join(lines) + "\n")
+    _git(repo, "add", "mod/lib.py")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        # Case 1: a bare citation, "alpha" at two other lines, none in range.
+        "The module `mod/lib.py` explains this. The `alpha` value sits at "
+        "`:11-20` supposedly.\n"
+        "\n"
+        # Case 2: a range citation. "beta" sits inside it, below its first line.
+        "Here `mod/lib.py:21-30` holds the `beta` reading directly.\n"
+        "\n"
+        # Case 3: a bare citation. "gamma" sits nowhere in the file at all.
+        "The module `mod/lib.py` is unrelated here. It holds `gamma` at "
+        "`:31-40` supposedly.\n"
+        "\n"
+        # Case 4: two strings. "epsilon" is in range and "delta" is not, so no report.
+        "Here `delta` and `epsilon` both matter, at `mod/lib.py:41-50` precisely.\n"
+        "\n"
+        # Case 5: two strings, neither in range. "omega" sits elsewhere, "zeta" nowhere.
+        "Both `zeta` and `omega` are claimed, at `mod/lib.py:51-60` exactly.\n"
+        "\n"
+        # Case 6: a period before a digit must still end the sentence, or the
+        # next sentence's "iota" (in range) wrongly suppresses this report.
+        "Here `theta` sits far off, at `mod/lib.py:61-70` presently. 9 more "
+        "items hold `iota` too.\n"
+    )
+
+    assert citation_defects(repo, base, text) == [
+        "mod/lib.py:11-20: quoted text sits at mod/lib.py:3, 7 instead",
+        "mod/lib.py:51-60: quoted text sits at mod/lib.py:9 instead",
+        "mod/lib.py:61-70: quoted text sits at mod/lib.py:71 instead",
+    ]
