@@ -7047,6 +7047,7 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
         "TE-310": [[], []],
         "TE-320": [[]],
         "TE-321": [["c1"]],
+        "TE-322": [RuntimeError("follow-up cite boom")],
     }
     cite_calls: list[tuple[str, str | None, str | None, int | None]] = []
     task_id_by_spec: dict[str, int] = {}
@@ -7070,6 +7071,7 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
         "__follow_ups__": [
             {"id": "TE-320", "budget_usd": 1.0},
             {"id": "TE-321", "budget_usd": 1.0},
+            {"id": "TE-322", "budget_usd": 1.0},
         ],
     }
     doubles = StackDoubles(ledger, repo_id, rows, order=order_log)
@@ -7167,6 +7169,7 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
     te310 = _spec_text("TE-310", touches=[])
     te320 = _spec_text("TE-320", touches=[])
     te321 = _spec_text("TE-321", touches=[])
+    te322 = _spec_text("TE-322", touches=[])
 
     assert cite_calls == [
         ("TE-301", None, None, task_id_by_spec["TE-301"]),
@@ -7181,6 +7184,7 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
         ("TE-310", "TE-309", te310, task_id_by_spec["TE-310"]),
         ("TE-320", "TE-310", te320, task_id_by_spec["TE-320"]),
         ("TE-321", "TE-320", te321, task_id_by_spec["TE-321"]),
+        ("TE-322", "TE-320", te322, task_id_by_spec["TE-322"]),
     ]
 
     assert order_log == [
@@ -7223,6 +7227,7 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
         "review:TE-320",
         "runner:TE-320",
         "cite:TE-321",
+        "cite:TE-322",
     ]
 
     assert doubles.runner_calls == [
@@ -7245,12 +7250,15 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
         f"{'TE-306':<10} raised RuntimeError: cite boom",
         f"{'TE-307':<10} refused  reaches TE-306",
         f"{'TE-321':<10} refused  1 citation(s) do not resolve",
+        f"{'TE-322':<10} raised RuntimeError: follow-up cite boom",
     ]
-    assert "follow-ups unrun  TE-321" in lines
+    assert "follow-ups unrun  TE-321 TE-322" in lines
 
     assert _task_state(ledger, task_id_by_spec["TE-301"]) == "QUEUED"
     assert _task_state(ledger, task_id_by_spec["TE-303"]) == "QUEUED"
     assert _task_state(ledger, task_id_by_spec["TE-321"]) == "QUEUED"
+    assert _task_state(ledger, task_id_by_spec["TE-322"]) == "QUEUED"
     assert _task_routes(ledger, task_id_by_spec["TE-301"]) == []
     assert _task_routes(ledger, task_id_by_spec["TE-303"]) == ["revise"]
     assert _task_routes(ledger, task_id_by_spec["TE-321"]) == []
+    assert _task_routes(ledger, task_id_by_spec["TE-322"]) == []
