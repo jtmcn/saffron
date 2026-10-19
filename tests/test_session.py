@@ -4178,15 +4178,25 @@ class _UnprovenVM(Apple):
         return False
 
 
+@dataclass(frozen=True)
+class _OtherSharedKernel(Podman):
+    """podman's dialect under another binary, so a warning must read the name."""
+
+    @property
+    def binary(self) -> str:
+        return "other"
+
+
 def test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_uncapped_pool(
     monkeypatch, tmp_path
 ):
     """b-0569f7: a task on a shared-kernel dialect with no `thread_env`
     entry warns once at preflight. It also records `thread_pool_uncapped`
-    on its own `task_created` fact, and does neither on a dialect with its
-    own kernel or with an entry declared."""
+    as true on its own `task_created` fact. On a dialect with its own
+    kernel, or with an entry declared, it does not warn and records false."""
     cases = [
         (Podman(), "gates: {}\n", True),
+        (_OtherSharedKernel(), "gates: {}\n", True),
         (Podman(), "gates: {}\nthread_env: {}\n", True),
         (Podman(), 'gates: {}\nthread_env:\n  OMP_NUM_THREADS: "1"\n', False),
         (Apple(), "gates: {}\n", False),
@@ -4225,6 +4235,24 @@ def test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_un
         assert key is not None
         created = next(f for f in record.read(key) if f.kind == "task_created")
         assert created.payload["thread_pool_uncapped"] is uncapped, i
+
+
+def test_a_task_created_by_a_caller_that_never_decided_carries_a_null_uncapped_pool(
+    tmp_path,
+):
+    """b-0569f7: a caller that passes no `thread_pool_uncapped` records `None`."""
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
+    repo_id = ledger.upsert_repo(
+        "repo", str(tmp_path / "repo"), str(tmp_path / "m.git"), None
+    )
+    task = ledger.create_task(
+        ledger.create_run(repo_id, "e" * 40), "SY-1", "a" * 64, branch="saffron/SY-1"
+    )
+    key = ledger.record_key(task)
+    assert key is not None
+    created = next(f for f in record.read(key) if f.kind == "task_created")
+    assert created.payload["thread_pool_uncapped"] is None
 
 
 def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(

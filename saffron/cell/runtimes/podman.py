@@ -80,8 +80,8 @@ class Podman:
 
     @property
     def shares_kernel(self) -> bool:
-        # Measured: `os.cpu_count()` inside a cell still sees the host's CPUs
-        # (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md:246-249).
+        # Measured: os.cpu_count() sees the host's CPUs (cpu_flags above), and the kernel
+        # is shared (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md:246-249).
         return True
 
     @property

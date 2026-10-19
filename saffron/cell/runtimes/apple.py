@@ -51,7 +51,8 @@ class Apple:
 
     @property
     def shares_kernel(self) -> bool:
-        # Each cell is its own VM (docs/appendices/G-the-cell-runtime.md:34).
+        # Measured: each cell is its own VM (docs/appendices/G-the-cell-runtime.md:34),
+        # with the vCPU offset in cpu_offset above.
         return False
 
     @property

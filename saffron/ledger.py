@@ -1499,7 +1499,7 @@ class Ledger:
                 "policy_sha": policy_sha,
                 "prompt_sha": prompt_sha,
                 # b-0569f7: a shared kernel with no thread_env cap, or None
-                # where the caller never decided (item 19).
+                # where the caller never decided.
                 "thread_pool_uncapped": thread_pool_uncapped,
                 **self._run_facts(run_id),
             },
