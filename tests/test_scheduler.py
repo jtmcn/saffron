@@ -3712,7 +3712,7 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     # apply to keeps a second one from slipping in behind it.
     disclosed = [r for r in refusals if "mutant names text" in r.reason]
     assert [r.path.name[:7] for r in disclosed] == ["SA-0063"]
-    # Seven more non-`depends_on` refusals, named by literal id rather
+    # Ten more non-`depends_on` refusals, named by literal id rather
     # than by the rule under test (`SA-0279`, backlog item b-e471bd).
     claude_touching = [r for r in refusals if "b-e471bd" in r.reason]
     assert [r.path.name[:7] for r in claude_touching] == [
@@ -3723,6 +3723,9 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
         "SA-0116",
         "SA-0129",
         "SA-0196",
+        "SA-0280",
+        "SA-0282",
+        "SA-0283",
     ]
     assert all(
         "depends_on" in r.reason
