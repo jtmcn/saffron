@@ -135,7 +135,7 @@ function `_seed_branch`).
 
 **A branch moves between two fetches.** `fetch_parent_branch` reads a
 parent's head fresh every call, because a predecessor's branch does not
-hold still (`saffron/phases/package.py:173-177`). So a check and a review
+hold still (`saffron/phases/package.py:167-170`). So a check and a review
 that each fetch can read two different commits.
 
 **`_batch` builds every stack callable once the scan resolves.** Under

@@ -90,7 +90,7 @@ acceptance:
       after each task. The reader runs to `READY_FOR_REVIEW`, and the next
       scan still holds the remover, naming the reader and `GATEWAY`. A
       remover with the later id, waiting in each of `READY_FOR_REVIEW`,
-      `APPROVED`, `MERGE_TRAIN` and `REBUTTAL_UNJUDGED`, holds the
+      `APPROVED`, `MERGE_TRAIN`, `REBUTTAL_UNJUDGED` and `REVIEW_INCOMPLETE`, holds the
       earlier-id reader. A remover whose task is `MERGED` or `EXHAUSTED`
       holds nothing, and the reader is a candidate with no refusal.
     witness: tests/test_scheduler.py::test_a_waiting_partner_holds_a_candidate_through_a_rescan
@@ -186,43 +186,43 @@ added `SA-0268` to its `depends_on`.
 
 **A spec declares the names it reads, and none it deletes.**
 `Spec.consumes` holds a `path` or `path:name` a parent built
-(`saffron/intake.py:169-171`). Its validator refuses an empty entry, an
+(`saffron/intake.py:195-197`). Its validator refuses an empty entry, an
 empty path or name, and a path that is not canonical
-(`saffron/intake.py:218-244`). A separate model validator refuses
-`consumes` with no `depends_on` (`saffron/intake.py:246-254`). No field
+(`saffron/intake.py:247-273`). A separate model validator refuses
+`consumes` with no `depends_on` (`saffron/intake.py:288-296`). No field
 names what a spec deletes. `Spec` sets `extra="forbid"`, so it
-refuses an unknown key (`saffron/intake.py:160`).
+refuses an unknown key (`saffron/intake.py:184`).
 
 **How the scan builds and refuses.** `build_queue`
-(`saffron/scheduler.py:1000`) parses every spec in the directory with
-`discover_specs` (`saffron/scheduler.py:1055`). It keeps as a candidate each one with no
+(`saffron/scheduler.py:1022`) parses every spec in the directory with
+`discover_specs` (`saffron/scheduler.py:1077`). It keeps as a candidate each one with no
 task done with it at its `spec_sha`. It then runs `_refuse` on each
-candidate in scan order (`saffron/scheduler.py:1150-1167`).
+candidate in scan order (`saffron/scheduler.py:1171-1189`).
 The loop passes `check_dependencies=not stack`
-(`saffron/scheduler.py:1161`). So under `stack=True`, `_refuse` skips its
+(`saffron/scheduler.py:1183`). So under `stack=True`, `_refuse` skips its
 `depends_on` loop and `_stack_order` decides `depends_on` instead.
-`_criteria_texts` (`saffron/scheduler.py:295-300`) returns a spec's
+`_criteria_texts` (`saffron/scheduler.py:307-312`) returns a spec's
 acceptance claims as prose.
 
 **When two specs compete, the scheduler lets the lower id through.**
 `_resolve_stack_base` takes the lowest qualifying id with
-`min(qualifying)` (`saffron/scheduler.py:895`). A spec naming another qualifying id is
+`min(qualifying)` (`saffron/scheduler.py:917`). A spec naming another qualifying id is
 refused with a reason that names the winner "by the lower id"
-(`saffron/scheduler.py:899-908`). `_stack_order` breaks a priority tie on
-`c.spec.id`, the lower id first (`saffron/scheduler.py:977`).
+(`saffron/scheduler.py:921-930`). `_stack_order` breaks a priority tie on
+`c.spec.id`, the lower id first (`saffron/scheduler.py:999`).
 
 **The refusal count is pinned.** `RefusalKind` names eight kinds
-(`saffron/scheduler.py:172-181`). `tests/test_refusal_count.py` holds
+(`saffron/scheduler.py:184-193`). `tests/test_refusal_count.py` holds
 that to the count in `DESIGN.md` §4.2.1, and pins each kind's sites in `SITES`
 (`tests/test_refusal_count.py:37-49`). `depends_on` has two. No module in
 `saffron/` but `scheduler.py` reads `Refusal.kind`.
 
 **A waiting spec drops out of the scan.** A batch rescans. A spec with
 a task in `DONE_STATES` at its `spec_sha` is no candidate
-(`saffron/scheduler.py:1063`). `READY_FOR_REVIEW` is one of those states.
-`DEPENDENCY_WAITING_STATES` holds the four that can still land
-(`saffron/scheduler.py:98-100`). The default batch calls `rescan()` after
-every task (`saffron/batch.py:343-345`). So a held spec whose partner reaches
+(`saffron/scheduler.py:1085`). `READY_FOR_REVIEW` is one of those states.
+`DEPENDENCY_WAITING_STATES` holds the five that can still land
+(`saffron/scheduler.py:104-112`). The default batch calls `rescan()` after
+every task (`saffron/batch.py:356-358`). So a held spec whose partner reaches
 `READY_FOR_REVIEW` would run the same night, unless a waiting partner
 still counts.
 
@@ -340,7 +340,7 @@ test pins the absence.
 
 **The retired corpus test is the last criterion.**
 `test_no_real_spec_is_refused_on_its_own_acceptance_criteria`
-(`tests/test_scheduler.py:3622`) asserts every refusal but `SA-0063`'s
+(`tests/test_scheduler.py:3691`) asserts every refusal but `SA-0063`'s
 names `depends_on`. No retired spec declares `removes`, so it holds as
 it is. Do not edit it.
 
