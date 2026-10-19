@@ -81,3 +81,4 @@ prints.
 - 2026-09-21: #416 merged, and `SA-0116` retires to `done/`. `bookkeeping`
   prints three of the four edits. `partial`, because the `PRIORITY.md` edit is
   still by hand. Its first use wrote this commit's smoke-test paragraph.
+- 2026-10-19: the spec loop's run 44 found an edit `bookkeeping` misses. Retiring `SA-0280`, `SA-0282` and `SA-0283` owed no smoke change, it said. Yet `test_no_real_spec_is_refused_on_its_own_acceptance_criteria` in `tests/test_scheduler.py` names the `.claude` refusals by literal list, and needed the three ids.

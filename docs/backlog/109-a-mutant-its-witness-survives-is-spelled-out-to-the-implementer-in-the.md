@@ -39,3 +39,5 @@ intended: the operator has the spec.
 ## Record
 
 **Status: merged, 2026-09-14 — `SA-0078`, PR #243, in stack #251.** The mutant that does not apply still reaches the critic: item 114.
+
+- 2026-10-19: `SA-0288` (#914) deleted `witness_blocking`, and `witness` now blocks at every tier. The Problem above describes the gate before that change.

@@ -32,3 +32,4 @@ names the six tables it covers.
 ## Record
 
 - 2026-10-07: filed from the first spec review of SA-0226.
+- 2026-10-19: the Problem's "Nothing constructs a record-backed `Ledger` yet" turns false when #907 merges. The cutover this item must precede is then the next step (b-d4b847).

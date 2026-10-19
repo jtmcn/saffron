@@ -45,3 +45,4 @@ before the finish commits it.
   `prose` hits, the queue refused it on its own text, and a criterion named a
   path outside its `touches`. Re-verification reported 24 new failures and the
   finish escalated. Review fixed the concern with one comment on #872.
+- 2026-10-19: recurred in both batches of the spec loop's run 44. Batch 37's finish wrote back `SA-0276`'s revision. Batch 38's wrote back `SA-0281`'s revision and the follow-up `SA-0296`. Each finish escalated red and pushed nothing (b-fe82d9). So #903 carries the spec text from before its revision. `SA-0296` had no file until step 5 wrote it into `done/` by hand.

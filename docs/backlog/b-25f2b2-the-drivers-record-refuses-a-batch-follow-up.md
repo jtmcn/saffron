@@ -31,3 +31,4 @@ order row for it.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-10-19: recurred in the spec loop's run 44. `driver.py record SA-0296` refused the follow-up as not in the order, and found no single spec file for it. The delegate recorded it by hand.

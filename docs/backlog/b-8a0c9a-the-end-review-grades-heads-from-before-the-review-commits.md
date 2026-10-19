@@ -46,3 +46,4 @@ test drives an end review over a layer whose branch moved after PACKAGE.
   review graded the packaged heads and raised a `SA-0262` docstring concern
   a held review commit had fixed. Three of its four blockers were new and
   real, on `SA-0262` and `SA-0267`. The delegate fixed them before the push.
+- 2026-10-19: recurred in the spec loop's run 44. Batch 38's end review drafted `SA-0296` from the critic's citation note on #911. The delegate held that fix as a local review commit on #911, which the writer could not see. So `SA-0296` (#915) redid it, and the restack conflicted on the same line. Review kept #911's wording.

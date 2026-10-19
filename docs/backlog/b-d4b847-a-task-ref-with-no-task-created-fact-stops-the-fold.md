@@ -43,3 +43,4 @@ origin holds. A test drives both a pruned mirror and a fresh one.
 ## Record
 
 - 2026-10-12: filed from `SA-0278`'s spec review, round 1.
+- 2026-10-19: #907 wires the record in, from the spec loop's run 44. On 2026-10-19 this repo's mirror held 0 refs under `refs/saffron/`, so the `saffron migrate` cutover is still owed before the first wired night. PACKAGE's module docstring names the same prune for a branch it creates (`saffron/phases/package.py:8-11`). No item owned that.
