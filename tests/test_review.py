@@ -209,7 +209,7 @@ def test_a_lens_whose_session_failed_still_charges_what_it_spent():
 
 def test_a_lens_that_errored_ends_review_incomplete_whatever_the_others_found():
     """The errored check fires ahead of the blocker check and at any
-    position (`DESIGN.md` §5.5). The errored lens pairs with a clean lens,
+    position. The errored lens pairs with a clean lens,
     and with a blocker or a concern once before it and once after. No case
     lets a check that reads only the first or the last lens pass."""
     errored = LensReview(lens="correctness", error="not the schema")
