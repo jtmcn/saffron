@@ -10886,15 +10886,10 @@ def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
 
     # The third leg is a `standard` spec an `elevate_on` match elevates.
     # `size` already exercises this half.
-    for label, risk, policy, expected in (
-        ("standard", "standard", "gates: {}\n", "EXHAUSTED"),
-        ("elevated", "elevated", "gates: {}\n", "EXHAUSTED"),
-        (
-            "elevated-by-path",
-            "standard",
-            "gates: {}\nelevate_on:\n  - src/**\n",
-            "EXHAUSTED",
-        ),
+    for label, risk, policy in (
+        ("standard", "standard", "gates: {}\n"),
+        ("elevated", "elevated", "gates: {}\n"),
+        ("elevated-by-path", "standard", "gates: {}\nelevate_on:\n  - src/**\n"),
     ):
         cell = _stub_the_runtime(
             monkeypatch, suites=(baseline_suite, head_suite, head_suite)
@@ -10907,7 +10902,7 @@ def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
             spec=_spec(risk=risk, max_attempts=1),
             policy=policy,
         )
-        assert outcome.state == expected, label
+        assert outcome.state == "EXHAUSTED", label
         if label == "elevated-by-path":
             # The spec is still `standard`; the path match is what elevated the
             # attempt, and the level must follow *that*.
@@ -10991,75 +10986,59 @@ def test_a_task_whose_declared_mutant_survives_its_witness_never_reaches_review(
     """§5.4.1 (b-02d328): a declared mutant that survives its witness blocks
     at every risk tier, never only `elevated`. Three legs: a declared
     `standard`, a declared `elevated`, and a `standard` spec an
-    `elevate_on` path elevates. Each runs the real `witness_gate`.
+    `elevate_on` path elevates.
 
-    `run_suite` is replaced with one calling `witness_gate` for real, a
-    fresh frame opened each call. `run_tests` records its subset into
-    that frame and reports `pass`. The patched `worktree.source_mutated`,
-    applied after `_stub_the_runtime`'s own, records the mutant there.
+    The real `runner.run_suite` runs, so `run_witness` and `witness_gate`
+    do too. Only `runner.run_gate` is faked: a plain `tests` call opens a
+    frame, and a subset call records itself with the mutant live under it.
     """
-    from saffron.gates.core.witness import Mutated, witness_gate
+    from saffron.gates import runner
     from saffron.intake import Criterion, Mutant
 
+    real_run_suite = runner.run_suite
     criterion = Criterion(
         claim="the guard rejects a negative amount",
         witness="tests/test_x.py::test_guard",
         mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
     )
+    old = "tests/test_x.py::test_old"
 
-    def _make_run_suite(frames: list[dict]):
-        def _run_suite(
-            gates,
-            cwd,
-            *,
-            timeout_s=900,
-            executor=None,
-            acceptance: Sequence[Criterion] = (),
-            mutate: Mutated | None = None,
-        ):
-            assert mutate is not None  # `_suite` always supplies one
-            frame: dict = {"subsets": [], "mutants": []}
-            frames.append(frame)
+    def _fakes(frames: list[dict]):
+        live: list = [None]
 
-            def _run_tests(subset):
-                frame["subsets"].append(list(subset))
+        def _run_gate(name, executable, cwd, *, subset=None, **_kw):
+            if subset is None:
+                collected = [old] if not frames else [old, criterion.witness]
+                frames.append({"subsets": []})
                 return GateResult(
-                    gate="tests",
-                    status="pass",
-                    tool="pytest 8.0",
-                    collected=list(subset),
+                    gate=name, status="pass", tool="pytest 8.0", collected=collected
                 )
+            frames[-1]["subsets"].append((list(subset), live[0]))
+            return GateResult(
+                gate=name, status="pass", tool="pytest 8.0", collected=list(subset)
+            )
 
-            return [
-                witness_gate(acceptance=acceptance, mutate=mutate, run_tests=_run_tests)
-            ]
-
-        return _run_suite
-
-    def _make_source_mutated(frames: list[dict]):
         @contextlib.contextmanager
         def _source_mutated(_container, mutant):
-            frames[-1]["mutants"].append(mutant)
-            yield None
+            live[0] = mutant
+            try:
+                yield None
+            finally:
+                live[0] = None
 
-        return _source_mutated
+        return _run_gate, _source_mutated
 
-    for label, risk, policy, expected_tier in (
-        ("standard", "standard", "gates: {}\n", "standard"),
-        ("elevated", "elevated", "gates: {}\n", "elevated"),
-        (
-            "elevated-by-path",
-            "standard",
-            "gates: {}\nelevate_on:\n  - src/**\n",
-            "elevated",
-        ),
+    for label, risk, elevate_on, expected_tier in (
+        ("standard", "standard", "", "standard"),
+        ("elevated", "elevated", "", "elevated"),
+        ("elevated-by-path", "standard", "elevate_on:\n  - src/**\n", "elevated"),
     ):
         frames: list[dict] = []
+        run_gate, source_mutated = _fakes(frames)
         cell = _stub_the_runtime(monkeypatch)
-        monkeypatch.setattr("saffron.gates.runner.run_suite", _make_run_suite(frames))
-        monkeypatch.setattr(
-            "saffron.cell.worktree.source_mutated", _make_source_mutated(frames)
-        )
+        monkeypatch.setattr("saffron.gates.runner.run_suite", real_run_suite)
+        monkeypatch.setattr("saffron.gates.runner.run_gate", run_gate)
+        monkeypatch.setattr("saffron.cell.worktree.source_mutated", source_mutated)
 
         outcome, _ledger = _drive(
             monkeypatch,
@@ -11067,7 +11046,8 @@ def test_a_task_whose_declared_mutant_survives_its_witness_never_reaches_review(
             cell=cell,
             turns=[_turn(_block(_PLAN)), _turn()],
             spec=_spec(risk=risk, max_attempts=1, acceptance=[criterion]),
-            policy=policy,
+            policy="gates: {tests: {}}\n" + elevate_on,
+            gates=("tests",),
         )
         assert outcome.effective_risk == expected_tier, label
         assert outcome.state == "EXHAUSTED", label
@@ -11075,10 +11055,8 @@ def test_a_task_whose_declared_mutant_survives_its_witness_never_reaches_review(
         assert [
             (nf.gate, nf.failure.file, nf.failure.code) for nf in outcome.new_failures
         ] == [("witness", criterion.witness, "survived-mutant")], label
-
-        last = frames[-1]
-        assert last["subsets"] == [[criterion.witness]], label
-        assert last["mutants"] == [criterion.mutant], label
+        assert len(frames) >= 2, label
+        assert ([criterion.witness], criterion.mutant) in frames[1]["subsets"], label
 
 
 def _cell_container(mutate) -> str | None:
