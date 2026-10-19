@@ -85,6 +85,21 @@ def test_a_spec_declares_a_tier_only_where_its_frontmatter_sets_one():
     assert elevated.declared_risk == "elevated" and elevated.risk == "elevated"
 
 
+def test_a_spec_reads_as_version_1_and_refuses_any_other():
+    head = "---\nid: TE-1\ntitle: t\ntype: chore\n"
+
+    for text in (head + "---\n", head + "schema_version: 1\n---\n"):
+        spec = parse_spec(text)
+        assert spec.schema_version == 1
+        assert type(spec.schema_version) is int
+
+    for literal in ("2", "true", "1.0"):
+        with pytest.raises(SpecError) as excinfo:
+            parse_spec(head + f"schema_version: {literal}\n---\n")
+        assert "schema_version" in str(excinfo.value)
+        assert "[1]" in str(excinfo.value)
+
+
 def test_a_missing_frontmatter_block_is_rejected():
     with pytest.raises(SpecError, match="frontmatter"):
         parse_spec("# Just a heading\n")

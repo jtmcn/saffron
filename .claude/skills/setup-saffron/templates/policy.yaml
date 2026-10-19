@@ -1,3 +1,6 @@
+# The version of this file's format. Only 1 is read today.
+schema_version: 1
+
 # What Saffron reads from this repo. Drop a gate with no analogue here.
 gates:
   format:     { blocking: true }

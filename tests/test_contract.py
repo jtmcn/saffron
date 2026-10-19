@@ -96,6 +96,22 @@ def test_tool_is_absent_rather_than_invented():
     assert parse_gate_json(raw, expected_gate="lint").tool is None
 
 
+def test_a_gate_result_reads_as_version_1_and_refuses_any_other():
+    base = {"gate": "lint", "status": "pass", "tool": "x"}
+
+    for extra in ({}, {"schema_version": 1}):
+        result = parse_gate_json(json.dumps({**base, **extra}), expected_gate="lint")
+        assert result.schema_version == 1
+        assert type(result.schema_version) is int
+
+    for value in (2, True, 1.0):
+        raw = json.dumps({**base, "schema_version": value})
+        with pytest.raises(ValidationError) as excinfo:
+            parse_gate_json(raw, expected_gate="lint")
+        assert "schema_version" in str(excinfo.value)
+        assert "[1]" in str(excinfo.value)
+
+
 def test_a_gate_may_report_the_names_it_collected():
     raw = json.dumps(
         {

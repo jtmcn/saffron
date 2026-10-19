@@ -12,8 +12,9 @@ GitHub issues remain in use only for research/evidence records under
 - **Frontmatter** (YAML between `---` fences). `id`, `title` and `type` are
   required. The rest default: `priority` 3; `depends_on`, `envelope`, `touches`,
   `forbidden` and `pending_symbols` empty; the ceilings `budget_usd` 12,
-  `max_attempts` 4, `max_turns` 60 and `risk` `standard`. An unknown key is
-  refused, not ignored.
+  `max_attempts` 4, `max_turns` 60 and `risk` `standard`; `schema_version`
+  absent or declared `1` reads as `1`, and any other declared value is
+  refused. An unknown key is refused, not ignored.
 - **`estimated_lines`** is optional and absent by default. When declared it is
   a strict positive integer, the author's own estimate in changed lines, with
   no overrun added. `driver.py check` multiplies it by the overrun measured

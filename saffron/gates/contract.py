@@ -10,7 +10,7 @@ import json
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from saffron.intake import RiskTier
 
@@ -18,6 +18,9 @@ GateStatus = Literal["pass", "fail", "skip", "error"]
 
 _DIGITS = re.compile(r"\d+")
 _WHITESPACE = re.compile(r"\s+")
+
+# Versioned per module (DESIGN.md §3.2). Only 1 exists today.
+SCHEMA_VERSIONS: tuple[int, ...] = (1,)
 
 
 def split_lines(text: str) -> list[str]:
@@ -60,6 +63,8 @@ class Failure(BaseModel):
 class GateResult(BaseModel):
     """One execution of one gate against one tree — CONTEXT.md §4."""
 
+    # Absent or 1 reads as the integer 1. Any other value is refused below.
+    schema_version: int = 1
     gate: str
     status: GateStatus
     tool: str | None = None
@@ -84,6 +89,19 @@ class GateResult(BaseModel):
     failures: list[Failure] = Field(default_factory=list)
     summary: str = ""
     duration_ms: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _schema_version_is_supported(cls, data: object) -> object:
+        """Refuse a bool or a float by its own type, before pydantic coerces it."""
+        if isinstance(data, dict) and "schema_version" in data:
+            value = data["schema_version"]
+            if type(value) is not int or value not in SCHEMA_VERSIONS:
+                raise ValueError(
+                    f"schema_version {value!r} is not supported; this engine "
+                    f"reads: {sorted(SCHEMA_VERSIONS)}"
+                )
+        return data
 
 
 def normalize_message(message: str) -> str:

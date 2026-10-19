@@ -165,6 +165,24 @@ def test_a_repo_gate_named_for_a_core_gate_is_a_policy_error(tmp_path, name):
         load_policy(repo)
 
 
+def test_a_policy_reads_as_version_1_and_refuses_any_other(tmp_path):
+    for index, text in enumerate([VALID, VALID + "schema_version: 1\n"]):
+        repo = tmp_path / f"ok-{index}"
+        repo.mkdir()
+        policy, _ = load_policy(write_repo(repo, policy_text=text))
+        assert policy.schema_version == 1
+        assert type(policy.schema_version) is int
+
+    for index, literal in enumerate(["2", "true", "1.0"]):
+        repo = tmp_path / f"bad-{index}"
+        repo.mkdir()
+        text = VALID + f"schema_version: {literal}\n"
+        with pytest.raises(PolicyError) as excinfo:
+            load_policy(write_repo(repo, policy_text=text))
+        assert "schema_version" in str(excinfo.value)
+        assert "[1]" in str(excinfo.value)
+
+
 def test_a_spec_declared_elevated_risk_stays_elevated():
     """§5.6's first clause: the spec's own word is enough, with no diff at all."""
     assert effective_risk("elevated", [], []) == "elevated"

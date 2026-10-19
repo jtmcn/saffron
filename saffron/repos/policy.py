@@ -46,6 +46,10 @@ CORE_GATE_NAMES = frozenset(
 )
 
 
+# Versioned per module (DESIGN.md §3.2). Only 1 exists today.
+SCHEMA_VERSIONS: tuple[int, ...] = (1,)
+
+
 class PolicyError(ValueError):
     """A repo whose declarations cannot be trusted. It fails preflight."""
 
@@ -158,12 +162,27 @@ class WitnessPatterns(BaseModel):
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # Absent or 1 reads as the integer 1. Any other value is refused below.
+    schema_version: int = 1
     gates: dict[GateName, GateDeclaration] = Field(default_factory=dict)
     elevate_on: list[str] = Field(default_factory=list)
     protected: list[str] = Field(default_factory=list)
     integrity: IntegrityPatterns = Field(default_factory=IntegrityPatterns)
     witness: WitnessPatterns = Field(default_factory=WitnessPatterns)
     thread_env: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _schema_version_is_supported(cls, data: object) -> object:
+        """Refuse a bool or a float by its own type, before pydantic coerces it."""
+        if isinstance(data, dict) and "schema_version" in data:
+            value = data["schema_version"]
+            if type(value) is not int or value not in SCHEMA_VERSIONS:
+                raise ValueError(
+                    f"schema_version {value!r} is not supported; this engine "
+                    f"reads: {sorted(SCHEMA_VERSIONS)}"
+                )
+        return data
 
     @field_validator("gates")
     @classmethod
