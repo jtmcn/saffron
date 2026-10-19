@@ -270,3 +270,11 @@ def test_a_witness_block_is_checked_when_the_policy_loads(tmp_path):
     assert policy.witness.witness_body == full_block["witness_body"]
     assert len(policy.witness.constants) == 1
     assert policy.witness.constants[0].pattern == good_pattern
+
+    # A quantifier's braces in the body are regex, not a format field.
+    quantified = {"witness_body": r"def {name}\(\w{2}.{0,3}"}
+    quantified_dir = tmp_path / "quantified"
+    quantified_dir.mkdir()
+    text = yaml.dump({"gates": {}, "witness": quantified})
+    policy, _ = load_policy(write_repo(quantified_dir, policy_text=text, gates=()))
+    assert policy.witness.witness_body == quantified["witness_body"]

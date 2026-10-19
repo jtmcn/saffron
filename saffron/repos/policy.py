@@ -84,7 +84,7 @@ class ConstantPattern(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pattern: str
-    replace: str = ""
+    replace: str
 
     @model_validator(mode="after")
     def _is_checkable(self) -> ConstantPattern:
@@ -148,7 +148,7 @@ class WitnessPatterns(BaseModel):
         if "{name}" not in value:
             raise ValueError(f"witness_body {value!r} has no {{name}} in it")
         try:
-            re.compile(value.format(name=re.escape("x")))
+            re.compile(value.replace("{name}", re.escape("x")))
         except re.error as exc:
             raise ValueError(
                 f"witness_body {value!r} is not a valid regular expression once {{name}} is filled in: {exc}"

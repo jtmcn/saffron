@@ -30,12 +30,12 @@ integrity:
     - "**/.gitignore"
 
 witness:
-  # FILL: Python `re`, checked when this policy loads. Each pattern's
-  # `name` group is a constant's name; a constant pattern's `value` group
-  # is the span a derived mutant edits, and its `replace` must leave every
-  # matched file importable.
+  # FILL: a Python `re` searched in a witness id. Its `name` group is the test's name.
   witness_name: null
+  # FILL: a pattern holding `{name}` that matches that test's own text.
   witness_body: null
+  # FILL: a `pattern` per constant spelling, with `name` and the `value` a constant mutant edits.
+  # Each `replace` must leave every matched file importable.
   constants: []
 
 # FILL: caps for a thread pool sized from the CPU count.

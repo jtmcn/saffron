@@ -16,12 +16,12 @@ It is `revert`'s exception, not a new one (§2.1). This gate executes no
 tool: it applies a text edit the *spec* supplied — data, not code — through
 an injected `mutate` context manager, and then invokes a gate the repo
 already declared, through the same JSON contract every gate uses, with the
-subset argument `revert` established. The edit can come from the repo's
-own declared `witness:` patterns instead, applied the identical way. It
-runs no runner, knows no framework,
-parses no node id, and does no file I/O of its own — `mutate` is a callable
-from a `Mutant` to a context manager, and holds whatever path it needs so
-this gate never has to (`SA-0060`).
+subset argument `revert` established. A constant mutant arrives the same
+way, in a criterion `constant_mutants` derived from the repo's own declared
+`witness:` patterns. It runs no runner and knows no framework. It reads a
+node id only through the repo's `witness_name` pattern. It does no file I/O
+of its own. `mutate` is a callable from a `Mutant` to a context manager,
+and holds whatever path it needs so this gate never has to (`SA-0060`).
 
 **`error` is not `fail`.** A `tests` gate that could not start under the
 mutant — collection crashed, the toolchain broke — has answered nothing
@@ -58,7 +58,6 @@ from saffron.gates.core.integrity import (
     _parse_block,
     _split_blocks,
 )
-from saffron.gates.core.scope import matches
 from saffron.intake import Criterion, Mutant
 from saffron.repos.policy import WitnessPatterns
 
@@ -118,12 +117,12 @@ def witness_gate(
     edit_noun: EditNoun = "mutant",
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
-    undone. A mutant can also come from `constant_mutants`.
+    undone.
 
-    `skip` is the answer for a spec that declares no mutants — every spec
-    that exists today, and this gate must not fail a task for a field its
-    own spec predates — and for one whose every declared mutant failed to
-    apply, or whose mutator could not reach the tree at all: named in the
+    `skip` answers when no criterion carries a mutant, declared by the spec
+    or derived from the repo's `witness:` patterns. No task fails for a
+    field its spec predates. `skip` also answers a spec whose every mutant
+    failed to apply, or whose mutator could not reach the tree at all: named in the
     summary, never counted as a witness that did its job. `error` ends the
     attempt the moment the repo's `tests` gate could not answer for one
     mutant; nothing already restored is undone, and nothing not yet touched
@@ -328,8 +327,8 @@ def _new_side(
 ) -> tuple[str, list[tuple[int, int]]]:
     """A hunk's context and added lines, joined with `\\n`.
 
-    Also each kept line's `(start, end)` offset in that text, as a parallel
-    list. A removed line contributes nothing: it has no new side.
+    Also the `(start, end)` offset of each added line in that text. A
+    removed line contributes nothing: it has no new side.
     """
     lines = [content for kind, content, _ in hunk if kind != "-"]
     kinds = [kind for kind, _content, _ in hunk if kind != "-"]
@@ -365,7 +364,7 @@ def _readable_files(diff: str, test_paths: Sequence[str]) -> list[_FileDiff]:
             continue
         if file_diff.unreadable or file_diff.new_path is None:
             continue
-        if any(matches(file_diff.path, pattern) for pattern in test_paths):
+        if file_diff.matches_any(list(test_paths)):
             continue
         files.append(file_diff)
     return files
@@ -407,7 +406,7 @@ def _witness_text(name: str, diff: str, patterns: WitnessPatterns) -> str:
     concatenated. Not filtered by `test_paths`: a witness commonly lives
     under one."""
     assert patterns.witness_body is not None  # callers check this first
-    body_pattern = patterns.witness_body.format(name=re.escape(name))
+    body_pattern = patterns.witness_body.replace("{name}", re.escape(name))
     pieces = []
     for file_diff in _readable_files(diff, ()):
         for hunk in file_diff.hunks:

@@ -1,10 +1,7 @@
 """Tests for `constant_mutants` (DESIGN.md §5.4.1, backlog item b-5b1f8a).
 
-`constant_mutants` and `WitnessPatterns` are both new names this spec adds.
-Every test here imports them inside its own body, not at module scope. A
-module-level import would make this file fail to collect once `revert`
-reverts the source that defines them. `revert` reads that as `skip`, not
-a repairable `fail` (`CLAUDE.md`'s own note on this).
+Every test imports `constant_mutants` and `WitnessPatterns` inside its body.
+A module-scope import would make `revert`'s reverted run a collection error.
 """
 
 from __future__ import annotations
@@ -224,6 +221,14 @@ index 1111111..2222222 100644
 +    "text"
 +)
  TAIL = "tail-value"
+diff --git a/b.py b/b.py
+index 5555555..6666666 100644
+--- a/b.py
++++ b/b.py
+@@ -1,2 +1,2 @@
+ KEEP = 1
+-OLD = "a"
++OLD = "b"
 diff --git a/tests/helper.py b/tests/helper.py
 new file mode 100644
 index 0000000..3333333
@@ -236,7 +241,7 @@ new file mode 100644
 index 0000000..4444444
 --- /dev/null
 +++ b/tests/test_stuff.py
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,29 @@
 +def test_uses_new():
 +    assert NEW == "value"
 +
@@ -267,6 +272,10 @@ index 0000000..4444444
 +
 +def test_spread():
 +    assert SPREAD
++
++
++def test_changed():
++    assert OLD == "b"
 """
 
 
@@ -278,7 +287,7 @@ def test_only_a_constant_the_diff_writes_and_a_witness_names_is_mutated():
     bare witness id `witness_name` does not match. A second criterion
     naming a witness already paired. `test_uses_new` pairs with `NEW`.
     `test_spread` pairs with a constant whose own match spans two
-    lines, so a matcher run one line at a time would miss it."""
+    lines. `test_changed` pairs with `OLD`, a line the diff changes."""
     from saffron.gates.core.witness import constant_mutants
     from saffron.repos.policy import WitnessPatterns
 
@@ -293,6 +302,7 @@ def test_only_a_constant_the_diff_writes_and_a_witness_names_is_mutated():
         Criterion(claim="c7", witness="tests/test_stuff.py::test_in_test_const"),
         Criterion(claim="c8", witness="tests/test_stuff.py::test_uses_new"),
         Criterion(claim="c9", witness="tests/test_stuff.py::test_spread"),
+        Criterion(claim="c10", witness="tests/test_stuff.py::test_changed"),
     ]
 
     derived = constant_mutants(_DIFF, acceptance, patterns, ["tests/**"])
@@ -304,6 +314,12 @@ def test_only_a_constant_the_diff_writes_and_a_witness_names_is_mutated():
         tuples.append((criterion.witness, mutant.file, mutant.find, mutant.replace))
     result = sorted(tuples)
     assert result == [
+        (
+            "tests/test_stuff.py::test_changed",
+            "b.py",
+            'OLD = "',
+            'OLD = "saffron constant mutant ',
+        ),
         (
             "tests/test_stuff.py::test_spread",
             "a.py",
