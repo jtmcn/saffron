@@ -75,6 +75,10 @@ class Dialect(Protocol):
         """
 
     @property
+    def shares_kernel(self) -> bool:
+        """Whether a cell here runs on the host kernel rather than its own."""
+
+    @property
     def unattended(self) -> bool:
         """Whether a night may run on this runtime: true only once a cell has
         started end to end on it, which is a fact about evidence, not flags."""

@@ -50,6 +50,11 @@ class Apple:
         return ["--cpus", str(cpus)]
 
     @property
+    def shares_kernel(self) -> bool:
+        # Each cell is its own VM (docs/appendices/G-the-cell-runtime.md:34).
+        return False
+
+    @property
     def unattended(self) -> bool:
         return True
 

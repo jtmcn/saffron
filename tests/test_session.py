@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import cast
 
@@ -18,6 +18,8 @@ import pytest
 from saffron import preflight
 from saffron.agents import artifacts, context
 from saffron.cell import proxy, runtime, session
+from saffron.cell.runtimes.apple import Apple
+from saffron.cell.runtimes.podman import Podman
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import (
     Agent,
@@ -4160,6 +4162,69 @@ def test_the_task_created_fact_carries_the_cells_declared_tier_and_null_where_no
             "SELECT risk FROM tasks WHERE task_id = ?", (outcome.task_id,)
         ).fetchall()
         assert row["risk"] == (declared if declared is not None else "standard")
+
+
+@dataclass(frozen=True)
+class _UnprovenVM(Apple):
+    """apple/container's own spellings, with `unattended` never proven.
+
+    Both real dialects pair `unattended` with the opposite of
+    `shares_kernel`. Only this stub breaks that pairing, so only it kills
+    a build that reads `not unattended` where `shares_kernel` belongs.
+    """
+
+    @property
+    def unattended(self) -> bool:
+        return False
+
+
+def test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_uncapped_pool(
+    monkeypatch, tmp_path
+):
+    """b-0569f7: a task on a shared-kernel dialect with no `thread_env`
+    entry warns once at preflight. It also records `thread_pool_uncapped`
+    on its own `task_created` fact, and does neither on a dialect with its
+    own kernel or with an entry declared."""
+    cases = [
+        (Podman(), "gates: {}\n", True),
+        (Podman(), "gates: {}\nthread_env: {}\n", True),
+        (Podman(), 'gates: {}\nthread_env:\n  OMP_NUM_THREADS: "1"\n', False),
+        (Apple(), "gates: {}\n", False),
+        (_UnprovenVM(), "gates: {}\n", False),
+    ]
+    for i, (dialect, policy, uncapped) in enumerate(cases):
+        drive_dir = tmp_path / f"case-{i}"
+        drive_dir.mkdir()
+        monkeypatch.setattr(runtime, "_selected", dialect)
+        monkeypatch.setattr(runtime, "_admitted", True)
+        record = MemoryRecord()
+        cell = _stub_the_runtime(monkeypatch)
+        capture: list = []
+        outcome, ledger = _drive(
+            monkeypatch,
+            drive_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            policy=policy,
+            capture=capture,
+            record=record,
+        )
+        assert len(cell.turns) >= 2, i
+
+        warnings = [
+            e for e in capture if isinstance(e, Preflight) and e.step == "thread_env"
+        ]
+        if uncapped:
+            assert len(warnings) == 1, i
+            assert "thread_env" in warnings[0].detail
+            assert dialect.binary in warnings[0].detail
+        else:
+            assert warnings == [], i
+
+        key = ledger.record_key(outcome.task_id)
+        assert key is not None
+        created = next(f for f in record.read(key) if f.kind == "task_created")
+        assert created.payload["thread_pool_uncapped"] is uncapped, i
 
 
 def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(

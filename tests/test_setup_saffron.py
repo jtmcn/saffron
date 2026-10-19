@@ -176,12 +176,8 @@ def test_the_policy_template_declares_every_repo_owned_role() -> None:
 
 @pytest.mark.parametrize("field", ["envelope_default", "when"])
 def test_a_field_the_skill_calls_unread_is_still_unread(field: str) -> None:
-    readers = [
-        str(path.relative_to(REPO))
-        for path in (REPO / "saffron").rglob("*.py")
-        if path.name != "policy.py" and f".{field}" in path.read_text()
-    ]
-    assert readers == [], f"templates/policy.yaml and SKILL.md call `{field}` unread"
+    text = (TEMPLATES / "policy.yaml").read_text() + (SKILL / "SKILL.md").read_text()
+    assert f"`{field}`" not in text, f"{field} is now refused, not merely unread"
 
 
 def test_the_dockerfile_template_starts_from_cores_base() -> None:

@@ -2183,6 +2183,16 @@ def _drive_cell(
     # edit to a gate — committed or not — never reaches the runner (§5.4).
     gates = policy.gate_executables(Path(worktree.GATES_MOUNT))
 
+    # A shared kernel with no thread_env entry leaves a pool sized from the
+    # host's CPU count, not the cell's (§5.1).
+    thread_pool_uncapped = runtime.dialect().shares_kernel and not policy.thread_env
+    if thread_pool_uncapped:
+        _preflight(
+            "thread_env",
+            f"{runtime.dialect().binary} shares the host kernel and thread_env "
+            "names no entries, so this task's thread pool is uncapped",
+        )
+
     if drift := spec_drift(gates_dir, spec.spec_id, spec.spec_sha):
         _preflight("spec_drift", drift)
 
@@ -2228,6 +2238,7 @@ def _drive_cell(
             # The prompt tree the cell was given, digested as authored — the
             # third input beside spec_sha and policy_sha (§4.1).
             prompt_sha=context.prompt_sha(),
+            thread_pool_uncapped=thread_pool_uncapped,
         )
         start_spend = 0.0
 

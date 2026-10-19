@@ -7,7 +7,7 @@ gates:
   no-network: { blocking: true }
   # Advisory at every tier: its cheapest satisfaction is a test that asserts nothing.
   coverage:   { blocking: false }
-  # FILL: the domain gate, what is expensive to fake here. `when` is parsed and not read yet.
+  # FILL: the domain gate, what is expensive to fake here.
 
 # FILL: where a plausible-looking wrong change hurts most.
 elevate_on: []
@@ -15,9 +15,6 @@ elevate_on: []
 # FILL: files no task edits, such as a lockfile.
 protected:
   - .saffron/**
-
-# Parsed and not read yet.
-envelope_default: []
 
 integrity:
   # FILL: where the tests live.

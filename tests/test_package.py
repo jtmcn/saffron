@@ -2301,8 +2301,7 @@ def test_reverifying_under_a_changed_policy_records_the_policy_it_used(
     assert before["policy_sha"] is None  # otherwise this test proves nothing
 
     (work / ".saffron" / "policy.yaml").write_text(
-        "gates:\n  tests: {}\nintegrity:\n  test_paths:\n    - f.txt\n"
-        "envelope_default: []\n"
+        "gates:\n  tests: {}\nintegrity:\n  test_paths:\n    - f.txt\nelevate_on: []\n"
     )
     git(work, "commit", "-qam", "widen the declaration")
     git(work, "push", "-q", "origin", "main")

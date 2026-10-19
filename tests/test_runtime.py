@@ -233,8 +233,15 @@ def test_every_declared_runtime_satisfies_the_dialect():
         assert dialect.exec_workdir_flag.startswith("-"), name
         assert isinstance(dialect.security_flags, list), name
         assert dialect.cpu_flags(2), name
+        assert isinstance(dialect.shares_kernel, bool), name
         assert isinstance(dialect.unattended, bool), name
         assert callable(dialect.host_refusal), name
+
+
+def test_each_dialect_says_whether_it_shares_the_host_kernel():
+    """apple/container gives each cell its own VM. podman does not (§5.1)."""
+    assert apple.DIALECT.shares_kernel is False
+    assert podman.DIALECT.shares_kernel is True
 
 
 def test_a_test_without_the_marker_still_may_not_exec_a_host_tool(request):

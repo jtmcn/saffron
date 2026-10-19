@@ -1463,6 +1463,7 @@ class Ledger:
         budget_usd: float | None = None,
         policy_sha: str | None = None,
         prompt_sha: str | None = None,
+        thread_pool_uncapped: bool | None = None,
     ) -> int:
         """`policy_sha` is the declaration the cell's gates ran under — read
         from the export at `base_sha` (§5.4). `prompt_sha` is
@@ -1497,6 +1498,9 @@ class Ledger:
                 "budget_usd": budget_usd,
                 "policy_sha": policy_sha,
                 "prompt_sha": prompt_sha,
+                # b-0569f7: a shared kernel with no thread_env cap, or None
+                # where the caller never decided (item 19).
+                "thread_pool_uncapped": thread_pool_uncapped,
                 **self._run_facts(run_id),
             },
         )

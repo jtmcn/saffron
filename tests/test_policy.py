@@ -13,7 +13,7 @@ gates:
   types:  { blocking: true }
   tests:  { blocking: true }
   coverage: { blocking: false }
-  shacl:  { blocking: true, when: "**/*.ttl" }
+  shacl:  { blocking: true }
 elevate_on:
   - alembic/versions/**
 protected:
@@ -46,7 +46,6 @@ def test_reads_the_declared_gates(tmp_path):
     policy, _ = load_policy(write_repo(tmp_path))
     assert policy.gates["lint"].blocking is True
     assert policy.gates["coverage"].blocking is False
-    assert policy.gates["shacl"].when == "**/*.ttl"
 
 
 def test_declaration_order_is_preserved(tmp_path):
@@ -86,6 +85,20 @@ def test_a_declared_gate_that_is_not_executable_is_a_policy_error(tmp_path):
     (repo / ".saffron" / "gates" / "lint").chmod(0o644)
     with pytest.raises(PolicyError, match="not executable"):
         load_policy(repo)
+
+
+def test_a_gate_declaring_when_is_refused_at_load(tmp_path):
+    policy_text = VALID.replace(
+        "shacl:  { blocking: true }", 'shacl:  { blocking: true, when: "**/*.ttl" }'
+    )
+    with pytest.raises(PolicyError, match=r"(?s)shacl.*when"):
+        load_policy(write_repo(tmp_path, policy_text))
+
+
+def test_a_policy_declaring_envelope_default_is_refused_at_load(tmp_path):
+    policy_text = VALID + "envelope_default: []\n"
+    with pytest.raises(PolicyError, match="envelope_default"):
+        load_policy(write_repo(tmp_path, policy_text))
 
 
 def test_a_missing_policy_file_is_a_policy_error(tmp_path):

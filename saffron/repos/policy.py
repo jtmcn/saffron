@@ -54,7 +54,6 @@ class GateDeclaration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     blocking: bool = True
-    when: str | None = None
 
 
 class IntegrityPatterns(BaseModel):
@@ -162,7 +161,6 @@ class Policy(BaseModel):
     gates: dict[GateName, GateDeclaration] = Field(default_factory=dict)
     elevate_on: list[str] = Field(default_factory=list)
     protected: list[str] = Field(default_factory=list)
-    envelope_default: list[str] = Field(default_factory=list)
     integrity: IntegrityPatterns = Field(default_factory=IntegrityPatterns)
     witness: WitnessPatterns = Field(default_factory=WitnessPatterns)
     thread_env: dict[str, str] = Field(default_factory=dict)
