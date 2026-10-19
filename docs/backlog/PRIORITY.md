@@ -287,6 +287,12 @@ verdict shares its $10 with the fixes. A task whose gates were green ended
 batch holds the spec writer's share back, then charges the writer again. At
 $134 it could not revise a $45 spec, and no cell ran.
 
+**Placed 2026-10-19**, from the spec loop's run 44: **b-e40d09**, moved up
+from tier 3, then **b-e7898b**. A host-run probe that survived was dropped
+for want of an anchor, so `SA-0288` packaged past its own blocker. A spec
+that added a refusal refused the specs queued below it, and its cell ended
+`EXHAUSTED`.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-15**, from the spec loop's run 40: **b-d31930**, then
@@ -300,6 +306,13 @@ later one fits.
 
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
+
+**Placed 2026-10-19**, from the spec loop's run 44: **b-619b7d**, **b-71e2df**,
+**b-32b3db**, **b-3a3081**, then **b-80cc6e**. An adopted task keeps its
+failed state, so its children stay refused. A spec named a module its own
+`forbidden` list made impossible. A multi-line constant derives no mutant.
+Redaction misses the files beside `events.jsonl`. The driver and two ADRs
+name the old halts.
 
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand after
 `SA-0290` merges. `CONTEXT.md` has no entry for a removed name.
@@ -561,6 +574,10 @@ passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
 **Placed 2026-10-17**, from the spec loop's run 43: **b-74a122**.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
+
+**Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
+**b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, **b-0094bd**, then
+**b-8ef729**. Each is a gap a seat found and the stack left alone.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.
