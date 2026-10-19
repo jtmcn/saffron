@@ -1,11 +1,12 @@
 ---
 id: b-0569f7
 title: "`.saffron/` declares no schema version, and two policy fields are parsed and read by nothing"
-status: open
+status: done
 tier: 2
 filed: 2026-10-06
+closed: 2026-10-18
 specs: [SA-0282, SA-0283]
-prs: []
+prs: [910, 911]
 commits: []
 cites: [§3.2, §5.4]
 related: [19, b-2e0b97]
@@ -40,3 +41,9 @@ warning at load. There it is the only control over a pool sized from
 `sysconf` (§5.1, ADR 10). The task still runs, and its record says the pool
 was uncapped. A test loads such a policy on a shared-kernel runtime and
 asserts the warning and the recorded field.
+
+## Record
+
+**2026-10-18, run 44.** SA-0282 (#910) removed `when` and `envelope_default` and
+added the shared-kernel warning. SA-0283 (#911) added `schema_version` to the
+policy, the spec and the gate result. Both retired to `done/` in SA-0279's PR.
