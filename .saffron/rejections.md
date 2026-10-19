@@ -2360,6 +2360,12 @@ seat finding the in-cell critic and the end review both passed.
   **Open:** b-e40d09.
 - `SA-0279`: its new refusal refused the three specs queued below it, and its
   cell ended `EXHAUSTED`. **No bucket**, the queue's checks. **Open:** b-e7898b.
+- `SA-0296` (#915): the witness read only the line above `SCHEMA_VERSIONS`,
+  so a two-line comment citing §3.2 above §5.4 survived. **Bucket 3**,
+  adequacy. **Landed:** a review commit on #915.
+- `SA-0296` (#915): the witness rebuilt the module's path as a string, and
+  its citation pattern cut a lettered section short. **Bucket 3**,
+  conventions. **Landed:** a review commit on #915.
 - Run 44: `driver.py stack` ordered #914 below #913 and left out #915 and
   #912. `size` read 0 tokens for `SA-0287`. **No bucket**, the loop's driver.
   **Open:** b-3a79a0.
