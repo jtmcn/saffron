@@ -364,3 +364,19 @@ def test_a_repo_declaring_no_witness_patterns_derives_nothing():
     # A diff it cannot read: a header line `_split_blocks` refuses.
     unreadable = "diff --git a/x b/y\nnot the a/X b/X shape\n"
     assert constant_mutants(unreadable, acceptance, full, ["tests/**"]) == []
+
+
+def test_a_quantifier_in_witness_body_is_regex_not_a_format_field():
+    """`{name}` is filled as text, so a body's `{0,2}` stays a quantifier."""
+    from saffron.gates.core.witness import constant_mutants
+    from saffron.repos.policy import WitnessPatterns
+
+    body = r"(?m)^(?P<i>[ \t]*)def {name}\({0,2}.*(?:\n(?:(?P=i)[ \t]+.*|[ \t]*))*"
+    patterns = WitnessPatterns.model_validate({**PATTERNS, "witness_body": body})
+    acceptance = [Criterion(claim="c", witness="tests/test_stuff.py::test_uses_new")]
+
+    derived = constant_mutants(_DIFF, acceptance, patterns, ["tests/**"])
+
+    assert [(c.witness, c.mutant.file, c.mutant.find) for c in derived if c.mutant] == [
+        ("tests/test_stuff.py::test_uses_new", "a.py", 'NEW = "')
+    ]
