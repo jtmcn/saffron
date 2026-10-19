@@ -173,13 +173,13 @@ def test_a_policy_reads_as_version_1_and_refuses_any_other(tmp_path):
         assert policy.schema_version == 1
         assert type(policy.schema_version) is int
 
-    for index, literal in enumerate(["2", "true", "1.0"]):
+    for index, (literal, value) in enumerate([("2", 2), ("true", True), ("1.0", 1.0)]):
         repo = tmp_path / f"bad-{index}"
         repo.mkdir()
         text = VALID + f"schema_version: {literal}\n"
         with pytest.raises(PolicyError) as excinfo:
             load_policy(write_repo(repo, policy_text=text))
-        assert "schema_version" in str(excinfo.value)
+        assert f"schema_version {value!r} " in str(excinfo.value)
         assert "[1]" in str(excinfo.value)
 
 

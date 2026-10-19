@@ -46,7 +46,7 @@ CORE_GATE_NAMES = frozenset(
 )
 
 
-# Versioned per module (DESIGN.md §3.2). Only 1 exists today.
+# The policy.yaml versions this engine reads (DESIGN.md §5.4). Only 1 exists today.
 SCHEMA_VERSIONS: tuple[int, ...] = (1,)
 
 
@@ -174,7 +174,7 @@ class Policy(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _schema_version_is_supported(cls, data: object) -> object:
-        """Refuse a bool or a float by its own type, before pydantic coerces it."""
+        """Refuse an unsupported version, and a bool or float before pydantic coerces it."""
         if isinstance(data, dict) and "schema_version" in data:
             value = data["schema_version"]
             if type(value) is not int or value not in SCHEMA_VERSIONS:

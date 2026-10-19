@@ -93,10 +93,10 @@ def test_a_spec_reads_as_version_1_and_refuses_any_other():
         assert spec.schema_version == 1
         assert type(spec.schema_version) is int
 
-    for literal in ("2", "true", "1.0"):
+    for literal, value in (("2", 2), ("true", True), ("1.0", 1.0)):
         with pytest.raises(SpecError) as excinfo:
             parse_spec(head + f"schema_version: {literal}\n---\n")
-        assert "schema_version" in str(excinfo.value)
+        assert f"schema_version {value!r} " in str(excinfo.value)
         assert "[1]" in str(excinfo.value)
 
 

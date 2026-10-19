@@ -19,7 +19,7 @@ GateStatus = Literal["pass", "fail", "skip", "error"]
 _DIGITS = re.compile(r"\d+")
 _WHITESPACE = re.compile(r"\s+")
 
-# Versioned per module (DESIGN.md §3.2). Only 1 exists today.
+# The gate result versions this engine reads (DESIGN.md §5.4). Only 1 exists today.
 SCHEMA_VERSIONS: tuple[int, ...] = (1,)
 
 
@@ -93,7 +93,7 @@ class GateResult(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _schema_version_is_supported(cls, data: object) -> object:
-        """Refuse a bool or a float by its own type, before pydantic coerces it."""
+        """Refuse an unsupported version, and a bool or float before pydantic coerces it."""
         if isinstance(data, dict) and "schema_version" in data:
             value = data["schema_version"]
             if type(value) is not int or value not in SCHEMA_VERSIONS:

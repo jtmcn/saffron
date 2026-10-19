@@ -108,7 +108,7 @@ def test_a_gate_result_reads_as_version_1_and_refuses_any_other():
         raw = json.dumps({**base, "schema_version": value})
         with pytest.raises(ValidationError) as excinfo:
             parse_gate_json(raw, expected_gate="lint")
-        assert "schema_version" in str(excinfo.value)
+        assert f"schema_version {value!r} " in str(excinfo.value)
         assert "[1]" in str(excinfo.value)
 
 
