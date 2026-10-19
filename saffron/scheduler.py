@@ -21,12 +21,11 @@ declarations already said before any of that started. It is the cheapest
 refusal here, needing no ledger and no `gh`, so `_refuse` checks it first.
 `build_queue` never reads `policy.yaml` itself — the caller already holds the
 export its specs come from, and hands the `protected` list in.
-
-`SA-0279` widens the seventh refusal again. It also refuses any `touches`
-entry holding `.claude` as a path component. That check runs whatever
-`protected` and `forbidden` declare, because the cell agent's file tools
-refuse to write there. Backlog item b-e471bd names it, and the work lands
-by hand.
+`SA-0279` widens the seventh refusal. It also refuses any `touches` entry
+holding `.claude` as a path component, whatever `protected` and `forbidden`
+declare. The cell agent's file tools refuse to write there. So the
+`protected_touch` kind now also covers a path no `policy.yaml` declares.
+Backlog item b-e471bd names it, and the work lands by hand.
 
 `SA-0027` adds the eighth §4.2.1 now counts, and it belongs beside the fifth
 (`_unmatched_criterion_path`): both are the same defect — a path an
@@ -398,30 +397,30 @@ def _unmatched_criterion_path(spec: Spec) -> str | None:
 def protected_touch_refusal(
     touches: list[str], protected: Sequence[str], forbidden: Sequence[str]
 ) -> str | None:
-    """Why this spec's own `touches` collides with the repo's global deny
-    list, or `None`. It also refuses any `touches` entry holding `.claude`
-    as a path component. That holds whatever `protected` or `forbidden`
-    say, since the cell agent cannot write there (backlog item b-e471bd).
+    """Why this spec's own `touches` collides with the repo's global deny list, or
+    `None`. It also refuses a `touches` entry with a `.claude` path component, whatever
+    `protected` or `forbidden` say, as the cell agent cannot write there (b-e471bd). The
+    `protected_touch` kind now also covers a path no `policy.yaml` declares.
 
-    Matched with `scope.matches`, the same glob every other `touches`
-    comparison in this module uses (`_unmatched_criterion_path`, the
-    open-pull-request overlap in `_refuse`) — a string compare here would
-    repeat `SA-0016`'s fifth refusal's own mistake, where a criterion naming a
-    nested file string-compared to no match against a `**` pattern that
-    plainly covered it. `matches(entry, pattern)`, not the reverse: `entry` is
-    a concrete path, `pattern` is `touches`' own glob, and `scope.matches`
+    Matched with `scope.matches`, the same glob every other `touches` comparison in this
+    module uses (`_unmatched_criterion_path`, the open-pull-request overlap in
+    `_refuse`) — a string compare here would repeat `SA-0016`'s fifth refusal's own
+    mistake, where a criterion naming a nested file string-compared to no match against
+    a `**` pattern that plainly covered it. `matches(entry, pattern)`, not the reverse:
+    `entry` is a concrete path, `pattern` is `touches`' own glob, and `scope.matches`
     only interprets glob syntax on its right-hand side.
 
-    ponytail: only a *literal* `protected` entry is decided here. An entry
-    that is itself a glob (`.saffron/**`) would need `matches` to answer
-    whether two patterns can ever intersect, which needs the file list at
-    `base_sha` — neither the scan nor the attended run has that before a cell
-    starts. A literal entry is what `SA-0021` hit. An entry left undecided
-    here still meets `validate_plan`'s own protected-path rejection once a
-    plan names a concrete file.
+    ponytail: only a *literal* `protected` entry is decided here. An entry that is
+    itself a glob (`.saffron/**`) would need `matches` to answer whether two patterns
+    can ever intersect, which needs the file list at `base_sha` — neither the scan nor
+    the attended run has that before a cell starts. This repo's own `policy.yaml` marks
+    three of its six `protected` entries as literal paths, and a literal one is what
+    `SA-0021` hit. An entry left undecided here still meets `validate_plan`'s own
+    protected-path rejection once a plan names a concrete file. That is the backstop
+    this refusal does not replace, only gets in front of.
     """
-    # Exact component match, not a prefix: `**` holds no `.claude`
-    # component, so this check reads neither `protected` nor `forbidden`.
+    # Exact component match, not a prefix. Read before `protected` and
+    # `forbidden`, since the file tools refuse whatever they say.
     for entry in touches:
         if ".claude" in entry.split("/"):
             return (

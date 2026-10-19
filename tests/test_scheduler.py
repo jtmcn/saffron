@@ -1482,6 +1482,7 @@ def test_a_touches_entry_under_claude_is_refused_in_every_spelling(tmp_path, led
         "RT-11": ".claud?/x.md",
         "RT-12": "'**/*.py'",
         "RT-13": "'**'",
+        "RT-15": "x.claude/y.md",
     }
     for spec_id, entry in admitted_spellings.items():
         _write_spec(directory, f"{spec_id}.md", id=spec_id, touches=[entry, "src/**"])
@@ -1500,6 +1501,7 @@ def test_a_touches_entry_under_claude_is_refused_in_every_spelling(tmp_path, led
     for refusal in refusals:
         spec = load_spec(refusal.path)[0]
         refused_by_id[spec.id] = refusal.reason
+        assert refusal.kind == "protected_touch"
     assert set(refused_by_id) == set(refused_spellings) | {"RT-14"}
     for spec_id, entry in refused_spellings.items():
         reason = refused_by_id[spec_id]
@@ -2817,18 +2819,18 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-19 for SA-0279, which widens the `.claude/` refusal.
-    The candidates and the refusals are the two lists below, in scan order.
+    """Re-measured 2026-10-18 for SA-0279's `.claude/` refusal, which refuses SA-0280,
+    SA-0282 and SA-0283 on their touches. Re-measured 2026-10-14 for SA-0293, refused on
+    its parents. The candidates and the refusals are the two lists below, in scan order.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
     Every other spec of b-792ab2's chain is still refused on its parent.
 
-    Re-measured 2026-09-25, a hundredth time: `SA-0177` queued for
-    backlog item b-792ab2, split from `SA-0167` on size. It builds the
-    ledger's `stack_finishes` table and its two methods. It declares
-    `depends_on: [SA-0174]`, so it is refused. `SA-0167` now declares
-    `depends_on: [SA-0177]`. The candidates are unmoved.
+    Re-measured 2026-09-25, a hundredth time: `SA-0177` queued for backlog item
+    b-792ab2, split from `SA-0167` on size. It builds the ledger's `stack_finishes`
+    table and its two methods. It declares `depends_on: [SA-0174]`, so it is refused.
+    `SA-0167` now declares `depends_on: [SA-0177]`. The candidates are unmoved.
 
     Re-measured 2026-09-25, a ninety-ninth time: `SA-0176` queued for
     backlog item b-792ab2, split from `SA-0160` on size. It builds core's
@@ -3692,10 +3694,10 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
 
     No ledger, so nothing is filtered before `_refuse` runs and every spec reaches
     it. The criterion-path check shipped refusing `SA-0011` and `SA-0016` on their
-    own criteria, and this is the assertion that catches that class: a `depends_on`
-    refusal, or a real retired spec whose `touches` reach `.claude/` (`SA-0279`).
-    The corpus is one long dependency chain with no tasks behind it, so a refusal on
-    anything else is the bug.
+    own criteria, and this is the assertion that catches that class. A `depends_on`
+    refusal is the expected shape, since the corpus is one long dependency chain
+    with no tasks behind it. So is a retired spec whose `touches` reach `.claude/`
+    (`SA-0279`). A refusal on anything else is the bug.
     """
     directory = _every_retired_spec_at_top_level(tmp_path)
 
