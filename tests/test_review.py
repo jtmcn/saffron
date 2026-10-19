@@ -186,7 +186,7 @@ def test_output_that_is_not_the_schema_is_an_incomplete_review_not_a_clean_one()
     assert reviews[0].error and reviews[0].error.startswith("not the schema")
     assert reviews[0].cost_usd == 0.2  # both attempts' cost, summed
     state, why = review.review_state(reviews)
-    assert state == "REVIEWING"
+    assert state == "REVIEW_INCOMPLETE"
     assert "correctness" in why
 
 
@@ -204,7 +204,46 @@ def test_a_lens_whose_session_failed_still_charges_what_it_spent():
     reviews = _review(failed, _block([]))
     assert reviews[0].cost_usd == 0.4
     assert reviews[0].error
-    assert review.review_state(reviews)[0] == "REVIEWING"
+    assert review.review_state(reviews)[0] == "REVIEW_INCOMPLETE"
+
+
+def test_a_lens_that_errored_ends_review_incomplete_whatever_the_others_found():
+    """The errored check fires ahead of the blocker check and at any
+    position (`DESIGN.md` §5.5). The errored lens pairs with a clean lens,
+    and with a blocker or a concern once before it and once after. No case
+    lets a check that reads only the first or the last lens pass."""
+    errored = LensReview(lens="correctness", error="not the schema")
+    clean = LensReview(lens="adequacy", findings=[])
+    blocker = LensReview(
+        lens="adequacy",
+        findings=[_finding_model(severity="blocker", anchored=True)],
+    )
+    concern = LensReview(
+        lens="adequacy",
+        findings=[_finding_model(severity="concern", anchored=True)],
+    )
+
+    cases = [
+        [errored],
+        [errored, clean],
+        [errored, blocker],
+        [blocker, errored],
+        [errored, concern],
+        [concern, errored],
+    ]
+    for reviews in cases:
+        state, why = review.review_state(reviews)
+        assert state == "REVIEW_INCOMPLETE"
+        assert "correctness" in why
+        assert "the review is incomplete" in why
+
+    assert review.review_state([clean])[0] == "READY_FOR_REVIEW"
+    assert review.review_state([clean, concern])[0] == "READY_FOR_REVIEW"
+    assert review.review_state([clean, blocker])[0] == "REBUTTING"
+
+
+def _finding_model(**kwargs):
+    return Finding(lens="adequacy", **_finding(**kwargs))
 
 
 def _lens_agent(*texts, record=None, costs=None):

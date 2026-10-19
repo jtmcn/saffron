@@ -5639,6 +5639,76 @@ def test_a_rebuttal_left_unjudged_ends_its_task_in_a_state_no_scan_stamps(
     assert second_row["state"] == "ORPHANED"
 
 
+def test_a_lens_that_errored_ends_its_task_in_a_state_no_batch_scan_takes_back(
+    monkeypatch, tmp_path
+):
+    """backlog item b-032c3e: an errored lens must land on a state a
+    stamping reconcile leaves alone, unlike the live-looking `REVIEWING` it
+    used to write. `on_state` still hears `REVIEWING` as REVIEW opens, and
+    `build_queue` resumes only the sibling row the scan orphaned."""
+    from saffron import reconcile, scheduler
+
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    sy1_text = (
+        "---\nid: SY-1\ntitle: One\ntype: chore\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    sy2_text = (
+        "---\nid: SY-2\ntitle: Two\ntype: chore\n---\n\n"
+        "## Acceptance criteria\n- [ ] it also works\n"
+    )
+    (specs_dir / "SY-1.md").write_text(sy1_text)
+    (specs_dir / "SY-2.md").write_text(sy2_text)
+    sy1_sha = hashlib.sha256(sy1_text.encode()).hexdigest()
+    sy2_sha = hashlib.sha256(sy2_text.encode()).hexdigest()
+
+    cell = _stub_the_runtime(monkeypatch)
+    heard: list[str] = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "cell",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            implement.AgentFailed("the lens session failed"),
+        ],
+        spec=_spec(spec_sha=sy1_sha),
+        on_state=heard.append,
+    )
+    assert outcome.state == "REVIEW_INCOMPLETE"
+    assert heard == ["IMPLEMENTING", "REVIEWING"]
+    (cell_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert cell_row["state"] == "REVIEW_INCOMPLETE"
+
+    (repo_row,) = ledger._db.execute("SELECT repo_id FROM repos").fetchall()
+    repo_id = repo_row["repo_id"]
+    run2 = ledger.create_run(repo_id, "b" * 40)
+    second_task = ledger.create_task(run2, "SY-2", sy2_sha, branch="saffron/SY-2")
+    ledger.set_task_state(second_task, "REVIEWING")
+
+    def _raising_gh(_argv):
+        raise AssertionError("gh must not be asked")
+
+    result = reconcile.reconcile(ledger, repo_id, gh=_raising_gh, stamp_orphaned=True)
+    assert result.orphaned == [second_task]
+    (cell_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert cell_row["state"] == "REVIEW_INCOMPLETE"
+    (second_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (second_task,)
+    ).fetchall()
+    assert second_row["state"] == "ORPHANED"
+
+    candidates, _refusals = scheduler.build_queue(specs_dir, repo_id, ledger)
+    assert [c.spec.id for c in candidates] == ["SY-2"]
+    assert candidates[0].task_id == second_task
+
+
 # --- backlog item 117: the adequacy lens's own probe, run for real ---
 
 
