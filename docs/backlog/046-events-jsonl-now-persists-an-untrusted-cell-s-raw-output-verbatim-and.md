@@ -1,10 +1,11 @@
 ---
 id: 46
 title: '`events.jsonl` now persists an untrusted cell''s raw output verbatim, and nothing bounds or scans it'
-status: partial
+status: done
+closed: 2026-10-19
 tier: 1
 specs: [SA-0041, SA-0068, SA-0103, SA-0277]
-prs: [213]
+prs: [213, 906]
 commits: []
 cites: [§5.4, §9]
 related: []
@@ -74,3 +75,5 @@ exist yet.
 a size cap and must come within the `secrets` gate's reach. **Tier 1.**
 
 **Status: the size half is done — `SA-0068`, PR #213, merged 2026-09-12.**
+
+- 2026-10-19, run 44: `SA-0277` (#906) closes the secrets half by the arm the operator chose. `EventLog.append` redacts the cell's token and every shape PACKAGE knows from an `Agent` event. The event names each kind it lost, never the value. The `secrets` gate stays reserved in §5.4. The cell-authored files beside the log are b-3a3081.

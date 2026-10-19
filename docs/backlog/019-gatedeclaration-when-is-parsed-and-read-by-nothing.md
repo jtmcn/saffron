@@ -1,10 +1,11 @@
 ---
 id: 19
 title: '`GateDeclaration.when` is parsed and read by nothing'
-status: open
+status: done
+closed: 2026-10-19
 tier: 3
 specs: [SA-0282]
-prs: [46]
+prs: [46, 910]
 commits: []
 cites: [§5.4, §10]
 related: [17]
@@ -33,3 +34,7 @@ one of: `run_suite` filters on `when` against the diff's
 changed paths and a test proves a non-matching gate does not run; or `load_policy`
 rejects `when` outright until something reads it, and §5.4's illustration drops
 it. §5.4 now says the field is unread — that note comes out with the fix.
+
+## Record
+
+- 2026-10-19, run 44: `SA-0282` (#910) deletes `when` from `GateDeclaration`, so `load_policy` refuses it, and a test asserts the refusal. §5.4 no longer shows the field or calls it unread.

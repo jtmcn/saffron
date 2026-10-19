@@ -1,11 +1,12 @@
 ---
 id: 120
 title: REBUT gets whatever the task budget has left, and the halt it ends in reads as a corpse
-status: partial
+status: done
 tier: 1
 filed: 2026-09-14
+closed: 2026-10-19
 specs: [SA-0087, SA-0088, SA-0089, SA-0231, SA-0276]
-prs: [778]
+prs: [778, 903]
 commits: []
 cites: [§3.3, §4.2, §5.6]
 related: []
@@ -50,3 +51,4 @@ halt everywhere it is read, or gets the terminal state §5.6 says §3.3 lacks.
 - 2026-10-11: the operator chose a terminal state for the halt. Its spec
   commit adds `REBUTTAL_UNJUDGED` to the vocabulary and the scheduler's sets.
   `SA-0276` makes REBUT write it.
+- 2026-10-19, run 44: `SA-0276` (#903) makes REBUT's halt write `REBUTTAL_UNJUDGED`. So the halt after the cell exits has a terminal state, as §5.6 asked. The loop's driver and `GOTCHAS.md` still name `REBUTTING`, which b-80cc6e owns. The cut check's unpinned state clause is b-b8f0d9.

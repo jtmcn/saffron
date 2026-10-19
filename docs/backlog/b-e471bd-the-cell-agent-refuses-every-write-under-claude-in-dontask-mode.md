@@ -1,11 +1,12 @@
 ---
 id: b-e471bd
 title: The cell's agent refuses every write under `.claude/` in dontAsk mode, so a spec that touches `.claude/**` depends on the agent routing around a denial
-status: partial
+status: done
 tier: 1
 filed: 2026-09-25
+closed: 2026-10-19
 specs: [SA-0259, SA-0279]
-prs: [809]
+prs: [809, 912]
 commits: []
 cites: [§5.3, §4.2]
 related: []
@@ -51,3 +52,4 @@ One of two, decided before a spec lands:
 - 2026-10-11: `SA-0279` is queued for the second exit. It makes the
   protected-touch refusal refuse a `touches` entry with a `.claude`
   component.
+- 2026-10-19, run 44: `SA-0279` (#912) takes the second exit. `protected_touch_refusal` refuses a `touches` entry with a `.claude` component, with a reason naming this item and no model call. Its cell ended `EXHAUSTED` on the specs queued below it, which b-e7898b records. The delegate finished it by hand and adopted it.

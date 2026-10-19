@@ -1,11 +1,11 @@
 ---
 id: b-2e0b97
 title: The engine ships only as a checkout, so no other operator can install it and no task records which engine judged it
-status: open
+status: partial
 tier: 2
 filed: 2026-10-06
 specs: [SA-0281]
-prs: []
+prs: [909]
 commits: []
 cites: [§1.4, §2, §5.1.2]
 related: [b-da550a, 170, 108]
@@ -35,3 +35,7 @@ carries the CLI and the base images it builds cells from. An operator runs
 Each task's record carries the engine commit, and the morning queue shows it.
 A merge to `main` changes no deployment until its digest is bumped, and
 rolling back is a digest bump too.
+
+## Record
+
+- 2026-10-19, run 44: `SA-0281` (#909) records the engine commit on each task and names it in the pull request body. Building, pushing and pinning the image by digest stays by hand. The morning queue does not show the engine yet. A migration drops it, which is b-d149c6.

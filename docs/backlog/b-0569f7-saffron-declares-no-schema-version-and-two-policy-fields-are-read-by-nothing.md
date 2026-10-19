@@ -6,7 +6,7 @@ tier: 2
 filed: 2026-10-06
 closed: 2026-10-18
 specs: [SA-0282, SA-0283]
-prs: [910, 911, 912]
+prs: [910, 911, 912, 915]
 commits: []
 cites: [§3.2, §5.4]
 related: [19, b-2e0b97]
@@ -47,3 +47,5 @@ asserts the warning and the recorded field.
 **2026-10-18, run 44.** SA-0282 (#910) removed `when` and `envelope_default` and
 added the shared-kernel warning. SA-0283 (#911) added `schema_version` to the
 policy, the spec and the gate result. Both retired to `done/` in #912.
+
+- 2026-10-19, run 44: `SA-0296` (#915), an end-review follow-up from the critic's note on #911, adds a witness for `contract.py`'s schema version comment. The comment cites §5.4, the gate result's rule, not §3.2.
