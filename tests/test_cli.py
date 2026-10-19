@@ -1577,6 +1577,45 @@ def test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts(
     ledger.close()
 
 
+def test_a_spec_touching_claude_refuses_before_the_cell_starts(
+    tmp_path, monkeypatch, capsys
+):
+    """`SA-0279`'s own witness (backlog item b-e471bd), end to end: a real
+    `policy.yaml` protecting nothing, and a real spec whose `touches` reach
+    `.claude/`, driven through the real `cli._run_cell`."""
+    repo = _local_origin_with_policy(tmp_path, "protected: []\n")
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-9.md"
+    args.spec.write_text(
+        "---\nid: SY-9\ntitle: Nine\ntype: feature\n"
+        "touches: ['.claude/skills/x/SKILL.md', 'src/**']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    started = False
+
+    def _started(*_a, **_k):
+        nonlocal started
+        started = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.task.run_one_cell", _started)
+    ledger = Ledger(tmp_path / "l.db")
+
+    result = cli._run_cell(args, ledger, tmp_path / "out")
+
+    assert result == 1
+    assert not started  # no cell, no model call
+    out = capsys.readouterr().out
+    assert out.startswith("SY-9")
+    assert "'.claude/skills/x/SKILL.md'" in out
+    assert "lands by hand" in out
+    # No row left behind: the refusal happened before a task ever existed.
+    count = ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    assert count == 0
+    ledger.close()
+
+
 def _repo_with_spec(
     tmp_path,
     *,

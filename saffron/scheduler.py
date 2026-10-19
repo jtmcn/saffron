@@ -22,6 +22,12 @@ refusal here, needing no ledger and no `gh`, so `_refuse` checks it first.
 `build_queue` never reads `policy.yaml` itself — the caller already holds the
 export its specs come from, and hands the `protected` list in.
 
+`SA-0279` widens the seventh refusal again. It also refuses any `touches`
+entry holding `.claude` as a path component. That check runs whatever
+`protected` and `forbidden` declare, because the cell agent's file tools
+refuse to write there. Backlog item b-e471bd names it, and the work lands
+by hand.
+
 `SA-0027` adds the eighth §4.2.1 now counts, and it belongs beside the fifth
 (`_unmatched_criterion_path`): both are the same defect — a path an
 acceptance criterion or a `saffron:retired-by` marker names that no
@@ -393,7 +399,9 @@ def protected_touch_refusal(
     touches: list[str], protected: Sequence[str], forbidden: Sequence[str]
 ) -> str | None:
     """Why this spec's own `touches` collides with the repo's global deny
-    list, or `None`.
+    list, or `None`. It also refuses any `touches` entry holding `.claude`
+    as a path component. That holds whatever `protected` or `forbidden`
+    say, since the cell agent cannot write there (backlog item b-e471bd).
 
     Matched with `scope.matches`, the same glob every other `touches`
     comparison in this module uses (`_unmatched_criterion_path`, the
@@ -408,12 +416,20 @@ def protected_touch_refusal(
     that is itself a glob (`.saffron/**`) would need `matches` to answer
     whether two patterns can ever intersect, which needs the file list at
     `base_sha` — neither the scan nor the attended run has that before a cell
-    starts. This repo's own `policy.yaml` marks three of its four `protected`
-    entries as literal paths, and a literal one is what `SA-0021` hit. An
-    entry left undecided here still meets `validate_plan`'s own
-    protected-path rejection once a plan names a concrete file — the backstop
-    this refusal does not replace, only gets in front of.
+    starts. A literal entry is what `SA-0021` hit. An entry left undecided
+    here still meets `validate_plan`'s own protected-path rejection once a
+    plan names a concrete file.
     """
+    # Exact component match, not a prefix: `**` holds no `.claude`
+    # component, so this check reads neither `protected` nor `forbidden`.
+    for entry in touches:
+        if ".claude" in entry.split("/"):
+            return (
+                f"touches entry {entry!r} holds .claude, which the cell "
+                "agent's own file tools refuse to write under (backlog item "
+                "b-e471bd) — the work lands by hand"
+            )
+
     for entry in protected:
         # ponytail: `_GLOB_CHARS` includes `[`, which `scope._to_regex` does
         # not tokenise — it escapes a bracket and matches it literally. So a

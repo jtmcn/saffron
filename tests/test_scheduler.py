@@ -1455,6 +1455,61 @@ def test_no_protected_declared_changes_nothing(tmp_path, ledger):
     assert refusals == []
 
 
+def test_a_touches_entry_under_claude_is_refused_in_every_spelling(tmp_path, ledger):
+    """`SA-0279`'s own witness (backlog item b-e471bd): the cell agent's
+    file tools refuse a write under `.claude` whatever `protected` holds,
+    so this is decided with no `protected` list at all. Each spelling below
+    is its own spec, beside `src/**`, so one false admission cannot hide
+    behind another spec's refusal. A leading `*` is quoted. `_write_spec`
+    emits `touches` unquoted, and YAML reads a bare leading `*` as an
+    alias."""
+    directory = _spec_dir(tmp_path)
+    refused_spellings = {
+        "RT-1": ".claude/skills/run-saffron-spec-loop/driver.py",
+        "RT-2": ".claude/agents/*.md",
+        "RT-3": ".claude/**",
+        "RT-4": "./.claude/settings.json",
+        "RT-5": "'**/.claude/**'",
+        "RT-6": "sub/.claude/skills/x.md",
+        "RT-7": ".claude",
+    }
+    for spec_id, entry in refused_spellings.items():
+        _write_spec(directory, f"{spec_id}.md", id=spec_id, touches=[entry, "src/**"])
+    admitted_spellings = {
+        "RT-8": ".claudeignore",
+        "RT-9": ".claude-plugin/plugin.json",
+        "RT-10": "docs/claude/notes.md",
+        "RT-11": ".claud?/x.md",
+        "RT-12": "'**/*.py'",
+        "RT-13": "'**'",
+    }
+    for spec_id, entry in admitted_spellings.items():
+        _write_spec(directory, f"{spec_id}.md", id=spec_id, touches=[entry, "src/**"])
+    _write_spec(
+        directory,
+        "RT-14.md",
+        id="RT-14",
+        touches=[".claude/skills/x/SKILL.md", "src/**"],
+        forbidden=[".claude/**"],
+    )
+
+    candidates, refusals = build_queue(directory, None, ledger)
+
+    assert {c.spec.id for c in candidates} == set(admitted_spellings)
+    refused_by_id = {}
+    for refusal in refusals:
+        spec = load_spec(refusal.path)[0]
+        refused_by_id[spec.id] = refusal.reason
+    assert set(refused_by_id) == set(refused_spellings) | {"RT-14"}
+    for spec_id, entry in refused_spellings.items():
+        reason = refused_by_id[spec_id]
+        assert repr(entry.strip("'")) in reason
+        assert "b-e471bd" in reason
+        assert "lands by hand" in reason
+    reason = refused_by_id["RT-14"]
+    assert repr(".claude/skills/x/SKILL.md") in reason
+
+
 # ------------------------------------------------------- refusal: depends_on
 
 
@@ -2762,7 +2817,7 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-14 for SA-0293, refused on its parents.
+    """Re-measured 2026-10-19 for SA-0279, which widens the `.claude/` refusal.
     The candidates and the refusals are the two lists below, in scan order.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
@@ -3635,11 +3690,11 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     """The half of the smoke check that catches a defect, pointed at the whole
     retired corpus — 36 specs rather than the 9 that happened to be in flight.
 
-    No ledger, so nothing is filtered before `_refuse` runs and every spec
-    reaches it. The criterion-path check shipped refusing `SA-0011` and
-    `SA-0016` on their own criteria, and this is the assertion that catches
-    that class: a `depends_on` refusal is the expected shape here, because the
-    corpus is one long dependency chain with no tasks behind it; a refusal on
+    No ledger, so nothing is filtered before `_refuse` runs and every spec reaches
+    it. The criterion-path check shipped refusing `SA-0011` and `SA-0016` on their
+    own criteria, and this is the assertion that catches that class: a `depends_on`
+    refusal, or a real retired spec whose `touches` reach `.claude/` (`SA-0279`).
+    The corpus is one long dependency chain with no tasks behind it, so a refusal on
     anything else is the bug.
     """
     directory = _every_retired_spec_at_top_level(tmp_path)
@@ -3657,4 +3712,20 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     # apply to keeps a second one from slipping in behind it.
     disclosed = [r for r in refusals if "mutant names text" in r.reason]
     assert [r.path.name[:7] for r in disclosed] == ["SA-0063"]
-    assert all("depends_on" in r.reason for r in refusals if r not in disclosed)
+    # Seven more non-`depends_on` refusals, named by literal id rather
+    # than by the rule under test (`SA-0279`, backlog item b-e471bd).
+    claude_touching = [r for r in refusals if "b-e471bd" in r.reason]
+    assert [r.path.name[:7] for r in claude_touching] == [
+        "SA-0092",
+        "SA-0112",
+        "SA-0114",
+        "SA-0115",
+        "SA-0116",
+        "SA-0129",
+        "SA-0196",
+    ]
+    assert all(
+        "depends_on" in r.reason
+        for r in refusals
+        if r not in disclosed and r not in claude_touching
+    )
