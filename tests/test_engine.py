@@ -6,24 +6,13 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
+from tests.test_finish import _isolate_git
 
 
 def _git(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True
     ).stdout.strip()
-
-
-def _isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Shields every git call here from the operator's own config, the way
-    `_isolate_git` in `tests/test_finish.py` does."""
-    empty = tmp_path / "empty-home"
-    empty.mkdir()
-    monkeypatch.setenv("HOME", str(empty))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty))
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-    monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
 
 
 def _commit(repo: Path) -> None:
@@ -108,6 +97,21 @@ def test_a_checkout_reports_its_head_and_marks_a_tracked_change_dirty(
 
     _git(repo, "add", "f.txt")
     assert engine_commit(pkg) == f"{head}-dirty"
+
+    # macOS reaches tmp through `/private`, so an unresolved spelling must still match.
+    link = tmp_path / "link"
+    link.symlink_to(repo)
+    assert engine_commit(link / "saffron") == f"{head}-dirty"
+
+    real_run = subprocess.run
+
+    def _status_fails(argv, *args, **kwargs):
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "fatal: broken")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _status_fails)
+    assert engine_commit(pkg) is None
 
 
 def test_no_baked_value_and_no_checkout_of_its_own_reads_none(tmp_path, monkeypatch):

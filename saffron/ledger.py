@@ -1644,8 +1644,8 @@ class Ledger:
 
     def task_engine_commit(self, task_id: int) -> str | None:
         """The engine on record for this task: what a cell observed with
-        `saffron.engine.engine_commit`, or `None` where no cell ran on it
-        yet (ADR 10). PACKAGE reads it to name the engine in the pull
+        `saffron.engine.engine_commit`, or `None` where no engine was
+        observed (ADR 10). PACKAGE reads it to name the engine in the pull
         request body."""
         row = self._db.execute(
             "SELECT engine_commit FROM tasks WHERE task_id = ?", (task_id,)

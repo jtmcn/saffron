@@ -1,4 +1,4 @@
-"""The engine commit that judged a task (ADR 10, `DESIGN.md` §5.1.2).
+"""The engine commit that judged a task (ADR 10, `DESIGN.md` §4.1).
 
 A target repo never ships the engine (ADR 10), so this module answers one
 question for whichever engine is running: what commit of itself is this. A
@@ -16,7 +16,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
     """One git call, or `None` for anything that is not a clean answer: a
     non-zero exit, or git missing outright. Never raises."""
     try:
-        return subprocess.run(
+        done = subprocess.run(
             ["git", "-C", str(cwd), *args],
             capture_output=True,
             text=True,
@@ -24,18 +24,19 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str] | None:
         )
     except OSError:
         return None
+    return done if done.returncode == 0 else None
 
 
 def _checkout_head(parent: Path) -> str | None:
     """The full `HEAD` of the checkout whose top level is `parent`, or
     `None` when `parent` is not one, or holds no commit yet."""
     toplevel = _git(parent, "rev-parse", "--show-toplevel")
-    if toplevel is None or toplevel.returncode != 0:
+    if toplevel is None:
         return None
     if Path(toplevel.stdout.strip()).resolve() != parent.resolve():
         return None
     head = _git(parent, "rev-parse", "--verify", "HEAD")
-    if head is None or head.returncode != 0:
+    if head is None:
         return None
     sha = head.stdout.strip()
     if not sha:
@@ -45,10 +46,9 @@ def _checkout_head(parent: Path) -> str | None:
     status = _git(
         parent, "--no-optional-locks", "status", "--porcelain", "--untracked-files=no"
     )
-    dirty = (
-        status is not None and status.returncode == 0 and status.stdout.strip() != ""
-    )
-    return f"{sha}-dirty" if dirty else sha
+    if status is None:
+        return None
+    return f"{sha}-dirty" if status.stdout.strip() else sha
 
 
 def engine_commit(source: str | Path | None = None) -> str | None:

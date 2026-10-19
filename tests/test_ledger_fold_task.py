@@ -161,7 +161,7 @@ def _seed_unrelated_task(tmp_path: Path, into: Ledger) -> None:
     into.fold_task(key, other.read(key))
 
 
-def _drive_eleven_kinds(source: Ledger, after) -> tuple[str, int]:
+def _drive_every_kind(source: Ledger, after) -> tuple[str, int]:
     """Every task fact kind once. `after(key)` runs once per write."""
     repo_id = source.upsert_repo("saffron", "https://o", "/m.git", policy_sha="p" * 64)
     run_id = source.create_run(repo_id, base_sha="a" * 40)
@@ -226,7 +226,7 @@ def test_every_task_fact_kind_folds_back_to_the_rows_its_write_made(tmp_path, re
         into.fold_task(key, record.read(key))
         assert _snapshot(fold_path, key) == _snapshot(source_path, key)
 
-    key, repo_id = _drive_eleven_kinds(source, check)
+    key, repo_id = _drive_every_kind(source, check)
 
     final = _snapshot(fold_path, key)
     for table, rows in final.items():
@@ -635,7 +635,7 @@ def test_a_written_task_folds_back_with_the_times_its_facts_carry(
             assert fold_rows == [_idless(r) for r in _raw_rows(source_path, sql, key)]
         _assert_stamped_by_the_clock(fold_path, key)
 
-    _drive_eleven_kinds(source, check)
+    _drive_every_kind(source, check)
     source.close()
     into.close()
 
@@ -643,7 +643,7 @@ def test_a_written_task_folds_back_with_the_times_its_facts_carry(
     _MinuteClock.calls = 0
     plain_path = tmp_path / "plain.db"
     plain = Ledger(plain_path)
-    _drive_eleven_kinds(plain, lambda k: _assert_stamped_by_the_clock(plain_path, k))
+    _drive_every_kind(plain, lambda k: _assert_stamped_by_the_clock(plain_path, k))
     plain.close()
 
 
@@ -879,7 +879,7 @@ def _busted_apply(*_args: object, **_kwargs: object) -> None:
     raise _BustedApply
 
 
-def _eleven_write_calls(ledger, run_id, task_id, attempt_id, finding_id):
+def _every_write_call(ledger, run_id, task_id, attempt_id, finding_id):
     """Not nested in the test's loop, so ruff sees no captured loop variable."""
     return [
         lambda: ledger.create_task(run_id, spec_id="SA-14", spec_sha="s", branch="b"),
@@ -890,6 +890,7 @@ def _eleven_write_calls(ledger, run_id, task_id, attempt_id, finding_id):
         lambda: ledger.record_findings(task_id, [_find("a", "note", "y", 2, "c2")]),
         lambda: ledger.record_rebuttal(finding_id, verdict="withdrawn", rebuttal="x"),
         lambda: ledger.record_policy(task_id, "p" * 64),
+        lambda: ledger.record_engine(task_id, "e" * 40),
         lambda: ledger.record_push(task_id, "d" * 40),
         lambda: ledger.set_task_package(task_id, "X", "b", "d" * 40, "u"),
         lambda: ledger.record_merged_head(task_id, "h" * 40),
@@ -910,9 +911,7 @@ def test_every_task_write_applies_its_fact_through_apply(tmp_path, record, monke
         ).fetchone()["run_id"]
 
         monkeypatch.setattr(Ledger, "_apply", _busted_apply)
-        for call in _eleven_write_calls(
-            ledger, run_id, task_id, attempt_id, finding_id
-        ):
+        for call in _every_write_call(ledger, run_id, task_id, attempt_id, finding_id):
             with pytest.raises(_BustedApply):
                 call()
         monkeypatch.undo()

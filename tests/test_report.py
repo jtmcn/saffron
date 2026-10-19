@@ -115,6 +115,7 @@ def test_the_provenance_names_the_engine_commit_and_nothing_where_none():
     )
     section = no_engine.split("### Provenance", 1)[1]
     assert "- engine" not in section
+    assert no_engine == with_engine.replace(f"- engine `{'c' * 40}`\n", "", 1)
 
 
 def test_notes_render_as_the_implementers_own_and_unadjudicated():
