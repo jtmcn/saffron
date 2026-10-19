@@ -81,6 +81,42 @@ def test_the_pr_body_opens_with_the_spec():
     assert "TE-9001" in body()
 
 
+def test_the_provenance_names_the_engine_commit_and_nothing_where_none():
+    """The engine (ADR 10) lands directly below `head`, in backticks, and
+    is absent entirely when the task carries none."""
+    with_engine = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=1,
+        transcript_path="~/.saffron/batches/1/thermal-edge/1",
+        engine_commit="c" * 40,
+    )
+    lines = [
+        line
+        for line in with_engine.split("### Provenance", 1)[1].splitlines()
+        if line.strip()
+    ]
+    head_index = next(i for i, line in enumerate(lines) if line.startswith("- head"))
+    assert lines[head_index + 1] == f"- engine `{'c' * 40}`"
+
+    no_engine = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=1,
+        transcript_path="~/.saffron/batches/1/thermal-edge/1",
+    )
+    section = no_engine.split("### Provenance", 1)[1]
+    assert "- engine" not in section
+
+
 def test_notes_render_as_the_implementers_own_and_unadjudicated():
     rendered = body(
         notes="Saw a hardcoded API key in config/legacy.py; touches did not "

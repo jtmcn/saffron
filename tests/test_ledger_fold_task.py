@@ -196,6 +196,8 @@ def _drive_eleven_kinds(source: Ledger, after) -> tuple[str, int]:
     after(key)
     source.record_policy(task_id, "f" * 64)
     after(key)
+    source.record_engine(task_id, "e" * 40)
+    after(key)
     source.record_push(task_id, "d" * 40)
     after(key)
     source.set_task_package(

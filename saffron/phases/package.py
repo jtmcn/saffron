@@ -900,6 +900,7 @@ def package(
             # byte-identical to one packaged before this existed.
             notes=outcome.notes,
             wrong_versions=outcome.wrong_versions,
+            engine_commit=ledger.task_engine_commit(outcome.task_id),
             exhausted=exhausted,
             head_moved=_rebuttal_head_moved(outcome.task_dir) if exhausted else False,
         )

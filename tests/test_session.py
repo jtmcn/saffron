@@ -4572,6 +4572,112 @@ def test_a_task_records_the_prompt_tree_it_ran_under(monkeypatch, tmp_path):
     assert row["prompt_sha"] == context.prompt_sha()
 
 
+def test_a_cell_records_the_engine_that_judged_its_task(monkeypatch, tmp_path):
+    """At cell start `_drive_cell` asks `saffron.engine.engine_commit()` once,
+    with no argument. It records the answer with `record_engine`, only when
+    the answer is not `None` and differs from what the task carries. The
+    fake ignores its own arguments: only the recorded calls can show
+    whether a cell asked about the target repo instead of its own engine."""
+    import saffron.engine as engine_mod
+
+    calls: list[tuple] = []
+    answers = iter(["a" * 40, "b" * 40, "b" * 40, None, None])
+
+    def _fake_engine_commit(*args, **kwargs):
+        calls.append((args, kwargs))
+        return next(answers)
+
+    monkeypatch.setattr(engine_mod, "engine_commit", _fake_engine_commit)
+    monkeypatch.setattr(
+        "saffron.cell.session.engine_commit", _fake_engine_commit, raising=False
+    )
+
+    record = MemoryRecord()
+    seed = Ledger(tmp_path / "ledger.db", record=record)
+    repo_id = seed.upsert_repo(
+        "repo", str(tmp_path / "repo"), str(tmp_path / "m.git"), None
+    )
+    given_run = seed.create_run(repo_id, "e" * 40)
+    given_task = seed.create_task(given_run, "SY-1", "a" * 64, branch="saffron/SY-1")
+    seed.record_engine(given_task, "z" * 40)
+    seed.close()
+
+    def _engine_fact_count(key):
+        return len([f for f in record.read(key) if f.kind == "task_engine"])
+
+    # 1: a freshly minted task, first scripted answer -> records it once.
+    cell1 = _stub_the_runtime(monkeypatch)
+    outcome1, ledger1 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        record=record,
+    )
+    key1 = ledger1.record_key(outcome1.task_id)
+    assert ledger1.task_engine_commit(outcome1.task_id) == "a" * 40
+    assert _engine_fact_count(key1) == 1
+
+    # 2: the given task, recorded under "z" * 40, gets a differing answer ->
+    # one new fact, the newer engine on record.
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=given_task),
+        record=record,
+    )
+    key2 = ledger2.record_key(given_task)
+    assert outcome2.task_id == given_task
+    assert ledger2.task_engine_commit(given_task) == "b" * 40
+    assert _engine_fact_count(key2) == 2
+
+    # 3: the same task, the same answer as on record -> no new fact.
+    cell3 = _stub_the_runtime(monkeypatch)
+    outcome3, ledger3 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell3,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=given_task),
+        record=record,
+    )
+    assert ledger3.task_engine_commit(given_task) == "b" * 40
+    assert _engine_fact_count(key2) == 2
+
+    # 4: the given task again, a `None` answer -> keeps its own engine, no fact.
+    cell4 = _stub_the_runtime(monkeypatch)
+    outcome4, ledger4 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell4,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=given_task),
+        record=record,
+    )
+    assert outcome4.task_id == given_task
+    assert ledger4.task_engine_commit(given_task) == "b" * 40
+    assert _engine_fact_count(key2) == 2
+
+    # 5: a fresh task, a `None` answer -> reads `None`, no fact at all.
+    cell5 = _stub_the_runtime(monkeypatch)
+    outcome5, ledger5 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell5,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        record=record,
+    )
+    key5 = ledger5.record_key(outcome5.task_id)
+    assert ledger5.task_engine_commit(outcome5.task_id) is None
+    assert _engine_fact_count(key5) == 0
+
+    for args, kwargs in calls:
+        assert args == () and kwargs == {}
+
+
 def test_the_repo_level_policy_sha_is_still_written(monkeypatch, tmp_path):
     """`repos.policy_sha` answers a different question — what the repo
     declared when it was last seen — and `upsert_repo`'s callers depend on

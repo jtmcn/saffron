@@ -28,6 +28,7 @@ from saffron.cell.worktree import (
     CriticPatchRejected,
     CriticPatchUnrepresentable,
 )
+from saffron.engine import engine_commit
 from saffron.events import (
     Attempt,
     Baseline,
@@ -2234,6 +2235,12 @@ def _drive_cell(
     # is already on record for, a given task with an older one included.
     if ledger.task_policy_sha(task_id) != policy_sha:
         ledger.record_policy(task_id, policy_sha)
+
+    # The engine itself, never the target repo (ADR 10). `None` means no
+    # engine was observed, so a given task keeps whatever it already carries.
+    engine = engine_commit()
+    if engine is not None and ledger.task_engine_commit(task_id) != engine:
+        ledger.record_engine(task_id, engine)
 
     # Only what this run reached the creation of can leak. `volume rm` on a
     # name that never existed also exits non-zero, so reporting every failure

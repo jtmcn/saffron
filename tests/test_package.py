@@ -1378,6 +1378,24 @@ def test_a_green_cell_becomes_a_branch_a_draft_pr_and_a_queue_line(packageable):
     assert "SA-0005" in index
 
 
+def test_the_pull_request_body_names_the_engine_the_task_recorded(packageable):
+    """`package()` reads the task's own engine from the ledger, through
+    `Ledger.task_engine_commit`, and hands it to `render_pr_body`. It never
+    asks `saffron.engine.engine_commit()` itself, which would answer about
+    PACKAGE's own process rather than the cell that was judged."""
+    engine = "d" * 40 + "-dirty"
+    packageable.ledger.record_engine(packageable.task_id, engine)
+
+    def fake_gh(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/1\n")
+
+    result = package(packageable.outcome, gh=fake_gh, **packageable.kwargs)
+
+    assert result.state == "READY_FOR_REVIEW"
+    body = (packageable.outcome.task_dir / "pr_body.md").read_text()
+    assert f"- engine `{engine}`" in body
+
+
 def test_the_pull_request_url_is_logged_as_an_event(packageable):
     """The pull-request line reaches the log, not only the terminal — the one
     an unattended morning most needs about a task that reached PACKAGE. Every

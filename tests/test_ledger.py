@@ -966,6 +966,83 @@ def test_an_existing_task_is_not_backfilled_with_a_policy_sha(tmp_path):
     ledger.close()
 
 
+def _schema_without_engine_commit() -> str:
+    """`tasks` minus `engine_commit`, the shape a ledger written before
+    this change has, built the same way `_schema_without_policy_sha`
+    is."""
+    before = SCHEMA.replace("    engine_commit TEXT,\n", "")
+    tasks_columns = before.split("CREATE TABLE IF NOT EXISTS tasks")[1].split(");")[0]
+    assert "engine_commit" not in tasks_columns  # otherwise this test proves nothing
+    return before
+
+
+def test_a_ledger_built_before_the_engine_commit_column_gains_it(tmp_path):
+    """A ledger built before `engine_commit` existed gains it when opened.
+    Its existing row survives, reads `None`, and takes a later write."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(_schema_without_engine_commit())
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        "INSERT INTO tasks (run_id, spec_id, spec_sha, state, record_key) "
+        "VALUES (1, 'SA-0016', 's', 'QUEUED', 'k1')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    columns = {
+        row["name"] for row in ledger._db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    assert "engine_commit" in columns
+    task_id = ledger._db.execute(
+        "SELECT task_id FROM tasks WHERE record_key = 'k1'"
+    ).fetchone()["task_id"]
+    assert ledger.task_engine_commit(task_id) is None
+    ledger.record_engine(task_id, "a" * 40)
+    assert ledger.task_engine_commit(task_id) == "a" * 40
+    ledger.close()
+
+
+def test_an_engine_commit_is_a_fact_the_fold_keeps(tmp_path):
+    """`record_engine` appends a `task_engine` fact and sets the column.
+    The last fact written for a task wins, and a fold of the record into a
+    fresh ledger rebuilds it the same way."""
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    path = tmp_path / "ledger.db"
+    ledger = Ledger(path, record=record)
+    repo_id = ledger.upsert_repo("r", "https://o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, "a" * 40)
+
+    written_twice = ledger.create_task(run_id, "SA-1", "s" * 64, branch="b1")
+    written_once = ledger.create_task(run_id, "SA-2", "s" * 64, branch="b2")
+    never_written = ledger.create_task(run_id, "SA-3", "s" * 64, branch="b3")
+
+    ledger.record_engine(written_twice, "a" * 40)
+    ledger.record_engine(written_twice, "b" * 40)
+    ledger.record_engine(written_once, "c" * 40)
+
+    assert ledger.task_engine_commit(written_twice) == "b" * 40
+    assert ledger.task_engine_commit(written_once) == "c" * 40
+    assert ledger.task_engine_commit(never_written) is None
+
+    fold_path = tmp_path / "fold.db"
+    folded = Ledger(fold_path)
+    for task_id in (written_twice, written_once, never_written):
+        key = ledger.record_key(task_id)
+        assert key is not None
+        folded.fold_task(key, record.read(key))
+
+    assert folded.task_engine_commit(written_twice) == "b" * 40
+    assert folded.task_engine_commit(written_once) == "c" * 40
+    assert folded.task_engine_commit(never_written) is None
+    ledger.close()
+    folded.close()
+
+
 # Each `tasks` column maps to one reader, `path::qualname` (§4.2.1).
 # The reader is a SELECT naming the column, or a row subscript.
 _TASKS_COLUMN_READERS: dict[str, str] = {
@@ -981,6 +1058,7 @@ _TASKS_COLUMN_READERS: dict[str, str] = {
     "pr_url": "saffron/reconcile.py::reconcile",
     "spent_usd_est": "saffron/ledger.py::Ledger.queue_lines",
     "policy_sha": "saffron/ledger.py::Ledger.task_policy_sha",
+    "engine_commit": "saffron/ledger.py::Ledger.task_engine_commit",
     "added": "saffron/ledger.py::Ledger.queue_lines",
     "removed": "saffron/ledger.py::Ledger.queue_lines",
     "updated_at": "saffron/ledger.py::Ledger.newest_tasks_in_states",

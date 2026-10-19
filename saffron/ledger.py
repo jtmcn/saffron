@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
     policy_sha TEXT,
     prompt_sha  TEXT,
+    engine_commit TEXT,
     added       INTEGER,
     removed     INTEGER,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -417,6 +418,7 @@ class Ledger:
             "pr_url",
             "policy_sha",
             "prompt_sha",
+            "engine_commit",
             "merged_head_sha",
             "record_key",
         ):
@@ -701,7 +703,7 @@ class Ledger:
         self, task_id: int | None, column: str, value: Any, at: str
     ) -> None:
         """One task column, plus `updated_at`, set by a single-column fact.
-        `column` is never a caller's string, only one of three literals."""
+        `column` is never a caller's string, only one of four literals."""
         self._db.execute(
             f"UPDATE tasks SET {column} = ?, updated_at = ? WHERE task_id = ?",
             (value, at, task_id),
@@ -902,6 +904,9 @@ class Ledger:
             return None
         if fact.kind == "task_policy":
             self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
+            return None
+        if fact.kind == "task_engine":
+            self._touch_task(task_id, "engine_commit", payload["engine_commit"], at)
             return None
         if fact.kind == "stack_layer":
             # Every value but `batch_key` comes straight from the payload,
@@ -1635,6 +1640,23 @@ class Ledger:
         writes only when the declaration differs from the one on record."""
         self._commit_and_append(
             self._build_fact(task_id, "task_policy", {"policy_sha": policy_sha})
+        )
+
+    def task_engine_commit(self, task_id: int) -> str | None:
+        """The engine on record for this task: what a cell observed with
+        `saffron.engine.engine_commit`, or `None` where no cell ran on it
+        yet (ADR 10). PACKAGE reads it to name the engine in the pull
+        request body."""
+        row = self._db.execute(
+            "SELECT engine_commit FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["engine_commit"] if row is not None else None
+
+    def record_engine(self, task_id: int, engine_commit: str) -> None:
+        """Written by a cell at start, only when the engine it observed
+        differs from the one already on record for this task."""
+        self._commit_and_append(
+            self._build_fact(task_id, "task_engine", {"engine_commit": engine_commit})
         )
 
     def set_task_package(
