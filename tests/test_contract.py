@@ -15,8 +15,14 @@ from saffron.gates.contract import (
 
 
 def test_the_schema_version_comment_cites_the_gate_result_section():
-    text = Path("saffron/gates/contract.py").read_text()
-    line = next(line for line in text.splitlines() if "Versioned per module" in line)
+    lines = (
+        (Path(__file__).parents[1] / "saffron/gates/contract.py")
+        .read_text()
+        .splitlines()
+    )
+    line = lines[
+        next(i for i, x in enumerate(lines) if x.startswith("SCHEMA_VERSIONS")) - 1
+    ]
     sections = re.findall(r"§\d+(?:\.\d+)*", line)
     assert sections == ["§5.4"]
 
