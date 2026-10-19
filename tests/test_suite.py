@@ -170,9 +170,11 @@ def test_an_elevate_on_path_elevates_the_tier_and_blocks_on_size_and_witness():
 
 
 def test_at_standard_size_and_witness_are_advisory():
+    """Keeps its name from before `witness` blocked at every tier
+    (b-02d328). Only `size` stays advisory at `standard`."""
     run = _suite().baseline(_Tree(changed=["src/a.py"]))
     assert run.effective_risk == "standard"
-    assert run.advisory_gates == {"size", "witness"}
+    assert run.advisory_gates == {"size"}
 
 
 def test_a_gate_declared_non_blocking_is_advisory_even_when_elevated():
@@ -267,13 +269,13 @@ _WITNESS = "tests/test_a.py::test_stays_true"
 
 
 def test_a_witness_left_unstrengthened_blocks_when_elevated_and_a_killed_mutant_reports_nothing():
-    """§5.4.1: an unstrengthened `preserves` witness blocks once its tier
-    makes `witness` blocking, and killing the mutant reports nothing new.
+    """§5.4.1: an unstrengthened `preserves` witness blocks at every tier
+    (b-02d328), and killing the mutant reports nothing new.
 
     Run through `GateSuite.against`, not the gate alone, because the
-    baseline carve-out and the tier's advisory filter both sit between them.
-    One `def` holds all four legs. The last two pass unmodified, and a
-    second `def` would read as theater to `revert` (item 78).
+    baseline carve-out sits between them. One `def` holds all four legs.
+    The last one passes unmodified, and a second `def` would read as
+    theater to `revert` (item 78).
     """
     criterion = Criterion(
         claim="a keeps returning true",
@@ -313,10 +315,11 @@ def test_a_witness_left_unstrengthened_blocks_when_elevated_and_a_killed_mutant_
         (n.gate, n.failure.file, n.failure.code) for n in comparison.new_failures
     ] == [("witness", _WITNESS, "survived-mutant")]
 
-    # Declared `standard`: `witness` stays advisory, though it still fails.
+    # Declared `standard`: `witness` blocks here too now (b-02d328).
     comparison = _comparison(standard_spec, elevated_policy, killed=False)
-    assert comparison.new_failures == ()
-    assert [r.status for r in comparison.run.results if r.gate == "witness"] == ["fail"]
+    assert [
+        (n.gate, n.failure.file, n.failure.code) for n in comparison.new_failures
+    ] == [("witness", _WITNESS, "survived-mutant")]
 
     # Declared `elevated`, killed: nothing new to report.
     comparison = _comparison(elevated_spec, elevated_policy, killed=True)
@@ -327,7 +330,8 @@ def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing()
     """§5.4/§5.6: a new failure in a gate this run holds advisory is still
     reported, in `advisory_failures`, counted against the baseline exactly as
     `new_failures` is. It is never among `new_failures`, though, so it
-    blocks nothing. Five legs for the three ways a gate is held advisory.
+    blocks nothing. Five legs follow, each a gate held advisory or a
+    contrast where it blocks instead.
     """
     from saffron.gates.core.size import _CEILINGS
 
@@ -401,8 +405,8 @@ def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing()
     assert [n.gate for n in elevate_comparison.new_failures] == ["size"]
     assert elevate_comparison.advisory_failures == ()
 
-    # 4. `witness` at `standard`: a `preserves` criterion, unstrengthened,
-    #    `killed=False` at both sides.
+    # 4. `witness`, unstrengthened and `killed=False` at both sides: blocks
+    #    rather than being carried as advisory (b-02d328).
     criterion = Criterion(
         claim="a keeps returning true",
         witness=_WITNESS,
@@ -420,10 +424,10 @@ def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing()
         _WitnessTree(changed=["src/a.py"], killed=False, witness=_WITNESS),
         witness_baseline,
     )
-    assert witness_comparison.new_failures == ()
-    assert [(n.gate, n.failure.code) for n in witness_comparison.advisory_failures] == [
+    assert [(n.gate, n.failure.code) for n in witness_comparison.new_failures] == [
         ("witness", "survived-mutant")
     ]
+    assert witness_comparison.advisory_failures == ()
 
     # 5. A drifted and an aborted head each carry no advisory failures,
     #    though an advisory `lint` failure is present at head in both.

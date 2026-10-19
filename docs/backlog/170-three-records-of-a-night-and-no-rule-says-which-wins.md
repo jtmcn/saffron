@@ -6,7 +6,7 @@ tier: 1
 filed: 2026-09-17
 by_hand: true
 specs: [SA-0220, SA-0221, SA-0222, SA-0223, SA-0224, SA-0278]
-prs: [722, 724, 731, 733, 735]
+prs: [722, 724, 731, 733, 735, 907]
 commits: []
 cites: [§4.1, §4.4, §4.6, §6]
 related: [43, 160, 165, 166, 167]
@@ -183,3 +183,5 @@ stored task into the record, and #733 adds its gate results. #735 adds its
 stack rows, and its `saffron migrate` pushes each repo's tasks to its origin. On a copy of
 the live ledger, 239 tasks migrated with none refused, and the fold gave back
 5,320 gate results with no row differing. The batch and run folds remain.
+
+- 2026-10-19, run 44: `SA-0278` (#907) wires the record in. The shared ledger appends each fact through a `RoutedRecord` to the task's ref in its repo's mirror. `run_task` pushes that ref as the task ends. The batch and run folds remain. `DESIGN.md:593` still says nothing constructs a record-backed `Ledger`, so its restatement remains too. `_append` lets a `RecordError` from a missing mirror stop every command that writes a fact, as the spec allowed. `saffron migrate` runs before the first wired night (b-d4b847).

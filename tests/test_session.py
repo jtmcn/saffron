@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import cast
 
@@ -18,6 +18,8 @@ import pytest
 from saffron import preflight
 from saffron.agents import artifacts, context
 from saffron.cell import proxy, runtime, session
+from saffron.cell.runtimes.apple import Apple
+from saffron.cell.runtimes.podman import Podman
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.events import (
     Agent,
@@ -1618,13 +1620,13 @@ def test_a_cell_reports_each_phase_state_as_it_enters_it(monkeypatch, tmp_path):
     assert outcome.state == "READY_FOR_REVIEW"
     assert heard == ["IMPLEMENTING", "REVIEWING"]
 
-    # A REBUTTING end: a claimed fix with nothing committed and no argument.
+    # A REBUTTAL_UNJUDGED end: a claimed fix with nothing committed and no argument.
     heard = []
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
     _rebuttable(monkeypatch, cell, rebut_commits=0)
     outcome, _ledger = _drive(
         monkeypatch,
-        tmp_path / "rebutting",
+        tmp_path / "unjudged",
         cell=cell,
         turns=_through_rebut(
             _turn("I have addressed the findings."),
@@ -1632,7 +1634,7 @@ def test_a_cell_reports_each_phase_state_as_it_enters_it(monkeypatch, tmp_path):
         ),
         on_state=heard.append,
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     assert heard == ["IMPLEMENTING", "REVIEWING", "REBUTTING"]
 
     # An EXHAUSTED end: the same new failure twice is no progress.
@@ -3739,9 +3741,9 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     # body, the queue line — has the effective tier and the advisory set to
     # render, rather than re-deriving them from `spec.risk` alone.
     assert outcome.effective_risk == "standard"
-    # `witness` joins `size` here too: both are advisory at `standard`
-    # (§5.4.1's own level for `witness`, `contract.witness_blocking`).
-    assert outcome.advisory_gates == ["size", "witness"]
+    # `witness` blocks at every tier now (b-02d328), so only `size` is
+    # advisory here.
+    assert outcome.advisory_gates == ["size"]
 
 
 _HIDDEN_DIFF = (
@@ -3914,10 +3916,9 @@ def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_pa
     assert not any(nf.gate == "lint" for nf in outcome.new_failures)
     (lint_result,) = [g for g in outcome.gates if g.gate == "lint"]
     assert lint_result.status == "fail"
-    # `size` and `witness` are also advisory here — the spec is `standard`
-    # and nothing declared an `elevate_on` match — beside `lint`'s own
-    # `blocking: false`.
-    assert outcome.advisory_gates == ["lint", "size", "witness"]
+    # `size` is also advisory here, standard and unelevated, beside `lint`'s
+    # own `blocking: false`. `witness` blocks at every tier now (b-02d328).
+    assert outcome.advisory_gates == ["lint", "size"]
 
 
 def _judged_attempt(ledger, task_id):
@@ -4160,6 +4161,97 @@ def test_the_task_created_fact_carries_the_cells_declared_tier_and_null_where_no
             "SELECT risk FROM tasks WHERE task_id = ?", (outcome.task_id,)
         ).fetchall()
         assert row["risk"] == (declared if declared is not None else "standard")
+
+
+@dataclass(frozen=True)
+class _UnprovenVM(Apple):
+    """apple/container's own spellings, with `unattended` never proven.
+
+    Both real dialects pair `unattended` with the opposite of
+    `shares_kernel`. Only this stub breaks that pairing, so only it kills
+    a build that reads `not unattended` where `shares_kernel` belongs.
+    """
+
+    @property
+    def unattended(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class _OtherSharedKernel(Podman):
+    """podman's dialect under another binary, so a warning must read the name."""
+
+    @property
+    def binary(self) -> str:
+        return "other"
+
+
+def test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_uncapped_pool(
+    monkeypatch, tmp_path
+):
+    """b-0569f7: a task on a shared-kernel dialect with no `thread_env`
+    entry warns once at preflight. It also records `thread_pool_uncapped`
+    as true on its own `task_created` fact. On a dialect with its own
+    kernel, or with an entry declared, it does not warn and records false."""
+    cases = [
+        (Podman(), "gates: {}\n", True),
+        (_OtherSharedKernel(), "gates: {}\n", True),
+        (Podman(), "gates: {}\nthread_env: {}\n", True),
+        (Podman(), 'gates: {}\nthread_env:\n  OMP_NUM_THREADS: "1"\n', False),
+        (Apple(), "gates: {}\n", False),
+        (_UnprovenVM(), "gates: {}\n", False),
+    ]
+    for i, (dialect, policy, uncapped) in enumerate(cases):
+        drive_dir = tmp_path / f"case-{i}"
+        drive_dir.mkdir()
+        monkeypatch.setattr(runtime, "_selected", dialect)
+        monkeypatch.setattr(runtime, "_admitted", True)
+        record = MemoryRecord()
+        cell = _stub_the_runtime(monkeypatch)
+        capture: list = []
+        outcome, ledger = _drive(
+            monkeypatch,
+            drive_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            policy=policy,
+            capture=capture,
+            record=record,
+        )
+        assert len(cell.turns) >= 2, i
+
+        warnings = [
+            e for e in capture if isinstance(e, Preflight) and e.step == "thread_env"
+        ]
+        if uncapped:
+            assert len(warnings) == 1, i
+            assert "thread_env" in warnings[0].detail
+            assert dialect.binary in warnings[0].detail
+        else:
+            assert warnings == [], i
+
+        key = ledger.record_key(outcome.task_id)
+        assert key is not None
+        created = next(f for f in record.read(key) if f.kind == "task_created")
+        assert created.payload["thread_pool_uncapped"] is uncapped, i
+
+
+def test_a_task_created_by_a_caller_that_never_decided_carries_a_null_uncapped_pool(
+    tmp_path,
+):
+    """b-0569f7: a caller that passes no `thread_pool_uncapped` records `None`."""
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
+    repo_id = ledger.upsert_repo(
+        "repo", str(tmp_path / "repo"), str(tmp_path / "m.git"), None
+    )
+    task = ledger.create_task(
+        ledger.create_run(repo_id, "e" * 40), "SY-1", "a" * 64, branch="saffron/SY-1"
+    )
+    key = ledger.record_key(task)
+    assert key is not None
+    created = next(f for f in record.read(key) if f.kind == "task_created")
+    assert created.payload["thread_pool_uncapped"] is None
 
 
 def test_a_test_missing_at_head_reaches_the_agent_as_a_census_failure(
@@ -4572,6 +4664,112 @@ def test_a_task_records_the_prompt_tree_it_ran_under(monkeypatch, tmp_path):
     assert row["prompt_sha"] == context.prompt_sha()
 
 
+def test_a_cell_records_the_engine_that_judged_its_task(monkeypatch, tmp_path):
+    """At cell start `_drive_cell` asks `saffron.engine.engine_commit()` once,
+    with no argument. It records the answer with `record_engine`, only when
+    the answer is not `None` and differs from what the task carries. The
+    fake ignores its own arguments: only the recorded calls can show
+    whether a cell asked about the target repo instead of its own engine."""
+    import saffron.engine as engine_mod
+
+    calls: list[tuple] = []
+    answers = iter(["a" * 40, "b" * 40, "b" * 40, None, None])
+
+    def _fake_engine_commit(*args, **kwargs):
+        calls.append((args, kwargs))
+        return next(answers)
+
+    monkeypatch.setattr(engine_mod, "engine_commit", _fake_engine_commit)
+    monkeypatch.setattr(
+        "saffron.cell.session.engine_commit", _fake_engine_commit, raising=False
+    )
+
+    record = MemoryRecord()
+    seed = Ledger(tmp_path / "ledger.db", record=record)
+    repo_id = seed.upsert_repo(
+        "repo", str(tmp_path / "repo"), str(tmp_path / "m.git"), None
+    )
+    given_run = seed.create_run(repo_id, "e" * 40)
+    given_task = seed.create_task(given_run, "SY-1", "a" * 64, branch="saffron/SY-1")
+    seed.record_engine(given_task, "z" * 40)
+    seed.close()
+
+    def _engine_fact_count(key):
+        return len([f for f in record.read(key) if f.kind == "task_engine"])
+
+    # 1: a freshly minted task, first scripted answer -> records it once.
+    cell1 = _stub_the_runtime(monkeypatch)
+    outcome1, ledger1 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell1,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        record=record,
+    )
+    key1 = ledger1.record_key(outcome1.task_id)
+    assert ledger1.task_engine_commit(outcome1.task_id) == "a" * 40
+    assert _engine_fact_count(key1) == 1
+
+    # 2: the given task, recorded under "z" * 40, gets a differing answer ->
+    # one new fact, the newer engine on record.
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell2,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=given_task),
+        record=record,
+    )
+    key2 = ledger2.record_key(given_task)
+    assert outcome2.task_id == given_task
+    assert ledger2.task_engine_commit(given_task) == "b" * 40
+    assert _engine_fact_count(key2) == 2
+
+    # 3: the same task, the same answer as on record -> no new fact.
+    cell3 = _stub_the_runtime(monkeypatch)
+    outcome3, ledger3 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell3,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=given_task),
+        record=record,
+    )
+    assert ledger3.task_engine_commit(given_task) == "b" * 40
+    assert _engine_fact_count(key2) == 2
+
+    # 4: the given task again, a `None` answer -> keeps its own engine, no fact.
+    cell4 = _stub_the_runtime(monkeypatch)
+    outcome4, ledger4 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell4,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(task_id=given_task),
+        record=record,
+    )
+    assert outcome4.task_id == given_task
+    assert ledger4.task_engine_commit(given_task) == "b" * 40
+    assert _engine_fact_count(key2) == 2
+
+    # 5: a fresh task, a `None` answer -> reads `None`, no fact at all.
+    cell5 = _stub_the_runtime(monkeypatch)
+    outcome5, ledger5 = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell5,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        record=record,
+    )
+    key5 = ledger5.record_key(outcome5.task_id)
+    assert ledger5.task_engine_commit(outcome5.task_id) is None
+    assert _engine_fact_count(key5) == 0
+
+    for args, kwargs in calls:
+        assert args == () and kwargs == {}
+
+
 def test_the_repo_level_policy_sha_is_still_written(monkeypatch, tmp_path):
     """`repos.policy_sha` answers a different question — what the repo
     declared when it was last seen — and `upsert_repo`'s callers depend on
@@ -4897,7 +5095,7 @@ def test_a_rebut_past_the_budget_shares_one_cap_and_stops_when_it_is_spent(
     # The verdict takes the extraction's scripted turn, which is no verdict
     # set. It failed with money left, so the rebuttal stands unjudged.
     assert caps == pytest.approx([10.00, 2.00])
-    assert state == "REBUTTING"
+    assert state == "REBUTTAL_UNJUDGED"
 
     caps, state, _capture = _caps("e", 6.00, 4.50, 0.75, budget_usd=0.25)
     assert caps == pytest.approx([10.00, 8.00, 5.50])
@@ -5060,7 +5258,7 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     outcome5, *_rest5 = _run(
         "e", 1.50, 0.50, 0.75, rebut_commits=0, extracted=_CLAIMED_FIX
     )
-    assert outcome5.state == "REBUTTING"
+    assert outcome5.state == "REBUTTAL_UNJUDGED"
     assert outcome5.rebut_result is not None
 
     outcome6, *_rest6 = _run(
@@ -5180,7 +5378,7 @@ def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
 def test_rebut_draws_on_its_own_cap_whatever_the_task_has_left(monkeypatch, tmp_path):
     """SA-0231, criterion 1: REBUT's pools hold at any spend, and none is
     the task's remainder. A rebuttal turn the cap cuts, with nothing committed,
-    ends EXHAUSTED where run_rebut would halt at REBUTTING. A Budget event
+    ends EXHAUSTED where run_rebut would halt at REBUTTAL_UNJUDGED. A Budget event
     still follows only a REBUT that started at or past budget_usd. A REBUT
     that only crosses it during its own spend gets none."""
     for budget_usd in (20.00, 3.75, 1.00, 0.75, 0.25):
@@ -5313,7 +5511,7 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
             budget_usd=budget_usd,
             rebut_commits=0,
         )
-        assert outcome.state == "REBUTTING"
+        assert outcome.state == "REBUTTAL_UNJUDGED"
         detail = _last_rebut_detail(capture)
         assert "moved no commit and made no argument" in detail
         assert "ran out of" not in detail
@@ -5330,7 +5528,7 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
             rebut_commits=0,
             extracted=_CLAIMED_FIX,
         )
-        assert outcome.state == "REBUTTING"
+        assert outcome.state == "REBUTTAL_UNJUDGED"
         detail = _last_rebut_detail(capture)
         assert "moved no commit and made no argument" in detail
         assert "ran out of" not in detail
@@ -5365,12 +5563,149 @@ def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
             _turn(structured_output=_CLAIMED_FIX),
         ),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     (queued,) = ledger.queue_lines()
-    assert queued["state"] == "REBUTTING"
+    assert queued["state"] == "REBUTTAL_UNJUDGED"
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
     assert record["head_moved"] is False
     assert record["verdicts"] == []
+
+
+def test_a_rebuttal_left_unjudged_ends_its_task_in_a_state_no_scan_stamps(
+    monkeypatch, tmp_path
+):
+    """backlog item 120: both unjudged shapes land the row on
+    `REBUTTAL_UNJUDGED`, never the live-looking `REBUTTING`. A stamping
+    reconcile then leaves it alone, while it still stamps a plain orphaned
+    `REBUTTING` row `ORPHANED` and asks GitHub nothing."""
+    from saffron import reconcile
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "silent",
+        cell=cell,
+        turns=_through_rebut(
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    (queued,) = ledger.queue_lines()
+    assert queued["state"] == "REBUTTAL_UNJUDGED"
+
+    cell2 = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell2, rebut_commits=1)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "unverdicted",
+        cell=cell2,
+        turns=_through_rebut(
+            _turn("It is intentional."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
+            ),
+            _turn("I still think it is wrong."),
+        ),
+    )
+    assert outcome2.state == "REBUTTAL_UNJUDGED"
+    (queued2,) = ledger2.queue_lines()
+    assert queued2["state"] == "REBUTTAL_UNJUDGED"
+
+    (repo_row,) = ledger._db.execute("SELECT repo_id FROM repos").fetchall()
+    repo_id = repo_row["repo_id"]
+    run_id = ledger.create_run(repo_id, "b" * 40)
+    second_task = ledger.create_task(run_id, "SY-2", "b" * 64, branch="saffron/SY-2")
+    ledger.set_task_state(second_task, "REBUTTING")
+
+    def _raising_gh(_argv):
+        raise AssertionError("gh must not be asked")
+
+    result = reconcile.reconcile(ledger, repo_id, gh=_raising_gh, stamp_orphaned=True)
+    assert result.orphaned == [second_task]
+    (cell_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert cell_row["state"] == "REBUTTAL_UNJUDGED"
+    (second_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (second_task,)
+    ).fetchall()
+    assert second_row["state"] == "ORPHANED"
+
+
+def test_a_lens_that_errored_ends_its_task_in_a_state_no_batch_scan_takes_back(
+    monkeypatch, tmp_path
+):
+    """backlog item b-032c3e: an errored lens must land on a state a
+    stamping reconcile leaves alone, unlike the live-looking `REVIEWING` it
+    used to write. `on_state` still hears `REVIEWING` as REVIEW opens, and
+    `build_queue` resumes only the sibling row the scan orphaned."""
+    from saffron import reconcile, scheduler
+
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    sy1_text = (
+        "---\nid: SY-1\ntitle: One\ntype: chore\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    sy2_text = (
+        "---\nid: SY-2\ntitle: Two\ntype: chore\n---\n\n"
+        "## Acceptance criteria\n- [ ] it also works\n"
+    )
+    (specs_dir / "SY-1.md").write_text(sy1_text)
+    (specs_dir / "SY-2.md").write_text(sy2_text)
+    sy1_sha = hashlib.sha256(sy1_text.encode()).hexdigest()
+    sy2_sha = hashlib.sha256(sy2_text.encode()).hexdigest()
+
+    cell = _stub_the_runtime(monkeypatch)
+    heard: list[str] = []
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "cell",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            implement.AgentFailed("the lens session failed"),
+        ],
+        spec=_spec(spec_sha=sy1_sha),
+        on_state=heard.append,
+    )
+    assert outcome.state == "REVIEW_INCOMPLETE"
+    assert heard == ["IMPLEMENTING", "REVIEWING"]
+    (cell_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert cell_row["state"] == "REVIEW_INCOMPLETE"
+
+    (repo_row,) = ledger._db.execute("SELECT repo_id FROM repos").fetchall()
+    repo_id = repo_row["repo_id"]
+    run2 = ledger.create_run(repo_id, "b" * 40)
+    second_task = ledger.create_task(run2, "SY-2", sy2_sha, branch="saffron/SY-2")
+    ledger.set_task_state(second_task, "REVIEWING")
+
+    def _raising_gh(_argv):
+        raise AssertionError("gh must not be asked")
+
+    result = reconcile.reconcile(ledger, repo_id, gh=_raising_gh, stamp_orphaned=True)
+    assert result.orphaned == [second_task]
+    (cell_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert cell_row["state"] == "REVIEW_INCOMPLETE"
+    (second_row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (second_task,)
+    ).fetchall()
+    assert second_row["state"] == "ORPHANED"
+
+    candidates, _refusals = scheduler.build_queue(specs_dir, repo_id, ledger)
+    assert [c.spec.id for c in candidates] == ["SY-2"]
+    assert candidates[0].task_id == second_task
 
 
 # --- backlog item 117: the adequacy lens's own probe, run for real ---
@@ -5496,7 +5831,7 @@ def test_a_concern_whose_probe_survives_is_rebutted_as_a_blocker(monkeypatch, tm
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
     assert [b["finding"] for b in record["blockers"]] == [1, 2]
     assert [b["claim"] for b in record["blockers"]] == [
@@ -5758,7 +6093,7 @@ def test_a_probe_that_raises_stops_probing_and_keeps_the_verdicts_given(
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     probes = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
     by_file = {p["probe"]["file"]: p for p in probes}
     assert by_file["src/a.py"]["probe_verdict"] == "survived"
@@ -5852,7 +6187,7 @@ def test_a_probe_only_a_test_the_diff_did_not_add_notices_is_rebutted_with_that_
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
 
     entries = json.loads((tmp_path / "out" / "SY-1" / "probes.json").read_text())
     by_file = {e["probe"]["file"]: e for e in entries}
@@ -10536,13 +10871,11 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
 def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
     monkeypatch, tmp_path
 ):
-    """§5.4.1's level, in effect rather than in prose: the identical new
-    `witness` failure ends a `standard` attempt clean and an `elevated` one
-    `EXHAUSTED` — agreeing with `contract.witness_blocking` rather than
-    defaulting to blocking at every tier for want of an entry in the
-    advisory set. `max_attempts=1` is what lets `repair_decision` resolve on
-    the first suite alone, so no repair turn is needed to tell the two
-    tiers apart."""
+    """Its name predates `witness` blocking at every tier (b-02d328). All
+    three legs below now end `EXHAUSTED`: `_advisory` leaves `witness` out
+    of every tier's advisory set rather than only `elevated`'s.
+    `max_attempts=1` is what lets `repair_decision` resolve on the first
+    suite alone, so no repair turn is needed to see it."""
     survived = Failure(file="t.py::test_guard", code="survived-mutant", message="m")
     baseline_suite = [GateResult(gate="witness", status="skip")]
     head_suite = [
@@ -10551,20 +10884,12 @@ def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
         )
     ]
 
-    # The third leg is the one the level is read from `current_tier` for: a
-    # `standard` spec that an `elevate_on` path match elevates. Measured —
-    # `witness_blocking(spec.risk)` in place of the effective tier fails no
-    # behavioural test without it, so half of §5.6's rule went unguarded while
-    # the claim said "in effect". `size` already exercises this half.
-    for label, risk, policy, expected in (
-        ("standard", "standard", "gates: {}\n", "READY_FOR_REVIEW"),
-        ("elevated", "elevated", "gates: {}\n", "EXHAUSTED"),
-        (
-            "elevated-by-path",
-            "standard",
-            "gates: {}\nelevate_on:\n  - src/**\n",
-            "EXHAUSTED",
-        ),
+    # The third leg is a `standard` spec an `elevate_on` match elevates.
+    # `size` already exercises this half.
+    for label, risk, policy in (
+        ("standard", "standard", "gates: {}\n"),
+        ("elevated", "elevated", "gates: {}\n"),
+        ("elevated-by-path", "standard", "gates: {}\nelevate_on:\n  - src/**\n"),
     ):
         cell = _stub_the_runtime(
             monkeypatch, suites=(baseline_suite, head_suite, head_suite)
@@ -10577,7 +10902,7 @@ def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
             spec=_spec(risk=risk, max_attempts=1),
             policy=policy,
         )
-        assert outcome.state == expected, label
+        assert outcome.state == "EXHAUSTED", label
         if label == "elevated-by-path":
             # The spec is still `standard`; the path match is what elevated the
             # attempt, and the level must follow *that*.
@@ -10653,6 +10978,85 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
         assert captured, tier
         assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured), tier
         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
+
+
+def test_a_task_whose_declared_mutant_survives_its_witness_never_reaches_review(
+    monkeypatch, tmp_path
+):
+    """§5.4.1 (b-02d328): a declared mutant that survives its witness blocks
+    at every risk tier, never only `elevated`. Three legs: a declared
+    `standard`, a declared `elevated`, and a `standard` spec an
+    `elevate_on` path elevates.
+
+    The real `runner.run_suite` runs, so `run_witness` and `witness_gate`
+    do too. Only `runner.run_gate` is faked: a plain `tests` call opens a
+    frame, and a subset call records itself with the mutant live under it.
+    """
+    from saffron.gates import runner
+    from saffron.intake import Criterion, Mutant
+
+    real_run_suite = runner.run_suite
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="tests/test_x.py::test_guard",
+        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
+    )
+    old = "tests/test_x.py::test_old"
+
+    def _fakes(frames: list[dict]):
+        live: list = [None]
+
+        def _run_gate(name, executable, cwd, *, subset=None, **_kw):
+            if subset is None:
+                collected = [old] if not frames else [old, criterion.witness]
+                frames.append({"subsets": []})
+                return GateResult(
+                    gate=name, status="pass", tool="pytest 8.0", collected=collected
+                )
+            frames[-1]["subsets"].append((list(subset), live[0]))
+            return GateResult(
+                gate=name, status="pass", tool="pytest 8.0", collected=list(subset)
+            )
+
+        @contextlib.contextmanager
+        def _source_mutated(_container, mutant):
+            live[0] = mutant
+            try:
+                yield None
+            finally:
+                live[0] = None
+
+        return _run_gate, _source_mutated
+
+    for label, risk, elevate_on, expected_tier in (
+        ("standard", "standard", "", "standard"),
+        ("elevated", "elevated", "", "elevated"),
+        ("elevated-by-path", "standard", "elevate_on:\n  - src/**\n", "elevated"),
+    ):
+        frames: list[dict] = []
+        run_gate, source_mutated = _fakes(frames)
+        cell = _stub_the_runtime(monkeypatch)
+        monkeypatch.setattr("saffron.gates.runner.run_suite", real_run_suite)
+        monkeypatch.setattr("saffron.gates.runner.run_gate", run_gate)
+        monkeypatch.setattr("saffron.cell.worktree.source_mutated", source_mutated)
+
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / label,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(risk=risk, max_attempts=1, acceptance=[criterion]),
+            policy="gates: {tests: {}}\n" + elevate_on,
+            gates=("tests",),
+        )
+        assert outcome.effective_risk == expected_tier, label
+        assert outcome.state == "EXHAUSTED", label
+        assert "witness" not in outcome.advisory_gates, label
+        assert [
+            (nf.gate, nf.failure.file, nf.failure.code) for nf in outcome.new_failures
+        ] == [("witness", criterion.witness, "survived-mutant")], label
+        assert len(frames) >= 2, label
+        assert ([criterion.witness], criterion.mutant) in frames[1]["subsets"], label
 
 
 def _cell_container(mutate) -> str | None:
@@ -11184,7 +11588,7 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     assert subsets == [["t.py::a"], ["t.py::b"]]
 
     entries = json.loads(
@@ -11530,7 +11934,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
         policy=_PROBE_POLICY,
         gates=("tests",),
     )
-    assert outcome.state == "REBUTTING"
+    assert outcome.state == "REBUTTAL_UNJUDGED"
     assert subsets == [["t.py::a"], ["t.py::a"]]
 
     entry = json.loads((tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text())

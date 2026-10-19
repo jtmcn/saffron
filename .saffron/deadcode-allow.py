@@ -9,7 +9,6 @@ _.supersedes  # Adr field (SA-0110): read only by check_adr_supersession in test
 _.APPENDIX_OPENS  # ontology/design_record.py: read only by the guard test that refuses an appendix heading in DESIGN.md
 _.add_adrs  # ontology/design_record.py: read only by the design-record tests that validate each ADR against ADRShape
 _.envelope  # Spec field (§3.2): extra="forbid" needs it for a bug spec to parse
-_.envelope_default  # Policy field (§2.1): extra="forbid" needs it for policy.yaml to parse
 _.pending_symbols  # Spec field: pydantic validates it, and .saffron/gates/dead.py reads it from YAML
 _.understanding  # Plan field (§5.3): validates the extraction turn's plan.json
 _.approach  # Plan field (§5.3): validates the extraction turn's plan.json

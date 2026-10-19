@@ -327,9 +327,7 @@ _Avoid_: conflating with `forbidden`, which is enforced.
 **Risk tier**: `standard` or `elevated`. Set on the spec, or raised automatically when
 the diff touches a path in the repo's `elevate_on`. At the plan checkpoint the same
 rule reads the plan's `files_to_change` instead, as a forecast. Elevated makes `size`
-blocking (`DESIGN.md` §5.6). The operator decided `witness` blocks at every tier,
-and `SA-0288` builds it. Until it lands, the gate suite holds `witness` advisory at
-`standard` (§5.4.1). The tier
+blocking (`DESIGN.md` §5.6). `witness` blocks at every tier (§5.4.1). The tier
 also marks the queue entry. It adds no lens, because every declared lens runs at every tier
 (`DESIGN.md` §5.5.1). It does **not** make `coverage` blocking: `coverage` is
 advisory at every tier (`DESIGN.md` §5.4).
@@ -362,10 +360,8 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
   `committed` reads the worktree's status instead, and `census` and `criteria`
   read other gates' results. `revert` and `witness` are the two that run
   something, and §2.1's rule is shaped around them rather than broken by them:
-  core invokes declared gates, never tools (`DESIGN.md` §2.1). The operator
-  decided `witness` blocks at every tier, and `SA-0288` builds it. Until it
-  lands, the gate suite holds `witness` advisory at `standard` (§5.4.1). The
-  rest sit at the level §5.4 fixes for them.
+  core invokes declared gates, never tools (`DESIGN.md` §2.1). `witness`
+  blocks at every tier (§5.4.1). The rest sit at the level §5.4 fixes for them.
 - **Contract gates**: the gate roles above. Declared in `policy.yaml`, implemented
   in the repo's `.saffron/gates/`.
 - **Repo-defined gates**: anything a repo adds against its own hard-to-fake

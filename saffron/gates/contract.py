@@ -10,14 +10,15 @@ import json
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
-
-from saffron.intake import RiskTier
+from pydantic import BaseModel, Field, model_validator
 
 GateStatus = Literal["pass", "fail", "skip", "error"]
 
 _DIGITS = re.compile(r"\d+")
 _WHITESPACE = re.compile(r"\s+")
+
+# The gate result versions this engine reads (DESIGN.md §5.4). Only 1 exists today.
+SCHEMA_VERSIONS: tuple[int, ...] = (1,)
 
 
 def split_lines(text: str) -> list[str]:
@@ -60,6 +61,8 @@ class Failure(BaseModel):
 class GateResult(BaseModel):
     """One execution of one gate against one tree — CONTEXT.md §4."""
 
+    # Absent or 1 reads as the integer 1. Any other value is refused below.
+    schema_version: int = 1
     gate: str
     status: GateStatus
     tool: str | None = None
@@ -85,6 +88,19 @@ class GateResult(BaseModel):
     summary: str = ""
     duration_ms: int | None = Field(default=None, ge=0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _schema_version_is_supported(cls, data: object) -> object:
+        """Refuse an unsupported version, and a bool or float before pydantic coerces it."""
+        if isinstance(data, dict) and "schema_version" in data:
+            value = data["schema_version"]
+            if type(value) is not int or value not in SCHEMA_VERSIONS:
+                raise ValueError(
+                    f"schema_version {value!r} is not supported; this engine "
+                    f"reads: {sorted(SCHEMA_VERSIONS)}"
+                )
+        return data
+
 
 def normalize_message(message: str) -> str:
     """Collapse whitespace and the numbers a diff shifts.
@@ -107,30 +123,6 @@ def identity(gate: str, failure: Failure) -> tuple[str, str, str, str]:
     with the same code.
     """
     return (gate, failure.file, failure.code, normalize_message(failure.message))
-
-
-def witness_blocking(tier: RiskTier) -> bool:
-    """§5.4.1's fixed answer for `witness`: advisory at `standard`, blocking
-    at `elevated` — `size`'s own two levels, for `size`'s own reason. An
-    elevated diff is where a plausible-looking wrong change hurts most, and a
-    claim guarded by nothing is exactly that.
-
-    A pure fact about the tier; `saffron.gates.suite` reads it to build each
-    run's advisory set.
-
-    This is the level, not a green light. Two things this decision is made in
-    full knowledge of, neither of which this module can change (`witness.py`
-    and the mutator are both out of reach here): a `tests` gate that errors
-    on a later criterion discards an earlier criterion's real survivor
-    finding in the same call (`witness_gate` returns on the first inner
-    `error`), and `witness` answers that same inner-`error` trap with `error`
-    where `revert` answers it with `skip` — a disagreement recorded, not
-    resolved, at `saffron/gates/core/witness.py`'s `ponytail:` comment. If
-    either turns out to make a blocking `witness` too likely to abort an
-    attempt on nothing, that is the backlog's to carry, not a reason to
-    silently soften the level here.
-    """
-    return tier == "elevated"
 
 
 def parse_gate_json(raw: str, expected_gate: str) -> GateResult:

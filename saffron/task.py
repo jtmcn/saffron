@@ -61,6 +61,7 @@ from saffron.events import (
     Event,
     EventLog,
     Preflight,
+    Teardown,
     describe,
 )
 from saffron.intake import Spec, SpecError, parse_spec
@@ -77,6 +78,7 @@ from saffron.phases.rebut import (
 )
 from saffron.phases.review import LensReview, anchored_blockers, anchored_concerns
 from saffron.reconcile import GhRunner, reconcile
+from saffron.record.contract import RecordError
 from saffron.report import index as index_report
 from saffron.repos import image as repo_image
 from saffron.repos.mirror import (
@@ -489,7 +491,7 @@ def run_task(
         # `package()` both default to: a caller that passes nothing must still
         # get `events.jsonl`. A print-only default is the defect item 43 is
         # about, and is not this.
-        log = EventLog(out_dir / spec.id)
+        log = EventLog(out_dir / spec.id, token=token)
         # ponytail: re-derives `EventLog`'s private path, since it has no accessor.
         log_path = out_dir / spec.id / "events.jsonl"
 
@@ -640,55 +642,103 @@ def run_task(
                     f"{spec.id}: the live row for ORPHANED could not be written: {exc}"
                 )
         raise
-    # SA-0204: an EXHAUSTED cell with gates green and a standing blocker
-    # still reaches package(), in its exhausted mode.
-    exhausted_package = (
-        outcome.state == "EXHAUSTED"
-        and outcome.rebut_result is None
-        and bool(anchored_blockers(outcome.reviews))
-    )
-    if outcome.state == "READY_FOR_REVIEW" or exhausted_package:
-        package_error_note: str | None = None
-        try:
-            result = package_phase.package(
-                outcome,
-                spec=spec,
-                repo=repo,
-                mirror=base.mirror,
-                # Derived, not rebuilt: preflight already built this tag.
-                image=repo_image.cell_tag(repo),
-                ledger=ledger,
-                out_dir=out_dir,
-                token=token,
-                # `None` unless `stacked_on` is too: a stacked worktree must not
-                # reach a pull request that is not.
-                parent_branch=target_branch,
-                exhausted=exhausted_package,
-                emit=emit,
-            )
-        except package_phase.PackageError as exc:
-            # Only in the exhausted mode: a READY_FOR_REVIEW cell's error
-            # still reaches cli.main (exit 2), as it always has.
-            if not exhausted_package:
-                # The cell's own write stopped short of this state
-                # (b-dce9a4), so the raise path writes it here instead.
-                ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+    # Everything below runs only when `run_one_cell` returned, never
+    # when it raised: that path above already re-raised past this point.
+    try:
+        # SA-0204: an EXHAUSTED cell with gates green and a standing blocker
+        # still reaches package(), in its exhausted mode.
+        exhausted_package = (
+            outcome.state == "EXHAUSTED"
+            and outcome.rebut_result is None
+            and bool(anchored_blockers(outcome.reviews))
+        )
+        if outcome.state == "READY_FOR_REVIEW" or exhausted_package:
+            package_error_note: str | None = None
+            try:
+                result = package_phase.package(
+                    outcome,
+                    spec=spec,
+                    repo=repo,
+                    mirror=base.mirror,
+                    # Derived, not rebuilt: preflight already built this tag.
+                    image=repo_image.cell_tag(repo),
+                    ledger=ledger,
+                    out_dir=out_dir,
+                    token=token,
+                    # `None` unless `stacked_on` is too: a stacked worktree must not
+                    # reach a pull request that is not.
+                    parent_branch=target_branch,
+                    exhausted=exhausted_package,
+                    emit=emit,
+                )
+            except package_phase.PackageError as exc:
+                # Only in the exhausted mode: a READY_FOR_REVIEW cell's error
+                # still reaches cli.main (exit 2), as it always has.
+                if not exhausted_package:
+                    # The cell's own write stopped short of this state
+                    # (b-dce9a4), so the raise path writes it here instead.
+                    ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+                    raise
+                result = None
+                package_error_note = str(exc)
+            except BaseException:
+                # Any other raise, `KeyboardInterrupt` included, leaves the
+                # same row in flight unless this writes it (b-dce9a4).
+                if not exhausted_package:
+                    ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
                 raise
-            result = None
-            package_error_note = str(exc)
-        except BaseException:
-            # Any other raise, `KeyboardInterrupt` included, leaves the
-            # same row in flight unless this writes it (b-dce9a4).
-            if not exhausted_package:
-                ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
-            raise
+            else:
+                print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
+                outcome.state = result.state
+            if exhausted_package and (result is None or not result.pr_url):
+                # No pull request either way, refused or raised, so the branch
+                # is pushed as any `EXHAUSTED` task's, told why PACKAGE did not open one.
+                package_note = result.note if result is not None else package_error_note
+                pushed = package_phase.push_unpackaged_work(
+                    outcome,
+                    spec=spec,
+                    repo=repo,
+                    mirror=base.mirror,
+                    out_dir=out_dir,
+                    repo_id=repo_id,
+                    ledger=ledger,
+                    token=token,
+                    package_refusal=package_note,
+                    emit=emit,
+                )
+                combined_note = f"{package_note}; {pushed.note}"
+                # This overwrites a refusal's `_finish` row, since `append_queue_line`
+                # upserts on `(repo, spec_id)`. A raised PACKAGE wrote none.
+                index_report.append_queue_line(
+                    out_dir,
+                    index_report.QueueLine(
+                        repo=repo.name,
+                        spec_id=spec.id,
+                        state="EXHAUSTED",
+                        attempts=outcome.attempts,
+                        cost_usd_est=outcome.spent_usd,
+                        concerns=anchored_concerns(outcome.reviews),
+                        added=0,
+                        removed=0,
+                        link="",
+                        note=combined_note,
+                        risk=outcome.effective_risk,
+                        sustained=sustained_blockers(outcome.rebut_result),
+                        unkept=unkept_fixes(outcome.rebut_result),
+                    ),
+                    header={
+                        "trailing accept rate": index_report.trailing_accept_rate(
+                            ledger
+                        )
+                    },
+                )
+                print(f"{spec.id:<10} EXHAUSTED  {combined_note}")
+                outcome.state = "EXHAUSTED"
         else:
-            print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
-            outcome.state = result.state
-        if exhausted_package and (result is None or not result.pr_url):
-            # No pull request either way, refused or raised, so the branch
-            # is pushed as any `EXHAUSTED` task's, told why PACKAGE did not open one.
-            package_note = result.note if result is not None else package_error_note
+            # PACKAGE never ran, but teardown may still have exported commits to
+            # the cell's own branch (backlog item 45, `SA-0069`). Never packaged,
+            # and never allowed to change `outcome.state`: a caller reading
+            # `MERGE_FAILED` or `READY_FOR_REVIEW` here would believe PACKAGE ran.
             pushed = package_phase.push_unpackaged_work(
                 outcome,
                 spec=spec,
@@ -698,25 +748,23 @@ def run_task(
                 repo_id=repo_id,
                 ledger=ledger,
                 token=token,
-                package_refusal=package_note,
                 emit=emit,
             )
-            combined_note = f"{package_note}; {pushed.note}"
-            # This overwrites a refusal's `_finish` row, since `append_queue_line`
-            # upserts on `(repo, spec_id)`. A raised PACKAGE wrote none.
+            # `_finish` never ran, so this is the task's only row. No pull request
+            # exists, so `link` stays empty; a pushed branch is already in `note`.
             index_report.append_queue_line(
                 out_dir,
                 index_report.QueueLine(
                     repo=repo.name,
                     spec_id=spec.id,
-                    state="EXHAUSTED",
+                    state=outcome.state,
                     attempts=outcome.attempts,
                     cost_usd_est=outcome.spent_usd,
                     concerns=anchored_concerns(outcome.reviews),
                     added=0,
                     removed=0,
                     link="",
-                    note=combined_note,
+                    note=pushed.note,
                     risk=outcome.effective_risk,
                     sustained=sustained_blockers(outcome.rebut_result),
                     unkept=unkept_fixes(outcome.rebut_result),
@@ -725,46 +773,20 @@ def run_task(
                     "trailing accept rate": index_report.trailing_accept_rate(ledger)
                 },
             )
-            print(f"{spec.id:<10} EXHAUSTED  {combined_note}")
-            outcome.state = "EXHAUSTED"
-    else:
-        # PACKAGE never ran, but teardown may still have exported commits to
-        # the cell's own branch (backlog item 45, `SA-0069`). Never packaged,
-        # and never allowed to change `outcome.state`: a caller reading
-        # `MERGE_FAILED` or `READY_FOR_REVIEW` here would believe PACKAGE ran.
-        pushed = package_phase.push_unpackaged_work(
-            outcome,
-            spec=spec,
-            repo=repo,
-            mirror=base.mirror,
-            out_dir=out_dir,
-            repo_id=repo_id,
-            ledger=ledger,
-            token=token,
-            emit=emit,
-        )
-        # `_finish` never ran, so this is the task's only row. No pull request
-        # exists, so `link` stays empty; a pushed branch is already in `note`.
-        index_report.append_queue_line(
-            out_dir,
-            index_report.QueueLine(
-                repo=repo.name,
-                spec_id=spec.id,
-                state=outcome.state,
-                attempts=outcome.attempts,
-                cost_usd_est=outcome.spent_usd,
-                concerns=anchored_concerns(outcome.reviews),
-                added=0,
-                removed=0,
-                link="",
-                note=pushed.note,
-                risk=outcome.effective_risk,
-                sustained=sustained_blockers(outcome.rebut_result),
-                unkept=unkept_fixes(outcome.rebut_result),
-            ),
-            header={"trailing accept rate": index_report.trailing_accept_rate(ledger)},
-        )
-        print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
+            print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
+    finally:
+        try:
+            ledger.push_record(outcome.task_id)
+        except (RecordError, OSError) as exc:
+            emit(
+                Teardown(
+                    timestamp=time.time(),
+                    spec_id=spec.id,
+                    step="record_push",
+                    ok=False,
+                    detail=f"record push refused: {exc}",
+                )
+            )
     return outcome
 
 

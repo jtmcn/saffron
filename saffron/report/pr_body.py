@@ -86,6 +86,7 @@ def render_pr_body(
     advisory_failures: Sequence[NewFailure] = (),
     notes: str = "",
     wrong_versions: Sequence[Mapping[str, object]] = (),
+    engine_commit: str | None = None,
     exhausted: bool = False,
     head_moved: bool = False,
 ) -> str:
@@ -122,7 +123,7 @@ def render_pr_body(
         None,  # _test_diff, sized last: it is the only unbounded section.
         _gate_table(results, advisory_gates),
         _findings(reviews),
-        _provenance(spec, base_sha, head_sha, transcript_path),
+        _provenance(spec, base_sha, head_sha, transcript_path, engine_commit),
         _not_covered(
             spec,
             results,
@@ -278,9 +279,9 @@ def _new_failures(
     change's problem (DESIGN.md §5.4).
 
     `advisory_failures` are the same suite comparison's new failures in a
-    gate this run holds advisory (`size` and `witness` at `standard`, or a
-    gate declared `blocking: false`): reported in their own section, after
-    the blocking one, and never a reason this body says anything but green.
+    gate this run holds advisory (`size` below `elevated`, or a gate
+    declared `blocking: false`): reported in their own section, after the
+    blocking one, and never a reason this body says anything but green.
     """
     if not new_failures and not advisory_failures:
         return "### No new failures\n\nEvery failure at head was already present at base.\n"
@@ -683,12 +684,20 @@ def _notes(notes: str) -> str:
     )
 
 
-def _provenance(spec: Spec, base_sha: str, head_sha: str, transcript_path: str) -> str:
+def _provenance(
+    spec: Spec,
+    base_sha: str,
+    head_sha: str,
+    transcript_path: str,
+    engine_commit: str | None = None,
+) -> str:
     touches = ", ".join(f"`{t}`" for t in spec.touches) or "—"
+    engine_line = f"- engine `{engine_commit}`\n" if engine_commit is not None else ""
     return (
         "### Provenance\n\n"
         f"- base `{base_sha}`\n"
         f"- head `{head_sha}`\n"
+        f"{engine_line}"
         f"- touches {touches}\n"
         f"- artifacts `{transcript_path}`\n"
     )

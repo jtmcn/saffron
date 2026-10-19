@@ -162,12 +162,13 @@ The push carries no `--force`:
 git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 ```
 
-A non-fast-forward refusal therefore means a stale writer. Re-reading and
-retrying is the caller's, and no caller does it yet: `append` lets the refusal
-propagate, and no production path sets a remote. The retry lands with the
-wiring. The spike measured that refusal directly, and it is the primitive the
-cross-host budget needs later — the thing `batch.py:194` cannot provide across
-hosts, because a SQLite file is local to one.
+A non-fast-forward refusal therefore means a stale writer. The wiring
+appends into each task's mirror with no remote, and `run_task` pushes the
+task's own ref once, as the task ends. A refused push is an event, and
+nothing here re-reads or retries. The spike measured that refusal directly,
+and it is the primitive the cross-host budget needs later — the thing
+`batch.py:194` cannot provide across hosts, because a SQLite file is local to
+one.
 
 **What the spike settled about this layout.** A cell reaches neither the ref nor
 its objects, by two independent mechanisms: `worktree.py`'s seed sequence fetches
@@ -242,10 +243,12 @@ needs a head failure the baseline cancelled.
 
 `saffron fold` rebuilds `~/.saffron/ledger.db` from the record. In the end
 state nothing writes the ledger directly: every write goes to the record and the
-fold follows. That end state is not this design's — here both are written, so
-the fold's output can be compared against a ledger the old path produced, and
-no production caller constructs a `Ledger` with a record at all. Cutting the
-direct writes is the second plan's, with the `queue.json` cutover of §6.
+fold follows. That end state is not this design's. Here both are written, so
+the fold's output can be compared against a ledger the old path produced.
+Every command now constructs its shared `Ledger` with a `RoutedRecord`
+(item 170 step 3), and the ledger is still written and read directly.
+Cutting the direct writes is the second plan's, with the `queue.json`
+cutover of §6.
 
 The test is the one item 170 names, and it is the whole acceptance criterion for
 this part: **delete the ledger, rebuild it, and get the same rows.**
@@ -363,8 +366,9 @@ the exact defect this design exists to close. One rule prevents it:
 > **Every record append also emits an event. No event implies an append.**
 
 The rule binds from the point a production caller constructs a `Ledger` with a
-record. Nothing does yet, and `_append` emits nothing, so the rule is stated
-here and implemented with that wiring.
+record. A production caller now constructs one. That wiring does not build the
+rule, and the ledger's append still emits no event. Backlog item b-6677b6
+holds the rule.
 
 One direction only. The two can differ in prose, and can never differ on whether
 something happened. An append that failed to emit is a missing line in a log; an

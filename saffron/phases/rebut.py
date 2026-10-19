@@ -495,9 +495,9 @@ def rebut_state(
 
     Doneness is measured, never reported (§4.3): HEAD moved, or an explicit
     recorded argument. A turn that claims a fix it did not commit produced
-    neither, and §3.3 has no state for it — `NOT_IMPLEMENTED` is IMPLEMENT's
-    measurement and would name the wrong phase — so the task halts at
-    `REBUTTING`, which is where it actually stopped.
+    neither. `NOT_IMPLEMENTED` is IMPLEMENT's own measurement and names the
+    wrong phase, so the task halts at `REBUTTAL_UNJUDGED` instead (§3.3),
+    the state where it stopped.
     """
     argued = [r for r in rebuttal.rebuttals if r.action == "argued"]
     claimed = [r for r in rebuttal.rebuttals if r.action == "fixed"]
@@ -508,7 +508,7 @@ def rebut_state(
             else rebuttal.error or "recorded nothing"
         )
         return (
-            "REBUTTING",
+            "REBUTTAL_UNJUDGED",
             f"the rebuttal moved no commit and made no argument: {detail}",
         )
     if never_started := [v for v in verdicts if v.error and v.never_started]:
@@ -518,7 +518,10 @@ def rebut_state(
         detail = "; ".join(v.error or "" for v in never_started)
         return "GATE_ERROR", f"{names} never started: {detail}"
     if errored := [v.lens for v in verdicts if v.error]:
-        return "REBUTTING", f"{errored} produced no verdict — the rebuttal is unjudged"
+        return (
+            "REBUTTAL_UNJUDGED",
+            f"{errored} produced no verdict — the rebuttal is unjudged",
+        )
     confirmed = [
         v for lens in verdicts for v in lens.verdicts if v.verdict == "confirmed"
     ]
@@ -618,10 +621,9 @@ def unkept_fixes(rebut_result: RebutResult | None) -> int:
     The second is not this function's to fix: a rebuttal that answered every
     blocker `fixed` and moved nothing returns at `run_rebut`'s early exit
     below, so no verdict pass runs and there is nothing to confirm against —
-    the purest instance of §6's failure counts zero here. It still reaches the
-    queue, as state `REBUTTING`; note that ranks `_ELEVATED`, *below* the
-    level-3 bucket this count feeds, so the purest case sorts under the
-    mixed ones until that task lands.
+    the purest instance of §6's failure counts zero here. It now reaches the
+    queue as state `REBUTTAL_UNJUDGED`, which ranks with the states that
+    need you.
     """
     if rebut_result is None or rebut_result.rebuttal.error or rebut_result.moved:
         return 0

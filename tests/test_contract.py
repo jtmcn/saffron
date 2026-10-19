@@ -1,8 +1,11 @@
 import json
+import re
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from saffron.gates import contract
 from saffron.gates.contract import (
     Failure,
     GateResult,
@@ -10,6 +13,19 @@ from saffron.gates.contract import (
     normalize_message,
     parse_gate_json,
 )
+
+
+def test_the_schema_version_comment_cites_the_gate_result_section():
+    lines = Path(contract.__file__).read_text().splitlines()
+    above = lines[
+        : next(i for i, x in enumerate(lines) if x.startswith("SCHEMA_VERSIONS"))
+    ]
+    comment = []
+    while above and above[-1].startswith("#"):
+        comment.insert(0, above.pop())
+    # The grammar tests/test_citations.py reads, so a lettered section is not cut short.
+    sections = re.findall(r"§\d+(?:\.\d+)*[a-z]?", "\n".join(comment))
+    assert sections == ["§5.4"]
 
 
 def test_parses_a_well_formed_gate_result():
@@ -94,6 +110,22 @@ def test_tool_is_carried_on_the_result():
 def test_tool_is_absent_rather_than_invented():
     raw = '{"gate":"lint","status":"pass","summary":"clean"}'
     assert parse_gate_json(raw, expected_gate="lint").tool is None
+
+
+def test_a_gate_result_reads_as_version_1_and_refuses_any_other():
+    base = {"gate": "lint", "status": "pass", "tool": "x"}
+
+    for extra in ({}, {"schema_version": 1}):
+        result = parse_gate_json(json.dumps({**base, **extra}), expected_gate="lint")
+        assert result.schema_version == 1
+        assert type(result.schema_version) is int
+
+    for value in (2, True, 1.0):
+        raw = json.dumps({**base, "schema_version": value})
+        with pytest.raises(ValidationError) as excinfo:
+            parse_gate_json(raw, expected_gate="lint")
+        assert f"schema_version {value!r} " in str(excinfo.value)
+        assert "[1]" in str(excinfo.value)
 
 
 def test_a_gate_may_report_the_names_it_collected():

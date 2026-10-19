@@ -44,3 +44,4 @@ The batch's `follow_ups` list came back empty.
   findings gave no follow-up. Seven were pooled for a `depends_on` entry.
   Six were pooled because the text did not parse. One draft had a backtick
   opening a YAML list item. One mutant named text the spec body also held.
+- 2026-10-19: recurred in the spec loop's run 44, batch 38. The writer drafted thirteen follow-ups, and twelve were pooled. Eight declared a `depends_on` entry. Three named a mutant whose text the spec body also held. One declared type `test`. The one admitted became `SA-0296` (#915).

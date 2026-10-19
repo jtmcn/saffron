@@ -6,7 +6,7 @@ tier: 1
 filed: 2026-09-29
 closed:
 specs: [SA-0195, SA-0280]
-prs: [600]
+prs: [600, 908]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-2750d5, b-78ccc7, b-7e69d0]
@@ -38,3 +38,4 @@ replaced the constant with a literal.
 - 2026-09-29: filed from the spec loop's run 21.
 - 2026-09-29: `SA-0195` (#600) made the adequacy prompt name the shape. No gate refuses it yet.
 - 2026-10-11: `SA-0280` queued. `witness` derives a constant mutant from patterns the repo declares under `policy.yaml`'s `witness:`. This repo's own block goes in by hand after it merges, since `.saffron/` is protected.
+- 2026-10-19, run 44: `SA-0280` (#908) derives constant mutants from the patterns a repo declares under `witness:`. This repo's own block in `.saffron/policy.yaml` still goes in by hand, so the item stays partial. Review found b-32b3db and b-b33854.

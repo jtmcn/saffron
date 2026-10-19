@@ -214,12 +214,75 @@ def test_a_claimed_fix_with_no_commit_and_no_argument_does_not_advance():
         gate_suites=gate_suites,
         critic_calls=critic_calls,
     )
-    assert result.state == "REBUTTING"
+    assert result.state == "REBUTTAL_UNJUDGED"
     assert "committed nothing" in result.why
     assert result.verdicts == []
     assert gate_suites == []  # HEAD did not move; the suite would answer twice
     assert critic_calls == []  # nothing to verdict, no cell built to verdict it in
     assert len(record) == 2  # the attempt and its extraction turn, no verdict
+
+
+def test_a_rebuttal_that_neither_moved_nor_argued_ends_rebuttal_unjudged():
+    """backlog item 120: a rebuttal that neither moved HEAD nor argued ends
+    `REBUTTAL_UNJUDGED`, never the live-looking state a stamping scan would
+    mistake for a running cell. A claimed fix, a turn that recorded nothing,
+    a turn that failed outright, and a reply outside the schema all read
+    the same way."""
+    claimed = _run("Fixed.", _rebuttals(_fixed()), moved=False)
+    assert claimed.state == "REBUTTAL_UNJUDGED"
+    assert "moved no commit and made no argument" in claimed.why
+
+    silent = _run("Fixed.", _rebuttals(), moved=False)
+    assert silent.state == "REBUTTAL_UNJUDGED"
+    assert "moved no commit and made no argument" in silent.why
+
+    failed = _run(implement.AgentFailed("max turns", _turn("", cost=0.1)), moved=False)
+    assert failed.state == "REBUTTAL_UNJUDGED"
+    assert "moved no commit and made no argument" in failed.why
+
+    outside_schema = _run("Fixed.", "I still think it is wrong.", moved=False)
+    assert outside_schema.state == "REBUTTAL_UNJUDGED"
+    assert "moved no commit and made no argument" in outside_schema.why
+
+
+def test_a_lens_that_started_and_gave_no_verdict_ends_rebuttal_unjudged():
+    """backlog item 120: a lens that started but gave no verdict leaves the
+    rebuttal unjudged, whether HEAD moved or the implementer only argued.
+    A lens that never started still wins `GATE_ERROR`, whatever else in the
+    list also carries an error."""
+    silent = rebut.LensVerdicts(
+        lens="adequacy", error="not the schema", never_started=False
+    )
+    clean = rebut.LensVerdicts(
+        lens="correctness",
+        verdicts=[rebut.Verdict(finding=1, verdict="withdrawn", reason="fair")],
+    )
+    fixed = rebut.RebuttalTurn(
+        rebuttals=[rebut.Rebuttal(finding=1, action="fixed", argument="done")]
+    )
+    moved_state, moved_why = rebut.rebut_state(
+        moved=True, rebuttal=fixed, verdicts=[silent, clean]
+    )
+    assert moved_state == "REBUTTAL_UNJUDGED"
+    assert "unjudged" in moved_why
+
+    argued = rebut.RebuttalTurn(
+        rebuttals=[rebut.Rebuttal(finding=1, action="argued", argument="by design")]
+    )
+    argued_state, argued_why = rebut.rebut_state(
+        moved=False, rebuttal=argued, verdicts=[silent, clean]
+    )
+    assert argued_state == "REBUTTAL_UNJUDGED"
+    assert "unjudged" in argued_why
+
+    never_started = rebut.LensVerdicts(
+        lens="contract", error="Argument list too long", never_started=True
+    )
+    gate_error_state, gate_error_why = rebut.rebut_state(
+        moved=True, rebuttal=fixed, verdicts=[silent, clean, never_started]
+    )
+    assert gate_error_state == "GATE_ERROR"
+    assert "contract" in gate_error_why
 
 
 def test_a_fix_that_commits_and_a_lens_that_withdraws_is_ready_for_review():
@@ -528,14 +591,14 @@ def test_a_lens_that_leaves_a_blocker_unverdicted_has_not_withdrawn_it():
         _verdicts(_verdict(1)),
         blockers=[_blocker(), _blocker(line=2)],
     )
-    assert result.state == "REBUTTING"
+    assert result.state == "REBUTTAL_UNJUDGED"
     assert "asked about [1, 2]" in result.verdicts[0].error
     assert "unjudged" in result.why
 
 
 def test_a_verdict_that_is_not_the_schema_is_not_a_clean_verdict():
     result = _run("Fixed.", _rebuttals(_fixed()), "I still think it is wrong.")
-    assert result.state == "REBUTTING"
+    assert result.state == "REBUTTAL_UNJUDGED"
     assert result.verdicts[0].error.startswith("not the schema")
 
 
@@ -554,7 +617,7 @@ def test_a_rebuttal_turn_that_failed_charges_what_it_spent_and_buys_no_extractio
         moved=False,
         record=record,
     )
-    assert result.state == "REBUTTING"
+    assert result.state == "REBUTTAL_UNJUDGED"
     assert result.cost_usd == 0.4
     assert len(record) == 1
 
@@ -567,7 +630,7 @@ def test_the_phase_charges_every_turn_it_bought():
 
 def test_an_empty_argument_is_not_an_argument():
     result = _run("Fixed.", _rebuttals(_argued(argument="")), moved=False)
-    assert result.state == "REBUTTING"
+    assert result.state == "REBUTTAL_UNJUDGED"
     assert result.rebuttal.error.startswith("not the schema")
 
 
@@ -1060,7 +1123,7 @@ def test_a_rebuttal_turn_without_a_valid_structured_output_is_not_the_schema():
             text=_block({"rebuttals": [_argued()]}), structured_output=bad_value
         )
         result = _run("Fixed.", extracted, moved=False, record=record)
-        assert result.state == "REBUTTING"
+        assert result.state == "REBUTTAL_UNJUDGED"
         assert result.rebuttal.error is not None
         assert result.rebuttal.error.startswith("not the schema")
         assert result.rebuttal.rebuttals == []
@@ -1084,7 +1147,7 @@ def test_a_verdict_session_without_a_valid_structured_output_is_not_the_schema()
         result = _run(
             "Fixed.", _rebuttals(_fixed()), verdict_turn, moved=True, record=record
         )
-        assert result.state == "REBUTTING"
+        assert result.state == "REBUTTAL_UNJUDGED"
         (lens_verdicts,) = result.verdicts
         assert lens_verdicts.verdicts == []
         assert lens_verdicts.error is not None
@@ -1439,7 +1502,7 @@ def test_a_contradicted_verdict_missing_a_quote_is_read_as_confirmed_and_recorde
         moved=False,
         spec_body=_CONTRADICTION_SPEC,
     )
-    assert result.state == "REBUTTING"
+    assert result.state == "REBUTTAL_UNJUDGED"
     (lens_verdicts,) = result.verdicts
     assert lens_verdicts.verdicts == []
     assert lens_verdicts.error is not None

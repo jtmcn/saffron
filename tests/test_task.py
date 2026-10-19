@@ -53,6 +53,7 @@ def _drive(
     events: Sequence[Event] | None = None,
     on_cell: Callable[[dict], None] | None = None,
     history: History | None = None,
+    token: str | None = None,
     **outcome_fields,
 ) -> CellOutcome:
     """One `run_task` call whose cell ends in `state`.
@@ -110,7 +111,7 @@ def _drive(
         repo=tmp_path / "target-repo",
         ledger=Ledger(tmp_path / f"{spec_id}.db"),
         out_dir=out_dir,
-        token=None,
+        token=token,
     )
     # None of this module's specs declare `consumes`, so `run_task` never
     # refuses here.
@@ -590,8 +591,8 @@ def test_a_log_that_failed_on_its_first_write_still_warns(
         real thing. `saffron.task.EventLog` is what `run_task` builds from,
         so this is where the substitution has to land."""
 
-        def __init__(self, task_dir):
-            super().__init__(task_dir)
+        def __init__(self, task_dir, **kwargs):
+            super().__init__(task_dir, **kwargs)
             self._first = True
 
         def append(self, event):
@@ -640,8 +641,8 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
         onward fails without writing, as a disk that fills partway through a
         night would."""
 
-        def __init__(self, task_dir):
-            super().__init__(task_dir)
+        def __init__(self, task_dir, **kwargs):
+            super().__init__(task_dir, **kwargs)
             self._count = 0
 
         def append(self, event):
@@ -676,6 +677,46 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
     logged = read_log(out_dir / "SY-11")
     assert len(logged) == 2, "only the two appends that ran before the flip land"
     assert logged[1] == events[0]
+
+
+def test_run_task_redacts_the_cells_own_token_from_its_log(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task` hands its log the token it was given, never the
+    environment's. The cell's own token, printed on a raw stdout line,
+    reaches `events.jsonl` redacted rather than verbatim."""
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    from saffron.events import Agent
+
+    token = "tkn-" + "9f2c7a1e5b"
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    out_dir = tmp_path / "out"
+    events = [
+        Agent(timestamp=1.0, spec_id="SY-12", raw=True, line=f"before {token} after")
+    ]
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-12",
+        state="EXHAUSTED",
+        task_id=13,
+        out_dir=out_dir,
+        events=events,
+        token=token,
+    )
+    capsys.readouterr()
+
+    written = (out_dir / "SY-12" / "events.jsonl").read_text()
+    assert token not in written
+
+    logged = [e for e in read_log(out_dir / "SY-12") if isinstance(e, Agent)]
+    assert len(logged) == 1
+    (only,) = logged
+    assert only.redacted == ("the cell's own CLAUDE_CODE_OAUTH_TOKEN",)
+    assert only.line is not None
+    assert "before " in only.line and " after" in only.line
+    assert token not in only.line
 
 
 def test_a_handoff_carries_both_halves_or_neither():
@@ -1392,6 +1433,49 @@ def test_gate_zero_refuses_a_recorded_spec_text_before_its_cell(
     assert isinstance(ok, tuple)
     assert ok[0].id == "SY-1"
     assert ok[0].budget_usd == 9.5
+
+
+def test_gate_zero_refuses_a_recorded_spec_text_touching_claude(
+    tmp_path, monkeypatch, capsys
+):
+    """`SA-0279`'s own witness (backlog item b-e471bd): a recorded spec text
+    whose `touches` add `.claude/x.md` is refused by `run_task` before any
+    cell starts. This is the same gate 0 the queue scan and `saffron cell`
+    share."""
+    ledger, run_id, repo_id, mirror, shas = _recorded_ledger(tmp_path)
+    spec, spec_sha, ceilings = _handed_spec()
+    out_dir = tmp_path / "out"
+
+    def _run_one_cell(*_a, **_k):
+        raise AssertionError("run_one_cell must not run for a refused task")
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+
+    task = _new_task(ledger, run_id)
+    _record(ledger, task, _rev_text(touches="['src/**', 'tests/**', '.claude/x.md']"))
+
+    result = task_module.run_task(
+        spec,
+        spec_sha,
+        ceilings=ceilings,
+        base=PinnedBase(
+            mirror=mirror, url="https://example.invalid/o/r.git", base_sha=shas["base"]
+        ),
+        repo_id=repo_id,
+        repo=tmp_path / "target-repo",
+        ledger=ledger,
+        out_dir=out_dir,
+        token=None,
+        task_id=task,
+        emit=lambda _event: None,
+    )
+
+    assert isinstance(result, Refused)
+    assert "'.claude/x.md'" in result.reason
+    assert "lands by hand" in result.reason
+    out = capsys.readouterr().out
+    assert out == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert ledger.attempts(task) == []
 
 
 def test_run_task_hands_the_cell_the_specs_own_estimate_in_lines(tmp_path, monkeypatch):

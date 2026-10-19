@@ -748,6 +748,44 @@ def test_a_child_is_admitted_once_its_edited_parent_is_kept(loop):
     assert stranded == []
 
 
+def test_a_child_with_one_parent_in_the_order_and_one_merged_is_admitted(loop):
+    # Run 44: SA-0277 depends on SA-0276, in the order, and on merged SA-0271.
+    # Only the in-order parent counted, so the whole chain was stranded.
+    parent_id, _sibling, _merged, _new = loop.ids
+    done = driver.REPO / ".saffron" / "specs" / "done"
+    done.mkdir()
+    (done / "SA-8888-merged.md").write_text("merged\n")
+    child = driver.REPO / ".saffron" / "specs" / "SA-9999-child.md"
+    child.write_text(
+        "---\n"
+        "id: SA-9999\n"
+        "title: a child of a queued and a merged spec\n"
+        "type: bug\n"
+        "priority: 3\n"
+        f"depends_on: [{parent_id}, SA-8888]\n"
+        "touches:\n  - saffron/cli.py\n"
+        "budget_usd: 5\nmax_attempts: 3\nmax_turns: 40\nrisk: standard\n"
+        "acceptance:\n"
+        "  - claim: it does the thing\n"
+        "    witness: tests/test_cli.py::test_it\n"
+        "---\n\n## Context\n\nnothing\n"
+    )
+    refusal = SimpleNamespace(
+        path=child,
+        reason=f"depends_on {parent_id} has no task at its current spec_sha",
+    )
+    held = loop.row(0, state=None, pr=None)
+
+    ordered, stranded = driver._order([], [refusal], [held], frozenset())
+    assert [p.spec_id for p in ordered] == [parent_id, "SA-9999"]
+    assert stranded == []
+
+    # A parent neither in the order nor merged still strands the child.
+    (done / "SA-8888-merged.md").unlink()
+    ordered, stranded = driver._order([], [refusal], [held], frozenset())
+    assert stranded == [child]
+
+
 def test_a_resnapshot_keeps_the_outcome_of_a_spec_edited_while_its_pr_is_open(
     loop, capsys
 ):

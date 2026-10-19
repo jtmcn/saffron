@@ -1,11 +1,12 @@
 ---
 id: b-032c3e
 title: A lens that errors halts the task at REVIEWING, which the reconciler reads as in flight, so a deliberate halt is re-queued as a crash
-status: open
+status: done
 tier: 1
 filed: 2026-09-22
+closed: 2026-10-19
 specs: [SA-0287]
-prs: []
+prs: [913]
 commits: []
 cites: [§4.2.1, §5.5]
 related: [120]
@@ -44,3 +45,4 @@ process died, and a witness covers the scan's choice.
 - 2026-10-12: the operator chose a terminal state for the halt,
   `REVIEW_INCOMPLETE`. Its spec commit adds it to the vocabulary and the
   scheduler's sets. `SA-0287` makes REVIEW write it.
+- 2026-10-19, run 44: `SA-0287` (#913) makes REVIEW's halt write `REVIEW_INCOMPLETE`, which no scan reads as in flight, and a witness covers the choice. ADR 4, ADR 8 and the loop's driver still name `REVIEWING`, which b-80cc6e owns.

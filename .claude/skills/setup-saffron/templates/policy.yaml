@@ -1,3 +1,6 @@
+# The version of this file's format. Only 1 is read today.
+schema_version: 1
+
 # What Saffron reads from this repo. Drop a gate with no analogue here.
 gates:
   format:     { blocking: true }
@@ -7,7 +10,7 @@ gates:
   no-network: { blocking: true }
   # Advisory at every tier: its cheapest satisfaction is a test that asserts nothing.
   coverage:   { blocking: false }
-  # FILL: the domain gate, what is expensive to fake here. `when` is parsed and not read yet.
+  # FILL: the domain gate, what is expensive to fake here.
 
 # FILL: where a plausible-looking wrong change hurts most.
 elevate_on: []
@@ -15,9 +18,6 @@ elevate_on: []
 # FILL: files no task edits, such as a lockfile.
 protected:
   - .saffron/**
-
-# Parsed and not read yet.
-envelope_default: []
 
 integrity:
   # FILL: where the tests live.
@@ -28,6 +28,15 @@ integrity:
   gate_config:
     - .saffron/**
     - "**/.gitignore"
+
+witness:
+  # FILL: a Python `re` searched in a witness id. Its `name` group is the test's name.
+  witness_name: null
+  # FILL: a pattern holding `{name}` that matches that test's own text.
+  witness_body: null
+  # FILL: a `pattern` per constant spelling, with `name` and the `value` a constant mutant edits.
+  # Each `replace` must leave every matched file importable.
+  constants: []
 
 # FILL: caps for a thread pool sized from the CPU count.
 thread_env: {}

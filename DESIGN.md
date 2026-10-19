@@ -1174,16 +1174,16 @@ not have run yet. `SA-0062` specified the opposite order and passed review
 (backlog item 78).
 
 **Blocking level.** Blocking at every tier. A claim guarded by nothing is
-the same defect at `standard` as at `elevated`. `SA-0288` builds it. Until it
-lands, the gate suite holds `witness` advisory at `standard`, the level `size`
-carries. `SA-0267` was `standard`, and its own
-declared mutant survived its witness on two gate suites. The task still went
-`READY_FOR_REVIEW`, and REBUT never saw the survivor (backlog item b-02d328).
+the same defect at `standard` as at `elevated`. Before `SA-0288` the gate
+suite held `witness` advisory at `standard`, the level `size` carries.
+`SA-0267` was `standard`, and its own declared mutant survived its witness on
+two gate suites. The task still went `READY_FOR_REVIEW`, and REBUT never saw
+the survivor (backlog item b-02d328).
 A spec declaring no mutants, whose diff yields no constant mutant,
 reports `skip`. So this cannot fail a task retroactively until a repo
 declares `witness:` patterns, which is an operator step. Once it does, a
 queued spec written before them can draw a constant-mutant survivor. Once
-`SA-0280` and `SA-0288` both land, a false survivor blocks as a true one does.
+`SA-0280` and `SA-0288` landed, a false survivor blocks as a true one does.
 A survivor at base is not subtracted
 (§5.4), so it blocks until the task kills its mutant.
 

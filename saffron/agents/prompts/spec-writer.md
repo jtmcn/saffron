@@ -24,9 +24,9 @@ List each new name that nothing calls until a later spec lands, under
 `pending_symbols`, as `<path>::<name>`. A name left out can fail a
 declared gate that reads unused code.
 
-Keep the size estimate under its type's ceiling, named below. The size
-and witness gates block when the spec says `risk: elevated`. They also
-block when a changed path is in the risk tier list below.
+Keep the size estimate under its type's ceiling, named below. The witness
+gate blocks at every risk tier. The size gate blocks when the spec says
+`risk: elevated`, or when a changed path is in the risk tier list below.
 
 Gates:
 {gates}

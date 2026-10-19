@@ -91,9 +91,9 @@ def test_a_witness_that_survives_its_mutant_fails(tmp_path):
 def test_a_surviving_mutant_names_its_claim_and_not_its_edit(tmp_path):
     """A mutant its witness survives fails `witness` with a result that names
     the criterion's claim and its witness, and carries neither the edit's
-    `find` text nor its `replace` text anywhere in the result. At `elevated`,
-    where `witness` blocks, `repair_prompt` hands this message to the next
-    REPAIR turn verbatim — a mutant a cell can read back is a mutant chosen
+    `find` text nor its `replace` text anywhere in the result. `witness`
+    blocks at every tier. `repair_prompt` hands this message to the next
+    REPAIR turn verbatim. A mutant a cell can read back is a mutant chosen
     to be killed (`CONTEXT.md`, **Mutant**)."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
     # `replace` appears nowhere else in the result, so finding it can only
@@ -529,11 +529,11 @@ def test_a_blocking_witness_failure_is_an_ordinary_blocking_failure(tmp_path):
     nothing in the whole suite.
 
     So this guards the *shape* half and not the *reaches* half. The reaches
-    half is now true: backlog item 71 made `witness` advisory below
-    `elevated`, which now lives in `_advisory` (`saffron/gates/suite.py`),
-    so a failure blocks at `elevated` only — this file has no way to drive `_advisory` or
+    half is now true: backlog item b-02d328 made `witness` block at every
+    tier in `_advisory` (`saffron/gates/suite.py`), so a failure blocks
+    everywhere. This file has no way to drive `_advisory` or
     `session._blocking`, so it cannot assert that itself. Said here rather
-    than left as an apparent omission — the assertions below are real, and
+    than left as an apparent omission. The assertions below are real, and
     they are not the claim."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
     criterion = _criterion(claim="the total is clamped at zero", replace="0")

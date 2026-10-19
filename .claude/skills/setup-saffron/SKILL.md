@@ -38,21 +38,21 @@ Omit a role with no analogue. Every other declared gate is blocking unless the o
 
 **B. The domain gate.** Ask the owner one question, from §5.4: *what is expensive to fake here?*
 A migration round-trip, a schema check, an invariant only this repo states. Propose one when the code suggests it. Accept "none yet".
-[GATES.md](GATES.md) says what makes one hard to fake. Declare it without `when`. The field is parsed and not read yet, so a conditional gate executes on every task.
+[GATES.md](GATES.md) says what makes one hard to fake. Saffron executes every declared gate on every task, so declare it with no condition.
 
 **C. `elevate_on`.** This is most of what onboarding means, so ask even when you have a guess. Offer the guess as the recommendation.
 The question is §5.6's: *where in here does a plausible-looking wrong change hurt most?*
 
-**D. `protected` and `integrity`.** Propose these from what step 1 found, without a question per list:
+**D. `protected`, `integrity` and `witness`.** Propose these from what step 1 found, without a question per list:
 
 - `protected`: files no task edits, such as a lockfile or a design record the owner names.
 - `integrity.test_paths`: where the tests live.
 - `integrity.suppressions`: each language's skip, expected-failure and ignore-comment tokens. A token the list omits is a hole `integrity` cannot see.
 - `integrity.gate_config`: every file that changes what a gate measures. That includes each tool's config, a `conftest.py` or its analogue, and `**/.gitignore`. Saffron's own `.saffron/policy.yaml` shows the reasoning behind each entry.
-
-`envelope_default` stays empty. It is parsed and not read yet.
+- `witness.witness_name`, `witness.witness_body` and `witness.constants`: Python `re` patterns naming the language's own constant shape and where a test's own text ends. Left `null`/empty when the language's constants are not worth deriving a mutant from yet.
 
 **E. `thread_env`.** Only when step 1 found a thread pool to cap. Skip the section otherwise.
+On a runtime that shares the host kernel, an empty `thread_env` draws a warning on every task, and that is expected.
 
 **F. Where the agent's instructions go.** A cell injects the target's `CLAUDE.md` at `base_sha`, and nothing else. An `@AGENTS.md` import in it reaches the model as literal text.
 Edit `CLAUDE.md` when it exists, and create it when neither file does. When only `AGENTS.md` exists, recommend a new `CLAUDE.md` holding the block, and ask.

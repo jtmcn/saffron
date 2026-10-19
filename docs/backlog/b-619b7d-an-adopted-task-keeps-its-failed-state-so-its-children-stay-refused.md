@@ -1,0 +1,38 @@
+---
+id: b-619b7d
+title: "`saffron adopt` keeps a task `EXHAUSTED`, refuses `MERGE_FAILED`, and nothing moves a fixed task back to waiting, so its children stay refused"
+status: open
+tier: 2
+filed: 2026-10-19
+specs: []
+prs: []
+commits: []
+cites: [§4.2.1]
+related: [b-dc5212, b-6b06e1]
+---
+
+## Problem
+
+Found in the spec loop's run 44.
+
+`adopt` takes `EXHAUSTED`, `NOT_IMPLEMENTED` and `READY_FOR_REVIEW`
+(`saffron/cli.py:2322`). It names the pull request and leaves the state.
+`SA-0279` ended `EXHAUSTED`, was finished by hand as #912 and adopted. Its
+task stayed `EXHAUSTED`. The loop's `driver.py size` and `driver.py stack`
+then refused it, so the delegate measured and linked it by hand. Its three
+children, `SA-0290`, `SA-0291` and `SA-0295`, cannot run until #912 merges.
+
+`SA-0277` ended `MERGE_FAILED` in the first batch, on a literal key header in
+a test. The delegate fixed the patch by hand as #904. `adopt` and `package`
+both refuse `MERGE_FAILED`, so the nine tasks below it stayed refused. The
+operator chose a re-run, and #904 closed.
+
+## Done looks like
+
+A task finished by hand reaches a state its children and the driver read as
+a reviewable parent. One route takes a fixed `MERGE_FAILED` task there, such
+as `regate` then `adopt`. A test drives each route and starts a child on it.
+
+## Record
+
+- 2026-10-19: filed from the spec loop's run 44.

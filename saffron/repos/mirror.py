@@ -69,7 +69,16 @@ def _git(repo: Path, *args: str, strip: bool = True) -> str:
 def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
     """Create the bare mirror if absent, fetch it if present."""
     if mirror_path.is_dir():
-        _git(mirror_path, "fetch", "--prune", "origin", "+refs/*:refs/*")
+        # The checkout holds none of the record's own refs, so a plain
+        # mirror of everything else would prune every task ref on each fetch.
+        _git(
+            mirror_path,
+            "fetch",
+            "--prune",
+            "origin",
+            "+refs/*:refs/*",
+            "^refs/saffron/*",
+        )
         return mirror_path
 
     mirror_path.parent.mkdir(parents=True, exist_ok=True)

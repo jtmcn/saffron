@@ -50,6 +50,12 @@ class Apple:
         return ["--cpus", str(cpus)]
 
     @property
+    def shares_kernel(self) -> bool:
+        # Measured: each cell is its own VM (docs/appendices/G-the-cell-runtime.md:34),
+        # with the vCPU offset in cpu_offset above.
+        return False
+
+    @property
     def unattended(self) -> bool:
         return True
 

@@ -47,6 +47,7 @@ from saffron.reconcile import MERGE_ONLY_STATES, ReconcileResult, Regated, recon
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
+from saffron.record.routed import RoutedRecord
 from saffron.replay import replay
 from saffron.report.index import orphan_rows, trailing_accept_rate
 from saffron.report.stack import write_stack_view
@@ -296,7 +297,12 @@ def main(argv: list[str] | None = None) -> int:
         # this command must report missing, not create.
         return _serve(args)
 
-    ledger = Ledger(args.home / "ledger.db")
+    # The lambda reads `ledger` only once a write appends, by which point
+    # the name below is bound.
+    ledger = Ledger(
+        args.home / "ledger.db",
+        record=RoutedRecord(lambda key: ledger.record_home(key)),
+    )
     try:
         if args.command == "cell":
             return _cell_guarding_sigterm(args, ledger, out_dir)

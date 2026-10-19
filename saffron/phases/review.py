@@ -864,12 +864,15 @@ def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     """The task's state after REVIEW, and the one line that says why.
 
     Any single anchored blocker routes to REBUT (§5.5), so `REBUTTING` here is
-    a phase to run, not a stop. A lens that errored *is* a stop, at `REVIEWING`:
-    an unrun lens must not read as a clean review, and there is no finding set
-    to rebut against.
+    a phase to run, not a stop. A lens that errored *is* a stop, at
+    `REVIEW_INCOMPLETE`. An unrun lens must not read as a clean review, and
+    there is no finding set to rebut against.
     """
     if errored := [r.lens for r in reviews if r.error]:
-        return "REVIEWING", f"{errored} produced no findings — the review is incomplete"
+        return (
+            "REVIEW_INCOMPLETE",
+            f"{errored} produced no findings — the review is incomplete",
+        )
     blockers = anchored_blockers(reviews)
     if blockers:
         return "REBUTTING", f"{len(blockers)} blocker(s) — the implementer rebuts"

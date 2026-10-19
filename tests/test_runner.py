@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -63,6 +64,30 @@ def test_a_crash_after_a_clean_pass_is_now_an_error(tmp_path):
     false-green this contract exists to catch, so it is `error` instead."""
     result = run_gate("types", FIXTURES / "crashes", cwd=tmp_path)
     assert result.status == "error"
+
+
+def test_a_gate_declaring_an_unsupported_version_is_an_error(tmp_path):
+    def _gate(schema_version: int) -> Path:
+        path = tmp_path / f"gate-{schema_version}"
+        body = json.dumps(
+            {
+                "gate": "lint",
+                "status": "pass",
+                "tool": "fixture 1.0",
+                "schema_version": schema_version,
+            }
+        )
+        path.write_text(f"#!/bin/sh\necho '{body}'\n")
+        path.chmod(0o755)
+        return path
+
+    unsupported = run_gate("lint", _gate(2), cwd=tmp_path)
+    assert unsupported.status == "error"
+    assert "schema_version" in unsupported.summary
+    assert "[1]" in unsupported.summary
+
+    supported = run_gate("lint", _gate(1), cwd=tmp_path)
+    assert supported.status == "pass"
 
 
 def test_the_subset_argument_reaches_the_gate(tmp_path):

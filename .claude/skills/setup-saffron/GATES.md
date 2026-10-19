@@ -14,6 +14,7 @@ A gate is an executable that prints one JSON object on stdout and nothing else t
 ```
 
 - `gate` equals the file name and the name `policy.yaml` declares.
+- `schema_version` names the contract version. A gate omits it or writes `1`.
 - `tool` comes from running the tool, as `ruff --version` does. A literal string reads the same whether the tool ran or was absent (Appendix H).
 - The gate reads its tool's exit code. Nonzero with no parsed failures is `error`, because the output shape changed and a parser that matched nothing reads as a pass.
 - `error` means the gate broke and `fail` means the code is wrong. A missing tool, a crash or a timeout is `error`.

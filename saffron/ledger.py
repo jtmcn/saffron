@@ -1,12 +1,13 @@
 """The ledger. SQLite, one file, WAL, authoritative for state (`DESIGN.md` §4.1).
 
-Still true of what runs. No caller constructs a `Ledger` with a record, so no
-row here is derived from one and §4.6 rule 1 holds as written. The record
-design reverses it: the ledger becomes a store folded out of `refs/saffron/*`
-by `saffron/record/fold.py`, deletable at any time. Only the nineteen kinds
-`_append` writes fold back, so even then it stays authoritative for the rest.
-That reversal lands with the wiring, and §4.6 and `CONTEXT.md` §8 are amended
-with it rather than ahead of it.
+Now true of what runs: every command's shared `Ledger` is constructed with a
+`RoutedRecord` (backlog item 170 step 3). No row here is derived from one,
+and §4.6 rule 1 holds as written. The record design reverses that: the
+ledger becomes a store folded out of `refs/saffron/*` by
+`saffron/record/fold.py`, deletable at any time. Only the nineteen kinds
+`_append` writes fold back, so even then it stays authoritative for the
+rest. That reversal waits on the batch and run folds. §4.6 and `CONTEXT.md`
+§8 are amended with it rather than ahead of it.
 
 Eight of the nine tables. `decisions` waits for an operator to have something
 to put in it. `stack_layers`, `end_reviews`, `baseline_names`,
@@ -32,7 +33,8 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from saffron.agents.findings import Finding, Severity
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import Failure, GateResult
-from saffron.record.contract import Fact, Record, new_task_key
+from saffron.record.contract import Fact, Record, RecordError, new_task_key
+from saffron.record.routed import RoutedRecord
 
 if TYPE_CHECKING:
     # At runtime it would load the cell runtime and the phases into every ledger reader.
@@ -142,6 +144,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     spent_usd_est REAL NOT NULL DEFAULT 0.0,
     policy_sha TEXT,
     prompt_sha  TEXT,
+    engine_commit TEXT,
     added       INTEGER,
     removed     INTEGER,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -415,6 +418,7 @@ class Ledger:
             "pr_url",
             "policy_sha",
             "prompt_sha",
+            "engine_commit",
             "merged_head_sha",
             "record_key",
         ):
@@ -594,6 +598,33 @@ class Ledger:
         ).fetchone()
         return row["record_key"] if row else None
 
+    def record_home(self, key: str) -> tuple[Path, str]:
+        """The mirror and origin of the repo row that key's own task ran
+        against, joined through `tasks.record_key`. Raises for a key no
+        task holds, since a `RoutedRecord` has nowhere else to append."""
+        row = self._db.execute(
+            """SELECT r.mirror_path AS mirror_path, r.origin AS origin
+                 FROM tasks t
+                 JOIN runs rn ON rn.run_id = t.run_id
+                 JOIN repos r ON r.repo_id = rn.repo_id
+                WHERE t.record_key = ?""",
+            (key,),
+        ).fetchone()
+        if row is None:
+            raise RecordError(f"no task holds record key {key!r}")
+        return Path(row["mirror_path"]), row["origin"]
+
+    def push_record(self, task_id: int) -> None:
+        """Push the task's own ref to its origin, through the ledger's
+        `RoutedRecord`. Returns at once for any other record, and for a
+        task id with no row, so a task that never minted writes nothing."""
+        if not isinstance(self._record, RoutedRecord):
+            return
+        key = self.record_key(task_id)
+        if key is None:
+            return
+        self._record.push(key)
+
     def _build_fact(self, task_id: int, kind: str, payload: dict[str, Any]) -> Fact:
         """Every write method's one fact. Raises if `task_id` names nothing."""
         row = self._db.execute(
@@ -672,7 +703,7 @@ class Ledger:
         self, task_id: int | None, column: str, value: Any, at: str
     ) -> None:
         """One task column, plus `updated_at`, set by a single-column fact.
-        `column` is never a caller's string, only one of three literals."""
+        `column` is never a caller's string, only one of four literals."""
         self._db.execute(
             f"UPDATE tasks SET {column} = ?, updated_at = ? WHERE task_id = ?",
             (value, at, task_id),
@@ -873,6 +904,9 @@ class Ledger:
             return None
         if fact.kind == "task_policy":
             self._touch_task(task_id, "policy_sha", payload["policy_sha"], at)
+            return None
+        if fact.kind == "task_engine":
+            self._touch_task(task_id, "engine_commit", payload["engine_commit"], at)
             return None
         if fact.kind == "stack_layer":
             # Every value but `batch_key` comes straight from the payload,
@@ -1429,6 +1463,7 @@ class Ledger:
         budget_usd: float | None = None,
         policy_sha: str | None = None,
         prompt_sha: str | None = None,
+        thread_pool_uncapped: bool | None = None,
     ) -> int:
         """`policy_sha` is the declaration the cell's gates ran under — read
         from the export at `base_sha` (§5.4). `prompt_sha` is
@@ -1463,6 +1498,9 @@ class Ledger:
                 "budget_usd": budget_usd,
                 "policy_sha": policy_sha,
                 "prompt_sha": prompt_sha,
+                # b-0569f7: a shared kernel with no thread_env cap, or None
+                # where the caller never decided.
+                "thread_pool_uncapped": thread_pool_uncapped,
                 **self._run_facts(run_id),
             },
         )
@@ -1606,6 +1644,23 @@ class Ledger:
         writes only when the declaration differs from the one on record."""
         self._commit_and_append(
             self._build_fact(task_id, "task_policy", {"policy_sha": policy_sha})
+        )
+
+    def task_engine_commit(self, task_id: int) -> str | None:
+        """The engine on record for this task: what a cell observed with
+        `saffron.engine.engine_commit`, or `None` where no engine was
+        observed (ADR 10). PACKAGE reads it to name the engine in the pull
+        request body."""
+        row = self._db.execute(
+            "SELECT engine_commit FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["engine_commit"] if row is not None else None
+
+    def record_engine(self, task_id: int, engine_commit: str) -> None:
+        """Written by a cell at start, only when the engine it observed
+        differs from the one already on record for this task."""
+        self._commit_and_append(
+            self._build_fact(task_id, "task_engine", {"engine_commit": engine_commit})
         )
 
     def set_task_package(

@@ -47,6 +47,9 @@ _CRITERIA_SECTION = re.compile(
 # What vulture reports, as `.saffron/gates/dead.py` keys it; that script reads this field itself.
 PENDING_SYMBOL = r"^[^\s:]+::[A-Za-z_][A-Za-z0-9_]*$"
 
+# Versioned per module (DESIGN.md §3.2). Only 1 exists today.
+SCHEMA_VERSIONS: tuple[int, ...] = (1,)
+
 
 class SpecError(ValueError):
     """A spec that cannot be trusted to describe what it asks for, or a scan
@@ -180,6 +183,8 @@ class Spec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Absent or 1 reads as the integer 1. Any other value is refused below.
+    schema_version: int = 1
     # Reaches a filesystem path (out_dir / spec.id) and an href in the index,
     # so it is constrained to the shape CONTEXT.md §10 states.
     id: str = Field(pattern=r"^[A-Za-z0-9]+-[0-9]+$")
@@ -266,6 +271,19 @@ class Spec(BaseModel):
                     f"consumes entry {entry!r} has a path that is not canonical"
                 )
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def _schema_version_is_supported(cls, data: object) -> object:
+        """Refuse an unsupported version, and a bool or float before pydantic coerces it."""
+        if isinstance(data, dict) and "schema_version" in data:
+            value = data["schema_version"]
+            if type(value) is not int or value not in SCHEMA_VERSIONS:
+                raise ValueError(
+                    f"schema_version {value!r} is not supported; this engine "
+                    f"reads: {sorted(SCHEMA_VERSIONS)}"
+                )
+        return data
 
     @model_validator(mode="after")
     def _consumes_needs_a_parent(self) -> Spec:

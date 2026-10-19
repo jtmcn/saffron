@@ -24,6 +24,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
+from saffron.credentials import (
+    CREDENTIAL_SHAPES,
+    OWN_TOKEN_DESCRIPTION,
+    matches_own_token,
+)
 from saffron.events import Event, EventLog, PhaseStart, describe
 from saffron.gates.contract import split_lines
 from saffron.gates.core.scope import scope_gate
@@ -57,17 +62,6 @@ APPLY_CONFLICT = "conflict"
 # git exits 0, which is why neither the exit code nor the output alone decides.
 _NO_BLOB = "lacks the necessary blob"
 _NO_FULL_INDEX = "without full index line"
-
-# ponytail: a refusal, not the `secrets` gate (§5.4) — that is v1's to build.
-# The ceiling is named in DESIGN.md §5.7: every credential shape not listed here
-# still reaches the remote, and the upgrade path is the gate, not more regexes.
-_CREDENTIAL_SHAPES = (
-    ("an Anthropic API key", re.compile(r"sk-ant-api\d{2}-[A-Za-z0-9_\-]{16,}")),
-    ("an Anthropic OAuth token", re.compile(r"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{8,}")),
-    ("a GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{16,}")),
-    ("an AWS access key id", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("a private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
-)
 
 
 class PackageError(RuntimeError):
@@ -281,11 +275,10 @@ def _scan(lines: list[tuple[str, str]], token: str | None) -> list[str]:
     """
     found = []
     for path, line in lines:
-        # length guard: a short/empty token would substring-match unrelated lines.
-        if token and len(token) > 8 and token in line:
-            found.append(f"{path}: the cell's own CLAUDE_CODE_OAUTH_TOKEN")
+        if matches_own_token(token, line):
+            found.append(f"{path}: {OWN_TOKEN_DESCRIPTION}")
             continue
-        for what, pattern in _CREDENTIAL_SHAPES:
+        for what, pattern in CREDENTIAL_SHAPES:
             if pattern.search(line):
                 found.append(f"{path}: {what}")
                 break
@@ -907,6 +900,7 @@ def package(
             # byte-identical to one packaged before this existed.
             notes=outcome.notes,
             wrong_versions=outcome.wrong_versions,
+            engine_commit=ledger.task_engine_commit(outcome.task_id),
             exhausted=exhausted,
             head_moved=_rebuttal_head_moved(outcome.task_dir) if exhausted else False,
         )

@@ -1,11 +1,12 @@
 ---
 id: b-02d328
 title: "The `witness` gate blocks only at `elevated` risk, so a spec's own declared mutant survives and its task packages"
-status: open
+status: done
 tier: 1
 filed: 2026-10-12
+closed: 2026-10-19
 specs: [SA-0288]
-prs: []
+prs: [914]
 commits: []
 cites: [§5.4]
 related: [b-7e69d0]
@@ -42,3 +43,4 @@ hand.
 - 2026-10-12: `SA-0288` queued. The operator chose the first arm, so a
   survivor blocks at every tier. The design record, the vocabulary, the
   shapes and ADR 3 changed by hand in the spec's own commit.
+- 2026-10-19, run 44: `SA-0288` (#914) makes `witness` block at every tier, and a test drives a `standard` task whose witness survives. The design record, the vocabulary and the shapes dropped their "until it lands" text by hand in the step-5 pull request. The host filed an adequacy blocker on #914 and then dropped it unanchored, which b-e40d09 records.

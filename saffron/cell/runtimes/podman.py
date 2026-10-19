@@ -79,6 +79,12 @@ class Podman:
         return ["--cpuset-cpus", f"0-{cpus - 1}"]
 
     @property
+    def shares_kernel(self) -> bool:
+        # Measured: os.cpu_count() sees the host's CPUs (cpu_flags above), and the kernel
+        # is shared (docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md:246-249).
+        return True
+
+    @property
     def unattended(self) -> bool:
         # No cell has started end to end here: the measured host refused
         # `10.88.0.0/24`, and `--memory` went unenforced (backlog item 108).
