@@ -2268,3 +2268,113 @@ seat finding the in-cell critic and the end review both passed.
 - Run 43: `driver.py stack` ordered #899 below #898, the reverse of the
   branches a stack batch built. **No bucket**, the loop's driver.
   **Open:** b-3a79a0.
+
+## 2026-10-19, spec loop run 44 (#903 to #915)
+
+- `SA-0276` (#903): a test docstring and a test comment still named the halt
+  `REBUTTING`. The spec review's second round had raised the docstring.
+  **Bucket 3**, conventions. **Landed:** a review commit on #903.
+- `SA-0276` (#903): no test pins the state clause of REBUT's cut check. The
+  Spec seat's probe dropping it survived 326 tests. **Bucket 3**, adequacy.
+  **Open:** b-b8f0d9.
+- `SA-0277` (#906): no witness put a non-string in a redacted event, so a walk
+  that dropped token counts survived. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #906.
+- `SA-0277` (#906): case 7's deep credential sat past the size bound, so its
+  assertion could not fail. **Bucket 3**, adequacy. **Landed:** a review
+  commit on #906.
+- `SA-0277` (#906): the `describe` comment and the module docstring each
+  contradicted §4.7's terminal line. **Bucket 3**, conventions. **Landed:** a
+  review commit on #906.
+- `SA-0277` (#906): the key header pattern and the token's description were
+  each spelled more than once. **Bucket 3**, conventions. **Landed:** a
+  review commit on #906.
+- `SA-0277` (#906): the cell-authored files beside `events.jsonl` are written
+  unredacted. **No bucket**, a spec's scope. **Open:** b-3a3081.
+- `SA-0278` (#907): the record design's §8 edit the spec asked for was
+  missing. **Bucket 3**, contract. **Landed:** a review commit on #907.
+- `SA-0278` (#907): repaired tests made mirrors at `/tmp/pinned-mirror.git`
+  and outside `tmp_path`. **Bucket 1**, no gate reads it yet. **Open:**
+  b-524b1a. A review commit on #907 fixed the instance.
+- `SA-0280` (#908): `witness_body` was filled with `str.format`, so a regex
+  quantifier crashed `load_policy` with a raw `KeyError`. **Bucket 3**,
+  correctness. **Landed:** a review commit on #908.
+- `SA-0280` (#908): the changed-line half of criterion 2 had no witness.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #908.
+- `SA-0280` (#908): `replace` was optional, so an entry without it deleted
+  the value span. **Bucket 3**, correctness. **Landed:** a review commit on #908.
+- `SA-0280` (#908): the template's `witness:` comment ran four lines, held a
+  semicolon and misnamed a group. **Bucket 1**, `prose` reads no `.yaml`.
+  **Open:** b-e9cd43. A review commit on #908 fixed the instance.
+- `SA-0280` (#908): the test-path skip restated `matches_any`. **Bucket 3**,
+  conventions. **Landed:** a review commit on #908.
+- `SA-0280` (#908): the spec named a new core module its own `forbidden`
+  list made impossible. **No bucket**, a spec's scope. **Open:** b-71e2df.
+- `SA-0281` (#909): criterion 8's witness never compared the body without an
+  engine to the body with one. **Bucket 3**, adequacy. **Landed:** a review
+  commit on #909.
+- `SA-0281` (#909): dropping both `.resolve()` calls survived, since
+  `tmp_path` is already resolved. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #909.
+- `SA-0281` (#909): `_git`'s docstring promised `None` on a non-zero exit.
+  **Bucket 3**, conventions. **Landed:** a review commit on #909.
+- `SA-0281` (#909): `tests/test_engine.py` copied `_isolate_git` line for
+  line. **Bucket 3**, conventions. **Landed:** a review commit on #909. The
+  older copies are b-8ef729.
+- `SA-0281` (#909): the list of every task write left out `record_engine`.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #909.
+- `SA-0282` (#910): a build that spelled `podman` in place of the dialect's
+  binary passed the witness. **Bucket 3**, adequacy. **Landed:** a review
+  commit on #910.
+- `SA-0282` (#910): no test pinned `create_task`'s `None` default.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #910.
+- `SA-0282` (#910): a ledger comment cited item 19 for a requirement b-0569f7
+  owns. **Bucket 3**, conventions. **Landed:** a review commit on #910.
+- `SA-0282` (#910): the `dead` gate's allowlist still named
+  `envelope_default`. **No bucket**, a spec's scope. **Landed:** this run's
+  step 5 PR.
+- `SA-0282` (#910): `FAMILIES` has no row for the new `thread_env` preflight.
+  **Bucket 1**, no test reads the call sites. **Open:** b-62e00a.
+- `SA-0283` (#911): `docs/agents/issue-tracker.md` gained a semicolon and a
+  sentence past 25 words. **Bucket 1**, `prose` skips `docs/agents/`.
+  **Open:** b-e9cd43. A review commit on #911 fixed the instance.
+- `SA-0283` (#911): no witness asserted that a refusal names the refused
+  value. **Bucket 3**, adequacy. **Landed:** a review commit on #911.
+- `SA-0279` (#912): no in-cell review ran. The witness had no near miss with
+  `.claude` as a component's tail. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #912.
+- `SA-0279` (#912): neither docstring said the refusal kind now covers a path
+  no `policy.yaml` declares. **Bucket 3**, conventions. **Landed:** a review
+  commit on #912.
+- `SA-0287` (#913): a test docstring cited §5.5 for an ordering §5.5 does not
+  state. **Bucket 3**, conventions. **Landed:** a review commit on #913.
+- `SA-0288` (#914): a new spec-review bullet was a bare statement among
+  questions. **Bucket 3**, conventions. **Landed:** a review commit on #914.
+- `SA-0288` (#914): the leg table kept an expected column that held one
+  value. **Bucket 3**, conventions. **Landed:** a review commit on #914.
+- `SA-0288` (#914): a test docstring still said `witness` blocks at
+  `elevated`. The end review raised it. **Bucket 3**, conventions.
+  **Landed:** a review commit on #914.
+- `SA-0288` (#914): the critic's adequacy blocker was host-filed, unanchored
+  and dropped, so no REBUT ran. **No bucket**, REVIEW's routing.
+  **Open:** b-e40d09.
+- `SA-0279`: its new refusal refused the three specs queued below it, and its
+  cell ended `EXHAUSTED`. **No bucket**, the queue's checks. **Open:** b-e7898b.
+- Run 44: `driver.py stack` ordered #914 below #913 and left out #915 and
+  #912. `size` read 0 tokens for `SA-0287`. **No bucket**, the loop's driver.
+  **Open:** b-3a79a0.
+- Run 44: `driver.py record` refused the follow-up `SA-0296`. **No bucket**,
+  the loop's driver. **Open:** b-25f2b2.
+- Run 44: `driver.py bookkeeping` missed the scheduler test's literal list
+  of `.claude` refusals. **No bucket**, the loop's driver. **Open:** b-7d3810.
+- Run 44: `adopt` kept `SA-0279` `EXHAUSTED`, so the driver refused it and
+  its children. **No bucket**, adoption. **Open:** b-619b7d.
+- Run 44: both finishes escalated red, wrote back spec text and named no
+  failure. **No bucket**, a batch's finish. **Open:** b-fe82d9 and b-703e64.
+- Run 44: the end review's writer drafted thirteen follow-ups, and twelve
+  were pooled. **No bucket**, the follow-up writer. **Open:** b-27bacc.
+- Run 44: `SA-0296` redid a fix held as a review commit on #911.
+  **No bucket**, the end review. **Open:** b-8a0c9a.
+- Run 44: the cell's seed fetch takes no fixture head, so `SA-0276`'s
+  baseline failed 4 corpus witnesses. **No bucket**, the cell's seed.
+  **Open:** b-055fa3.
